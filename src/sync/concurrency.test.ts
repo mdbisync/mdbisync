@@ -7,15 +7,18 @@
 // and the usual checks hold: both sides converge (I1), no edit is lost (I2),
 // the tracked branch changes only by the person's commits and sync merges
 // (I3), refs only move forward (I4), and one more run changes nothing (I6).
+// Each scenario has its own remote, fake world and server, so scenarios run
+// side by side.
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { type AddressInfo } from 'node:net';
+import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, it, type TestContext } from 'node:test';
+import { after, describe, it, type TestContext } from 'node:test';
 import { CheckpointControl, KILLED_RUN_CHECKPOINT } from '../../test/e2e/harness/checkpoints.ts';
 import { cleanupKilledTokens } from '../../test/e2e/harness/token-cleanup.ts';
 import { runCli } from '../cli.ts';
@@ -51,6 +54,19 @@ const TREE: Record<string, string> = {
 
 const STATE_REFS = ['refs/mdbisync/linear', 'refs/mdbisync/ids', 'refs/mdbisync/uploads', 'refs/heads/mdbisync/linear'] as const;
 const RUN_TIMEOUT_MS = 60_000;
+/**
+ * How many scenarios run side by side. Each has its own repository, fake
+ * world and server, and most of a scenario's time is engine processes
+ * starting and running git, so a few at once cut the file's time. Half the
+ * cores, at most four: the test runner already runs other files beside it.
+ */
+const CONCURRENCY = Math.max(1, Math.min(4, Math.floor(availableParallelism() / 2)));
+/**
+ * The engine processes share one compile cache: every one of them loads the
+ * same TypeScript sources, and the cache saves most of that work after the first.
+ */
+const COMPILE_CACHE = await mkdtemp(join(tmpdir(), 'mdbisync-compile-cache-'));
+after(() => rm(COMPILE_CACHE, { recursive: true, force: true }));
 
 interface Ended {
   code: number | null;
@@ -69,7 +85,11 @@ interface Running {
   kill(): void;
 }
 
-describe('sync: races inside a run', { timeout: 240_000 }, () => {
+/**
+ * Sets up one scenario: a seeded repository after initial sync, its fake
+ * world served over HTTP and a person's clone. Removed when the test ends.
+ */
+async function scenario(t: TestContext) {
   let fixture: Fixture;
   let world: FakeWorld;
   let server: Served;
@@ -82,38 +102,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
   /** Every value each state ref held, in order: each only moves forward (I4). */
   let history: Map<string, string[]>;
   let runs = 0;
-
-  beforeEach(async () => {
-    fixture = await createFixture();
-    await fixture.seed(TREE);
-    world = fakeWorld();
-    world.github.checks = new Map();
-    world.github.merge = mergeOnRemote;
-    server = await serve(world);
-    personDir = join(fixture.root, 'person');
-    await new Git(fixture.root).run(['clone', '--quiet', fixture.url, personDir]);
-    person = new Git(personDir, {
-      GIT_AUTHOR_NAME: IDENTITY.name,
-      GIT_AUTHOR_EMAIL: IDENTITY.email,
-      GIT_COMMITTER_NAME: IDENTITY.name,
-      GIT_COMMITTER_EMAIL: IDENTITY.email,
-    });
-    const engine = await fixture.clone('initial');
-    const initial = await runCli(['initial-sync'], {
-      env: { ...env('initial', ''), MDBISYNC_LINEAR_API_URL: LINEAR_API, MDBISYNC_GITHUB_API_URL: GITHUB_API, MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' },
-      cwd: engine.dir,
-      fetch: fakeFetch(world),
-    });
-    assert.equal(initial.exitCode, 0, initial.stderr);
-    start = await rev('refs/heads/main');
-    personCommits = [];
-    history = new Map();
-    await observeRefs();
-  });
-  afterEach(async () => {
-    await server.close();
-    await fixture.cleanup();
-  });
+  /** Engine processes still running when the test ends, a failed test's paused run among them. */
+  const live = new Set<ChildProcess>();
 
   function env(name: string, url: string): Record<string, string> {
     return {
@@ -126,6 +116,7 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
       MDBISYNC_GITHUB_API_URL: `${url}/github`,
       MDBISYNC_REPOSITORY: 'owner/repo',
       MDBISYNC_REPORT_FILE: join(fixture.root, `${name}.json`),
+      NODE_COMPILE_CACHE: COMPILE_CACHE,
       GITHUB_STEP_SUMMARY: join(fixture.root, `${name}.md`),
     };
   }
@@ -144,6 +135,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     });
     let stderr = '';
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
+    live.add(child);
+    child.once('exit', () => live.delete(child));
     const timer = setTimeout(() => child.kill('SIGKILL'), RUN_TIMEOUT_MS);
     const ended = new Promise<Ended>((resolve, reject) => {
       child.once('close', (code, signal) => {
@@ -208,7 +201,9 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
   }
 
   /** GitHub's merge with a merge commit, done on the bare remote: parents (base, head), refused when the head moved. */
-  const mergeOnRemote = (pr: { head: string; base: string; number: number }, sha: string) => mergeOnGitHub(fixture, pr, sha);
+  function mergeOnRemote(pr: { head: string; base: string; number: number }, sha: string) {
+    return mergeOnGitHub(fixture, pr, sha);
+  }
 
   const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
   const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
@@ -302,7 +297,43 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     }
   }
 
-  it('L4-07: closing a pending pull request opens a replacement from the same branch, retaining its edits', async () => {
+  fixture = await createFixture();
+  // Stops the runs first, then the server they talk to, then removes the repositories.
+  t.after(async () => {
+    for (const child of live) child.kill('SIGKILL');
+    await server?.close();
+    await fixture.cleanup();
+  });
+  await fixture.seed(TREE);
+  world = fakeWorld();
+  world.github.checks = new Map();
+  world.github.merge = mergeOnRemote;
+  server = await serve(world);
+  personDir = join(fixture.root, 'person');
+  await new Git(fixture.root).run(['clone', '--quiet', fixture.url, personDir]);
+  person = new Git(personDir, {
+    GIT_AUTHOR_NAME: IDENTITY.name,
+    GIT_AUTHOR_EMAIL: IDENTITY.email,
+    GIT_COMMITTER_NAME: IDENTITY.name,
+    GIT_COMMITTER_EMAIL: IDENTITY.email,
+  });
+  const engine = await fixture.clone('initial');
+  const initial = await runCli(['initial-sync'], {
+    env: { ...env('initial', ''), MDBISYNC_LINEAR_API_URL: LINEAR_API, MDBISYNC_GITHUB_API_URL: GITHUB_API, MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' },
+    cwd: engine.dir,
+    fetch: fakeFetch(world),
+  });
+  assert.equal(initial.exitCode, 0, initial.stderr);
+  start = await rev('refs/heads/main');
+  personCommits = [];
+  history = new Map();
+  await observeRefs();
+  return { fixture, world, server, person, personDir, personCommits, env, startRun, sync, reached, settle, rev, show, remoteRef, refTips, ids, body, documentOf, editInLinear, editInGit, editSyncBranch, assertSettled, assertRetained };
+}
+
+describe('sync: races inside a run', { timeout: 240_000, concurrency: CONCURRENCY }, () => {
+  it('L4-07: closing a pending pull request opens a replacement from the same branch, retaining its edits', async (t) => {
+    const { world, sync, editInLinear, editSyncBranch, assertSettled, assertRetained } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     const opened = await sync();
     assert.equal(opened.report?.pullRequest?.pullRequest?.opened, true);
@@ -320,7 +351,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     await assertRetained(commit);
   });
 
-  it('L4-07: a replacement carries a pending person edit even when Linear has no remaining changes', async () => {
+  it('L4-07: a replacement carries a pending person edit even when Linear has no remaining changes', async (t) => {
+    const { world, sync, editInLinear, editSyncBranch, assertSettled, assertRetained } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     await sync();
     const commit = await editSyncBranch(NOTES, 'First paragraph.', 'First paragraph, reviewed by a person.');
@@ -336,7 +368,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     await assertRetained(commit);
   });
 
-  it('L4-08: a person pushes to the pending sync branch; the commit and a later capture both converge', async () => {
+  it('L4-08: a person pushes to the pending sync branch; the commit and a later capture both converge', async (t) => {
+    const { world, sync, editInLinear, editSyncBranch, assertSettled, assertRetained } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     await sync();
     const commit = await editSyncBranch(NOTES, 'First paragraph.', 'First paragraph, reviewed by a person.');
@@ -346,7 +379,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(world.github.pullRequests.length, 1);
   });
 
-  it('L4-09: CI fixes before and after a new capture survive, including a push after the run fetched its head', async () => {
+  it('L4-09: CI fixes before and after a new capture survive, including a push after the run fetched its head', async (t) => {
+    const { world, startRun, sync, reached, editInLinear, editSyncBranch, assertSettled, assertRetained } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     await sync();
     const first = await editSyncBranch(REVIEW, 'Findings, edited in Linear.', 'Findings, checked by CI.');
@@ -368,7 +402,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(world.github.pullRequests.length, 1);
   });
 
-  it('L4-01: of two overlapping runs one lease push is refused, nothing partial is written to the refs, and the next run converges', async () => {
+  it('L4-01: of two overlapping runs one lease push is refused, nothing partial is written to the refs, and the next run converges', async (t) => {
+    const { startRun, sync, reached, refTips, editInLinear, editInGit, assertSettled } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     // The first run writes and waits before its record; the second runs from start to end meanwhile.
@@ -396,7 +431,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     await assertSettled(['Findings, edited in Linear.', 'Second paragraph, edited in git.']);
   });
 
-  it('L4-01: two runs started together both end cleanly, and the next run converges', async () => {
+  it('L4-01: two runs started together both end cleanly, and the next run converges', async (t) => {
+    const { startRun, editInLinear, editInGit, assertSettled } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     const both = await Promise.all([startRun(), startRun()]);
@@ -409,7 +445,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     await assertSettled(['Findings, edited in Linear.', 'Second paragraph, edited in git.']);
   });
 
-  it('L4-01: a run whose new pull request loses to one the other run opened meanwhile uses that one', async () => {
+  it('L4-01: a run whose new pull request loses to one the other run opened meanwhile uses that one', async (t) => {
+    const { world, server, startRun, sync, remoteRef, editInLinear, editInGit, assertSettled } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     // The first run pushes the sync branch and finds no pull request; that answer reaches it only once the second run,
@@ -454,7 +491,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     await assertSettled(['Findings, edited in Linear.', 'Second paragraph, edited in git.']);
   });
 
-  it('L4-02: a document edited in Linear while the run waits to write is skipped; the record is an ordinary commit and the next run merges the edit', async () => {
+  it('L4-02: a document edited in Linear while the run waits to write is skipped; the record is an ordinary commit and the next run merges the edit', async (t) => {
+    const { fixture, startRun, reached, rev, documentOf, editInLinear, editInGit, assertSettled } = await scenario(t);
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     // Another document the run does write, so it records what it did.
     await editInGit(REVIEW, 'Findings of the review.', 'Findings, revised in git.');
@@ -481,6 +519,7 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
   });
 
   it('L4-03: an edit inside the window between re-read and write is overwritten; the run reports the window', async (t: TestContext) => {
+    const { startRun, sync, reached, show, documentOf, editInLinear, editInGit, assertSettled } = await scenario(t);
     // The window without a pause: what a run leaves to chance.
     await editInGit(REVIEW, 'Findings of the review.', 'Findings, revised in git.');
     const natural = await sync();
@@ -517,7 +556,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(metrics.lostEditCount, tokens.length);
   });
 
-  it('L4-03: a write retried after a rate limit counts its wait in the reported window', async () => {
+  it('L4-03: a write retried after a rate limit counts its wait in the reported window', async (t) => {
+    const { server, sync, editInGit } = await scenario(t);
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     // The first write is answered with a rate limit and a short Retry-After; the client waits and sends it again.
     let limited = false;
@@ -538,7 +578,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.ok(window >= 1000, `the reported window ${window} ms leaves out the one-second retry`);
   });
 
-  it('L4-04: a run killed between write and record heals: the next capture takes the written documents equal to the tracked branch, and they add nothing to the pull request', async () => {
+  it('L4-04: a run killed between write and record heals: the next capture takes the written documents equal to the tracked branch, and they add nothing to the pull request', async (t) => {
+    const { startRun, reached, rev, show, body, documentOf, editInLinear, editInGit, assertSettled } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     const gitEdit = await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     const running = await startRun('after-write-before-record');
@@ -560,7 +601,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     for (const run of [next]) assert.ok(!(run?.report?.pullRequest?.paths ?? []).includes(NOTES), 'the written document reached the pull request');
   });
 
-  it('L4-05: a run killed after its capture push and before the pull request: the next run opens the pull request', async () => {
+  it('L4-05: a run killed after its capture push and before the pull request: the next run opens the pull request', async (t) => {
+    const { world, startRun, reached, show, editInLinear, editInGit, assertSettled } = await scenario(t);
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     const running = await startRun('after-capture-push-before-pr');
@@ -577,7 +619,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(world.github.pullRequests.length, 1);
   });
 
-  it('L5-20: on a converged setup a run killed where the token scenario kills it leaves its token, and post revokes it', async () => {
+  it('L5-20: on a converged setup a run killed where the token scenario kills it leaves its token, and post revokes it', async (t) => {
+    const { fixture, world, server, env, startRun, reached, settle } = await scenario(t);
     // The precondition of the scenario: a sync with nothing to write still reaches the checkpoint, never before-write.
     const idle = (await settle()).at(-1)!;
     assert.equal(idle.hooks.reached(KILLED_RUN_CHECKPOINT), 1);
@@ -601,7 +644,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(world.minted, world.revoked);
   });
 
-  it('a document an interrupted run created and a person then edited is not overwritten by a run that adopts it; the next run takes the edit in', async () => {
+  it('a document an interrupted run created and a person then edited is not overwritten by a run that adopts it; the next run takes the edit in', async (t) => {
+    const { world, person, personDir, personCommits, startRun, reached, show, ids, body, assertSettled } = await scenario(t);
     const path = 'eng/notes/draft.md';
     await person.run(['pull', '--quiet', '--ff-only']);
     await writeFile(join(personDir, path), `# Draft\n\nA new page from git. ${CANARY}\n`);
@@ -647,7 +691,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(orphan.content, body(tracked));
   });
 
-  it('L4-06: a push to the tracked branch during a run: the record merges the commit the run took in, and the next run takes the new one', async () => {
+  it('L4-06: a push to the tracked branch during a run: the record merges the commit the run took in, and the next run takes the new one', async (t) => {
+    const { fixture, startRun, reached, rev, documentOf, editInGit, assertSettled } = await scenario(t);
     const first = await editInGit(NOTES, 'First paragraph.', 'First paragraph, edited in git.');
     const linearBefore = await rev('refs/mdbisync/linear');
     const running = await startRun('after-local-merge-before-record');

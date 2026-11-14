@@ -339,7 +339,7 @@ describe('reports', () => {
     const page = readFileSync(file, 'utf8');
     assert.ok(page.startsWith('---\ntitle: test-status\n'));
     assert.match(page, /## UI environment \(L6\)\n\nReady\./);
-    assert.match(page, /\| L1 Initial sync git → Linear \| 20 \| 0 \| 1 \| 0 \| 0 \| 0 \| 19 \|/);
+    assert.match(page, /\| L1 Initial sync git → Linear \| 23 \| 0 \| 1 \| 0 \| 0 \| 0 \| 22 \|/);
     assert.match(page, /\| L1-04 \| expected-red \| not implemented: initial-sync \|/);
     assert.doesNotMatch(page, /old text/);
     // A later run keeps earlier results it did not repeat; a skipped result does not replace a real one.

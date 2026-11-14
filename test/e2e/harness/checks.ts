@@ -850,6 +850,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 
   async I5(ctx) {
+    if (ctx.observations.get('workflows.outputLeak') === true) return bad('I5', 'workflow output contained a secret or content canary; clear output withheld');
     const hits = await canaryScan(ctx, { summariesOnly: false });
     return hits.length === 0 ? ok('I5') : bad('I5', `canary tokens found in: ${[...new Set(hits.map((hit) => hit.source))].join(', ')}`);
   },

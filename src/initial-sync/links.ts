@@ -99,7 +99,7 @@ function destinationUrl(raw: string): string | undefined {
 }
 
 /** Percent-encodes what a fragment cannot hold as it is in a link destination (the parser has resolved escapes and entities). */
-function encodeFragment(fragment: string): string {
+export function encodeFragment(fragment: string): string {
   // By code point (`u`): a character outside the Basic Multilingual Plane is one match, not two lone surrogates.
   return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/gu, (char) => encodeURIComponent(char));
 }
@@ -204,7 +204,8 @@ export function linksFromLinear(content: string, fromPath: string, map: LinkMap,
     const id = hash === -1 ? rest : rest.slice(0, hash);
     const path = paths.get(id) ?? map.aliases?.get(id);
     if (path === undefined) return undefined;
-    return `<${relativeLink(fromPath, path)}${hash === -1 ? '' : rest.slice(hash)}>`;
+    // The fragment as the parser decoded it, encoded again: a `>` or a line end in it would end the link early.
+    return `<${relativeLink(fromPath, path)}${hash === -1 ? '' : `#${encodeFragment(rest.slice(hash + 1))}`}>`;
   });
 }
 

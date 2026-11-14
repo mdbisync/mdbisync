@@ -132,12 +132,12 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
       engine: { results: [], setupRuns: 0, env: {}, restores: [] }, edits: [], ownCommits: [], observations: new Map(), sequence: 0, uiSteps: 0,
       log: (message: string) => t.diagnostic(message), signal: t.signal, checkPollMs: 10, person: async () => person, personHooks: async () => {}, engineClone: async () => engine.dir,
     } as unknown as RunContext;
-    const sync = async (command: 'sync' | 'initial-sync' = 'sync', direction: 'git-to-linear' | 'linear-to-git' = 'git-to-linear') => {
+    const sync = async (command: 'sync' | 'initial-sync' | 'check' = 'sync', direction: 'git-to-linear' | 'linear-to-git' = 'git-to-linear', confirm = true) => {
       const reportFile = join(fixture.root, 'report.json');
       const summaryFile = join(fixture.root, 'summary.md');
       await rm(reportFile, { force: true });
       await rm(summaryFile, { force: true });
-      const env = engineInputs({ names, command, cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: 'client-id', linearClientSecret: 'client-secret', githubToken: 'app-token' }, reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: {}, timeoutMs: 30_000, linearUrl: LINEAR_API, mergeGraceSeconds: 0, direction, confirm: true });
+      const env = engineInputs({ names, command, cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: 'client-id', linearClientSecret: 'client-secret', githubToken: 'app-token' }, reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: {}, timeoutMs: 30_000, linearUrl: LINEAR_API, mergeGraceSeconds: 0, direction, confirm });
       await watchRun(ctx, { throughProxy: false }, async () => {
         const requests: LogEntry[] = [];
         const result = await runCli([command], { cwd: engine.dir, env: { ...env, PATH: process.env.PATH!, HOME: process.env.HOME!, MDBISYNC_GITHUB_API_URL: GITHUB_API, GITHUB_STEP_SUMMARY: summaryFile }, fetch: serve, log: (entry) => requests.push(entry) });
@@ -156,7 +156,10 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
           if (stepCtx.engine.results.at(-1)?.report?.['changed'] === false) break;
         }
       } else if (next.kind === 'run' && (next.action === 'sync' || next.action === 'capture')) await sync();
-      else if (next.kind === 'run' && next.action === 'initial-sync') await sync('initial-sync', next.args.direction === 'linear-to-git' ? 'linear-to-git' : 'git-to-linear');
+      else if (next.kind === 'run' && next.action === 'initial-sync') await sync('initial-sync', next.args.direction === 'linear-to-git' ? 'linear-to-git' : 'git-to-linear', next.args.confirm !== false);
+      // The setup check reads Linear and the repository and writes nothing. Like the syncs here, it must exit 0:
+      // a failing check stops the fake run (a live run records it as the run's result).
+      else if (next.kind === 'run' && next.action === 'check') await sync('check');
       // Other runs (lint, fix, workflows, cleanup) have no in-process counterpart here.
       else if (next.kind === 'run') throw new Error(`the fake-service specs cannot run run.${next.action}`);
       else if (options.steps?.[`${next.kind}.${next.action}`] !== undefined) await options.steps[`${next.kind}.${next.action}`]!(stepCtx, next.args);
