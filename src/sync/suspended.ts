@@ -126,10 +126,15 @@ export async function commitLaneIds(context: RunContext, parent: Oid | null, ids
 async function push(context: RunContext, options: LaneOptions, ids: IdMap, head: Oid, expected: Oid | null, normal?: { expected: Oid | null; next: Oid }, updateLane = true): Promise<boolean> {
   // Keep one copy of the complete lane path set, rather than N copies in a batch of N documents.
   const paths = suspendedPaths(ids);
+  // Only a push that moves the suspended branch is the sync's own head; a run that finds someone else's commit there
+  // keeps the earlier one.
+  const own = updateLane && head !== expected ? head : lastPushed(ids);
   let first = true;
   for (const [path, entry] of ids) if (entry.suspended !== undefined) {
     entry.suspended.paths = first ? [...paths].sort() : [path];
     entry.suspended.head = head;
+    if (own === undefined) delete entry.suspended.pushed;
+    else entry.suspended.pushed = own;
     first = false;
   }
   const idsTip = await persistIds(context, options, ids);
@@ -145,6 +150,11 @@ async function push(context: RunContext, options: LaneOptions, ids: IdMap, head:
   if (updateLane) context.fetched.suspended = head;
   if (normal !== undefined) context.fetched.sync = normal.next;
   return pushed.updated.length > 0;
+}
+
+/** The last head the sync itself pushed on the suspended branch, as its episodes record it. */
+function lastPushed(ids: IdMap): Oid | undefined {
+  return [...ids.values()].find((entry) => entry.suspended?.pushed !== undefined)?.suspended?.pushed;
 }
 
 async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap, paths: ReadonlySet<string>, checks: string[], timedOut: string[] = []): Promise<void> {
@@ -239,8 +249,9 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // The deadline runs from the push of this head, noted in the description; a new head starts it now.
   const since = headSince(open?.body, head, new Date());
   // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
-  // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body, git, base: tracked, linear });
+  // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`). The episodes record
+  // the last head the sync pushed on this branch, also a single-parent commit (a Linear intake): the history stops there.
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body, git, base: tracked, linear, pushed: lastPushed(ids) });
   // As in the normal lane: whoever added commits to this branch, the sync merges only synchronized documents and their
   // assets. Read before the checks, so a head the sync will not merge neither holds the normal lane nor marks documents.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];

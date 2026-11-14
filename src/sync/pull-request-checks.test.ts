@@ -329,6 +329,17 @@ describe('sync: pull request checks', () => {
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     assert.equal(run.report.pullRequest?.merged, null, 'merged without knowing the checks of its earlier heads');
     assert.equal(await rev('refs/heads/main'), h.start);
+    // A Linear change is pushed on top: the sync's own merge ends the history, and the new head merges.
+    await editInLinear('combined/guide.md', '# Guide\n\nLater edit.\n');
+    const transport = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => {
+      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
+      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
+      return transport(input, init);
+    };
+    const recovered = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+    assert.equal(recovered.report.pullRequest?.branchMoved, true, 'kept the held head instead of pushing the Linear change');
+    assert.ok(recovered.report.pullRequest?.merged);
   });
 
   it('reports checks-missing past the deadline when an expected check never starts, without suspending', async () => {

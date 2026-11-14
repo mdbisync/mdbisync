@@ -48,9 +48,10 @@ export interface ExpectedChecks {
 /**
  * Where a head's earlier checks are read: the description's note together with the branch's own history above `base`
  * (the tracked branch) down to the nearest commit the sync made (one `linear`, Linear's state, holds, or a merge of the
- * tracked branch or of Linear's state into the branch); or the commits the sync pushed it on this run.
+ * tracked branch or of Linear's state into the branch, or `pushed`, the head the sync's own state records it pushed on
+ * this branch); or the commits the sync pushed it on this run.
  */
-export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; linear: Oid } | { pushedFrom: readonly Oid[] };
+export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; linear: Oid; pushed?: Oid | undefined } | { pushedFrom: readonly Oid[] };
 
 /** How many commits below a head are searched for a commit the sync made. */
 const EARLIER_HEAD_DEPTH = 50;
@@ -105,13 +106,13 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
  * sync made itself expects, as when it pushed it, only what the commit below it registered. Null when that commit is
  * not found within the bound.
  */
-async function earlierHeadNames(git: Git, github: GitHubRepository, head: Oid, { base, linear }: { git: Git; base: Oid; linear: Oid }): Promise<string[] | null> {
+async function earlierHeadNames(git: Git, github: GitHubRepository, head: Oid, { base, linear, pushed }: { base: Oid; linear: Oid; pushed?: Oid | undefined }): Promise<string[] | null> {
   // Each line: a commit, then its parents.
   const lines = (await git.text(['rev-list', '--first-parent', '--parents', '-n', String(EARLIER_HEAD_DEPTH + 2), head, '--not', base])).split('\n').filter(Boolean).map((line) => line.split(' ') as Oid[]);
-  // The sync's own commits: Linear's state, or a merge of the tracked branch or Linear's state into the branch. A merge
-  // of anything else (a commit made up for the purpose) is not one of them.
+  // The sync's own commits: the head its state records it pushed, Linear's state, or a merge of the tracked branch or
+  // Linear's state into the branch. A merge of anything else (a commit made up for the purpose) is not one of them.
   const known = async (commit: Oid) => await isAncestorOf(git, commit, linear) || await isAncestorOf(git, commit, base);
-  const synced = async ([commit, , ...merged]: Oid[]) => await isAncestorOf(git, commit as Oid, linear)
+  const synced = async ([commit, , ...merged]: Oid[]) => commit === pushed || await isAncestorOf(git, commit as Oid, linear)
     || (await Promise.all(merged.map(known))).some(Boolean);
   const names = new Set<string>();
   const own = lines[0] !== undefined && await synced(lines[0]);

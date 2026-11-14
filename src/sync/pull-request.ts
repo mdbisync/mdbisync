@@ -242,10 +242,16 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const merger = markedMerger(git, options.state.ids, identity, frozen);
     /** What this run's merges into the sync branch resolved; reported only once the branch has moved to them. */
     const resolved: Resolution = { marked: [], decided: [] };
+    // A head whose earlier checks the history does not show is never kept: the sync's next push (Linear's changes) is
+    // what lets it merge again.
+    const checkedExpectation = async () => {
+      const known = await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, linear });
+      return known.complete ? checkExpectation(options, known.names) : null;
+    };
     const keepCheckedHead = open !== null && pending && suspended?.waiting !== true && noted === null
       && await mergedTree(git, tracked, sync as Oid) !== null
       && !(await needsTrackedMerge(git, tracked, sync as Oid, noted))
-      && await checkedHeadReady(github, sync as Oid, checkExpectation(options, (await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open.body, git, base: tracked, linear })).names));
+      && await checkedHeadReady(github, sync as Oid, await checkedExpectation());
     let head: Oid | null = sync;
     if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid, tracked)))) {
       // A merged branch can start again from Linear. An older initial
@@ -424,7 +430,8 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
  * them in. An empty check list does not establish completed CI here.
  * Tracked-branch reconciliation and the final exact-head check still run.
  */
-async function checkedHeadReady(github: GitHubRepository, head: Oid, expectation: CheckExpectation): Promise<boolean> {
+async function checkedHeadReady(github: GitHubRepository, head: Oid, expectation: CheckExpectation | null): Promise<boolean> {
+  if (expectation === null) return false;
   const checks = await readChecks(github, head, expectation);
   return checks.hasChecks && checks.state === 'passed';
 }

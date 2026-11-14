@@ -325,6 +325,11 @@ export interface SuspensionEpisode {
   noticeId: string;
   /** Last durable head, also used if GitHub deletes the branch after merging. */
   head?: Oid;
+  /**
+   * The last head the sync itself pushed on the suspended branch; unlike `head`, a commit someone else pushed there
+   * never takes its place. The checks expected of a later head are read down to it.
+   */
+  pushed?: Oid;
   /** Paths of this episode; one entry also holds former names and assets for the lane. */
   paths: string[];
   checks: string[];
@@ -567,6 +572,7 @@ function isIdEntry(value: unknown): value is IdEntry {
     if (episode === null || typeof episode !== 'object' || typeof episode.noticeId !== 'string'
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(episode.noticeId)
       || (episode.head !== undefined && (typeof episode.head !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.head)))
+      || (episode.pushed !== undefined && (typeof episode.pushed !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.pushed)))
       || !Array.isArray(episode.paths) || !episode.paths.every((path) => typeof path === 'string')
       || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === 'string')
       || (episode.timedOut !== undefined && (!Array.isArray(episode.timedOut) || !episode.timedOut.every((name) => typeof name === 'string')))) return false;
