@@ -8,7 +8,7 @@ import { isMap, parseDocument, stringify } from 'yaml';
 import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
+import { joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -351,7 +351,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
         const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
-        const candidate: Candidate = {doc, path, head, assets, files: new Map<string, Buffer | string>([[path, head + assets.body], ...assets.files])};
+        const candidate: Candidate = {doc, path, head, assets, files: new Map<string, Buffer | string>([[path, joinFile(head, assets.body)], ...assets.files])};
         if (old?.path === path) candidate.previousBody = prior.body;
         candidates.set(doc.id, candidate);
         resetTarget(doc.id);
@@ -394,7 +394,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const newAssets = assets.files.size > 0 || [...assets.uploads].some(([hash, url]) => uploads.get(hash) !== url);
         candidate.compared = {body, same: candidate.previousBody !== undefined && !newAssets && sameMarkdown(candidate.previousBody, body)};
       }
-      return candidate.head + (candidate.compared.same ? candidate.previousBody : body);
+      return joinFile(candidate.head, candidate.compared.same ? candidate.previousBody! : body);
     };
     let again = true;
     while (again) {
@@ -475,7 +475,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (baseline == null || candidate.assets.files.size === 0) return false;
       const captureAtBaseline = acceptedAssets.get(baseline.commit) ?? createAssetCapture(git, options.config, baseline.commit, () => Promise.reject(new NotDownloaded()));
       acceptedAssets.set(baseline.commit, captureAtBaseline);
-      const body = splitFile(baseline.text).body;
+      const {head, body} = splitFile(baseline.text);
       let assets: CapturedAssets;
       try {
         assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body);
@@ -485,7 +485,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         throw error;
       }
       // Linear's spelling of that version reads back as its text.
-      return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head: '', assets, files: new Map(), previousBody: body}, documentIds) === body;
+      return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
     };
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);

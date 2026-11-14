@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { sameMarkdown } from './markdown.ts';
+import { joinFile, sameMarkdown, splitFile } from './markdown.ts';
 
 describe('sameMarkdown', () => {
   it("takes Linear's spellings of the same document as the same", () => {
@@ -40,5 +40,51 @@ describe('sameMarkdown', () => {
   it('compares a destination holding a lone surrogate without throwing', () => {
     assert.ok(!sameMarkdown('[a](x\uD800)', '[a](y\uD800)'));
     assert.ok(sameMarkdown('[a](x\uD800)', '[a](<x\uD800>)'));
+  });
+});
+
+describe('joinFile', () => {
+  // Linear spells every thematic break `---`, so a body can start with a block that reads as front matter.
+  const blockFirst = '---\nlinear-team: Other\n---\n\nText.\n';
+
+  it('keeps a body that opens with a front matter block as the body', () => {
+    for (const head of ['', '\uFEFF']) {
+      const text = joinFile(head, blockFirst);
+      assert.equal(splitFile(text).head, head);
+      assert.ok(sameMarkdown(splitFile(text).body, blockFirst));
+      assert.ok(!text.replace(/^\uFEFF/, '').startsWith('---'));
+    }
+    // A byte order mark at the start of the body would hide the block from a check of the body alone.
+    const text = joinFile('', `\uFEFF${blockFirst}`);
+    assert.equal(splitFile(text).head, '\uFEFF');
+    assert.ok(sameMarkdown(splitFile(text).body, blockFirst));
+  });
+
+  it('keeps a rule with trailing spaces and an empty block as the body', () => {
+    for (const body of ['---  \nA.\n---\n', '---\n---\n', '---\r\nA.\r\n---\r\nB.']) {
+      const text = joinFile('', body);
+      assert.equal(splitFile(text).head, '');
+      assert.ok(sameMarkdown(splitFile(text).body, body), body);
+    }
+  });
+
+  it('writes other bodies as they are', () => {
+    assert.equal(joinFile('', 'Text.\n\n---\n\nMore.\n---\n'), 'Text.\n\n---\n\nMore.\n---\n');
+    assert.equal(joinFile('', '---\nNo closing rule.\n'), '---\nNo closing rule.\n');
+    assert.equal(joinFile('---\nowner: ops\n---\n\n', blockFirst), `---\nowner: ops\n---\n\n${blockFirst}`);
+  });
+
+  it('starts the body on a new line after a front matter block that ends the file, in its line ending', () => {
+    const text = joinFile('---\nowner: ops\n---', 'Text.');
+    assert.deepEqual(splitFile(text), {head: '---\nowner: ops\n---\n', body: 'Text.'});
+    assert.equal(joinFile('---\nowner: ops\n---', ''), '---\nowner: ops\n---');
+    assert.equal(joinFile('---\r\nowner: ops\r\n---', 'Text.'), '---\r\nowner: ops\r\n---\r\nText.');
+  });
+
+  it('gives back any file it was split from', () => {
+    for (const text of ['', 'Text.', '\uFEFF', '\uFEFF\uFEFF---\nA.\n---\n', '---\nowner: ops\n---', '---\nowner: ops\n---\n\n---\nA.\n---\n', '\uFEFF---\r\nowner: ops\r\n---\r\n\r\nText.']) {
+      const {head, body} = splitFile(text);
+      assert.equal(joinFile(head, body), text, JSON.stringify(text));
+    }
   });
 });

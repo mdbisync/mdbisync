@@ -23,7 +23,7 @@
 //    files. The sync refuses to run until it is merged.
 
 import { posix } from 'node:path';
-import { splitFile } from '../format/index.ts';
+import { joinFile, splitFile } from '../format/index.ts';
 import { type LinearDocument, LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
@@ -449,11 +449,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       const body = restored(entry);
       const tracked = input.texts.get(entry.path);
       if (tracked === undefined) return body;
-      const { head } = splitFile(tracked);
-      // A file that ends right after its closing fence needs a line break before the body
-      // (a head that is only a byte order mark has no fence).
-      const fenced = head.replace(/^﻿/, '') !== '';
-      return fenced && body !== '' && !head.endsWith('\n') ? `${head}\n${body}` : head + body;
+      return joinFile(splitFile(tracked).head, body);
     };
     const leaveOut = (paths: Iterable<string>, rule: RecordLeftOutRule) => {
       const out = new Set(paths);

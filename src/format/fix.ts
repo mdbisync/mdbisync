@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, parse, splitFile, start, visit } from './markdown.ts';
+import { end, joinFile, parse, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -28,7 +28,7 @@ export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
   const fixed = fixBody(body.replace(/\r\n?/g, '\n'), options);
-  return head + fixed;
+  return joinFile(head, fixed);
 }
 
 function fixBody(body: string, options: FixOptions): string {
