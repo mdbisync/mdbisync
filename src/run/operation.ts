@@ -105,9 +105,10 @@ export async function runOperation(
     await stageNothing(security.folder, null);
     return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 }, writes: noWrites() };
   }
+  let reads: LinearReads | null = null;
   try {
     // The stage step keeps Linear's answers to its reads; the apply step's capture takes them instead of reading again.
-    const reads = security?.step === 'stage' ? LinearReads.recording() : security?.step === 'apply' ? await LinearReads.replaying(readsFolder(security.folder)) : null;
+    reads = security?.step === 'stage' ? LinearReads.recording() : security?.step === 'apply' ? await LinearReads.replaying(readsFolder(security.folder)) : null;
     const outcome = await runWithSecurity(operation, inputs, initialSync, reads === null ? options : { ...options, reads }, security);
     if (security?.step !== 'stage' || !outcome.ok) return outcome;
     // The preflight passed without work to do (no annotated folder has a target): the hooks step still gets its command.
@@ -116,6 +117,7 @@ export async function runOperation(
     await reads?.save(readsFolder(security.folder));
     return staged;
   } finally {
+    reads?.close();
     // The folder holds document content; the apply step is its last reader.
     if (security?.step === 'apply') await rm(security.folder, { recursive: true, force: true });
   }

@@ -300,6 +300,7 @@ the reason is fixed. The summaries list each with its rules:
 | `security-unchecked` | From Linear: the security hooks did not see this text, because their step did not run or the tracked branch moved after it. | Nothing; the next run checks it. If it repeats, check that the hooks step runs. |
 | `title-not-a-path` | From Linear: the file the document's title names would map to a different document, for example because it lands in a folder another annotation owns. | Rename the document in Linear. |
 | `front-matter-boundary` | From Linear: the document's text starts with something that reads as front matter, so it would not stay the file's body. | Change the start of the document in Linear. |
+| `attachment-budget` | Attachment capture exceeded 32 unique links or 32 MiB per document, or 256 downloads or 256 MiB per run. Candidate files stay in bounded temporary storage. The document keeps its previous text and the capture cursor holds. | Reduce or split attachments and rerun. Other documents can still be captured; no budget rejection marks the document as unsafe. |
 | `download-retry` | An upload download timed out, lost its connection, or returned 429 or a server error. The document stays out of this capture without a mark. | The next run retries automatically. |
 | `capture-translation` | The run could not turn the document's text from Linear into the file's text. | Check the document in Linear for unusual content, or report it as a bug. |
 
@@ -526,3 +527,8 @@ default) and start again from step 2.
 | `cannot write report text: expected printable Unicode text of at most <limit> characters` | A report exceeds its output limit or an output field has an unexpected type. Normal Unicode Markdown is preserved, and control characters in display text are shown as Unicode escapes. Reduce the report size; if the message repeats for a small report, report the error with its operation and code. |
 | `cannot write report metadata: expected a non-negative safe integer` | A workflow identifier or count has an invalid type or value. Check the upstream response before retrying; an invalid workflow identifier is never used as an evidence directory. |
 | `report destination must stay inside the configured output directory` | A derived output path would leave its selected directory. Check the output configuration and file name. |
+
+| Attachment storage error | What to do |
+| --- | --- |
+| `attachment budget exceeded; reduce attachments and retry`, `temporary attachment storage budget exceeded; reduce attachments and retry` | Reduce attachment count or size, split large documents, then rerun. No partial document is accepted. |
+| `temporary attachment content changed; retry the run` | Temporary candidate bytes no longer match their hash. Rerun to download and check them again. |

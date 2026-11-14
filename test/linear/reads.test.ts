@@ -49,16 +49,30 @@ describe('Linear reads kept for the next step', () => {
       reads.tokenMinted(token.scope, token.context);
       await work(new LinearClient({ token: token.accessToken, auth: token.context, baseUrl: fake.url, reads }));
     });
-    await reads.save(dir);
+    try { await reads.save(dir); } finally { reads.close(); }
   }
 
   /** The apply step: the kept answers and a token minted on first need. */
   async function replay<T>(work: (client: LinearClient, reads: LinearReads) => Promise<T>): Promise<T> {
     const reads = await LinearReads.replaying(dir);
     assert.ok(reads !== null && reads.token !== null);
-    return withDeferredRunToken(credentials, reads.token, { baseUrl: fake.url, onRevokeError: (error) => assert.fail(String(error)) }, (token) =>
+    try { return await withDeferredRunToken(credentials, reads.token, { baseUrl: fake.url, onRevokeError: (error) => assert.fail(String(error)) }, (token) =>
       work(new LinearClient({ token: () => token.accessToken(), auth: token.context, baseUrl: fake.url, reads }), reads));
+    } finally { reads.close(); }
   }
+
+  it('replays a recorded page larger than 32 MiB within the aggregate budget', async () => {
+    const recording = LinearReads.recording();
+    let replaying: LinearReads | null = null;
+    try {
+      recording.tokenMinted(['read'], {grantType:'client_credentials', requestedScopes:['read'], returnedScopes:['read']});
+      recording.keep('large-page', {status:200, type:'application/json', body:Buffer.alloc(33 * 1024 * 1024, 32)});
+      await recording.save(dir);
+      replaying = await LinearReads.replaying(dir);
+      assert.ok(replaying !== null);
+      assert.equal(replaying.take('large-page')?.body.length, 33 * 1024 * 1024);
+    } finally { recording.close(); replaying?.close(); }
+  });
 
   it('answers the stage step\'s reads without a token or a request of its own', async () => {
     await record(async (client) => {

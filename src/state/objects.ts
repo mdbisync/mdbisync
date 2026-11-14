@@ -3,6 +3,7 @@
 // a private index file, so the repository's own index and files are never
 // touched.
 
+import { type FileContent, contentBytes } from './content.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,8 +76,8 @@ export async function readBlobs(git: Git, oids: readonly Oid[]): Promise<Map<Oid
 }
 
 /** Stores content as a blob, exactly as given (no clean filters, no LFS). */
-export async function writeBlob(git: Git, content: Buffer | string): Promise<Oid> {
-  return git.text(['hash-object', '-w', '--no-filters', '--stdin'], { input: content });
+export async function writeBlob(git: Git, content: FileContent): Promise<Oid> {
+  return git.text(['hash-object', '-w', '--no-filters', '--stdin'], { input: contentBytes(content) });
 }
 
 /**
@@ -118,7 +119,7 @@ export interface CommitSpec {
   /** The tree the changes apply to (a commit or tree id); null starts from an empty tree. */
   base: string | null;
   /** New content by path; null removes the path. Other paths keep the base's version. */
-  changes: ReadonlyMap<string, Buffer | string | null>;
+  changes: ReadonlyMap<string, FileContent | null>;
   message: string;
   identity: CommitIdentity;
   /**
@@ -154,7 +155,7 @@ export async function commitTree(git: Git, spec: CommitSpec): Promise<Oid> {
 }
 
 /** Builds a tree from `base` (a commit or tree id; null for an empty tree) plus `changes`, without a commit. */
-export async function buildTree(git: Git, base: string | null, changes: ReadonlyMap<string, Buffer | string | null>): Promise<Oid> {
+export async function buildTree(git: Git, base: string | null, changes: ReadonlyMap<string, FileContent | null>): Promise<Oid> {
   const dir = await mkdtemp(join(tmpdir(), 'state-index-'));
   const env = { GIT_INDEX_FILE: join(dir, 'index') };
   try {

@@ -1,5 +1,6 @@
 // Step one of a run: read Linear's changes, scan them, then record and push
 // accepted content and its identities in one atomic transaction.
+import { type FileContent, contentBytes, ContentSpool } from '../state/content.ts';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -23,7 +24,7 @@ import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, ImageBlockedError, DownloadRetryError, type CapturedAssets } from './assets.ts';
+import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
@@ -129,6 +130,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const superseded = await readSupersededIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
   const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], heldRemovals:[], leftOut:[], writeBackWarnings:[], summary:'', conflictNotices:noConflictNotices()};
+  const spool = new ContentSpool();
   let published = false;
   try {
     // Capture the old place before a git annotation change moves its documents.
@@ -285,11 +287,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Keep metadata for out-of-scope documents; never infer deletion from a missing page.
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
     result.documents = documents;
-    const changes = new Map<string, Buffer | string | null>();
+    const changes = new Map<string, FileContent | null>();
     const removeBody = (path: string): boolean => {
       const next = annotationHead(path) ?? null;
       changes.set(path, next);
-      return next === null ? previous.has(path) : previous.get(path)?.equals(Buffer.from(next)) !== true;
+      return next === null ? previous.has(path) : previous.get(path)?.equals(contentBytes(next)) !== true;
     };
     // Only files already present in the branch are link targets until their
     // candidates pass. A blocked rename continues to point at its old file.
@@ -316,8 +318,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       reservations.add(path);
     }
     const linkBase = [...work.values()].some((doc) => linksLinearDocuments(doc.content ?? '')) ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
-    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads);
-    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, Buffer | string>; checked?: string; compared?: { body: string; same: boolean } };
+    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool);
+    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
     const resetTarget = (id: string, targets: Map<string, string> = documentIds) => {
       for (const [path, target] of targets) if (target === id) targets.delete(path);
@@ -351,7 +353,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
         const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
-        const candidate: Candidate = {doc, path, head, assets, files: new Map<string, Buffer | string>([[path, joinFile(head, assets.body)], ...assets.files])};
+        const candidate: Candidate = {doc, path, head, assets, files: new Map<string, FileContent>([[path, joinFile(head, assets.body)], ...assets.files])};
         if (old?.path === path) candidate.previousBody = prior.body;
         candidates.set(doc.id, candidate);
         resetTarget(doc.id);
@@ -369,7 +371,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           }
           continue;
         }
-        if (error instanceof DownloadRetryError) result.leftOut.push({id: doc.id, rule: 'download-retry'});
+        if (error instanceof AttachmentBudgetError) result.leftOut.push({id: doc.id, rule: 'attachment-budget'});
+        else if (error instanceof DownloadRetryError) result.leftOut.push({id: doc.id, rule: 'download-retry'});
         else result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
     }
@@ -411,7 +414,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           // Upload URLs also enter the cache ref. Scan the original text so
           // localization cannot hide a secret embedded in a URL or its query.
           const original = head + (doc.content ?? '');
-          if (original !== text) findings = await gate.check(new Map<string, Buffer | string>([[path, original], ...assets.files]));
+          if (original !== text) findings = await gate.check(new Map<string, FileContent>([[path, original], ...assets.files]));
           if (findings?.length === 0) findings = await gate.check(candidate.files);
         }
         if (findings === null) {
@@ -505,7 +508,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           const baseline = baselines.get(path);
           if (baseline != null && splitFile(baseline.text).body === splitFile(String(content)).body) continue;
         }
-        if (previous.get(path)?.equals(Buffer.from(content)) !== true) {
+        if (previous.get(path)?.equals(contentBytes(content)) !== true) {
           changes.set(path, content);
           result.changed.push(path);
         }
@@ -590,7 +593,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     if (!published) { result.changed = []; result.removed = []; result.heldRemovals = []; }
     result.summary = renderCapture(result, gate.configured);
     return result;
-  } finally { await gate.close?.(); }
+  } finally { spool.close(); await gate.close?.(); }
 }
 
 /**
@@ -609,13 +612,13 @@ const LINK_VARIANT_TARGETS = 4;
  * other candidates it links to are rejected: its text with those targets'
  * fallback links, and its embedded files.
  */
-function linkVariants<C extends { path: string; files: Map<string, Buffer | string> }>(
+function linkVariants<C extends { path: string; files: Map<string, FileContent> }>(
   candidates: ReadonlyMap<string, C>,
   textOf: (candidate: C, targets: ReadonlyMap<string, string>) => string,
   reset: (id: string, targets: Map<string, string>) => void,
   documentIds: ReadonlyMap<string, string>,
-): Array<Map<string, Buffer | string>> {
-  const variants: Array<Map<string, Buffer | string>> = [];
+): Array<Map<string, FileContent>> {
+  const variants: Array<Map<string, FileContent>> = [];
   const without = (rejected: readonly string[]) => {
     const targets = new Map(documentIds);
     for (const id of rejected) reset(id, targets);
@@ -661,6 +664,7 @@ function placeKeyOf(place: {projectId?: string | null; teamId?: string | null}):
 
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
+  for (const item of result.leftOut) if (item.rule === 'attachment-budget') summary += `\nattachment-budget: ${JSON.stringify(item.id)}. Attachment count or bytes exceeded the document or run limit; reduce attachments and retry. The cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;
@@ -678,7 +682,7 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
 }
 
 /** Apply only LFS, after the security gate. Other clean filters cannot change captured text. */
-export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: Map<string, Buffer | string | null>) {
+export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: Map<string, FileContent | null>) {
   const dir = await mkdtemp(join(tmpdir(), 'capture-attributes-'));
   const env = { GIT_INDEX_FILE: join(dir, 'index') };
   const result = new Map(changes);
@@ -692,8 +696,8 @@ export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: 
       // No path: git-lfs takes the size of a file at that path in the working copy for the size of
       // its input, and a checkout without LFS content holds the pointer there, so it would store only
       // the first kilobyte of the content. The content given here is never the file on disk.
-      const cleaned = await git.run(['lfs', 'clean'], { input: content });
-      const bytes = typeof content === 'string' ? Buffer.from(content) : content;
+      const bytes = contentBytes(content);
+      const cleaned = await git.run(['lfs', 'clean'], { input: bytes });
       const pointer = parseLfsPointer(cleaned.stdout);
       // Content that already is a pointer, or is empty, comes back as it is; any other becomes a pointer to the whole content.
       if (!cleaned.stdout.equals(bytes)) {

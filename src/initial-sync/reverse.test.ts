@@ -1,3 +1,4 @@
+import { contentBytes } from '../state/content.ts';
 // The initial sync from Linear to the tracked branch through the command
 // line, against a local git remote and a fake GitHub and Linear: the dry run,
 // the pull request left for a person, the refusal of the sync until it is
@@ -539,6 +540,18 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'front-matter-boundary' }]);
     assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+  });
+
+  it('leaves an initial attachment budget overrun out without partial files or Linear writes', async () => {
+    const world = fakeWorld();
+    const body = Array.from({length: 33}, (_, i) => `[File](${UPLOADS_HOST}/file-${i})`).join('\n');
+    world.linear.documents = linearDocuments().map((d) => d.id === 'doc-runbook' ? {...d, content: body} : d);
+    const {result, report} = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{path:'eng/ops/runbook.md', rule:'attachment-budget'}]);
+    assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/ops/runbook.md'));
+    assert.equal(world.linear.comments.size, 0);
+    assert.equal(world.linear.uploads.length, 0);
   });
 
   it('refuses unsupported attachment bytes equal to a removed Markdown page instead of linking that page', async () => {
@@ -1210,7 +1223,7 @@ describe('the security gate of an initial sync from Linear', () => {
         configured: true,
         async check(files) {
           checked.push([...files.keys()]);
-          return [...files.values()].some((content) => content.toString().includes(SECRET)) ? [{ hook: 'secret-check', line: 1 }] : [];
+          return [...files.values()].some((content) => contentBytes(content).toString().includes(SECRET)) ? [{ hook: 'secret-check', line: 1 }] : [];
         },
       };
       const { result } = await confirmLinearToGit(

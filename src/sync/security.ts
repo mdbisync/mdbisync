@@ -1,5 +1,6 @@
 // Hook output is untrusted: retain only configured hook ids and line numbers.
 // Candidates stay in a disposable repository with no remote until accepted.
+import { type FileContent, contentBytes } from '../state/content.ts';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,7 +16,7 @@ export interface SecurityGate {
    * The findings, none when the files pass; null when the gate has no answer
    * for these files (the staged steps): they are not pushed this run.
    */
-  check(files: ReadonlyMap<string, Buffer | string>): Promise<SecurityFinding[] | null>;
+  check(files: ReadonlyMap<string, FileContent>): Promise<SecurityFinding[] | null>;
   close?(): Promise<void>;
 }
 
@@ -95,7 +96,7 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
           // pre-commit and its hooks would read a path that starts with `-` as an option, such as `--config`.
           if (path === PRE_COMMIT_CONFIG || path.startsWith('-')) return [{ hook: SECURITY_ALIAS, line: 1 }];
           await mkdir(dirname(join(dir, path)), { recursive: true });
-          await writeFile(join(dir, path), content);
+          await writeFile(join(dir, path), contentBytes(content));
         }
         // Index-inspecting hooks see the candidate too. This repository has no remote.
         await scratch.run(['add', '--force', '--', ...files.keys()]);
@@ -118,7 +119,7 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
         // Capture only Linear's text. A security hook that rewrites it is a rejection.
         for (const [path, content] of files) {
           const after = await readFile(join(dir, path)).catch(() => null);
-          if (after === null || !after.equals(Buffer.from(content))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
+          if (after === null || !after.equals(contentBytes(content))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         }
         return findings;
       } catch {

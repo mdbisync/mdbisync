@@ -22,6 +22,7 @@
 //    find the one a previous run opened. A person merges it: it can remove
 //    files. The sync refuses to run until it is merged.
 
+import { type FileContent, contentBytes, ContentSpool } from '../state/content.ts';
 import { posix } from 'node:path';
 import { joinFile, splitFile } from '../format/index.ts';
 import { type LinearDocument, LinearError } from '../linear/index.ts';
@@ -60,7 +61,7 @@ import {
   readUploads,
   stateRef,
 } from '../state/index.ts';
-import { createAssetCapture, ImageBlockedError } from '../sync/assets.ts';
+import { createAssetCapture, AttachmentBudgetError, ImageBlockedError } from '../sync/assets.ts';
 import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
 import { type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
@@ -375,7 +376,9 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     return { plan, result };
   }
 
-  const recorded = await record();
+  const spool = new ContentSpool();
+  let recorded: Awaited<ReturnType<typeof record>>;
+  try { recorded = await record(); } finally { spool.close(); }
   if (recorded === 'staged') return { plan, result };
   if (recorded === 'sync-branch-changed') {
     result.code = 'sync-branch-changed';
@@ -422,7 +425,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
    */
   async function record(): Promise<ReverseRecord | null | 'sync-branch-changed' | 'staged'> {
     // Each document's body once its embedded files are downloaded, the files, and their upload URLs by content hash.
-    const bodies = new Map<string, { body: string; files: Map<string, Buffer>; uploads: UploadMap }>();
+    const bodies = new Map<string, { body: string; files: Map<string, FileContent>; uploads: UploadMap }>();
     // A link to another synchronized document's URL becomes a relative link to its file, as the capture does:
     // only to a file the record holds, so the links follow every file left out on the way.
     let linkBase: string | undefined;
@@ -466,8 +469,9 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
     let entries = [...plan.overwrite, ...plan.create];
     const uploads = await readUploads(git, expected.uploads);
-    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads);
+    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool);
     const failed: string[] = [];
+    const budget: string[] = [];
     const imageBlocked: string[] = [];
     if (entries.some((entry) => linksLinearDocuments((documents.get(entry.documentId) as LinearDocument).content ?? ''))) {
       linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
@@ -486,7 +490,8 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         // An image the capture would block (not an upload, a dead, oversized or unsupported one): the
         // document's text does not enter git. This sync writes nothing to Linear, so the first sync
         // after the merge reads the document again and marks it there.
-        if (error instanceof ImageBlockedError) imageBlocked.push(entry.path);
+        if (error instanceof AttachmentBudgetError) budget.push(entry.path);
+        else if (error instanceof ImageBlockedError) imageBlocked.push(entry.path);
         // Not downloaded this run (a network error, a rate limit, a server error, a file it could not place): the file keeps the tracked branch's version.
         else failed.push(entry.path);
       }
@@ -505,6 +510,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       result.overwritten = result.overwritten.filter((path) => !kept.has(path));
       leaveOut(paths.filter((path) => created.has(path)), rule);
     };
+    keepTracked(budget, 'attachment-budget');
     keepTracked(failed, 'download-failed');
     keepTracked(imageBlocked, 'image-blocked');
     // The document's text must stay the file's body: text that reads as front
@@ -517,10 +523,10 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         const blocked: string[] = [];
         const unchecked: string[] = [];
         for (const entry of entries) {
-          const { files } = bodies.get(entry.path) as { files: Map<string, Buffer> };
+          const { files } = bodies.get(entry.path) as { files: Map<string, FileContent> };
           const text = textOf(entry);
           if (files.size === 0 && text === input.texts.get(entry.path)) continue;
-          const findings = await gate.check(new Map<string, Buffer | string>([[entry.path, text], ...files]));
+          const findings = await gate.check(new Map<string, FileContent>([[entry.path, text], ...files]));
           // No answer: the hooks have not seen this text (the hooks step did not run, or the tracked branch moved).
           if (findings === null) unchecked.push(entry.path);
           else if (findings.length > 0) blocked.push(entry.path);
@@ -537,9 +543,9 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     let lfsObjects: string[] = [];
     // What `.gitattributes` makes of each changed path, by the content it was given: a later build
     // reuses it only for the same bytes (a link can change when a document is left out).
-    const stored = new Map<string, { input: Buffer | string | null; output: Buffer | string | null }>();
-    const same = (a: Buffer | string | null, b: Buffer | string | null) =>
-      a === null || b === null ? a === b : Buffer.from(a).equals(Buffer.from(b));
+    const stored = new Map<string, { input: FileContent | null; output: FileContent | null }>();
+    const same = (a: FileContent | null, b: FileContent | null) =>
+      a === null || b === null ? a === b : contentBytes(a).equals(contentBytes(b));
     let commit = await build(entries);
     // The new tree must map every file back to its document's title and place.
     // Each pass leaves out more: the misplaced new files (and new README files,
@@ -563,22 +569,22 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     }
 
     async function build(list: readonly ReverseEntry[]): Promise<Oid> {
-      const changes = new Map<string, Buffer | string | null>();
+      const changes = new Map<string, FileContent | null>();
       for (const entry of list) {
-        for (const [path, bytes] of (bodies.get(entry.path) as { files: Map<string, Buffer> }).files) changes.set(path, bytes);
+        for (const [path, bytes] of (bodies.get(entry.path) as { files: Map<string, FileContent> }).files) changes.set(path, bytes);
         changes.set(entry.path, textOf(entry));
       }
       for (const path of plan.remove) changes.set(path, null);
       // `.gitattributes` decides what is stored in LFS, as for a person's commit.
       const fresh = new Map([...changes].filter(([path, content]) => !same(stored.get(path)?.input ?? null, content) || !stored.has(path)));
-      if (fresh.size > 0) for (const [path, output] of (await prepareLfs(git, fetched.tracked, fresh)).changes) stored.set(path, { input: fresh.get(path) as Buffer | string | null, output });
-      const prepared = new Map([...changes.keys()].map((path) => [path, (stored.get(path) as { output: Buffer | string | null }).output]));
+      if (fresh.size > 0) for (const [path, output] of (await prepareLfs(git, fetched.tracked, fresh)).changes) stored.set(path, { input: fresh.get(path) as FileContent | null, output });
+      const prepared = new Map([...changes.keys()].map((path) => [path, (stored.get(path) as { output: FileContent | null }).output]));
       lfsObjects = [
         ...new Set(
           [...changes.keys()]
-            .map((path) => stored.get(path) as { input: Buffer | string | null; output: Buffer | string | null })
+            .map((path) => stored.get(path) as { input: FileContent | null; output: FileContent | null })
             .filter(({ input, output }) => output !== null && output !== input)
-            .map(({ output }) => parseLfsPointer(Buffer.from(output as Buffer | string))?.oid)
+            .map(({ output }) => parseLfsPointer(contentBytes(output as FileContent))?.oid)
             .filter((oid): oid is string => oid !== undefined),
         ),
       ];

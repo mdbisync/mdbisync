@@ -1,14 +1,18 @@
+import { contentBytes } from '../state/content.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { it } from 'node:test';
+import { it, afterEach } from 'node:test';
 import { LinearReads } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture, imageFindings, ImageBlockedError } from './assets.ts';
+import { captureAssets, createAssetCapture as makeCapture, imageFindings, ImageBlockedError } from './assets.ts';
 
+const captures: ReturnType<typeof makeCapture>[] = [];
+const createAssetCapture: typeof makeCapture = (...args) => { const capture = makeCapture(...args); captures.push(capture); return capture; };
+afterEach(() => { for (const capture of captures.splice(0)) capture.close(); });
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
 it('downloads new uploads next to the document, reuses content hashes and preserves ordinary links', async () => {
@@ -80,11 +84,10 @@ it('returns replacement bytes when a cached LFS pointer has no readable object',
     await fixture.seed({'plan.md':'![Image](missing.png)\n','missing.png':pointer});
     const git = await fixture.clone('missing-object');
     const base = await git.text(['rev-parse','origin/main']);
-    const { createAssetCapture } = await import('./assets.ts');
     const url = 'https://uploads.linear.app/workspace/image.png';
     const read = createAssetCapture(git,resolveStateConfig({}),base,async()=>new Response(bytes));
     const result = await read('plan.md',`![Image](${url})\n`,new Map([[hash,url]]),'![Image](missing.png)\n');
-    assert.deepEqual(result.files.get('missing.png'),bytes);
+    assert.deepEqual(contentBytes(result.files.get('missing.png')!),bytes);
     assert.equal(result.body,'![Image](missing.png)\n');
   } finally {await fixture.cleanup();}
 });
@@ -138,7 +141,7 @@ it('keeps the previous spelling of each linked file whether or not the cache kno
       assert.equal(result.body, expected, `cache ${JSON.stringify([...uploads.values()])}`);
       // A downloaded upload lands on the tracked file it equals, so the tree does not change either.
       const tracked: Record<string, string> = {'docs/img.png': 'same-image', 'docs/shot (1).png': 'shot', 'docs/a<b.png': 'angle'};
-      for (const [file, content] of result.files) assert.equal(content.toString(), tracked[file]);
+      for (const [file, content] of result.files) assert.equal(contentBytes(content).toString(), tracked[file]);
       // The parser reads all five as images again (each a local file, so none is an upload).
       assert.equal(imageFindings(result.body).length, 5);
     }
@@ -213,7 +216,8 @@ it('a download kept by the stage step is taken by the apply step without a reque
     assert.ok(replaying !== null);
     const applied = await createAssetCapture(git, resolveStateConfig({}), base, fetcher, replaying)('plan.md', body, new Map());
     assert.equal(gets, 1, 'the apply step downloaded again');
-    assert.deepEqual([...applied.files], [...staged.files]);
+    assert.deepEqual([...applied.files].map(([p, c]) => [p, contentBytes(c)]), [...staged.files].map(([p, c]) => [p, contentBytes(c)]));
+    recording.close(); replaying.close();
     assert.equal(applied.body, staged.body);
   } finally {
     await rm(dir, {recursive: true, force: true});
@@ -398,5 +402,79 @@ it('classifies oversized attachments and empty upload responses as permanent fin
         return true;
       });
     }
+  } finally { await fixture.cleanup(); }
+});
+
+it('bounds document and run bytes, reuses spooled downloads, and removes temporary files', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md': 'Plan.'});
+    const git = await fixture.clone('budget');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const { ContentSpool } = await import('../state/content.ts');
+    const { AttachmentBudgetError } = await import('./assets.ts');
+    const limits = {documentCount: 2, documentBytes: png.length * 2, runCount: 3, runBytes: png.length * 3};
+    let gets = 0;
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async () => { gets++; return new Response(png); }, undefined, new ContentSpool(), limits);
+    const links = (...ids: number[]) => ids.map((id) => `![Image](https://uploads.linear.app/file-${id})`).join('\n');
+    await assert.rejects(capture('plan.md', links(0, 1, 2), new Map()), AttachmentBudgetError);
+    assert.equal(gets, 0, 'count is checked before downloads');
+    const result = await capture('plan.md', links(0, 1), new Map());
+    const file = result.files.values().next().value!;
+    assert.ok(typeof file === 'object' && !Buffer.isBuffer(file));
+    assert.deepEqual(contentBytes(file), png);
+    assert.equal(gets, 2);
+    await capture('second.md', links(0, 2), new Map());
+    assert.equal(gets, 3, 'a duplicate URL uses its temporary file');
+    await assert.rejects(capture('third.md', links(3), new Map()), AttachmentBudgetError);
+    assert.equal(gets, 3, 'run count stops the next request');
+    capture.close();
+    assert.throws(() => contentBytes(file), /ENOENT/);
+
+    for (const headers of [{}, {'content-length': String(png.length)}]) {
+      const doc = createAssetCapture(git, resolveStateConfig({}), base, async () => new Response(png, {headers}), undefined, new ContentSpool(), {...limits, documentBytes: png.length - 1});
+      await assert.rejects(doc('plan.md', links(0), new Map()), AttachmentBudgetError);
+      const run = createAssetCapture(git, resolveStateConfig({}), base, async () => new Response(png, {headers}), undefined, new ContentSpool(), {...limits, runBytes: png.length});
+      await run('plan.md', links(0), new Map());
+      await assert.rejects(run('next.md', links(1), new Map()), AttachmentBudgetError);
+    }
+  } finally { await fixture.cleanup(); }
+});
+
+it('charges interrupted streams against the run byte budget before retrying other documents', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md': 'Plan.'});
+    const git = await fixture.clone('interrupted-budget');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const { ContentSpool } = await import('../state/content.ts');
+    const { AttachmentBudgetError, DownloadRetryError } = await import('./assets.ts');
+    let gets = 0;
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async () => {
+      gets++;
+      let sent = false;
+      return new Response(new ReadableStream({pull(controller) {
+        if (sent) controller.error(new Error('interrupted'));
+        else { sent = true; controller.enqueue(Buffer.alloc(8)); }
+      }}));
+    }, undefined, new ContentSpool(), {documentCount:32, documentBytes:32, runCount:10, runBytes:16});
+    for (let i = 0; i < 2; i++) await assert.rejects(capture('plan.md', `[File](https://uploads.linear.app/file-${i})`, new Map()), DownloadRetryError);
+    await assert.rejects(capture('next.md', '[File](https://uploads.linear.app/next)', new Map()), AttachmentBudgetError);
+    assert.equal(gets, 2);
+  } finally { await fixture.cleanup(); }
+});
+
+it('counts cached query variants as one attachment, matching download identity', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.', 'image.png':png});
+    const git = await fixture.clone('query-budget');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const url = 'https://uploads.linear.app/image';
+    const hash = createHash('sha256').update(png).digest('hex');
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async () => { throw new Error('Unexpected download'); });
+    const result = await capture('plan.md', Array.from({length:33}, (_, i) => `![Image](${url}?width=${i})`).join('\n'), new Map([[hash,url]]));
+    assert.equal(result.files.size, 0);
+    assert.match(result.body, /image\.png\?width=32/);
   } finally { await fixture.cleanup(); }
 });
