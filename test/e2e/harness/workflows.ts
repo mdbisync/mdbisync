@@ -445,8 +445,12 @@ export function retainWorkflowOutput(dir: string, logs: ReadonlyMap<string, stri
   const values = [...forbidden].filter((value) => value.length > 0);
   const normalize = (text: string) => text.replace(/\r\n/g, '\n').replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /gm, '');
   // Actions prefixes every line, including each line of a PEM credential.
-  const matches = (text: string) => values.some((value) => text.includes(value) ||
-    text.includes(JSON.stringify(value).slice(1, -1)) || (normalize(value).trimEnd().length > 0 && normalize(text).includes(normalize(value).trimEnd())));
+  const forms = values.map((value) => ({ raw: value, escaped: JSON.stringify(value).slice(1, -1), normalized: normalize(value).trimEnd() }));
+  const matches = (text: string) => {
+    const normalized = normalize(text);
+    return forms.some((value) => text.includes(value.raw) || text.includes(value.escaped) ||
+      (value.normalized.length > 0 && normalized.includes(value.normalized)));
+  };
   const rejectedSources = [...logs].filter(([name, text]) => matches(name) || matches(text)).map(([name]) => `log: ${safeWorkflowValue(name, values)}`);
   for (const [name, value] of Object.entries({ ...result, stdout: '' })) {
     if (matches(JSON.stringify(value) ?? '')) rejectedSources.push(name);
