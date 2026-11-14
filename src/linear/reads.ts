@@ -11,8 +11,9 @@
 // an index file and one file per answer body, so a run with many large
 // uploads never builds one large string.
 
+import { ContentSpool, contentBytes, type SpooledFile } from '../state/content.ts';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type AuthContext, authMetadata } from './diagnostics.ts';
 
@@ -45,7 +46,8 @@ export const uploadReadKey = (url: string) => sha256(`upload\n${url}`);
 export class LinearReads {
   readonly mode: 'record' | 'replay';
   /** Kept answers by key, each key's in the order they were kept. */
-  #answers = new Map<string, KeptAnswer[]>();
+  #answers = new Map<string, Array<{status: number; type: string; body: SpooledFile}>>();
+  #spool = new ContentSpool(512 * 1024 * 1024, 8192);
   #order: string[] = [];
   #token: ReadsIndex['token'] = null;
   #ended = false;
@@ -70,11 +72,29 @@ export class LinearReads {
       if (index.version !== VERSION || index.token === null || !Array.isArray(index.answers)) return null;
       const reads = new LinearReads('replay');
       reads.#token = index.token;
+      if (index.answers.length > 8192) return null;
+      let total = 0;
       for (const { key, status, type, body } of index.answers) {
         if (!/^[0-9a-f]{64}$/.test(body)) return null;
-        const bytes = await readFile(join(folder, BODIES, body));
-        if (sha256(bytes) !== body) return null;
-        reads.#add(key, { status, type, body: bytes });
+        const file = join(folder, BODIES, body);
+        const handle = await open(file, 'r');
+        try {
+          // Inspect and read the same opened file, even if its path is replaced.
+          const info = await handle.stat();
+          const size = info.size;
+          total += size;
+          if (!info.isFile() || total > 512 * 1024 * 1024) return null;
+          const bytes = Buffer.alloc(size);
+          let offset = 0;
+          while (offset < size) {
+            const {bytesRead} = await handle.read(bytes, offset, size - offset, offset);
+            if (bytesRead === 0) return null;
+            offset += bytesRead;
+          }
+          const extra = await handle.read(Buffer.alloc(1), 0, 1, size);
+          if (extra.bytesRead !== 0 || sha256(bytes) !== body) return null;
+          reads.#add(key, { status, type, body: {file, hash: body, size} });
+        } finally { await handle.close(); }
       }
       return reads;
     } catch {
@@ -95,13 +115,14 @@ export class LinearReads {
   /** The kept answer to this read, taken so it answers once; none while recording or after the capture ended. */
   take(key: string): KeptAnswer | undefined {
     if (this.mode !== 'replay' || this.#ended) return undefined;
-    return this.#answers.get(key)?.shift();
+    const answer = this.#answers.get(key)?.shift();
+    return answer === undefined ? undefined : {...answer, body: contentBytes(answer.body)};
   }
 
   /** Keeps a successful answer while recording. */
   keep(key: string, answer: KeptAnswer): void {
     if (this.mode !== 'record' || this.#ended || answer.status < 200 || answer.status >= 300) return;
-    this.#add(key, answer);
+    this.#add(key, {...answer, body: this.#spool.put(answer.body)});
   }
 
   /** The capture ended: nothing more is kept or answered. */
@@ -117,14 +138,16 @@ export class LinearReads {
     for (const key of this.#order) {
       const answer = queues.get(key)?.shift();
       if (answer === undefined) continue;
-      const body = sha256(answer.body);
-      await writeFile(join(folder, BODIES, body), answer.body, { mode: 0o600 });
+      const body = answer.body.hash;
+      await writeFile(join(folder, BODIES, body), contentBytes(answer.body), { mode: 0o600 });
       index.answers.push({ key, status: answer.status, type: answer.type, body });
     }
     await writeFile(join(folder, INDEX), JSON.stringify(index), { mode: 0o600 });
   }
 
-  #add(key: string, answer: KeptAnswer): void {
+  close(): void { this.#spool.close(); this.#answers.clear(); this.#order = []; }
+
+  #add(key: string, answer: {status: number; type: string; body: SpooledFile}): void {
     const queue = this.#answers.get(key);
     if (queue === undefined) this.#answers.set(key, [answer]);
     else queue.push(answer);

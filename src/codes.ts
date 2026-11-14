@@ -59,11 +59,11 @@ export type LeftOutAtWriteRule = (typeof LEFT_OUT_AT_WRITE_RULES)[number];
 export type FileLeftOutRule = LintRule | UnsyncedReason | LeftOutRule | LeftOutAtWriteRule;
 
 /** Why an initial sync from Linear leaves a file out of its record, or keeps the tracked one. */
-export const RECORD_LEFT_OUT_RULES = ['download-failed', 'image-blocked', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;
+export const RECORD_LEFT_OUT_RULES = ['attachment-budget', 'download-failed', 'image-blocked', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;
 export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
 
 /** Why the sync's capture leaves a Linear document out. */
-export const CAPTURE_LEFT_OUT_RULES = ['capture-translation', 'download-retry', 'security-unchecked'] as const;
+export const CAPTURE_LEFT_OUT_RULES = ['attachment-budget', 'capture-translation', 'download-retry', 'security-unchecked'] as const;
 export type CaptureLeftOutRule = (typeof CAPTURE_LEFT_OUT_RULES)[number];
 
 /** The rule a file name read from Linear follows. */

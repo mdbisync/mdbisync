@@ -19,6 +19,7 @@
 // The folder holds document content on the runner's disk only; it is never
 // uploaded, and the apply step removes it when its operation ends.
 
+import { type FileContent, contentBytes } from '../state/content.ts';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -60,10 +61,10 @@ export function stageFolder(env: NodeJS.ProcessEnv = process.env): string {
 /** Where the stage step keeps Linear's answers to its reads for the apply step. */
 export const readsFolder = (folder: string) => join(folder, READS);
 
-const sha256 = (content: Buffer | string) => createHash('sha256').update(content).digest('hex');
+const sha256 = (content: FileContent) => createHash('sha256').update(contentBytes(content)).digest('hex');
 
 /** One answer per set of files: the paths and the hashes of their bytes. */
-export function candidateKey(files: ReadonlyMap<string, Buffer | string>): string {
+export function candidateKey(files: ReadonlyMap<string, FileContent>): string {
   const pairs = [...files].map(([path, content]) => [path, sha256(content)]).sort(([a], [b]) => (a! < b! ? -1 : a! > b! ? 1 : 0));
   return sha256(JSON.stringify(pairs));
 }
@@ -93,7 +94,7 @@ export async function stagingGate(git: Git, tracked: Oid, folder: string): Promi
         for (const [path, content] of files) {
           checkRepoPath(path);
           const hash = sha256(content);
-          await writeFile(join(folder, 'files', hash), content, { mode: 0o600 });
+          await writeFile(join(folder, 'files', hash), contentBytes(content), { mode: 0o600 });
           entries.push({ path, sha256: hash });
         }
         sets.set(key, { key, files: entries });

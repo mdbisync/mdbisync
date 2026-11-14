@@ -154,13 +154,31 @@ export class GraphQLTransport {
     query: string,
     variables: Record<string, unknown> = {},
   ): Promise<T> {
+    return kind === 'mutation' ? this.mutate<T>(operation, query, variables) : this.query<T>(operation, query, variables);
+  }
+
+  /** Reads alone can consume or record a saved answer. */
+  async query<T>(operation: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
+    if (this.#stopped) throw this.#refuse(operation, 'query', this.#stopped);
     const requestBody = JSON.stringify({ query, variables, operationName: operation });
-    // Only reads are kept and answered again; a write always reaches Linear.
-    const key = this.reads !== undefined && kind === 'query' ? graphqlReadKey(requestBody) : undefined;
+    const key = this.reads === undefined ? undefined : graphqlReadKey(requestBody);
+    const kept = key === undefined ? undefined : this.reads?.take(key);
+    if (kept !== undefined) return keptData<T>(operation, kept.status, kept.body);
+    const answer = await this.#network(operation, 'query', requestBody);
+    if (key !== undefined) this.reads?.keep(key, { status: answer.status, type: 'application/json', body: Buffer.from(answer.text, 'utf8') });
+    return answer.data as T;
+  }
+
+  /** Every write obtains its answer directly from the network, never the read store. */
+  async mutate<T>(operation: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
+    const requestBody = JSON.stringify({ query, variables, operationName: operation });
+    return (await this.#network(operation, 'mutation', requestBody)).data as T;
+  }
+
+  /** Network execution shared by reads and writes; has no read-store access. */
+  async #network(operation: string, kind: OperationKind, requestBody: string): Promise<{data: unknown; text: string; status: number}> {
     for (let attempt = 1; ; attempt += 1) {
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
-      const kept = attempt === 1 && key !== undefined ? this.reads?.take(key) : undefined;
-      if (kept !== undefined) return keptData<T>(operation, kept.status, kept.body);
       const info: RequestInfo = { operation, kind, attempt };
       await this.#hooks.beforeRequest?.(info);
       // Another request may have stopped the client while this one waited.
@@ -244,8 +262,7 @@ export class GraphQLTransport {
       if (!response.ok || body === undefined || body.data === undefined || body.data === null) {
         throw new LinearHttpError(operation, response.status, requestId);
       }
-      if (key !== undefined) this.reads?.keep(key, { status: response.status, type: 'application/json', body: Buffer.from(text, 'utf8') });
-      return body.data as T;
+      return {data: body.data, text, status: response.status};
     }
   }
 

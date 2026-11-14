@@ -5,11 +5,11 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, open, readFile, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
-import { LinearClient, LinearHttpError, LinearReads, withDeferredRunToken, withRunToken } from '../../src/linear/index.ts';
+import { graphqlReadKey, LinearClient, LinearHttpError, LinearReads, withDeferredRunToken, withRunToken } from '../../src/linear/index.ts';
 import { FakeLinear } from './fake-linear.ts';
 
 const credentials = { clientId: 'client-id', clientSecret: 'client-secret-value' };
@@ -49,16 +49,30 @@ describe('Linear reads kept for the next step', () => {
       reads.tokenMinted(token.scope, token.context);
       await work(new LinearClient({ token: token.accessToken, auth: token.context, baseUrl: fake.url, reads }));
     });
-    await reads.save(dir);
+    try { await reads.save(dir); } finally { reads.close(); }
   }
 
   /** The apply step: the kept answers and a token minted on first need. */
   async function replay<T>(work: (client: LinearClient, reads: LinearReads) => Promise<T>): Promise<T> {
     const reads = await LinearReads.replaying(dir);
     assert.ok(reads !== null && reads.token !== null);
-    return withDeferredRunToken(credentials, reads.token, { baseUrl: fake.url, onRevokeError: (error) => assert.fail(String(error)) }, (token) =>
+    try { return await withDeferredRunToken(credentials, reads.token, { baseUrl: fake.url, onRevokeError: (error) => assert.fail(String(error)) }, (token) =>
       work(new LinearClient({ token: () => token.accessToken(), auth: token.context, baseUrl: fake.url, reads }), reads));
+    } finally { reads.close(); }
   }
+
+  it('replays a recorded page larger than 32 MiB within the aggregate budget', async () => {
+    const recording = LinearReads.recording();
+    let replaying: LinearReads | null = null;
+    try {
+      recording.tokenMinted(['read'], {grantType:'client_credentials', requestedScopes:['read'], returnedScopes:['read']});
+      recording.keep('large-page', {status:200, type:'application/json', body:Buffer.alloc(33 * 1024 * 1024, 32)});
+      await recording.save(dir);
+      replaying = await LinearReads.replaying(dir);
+      assert.ok(replaying !== null);
+      assert.equal(replaying.take('large-page')?.body.length, 33 * 1024 * 1024);
+    } finally { recording.close(); replaying?.close(); }
+  });
 
   it('answers the stage step\'s reads without a token or a request of its own', async () => {
     await record(async (client) => {
@@ -70,6 +84,35 @@ describe('Linear reads kept for the next step', () => {
     assert.deepEqual(data.teams.nodes, [{ id: 'team-1' }]);
     assert.deepEqual(paths(), []);
   });
+
+  for (const mode of ['explicit', 'compatibility', 'transport'] as const) {
+    it(`never consults or records replay data for a mutation with a matching kept key (${mode})`, async (t) => {
+      const key = graphqlReadKey(JSON.stringify({query: MUTATION, variables: {}, operationName: 'Touch'}));
+      const planted = {status: 200, type: 'application/json', body: Buffer.from('{"data":{"touch":{"success":false}}}')};
+      const recording = LinearReads.recording();
+      let reads: LinearReads | null = null;
+      try {
+        recording.tokenMinted(['read', 'write'], {grantType:'client_credentials', requestedScopes:['read', 'write'], returnedScopes:['read', 'write']});
+        recording.keep(key, planted);
+        await recording.save(dir);
+        reads = await LinearReads.replaying(dir);
+        assert.ok(reads);
+        const take = t.mock.method(reads, 'take');
+        const keep = t.mock.method(reads, 'keep');
+        const client = new LinearClient({token: 'test', baseUrl: fake.url, reads});
+        const answer = mode === 'explicit'
+          ? await client.mutate('Touch', MUTATION)
+          : mode === 'compatibility'
+            ? await client.request('Touch', 'mutation', MUTATION)
+            : await client.transport.request('Touch', 'mutation', MUTATION);
+        assert.deepEqual(answer, {touch: {success: true}});
+        assert.deepEqual(paths(), ['Touch']);
+        assert.equal(take.mock.callCount(), 0);
+        assert.equal(keep.mock.callCount(), 0);
+        assert.deepEqual(reads.take(key), planted, 'the matching kept answer must remain untouched');
+      } finally { recording.close(); reads?.close(); }
+    });
+  }
 
   it('answers each read once; a repeated read, a write and a read after the end reach Linear with one minted token', async () => {
     await record(async (client) => {
@@ -154,6 +197,24 @@ describe('Linear reads kept for the next step', () => {
     });
     const kept = JSON.parse(await readFile(index(), 'utf8')) as { answers: Array<{ body: string }> };
     await writeFile(join(dir, 'bodies', kept.answers[0]!.body), 'changed');
+    assert.equal(await LinearReads.replaying(dir), null);
+  });
+
+  it('rejects a body that grows after its opened file is measured', async (t) => {
+    await record(async (client) => {
+      await client.transport.request('Teams', 'query', QUERY);
+    });
+    const kept = JSON.parse(await readFile(index(), 'utf8')) as { answers: Array<{ body: string }> };
+    const file = join(dir, 'bodies', kept.answers[0]!.body);
+    const probe = await open(file, 'r');
+    const prototype = Object.getPrototypeOf(probe) as FileHandle;
+    const originalStat = prototype.stat;
+    await probe.close();
+    t.mock.method(prototype, 'stat', async function (this: FileHandle) {
+      const info = await originalStat.call(this);
+      await appendFile(file, 'extra');
+      return info;
+    });
     assert.equal(await LinearReads.replaying(dir), null);
   });
 });

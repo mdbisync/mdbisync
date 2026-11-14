@@ -125,6 +125,7 @@ file keeps the tracked branch's text and stays tied to its document.
 | Rule | Why |
 | --- | --- |
 | `image-blocked` | An image or file the document embeds is one the sync blocks: not an upload of the workspace (an external URL, a `data:` URI, a path), or an upload that is gone, over 10 MB, redirected or not a supported type. The first sync afterwards marks the document and comments which images to fix. |
+| `attachment-budget` | More than 32 unique upload links or 32 MiB in one document, or 256 downloads or 256 MiB in the run. The document keeps its tracked text (or stays out if new). Reduce or split attachments and rerun. |
 | `download-failed` | A file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed next to it. The first sync afterwards reads the document again. |
 | `front-matter-boundary` | The document's text starts with something that reads as front matter, so it would not stay the file's body. |
 | `title-not-a-path` | The new file would map back to another document or another folder's team or project. |

@@ -1,3 +1,4 @@
+import { ContentSpool, contentBytes, type FileContent, type SpooledFile } from '../state/content.ts';
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { destinations, findFileLinks } from '../initial-sync/uploads.ts';
@@ -9,10 +10,14 @@ import { uploadExtension } from './upload-type.ts';
 
 export interface CapturedAssets {
   body: string;
-  files: Map<string, Buffer>;
+  files: Map<string, FileContent>;
   uploads: UploadMap;
 }
 
+export class AttachmentBudgetError extends Error {
+  constructor() { super(message('assets.budget')); }
+}
+export const ATTACHMENT_LIMITS = Object.freeze({documentCount: 32, documentBytes: 32 * 1024 * 1024, runCount: 256, runBytes: 256 * 1024 * 1024});
 const LIMIT = 10 * 1024 * 1024;
 function isUpload(url: string): boolean {
   try { const parsed = new URL(url); return parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.username === '' && parsed.password === '' && parsed.port === ''; }
@@ -87,10 +92,12 @@ class DownloadBlockedError extends Error {
 }
 
 /** The caller authenticates the allowed upload host. Redirects cannot forward credentials elsewhere. */
-async function download(url: string, fetcher: typeof fetch, reads: LinearReads | undefined): Promise<{ bytes: Buffer; type: string }> {
+async function download(url: string, fetcher: typeof fetch, reads: LinearReads | undefined, budget: number, consume: (size: number) => void): Promise<{ bytes: Buffer; type: string }> {
   if (!isUpload(url)) throw new Error(message('assets.not-allowed'));
   const key = uploadReadKey(url);
   const kept = reads?.take(key);
+  if (kept !== undefined) consume(kept.body.length);
+  if (kept !== undefined && kept.body.length > budget) throw new AttachmentBudgetError();
   if (kept !== undefined && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
   try {
     const response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
@@ -103,25 +110,31 @@ async function download(url: string, fetcher: typeof fetch, reads: LinearReads |
       await response.body.cancel().catch(() => {});
       throw new DownloadBlockedError('too-large');
     }
+    if (Number(response.headers.get('content-length') ?? 0) > budget) {
+      await response.body.cancel().catch(() => {});
+      throw new AttachmentBudgetError();
+    }
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of response.body) {
+      consume(chunk.length);
       size += chunk.length;
       if (size > LIMIT) throw new DownloadBlockedError('too-large');
+      if (size > budget) throw new AttachmentBudgetError();
       chunks.push(Buffer.from(chunk));
     }
     const asset = {bytes: Buffer.concat(chunks), type: response.headers.get('content-type')?.split(';')[0]?.trim() ?? ''};
     reads?.keep(key, { status: response.status, type: asset.type, body: asset.bytes });
     return asset;
   } catch (error) {
-    if (error instanceof LinearError || error instanceof DownloadBlockedError || error instanceof DownloadRetryError) throw error;
+    if (error instanceof AttachmentBudgetError || error instanceof LinearError || error instanceof DownloadBlockedError || error instanceof DownloadRetryError) throw error;
     // Fetch failures and interrupted response streams are retried without quoting their messages.
     throw new DownloadRetryError(error);
   }
 }
 
 /** One lazily built hash index per capture, read in bounded batches. */
-export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fetcher: typeof fetch = fetch, reads?: LinearReads) {
+export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fetcher: typeof fetch = fetch, reads?: LinearReads, spool = new ContentSpool(), limits: {documentCount: number; documentBytes: number; runCount: number; runBytes: number} = ATTACHMENT_LIMITS) {
   const hashPaths = new Map<string, string>();
   const pathHashes = new Map<string, string>();
   let indexed = false;
@@ -152,15 +165,17 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     if (!readable.has(path)) readable.set(path, (await readFiles(git, config, base, [path])).get(path)?.ok === true);
     return readable.get(path)!;
   };
-  const downloaded = new Map<string, {bytes: Buffer; type: string}>();
+  const downloaded = new Map<string, {file: SpooledFile; type: string}>();
+  let runCount = 0;
+  let runBytes = 0;
   const failed = new Map<string, DownloadBlockedError | DownloadRetryError>();
 
-  return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
+  const capture = async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
     // The image gate, before any download: every path that takes a document's text from Linear into git
     // (the capture and the initial sync from Linear) reads its embedded files here, so they cannot disagree.
     const notUploaded = imageFindings(body);
     if (notUploaded.length > 0) throw new ImageBlockedError(notUploaded);
-    const files = new Map<string, Buffer>();
+    const files = new Map<string, FileContent>();
     const additions: UploadMap = new Map();
     const originalBody = body;
     const rejected = new Map<string, ImageFinding['reason']>();
@@ -207,6 +222,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       return inner.replace(/\s/g, encodeURIComponent);
     };
     const references = destinations(body).filter(({node}) => isUpload(node.url) || knownUpload(node.url));
+    const canonical = (url: string) => cachedUrls.filter((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`)).sort((a,b) => b.length - a.length)[0] ?? url.split('#')[0]!;
+    const unique = new Set(references.map(({node}) => canonical(node.url)));
+    if (unique.size > limits.documentCount) throw new AttachmentBudgetError();
+    let documentBytes = 0;
+    const counted = new Set<string>();
     const replacements: Array<{from: number; to: number; text: string}> = [];
     for (const {node, range, outer} of references) {
       const cached = cachedUrls.filter((known) => node.url === known || node.url.startsWith(`${known}?`) || node.url.startsWith(`${known}#`)).sort((a,b) => b.length - a.length)[0];
@@ -224,7 +244,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
           try {
             const failure = failed.get(url);
             if (failure !== undefined) throw failure;
-            asset = await download(url, fetcher, reads);
+            if (runCount >= limits.runCount || runBytes >= limits.runBytes || documentBytes >= limits.documentBytes) throw new AttachmentBudgetError();
+            runCount++;
+            const fresh = await download(url, fetcher, reads, Math.min(limits.runBytes - runBytes, limits.documentBytes - documentBytes), (size) => { runBytes += size; documentBytes += size; });
+            counted.add(url);
+            asset = {file: spool.put(fresh.bytes), type: fresh.type};
           }
           catch (error) {
             if (error instanceof DownloadBlockedError || error instanceof DownloadRetryError) failed.set(url, error);
@@ -235,16 +259,18 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
           }
           downloaded.set(url, asset);
         }
-        hash = createHash('sha256').update(asset.bytes).digest('hex');
+        if (!counted.has(url)) { documentBytes += asset.file.size; counted.add(url); }
+        if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
+        hash = asset.file.hash;
         assetPath = preferredPaths.get(hash) ?? hashPaths.get(hash);
         if (assetPath === undefined) {
-          const extension = uploadExtension(asset.bytes);
+          const extension = uploadExtension(contentBytes(asset.file));
           if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
           assetPath = posix.join(posix.dirname(path), `${hash}${extension}`);
           if (pathHashes.has(assetPath)) throw new Error(message('assets.destination-exists'));
         }
         // Each document owns its candidate bytes until its security check passes.
-        files.set(assetPath, asset.bytes);
+        files.set(assetPath, asset.file);
       }
       additions.set(hash!, url);
       // The link's query and fragment as Linear wrote them, whatever part of the URL the cache holds.
@@ -281,9 +307,14 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     for (const replacement of replacements.sort((a,b) => b.from - a.from)) result = result.slice(0,replacement.from) + replacement.text + result.slice(replacement.to);
     return {body: result, files, uploads: additions};
   };
+  return Object.assign(capture, {close: () => spool.close()});
 }
 
 /** Standalone inverse; a full capture reuses createAssetCapture's hash index. */
-export async function captureAssets(git: Git, config: StateConfig, base: Oid, path: string, body: string, uploads: ReadonlyMap<string, string>, fetcher: typeof fetch = fetch): Promise<CapturedAssets> {
-  return createAssetCapture(git, config, base, fetcher)(path, body, uploads);
+export async function captureAssets(git: Git, config: StateConfig, base: Oid, path: string, body: string, uploads: ReadonlyMap<string, string>, fetcher: typeof fetch = fetch): Promise<Omit<CapturedAssets, 'files'> & {files: Map<string, Buffer>}> {
+  const capture = createAssetCapture(git, config, base, fetcher);
+  try {
+    const result = await capture(path, body, uploads);
+    return {...result, files: new Map([...result.files].map(([path, content]) => [path, contentBytes(content)]))};
+  } finally { capture.close(); }
 }
