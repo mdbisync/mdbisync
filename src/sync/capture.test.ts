@@ -451,6 +451,19 @@ describe('capture from Linear', () => {
     assert.equal((await fixture.remote.run(['cat-file','-e',`${result.state.linear}:docs/future.md`],{okCodes:[0,128]})).code, 128);
   });
 
+  it('gives the security gate no path that starts with a dash for a title that does', async () => {
+    world.linear.documents.push({id:'dash', title:'--config=x', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'Dash.\n'});
+    const checked: string[] = [];
+    const result = await capture(context, {config, state:context.fetched.state, identity:IDENTITY,
+      security:{configured:true, check:async (files) => { checked.push(...files.keys()); return []; }},
+    });
+    assert.equal(result.ok, true);
+    assert.ok(checked.includes('docs/--config=x.md'));
+    assert.ok(!checked.some((path) => path.startsWith('-')));
+    assert.equal(await text('docs/--config=x.md'), 'Dash.\n');
+    assert.equal(world.linear.documents.at(-1)!.title, '--config=x');
+  });
+
   it('combines image and security findings without downloading any asset or disclosing image text', async () => {
     world.linear.documents[0]!.content = '![Allowed](https://uploads.linear.app/a.png)\n\n![private alt](https://example.com/private-destination)\n';
     const result = await capture(context, {config, state:context.fetched.state,
@@ -802,6 +815,22 @@ it('makes safe title paths and deterministic collision names', () => {
     assert.ok(!/[\\:*?"<>|]/.test(path));
   }
   assert.equal(documentPath('docs', '100% done', 'one', new Set(), 'docs/100% done.md'), 'docs/100% done.md');
+  // A path at the repository root never starts with `-`, which tools read as an option.
+  assert.equal(documentPath('', '--config=x', 'one', new Set()), '%2D-config=x.md');
+  assert.equal(documentPath('', '-c/-d', 'one', new Set()), '%2Dc/-d.md');
+  assert.equal(documentPath('', 'a-b', 'one', new Set()), 'a-b.md');
+  // Such a file at the root moves to the encoded name, however it was named before.
+  assert.equal(documentPath('', '-x', 'one', new Set(), '-x.md'), '%2Dx.md');
+  const rootCollision = documentPath('', '-x', 'one', new Set(['%2Dx.md']));
+  assert.match(rootCollision, /^%2Dx~[0-9a-f]{12}\.md$/);
+  assert.equal(documentPath('', '-x', 'one', new Set(['%2Dx.md']), rootCollision), rootCollision);
+  assert.equal(documentPath('', '-x', 'one', new Set(['%2Dx.md']), `-${rootCollision.slice(3)}`), rootCollision);
+  // Below a folder a leading dash is no option: names, also those from before, stay as they are.
+  assert.equal(documentPath('docs', '-x', 'one', new Set()), 'docs/-x.md');
+  assert.equal(documentPath('docs', '-Q3: plan', 'one', new Set(), 'docs/-Q3%3A plan.md'), 'docs/-Q3%3A plan.md');
+  const folderCollision = documentPath('docs', '-x', 'one', new Set(['docs/-x.md']));
+  assert.equal(documentPath('docs', '-x', 'one', new Set(['docs/-x.md']), folderCollision), folderCollision);
+  assert.equal(documentPath('-notes', '-x', 'one', new Set()), '-notes/-x.md');
   const occupied = new Set(['docs/plan.md']);
   const collision = documentPath('docs', 'plan', 'two', occupied);
   assert.notEqual(collision, 'docs/plan.md');

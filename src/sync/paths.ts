@@ -24,28 +24,36 @@ export function titlePath(title: string): string {
   }).join('/');
 }
 
+/**
+ * A name in the folder. Command-line tools, pre-commit among them, read a path that starts with `-` as an
+ * option, so a name at the repository root never starts with one; a folder's own name is the mapping's.
+ */
+function inFolder(folder: string, name: string): string { return folder === '' && name.startsWith('-') ? `%2D${name.slice(1)}` : posix.join(folder, name); }
+
+/** The file a title names in a folder, before any collision suffix. */
+export function titleFile(folder: string, title: string): string { return `${inFolder(folder, titlePath(title))}.md`; }
+
 export function pathKey(path: string): string { return path.normalize('NFC').toLowerCase(); }
 
 /** Never overwrite an existing file, directory, or case-insensitive alias. */
 export function documentPath(folder: string, title: string, id: string, occupied: ReadonlySet<string>, previous?: string, invalid: (path: string) => boolean = () => false): string {
-  const stem = posix.join(folder, titlePath(title));
   const keys = [...occupied].map(pathKey);
   const conflicts = (path: string) => invalid(path) || keys.some((key) => key === pathKey(path) || key.startsWith(`${pathKey(path)}/`) || pathKey(path).startsWith(`${key}/`));
-  let candidate = `${stem}.md`;
+  let candidate = titleFile(folder, title);
   // An existing git-originated spelling already represents this title.
   const raw = `${folder === '' ? '' : `${folder}/`}${title}.md`;
-  if (previous === raw && !conflicts(previous)) return previous;
+  if (previous === raw && !conflicts(previous) && !(folder === '' && raw.startsWith('-'))) return previous;
   const suffix = createHash('sha256').update(id).digest('hex').slice(0, 12);
   // A conflicting ancestor may be a file; flatten the title in that case.
   const flattened = titlePath(title).replaceAll('/', '%2F');
   const flat = Buffer.byteLength(flattened) > 180 ? `${[...flattened].slice(0, 40).join('')}~${createHash('sha256').update(title).digest('hex').slice(0, 16)}` : flattened;
   if (previous !== undefined && !conflicts(previous)) {
-    const prefix = posix.join(folder, `${flat}~${suffix}`);
+    const prefix = inFolder(folder, `${flat}~${suffix}`);
     if (previous === `${prefix}.md` || (previous.startsWith(`${prefix}-`) && /^\d+\.md$/.test(previous.slice(prefix.length + 1)))) return previous;
   }
   if (!conflicts(candidate)) return candidate;
   for (let index = 0; ; index += 1) {
-    candidate = posix.join(folder, `${flat}~${suffix}${index === 0 ? '' : `-${index}`}.md`);
+    candidate = inFolder(folder, `${flat}~${suffix}${index === 0 ? '' : `-${index}`}.md`);
     if (!conflicts(candidate)) return candidate;
     if (index > occupied.size + 1) throw new Error(message('sync.no-safe-path'));
   }
