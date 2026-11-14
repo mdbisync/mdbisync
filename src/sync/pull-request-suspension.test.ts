@@ -390,6 +390,32 @@ describe('sync: pull request suspension', () => {
     assert.match(await show(`refs/heads/main:${path}`), /Formatted/);
   });
 
+  // Editing the suspended pull request's description cannot drop the check its earlier head failed.
+  for (const fixes of [1, 2]) for (const tamper of ['deleted', 'forged'] as const) it(`does not release ${fixes} suspended fix${fixes === 1 ? '' : 'es'} in a row when the head note is ${tamper}`, async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne(path);
+    await sync();
+    let fixed = await rev(SUSPENDED);
+    for (let fix = 1; fix <= fixes; fix += 1) {
+      fixed = await h.editRef(SUSPENDED, path, `# Plan\n\nHeld Linear edit.\n\nFormatted ${fix}.\n`, 'Apply pre-commit fixes');
+      checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+      if (fix < fixes) await sync();
+    }
+    h.editHeadNote('mdbisync/suspended', () => tamper === 'deleted' ? '' : `<!-- head: sha=${fixed} since=${new Date().toISOString()} -->`);
+    const start = await rev('refs/heads/main');
+    const waiting = await sync();
+    assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+    assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released a head that never ran `ci`');
+    assert.equal(await rev(SUSPENDED), fixed);
+    assert.equal(await rev('refs/heads/main'), start);
+    const again = await sync();
+    assert.equal(again.report.pullRequest?.suspended?.released, undefined);
+    assert.equal(await rev('refs/heads/main'), start);
+    checksOn(fixed, [...PASSED, { name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+  });
+
   it('a batch that joins the suspended lane keeps the checks its heads ran expected', async () => {
     await suspendOne('eng/notes/plan.md');
     // A second batch fails and joins the suspended pull request: the sync pushes a new suspended head.

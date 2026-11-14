@@ -245,7 +245,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const keepCheckedHead = open !== null && pending && suspended?.waiting !== true && noted === null
       && await mergedTree(git, tracked, sync as Oid) !== null
       && !(await needsTrackedMerge(git, tracked, sync as Oid, noted))
-      && await checkedHeadReady(github, sync as Oid, checkExpectation(options, (await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open.body })).names));
+      && await checkedHeadReady(github, sync as Oid, checkExpectation(options, (await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open.body, git, base: tracked, linear })).names));
     let head: Oid | null = sync;
     if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid, tracked)))) {
       // A merged branch can start again from Linear. An older initial
@@ -318,7 +318,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const since = headSince(open?.body, head, new Date());
     // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
     // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
-    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync] } : { body: open?.body });
+    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync] } : { body: open?.body, git, base: tracked, linear });
     const stillHeld = hold === null ? null : { ...hold, head };
     // Whoever added commits to the sync branch, the sync merges only changes to synchronized documents and their assets.
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);
@@ -392,6 +392,8 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       result.waitsForSuspended = true;
       return result;
     }
+    // Earlier checks the branch's history does not show within the bound may not have run: wait for the sync's next push.
+    if (!expected.complete) return result;
     const merge = await mergePullRequest(github, pullRequest.number, head);
     if (!merge.merged) {
       const refusal: MergeRefusal = { head, base: tracked, status: merge.status, reason: merge.reason };

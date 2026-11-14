@@ -220,6 +220,14 @@ export function pullRequestHarness() {
     assert.notEqual(body, pr.body, 'the description notes no push time');
     pr.body = body;
   }
+  /** Rewrites the head note in the description of the open pull request from `branch`, as a person editing it could. */
+  function editHeadNote(branch: string, replace: (note: string) => string) {
+    const pr = openPullRequests().find((item) => item.head === branch);
+    assert.ok(pr !== undefined, `no open pull request from ${branch}`);
+    const body = pr.body.replace(/^<!-- head: [^\n]* -->$/m, replace);
+    assert.notEqual(body, pr.body, 'the description has no head note');
+    pr.body = body;
+  }
   /** No request asked GitHub to rerun or cancel a workflow run or check (the sync never reruns a check). */
   const assertNoRerun = () => {
     for (const request of githubRequests) assert.doesNotMatch(request, /\/actions\/|rerun|rerequest|cancel/, request);
@@ -397,6 +405,7 @@ export function pullRequestHarness() {
     suspendOne,
     releaseHeld,
     backdate,
+    editHeadNote,
     assertNoRerun,
     suspendThenTrash,
     onResolve,

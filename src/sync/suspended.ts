@@ -240,7 +240,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   const since = headSince(open?.body, head, new Date());
   // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
   // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body });
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body, git, base: tracked, linear });
   // As in the normal lane: whoever added commits to this branch, the sync merges only synchronized documents and their
   // assets. Read before the checks, so a head the sync will not merge neither holds the normal lane nor marks documents.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
@@ -277,6 +277,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (!(await isAncestor(git, tracked, head))) return result;
   const remoteTip = (await git.text(['ls-remote', '--refs', options.config.remote, branchRef(options.config.trackedBranch)])).split('\t')[0];
   if (remoteTip !== tracked) return { ...result, waiting: true };
+  // Earlier checks the branch's history does not show within the bound may not have run: wait for the sync's next push.
+  if (!expected.complete) return { ...result, waiting: true };
   const merged = await mergePullRequest(options.github, pullRequest.number, head);
   if (!merged.merged) {
     const repeated = earlier !== null && Number(earlier[3]) === merged.status && earlier[4] === encodeURIComponent(merged.reason);

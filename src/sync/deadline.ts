@@ -11,7 +11,7 @@
 // there under the same name is not the batch's fault, and the lane is held.
 
 import { type CheckExpectation, type CheckFailure, type CheckState, type GitHubRepository, PullRequestError, readChecks } from '../pull-request/index.ts';
-import { type Oid } from '../state/index.ts';
+import { type Git, type Oid } from '../state/index.ts';
 
 export const DEFAULT_CHECK_DEADLINE_MINUTES = 60;
 export const MIN_CHECK_DEADLINE_MINUTES = 10;
@@ -38,10 +38,22 @@ export interface ExpectedChecks {
    * the configured ones: a name removed from `required-checks` stops counting.
    */
   observed: string[];
+  /**
+   * False when the branch's history below the head runs past the search bound before it reaches a commit the sync
+   * made: the earlier checks are not known, and the head does not merge.
+   */
+  complete: boolean;
 }
 
-/** Where a head's earlier checks are read: the description's note, or the commits the sync pushed it on this run. */
-export type EarlierHeads = { body: string | undefined } | { pushedFrom: readonly Oid[] };
+/**
+ * Where a head's earlier checks are read: the description's note together with the branch's own history above `base`
+ * (the tracked branch) down to the nearest commit the sync made (one `linear`, Linear's state, holds, or a merge of the
+ * tracked branch or of Linear's state into the branch); or the commits the sync pushed it on this run.
+ */
+export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; linear: Oid } | { pushedFrom: readonly Oid[] };
+
+/** How many commits below a head are searched for a commit the sync made. */
+const EARLIER_HEAD_DEPTH = 50;
 
 /**
  * The check names `head` must pass beyond those registered on it. A commit
@@ -50,7 +62,10 @@ export type EarlierHeads = { body: string | undefined } | { pushedFrom: readonly
  *
  * - From the description: the names its note carries, and, when the branch
  *   moved since the noted head (someone else pushed), every check registered
- *   on that head. They add up while others push.
+ *   on that head. They add up while others push. The description is text a
+ *   person can edit, so it can only add: whatever it says, every check
+ *   registered on the branch's own commits below `head`, down to and with
+ *   the nearest commit the sync made, counts (see `earlierHeadNames`).
  * - For a head the sync pushed this run: every check registered on the
  *   commits it pushed on, one step back only. Its push starts the
  *   repository's whole CI, so a check that no longer runs (a renamed job)
@@ -58,9 +73,13 @@ export type EarlierHeads = { body: string | undefined } | { pushedFrom: readonly
  */
 export async function expectedChecks(github: GitHubRepository, head: Oid, required: readonly string[], earlier: EarlierHeads): Promise<ExpectedChecks> {
   const observed = new Set<string>();
+  let complete = true;
   if ('pushedFrom' in earlier) {
     for (const parent of earlier.pushedFrom) for (const name of await registeredNames(github, parent)) observed.add(name);
   } else {
+    const history = await earlierHeadNames(earlier.git, github, head, earlier);
+    complete = history !== null;
+    for (const name of history ?? []) observed.add(name);
     const note = HEAD_NOTE.exec(earlier.body ?? '');
     if (note !== null) {
       for (const name of (note[3] ?? '').split(',').filter(Boolean)) {
@@ -76,7 +95,36 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
   }
   // A note for unlisted checks ("3 more check runs") is no check name: such a head was never read as passed.
   const listed = [...observed].filter((name) => !/^[0-9]+ more (check runs|commit statuses)$/.test(name)).sort();
-  return { names: [...new Set([...listed, ...required])].sort(), observed: listed };
+  return { names: [...new Set([...listed, ...required])].sort(), observed: listed, complete };
+}
+
+/**
+ * The checks registered on the branch's first-parent history below `head`, above `base`, down to and with the nearest
+ * commit the sync made. Every push the sync makes starts the repository's whole CI; a push with a workflow's own token
+ * (a formatter's fix, one or several in a row) starts none, so the checks of every such commit since count. A head the
+ * sync made itself expects, as when it pushed it, only what the commit below it registered. Null when that commit is
+ * not found within the bound.
+ */
+async function earlierHeadNames(git: Git, github: GitHubRepository, head: Oid, { base, linear }: { git: Git; base: Oid; linear: Oid }): Promise<string[] | null> {
+  // Each line: a commit, then its parents.
+  const lines = (await git.text(['rev-list', '--first-parent', '--parents', '-n', String(EARLIER_HEAD_DEPTH + 2), head, '--not', base])).split('\n').filter(Boolean).map((line) => line.split(' ') as Oid[]);
+  // The sync's own commits: Linear's state, or a merge of the tracked branch or Linear's state into the branch. A merge
+  // of anything else (a commit made up for the purpose) is not one of them.
+  const known = async (commit: Oid) => await isAncestorOf(git, commit, linear) || await isAncestorOf(git, commit, base);
+  const synced = async ([commit, , ...merged]: Oid[]) => await isAncestorOf(git, commit as Oid, linear)
+    || (await Promise.all(merged.map(known))).some(Boolean);
+  const names = new Set<string>();
+  const own = lines[0] !== undefined && await synced(lines[0]);
+  for (const [index, commit] of lines.slice(1).entries()) {
+    if (index === EARLIER_HEAD_DEPTH) return null;
+    for (const name of await registeredNames(github, commit[0] as Oid)) names.add(name);
+    if (own || await synced(commit)) break;
+  }
+  return [...names];
+}
+
+async function isAncestorOf(git: Git, commit: Oid, of: Oid): Promise<boolean> {
+  return (await git.run(['merge-base', '--is-ancestor', commit, of], { okCodes: [0, 1] })).code === 0;
 }
 
 /** The names of the checks registered on a commit, whatever their state; none for a commit GitHub does not know. */

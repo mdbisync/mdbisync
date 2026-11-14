@@ -261,8 +261,13 @@ remain after release; its presence alone does not mean a batch is on hold.
   formatter's fix, say) starts no other workflow, so without this rule it
   would carry only that workflow's check and merge past the others. The
   expected names are kept in a hidden HTML note in the pull request
-  description. A head the sync pushes itself starts the repository's whole
-  CI, so it expects only what the head it was pushed on registered, besides
+  description. A person can edit that note, so it only adds names:
+  whatever it says, the sync also reads the checks registered on the
+  branch's commits below the head, down to the nearest commit the sync
+  made itself, from git and GitHub. When that commit is more than 50
+  commits below the head, the head does not merge until the sync pushes
+  again. A head the sync pushes itself starts the repository's whole CI,
+  so it expects only what the head it was pushed on registered, besides
   `required-checks`: a check that no longer runs (a renamed job) stays
   expected for at most one more push of the sync. A name removed from
   `required-checks` stops counting at once.
