@@ -1,15 +1,16 @@
 // The setup check, run before any write in both workflows: both
 // tokens work and have their rights, merge commits are allowed, the
 // Linear-format hook is configured, every annotation is usable and its team
-// and project exist. Missing security hooks are a warning. Nothing here
-// writes, and the report holds names and states only.
+// and project exist. Missing security hooks, and sync branches anyone who
+// can push may create or delete, are warnings. Nothing here writes, and the
+// report holds names and states only.
 
 import { type LinearClient } from '../linear/index.ts';
 import { type RepositoryMapping } from '../mapping/index.ts';
 import { type GitHubCheck } from './github.ts';
 import { type HookConfig, checkLinearFormatHook, checkSecurityHooks, securityHooks } from './hooks.ts';
 import { type ResolvedTargets, checkLinearScopes, linearCredentialFailure, resolveTargets } from './linear.ts';
-import { type CheckResult, type SetupReport, buildReport, failed, notChecked, passed } from './report.ts';
+import { type CheckResult, type SetupReport, buildReport, failed, notChecked, passed, warning } from './report.ts';
 import { message } from '../messages.ts';
 
 export interface SetupInput {
@@ -51,6 +52,7 @@ export async function runSetupCheck(input: SetupInput): Promise<SetupResult> {
     input.github.access,
     input.github.app,
     input.github.mergeCommits,
+    input.github.syncBranchRules,
     checkLinearFormatHook(input.hooks),
     annotations,
     targets.result,
@@ -73,7 +75,7 @@ function checkLeftOut(mapping: RepositoryMapping): CheckResult {
   if (files.length === 0) return passed('left-out-files', 'no files left out');
   const named = files.slice(0, LEFT_OUT_NAMED).map((file) => `${file.path} (${file.rule})`);
   const more = files.length > LEFT_OUT_NAMED ? message('setup.left-out-more', { count: files.length - LEFT_OUT_NAMED }) : '';
-  return { name: 'left-out-files', state: 'warning', detail: message('setup.left-out', { count: files.length, files: named.join(', '), more }) };
+  return warning('left-out-files', message('setup.left-out', { count: files.length, files: named.join(', '), more }));
 }
 
 function checkAnnotations(mapping: RepositoryMapping): CheckResult {

@@ -78,6 +78,7 @@ export const MESSAGES = {
   'pull-request.merge-blocked': 'setup error ({code}): GitHub refuses again to merge the sync pull request ({refusal})',
   'pull-request.checks-missing': 'setup error ({code}): the sync pull request waited past the check deadline for checks that never started ({checks})',
   'pull-request.initial-pending': 'stopped short ({code}): an initial sync from Linear waits for a person to merge it',
+  'pull-request.head-unverified': 'waits for a person ({code}): the sync pull request also changes files that are not synchronized documents or their assets ({files}); a person reviews and merges it',
   'pull-request.not-finished': 'not finished ({code}); run it again',
 
   // The setup check.
@@ -97,6 +98,12 @@ export const MESSAGES = {
   'setup.github-app-not-found': "GitHub has no App account {login}; give app-slug the App token step's output app-slug",
   'setup.merge-commits-unknown': 'GitHub did not show whether merge commits are allowed',
   'setup.merge-commits-off': 'merge commits are not allowed in the repository settings',
+  'setup.github-rate-limited-rules': 'GitHub rate-limited the setup check while reading the rules of {branch} (HTTP {status}); run again later',
+  'setup.sync-branch-rules-unread': 'GitHub answered HTTP {status} while reading the rules of {branch}; the sync branches may not be kept to the App',
+  'setup.sync-branch-rules': '{branches}: {rules}',
+  'setup.sync-branch-rules-open': '{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch',
+  'setup.sync-branch-rule-restricted': '{rule} restricted',
+  'setup.sync-branch-rule-open': '{rule} not restricted on {branches}',
   'setup.security-hooks-missing': 'no pre-commit hook marked "alias: {alias}": content is pushed unchecked',
   'setup.hooks-invalid-yaml': '{file} is not valid YAML',
   'setup.hooks-no-repos': '{file} has no "repos" list',

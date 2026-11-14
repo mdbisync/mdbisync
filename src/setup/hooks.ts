@@ -3,7 +3,7 @@
 // hook is configured.
 
 import { parseQuietly } from '../mapping/front-matter.ts';
-import { type CheckResult, failed, passed } from './report.ts';
+import { type CheckResult, failed, passed, warning } from './report.ts';
 import { message } from '../messages.ts';
 
 export const PRE_COMMIT_CONFIG = '.pre-commit-config.yaml';
@@ -50,7 +50,7 @@ export function securityHooks(config: HookConfig): string[] {
 export function checkSecurityHooks(config: HookConfig): CheckResult {
   const ids = securityHooks(config);
   if (ids.length > 0) return passed('security-hooks', `security hooks present: ${ids.join(', ')}`);
-  return { name: 'security-hooks', state: 'warning', detail: message('setup.security-hooks-missing', { alias: SECURITY_ALIAS }) };
+  return warning('security-hooks', message('setup.security-hooks-missing', { alias: SECURITY_ALIAS }));
 }
 
 /**

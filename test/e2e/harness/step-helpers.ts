@@ -161,6 +161,17 @@ export async function commitAsPerson(ctx: RunContext, changes: Map<string, strin
   return commit;
 }
 
+/** A person's empty commit on the tracked branch, carrying only its message: a check state request. */
+export async function commitStateAsPerson(ctx: RunContext, message: string): Promise<string> {
+  const git = await ctx.person();
+  await pull(git, ctx);
+  await git.run(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', message]);
+  await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+  const commit = (await git.text(['rev-parse', 'HEAD'])).trim();
+  ctx.ownCommits.push(commit);
+  return commit;
+}
+
 /** The run's ids map as the engine last pushed it; null when there is no ids ref. */
 export async function readRunIds(ctx: RunContext): Promise<IdMap | null> {
   const git = await ctx.person();

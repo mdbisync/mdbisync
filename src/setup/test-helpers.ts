@@ -6,6 +6,8 @@
 import { PERMISSION_PROBES } from './github.ts';
 
 export const GITHUB_API = 'https://github.test/api';
+/** The default sync branches, whose rules the setup check reads. */
+export const SYNC_BRANCHES = ['mdbisync/linear', 'mdbisync/suspended'] as const;
 /** The fake App: the run's `app-slug`, and the commit identity GitHub links to it. */
 export const FAKE_APP_SLUG = 'sync-app';
 export const FAKE_APP_ID = 1001;
@@ -113,6 +115,15 @@ export interface FakeWorld {
     app: { slug: string; id: number };
     missing: Set<string>;
     allowMergeCommit: boolean;
+    /**
+     * The rule types GitHub applies to each branch (`GET /rules/branches/<branch>`);
+     * a branch without an entry gets `defaultBranchRules`.
+     */
+    branchRules?: Map<string, string[]>;
+    /** The rule types of a branch not in `branchRules`: creations, updates and deletions restricted. */
+    defaultBranchRules: string[];
+    /** An HTTP status the branch rules endpoint answers instead of the rules. */
+    branchRulesStatus?: number;
     rateLimited: boolean;
     rateLimitedRepository: boolean;
     pullRequests: FakePullRequest[];
@@ -194,7 +205,7 @@ export interface FakeWorld {
 
 export function fakeWorld(): FakeWorld {
   return {
-    github: { tokenValid: true, app: { slug: FAKE_APP_SLUG, id: FAKE_APP_ID }, missing: new Set(), allowMergeCommit: true, rateLimited: false, rateLimitedRepository: false, pullRequests: [] },
+    github: { tokenValid: true, app: { slug: FAKE_APP_SLUG, id: FAKE_APP_ID }, missing: new Set(), allowMergeCommit: true, defaultBranchRules: ['creation', 'update', 'deletion'], rateLimited: false, rateLimitedRepository: false, pullRequests: [] },
     linear: {
       credentialsValid: true,
       unavailable: false,
@@ -275,6 +286,15 @@ async function github(world: FakeWorld, method: string, path: string, init: Requ
     // GitHub shows the merge settings only to a token with write access.
     const writable = !world.github.missing.has('contents:write');
     return json(200, { full_name: repo[0].slice(7), ...(writable ? { allow_merge_commit: world.github.allowMergeCommit } : {}) });
+  }
+  const rules = /^\/rules\/branches\/([^?]+)/.exec(rest);
+  if (rules !== null && method === 'GET') {
+    // Readable with metadata access, which every App installation has.
+    if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
+    if (world.github.branchRulesStatus !== undefined) return json(world.github.branchRulesStatus, { message: 'Server Error' });
+    const branch = decodeURIComponent(rules[1] as string);
+    const types = world.github.branchRules?.get(branch) ?? world.github.defaultBranchRules;
+    return json(200, types.map((type, index) => ({ type, ruleset_source_type: 'Repository', ruleset_source: 'owner/repo', ruleset_id: index + 1 })));
   }
   const pulls = await pullRequests(world, method, rest, init);
   if (pulls !== undefined) return pulls;

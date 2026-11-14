@@ -16,7 +16,8 @@ import { Rng } from "./rng.ts";
 import { makeSlices, MID_REGRESSIONS, midRegressions, MINI_DOCUMENTS, pickMid } from "./slices.ts";
 import { fixText, linkedFileCheck, lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
-import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
+import { CHECK_TRAILER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH, type CheckEvent, checkStateMessage, readCheckState } from "./check-workflow.ts";
+import { SET_ASIDE_MESSAGE } from "../../src/sync/suspended.ts";
 
 // The default corpus, built once for the tests that only read it.
 let defaultCorpus: ReturnType<typeof buildCorpus> | undefined;
@@ -43,47 +44,74 @@ test("every published slice carries the marker workflow for pull requests and tr
   }
 });
 
-test("the workflow passes without a marker, fails on failure or invalid markers, and holds pending", () => {
+test("the workflow reads the state from the head's history: it passes without one, fails on failure or an invalid state, and holds pending", async () => {
   const dir = mkdtempSync(join(tmpdir(), 'check-workflow-'));
   try {
     const yaml = parse(CHECK_WORKFLOW);
+    assert.equal(yaml.jobs.format.steps[0].with['fetch-depth'], 0);
     const script = yaml.jobs.format.steps.at(-1).run;
-    execFileSync('git', ['init', '--quiet'], { cwd: dir });
+    const env = { ...process.env, GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
+    git('init', '--quiet', '--initial-branch=main');
     writeFileSync(join(dir, 'notes.md'), '# Notes\n\nReview required.\n');
-    writeFileSync(join(dir, '.harness-check-target'), 'notes.md\n');
-    execFileSync('git', ['add', '--', 'notes.md'], { cwd: dir });
+    git('add', '--', 'notes.md');
+    git('commit', '--quiet', '-m', 'Start');
+    const state = (event: CheckEvent, target?: string) => { git('commit', '--quiet', '--allow-empty', '-m', checkStateMessage(event, target)); return git('rev-parse', 'HEAD'); };
     const run = (attempt = 1) => {
-      try { return { status: 0, output: execFileSync('bash', ['-e', '-c', script], { cwd: dir, encoding: 'utf8', env: { ...process.env, CHECK_ATTEMPT: String(attempt) } }) }; }
+      try { return { status: 0, output: execFileSync('bash', ['-e', '-o', 'pipefail', '-c', script], { cwd: dir, encoding: 'utf8', env: { ...env, CHECK_ATTEMPT: String(attempt) } }) }; }
       catch (error) { return error as { status: number; stdout: string }; }
     };
     assert.equal(run().status, 0);
-    writeFileSync(join(dir, CHECK_MARKER), 'failed\n');
+    state('failed', 'notes.md');
     assert.equal(run().status, 1);
-    writeFileSync(join(dir, CHECK_MARKER), 'flaky\n');
+    assert.deepEqual(await readCheckState(dir, 'HEAD'), { mode: 'failed', target: 'notes.md' });
+    state('flaky', 'notes.md');
     assert.equal(run(1).status, 1);
     assert.equal(run(2).status, 0);
-    writeFileSync(join(dir, CHECK_MARKER), 'document\n');
+    state('document', 'notes.md');
     assert.equal(run().status, 1);
     writeFileSync(join(dir, 'notes.md'), '# Notes\n\nApproved for review.\n');
+    git('commit', '--quiet', '-am', 'Approve');
     assert.equal(run().status, 0);
-    writeFileSync(join(dir, CHECK_MARKER), 'failed\n');
-    writeFileSync(join(dir, '.harness-check-fixed'), 'approved\n');
+    state('failed', 'notes.md');
+    state('fixed');
     assert.equal(run().status, 0);
-    rmSync(join(dir, '.harness-check-fixed'));
-    writeFileSync(join(dir, CHECK_MARKER), 'invalid\n');
+    state('failed', 'notes.md');
+    assert.equal(run().status, 1, 'a later state drops the fix');
+    state('fixed');
+    state('reset');
+    assert.equal(run().status, 0);
+    assert.deepEqual(await readCheckState(dir, 'HEAD'), { mode: 'passed', target: undefined });
+    git('commit', '--quiet', '--allow-empty', '-m', checkStateMessage('failed').replace(`${CHECK_TRAILER}: failed`, `${CHECK_TRAILER}: invalid`));
     assert.equal(run().status, 1);
     const unusual = 'notes,:%.md';
     writeFileSync(join(dir, unusual), '# Notes\n');
-    execFileSync('git', ['add', '--', unusual], { cwd: dir });
-    writeFileSync(join(dir, '.harness-check-target'), `${unusual}\n`);
-    writeFileSync(join(dir, CHECK_MARKER), 'failed\n');
+    git('add', '--', unusual);
+    git('commit', '--quiet', '-m', 'Add');
+    state('failed', unusual);
     assert.match((run() as { stdout: string }).stdout, /file=notes%2C%3A%25\.md,line=1/);
-    writeFileSync(join(dir, CHECK_MARKER), 'pending\n');
+    state('pending', 'notes.md');
     // Observe the long hold without sleeping: replace only sleep in this shell.
     assert.throws(() => execFileSync('bash', ['-e', '-c', `sleep() { echo "hold:$1"; }; ${script}`], { cwd: dir, encoding: 'utf8' }), (error: unknown) => {
       const result = error as { status: number; stdout: string };
       return result.status === 1 && result.stdout.trim() === 'hold:1140';
     });
+    state('passed');
+    assert.equal(run().status, 0);
+
+    // A failed batch: its state goes on into the suspended head, but not into the set-aside normal head.
+    const tracked = git('rev-parse', 'HEAD');
+    const failed = state('failed', 'notes.md');
+    const tree = git('rev-parse', `${tracked}^{tree}`);
+    const suspended = git('commit-tree', tree, '-p', failed, '-p', tracked, '-m', 'Suspend changes from Linear');
+    const setAside = git('commit-tree', tree, '-p', failed, '-p', tracked, '-m', SET_ASIDE_MESSAGE);
+    assert.equal((await readCheckState(dir, suspended)).mode, 'failed');
+    assert.equal((await readCheckState(dir, setAside)).mode, 'passed');
+    // A fix on the tracked branch, later than the failure, passes a head that merges it in.
+    git('checkout', '--quiet', '--detach', tracked);
+    const fix = state('fixed');
+    const merged = git('commit-tree', tree, '-p', suspended, '-p', fix, '-m', 'Merge the tracked branch into suspended changes');
+    assert.equal((await readCheckState(dir, merged)).mode, 'passed');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

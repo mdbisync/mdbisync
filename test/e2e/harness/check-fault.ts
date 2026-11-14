@@ -2,11 +2,10 @@
 // reads the resulting check. It never needs checks:write. A person's
 // credential (never the sync App's) reruns a failed check and cancels a
 // pending marker job that would keep the sandbox's single runner busy.
-import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
-import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { CHECK_NAME, CHECK_SEQUENCE_TRAILER, CHECK_WORKFLOW_PATH, type CheckEvent, checkStateMessage, readCheckState } from '../../corpus/check-workflow.ts';
 import type { RunContext } from './context.ts';
 import { GitHubError, SandboxRest, hostToken } from './github.ts';
 import { targetPath } from './step-helpers.ts';
@@ -84,13 +83,11 @@ export async function waitForHeadChecks(rest: SandboxRest, sha: string, options:
 }
 
 /**
- * Whether this head's marker job sleeps by design: its tree selects
- * `pending` and no person fixed the check. The commit must be fetched.
+ * Whether this head's marker job sleeps by design: its history requests
+ * `pending` and no person fixed the check since. The commit must be fetched.
  */
 export async function sleepsByDesign(git: Git, sha: string): Promise<boolean> {
-  const marker = await git.run(['show', `${sha}:${CHECK_MARKER}`], { okCodes: [0, 128] });
-  const fixed = await git.run(['cat-file', '-e', `${sha}:.harness-check-fixed`], { okCodes: [0, 128] });
-  return marker.code === 0 && marker.stdout.toString('utf8').trim() === 'pending' && fixed.code !== 0;
+  return (await readCheckState(git.dir, sha)).mode === 'pending';
 }
 
 /**
@@ -155,7 +152,7 @@ export async function cancelPendingRuns(
 /**
  * Heads whose marker job may still sleep where a push to `branch` does not
  * cancel it: the pending head and this run's other lane tips. Only a head
- * whose tree still selects `pending` and whose check is still pending counts,
+ * whose history still requests `pending` and whose check is still pending counts,
  * so a check that a scenario fixed or failed is never cancelled. Nothing is
  * read before the scenario's first pending head.
  */
@@ -221,26 +218,17 @@ export async function faultChecks(
   const git = new Git(dir, world.sandbox.env(HARNESS));
   let sha: string;
   try {
-    const workflow = await git.run(['cat-file', '-e', `HEAD:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
-    if (workflow.code !== 0) throw new EnvBlockedError('the run tree has no marker check workflow; publish the updated corpus first');
-    // Only the `failed` and `document` markers read the target; a release removes the marker, so it never
-    // writes the target and leaves the head's files to the scenario's own change.
-    if (state !== 'passed') {
-      const path = typeof args.target === 'string' ? targetPath(ctx, args.target) : (ctx.observations.get('target.path') as string | undefined) ?? targetPath(ctx);
-      writeFileSync(join(dir, '.harness-check-target'), `${path}\n`);
-      await git.run(['add', '--', '.harness-check-target']);
+    const workflow = await git.run(['show', `HEAD:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
+    if (workflow.code !== 0 || !workflow.stdout.toString('utf8').includes(CHECK_SEQUENCE_TRAILER)) {
+      throw new EnvBlockedError('the run tree has no check workflow that reads state commits; publish the updated corpus first');
     }
-    if (args.reset === true || state !== 'passed') await git.run(['rm', '--quiet', '--ignore-unmatch', '--', '.harness-check-fixed']);
-    if (state === 'passed' && args.lane === 'tracked' && args.reset !== true) {
-      writeFileSync(join(dir, '.harness-check-fixed'), 'approved\n');
-      await git.run(['add', '--', '.harness-check-fixed']);
-    }
-    if (state === 'passed') await git.run(['rm', '--quiet', '--ignore-unmatch', '--', CHECK_MARKER]);
-    else {
-      writeFileSync(join(dir, CHECK_MARKER), `${args.flaky === true ? 'flaky' : args.document === true ? 'document' : state}\n`);
-      await git.run(['add', '--', CHECK_MARKER]);
-    }
-    await git.run(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', `Set check state to ${state}`]);
+    // An empty commit carries the state: the head's tree stays the scenario's own, so the sync can merge it.
+    const event: CheckEvent = state === 'passed'
+      ? (args.reset === true ? 'reset' : args.lane === 'tracked' ? 'fixed' : 'passed')
+      : args.flaky === true ? 'flaky' : args.document === true ? 'document' : state;
+    // Only a failing state names its target document, for the annotation and the `document` approval.
+    const target = state === 'passed' ? undefined : typeof args.target === 'string' ? targetPath(ctx, args.target) : (ctx.observations.get('target.path') as string | undefined) ?? targetPath(ctx);
+    await git.run(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', checkStateMessage(event, target)]);
     sha = (await git.text(['rev-parse', 'HEAD'])).trim();
     await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:${ref}`]);
     ctx.ownCommits.push(sha);

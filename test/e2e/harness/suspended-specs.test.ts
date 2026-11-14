@@ -9,7 +9,7 @@ import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeCheck } from '../../../src/setup/test-helpers.ts';
 import { resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
-import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { CHECK_WORKFLOW, CHECK_WORKFLOW_PATH, readCheckState } from '../../corpus/check-workflow.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { colorLabel, CONFLICT_MARK } from './conflicts.ts';
 import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
@@ -53,6 +53,8 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
       // harness has polled it once: it runs while the harness waits, and a sync
       // that does not wait for it sees it queued, as on GitHub.
       const polled = new Set<string>();
+      // The marker workflow's own reading of a head's requested state, run on the bare remote.
+      const stateOf = (sha: string) => readCheckState(fixture.remote.dir, sha);
       const show = async (sha: string, path: string) => {
         const result = await fixture.remote.run(['show', `${sha}:${path}`], { okCodes: [0, 128] });
         return result.code === 0 ? result.stdout.toString('utf8') : null;
@@ -71,7 +73,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         }
         for (const run of markerRuns.values()) if (run.status !== 'completed' && !tips.has(run.head_sha)) Object.assign(run, { status: 'completed', conclusion: 'cancelled', cancelledBy: 'concurrency' });
         for (const [sha, branch] of tips) {
-          if (markerRuns.has(sha) || (await show(sha, CHECK_MARKER))?.trim() !== 'pending' || await show(sha, '.harness-check-fixed') !== null) continue;
+          if (markerRuns.has(sha) || (await stateOf(sha)).mode !== 'pending') continue;
           markerRuns.set(sha, { id: 100 + markerRuns.size, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null, branch });
         }
         return holder();
@@ -82,11 +84,10 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         const url = String(input);
         const sha = /\/commits\/([0-9a-f]+)\/check-runs/.exec(url)?.[1];
         if (sha !== undefined) {
-          const marker = (await show(sha, CHECK_MARKER))?.trim();
-          const target = (await show(sha, '.harness-check-target'))?.trim();
-          const passed = marker === undefined || await show(sha, '.harness-check-fixed') !== null || (marker === 'flaky' && (attempts.get(sha) ?? 1) > 1) || (marker === 'document' && target !== undefined && (await show(sha, target))?.includes('Approved for review.'));
+          const { mode, target } = await stateOf(sha);
+          const passed = mode === 'passed' || (mode === 'flaky' && (attempts.get(sha) ?? 1) > 1) || (mode === 'document' && target !== undefined && (await show(sha, target))?.includes('Approved for review.') === true);
           const check = checks.get(sha) ?? { name: 'format', status: 'completed' };
-          const sleeping = marker === 'pending' && !passed;
+          const sleeping = mode === 'pending';
           const busy = await runner();
           const own = markerRuns.get(sha);
           const blocked = busy !== undefined && busy.head_sha !== sha;

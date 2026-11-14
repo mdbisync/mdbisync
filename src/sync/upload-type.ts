@@ -1,5 +1,8 @@
 import { parseXml, XmlElement, type XmlNode } from '@rgrove/parse-xml';
 
+/** Every extension `uploadExtension` gives: the asset files a sync writes next to a document. */
+export const UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.png', '.jpg', '.gif', '.webp', '.pdf', '.avif', '.mp4', '.webm', '.svg']);
+
 /** A signature identifies a type, not whether a media decoder can render it. */
 export function uploadExtension(bytes: Buffer): string | null {
   const starts = (signature: number[]) => bytes.subarray(0, signature.length).equals(Buffer.from(signature));

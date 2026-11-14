@@ -11,7 +11,7 @@ import { PERMISSION_PROBES, checkGitHub } from './github.ts';
 import { readHookConfig } from './hooks.ts';
 import { checkSyncState, renderSetupSummary, renderStateRefusal, runSetupCheck } from './index.ts';
 import { DEFAULT_STATE_CONFIG } from '../state/index.ts';
-import { GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from './test-helpers.ts';
+import { GITHUB_API, LINEAR_API, SYNC_BRANCHES, fakeFetch, fakeWorld } from './test-helpers.ts';
 
 const ROOT = new URL('../../', import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, ROOT), 'utf8');
@@ -132,7 +132,7 @@ describe('setup check failures L5-01 to L5-05', () => {
     it(`${scenario.id}: names the missing piece and links the section that fixes it`, async () => {
       const world = fakeWorld();
       scenario.change(world);
-      const target = { repository: 'owner/repo', token: 'gh-token', commit: 'a'.repeat(40), apiUrl: GITHUB_API, fetch: fakeFetch(world) };
+      const target = { repository: 'owner/repo', token: 'gh-token', commit: 'a'.repeat(40), apiUrl: GITHUB_API, syncBranches: SYNC_BRANCHES, fetch: fakeFetch(world) };
       const client = new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
       const { report } = await runSetupCheck({
         mapping: MAPPING,

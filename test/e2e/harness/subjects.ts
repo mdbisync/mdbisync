@@ -2155,7 +2155,7 @@ export const SUBJECTS: Record<string, Compute> = {
  * so a check the engine adds, drops or moves fails `setup-checks.test.ts`
  * until this list is updated on purpose.
  */
-export const REQUIRED_SETUP_CHECKS = ['linear-credentials', 'github-access', 'github-app', 'merge-commits', 'linear-format-hook', 'annotations', 'annotation-targets', 'left-out-files', 'security-hooks'] as const;
+export const REQUIRED_SETUP_CHECKS = ['linear-credentials', 'github-access', 'github-app', 'merge-commits', 'sync-branch-rules', 'linear-format-hook', 'annotations', 'annotation-targets', 'left-out-files', 'security-hooks'] as const;
 
 interface SetupCheck {
   name: string;

@@ -126,7 +126,6 @@
         "subject": "runs.1.pullRequest.paths",
         "operator": "equal",
         "expected": [
-          ".harness-check",
           "docs/handbook/briefs/equipment.md"
         ]
       },

@@ -12,7 +12,7 @@ import {
   runSetupCheck,
   securityHooks,
 } from './index.ts';
-import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from './test-helpers.ts';
+import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, SYNC_BRANCHES, fakeFetch, fakeWorld } from './test-helpers.ts';
 import { resolveTargets } from './linear.ts';
 import { DEFAULT_STATE_CONFIG } from '../state/index.ts';
 import type { Nodes } from 'mdast';
@@ -32,7 +32,7 @@ const PRE_COMMIT = `repos:
         entry: 'TESTKEY-[0-9a-f]{24}'
 `;
 
-const target = (world: ReturnType<typeof fakeWorld>) => ({ repository: 'owner/repo', token: 'gh-token', commit: 'a'.repeat(40), apiUrl: GITHUB_API, fetch: fakeFetch(world) });
+const target = (world: ReturnType<typeof fakeWorld>) => ({ repository: 'owner/repo', token: 'gh-token', commit: 'a'.repeat(40), apiUrl: GITHUB_API, syncBranches: SYNC_BRANCHES, fetch: fakeFetch(world) });
 
 function mapping(annotations: RepositoryMapping['annotations']): RepositoryMapping {
   return { annotations, zones: resolveZones(annotations).zones, problems: [], documents: [], unsynced: [], leftOut: [], files: new Set<string>() };
@@ -73,7 +73,8 @@ describe('GitHub access', () => {
     const result = await checkGitHub(target(world));
     assert.equal(result.access.state, 'passed');
     assert.equal(result.mergeCommits.state, 'passed');
-    assert.equal(world.requests.length, 6);
+    // The repository, five permission probes and the rules on the two sync branches.
+    assert.equal(world.requests.length, 8);
     assert.deepEqual(world.writes, []);
   });
 
@@ -106,6 +107,110 @@ describe('GitHub access', () => {
     const refused = await checkGitHub(target(world));
     assert.equal(refused.access.code, 'github-credential-failed');
     assert.equal(refused.mergeCommits.state, 'not-checked');
+    assert.equal(refused.syncBranchRules.state, 'not-checked');
+  });
+});
+
+describe('the rules on the sync branches', () => {
+  const rulesRequests = (world: ReturnType<typeof fakeWorld>) => world.requests.filter((request) => request.includes('/rules/branches/'));
+
+  it('passes when creations, updates and deletions of both sync branches are restricted, reading each once', async () => {
+    const world = fakeWorld();
+    const result = await checkGitHub(target(world));
+    assert.deepEqual(result.syncBranchRules, {
+      name: 'sync-branch-rules',
+      state: 'passed',
+      detail: 'mdbisync/linear and mdbisync/suspended: creations restricted; deletions restricted; updates restricted',
+    });
+    assert.deepEqual(rulesRequests(world), [
+      `GET ${GITHUB_API}/repos/owner/repo/rules/branches/mdbisync/linear?per_page=100`,
+      `GET ${GITHUB_API}/repos/owner/repo/rules/branches/mdbisync/suspended?per_page=100`,
+    ]);
+    assert.deepEqual(world.writes, []);
+  });
+
+  it('passes with updates left open for the pre-commit fixes, and names them', async () => {
+    const world = fakeWorld();
+    world.github.defaultBranchRules = ['creation', 'deletion', 'required_linear_history'];
+    const result = await checkGitHub(target(world));
+    assert.equal(result.syncBranchRules.state, 'passed');
+    assert.equal(
+      result.syncBranchRules.detail,
+      'mdbisync/linear and mdbisync/suspended: creations restricted; deletions restricted; updates not restricted on mdbisync/linear and mdbisync/suspended',
+    );
+  });
+
+  it('warns, without stopping the run, when creations or deletions are not restricted', async () => {
+    const world = fakeWorld();
+    world.github.branchRules = new Map([['mdbisync/suspended', ['creation', 'update']]]);
+    const result = await checkGitHub(target(world));
+    assert.deepEqual(result.syncBranchRules, {
+      name: 'sync-branch-rules',
+      state: 'warning',
+      detail: 'mdbisync/linear and mdbisync/suspended: creations restricted; deletions not restricted on mdbisync/suspended; updates restricted; no ruleset keeps those who can push from creating or deleting a sync branch',
+    });
+    assert.equal(result.syncBranchRules.code, undefined);
+
+    const none = fakeWorld();
+    none.github.defaultBranchRules = [];
+    const open = await checkGitHub(target(none));
+    assert.equal(open.syncBranchRules.state, 'warning');
+    assert.equal(
+      open.syncBranchRules.detail,
+      'mdbisync/linear and mdbisync/suspended: creations not restricted on mdbisync/linear and mdbisync/suspended; deletions not restricted on mdbisync/linear and mdbisync/suspended; updates not restricted on mdbisync/linear and mdbisync/suspended; no ruleset keeps those who can push from creating or deleting a sync branch',
+    );
+  });
+
+  it('reads the rules of the configured sync branches', async () => {
+    const world = fakeWorld();
+    world.github.branchRules = new Map([['sync/linear', ['creation', 'deletion', 'update']], ['sync/suspended', ['update']]]);
+    const result = await checkGitHub({ ...target(world), syncBranches: ['sync/linear', 'sync/suspended'] });
+    assert.equal(result.syncBranchRules.state, 'warning');
+    assert.match(result.syncBranchRules.detail, /^sync\/linear and sync\/suspended: creations not restricted on sync\/suspended; deletions not restricted on sync\/suspended; updates restricted;/);
+  });
+
+  it('warns when GitHub does not answer with the rules, and stops on a rate limit', async () => {
+    const world = fakeWorld();
+    world.github.branchRulesStatus = 500;
+    const result = await checkGitHub(target(world));
+    assert.equal(result.access.state, 'passed');
+    assert.deepEqual(result.syncBranchRules, {
+      name: 'sync-branch-rules',
+      state: 'warning',
+      detail: 'GitHub answered HTTP 500 while reading the rules of mdbisync/linear; the sync branches may not be kept to the App',
+    });
+    assert.equal(rulesRequests(world).length, 1);
+
+    const limited = fakeWorld();
+    const fetchImpl = fakeFetch(limited);
+    const rateLimited: typeof fetch = async (input, init) => String(input).includes('/rules/branches/')
+      ? new Response(JSON.stringify({ message: 'API rate limit exceeded for installation.' }), { status: 403, headers: { 'x-ratelimit-remaining': '0' } })
+      : fetchImpl(input, init);
+    await assert.rejects(
+      checkGitHub({ ...target(limited), fetch: rateLimited }),
+      /GitHub rate-limited the setup check while reading the rules of mdbisync\/linear \(HTTP 403\); run again later/,
+    );
+
+    // A secondary rate limit may come as HTTP 429, with or without its headers.
+    const tooMany = fakeWorld();
+    const tooManyFetch = fakeFetch(tooMany);
+    const answer429: typeof fetch = async (input, init) => String(input).includes('/rules/branches/mdbisync/suspended')
+      ? new Response(JSON.stringify({ message: 'Too Many Requests' }), { status: 429 })
+      : tooManyFetch(input, init);
+    await assert.rejects(
+      checkGitHub({ ...target(tooMany), fetch: answer429 }),
+      /GitHub rate-limited the setup check while reading the rules of mdbisync\/suspended \(HTTP 429\); run again later/,
+    );
+  });
+
+  it('is a warning row in the setup report, which still passes', async () => {
+    const world = fakeWorld();
+    world.github.defaultBranchRules = ['update'];
+    const client = new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
+    const { report } = await runSetupCheck({ mapping: MINI, hooks: readHookConfig(PRE_COMMIT), github: await checkGitHub(target(world)), linear: { client, scope: world.linear.scope } });
+    assert.equal(report.ok, true);
+    assert.equal(report.checks.find((check) => check.name === 'sync-branch-rules')?.state, 'warning');
+    assert.match(renderSetupSummary(report), /\| sync-branch-rules \| warning \| mdbisync\/linear and mdbisync\/suspended: creations not restricted/);
   });
 });
 
@@ -119,7 +224,7 @@ describe('the App account', () => {
     assert.equal(result.app.detail, 'commits name the App sync-app[bot]');
     assert.deepEqual(result.identity, FAKE_APP_IDENTITY);
     assert.ok(world.requests.includes(`GET ${GITHUB_API}/users/sync-app%5Bbot%5D`));
-    assert.equal(world.requests.length, 7);
+    assert.equal(world.requests.length, 9);
     assert.deepEqual(world.writes, []);
   });
 

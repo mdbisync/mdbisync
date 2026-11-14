@@ -61,6 +61,7 @@ import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_ME
 import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold } from './deadline.ts';
 import { LaneMoved, LaneConflict, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
+import { oneLine, unverifiedList, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { message } from '../messages.ts';
 import { type PullRequestCode } from '../codes.ts';
 
@@ -139,8 +140,11 @@ export interface PullRequestResult {
    * - `initial-pull-request-pending`: the sync branch holds the record of an initial sync from Linear that a person has not merged.
    * - `state-moved`: the sync branch moved while this run worked.
    * - `github-failed`: GitHub refused or failed a request, or no answer came; `status` is its HTTP status, absent when no answer came.
+   * - `head-unverified`: the merge would change files other than synchronized documents and their assets (`unverified`); the sync leaves the pull request to a person.
    */
   code?: PullRequestCode;
+  /** For `head-unverified`: the files the merge would change that the sync does not merge by itself. */
+  unverified?: string[];
   /** GitHub's HTTP status for `merge-refused`, `merge-blocked` and `github-failed`. */
   status?: number;
   /** GitHub's reason for `merge-refused` and `merge-blocked`, on one line; empty when it gave none. */
@@ -167,13 +171,13 @@ export interface PullRequestFailure {
 export function pullRequestFailure(result: PullRequestResult | undefined): PullRequestFailure | null {
   if (result?.suspended?.code === 'merge-blocked') return {kind:'setup', code:'merge-blocked', message:message('pull-request.merge-blocked', {code:'merge-blocked', refusal:refusalText(result.suspended)})};
   if (result?.suspended?.code === 'checks-missing') return { kind: 'setup', code: 'checks-missing', message: message('pull-request.checks-missing', { code: 'checks-missing', checks: missingText(result.suspended.missing ?? []) }) };
+  if (result?.code === 'checks-missing') return { kind: 'setup', code: result.code, message: message('pull-request.checks-missing', { code: result.code, checks: missingText(result.checks?.missing ?? []) }) };
+  if (result?.code === 'merge-blocked') return { kind: 'setup', code: result.code, message: message('pull-request.merge-blocked', { code: result.code, refusal: refusalText(result) }) };
+  if (result?.code === 'initial-pull-request-pending') return { kind: 'no-state', code: result.code, message: message('pull-request.initial-pending', { code: result.code }) };
+  // Either lane's head that waits for a person, after the endings above and before a lane that only needs another run.
+  const unverified = result?.unverified ?? result?.suspended?.unverified;
+  if (unverified !== undefined) return {kind:'setup', code:'head-unverified', message:message('pull-request.head-unverified', {code:'head-unverified', files:unverifiedList(unverified)})};
   switch (result?.code) {
-    case 'checks-missing':
-      return { kind: 'setup', code: result.code, message: message('pull-request.checks-missing', { code: result.code, checks: missingText(result.checks?.missing ?? []) }) };
-    case 'merge-blocked':
-      return { kind: 'setup', code: result.code, message: message('pull-request.merge-blocked', { code: result.code, refusal: refusalText(result) }) };
-    case 'initial-pull-request-pending':
-      return { kind: 'no-state', code: result.code, message: message('pull-request.initial-pending', { code: result.code }) };
     case 'state-moved':
     case 'github-failed':
       return { kind: 'incomplete', code: result.code, message: message('pull-request.not-finished', { code: result.code }) };
@@ -316,13 +320,16 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
     const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync] } : { body: open?.body });
     const stillHeld = hold === null ? null : { ...hold, head };
+    // Whoever added commits to the sync branch, the sync merges only changes to synchronized documents and their assets.
+    const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);
     const { pullRequest, opened } = await ensurePullRequest(github, {
       head: config.syncBranch,
       base: config.trackedBranch,
       title: SYNC_PULL_REQUEST_TITLE,
-      body: pullRequestBody(result.paths, earlier, { head, since, held: stillHeld, checks: expected.observed }),
+      body: pullRequestBody(result.paths, earlier, { head, since, held: stillHeld, checks: expected.observed, unverified }),
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
+    if (unverified.length > 0) return { ...result, code: 'head-unverified', unverified };
     const fresh = result.branchMoved || opened || suspended?.released !== undefined;
     const grace = options.mergeGraceSeconds ?? DEFAULT_MERGE_GRACE_SECONDS;
     if (fresh && grace === 0) return result;
@@ -552,7 +559,7 @@ function commitMerge(git: Git, tree: string, parents: [Oid, Oid], message: strin
 }
 
 /** Names, counts and GitHub's reason for a refused merge, and the notes on its head; never document content. */
-function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null; checks: readonly string[] }): string {
+function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null; checks: readonly string[]; unverified?: readonly string[] }): string {
   const lines = [
     'Changes made in Linear, on their way to this branch.',
     '',
@@ -560,7 +567,8 @@ function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null,
     '',
     `Files changed: ${paths.length}.`,
   ];
-  if (paths.length > 0) lines.push('', ...paths.slice(0, LISTED_PATHS).map((path) => `- ${path}`));
+  // A file name holds no line break here: one could forge the hidden notes a later run reads back.
+  if (paths.length > 0) lines.push('', ...paths.slice(0, LISTED_PATHS).map((path) => `- ${oneLine(path)}`));
   if (paths.length > LISTED_PATHS) lines.push(`- and ${paths.length - LISTED_PATHS} more`);
   if (refusal !== null) {
     lines.push(
@@ -569,6 +577,7 @@ function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null,
       `<!-- merge refused: head=${refusal.head} base=${refusal.base} status=${refusal.status} reason=${encodeURIComponent(refusal.reason)} -->`,
     );
   }
+  if (notes.unverified !== undefined && notes.unverified.length > 0) lines.push('', unverifiedNote(notes.unverified));
   if (notes.held !== null) {
     lines.push('', `Waiting: ${codeNames(notes.held.checks)} also failed on the tracked branch's tip, so this change is not to blame. The sync merges the tracked branch in once it passes there.`, redMainNote(notes.held));
   }
@@ -618,6 +627,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     const hold = result.suspended;
     const link = hold.pullRequest === undefined ? '' : ` [#${hold.pullRequest.number}](${hold.pullRequest.url})`;
     lines.push(hold.released ? 'Released the suspended batch.' : `Suspended changes${link}: ${hold.paths.map((path) => `\`${path}\``).join(', ')}.`, '');
+    if (hold.code === 'head-unverified') lines.push(`The suspended pull request also changes files that are not synchronized documents or their assets: ${unverifiedList(hold.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from its branch.`, '');
     if (hold.code === 'merge-refused' || hold.code === 'merge-blocked') lines.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, '');
     if (hold.code === 'checks-missing') lines.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold.missing ?? [])}).`, CHECKS_MISSING_ADVICE, '');
     if (hold.normalClosePending === true) lines.push('The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.', '');
@@ -649,7 +659,9 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     lines.push(`Every check on the sync pull request ${link} passed; it merges after the suspended pull request, whose checks still run.`);
   }
   const explained = result.redMain !== undefined || result.mainPending !== undefined || result.waitsForSuspended === true || result.suspended?.normalClosePending === true;
-  switch (result.code) {
+  // A suspended head that waits for a person has its own line above; the normal lane's outcome still gets its line.
+  const code = result.code === 'head-unverified' && result.unverified === undefined ? undefined : result.code;
+  switch (code) {
     case 'conflict':
       lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
       break;
@@ -670,6 +682,9 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       break;
     case 'initial-pull-request-pending':
       lines.push('The sync branch holds an initial sync from Linear that a person has not merged yet. The sync adds nothing to it and writes nothing to Linear until it is merged.');
+      break;
+    case 'head-unverified':
+      lines.push(`The sync pull request ${link} also changes files that are not synchronized documents or their assets: ${unverifiedList(result.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from the sync branch. Linear's changes keep joining it.`);
       break;
     case 'state-moved':
       lines.push('The sync branch moved while this run worked; the next run updates the sync pull request.');

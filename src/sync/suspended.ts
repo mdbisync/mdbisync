@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { splitFile } from '../format/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
+import { oneLine, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type StateConfig, type StateSnapshot } from '../state/index.ts';
@@ -41,9 +42,11 @@ export interface SuspendedResult {
   normalClosePending?: boolean;
   changed?: boolean;
   conflicts?: string[];
-  code?: 'github-failed' | 'merge-refused' | 'merge-blocked' | 'checks-missing';
+  code?: 'github-failed' | 'merge-refused' | 'merge-blocked' | 'checks-missing' | 'head-unverified';
   /** For `checks-missing`: the expected checks never registered on the head; empty when it has no checks at all. */
   missing?: string[];
+  /** For `head-unverified`: the files the merge would change that the sync does not merge by itself. */
+  unverified?: string[];
   status?: number;
   reason?: string;
 }
@@ -238,11 +241,16 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
   // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
   const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body });
-  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${path}`).join('\n')}\n${earlier === null ? '' : `\n${earlier[0]}\n`}\n${headNote(head, since, expected.observed)}\n`;
+  // As in the normal lane: whoever added commits to this branch, the sync merges only synchronized documents and their
+  // assets. Read before the checks, so a head the sync will not merge neither holds the normal lane nor marks documents.
+  const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
+  const held = unverified.length === 0 ? '' : `\n${unverifiedNote(unverified)}\n`;
+  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${oneLine(path)}`).join('\n')}\n${held}${earlier === null ? '' : `\n${earlier[0]}\n`}\n${headNote(head, since, expected.observed)}\n`;
   const { pullRequest, opened } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body,
   });
   result.pullRequest = { number: pullRequest.number, url: pullRequest.url };
+  if (unverified.length > 0) return { ...result, code: 'head-unverified', unverified };
   const fresh = head !== previous || opened;
   const grace = options.mergeGraceSeconds ?? 60;
   if (fresh && grace === 0) return { ...result, waiting: true };
@@ -341,10 +349,13 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
   // The new head joins the failed batch and the earlier suspended head: it expects what both registered.
   const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous === null ? [failed] : [previous, failed] });
+  // A batch joining a suspended head that holds someone else's non-document change keeps it waiting for a person.
+  const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
+  const held = unverified.length === 0 ? '' : `${unverifiedNote(unverified)}\n\n`;
   const { pullRequest } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
-    body: `Changes on hold: ${codeNames([...checks, ...timedOut])}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n\n${headNote(head, new Date(), observed)}\n`,
+    body: `Changes on hold: ${codeNames([...checks, ...timedOut])}.\n\n${[...paths].sort().map((path) => `- ${oneLine(path)}`).join('\n')}\n\n${held}${headNote(head, new Date(), observed)}\n`,
   });
   const late = timedOut.length > 0 ? { timedOut } : {};
-  return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed, paths: batchPaths, checks: failures, ...late }, ...(!closed ? { normalClosePending: true } : {}), changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
+  return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed, paths: batchPaths, checks: failures, ...late }, ...(!closed ? { normalClosePending: true } : {}), ...(unverified.length > 0 ? { code: 'head-unverified' as const, unverified } : {}), changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }

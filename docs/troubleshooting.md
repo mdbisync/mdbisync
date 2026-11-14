@@ -55,6 +55,7 @@ step with the bare message, without `error:`.
 | `<command>: not finished (sync-branch-changed); merge or close the pull request of the sync branch and delete the branch, then run it again` | See [`sync-branch-changed`](#initial-sync). |
 | `<command>: setup error (merge-blocked): GitHub refuses again to merge the sync pull request (<reason>)` | See [`merge-blocked`](#the-sync-pull-request). |
 | `<command>: setup error (checks-missing): the sync pull request waited past the check deadline for checks that never started (<checks>)` | See [`checks-missing`](#the-sync-pull-request). |
+| `<command>: waits for a person (head-unverified): the sync pull request also changes files that are not synchronized documents or their assets (<files>); a person reviews and merges it` | See [`head-unverified`](#the-sync-pull-request). |
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
@@ -75,6 +76,7 @@ example [GitHub App](quickstart.md#github-app) for a missing permission:
 | `github-access` | The GitHub token can read the repository and has the permissions the sync needs. |
 | `github-app` | GitHub has the bot account of the App named by `app-slug`; the sync's commits name it as their author. |
 | `merge-commits` | The repository allows merge commits. |
+| `sync-branch-rules` | A warning when no ruleset restricts creating or deleting a sync branch, or when GitHub did not give the rules; the run goes on. It names updates on their own. |
 | `linear-format-hook` | `.pre-commit-config.yaml` has the `linear-format` hook. |
 | `annotations` | Every `linear-team` and `linear-project` in a `README.md` front matter is valid. |
 | `annotation-targets` | Every annotated team and project exists in Linear, once. |
@@ -103,7 +105,8 @@ The setup check can also end with:
 
 - `GitHub rate-limited the setup check while reading the repository (HTTP 403); run again later`
   or `GitHub rate-limited the setup check while checking <permission> (HTTP 403); run again later`
-  or `GitHub rate-limited the setup check while reading the App's account (HTTP 403); run again later`:
+  or `GitHub rate-limited the setup check while reading the App's account (HTTP 403); run again later`
+  or `GitHub rate-limited the setup check while reading the rules of <branch> (HTTP <status>); run again later`:
   wait and run again.
 - `GitHub answered HTTP <status> while checking <permission>`,
   `GitHub answered HTTP <status> while reading the repository` or
@@ -112,10 +115,25 @@ The setup check can also end with:
 - `more than 250 Linear projects share the annotated names`: name fewer
   projects with the same name, or rename them in Linear.
 
-The two warnings say:
+The warnings say:
 
 - `<n> files left out, not synced: <path> (<rule>), …`: files with a title
   collision stay in git only. Rename one of each pair.
+- `<branches>: creations <state>; deletions <state>; updates <state>; no
+  ruleset keeps those who can push from creating or deleting a sync
+  branch`, where each state is `restricted` or `not restricted on
+  <branches>`: no active ruleset restricts creating or deleting a sync
+  branch, so anyone who can push to it can add a document edit to the sync
+  pull request. Add the ruleset in
+  [Who may push to the sync branches](quickstart.md#who-may-push-to-the-sync-branches).
+  The check reads rulesets only: classic branch protection rules do not
+  count. When creations and deletions are restricted, the row passes and
+  still says whether updates are.
+- `GitHub answered HTTP <status> while reading the rules of <branch>; the
+  sync branches may not be kept to the App`: GitHub did not give the rules.
+  The next run reads them again. If it repeats with HTTP 403 or 404, the
+  repository may not have rulesets on its plan (a private repository on
+  GitHub Free), so the sync branches cannot be kept to the App this way.
 - `no pre-commit hook marked "alias: security": content is pushed unchecked`:
   nothing checks what comes from Linear before it is pushed. Add hooks marked
   `alias: security` if you want that (`mdbisync init --security-hooks` adds
@@ -232,6 +250,7 @@ Its step reports:
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked. | Nothing; the next run updates the pull request. |
 | `github-failed` | A GitHub request for the sync pull request failed or got no answer. | Nothing, unless it repeats; then check GitHub's status and the App's permissions. |
+| `head-unverified` | The sync pull request, or the suspended one, would also change files that are not synchronized documents or their assets: anything outside an annotated folder, inside a `.github` folder, of another type, or not a regular file, or a `README.md` change that adds, edits or removes a folder's Linear team or project (exit code 3). Someone added those changes to its branch; the sync does not merge them by itself. The description and the run summary list the files. | Review the changes. Merge the pull request yourself with a merge commit, or remove those changes from its branch with an ordinary commit (no force push); a later run merges what remains. To keep others from pushing to the sync branches, see [quickstart.md](quickstart.md#who-may-push-to-the-sync-branches). |
 
 ## Initial sync
 
