@@ -340,8 +340,9 @@ the source commit. It names every reason it refuses. The workflow token cannot r
 secret scanning alerts, so the gate reads them with `SECRET_SCANNING_READ_TOKEN`
 in the `release` environment, a fine-grained token with read-only access to
 secret scanning alerts. Limit that environment's deployment branches and tags
-to the branch `main`, with no required reviewers, and store the token only as
-an environment secret. Remove any repository secret of the same name. Only
+to the branch `main`, require the repository owner's review, turn off
+"Prevent self-review", and set no wait timer. Store the token only as an
+environment secret. Remove any repository secret of the same name. Only
 the gate job uses this environment; without the token the gate refuses.
 Pre-release builds do not run the gate.
 
