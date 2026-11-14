@@ -332,7 +332,10 @@ A failed build leaves existing pins unchanged.
 
 A final version such as `v0.1.0` is built the same way, but only after a
 security gate passes. The gate refuses the build unless the source commit
-has a `security-gate` commit status of `success`, `main` has no open code
+has a `security-gate` commit status of `success` posted by the account whose
+id the workflow sets in `SECURITY_GATE_CREATOR_ID` (only the newest status of
+that context counts: a later one from another account refuses the release
+until the scan posts again), `main` has no open code
 scanning alert of medium or higher severity (or of severity error), no open
 Dependabot alert of medium or higher, and no open secret scanning alert, and
 CodeQL's latest analysis of each category on `main` succeeded and includes

@@ -47,6 +47,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           # The workflow token cannot read secret scanning alerts; without this read-only token the gate refuses.
           SECRET_SCANNING_TOKEN: ${{ secrets.SECRET_SCANNING_READ_TOKEN }}
+          # The GitHub account id whose token posts the security-gate status; the gate refuses one from anyone else.
+          SECURITY_GATE_CREATOR_ID: '16704707'
         run: node src/release/gate.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA"
 
   # The full suite on the source commit, in the same four shards as CI: one
