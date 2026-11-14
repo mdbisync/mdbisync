@@ -1,7 +1,6 @@
 {
   "about": "Scenarios whose feature has not landed. A task that makes one pass removes its id here.",
   "scenarios": [
-    "L4-13",
     "L5-02",
     "L5-03",
     "L5-05",
