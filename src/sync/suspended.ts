@@ -349,10 +349,13 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
   // The new head joins the failed batch and the earlier suspended head: it expects what both registered.
   const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous === null ? [failed] : [previous, failed] });
+  // A batch joining a suspended head that holds someone else's non-document change keeps it waiting for a person.
+  const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
+  const held = unverified.length === 0 ? '' : `${unverifiedNote(unverified)}\n\n`;
   const { pullRequest } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
-    body: `Changes on hold: ${codeNames([...checks, ...timedOut])}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n\n${headNote(head, new Date(), observed)}\n`,
+    body: `Changes on hold: ${codeNames([...checks, ...timedOut])}.\n\n${[...paths].sort().map((path) => `- ${oneLine(path)}`).join('\n')}\n\n${held}${headNote(head, new Date(), observed)}\n`,
   });
   const late = timedOut.length > 0 ? { timedOut } : {};
-  return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed, paths: batchPaths, checks: failures, ...late }, ...(!closed ? { normalClosePending: true } : {}), changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
+  return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed, paths: batchPaths, checks: failures, ...late }, ...(!closed ? { normalClosePending: true } : {}), ...(unverified.length > 0 ? { code: 'head-unverified' as const, unverified } : {}), changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }
