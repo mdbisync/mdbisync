@@ -5,7 +5,7 @@ import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import { encodeFragment } from '../initial-sync/links.ts';
 import { type LinearReads, uploadReadKey, LinearError, LinearHttpError } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
-import { parse, visit, line } from '../format/markdown.ts';
+import { parse, visit, line, start } from '../format/markdown.ts';
 import { message } from '../messages.ts';
 import { uploadExtension } from './upload-type.ts';
 
@@ -73,11 +73,17 @@ export function typedFileLinkFindings(path: string, body: string, previousBody?:
       if (target !== null) known.add(target);
     }
   }
-  // A definition an image uses is that image's: the image gate blocks it already.
+  // Only the first definition resolves an image reference and is checked by
+  // the image gate. Shadowed definitions still reach the file upload writer.
   const imageLabels = new Set<string>();
-  visit(parse(body), (node) => { if (node.type === 'imageReference') imageLabels.add(node.identifier); });
+  const definitions = new Map<string, number>();
+  visit(parse(body), (node) => {
+    if (node.type === 'imageReference') imageLabels.add(node.identifier);
+    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, start(node));
+  });
   const links = destinations(body).filter(({ node }) => {
-    if (node.type === 'image' || (node.type === 'definition' && imageLabels.has(node.identifier))) return false;
+    if (node.type === 'image') return false;
+    if (node.type === 'definition' && imageLabels.has(node.identifier) && definitions.get(node.identifier) === start(node)) return false;
     const target = resolveTarget(path, node.url);
     return target !== null && !target.endsWith(MARKDOWN_EXTENSION);
   });

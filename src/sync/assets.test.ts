@@ -9,6 +9,7 @@ import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
 import { captureAssets, createAssetCapture, imageFindings, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
 import { destinations } from '../initial-sync/uploads.ts';
+import { fixText } from '../format/index.ts';
 
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
@@ -408,6 +409,18 @@ it('blocks a link typed in Linear to a repository file the previous text did not
   assert.deepEqual(findings('A\n\n[r]: ../private/%72eport.csv'), [[1, 1, 3]]);
   // A definition an image uses is left to the image gate; one a link uses is not.
   assert.deepEqual(findings('![i][a] [l][b]\n\n[a]: a.png\n[b]: b.csv'), [[1, 1, 4]]);
+  // The image gate resolves the first definition only; shadowed definitions
+  // must pass the file gate even with case or whitespace variants of a label.
+  assert.deepEqual(findings('![i][a]\n\n[a]: https://uploads.linear.app/a.png\n[A]: report.csv'), [[1, 1, 4]]);
+  assert.deepEqual(findings('![i][a b]\n\n[a b]: https://uploads.linear.app/a.png\n[A  B]: report.csv\n[a b]: second.csv'), [[1, 2, 4], [2, 2, 5]]);
+  assert.deepEqual(findings('![i][a]\n\n[a]: report.csv\n[A]: second.csv'), [[1, 1, 4]]);
+  assert.deepEqual(findings('![i][a]\n\n[a]: https://uploads.linear.app/a.png\n[A]: https://example.com/a.csv'), []);
+  assert.deepEqual(findings('![i][a]\n\n> [a]:\n> https://uploads.linear.app/a.png\n\n[A]: report.csv'), [[1, 1, 6]]);
+  // The formatter drops shadowed definitions. Validate the original text
+  // before that rewrite can hide a destination the upload writer would read.
+  const shadowed = '![i][a]\n\n[a]: https://uploads.linear.app/a.png\n[A]: report.csv\n';
+  assert.deepEqual(findings(shadowed), [[1, 1, 4]]);
+  assert.equal(fixText(shadowed), '![i](https://uploads.linear.app/a.png)');
   // Images have their own gate; Markdown documents and other sites upload nothing.
   assert.deepEqual(findings('![i](../private/a.png) [d](guide.md) [s](https://example.com/a.csv) [t](#top)'), []);
   // The previous text linked the same file, also by another spelling or from where the document was.
