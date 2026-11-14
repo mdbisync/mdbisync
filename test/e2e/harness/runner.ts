@@ -900,6 +900,7 @@ export function resultOf(
     durationMs: Date.now() - extra.startedAt,
     engineRequests: engineRequestCount(ctx, remote),
     requestBuckets: requestBuckets(ctx, remote),
+    ...(ctx.observations.has('workflowRateLimits') ? { workflowRateLimits: ctx.observations.get('workflowRateLimits') as NonNullable<ScenarioResult['workflowRateLimits']> } : {}),
     harnessRequests: ctx.live === null ? 0 : [...Object.values(ctx.live.editors)].reduce((sum, client) => sum + client.stats.total, 0),
     budgetWaitMs: extra.budgetWaitMs,
     checks: extra.checks,
@@ -1020,10 +1021,14 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       registration.hold(Number.MAX_SAFE_INTEGER);
       locks.splice(0).reverse().forEach((lock) => lock.hold(Number.MAX_SAFE_INTEGER));
     } else locks.splice(0).reverse().forEach((lock) => lock.release());
-    if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
-      if (isGraphql(entry) && deps.config.linearApps[0] !== undefined) {
-        deps.governor?.observeRateLimits(deps.config.linearApps[0].name, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
-      }
+    const workflowApp = deps.config.linearApps[0]?.name;
+    if (grant !== undefined && workflowApp !== undefined) {
+      const samples = remoteRequests(ctx).filter(({ entry }) => isGraphql(entry) && Object.keys(entry.rateLimitHeaders).length > 0);
+      for (const { entry } of samples) deps.governor?.observeRateLimits(workflowApp, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
+      ctx.observations.set('workflowRateLimits', {
+        app: workflowApp, samples,
+        governor: deps.governor?.rateLimitEvidence(workflowApp) ?? null,
+      });
     }
     if (grant !== undefined && !writerUnstopped && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
       try { await grant.release(); released = true; }

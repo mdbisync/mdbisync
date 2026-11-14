@@ -236,16 +236,26 @@ export class Governor {
     this.#observed.set(app, observed);
   }
 
+  readonly #decisions = new Map<string, { readStartedAt: number; fresh: Budget; used: Budget; sources: Partial<Record<'requests' | 'complexity', number>> }>();
+
+  /** Snapshot of the actual selection, including the fresh read that may supersede response samples. */
+  rateLimitEvidence(app: string) {
+    return structuredClone({ selected: this.#observed.get(app) ?? {}, decision: this.#decisions.get(app) ?? null });
+  }
+
   #withObserved(app: string, fresh: Budget, readStartedAt: number): Budget {
     const observed = this.#observed.get(app);
     const result = { ...fresh };
+    const sources: Partial<Record<'requests' | 'complexity', number>> = {};
     for (const [kind, field] of [['requests', 'requestsRemaining'], ['complexity', 'complexityRemaining']] as const) {
       const limit = observed?.[kind];
       if (limit !== undefined && limit.at >= readStartedAt && limit.resetAt > this.#now() && limit.remaining < result[field]) {
         result[field] = limit.remaining;
+        sources[kind] = limit.at;
         result.resetAt = Math.max(result.resetAt, limit.resetAt);
       }
     }
+    this.#decisions.set(app, { readStartedAt, fresh: { ...fresh }, used: { ...result }, sources });
     return result;
   }
 

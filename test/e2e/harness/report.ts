@@ -55,6 +55,19 @@ export function renderRunMarkdown(report: HarnessReport): string {
   for (const result of report.results) {
     lines.push(`| ${result.id} | ${result.runId} | ${result.result}${result.unexpectedPass ? ' (expected red)' : ''} | ${cell(result.reason ?? '')} | ${result.engineRequests} | ${result.harnessAppRequests} | ${Math.round(result.durationMs / 1000)} | ${result.cleanup.ok ? 'ok' : cell(result.cleanup.detail ?? 'failed')} |`);
   }
+  const limits = report.results.filter((result) => result.workflowRateLimits !== undefined);
+  if (limits.length > 0) {
+    lines.push('', '## Workflow rate-limit evidence', '',
+      'Response samples and the governor snapshot are retained in report.json. A selected response is cached evidence; admission uses the fresh budget unless a concurrent response constrains it.', '',
+      '| Scenario | App | Response samples | Selected requests sample | Selected complexity sample | Admission sources |',
+      '| --- | --- | --- | --- | --- | --- |');
+    for (const result of limits) {
+      const evidence = result.workflowRateLimits!;
+      const selected = evidence.governor?.selected;
+      const sample = (value: { at: number; remaining: number } | undefined) => value === undefined ? 'none' : `${new Date(value.at).toISOString()} (${value.remaining} remaining)`;
+      lines.push(`| ${result.id} | ${cell(evidence.app)} | ${evidence.samples.length} | ${sample(selected?.requests)} | ${sample(selected?.complexity)} | ${cell(JSON.stringify(evidence.governor?.decision ?? null))} |`);
+    }
+  }
   const passing = unexpectedPasses(report.results);
   if (passing.length > 0) lines.push('', `Passing while on the expected-red list, which fails the run (remove them from the list): ${passing.join(', ')}.`);
   const answers = report.results.flatMap((result) => Object.entries(result.answerSizes ?? {}).map(([operation, size]) => ({ id: result.id, operation, size })));

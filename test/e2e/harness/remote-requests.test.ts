@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, it } from 'node:test';
@@ -11,7 +11,7 @@ import { INVARIANT_CHECKS } from './checks.ts';
 import { resultOf } from './runner.ts';
 import { BudgetBlockedError, Governor } from './governor.ts';
 import { loadScenarios } from './spec.ts';
-import { runResult } from './workflows.ts';
+import { retainWorkflowOutput, runResult } from './workflows.ts';
 
 // Retained dry and confirmed initial-sync diagnostics, stripped to safe request
 // metadata, with neutral request identifiers. Counts and limit headers are real.
@@ -169,9 +169,14 @@ it('admits workflows on their configured app and lets a later fresh read superse
   assert.equal(other.app.name, 'other');
   other.release();
   await assert.rejects(governor.admit(scenario, 'abcdef2', { requests: 1, complexity: 1 }, 'primary'), BudgetBlockedError);
+  assert.equal(governor.rateLimitEvidence('primary').decision?.used.requestsRemaining, 0);
+  assert.equal(governor.rateLimitEvidence('primary').decision?.sources.requests, now);
   now += 1;
   const primary = await governor.admit(scenario, 'abcdef3', { requests: 1, complexity: 1 }, 'primary');
   assert.equal(primary.app.name, 'primary');
+  assert.equal(governor.rateLimitEvidence('primary').decision?.used.requestsRemaining, 5000);
+  assert.deepEqual(governor.rateLimitEvidence('primary').decision?.sources, {});
+  assert.equal(governor.rateLimitEvidence('primary').selected.requests?.remaining, 0);
   primary.release();
   now += 2000;
   const recovered = await governor.admit(scenario, 'abcdef4', { requests: 1, complexity: 1 }, 'primary');
@@ -192,5 +197,34 @@ it('allows the hook-only L0-09 workflow while requiring diagnostics from Linear 
       ctx.engine.results = [await runResult(rest, { ...run(6), conclusion, ...(path === undefined ? {} : { path }) }, 'sync', new Map())];
       assert.equal((await INVARIANT_CHECKS.I9(ctx, async () => { throw new Error('unexpected world read'); })).ok, false);
     }
+  }
+});
+
+it('retains scanned stage/apply logs and the exact deduplicated accounting ledger', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'workflow-output-'));
+  roots.push(dir);
+  const files = logs(recorded.confirmed);
+  files.set('../../escape.txt', 'ordinary work output');
+  const result = await runResult(rest, run(7), 'initial-sync', files);
+  assert.equal(retainWorkflowOutput(dir, files, result, ['kx-hidden-note']), true);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'logs.json'), 'utf8')), Object.fromEntries(files));
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'requests.json'), 'utf8')), result.remote);
+  assert.equal(JSON.parse(readFileSync(join(dir, 'output-scan.json'), 'utf8')).clean, true);
+});
+
+it('withholds logs and diagnostics when a log, summary or request contains a secret', async () => {
+  for (const source of ['log', 'summary', 'request']) {
+    const dir = mkdtempSync(join(tmpdir(), 'workflow-secret-'));
+    roots.push(dir);
+    const files = logs(recorded.dry);
+    const secret = 'kx-hidden-note';
+    if (source === 'log') files.set('job/7_Apply.txt', secret);
+    const result = await runResult(rest, run(8), 'initial-sync', files);
+    if (source === 'summary') result.summary = secret;
+    if (source === 'request') result.remote!.requests[0]!.operation = secret;
+    assert.equal(retainWorkflowOutput(dir, files, result, [secret]), false);
+    assert.equal(existsSync(join(dir, 'logs.json')), false);
+    assert.equal(existsSync(join(dir, 'requests.json')), false);
+    assert.equal(readFileSync(join(dir, 'output-scan.json'), 'utf8').includes(secret), false);
   }
 });

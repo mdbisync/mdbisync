@@ -468,7 +468,7 @@ describe('workflows', () => {
     assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
     const run = (ctx.observations.get('workflows.runs') as Array<{ id: number }>)[0]!;
     assert.equal(runs.find((candidate) => candidate.id === run.id)?.path, '.github/workflows/mdbisync.yml', 'the sync\'s push run, not another workflow\'s run on the same push');
-    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    const dir = join(ctx.runDir, 'workflows', String(run.id), '1');
     assert.equal(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).conclusion, 'failure');
     assert.equal(JSON.parse(readFileSync(join(dir, 'blocker.json'), 'utf8')).cause, 'pipx: command not found (exit 127)');
     assert.equal(readFileSync(join(dir, 'failed-step.txt'), 'utf8'), logs['sync/4_Install pre-commit.txt']);
@@ -485,7 +485,7 @@ describe('workflows', () => {
     assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
     assert.equal(ctx.observations.has('workflows.blocker'), false, 'a step outside the prerequisites proves no environment blocker');
     const run = (ctx.observations.get('workflows.runs') as Array<{ id: number }>)[0]!;
-    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    const dir = join(ctx.runDir, 'workflows', String(run.id), '1');
     const evidence = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')) as { conclusion: string; jobs: Array<{ name: string; conclusion: string; steps: Array<{ number: number; name: string; conclusion: string }> }> };
     assert.equal(evidence.conclusion, 'failure');
     assert.deepEqual(evidence.jobs.map((entry) => [entry.name, entry.conclusion]), [['sync', 'failure']]);
@@ -501,11 +501,32 @@ describe('workflows', () => {
     await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
     await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
     const run = (ctx.observations.get('workflows.runs') as Array<{ id: number }>)[0]!;
-    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    const dir = join(ctx.runDir, 'workflows', String(run.id), '1');
     const evidence = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')) as { conclusion: string; jobs: Array<{ steps: Array<{ name: string; conclusion: string }> }> };
     assert.equal(evidence.conclusion, 'success');
     assert.deepEqual(evidence.jobs[0]!.steps.map((step) => [step.name, step.conclusion]), [['Sync', 'success']]);
     assert.equal(existsSync(join(dir, 'failed-step.txt')), false);
+  });
+
+  it('retain stage and apply logs only after scanning, with no clear secret on failure', async () => {
+    for (const leaking of [false, true]) {
+      const { ctx, remoteGit } = await fakeRun();
+      const logs = { 'sync/3_Stage.txt': 'stage diagnostics', 'sync/7_Apply.txt': leaking ? ctx.live!.engineApp.clientSecret : 'apply diagnostics' };
+      fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs });
+      await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+      const action = STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
+      if (leaking) await assert.rejects(action, /output contains a secret/);
+      else await action;
+      const run = (ctx.observations.get('workflows.runs') as Array<{ id: number }>)[0]!;
+      const dir = join(ctx.runDir, 'workflows', String(run.id), '1');
+      assert.equal(existsSync(join(dir, 'logs.json')), !leaking);
+      assert.equal(existsSync(join(dir, 'requests.json')), !leaking);
+      if (!leaking) assert.deepEqual(JSON.parse(readFileSync(join(dir, 'logs.json'), 'utf8')), logs);
+      else {
+        assert.equal(ctx.engine.results.at(-1)!.stdout, '');
+        assert.equal(ctx.engine.results.at(-1)!.report, null);
+      }
+    }
   });
 
   it('keep a failed run whose old post step says "not implemented" as a failure, not expected-red', async () => {

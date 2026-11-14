@@ -57,7 +57,7 @@ function requestKey(entry: LogEntry): string {
     entry.requestId ?? null, entry.startedAt, entry.finishedAt]);
 }
 
-export function remoteRequests(ctx: RunContext): Array<{ phase: 'setup' | 'scenario' | 'I6'; entry: LogEntry }> {
+export function remoteRequests(ctx: RunContext): Array<{ phase: 'setup' | 'scenario' | 'I6'; runId: number; runAttempt: number; entry: LogEntry }> {
   const seen = new Set<string>();
   const end = Number(ctx.observations.get('scenario.runsEnd') ?? ctx.engine.results.length);
   return ctx.engine.results.flatMap((result, index) => {
@@ -67,7 +67,7 @@ export function remoteRequests(ctx: RunContext): Array<{ phase: 'setup' | 'scena
     const key = `${remote.runId}:${remote.runAttempt}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    return remote.requests.map((entry) => ({ phase, entry }));
+    return remote.requests.map((entry) => ({ phase, runId: remote.runId, runAttempt: remote.runAttempt, entry }));
   });
 }
 
