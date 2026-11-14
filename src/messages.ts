@@ -9,6 +9,9 @@
 // own page.
 
 export const MESSAGES = {
+  'assets.budget': 'attachment budget exceeded; reduce attachments and retry',
+  'assets.spool-changed': 'temporary attachment content changed; retry the run',
+  'assets.spool-budget': 'temporary attachment storage budget exceeded; reduce attachments and retry',
   // The command line and the action.
   'cli.missing-command': 'missing command',
   'cli.unknown-command': 'unknown command: {command}',

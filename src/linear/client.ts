@@ -160,7 +160,12 @@ export class LinearClient {
 
   /** Sends any GraphQL document; for setup checks and tests. */
   request<T>(operation: string, kind: 'query' | 'mutation', query: string, variables?: Record<string, unknown>) {
-    return this.transport.request<T>(operation, kind, query, variables);
+    return kind === 'mutation' ? this.mutate<T>(operation, query, variables) : this.transport.query<T>(operation, query, variables);
+  }
+
+  /** Sends a write through the network-only transport path. */
+  mutate<T>(operation: string, query: string, variables?: Record<string, unknown>): Promise<T> {
+    return this.transport.mutate<T>(operation, query, variables);
   }
 
   async rateLimitStatus(): Promise<RateLimitStatus> {
@@ -282,9 +287,8 @@ export class LinearClient {
   }
 
   async #createDocumentOnce(place: DocumentPlace, input: CreateDocumentInput): Promise<LinearDocument> {
-    const data = await this.request<{ documentCreate: { success: boolean; document: RawDocument } }>(
+    const data = await this.mutate<{ documentCreate: { success: boolean; document: RawDocument } }>(
       'CreateDocument',
-      'mutation',
       `mutation CreateDocument($input: DocumentCreateInput!, $withContent: Boolean!) {
         documentCreate(input: $input) { success document { ${DOCUMENT_FIELDS} } }
       }`,
@@ -303,9 +307,8 @@ export class LinearClient {
    */
   async updateDocument(id: string, patch: DocumentPatch): Promise<LinearDocument> {
     this.#refuseTooLong('UpdateDocument', patch);
-    const data = await this.request<{ documentUpdate: { success: boolean; document: RawDocument } }>(
+    const data = await this.mutate<{ documentUpdate: { success: boolean; document: RawDocument } }>(
       'UpdateDocument',
-      'mutation',
       `mutation UpdateDocument($id: String!, $input: DocumentUpdateInput!, $withContent: Boolean!) {
         documentUpdate(id: $id, input: $input) { success document { ${DOCUMENT_FIELDS} } }
       }`,
@@ -318,9 +321,8 @@ export class LinearClient {
 
   /** Moves a document to trash; it can be restored. Never deletes for good. */
   async trashDocument(id: string): Promise<void> {
-    const data = await this.request<{ documentDelete: { success: boolean } }>(
+    const data = await this.mutate<{ documentDelete: { success: boolean } }>(
       'TrashDocument',
-      'mutation',
       `mutation TrashDocument($id: String!) { documentDelete(id: $id) { success } }`,
       { id },
     );
@@ -329,9 +331,8 @@ export class LinearClient {
   }
 
   async restoreDocument(id: string): Promise<void> {
-    const data = await this.request<{ documentUnarchive: { success: boolean } }>(
+    const data = await this.mutate<{ documentUnarchive: { success: boolean } }>(
       'RestoreDocument',
-      'mutation',
       `mutation RestoreDocument($id: String!) { documentUnarchive(id: $id) { success } }`,
       { id },
     );
@@ -341,9 +342,8 @@ export class LinearClient {
 
   /** Comments on a document; `documentContentId` comes from the document. */
   async commentOnDocument(documentContentId: string, body: string, id?: string): Promise<{ id: string }> {
-    const data = await this.request<{ commentCreate: { success: boolean; comment: { id: string } } }>(
+    const data = await this.mutate<{ commentCreate: { success: boolean; comment: { id: string } } }>(
       'CommentOnDocument',
-      'mutation',
       `mutation CommentOnDocument($input: CommentCreateInput!) {
         commentCreate(input: $input) { success comment { id } }
       }`,
@@ -356,8 +356,8 @@ export class LinearClient {
 
   /** Update a previously posted notice without adding another comment. */
   async updateDocumentComment(id: string, body: string): Promise<{ id: string }> {
-    const data = await this.request<{ commentUpdate: { success: boolean; comment: { id: string } } }>(
-      'UpdateDocumentComment', 'mutation',
+    const data = await this.mutate<{ commentUpdate: { success: boolean; comment: { id: string } } }>(
+      'UpdateDocumentComment',
       `mutation UpdateDocumentComment($id: String!, $input: CommentUpdateInput!) {
         commentUpdate(id: $id, input: $input) { success comment { id } }
       }`,
@@ -384,8 +384,8 @@ export class LinearClient {
    * an error to the caller.
    */
   async resolveComment(id: string): Promise<void> {
-    const data = await this.request<{ commentResolve: { success: boolean } }>(
-      'ResolveComment', 'mutation',
+    const data = await this.mutate<{ commentResolve: { success: boolean } }>(
+      'ResolveComment',
       `mutation ResolveComment($id: String!) { commentResolve(id: $id) { success } }`,
       { id },
     );
@@ -456,11 +456,10 @@ export class LinearClient {
    * 10 MiB + 1 byte, and refuses a declared 100 MiB (INPUT_ERROR).
    */
   async uploadFile(input: UploadInput): Promise<{ assetUrl: string }> {
-    const data = await this.request<{
+    const data = await this.mutate<{
       fileUpload: { success: boolean; uploadFile: { uploadUrl: string; assetUrl: string; headers: Array<{ key: string; value: string }> } | null };
     }>(
       'FileUpload',
-      'mutation',
       `mutation FileUpload($contentType: String!, $filename: String!, $size: Int!) {
         fileUpload(contentType: $contentType, filename: $filename, size: $size) {
           success uploadFile { uploadUrl assetUrl headers { key value } }
@@ -498,7 +497,7 @@ export class LinearClient {
       variables[`size${index}`] = input.bytes.byteLength;
     });
     type Payload = { success: boolean; uploadFile: { uploadUrl: string; assetUrl: string; headers: Array<{ key: string; value: string }> } | null };
-    const data = await this.request<Record<string, Payload>>('FileUploads', 'mutation', `mutation FileUploads(${declarations}) {\n        ${fields}\n      }`, variables);
+    const data = await this.mutate<Record<string, Payload>>('FileUploads', `mutation FileUploads(${declarations}) {\n        ${fields}\n      }`, variables);
     const targets = inputs.map((_, index) => {
       const payload = data[`f${index}`];
       const target = payload === undefined ? null : succeeded('FileUploads', payload).uploadFile;

@@ -96,6 +96,28 @@ describe('capture from Linear', () => {
     assert.notEqual(world.linear.documents[1]!.icon, 'Cross');
   });
 
+  it('leaves an attachment count overrun resumable through the fake-service CLI', async () => {
+    await fixture.seed({'.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n'});
+    world.linear.documents[0]!.content = Array.from({length: 33}, (_, i) => `[File](https://uploads.linear.app/file-${i})`).join('\n');
+    const network = fakeFetch(world);
+    const reportFile = join(fixture.root, 'budget-report.json');
+    let downloads = 0;
+    const result = await runCli(['sync'], {cwd: context.git.dir, fetch: async (input, init) => {
+      if (String(input).startsWith('https://uploads.linear.app/')) { downloads++; return new Response(png); }
+      return network(input, init);
+    }, env: {
+      MDBISYNC_LINEAR_CLIENT_ID:'client', MDBISYNC_LINEAR_CLIENT_SECRET:'secret', MDBISYNC_LINEAR_API_URL:LINEAR_API,
+      MDBISYNC_MERGE_GRACE_SECONDS:'0', MDBISYNC_GITHUB_TOKEN:'token', MDBISYNC_GITHUB_API_URL:GITHUB_API,
+      MDBISYNC_REPOSITORY:'example/repository', MDBISYNC_REPORT_FILE:reportFile,
+    }});
+    const report = JSON.parse(await readFile(reportFile, 'utf8'));
+    assert.deepEqual(report.capture.leftOut, [{id:'plan', rule:'attachment-budget'}]);
+    assert.equal(downloads, 0);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+    assert.equal(world.linear.comments.size, 0);
+    assert.match(result.stdout, /attachment-budget/);
+  });
+
   it('captures edits with previous front matter; repeated capture makes no content commit', async () => {
     world.linear.documents[0]!.content = 'Updated.\n';
     const result = await run();
