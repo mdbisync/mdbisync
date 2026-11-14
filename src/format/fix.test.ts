@@ -14,7 +14,9 @@ const cases: Array<[string, string, string]> = [
   ['extra blank lines between blocks collapse', 'One.\n\n\n\nTwo.', 'One.\n\nTwo.'],
   ['setext headings become ATX', 'Title\n=====\n\nSub\n---\n\nText.', '# Title\n\n## Sub\n\nText.'],
   ['closing hashes go', '## Summary ##', '## Summary'],
-  ['thematic breaks become ---', '***\n\n___\n\n- - -', '---\n\n---\n\n---'],
+  ['thematic breaks become ---', 'Text.\n\n***\n\n___\n\n- - -', 'Text.\n\n---\n\n---\n\n---'],
+  // An opening rule pair stays `***` first, or the two rules would read as front matter.
+  ['an opening rule pair keeps *** first', '***\n\n___\n\n- - -', '***\n\n---\n\n---'],
   ['bullets become *', '- a\n- b', '* a\n* b'],
   ['a + bullet becomes *', '+ a', '* a'],
   ['loose lists become tight', '* a\n\n* b', '* a\n* b'],
@@ -93,6 +95,17 @@ describe('links to files that are not there', () => {
 
   it('without the check every linked file is taken to exist', () => {
     assert.equal(fixText('* [Report](<missing/report.pdf>)'), '* \n  [Report](missing/report.pdf)');
+  });
+});
+
+describe('a body that opens with a rule pair', () => {
+  it('keeps its opening rule from reading as front matter', () => {
+    // Fix writes every rule `---`; the opening one stays `***`, or the pair would become the file's front matter.
+    assert.equal(fixText('***\n\nIntro.\n\n---\n\nText.'), '***\n\nIntro.\n\n---\n\nText.');
+    // Under front matter of its own the body's rules are plain `---`.
+    const fenced = '---\nowner: ops\n---\n\n---\n\nIntro.\n\n---\n\nText.';
+    assert.equal(fixText(fenced.replace('\n\n---\n\nIntro', '\n\n***\n\nIntro')), fenced);
+    assert.equal(fixText('***\n\nText.'), '---\n\nText.');
   });
 });
 

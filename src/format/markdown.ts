@@ -35,6 +35,28 @@ export function splitFile(text: string): SplitFile {
   return { head: bom + match[0] + blank, body: afterBlock.slice(blank.length) };
 }
 
+/**
+ * Joins a head and a body so that `splitFile` gives the body back as the
+ * body. Linear spells a thematic break `---`, so a body that opens with one
+ * and has another later would read as front matter under a head without
+ * its own block: that text would stop going to Linear, and in a folder's
+ * `README.md` it would become the folder's annotation. Such a body opens
+ * with `***` instead, the same rule in Markdown, which Linear reads back
+ * as `---` and `sameMarkdown` takes as no change.
+ */
+export function joinFile(head: string, body: string): string {
+  if (FRONT_MATTER.test(head.startsWith(BOM) ? head.slice(BOM.length) : head)) {
+    // A file that ends right after its closing fence needs a line break before the body, in the head's own style.
+    if (body === '' || head.endsWith('\n')) return head + body;
+    return head + (head.includes('\r\n') ? '\r\n' : '\n') + body;
+  }
+  // Without a block of its own the head is empty or a byte order mark: read the text as `splitFile` does.
+  const text = head + body;
+  const at = text.startsWith(BOM) ? BOM.length : 0;
+  if (!FRONT_MATTER.test(text.slice(at))) return text;
+  return text.slice(0, at) + '***' + text.slice(at + '---'.length);
+}
+
 /** Number of line breaks in a text: the line offset of what follows it. */
 export function lineCount(text: string): number {
   let count = 0;

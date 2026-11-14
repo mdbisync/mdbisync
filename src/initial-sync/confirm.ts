@@ -23,7 +23,7 @@
 
 import { assessCapacity, capacityBlocked } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import { fixText, sameMarkdown, splitFile } from '../format/index.ts';
+import { fixText, joinFile, sameMarkdown, splitFile } from '../format/index.ts';
 import {
   DocumentTooLongError,
   type LinearDocument,
@@ -507,7 +507,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const reformatted: string[] = [];
     for (const path of [...synced].sort(compare)) {
       const text = texts.get(path) as string;
-      const file = splitFile(text).head + restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string);
+      const file = joinFile(splitFile(text).head, restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string));
       if (file !== text) {
         changes.set(path, file);
         reformatted.push(path);
