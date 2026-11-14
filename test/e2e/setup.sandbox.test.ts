@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { LinearClient, withRunToken, type LogEntry } from '../../src/linear/index.ts';
 import { PERMISSION_PROBES, checkGitHub, resolveTargets } from '../../src/setup/index.ts';
+import { DEFAULT_STATE_CONFIG, suspendedBranch } from '../../src/state/index.ts';
 
 const env = process.env;
 const appId = env.MDBISYNC_TEST_GITHUB_APP_ID ?? '';
@@ -55,15 +56,19 @@ async function installationToken(without?: string): Promise<{ token: string; rev
   return { token, revoke: async () => void (await github('/installation/token', token, { method: 'DELETE' })) };
 }
 
+const syncBranches = [DEFAULT_STATE_CONFIG.syncBranch, suspendedBranch(DEFAULT_STATE_CONFIG)];
+
 describe('setup check against GitHub', { skip: appId && keyFile && repository ? false : 'the GitHub App test variables are not set' }, () => {
   const commit = async (token: string) => ((await (await github(`/repos/${repository}/commits/HEAD`, token)).json()) as { sha: string }).sha;
 
   it('passes the App token with all its permissions and reads the merge setting', async () => {
     const { token, revoke } = await installationToken();
     try {
-      const result = await checkGitHub({ repository, token, commit: await commit(token) });
+      const result = await checkGitHub({ repository, token, commit: await commit(token), syncBranches });
       assert.equal(result.access.state, 'passed', result.access.detail);
       assert.notEqual(result.mergeCommits.state, 'not-checked', result.mergeCommits.detail);
+      assert.ok(['passed', 'warning'].includes(result.syncBranchRules.state), result.syncBranchRules.detail);
+      assert.match(result.syncBranchRules.detail, /^mdbisync\/linear and mdbisync\/suspended: creations /, result.syncBranchRules.detail);
     } finally {
       await revoke();
     }
@@ -73,7 +78,7 @@ describe('setup check against GitHub', { skip: appId && keyFile && repository ? 
     it(`names ${permission} when the token lacks it`, async () => {
       const { token, revoke } = await installationToken(permission);
       try {
-        const result = await checkGitHub({ repository, token, commit: await commit(token) });
+        const result = await checkGitHub({ repository, token, commit: await commit(token), syncBranches });
         assert.equal(result.access.code, 'missing-permission');
         const unchecked = permission === 'contents:write' ? ' (workflows:write not checked without it)' : '';
         assert.equal(result.access.detail, `the GitHub token lacks ${permission}${unchecked}`);

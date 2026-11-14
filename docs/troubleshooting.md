@@ -76,6 +76,7 @@ example [GitHub App](quickstart.md#github-app) for a missing permission:
 | `github-access` | The GitHub token can read the repository and has the permissions the sync needs. |
 | `github-app` | GitHub has the bot account of the App named by `app-slug`; the sync's commits name it as their author. |
 | `merge-commits` | The repository allows merge commits. |
+| `sync-branch-rules` | A warning when no ruleset restricts creating or deleting a sync branch, or when GitHub did not give the rules; the run goes on. It names updates on their own. |
 | `linear-format-hook` | `.pre-commit-config.yaml` has the `linear-format` hook. |
 | `annotations` | Every `linear-team` and `linear-project` in a `README.md` front matter is valid. |
 | `annotation-targets` | Every annotated team and project exists in Linear, once. |
@@ -104,7 +105,8 @@ The setup check can also end with:
 
 - `GitHub rate-limited the setup check while reading the repository (HTTP 403); run again later`
   or `GitHub rate-limited the setup check while checking <permission> (HTTP 403); run again later`
-  or `GitHub rate-limited the setup check while reading the App's account (HTTP 403); run again later`:
+  or `GitHub rate-limited the setup check while reading the App's account (HTTP 403); run again later`
+  or `GitHub rate-limited the setup check while reading the rules of <branch> (HTTP <status>); run again later`:
   wait and run again.
 - `GitHub answered HTTP <status> while checking <permission>`,
   `GitHub answered HTTP <status> while reading the repository` or
@@ -113,10 +115,25 @@ The setup check can also end with:
 - `more than 250 Linear projects share the annotated names`: name fewer
   projects with the same name, or rename them in Linear.
 
-The two warnings say:
+The warnings say:
 
 - `<n> files left out, not synced: <path> (<rule>), …`: files with a title
   collision stay in git only. Rename one of each pair.
+- `<branches>: creations <state>; deletions <state>; updates <state>; no
+  ruleset keeps those who can push from creating or deleting a sync
+  branch`, where each state is `restricted` or `not restricted on
+  <branches>`: no active ruleset restricts creating or deleting a sync
+  branch, so anyone who can push to it can add a document edit to the sync
+  pull request. Add the ruleset in
+  [Who may push to the sync branches](quickstart.md#who-may-push-to-the-sync-branches).
+  The check reads rulesets only: classic branch protection rules do not
+  count. When creations and deletions are restricted, the row passes and
+  still says whether updates are.
+- `GitHub answered HTTP <status> while reading the rules of <branch>; the
+  sync branches may not be kept to the App`: GitHub did not give the rules.
+  The next run reads them again. If it repeats with HTTP 403 or 404, the
+  repository may not have rulesets on its plan (a private repository on
+  GitHub Free), so the sync branches cannot be kept to the App this way.
 - `no pre-commit hook marked "alias: security": content is pushed unchecked`:
   nothing checks what comes from Linear before it is pushed. Add hooks marked
   `alias: security` if you want that (`mdbisync init --security-hooks` adds

@@ -37,6 +37,10 @@ export function failed(name: CheckName, code: FailureCode, detail: string): Chec
   return { name, state: 'failed', detail, code };
 }
 
+export function warning(name: CheckName, detail: string): CheckResult {
+  return { name, state: 'warning', detail };
+}
+
 export function notChecked(name: CheckName, detail: string): CheckResult {
   return { name, state: 'not-checked', detail };
 }

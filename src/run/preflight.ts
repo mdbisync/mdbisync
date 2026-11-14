@@ -18,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
+import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress, suspendedBranch } from '../state/index.ts';
 import { type CheckClock } from '../pull-request/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
@@ -110,7 +110,8 @@ export async function runPreflight(
 
   const mapping = await loadMapping(git, fetched.tracked);
   const hooks = readHookConfig(await readTrackedFile(git, fetched.tracked, PRE_COMMIT_CONFIG));
-  const github = await checkGitHub({ ...inputs.github, commit: fetched.tracked, ...(options.fetch ? { fetch: options.fetch } : {}) });
+  const syncBranches = [inputs.state.syncBranch, suspendedBranch(inputs.state)];
+  const github = await checkGitHub({ ...inputs.github, commit: fetched.tracked, syncBranches, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
   const stats = new RequestStats();
   const requestHooks = { log: options.log };

@@ -187,6 +187,15 @@ request with the workflow's own token. If you use that workflow, leave
 can then still add a document edit to a sync pull request, but nothing
 else: the sync leaves any other change for a person to review.
 
+Every run's setup check reads the rules GitHub applies to the two sync
+branches. Its `sync-branch-rules` row is a warning when creating or
+deleting either branch is not restricted, and it names updates on their
+own: restricted, or not restricted on which branch. The warning does not
+stop the run. The check reads rulesets only, not classic branch
+protection rules. The App cannot see a ruleset's bypass list, so the
+check does not tell whether the App is on it; GitHub refusing the sync's
+own pushes to these branches shows that it is not.
+
 The App keeps **Workflows: Read and write**. The sync branches take in
 `main` with merge commits, so a workflow someone changes on `main` shows up
 in commits the App pushes, and GitHub refuses those pushes without that

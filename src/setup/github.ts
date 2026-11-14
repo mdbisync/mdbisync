@@ -5,10 +5,12 @@
 // before anything is created. The repository's merge settings are read the
 // same way (they are visible to a token with write access). The App's bot
 // account, which the sync's commits name as their author, is read by the
-// App's slug.
+// App's slug. The rules on the sync branches are read too (any token with
+// metadata access can): whether creating, updating and deleting them is
+// restricted, as a ruleset that keeps them to the App does.
 
 import { type CommitIdentity, NEUTRAL_IDENTITY } from '../state/index.ts';
-import { type CheckResult, failed, notChecked, passed } from './report.ts';
+import { type CheckResult, failed, notChecked, passed, warning } from './report.ts';
 import { message } from '../messages.ts';
 
 export const DEFAULT_GITHUB_API_URL = 'https://api.github.com';
@@ -22,6 +24,8 @@ export interface GitHubTarget {
   apiUrl?: string | undefined;
   /** The slug of the App whose installation token `token` is. */
   appSlug?: string | undefined;
+  /** The sync branches whose rules are read: the sync branch and its suspended branch. */
+  syncBranches: readonly string[];
   fetch?: typeof fetch;
 }
 
@@ -56,13 +60,16 @@ export interface GitHubCheck {
   access: CheckResult;
   app: CheckResult;
   mergeCommits: CheckResult;
+  /** Whether the sync branches are kept to the App: a warning at most. */
+  syncBranchRules: CheckResult;
   /** Who the sync's commits are by: the App's bot account; absent without an App slug or when it was not found. */
   identity?: CommitIdentity;
 }
 
 /**
- * Probes the token's permissions and the repository's merge setting, and
- * reads the App's bot account. At most seven requests, no writes.
+ * Probes the token's permissions and the repository's merge setting, reads
+ * the App's bot account and the rules on each sync branch. At most nine
+ * requests with the two sync branches, no writes.
  */
 export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
   const request = requester(target);
@@ -73,7 +80,8 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
   if (repository.status === 401 || repository.status === 403 || repository.status === 404) {
     const why = repository.status === 401 ? message('setup.github-refused', { status: repository.status }) : message('setup.github-cannot-see', { status: repository.status });
     const access = failed('github-access', 'github-credential-failed', why);
-    return { access, app: notChecked('github-app', 'needs a working GitHub token'), mergeCommits: notChecked('merge-commits', 'needs a working GitHub token') };
+    const needsToken = 'needs a working GitHub token';
+    return { access, app: notChecked('github-app', needsToken), mergeCommits: notChecked('merge-commits', needsToken), syncBranchRules: notChecked('sync-branch-rules', needsToken) };
   }
   ensureAnswered(repository.status, message('setup.github-reading-repository'));
 
@@ -110,7 +118,52 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
     : allow
       ? passed('merge-commits', 'merge commits are allowed')
       : failed('merge-commits', 'merge-commits-required', message('setup.merge-commits-off'));
-  return { access, mergeCommits, ...(await checkApp(target)) };
+  return { access, mergeCommits, ...(await checkApp(target)), syncBranchRules: await checkSyncBranchRules(target) };
+}
+
+/** The rules that keep a branch to those who may bypass them, in the order the report names them. */
+const BRANCH_RULES = [
+  { type: 'creation', words: 'creations' },
+  { type: 'deletion', words: 'deletions' },
+  { type: 'update', words: 'updates' },
+] as const;
+
+/**
+ * Reads the rules GitHub applies to each sync branch (active rulesets only,
+ * from the repository and its organization; the branch need not exist).
+ * Anyone who can push to a sync branch can add a document edit to the sync
+ * pull request, which the sync merges without review. A branch whose
+ * creations or deletions are not restricted is a warning; updates are named
+ * on their own, since the `pre-commit` workflow's fixes need them open.
+ * Classic branch protection is not among these rules, and the rules' bypass
+ * list is not visible to the App, so the check cannot tell whether the App
+ * is on it.
+ */
+async function checkSyncBranchRules(target: GitHubTarget): Promise<CheckResult> {
+  const request = requester(target);
+  const rulesOf = new Map<string, Set<unknown>>();
+  for (const branch of target.syncBranches) {
+    // A page holds up to 100 rules; a branch with more would need several rulesets of every kind.
+    const answer = await request('GET', `/rules/branches/${branch.split('/').map(encodeURIComponent).join('/')}?per_page=100`);
+    if (answer.status === 429 || (answer.status === 403 && isRateLimited(answer))) {
+      throw new Error(message('setup.github-rate-limited-rules', { status: answer.status, branch }));
+    }
+    if (answer.status < 200 || answer.status >= 300 || !Array.isArray(answer.json)) {
+      return warning('sync-branch-rules', message('setup.sync-branch-rules-unread', { status: answer.status, branch }));
+    }
+    rulesOf.set(branch, new Set((answer.json as Array<{ type?: unknown } | null>).map((rule) => rule?.type)));
+  }
+  const openOn = (type: string) => target.syncBranches.filter((branch) => !rulesOf.get(branch)?.has(type));
+  const rules = BRANCH_RULES.map((rule) => {
+    const open = openOn(rule.type);
+    return open.length === 0
+      ? message('setup.sync-branch-rule-restricted', { rule: rule.words })
+      : message('setup.sync-branch-rule-open', { rule: rule.words, branches: open.join(' and ') });
+  }).join('; ');
+  const branches = target.syncBranches.join(' and ');
+  return openOn('creation').length === 0 && openOn('deletion').length === 0
+    ? passed('sync-branch-rules', message('setup.sync-branch-rules', { branches, rules }))
+    : warning('sync-branch-rules', message('setup.sync-branch-rules-open', { branches, rules }));
 }
 
 /**

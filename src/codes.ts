@@ -12,6 +12,7 @@ export const CHECK_NAMES = [
   'github-access',
   'github-app',
   'merge-commits',
+  'sync-branch-rules',
   'linear-format-hook',
   'annotations',
   'annotation-targets',
