@@ -64,7 +64,11 @@ What both commands leave alone:
   paths; `fix` keeps the path as written, only encoding characters such as
   spaces. Every image must be such a path to a file of the repository (see
   [`image-not-in-repository`](#image-not-in-repository)); links to web
-  pages and other URLs are fine.
+  pages and other URLs are fine. In Linear, a link typed as a relative
+  path to a file other than a Markdown document is blocked like an image
+  that is not an upload (`image-blocked`): the sync would upload the file
+  it names, so only the repository chooses which files reach Linear. A
+  link the file already had stays allowed.
 - **The sync's conflict markers.** A conflict the sync writes is ordinary
   bold paragraphs (`**Sync conflict: git version**` and so on) and passes
   both commands unchanged ([conflicts](conflicts.md) shows them and how to

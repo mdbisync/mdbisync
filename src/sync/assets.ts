@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
-import { destinations, findFileLinks } from '../initial-sync/uploads.ts';
+import { destinations, findFileLinks, resolveTarget } from '../initial-sync/uploads.ts';
+import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
+import { encodeFragment } from '../initial-sync/links.ts';
 import { type LinearReads, uploadReadKey, LinearError, LinearHttpError } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
 import { parse, visit, line } from '../format/markdown.ts';
@@ -42,7 +44,7 @@ export interface FileFinding {
   file: number;
   total: number;
   line: number;
-  reason: Exclude<ImageFinding['reason'], 'not-uploaded'>;
+  reason: ImageFinding['reason'];
 }
 
 export class ImageBlockedError extends Error {
@@ -51,6 +53,52 @@ export class ImageBlockedError extends Error {
     super(message('assets.not-allowed'));
     this.findings = findings;
   }
+}
+
+/**
+ * Links typed in Linear that name a file of the repository by its relative
+ * path (a link or definition, not an image: images have their own gate).
+ * The sync uploads the file a document's relative link names when it writes
+ * the document, so such a link reaching git would let anyone who can edit
+ * the document in Linear publish any repository file there. A link to a
+ * file the document's previous text already linked was written in the
+ * repository and stays; links to Markdown documents upload
+ * nothing and stay too.
+ */
+export function typedFileLinkFindings(path: string, body: string, previousBody?: string, previousPath = path): FileFinding[] {
+  const known = new Set<string>();
+  if (previousBody !== undefined) {
+    for (const { node } of destinations(previousBody)) {
+      const target = resolveTarget(previousPath, node.url);
+      if (target !== null) known.add(target);
+    }
+  }
+  // A definition an image uses is that image's: the image gate blocks it already.
+  const imageLabels = new Set<string>();
+  visit(parse(body), (node) => { if (node.type === 'imageReference') imageLabels.add(node.identifier); });
+  const links = destinations(body).filter(({ node }) => {
+    if (node.type === 'image' || (node.type === 'definition' && imageLabels.has(node.identifier))) return false;
+    const target = resolveTarget(path, node.url);
+    return target !== null && !target.endsWith(MARKDOWN_EXTENSION);
+  });
+  const findings: FileFinding[] = [];
+  links.forEach(({ node }, index) => {
+    if (!known.has(resolveTarget(path, node.url) as string)) findings.push({ file: index + 1, total: links.length, line: line(node), reason: 'not-uploaded' });
+  });
+  return findings;
+}
+
+/**
+ * A link's query and fragment (`?a=1#b`), as the parser decoded them, in a
+ * form a bare destination holds: each part percent-encoded on its own, the
+ * parentheses too, so the text cannot end the destination and spell another.
+ */
+function encodeSuffix(suffix: string): string {
+  const encode = (part: string) => encodeFragment(part).replace(/[()]/g, (char) => (char === '(' ? '%28' : '%29'));
+  const hashAt = suffix.indexOf('#');
+  const query = hashAt === -1 ? suffix : suffix.slice(0, hashAt);
+  const fragment = hashAt === -1 ? undefined : suffix.slice(hashAt + 1);
+  return (query === '' ? '' : `?${encode(query.slice(1))}`) + (fragment === undefined ? '' : `#${encode(fragment)}`);
 }
 
 /** Inspect the original Linear text, before localization or any download. */
@@ -158,7 +206,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
     // The image gate, before any download: every path that takes a document's text from Linear into git
     // (the capture and the initial sync from Linear) reads its embedded files here, so they cannot disagree.
-    const notUploaded = imageFindings(body);
+    const notUploaded = [...imageFindings(body), ...typedFileLinkFindings(path, body, previousBody, previousPath)];
     if (notUploaded.length > 0) throw new ImageBlockedError(notUploaded);
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
@@ -254,7 +302,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         replacements.push({...outer, text: spelled});
         continue;
       }
-      replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + suffix});
+      // The query and fragment as the parser decoded them, encoded again: a space, `>` or a parenthesis would end
+      // the bare destination early and could spell another link.
+      replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + encodeSuffix(suffix)});
     }
     if (rejected.size > 0) {
       const images = imagesOf(originalBody);
