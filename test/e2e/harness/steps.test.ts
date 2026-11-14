@@ -1360,7 +1360,7 @@ describe('load', () => {
 /** The widest token of a soak with these edits, as the step bounds it: git pushes can retry three times. */
 const soakToken = (edits: Record<Actor, number>) => `abcdef-${String(edits['editor-a'] + edits['editor-b'] + 4 * edits.git).padStart(3, '0')}`;
 
-/** The L4-13 soak's options. */
+/** A day-long soak on L4-13's schedule and seed: longer than L4-13, to stress the loop. */
 const SOAK = { durationMs: 86_400_000, scheduleMs: 300_000, invariantIntervalMs: 3_600_000, actors: ['editor-a', 'editor-b', 'git'] as readonly Actor[], seed: '173', lastToken: soakToken };
 
 describe('oracles', () => {

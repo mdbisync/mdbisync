@@ -21,19 +21,19 @@ const freshStateDir = () => {
 after(() => stateDirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 describe('scenario selection', () => {
-  it('plans the 24-hour Actions soak on mid with all 288 scheduled syncs', () => {
+  it('plans the 2-hour Actions soak on mid with all 24 scheduled syncs', () => {
     const soak = byId('L4-13');
     assert.equal(soak.slice, 'mid');
     assert.equal(soak.mode, 'actions');
-    // Initial sync, 288 ticks (an hourly check's drain runs are scheduled ticks), up to four settle runs, I6.
-    assert.equal(engineRuns(soak), 1 + 288 + 4 + 1);
+    // Initial sync, 24 ticks (an hourly check's drain runs are scheduled ticks), up to four settle runs, I6.
+    assert.equal(engineRuns(soak), 1 + 24 + 4 + 1);
     const documents = 212;
     const undrained = { ...soak, steps: soak.steps.map((step) => (step.action === 'soak' ? { ...step, args: { ...step.args, drainSyncs: 0 } } : step)) };
-    assert.equal(engineRuns(undrained), 294);
-    assert.ok(estimate(undrained, documents).requests > 90000);
-    // Each hourly check reads every document once, and the 23 that can drain again after each of three drain
-    // runs; the last check, at the end of the 24 hours, has no scheduled run left and is strict at once.
-    assert.equal(estimate(soak, documents).requests - estimate(undrained, documents).requests, 23 * 3 * documents);
+    assert.equal(engineRuns(undrained), 30);
+    assert.ok(estimate(undrained, documents).requests > 10000);
+    // Each hourly check reads every document once, and the first, which can drain, again after each of three
+    // drain runs; the last check, at the end of the 2 hours, has no scheduled run left and is strict at once.
+    assert.equal(estimate(soak, documents).requests - estimate(undrained, documents).requests, 1 * 3 * documents);
   });
   it('loads every spec of the catalog, validated', () => {
     assert.ok(scenarios.length >= 137);

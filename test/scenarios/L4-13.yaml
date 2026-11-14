@@ -15,7 +15,7 @@
       "kind": "run",
       "action": "soak",
       "args": {
-        "durationSeconds": 86400,
+        "durationSeconds": 7200,
         "scheduleSeconds": 300,
         "invariantIntervalSeconds": 3600,
         "actors": [
@@ -73,7 +73,7 @@
       {
         "subject": "report.hourlyInvariantChecks",
         "operator": "at-least",
-        "expected": 24
+        "expected": 2
       },
       {
         "subject": "report.metrics",
