@@ -609,7 +609,7 @@ const LINK_VARIANT_TARGETS = 4;
  * other candidates it links to are rejected: its text with those targets'
  * fallback links, and its embedded files.
  */
-function linkVariants<C extends { path: string; files: Map<string, Buffer | string> }>(
+export function linkVariants<C extends { path: string; files: Map<string, Buffer | string> }>(
   candidates: ReadonlyMap<string, C>,
   textOf: (candidate: C, targets: ReadonlyMap<string, string>) => string,
   reset: (id: string, targets: Map<string, string>) => void,
