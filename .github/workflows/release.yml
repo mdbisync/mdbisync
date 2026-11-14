@@ -24,6 +24,7 @@ jobs:
   # only after the security gate passes. Pre-releases skip the gate.
   gate:
     if: github.ref == 'refs/heads/main' && !contains(inputs.version, '-')
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
