@@ -233,6 +233,20 @@ A 260 KB log pasted into one Markdown file.
 
 Instead, split the file into several documents.
 
+### `markdown-complexity`
+
+Markdown trees over 128 levels deep or 50,000 nodes are rejected. This
+keeps traversal and formatting bounded independently of the text length.
+For example, this generates a document that exceeds the nesting limit:
+
+```javascript
+'> '.repeat(130) + 'Nested note.'
+```
+
+Reduce the nesting or split the document. `fix` leaves the text unchanged.
+Capture and initial import leave the document out of the current run,
+preserve any previously accepted text, and continue with other documents.
+
 ### `duplicate-title`
 
 Two files map to one document title. Their paths differ only in letter case
