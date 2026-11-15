@@ -13,6 +13,7 @@ import { joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.t
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
+import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
@@ -337,7 +338,19 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       paths.set(doc.id, path);
       reservations.add(path);
     }
-    const linkBase = [...work.values()].some((doc) => linksLinearDocuments(doc.content ?? '')) ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
+    const limited = new Map<string, MarkdownLimitError>();
+    let needsLinkBase = false;
+    for (const doc of work.values()) {
+      if (!live(doc)) continue;
+      try {
+        // Check every body, including those after the first linked document.
+        if (linksLinearDocuments(doc.content ?? '')) needsLinkBase = true;
+      } catch (error) {
+        if (!(error instanceof MarkdownLimitError)) throw error;
+        limited.set(doc.id, error);
+      }
+    }
+    const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
     const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool);
     type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
@@ -377,6 +390,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
+        if (limited.has(doc.id)) throw limited.get(doc.id)!;
+        // Link restoration and equality also read the accepted file's body.
+        parse(prior.body);
         const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
         const candidate: Candidate = {doc, path, head, assets, files: new Map<string, FileContent>([[path, joinFile(head, assets.body)], ...assets.files])};
         if (old?.path === path) candidate.previousBody = prior.body;
@@ -436,7 +452,17 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       for (const [id, candidate] of candidates) {
         const {doc, path, head, assets} = candidate;
         const old = byId.get(id);
-        const text = textOf(candidate, documentIds);
+        let text: string;
+        try {
+          text = textOf(candidate, documentIds);
+        } catch (error) {
+          if (!(error instanceof MarkdownLimitError)) throw error;
+          result.leftOut.push({id, rule: 'capture-translation'});
+          candidates.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
         candidate.files.set(path, text);
         if (candidate.checked === text) continue;
         let findings: SecurityFinding[] | null = [];

@@ -1,6 +1,61 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { joinFile, sameMarkdown, splitFile } from './markdown.ts';
+import type { Nodes, Root } from 'mdast';
+import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, joinFile, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { lintText } from './lint.ts';
+import { fixText } from './fix.ts';
+
+describe('Markdown traversal limits', () => {
+  it('rejects excessive reachable blockquote nesting before returning a tree', () => {
+    assert.throws(() => parse('> '.repeat(130) + 'nesting-canary'), /Markdown.*depth/);
+    const accepted = '> '.repeat(MARKDOWN_MAX_DEPTH - 2) + 'canary';
+    let deepest = 0;
+    visit(parse(accepted), (_, ancestors) => { deepest = Math.max(deepest, ancestors.length); });
+    assert.equal(deepest, MARKDOWN_MAX_DEPTH);
+    assert.ok(sameMarkdown(accepted, accepted + '\n'));
+  });
+
+  it('bounds synthetic tree depth and node count independently', () => {
+    let nested: Nodes = {type: 'text', value: 'canary'};
+    for (let i = 0; i < MARKDOWN_MAX_DEPTH; i++) nested = {type: 'blockquote', children: [nested]} as Nodes;
+    assert.doesNotThrow(() => visit(nested, () => {}));
+    assert.throws(() => visit({type: 'root', children: [nested]} as Root, () => {}), (error) => error instanceof MarkdownLimitError && error.limit === 'depth');
+    const wide: Root = {type: 'root', children: Array.from({length: MARKDOWN_MAX_NODES - 1}, () => ({type: 'thematicBreak'}))};
+    let count = 0;
+    visit(wide, () => count++);
+    assert.equal(count, MARKDOWN_MAX_NODES);
+    wide.children.push({type: 'thematicBreak'});
+    count = 0;
+    assert.throws(() => visit(wide, () => count++), (error) => error instanceof MarkdownLimitError && error.limit === 'nodes');
+    assert.equal(count, MARKDOWN_MAX_NODES);
+  });
+
+  it('bounds parsed shallow trees and reports limits without echoing content', () => {
+    assert.throws(() => parse('x\n\n'.repeat(MARKDOWN_MAX_NODES / 2)), (error) => error instanceof MarkdownLimitError && error.limit === 'nodes');
+    const body = '> '.repeat(130) + 'nesting-canary';
+    const findings = lintText('notes.md', body);
+    assert.deepEqual(findings.map(({rule}) => rule), ['markdown-complexity']);
+    assert.ok(!JSON.stringify(findings).includes('nesting-canary'));
+    assert.equal(fixText(body), body);
+  });
+
+  it('keeps preorder and ancestor paths across siblings without mutating supplied ancestors', () => {
+    const ancestor: Nodes = {type: 'blockquote', children: []};
+    const ancestors = [ancestor];
+    const seen: string[] = [];
+    visit(parse('> a\n\n---\n\nb'), (node, parents) => {
+      seen.push([...parents.map((parent) => parent.type), node.type].join('/'));
+    }, ancestors);
+    assert.deepEqual(seen, [
+      'blockquote/root', 'blockquote/root/blockquote', 'blockquote/root/blockquote/paragraph',
+      'blockquote/root/blockquote/paragraph/text', 'blockquote/root/thematicBreak',
+      'blockquote/root/paragraph', 'blockquote/root/paragraph/text',
+    ]);
+    assert.deepEqual(ancestors, [ancestor]);
+    assert.throws(() => visit(parse('x'), () => { throw new Error('callback'); }, ancestors), /callback/);
+    assert.deepEqual(ancestors, [ancestor]);
+  });
+});
 
 describe('sameMarkdown', () => {
   it("takes Linear's spellings of the same document as the same", () => {

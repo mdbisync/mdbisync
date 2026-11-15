@@ -25,6 +25,7 @@
 import { type FileContent, contentBytes, ContentSpool } from '../state/content.ts';
 import { posix } from 'node:path';
 import { joinFile, splitFile } from '../format/index.ts';
+import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { type LinearDocument, LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
@@ -474,14 +475,14 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     const failed: string[] = [];
     const budget: string[] = [];
     const imageBlocked: string[] = [];
-    if (entries.some((entry) => linksLinearDocuments((documents.get(entry.documentId) as LinearDocument).content ?? ''))) {
-      linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
-    }
     for (const entry of entries) {
       const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
       const tracked = input.texts.get(entry.path);
       const trackedBody = tracked === undefined ? undefined : splitFile(tracked).body;
       try {
+        // Keep parsing and link discovery inside this document's boundary.
+        if (linksLinearDocuments(content) && linkBase === undefined) linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
+        if (trackedBody !== undefined) parse(trackedBody);
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
         const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, trackedBody);
         bodies.set(entry.path, captured);
@@ -532,7 +533,18 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         const before = entries.length;
         // The document's text must stay the file's body: text that reads as front
         // matter would become the file's metadata (or a folder's annotation).
-        keepTracked(entries.filter((entry) => splitFile(textOf(entry)).body !== restored(entry)).map((entry) => entry.path), 'front-matter-boundary');
+        const tooComplex: string[] = [];
+        const frontMatter: string[] = [];
+        for (const entry of entries) {
+          try {
+            if (splitFile(textOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
+          } catch (error) {
+            if (!(error instanceof MarkdownLimitError)) throw error;
+            tooComplex.push(entry.path);
+          }
+        }
+        keepTracked(tooComplex, 'download-failed');
+        keepTracked(frontMatter, 'front-matter-boundary');
         if (gate.configured) {
           const blocked: string[] = [];
           const unchecked: string[] = [];
