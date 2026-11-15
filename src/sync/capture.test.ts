@@ -1260,6 +1260,25 @@ describe('staged texts with rejected link targets', () => {
     assert.ok(sets.every((set) => rejectedIn(set).join() === '29'), JSON.stringify(sets.map(rejectedIn)));
   });
 
+  it('gives the documents that link refused ones their text before the refused documents use up the budget', () => {
+    // Thirty documents the hooks keep refusing link each other; after them come documents that link only the first.
+    const refusedCount = 30;
+    const links = (later: number) => (index: number) => (index < refusedCount ? Array.from({ length: refusedCount }, (_, i) => i).filter((i) => i !== index) : [0]);
+    const refused = new Set(Array.from({ length: refusedCount }, (_, i) => `d${String(i).padStart(3, '0')}`));
+    const stagedFor = (sets: Iterable<Map<string, FileContent>>) => [...sets].filter((set) => Number([...set.keys()][0]!.slice('docs/d'.length, -'.md'.length)) >= refusedCount);
+    // One later document: it gets its text with the first one rejected.
+    const one = stagedFor(corpus(refusedCount + 1, links(1)).variants({ refused }));
+    assert.deepEqual(one.map(rejectedIn), [[0]]);
+    // More later documents than the budget holds: as many as it holds now, and the rest once those are recorded.
+    const later = 300;
+    const first = stagedFor(corpus(refusedCount + later, links(later)).variants({ refused }));
+    assert.equal(first.length, linkVariantBudget().sets);
+    const recorded = new Set(first.map((set) => [...set.keys()][0]));
+    const next = stagedFor(corpus(refusedCount + later, links(later)).variants({ refused, settled: (candidate, text) => recorded.has(candidate.path) && rejectedIn(new Map([[candidate.path, text]])).join() === '0' }));
+    assert.equal(next.length, later - linkVariantBudget().sets);
+    assert.ok(next.every((set) => !recorded.has([...set.keys()][0])));
+  });
+
   it('does not stage a text the file already holds', () => {
     const { variants } = dense(10);
     const all = [...variants({ budget: unlimited() })];

@@ -665,11 +665,17 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
 ): Generator<Map<string, FileContent>> {
   const budget = options.budget ?? linkVariantBudget();
   const refused = [...candidates.keys()].filter((id) => options.refused?.has(id) === true);
-  // Refused targets first, alone; then every target, refused ones still first.
-  const passes = refused.length > 0 ? [refused, [...new Set([...refused, ...candidates.keys()])]] : [[...candidates.keys()]];
+  // With targets refused before, every candidate first gets one text, the one with all of them rejected: the text it
+  // needs when the hooks refuse them again. Then each of them alone, then every target, refused ones still first.
+  // Candidates refused themselves come last in each pass: their own text is likely refused again, and their texts
+  // must not use up the budget of the documents that link them.
+  const passes: Array<{ targets: string[]; allOnly: boolean }> = refused.length > 0
+    ? [{targets: refused, allOnly: true}, {targets: refused, allOnly: false}, {targets: [...new Set([...refused, ...candidates.keys()])], allOnly: false}]
+    : [{targets: [...candidates.keys()], allOnly: false}];
+  const order = [...candidates].sort(([a], [b]) => Number(options.refused?.has(a) === true) - Number(options.refused?.has(b) === true));
   const staged = new Map<string, Set<string>>();
   for (const pass of passes) {
-    for (const [id, candidate] of candidates) {
+    for (const [id, candidate] of order) {
       if (budget.sets <= 0) { budget.short = true; return; }
       const accepted = candidate.files.get(candidate.path) as string;
       // The candidate's text with the `rejected` targets' fallback links; undefined once the budget is spent.
@@ -682,7 +688,7 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
         budget.work -= cost + Math.max(0, text.length - accepted.length);
         return text;
       };
-      const others = pass.filter((other) => other !== id);
+      const others = pass.targets.filter((other) => other !== id);
       if (others.length === 0) continue;
       const all = without(others);
       if (all === undefined || all === accepted) continue;
@@ -703,7 +709,7 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
         const secondText = without(second);
         if (secondText !== undefined && secondText !== accepted) find(second, secondText);
       };
-      find(others, all);
+      if (!pass.allOnly) find(others, all);
       const texts = new Set([...alone.values(), all]);
       // A few targets: also every combination of two or more of them.
       const linked = [...alone.keys()];
