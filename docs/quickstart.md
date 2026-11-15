@@ -448,7 +448,7 @@ layers.
 | --- | --- | --- | --- | --- |
 | Before push | People and agents | on `git commit` and `git push`, after `pre-commit install` | all hooks of that stage | no: a clone without `pre-commit install`, or `--no-verify`, skips them |
 | Before push | The sync | on every change from Linear, before it pushes | hooks marked `alias: security` | yes: a rejected document is not pushed and is marked in Linear |
-| In CI | The `pre-commit` workflow | on every pull request, the sync's included | all hooks; fixing hooks commit their fixes to the pull request, with the workflow's own token (it asks for `contents: write` and `checks: write` in its `permissions:`) | yes, where `pre-commit` is a required check on `main`; the sync merges its pull request only after its checks pass |
+| In CI | The `pre-commit` workflow | on every pull request, the sync's included | all hooks, in a job that can only read; a separate job commits their fixes to the pull request with the workflow's own token (it asks for `contents: write`, `checks: write` and `actions: write` in its `permissions:`) and runs none of the pull request's code | yes, where `pre-commit` is a required check on `main`; the sync merges its pull request only after its checks pass |
 
 The first layer keeps secrets and personal data from Linear off GitHub;
 the second catches what a person's machine skipped. Hooks that fix

@@ -14,13 +14,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pre-commit:
+  # Runs the pull request's hooks, which are the pull request's own code. A
+  # step can change the later steps of its job (through GITHUB_ENV and
+  # GITHUB_PATH), so this job can only read and no step of it holds a write
+  # token; its fix reaches the next job only as data that job checks.
+  hooks:
+    name: pre-commit hooks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write # Fork pull requests retain a read-only token.
-      checks: write # Attach the result to the fixing commit too.
-      actions: write # Start the workflows MDBISYNC_CI_WORKFLOWS lists on the fixing commit.
+      contents: read
+    outputs:
+      changed: ${{ steps.fixes.outputs.changed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,6 +35,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+          package-manager-cache: false
       - name: Install compatible npm
         run: npm install --global --ignore-scripts npm@11.21.2
       - name: Install pre-commit
@@ -151,43 +157,138 @@ jobs:
             git -c user.name='github-actions[bot]' \
                 -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
                 -c core.hooksPath=/dev/null commit -F "$RUNNER_TEMP/pre-commit-message"
+            # The fix and its message go to the publish job, which checks both.
+            mkdir -p "$RUNNER_TEMP/pre-commit-fix"
+            git diff --binary --no-ext-diff --no-textconv HEAD^ HEAD > "$RUNNER_TEMP/pre-commit-fix/fix.patch"
+            cp "$RUNNER_TEMP/pre-commit-message" "$RUNNER_TEMP/pre-commit-fix/message"
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check the fixed tree in the same job
+        id: checks
+        if: ${{ !cancelled() && steps.hooks.outcome == 'success' }}
+        run: |
+          pre-commit run --all-files --show-diff-on-failure
+          git diff --exit-code
+          git diff --cached --exit-code
+      - name: Keep the fix for the publish job
+        if: ${{ !cancelled() && steps.fixes.outputs.changed == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pre-commit-fix
+          path: ${{ runner.temp }}/pre-commit-fix
+          if-no-files-found: error
+          overwrite: true # A re-run of all jobs uploads it again.
+          retention-days: 1
+
+  # Pushes the hooks' fix to a same-repository pull request and publishes its
+  # checks. The only job with a write token: it starts on a fresh runner,
+  # never runs the pull request's code (no hooks, no repository scripts or
+  # git hooks) and applies the fix only after checking it as data.
+  publish:
+    name: pre-commit fixes
+    needs: hooks
+    if: ${{ !cancelled() && needs.hooks.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # Push the fixing commit to the pull request branch.
+      checks: write # Attach the result to the fixing commit too.
+      actions: write # Start the workflows MDBISYNC_CI_WORKFLOWS lists on the fixing commit.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pre-commit-fix
+          path: ${{ runner.temp }}/pre-commit-fix
+      - name: Apply the checked fix
+        id: fixes
+        shell: bash
+        run: |
+          # The fix comes from the job that ran the pull request's code: it may
+          # change only files the pull request already tracks as regular files,
+          # and the commit message keeps only hook ids from its message.
+          git_safe() { git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"; }
+          refuse() { echo "::error::The pre-commit fix is refused: $1."; exit 1; }
+          fix="$RUNNER_TEMP/pre-commit-fix"
+          for file in "$fix/fix.patch" "$fix/message"; do
+            [[ -f "$file" && ! -L "$file" ]] || refuse 'its files are missing'
+          done
+          [[ -z "$(git_safe apply --summary -- "$fix/fix.patch")" ]] || refuse 'it creates, deletes, renames or changes the mode of a file'
+          while IFS= read -r -d '' entry; do
+            path=${entry#*$'\t'}
+            path=${path#*$'\t'}
+            mode=''
+            read -r -d '' mode _ < <(git_safe ls-files --stage -z -- ":(literal)$path") || true
+            [[ "$mode" == 100644 || "$mode" == 100755 ]] || refuse 'it changes a path that is not a tracked regular file'
+          done < <(git_safe apply --numstat -z -- "$fix/fix.patch")
+          mapfile -t lines < "$fix/message"
+          [[ "${lines[0]-}" == 'Apply pre-commit fixes' ]] || refuse 'its message is not the one the hooks job writes'
+          message='Apply pre-commit fixes'
+          trailers=''
+          for line in "${lines[@]:1}"; do
+            if [[ "$line" =~ ^Pre-commit-fix:\ [[:graph:]]{1,200}$ ]]; then
+              trailers+=$'\n'"$line"
+            elif [[ -n "$line" ]]; then
+              echo '::warning::A line of the fix message that names no hook id is left out of the fixing commit.'
+            fi
+          done
+          [[ -z "$trailers" ]] || message+=$'\n'"$trailers"
+          # Quietly: a warning would echo the patch's text into the log.
+          git_safe apply --index --whitespace=nowarn -- "$fix/fix.patch"
+          # What was staged decides, since a patch's headers need not state every change.
+          [[ -z "$(git_safe diff --cached --no-renames --summary)" ]] || refuse 'it creates, deletes or changes the mode of a file'
+          git_safe -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --no-verify -m "$message"
+          echo "sha=$(git_safe rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Push fixes
-        if: ${{ steps.fixes.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          # Disable repository-configured subprocess hooks while credentials exist.
+          # No repository-configured subprocess hooks while credentials exist.
           authorization=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= \
               -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" \
               push origin "HEAD:refs/heads/$HEAD_BRANCH"
       - name: Mark the fixing commit pending
         id: fixed-check
-        if: ${{ steps.fixes.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           CHECKED_SHA: ${{ steps.fixes.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
         run: |
-          payload=$(node -e 'console.log(JSON.stringify({name: "pre-commit", head_sha: process.env.CHECKED_SHA, status: "in_progress", details_url: process.env.RUN_URL}))')
-          response=$(curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$REPOSITORY/check-runs" --data "$payload")
-          check_id=$(node -e 'const id=JSON.parse(process.argv[1]).id; if (!Number.isSafeInteger(id)) process.exit(1); console.log(id)' "$response")
-          echo "id=$check_id" >> "$GITHUB_OUTPUT"
+          # A GITHUB_TOKEN push starts no workflow, so the fixing commit gets
+          # this run's checks: each job's, by the names the earlier head has.
+          # Each id is kept once created, so the last step completes every
+          # check that exists even when a later one could not be created.
+          ids=()
+          for name in 'pre-commit hooks' 'pre-commit fixes' 'pre-commit'; do
+            payload=$(node -e 'console.log(JSON.stringify({name: process.argv[1], head_sha: process.env.CHECKED_SHA, status: "in_progress", details_url: process.env.RUN_URL}))' "$name")
+            response=$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPOSITORY/check-runs" --data "$payload")
+            id=$(node -e 'const id=JSON.parse(process.argv[1]).id; if (!Number.isSafeInteger(id)) process.exit(1); console.log(id)' "$response")
+            ids+=("$id")
+            echo "ids=${ids[*]}" >> "$GITHUB_OUTPUT"
+          done
       - name: Start the other CI on the fixing commit
         # A GITHUB_TOKEN push starts no other workflow, so the fixing commit lacks
         # the repository's other checks, and the sync merges no head that lacks a
         # check its earlier heads ran. List those workflows' files, each with a
         # `workflow_dispatch:` trigger, in the repository variable
         # MDBISYNC_CI_WORKFLOWS (for example `tests.yml lint.yml`). It runs once
-        # the fixing commit's check is pending, so a failed start fails that check.
-        if: ${{ steps.fixes.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository && vars.MDBISYNC_CI_WORKFLOWS != '' }}
+        # the fixing commit's checks are pending, so a failed start fails them.
+        if: ${{ vars.MDBISYNC_CI_WORKFLOWS != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -208,28 +309,42 @@ jobs:
               -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/$REPOSITORY/actions/workflows/$workflow/dispatches" --data "$payload"
           done
-      - name: Check the fixed tree in the same job
-        id: checks
-        # A GITHUB_TOKEN push does not start another workflow run.
-        if: ${{ !cancelled() && steps.hooks.outcome == 'success' }}
-        run: |
-          pre-commit run --all-files --show-diff-on-failure
-          git diff --exit-code
-          git diff --cached --exit-code
       - name: Publish result on the fixing commit
-        if: ${{ always() && steps.fixed-check.outcome == 'success' }}
+        if: ${{ always() && steps.fixed-check.outputs.ids != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          CHECK_ID: ${{ steps.fixed-check.outputs.id }}
-          CHECK_OUTCOME: ${{ steps.checks.outcome }}
+          CHECK_IDS: ${{ steps.fixed-check.outputs.ids }}
+          HOOKS_RESULT: ${{ needs.hooks.result }}
           JOB_STATUS: ${{ job.status }}
+        shell: bash
         run: |
+          # The hooks job's final pass on the fixed tree decides, with this job's steps.
           conclusion=failure
-          if [[ "$CHECK_OUTCOME" == success && "$JOB_STATUS" == success ]]; then
+          if [[ "$HOOKS_RESULT" == success && "$JOB_STATUS" == success ]]; then
             conclusion=success
           fi
           payload=$(node -e 'console.log(JSON.stringify({status: "completed", conclusion: process.argv[1]}))' "$conclusion")
-          curl --fail-with-body --silent --show-error --request PATCH \
-            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$REPOSITORY/check-runs/$CHECK_ID" --data "$payload"
+          for id in $CHECK_IDS; do
+            [[ "$id" =~ ^[0-9]+$ ]] || exit 1
+            curl --fail-with-body --silent --show-error --request PATCH \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPOSITORY/check-runs/$id" --data "$payload"
+          done
+
+  # The check to require: it passes only when the hooks passed and their fix,
+  # if any, was published, as when both ran in one job.
+  pre-commit:
+    needs: [hooks, publish]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require the hooks and the published fix
+        env:
+          HOOKS_RESULT: ${{ needs.hooks.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          echo "Hooks: $HOOKS_RESULT. Fix published: $PUBLISH_RESULT."
+          [[ "$HOOKS_RESULT" == success && ( "$PUBLISH_RESULT" == success || "$PUBLISH_RESULT" == skipped ) ]]

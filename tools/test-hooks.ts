@@ -74,11 +74,18 @@ try {
   console.log('L0-08: offline install, fix, second pass, check-only and lint refusal passed');
 
   const workflow = parse(await readFile(join(root, 'examples/pre-commit.yml'), 'utf8'));
-  const steps = workflow.jobs['pre-commit'].steps as { name?: string; run?: string }[];
+  const steps = Object.values(workflow.jobs as Record<string, { steps: { name?: string; run?: string }[] }>).flatMap((job) => job.steps);
   const script = (name: string) => steps.find((step) => step.name === name)!.run!;
   const collect = script('Run all hooks and collect fixes');
   const commit = script('Commit fixes or show the fork patch');
+  const apply = script('Apply the checked fix');
   const push = script('Push fixes');
+  // The publish job: a fresh checkout of the pull request's head, the hooks job's fix applied after its checks, then the push.
+  const publish = (expected = 0) => {
+    git(scratch, 'reset', '--quiet', '--hard', 'HEAD^');
+    run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', apply], vars);
+    return run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', push], vars, expected);
+  };
   const check = script('Check the fixed tree in the same job');
   const remote = join(temporary, 'remote.git');
   run(temporary, 'git', ['init', '--bare', remote]);
@@ -94,7 +101,7 @@ try {
   const vars = { RUNNER_TEMP: temporary, GITHUB_OUTPUT: join(temporary, 'output'), SAME_REPOSITORY: 'true', HEAD_BRANCH: 'topic', GH_TOKEN: 'fixture' };
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', collect], vars);
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', commit], vars);
-  run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', push], vars);
+  publish();
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', check], vars);
   assert.equal(git(scratch, 'log', '-1', '--format=%s'), 'Apply pre-commit fixes');
   assert.equal(git(scratch, 'log', '-1', '--format=%(trailers:key=Pre-commit-fix,valueonly)'), 'linear-format');
@@ -113,19 +120,21 @@ printf '{"id":123}\\n'
 `, { mode: 0o755 });
   const apiVars = { ...vars, PATH: `${stubBin}:${process.env.PATH}`, CAPTURE_FILE: capture,
     REPOSITORY: 'example/repository', CHECKED_SHA: git(scratch, 'rev-parse', 'HEAD'),
-    RUN_URL: 'https://example.com/run', CHECK_ID: '123', CHECK_OUTCOME: 'success', JOB_STATUS: 'success' };
+    RUN_URL: 'https://example.com/run', CHECK_IDS: '123 124', HOOKS_RESULT: 'success', JOB_STATUS: 'success' };
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', script('Mark the fixing commit pending')], apiVars);
   let request = (await readFile(capture, 'utf8')).trim().split('\n');
+  // One check per job of the workflow, the required one last.
   assert.deepEqual(JSON.parse(request.at(-1)!), { name: 'pre-commit', head_sha: apiVars.CHECKED_SHA, status: 'in_progress', details_url: apiVars.RUN_URL });
-  assert.match(await readFile(vars.GITHUB_OUTPUT, 'utf8'), /id=123/);
+  assert.match(await readFile(vars.GITHUB_OUTPUT, 'utf8'), /ids=123 123 123\n/);
   for (const outcome of ['success', 'failure', 'cancelled']) {
-    run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', script('Publish result on the fixing commit')], { ...apiVars, CHECK_OUTCOME: outcome });
+    run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', script('Publish result on the fixing commit')], { ...apiVars, HOOKS_RESULT: outcome });
     request = (await readFile(capture, 'utf8')).trim().split('\n');
     const dataIndex = request.indexOf('--data');
     assert.ok(dataIndex > 0, 'curl payload follows the endpoint URL');
     const endpoint = new URL(request[dataIndex - 1]!);
     assert.equal(endpoint.origin, 'https://api.github.com');
-    assert.equal(endpoint.pathname, '/repos/example/repository/check-runs/123');
+    // The last of the two checks; each gets the same conclusion.
+    assert.equal(endpoint.pathname, '/repos/example/repository/check-runs/124');
     assert.deepEqual(JSON.parse(request.at(-1)!), { status: 'completed', conclusion: outcome === 'success' ? 'success' : 'failure' });
   }
 
@@ -142,7 +151,7 @@ printf '{"id":123}\\n'
   git(scratch, 'commit', '-m', 'Unformatted concurrent page');
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', collect], vars);
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', commit], vars);
-  assert.match(run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', push], vars, 1), /rejected/);
+  assert.match(publish(1), /rejected/);
   assert.equal(git(scratch, 'ls-remote', 'origin', 'refs/heads/topic').split(/\s+/)[0], concurrentHead);
 
   // A fork cannot write back: emit a ready patch and leave the remote alone.
