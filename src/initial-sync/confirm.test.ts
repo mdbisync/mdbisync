@@ -102,6 +102,16 @@ describe('confirmed initial sync from git to Linear', () => {
   const readIds = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
   const live = (world: FakeWorld) => world.linear.documents.filter((d) => d.trashed !== true && d.archivedAt === undefined);
 
+  it('leaves an over-nested matched document out while initializing valid neighbors', async () => {
+    const world = fakeWorld();
+    const nested = '> '.repeat(130) + CANARY;
+    world.linear.documents.push({id: 'deep', title: 'plan', projectId: 'project-api', content: nested, createdAt: '2026-01-01T00:00:00Z'});
+    const {report} = await run(world);
+    assert.ok(report.initialSync?.leftOutAtWrite.some((entry) => entry.path === 'eng/notes/plan.md' && entry.rule === 'markdown-complexity'));
+    assert.equal(world.linear.documents.find((document) => document.id === 'deep')!.content, nested);
+    assert.ok(world.linear.documents.some((document) => document.title === 'backend/notes'));
+  });
+
   /** Every synchronized file has exactly one live document holding its body, in its place, under its title. */
   const assertConverged = async (world: FakeWorld) => {
     const ids = await readIds();

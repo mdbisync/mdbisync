@@ -8,7 +8,7 @@ export const LINT_RULES = {
   'table-hash-cell': 'A table body cell starting with # becomes a heading.',
   'image-in-link': 'The link around an image is dropped.',
   'content-too-long': 'Documents over 250,000 characters are rejected.',
-  'markdown-complexity': 'Markdown trees over 128 levels deep or 50,000 nodes are rejected.',
+  'markdown-complexity': 'Markdown trees over 128 levels deep or 500,000 nodes are rejected.',
   'duplicate-title': 'Two files map to one document title.',
   'table-alignment': 'Table column alignment is dropped.',
   'link-title': 'A link title is dropped.',

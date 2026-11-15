@@ -235,7 +235,7 @@ Instead, split the file into several documents.
 
 ### `markdown-complexity`
 
-Markdown trees over 128 levels deep or 50,000 nodes are rejected. This
+Markdown trees over 128 levels deep or 500,000 nodes are rejected. This
 keeps traversal and formatting bounded independently of the text length.
 For example, this generates a document that exceeds the nesting limit:
 

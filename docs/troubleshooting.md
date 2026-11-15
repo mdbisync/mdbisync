@@ -309,7 +309,7 @@ the reason is fixed. The summaries list each with its rules:
 | `duplicate-title` | Two files map to one document title (their names differ only in letter case or Unicode normalization). | Rename one of them. |
 | `title-too-long` | The title made from the file's path is longer than Linear accepts. | Use a shorter file name or folder path. |
 | `content-too-long` | The text is longer than the 250,000 characters Linear accepts. | Split the file. |
-| `markdown-complexity` | The Markdown tree exceeds 128 levels or 50,000 nodes. | Reduce nesting or split the file. |
+| `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes. | Reduce nesting or split the file. |
 | `outside-annotations` | The file is above every annotated folder. | Move it into an annotated folder, or annotate a folder above it. |
 | `not-a-regular-file` | The path is a symbolic link or another kind of file. | Replace it with a regular file. |
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |

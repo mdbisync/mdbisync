@@ -25,7 +25,7 @@
 import { type FileContent, contentBytes, ContentSpool } from '../state/content.ts';
 import { posix } from 'node:path';
 import { joinFile, splitFile } from '../format/index.ts';
-import { MarkdownLimitError, parse } from '../format/markdown.ts';
+import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { type LinearDocument, LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
@@ -427,6 +427,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
   async function record(): Promise<ReverseRecord | null | 'sync-branch-changed' | 'staged'> {
     // Each document's body once its embedded files are downloaded, the files, and their upload URLs by content hash.
     const bodies = new Map<string, { body: string; files: Map<string, FileContent>; uploads: UploadMap }>();
+    const trackedBodies = new Map<string, string>();
     // A link to another synchronized document's URL becomes a relative link to its file, as the capture does:
     // only to a file the record holds, so the links follow every file left out on the way.
     let linkBase: string | undefined;
@@ -446,8 +447,8 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       const map = ids === undefined ? linkMap(linkBase) : { base: linkBase, ids };
       // The tracked file's own spelling of each link comes back as it was.
       const seen: LinkSpellings = new Map();
-      const tracked = input.texts.get(entry.path);
-      if (tracked !== undefined) linksToLinear(splitFile(tracked).body, entry.path, map, seen);
+      const tracked = trackedBodies.get(entry.path);
+      if (tracked !== undefined) linksToLinear(tracked, entry.path, map, seen);
       return linksFromLinear(body, entry.path, map, seen);
     };
     const textOf = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
@@ -475,14 +476,16 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     const failed: string[] = [];
     const budget: string[] = [];
     const imageBlocked: string[] = [];
+    const complexity: string[] = [];
+    let needsLinkBase = false;
     for (const entry of entries) {
       const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
       const tracked = input.texts.get(entry.path);
-      const trackedBody = tracked === undefined ? undefined : splitFile(tracked).body;
+      const trackedBody = markdownBaseline(tracked === undefined ? undefined : splitFile(tracked).body);
+      if (trackedBody !== undefined) trackedBodies.set(entry.path, trackedBody);
       try {
         // Keep parsing and link discovery inside this document's boundary.
-        if (linksLinearDocuments(content) && linkBase === undefined) linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
-        if (trackedBody !== undefined) parse(trackedBody);
+        if (linksLinearDocuments(content)) needsLinkBase = true;
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
         const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, trackedBody);
         bodies.set(entry.path, captured);
@@ -492,12 +495,14 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         // An image the capture would block (not an upload, a dead, oversized or unsupported one): the
         // document's text does not enter git. This sync writes nothing to Linear, so the first sync
         // after the merge reads the document again and marks it there.
-        if (error instanceof AttachmentBudgetError) budget.push(entry.path);
+        if (error instanceof MarkdownLimitError) complexity.push(entry.path);
+        else if (error instanceof AttachmentBudgetError) budget.push(entry.path);
         else if (error instanceof ImageBlockedError) imageBlocked.push(entry.path);
         // Not downloaded this run (a network error, a rate limit, a server error, a file it could not place): the file keeps the tracked branch's version.
         else failed.push(entry.path);
       }
     }
+    if (needsLinkBase) linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
     const created = new Set(plan.create.map((entry) => entry.path));
     // A new file is left out; an existing one keeps the tracked text and its
     // document's id, so the document stays its document and is not adopted and overwritten later.
@@ -517,6 +522,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     keepTracked(budget, 'attachment-budget');
     keepTracked(failed, 'download-failed');
     keepTracked(imageBlocked, 'image-blocked');
+    keepTracked(complexity, 'markdown-complexity');
     // The repository's security hooks see Linear's text and every downloaded file before any byte is pushed, as in the capture.
     const gate = options.security ?? (await securityGate(git, fetched.tracked));
     // The text each document last passed the hooks with: a document is checked again only when its bytes change.
@@ -543,7 +549,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
             tooComplex.push(entry.path);
           }
         }
-        keepTracked(tooComplex, 'download-failed');
+        keepTracked(tooComplex, 'markdown-complexity');
         keepTracked(frontMatter, 'front-matter-boundary');
         if (gate.configured) {
           const blocked: string[] = [];

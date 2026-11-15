@@ -67,7 +67,7 @@ export function lineCount(text: string): number {
 // Keep downstream renderers and structural comparisons within a safe depth,
 // and cap work even for a shallow document with many small nodes.
 export const MARKDOWN_MAX_DEPTH = 128;
-export const MARKDOWN_MAX_NODES = 50_000;
+export const MARKDOWN_MAX_NODES = 500_000;
 
 export class MarkdownLimitError extends Error {
   readonly limit: 'depth' | 'nodes';
@@ -83,6 +83,18 @@ export function parse(body: string, mdastExtensions: Extension[] = []): Root {
   // Validate before returning the tree to any recursive renderer or comparer.
   visit(tree, () => {});
   return tree;
+}
+
+/** An old accepted body can be too complex to use as a comparison baseline. */
+export function markdownBaseline(body: string | undefined): string | undefined {
+  if (body === undefined) return undefined;
+  try {
+    parse(body);
+    return body;
+  } catch (error) {
+    if (!(error instanceof MarkdownLimitError)) throw error;
+    return undefined;
+  }
 }
 
 /**

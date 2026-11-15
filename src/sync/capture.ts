@@ -13,7 +13,7 @@ import { joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.t
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
-import { MarkdownLimitError, parse } from '../format/markdown.ts';
+import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
@@ -338,7 +338,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       paths.set(doc.id, path);
       reservations.add(path);
     }
-    const limited = new Map<string, MarkdownLimitError>();
+    const limited = new Set<string>();
     let needsLinkBase = false;
     for (const doc of work.values()) {
       if (!live(doc)) continue;
@@ -347,7 +347,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (linksLinearDocuments(doc.content ?? '')) needsLinkBase = true;
       } catch (error) {
         if (!(error instanceof MarkdownLimitError)) throw error;
-        limited.set(doc.id, error);
+        limited.add(doc.id);
+        result.leftOut.push({id: doc.id, rule: 'markdown-complexity'});
       }
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
@@ -387,15 +388,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         continue;
       }
       const path = paths.get(doc.id)!;
+      if (limited.has(doc.id)) continue;
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
-        if (limited.has(doc.id)) throw limited.get(doc.id)!;
-        // Link restoration and equality also read the accepted file's body.
-        parse(prior.body);
-        const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
+        // An over-limit legacy body is not evidence for links or equality.
+        const previousBody = old === undefined ? undefined : markdownBaseline(prior.body);
+        const assets = await downloadAssets(path, doc.content ?? '', uploads, previousBody, old?.path);
         const candidate: Candidate = {doc, path, head, assets, files: new Map<string, FileContent>([[path, joinFile(head, assets.body)], ...assets.files])};
-        if (old?.path === path) candidate.previousBody = prior.body;
+        if (old?.path === path && previousBody !== undefined) candidate.previousBody = previousBody;
         candidates.set(doc.id, candidate);
         resetTarget(doc.id);
         if (old !== undefined) documentIds.delete(old.path);
@@ -412,7 +413,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           }
           continue;
         }
-        if (error instanceof AttachmentBudgetError) result.leftOut.push({id: doc.id, rule: 'attachment-budget'});
+        if (error instanceof MarkdownLimitError) result.leftOut.push({id: doc.id, rule: 'markdown-complexity'});
+        else if (error instanceof AttachmentBudgetError) result.leftOut.push({id: doc.id, rule: 'attachment-budget'});
         else if (error instanceof DownloadRetryError) result.leftOut.push({id: doc.id, rule: 'download-retry'});
         else result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
@@ -457,7 +459,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           text = textOf(candidate, documentIds);
         } catch (error) {
           if (!(error instanceof MarkdownLimitError)) throw error;
-          result.leftOut.push({id, rule: 'capture-translation'});
+          result.leftOut.push({id, rule: 'markdown-complexity'});
           candidates.delete(id);
           resetTarget(id);
           again = true;
@@ -542,13 +544,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       let assets: CapturedAssets;
       try {
         assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body);
+        // Linear's spelling of that version reads back as its text.
+        return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
       } catch (error) {
+        if (error instanceof MarkdownLimitError) return false;
         // An image that version did not have: the document changed.
         if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
         throw error;
       }
-      // Linear's spelling of that version reads back as its text.
-      return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
     };
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);

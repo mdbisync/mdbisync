@@ -58,6 +58,7 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
+import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { type ConflictNotices, MARKS, noConflictNotices, reconcileDocumentMark } from '../sync/marks.ts';
 import { withRecorded } from '../sync/recorded.ts';
@@ -353,6 +354,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       if (item.kind === 'overwrite' && document === undefined) throw new Error(message('initial-sync.document-not-listed', { path }));
 
       try {
+        if (document !== undefined) parse(document.content ?? '');
         const source = splitFile(texts.get(path) as string).body;
         const body = await transformBody(transforms, path, source);
         const hash = sha256(body);
@@ -412,6 +414,10 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           await reconcileMark(path, updated, hash, document);
         }
       } catch (error) {
+        if (error instanceof MarkdownLimitError) {
+          result.leftOutAtWrite.push({path, rule: 'markdown-complexity'});
+          continue;
+        }
         if (error instanceof LeaveOutError) {
           result.leftOutAtWrite.push(error.files.length > 0 ? { path, rule: error.rule, files: [...error.files] } : { path, rule: error.rule });
           continue;

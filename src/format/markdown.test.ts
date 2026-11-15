@@ -20,7 +20,7 @@ describe('Markdown traversal limits', () => {
     for (let i = 0; i < MARKDOWN_MAX_DEPTH; i++) nested = {type: 'blockquote', children: [nested]} as Nodes;
     assert.doesNotThrow(() => visit(nested, () => {}));
     assert.throws(() => visit({type: 'root', children: [nested]} as Root, () => {}), (error) => error instanceof MarkdownLimitError && error.limit === 'depth');
-    const wide: Root = {type: 'root', children: Array.from({length: MARKDOWN_MAX_NODES - 1}, () => ({type: 'thematicBreak'}))};
+    const wide: Root = {type: 'root', children: Array(MARKDOWN_MAX_NODES - 1).fill({type: 'thematicBreak'})};
     let count = 0;
     visit(wide, () => count++);
     assert.equal(count, MARKDOWN_MAX_NODES);
@@ -31,7 +31,10 @@ describe('Markdown traversal limits', () => {
   });
 
   it('bounds parsed shallow trees and reports limits without echoing content', () => {
-    assert.throws(() => parse('x\n\n'.repeat(MARKDOWN_MAX_NODES / 2)), (error) => error instanceof MarkdownLimitError && error.limit === 'nodes');
+    const children = Array(MARKDOWN_MAX_NODES).fill({type: 'thematicBreak'});
+    assert.throws(() => parse('x', [{transforms: [() => ({type: 'root', children})]}]), (error) => error instanceof MarkdownLimitError && error.limit === 'nodes');
+    // A normal list well within the text-length limit must remain accepted.
+    assert.doesNotThrow(() => parse('- a\n'.repeat(17_000)));
     const body = '> '.repeat(130) + 'nesting-canary';
     const findings = lintText('notes.md', body);
     assert.deepEqual(findings.map(({rule}) => rule), ['markdown-complexity']);

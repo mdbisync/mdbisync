@@ -24,6 +24,7 @@ import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, 
 import { randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
 import { joinFile, sameMarkdown, splitFile } from '../format/index.ts';
+import { MarkdownLimitError } from '../format/markdown.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -405,7 +406,16 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const targets = new Set(superseded.values());
     /** Records under `path` the superseded paths that `text`, the file at `from`, links. */
     const linked = (path: string, text: string, from = path) => {
-      const found = linkDestinations(splitFile(text).body).flatMap((destination) => {
+      let destinations: ReturnType<typeof linkDestinations>;
+      try {
+        destinations = linkDestinations(splitFile(text).body);
+      } catch (error) {
+        if (!(error instanceof MarkdownLimitError)) throw error;
+        // Unknown links may still use any superseded id: retain them all.
+        relinks.set(path, new Set(targets));
+        return;
+      }
+      const found = destinations.flatMap((destination) => {
         const target = resolveRelative(from, destination.url)?.path;
         return target !== undefined && targets.has(target) ? [target] : [];
       });
@@ -503,6 +513,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
           if (done) written += 1;
           else notDone.push(change);
         } catch (error) {
+          if (error instanceof MarkdownLimitError) {
+            result.leftOutAtWrite.push({path, rule: 'markdown-complexity'});
+            notDone.push(change);
+            continue;
+          }
           if (error instanceof LeaveOutError) {
             result.leftOutAtWrite.push(error.files.length > 0 ? { path, rule: error.rule, files: [...error.files] } : { path, rule: error.rule });
             if (leftOutForGood(change, error.rule)) leftOutNew.push(change);
