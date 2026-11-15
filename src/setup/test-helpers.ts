@@ -365,7 +365,7 @@ async function pullRequests(world: FakeWorld, method: string, rest: string, init
     const head = query.get('head');
     const base = query.get('base');
     const found = store
-      .filter((pr) => (head === null || `owner:${pr.head}` === head) && (base === null || pr.base === base))
+      .filter((pr) => (head === null || `${(pr.headRepository ?? 'owner/repo').split('/')[0]}:${pr.head}` === head) && (base === null || pr.base === base))
       .map(read)
       .filter((pr) => state === 'all' || pr.state === state);
     return json(200, found.map(pullRequestNode));

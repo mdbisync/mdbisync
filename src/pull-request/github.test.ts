@@ -85,6 +85,16 @@ describe('ensuring the sync pull request', () => {
     }
   });
 
+  it('finds its own repository after a fork and accepts canonical name casing', async () => {
+    const fork = { ...node('Fork body.'), head: { ref: 'sync', repo: { full_name: 'owner/fork' } } };
+    const own = { ...node('Body.'), head: { ref: 'sync', repo: { full_name: 'Owner/Repo' } } };
+    const { target } = answering(200, [fork, own]);
+    assert.equal((await findOpenPullRequest(target, 'sync', 'main'))?.headRepository, 'Owner/Repo');
+    const race = racing([fork, own], { status: 422, body: { message: 'Validation Failed' } });
+    assert.equal((await ensurePullRequest(race.target, spec)).updated, false);
+    assert.deepEqual(race.calls, ['GET', 'POST', 'GET']);
+  });
+
   it('still fails on a refusal when no pull request is open, and on other statuses without looking again', async () => {
     const none = racing([], { status: 422, body: { message: 'Validation Failed' } });
     await assert.rejects(ensurePullRequest(none.target, spec), (error: unknown) => error instanceof PullRequestError && error.status === 422);

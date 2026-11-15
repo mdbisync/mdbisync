@@ -7,7 +7,7 @@ describe('sync: pull request head repository', () => {
 
   it('leaves a same-organization fork alone and opens and reuses its own pull request', async () => {
     const fork = {
-      number: 1, head: 'mdbisync/linear', headRepository: 'owner/fork', base: 'main',
+      number: 1, head: SYNC_BRANCH.slice('refs/heads/'.length), headRepository: 'owner/fork', base: 'main',
       title: 'Fork changes', body: 'Please review these changes.', state: 'open' as const, merged: false,
     };
     h.world.github.pullRequests.push(fork);

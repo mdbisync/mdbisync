@@ -78,7 +78,7 @@ export async function findOpenPullRequest(target: GitHubRepository, head: string
   const query = new URLSearchParams({ state: 'open', head: `${owner}:${head}`, base, per_page: '10' });
   const answer = await request(target, 'GET', `/pulls?${query.toString()}`);
   if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message('github.listing'), answer.status);
-  const found = (answer.json as unknown[]).map(toPullRequest).find((pr) => pr !== null && pr.head === head && pr.base === base && pr.headRepository === target.repository);
+  const found = (answer.json as unknown[]).map(toPullRequest).find((pr) => pr !== null && pr.head === head && pr.base === base && pr.headRepository?.toLowerCase() === target.repository.toLowerCase());
   return found ?? null;
 }
 
@@ -146,8 +146,8 @@ export async function closePullRequestAtHead(target: GitHubRepository, number: n
  * it is now.
  *
  * Another run can open the same pull request between the look and the open:
- * GitHub then refuses the second with 422. When a pull request from `head`
- * into `base` is open after that refusal, it is the one to use.
+ * GitHub then refuses the second with 422. When a pull request from this
+ * repository's `head` into `base` is open after that refusal, it is the one to use.
  */
 export async function ensurePullRequest(
   target: GitHubRepository,
