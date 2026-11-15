@@ -41,6 +41,8 @@ export interface PullRequest {
   number: number;
   url: string;
   head: string;
+  /** The full name of the head repository; null when GitHub omits it. */
+  headRepository: string | null;
   base: string;
   title: string;
   body: string;
@@ -70,13 +72,13 @@ export class PullRequestError extends Error {
   }
 }
 
-/** The open pull request from `head` into `base`, or null. */
+/** The open pull request from this repository's `head` into `base`, or null. */
 export async function findOpenPullRequest(target: GitHubRepository, head: string, base: string): Promise<PullRequest | null> {
   const owner = target.repository.split('/')[0] as string;
   const query = new URLSearchParams({ state: 'open', head: `${owner}:${head}`, base, per_page: '10' });
   const answer = await request(target, 'GET', `/pulls?${query.toString()}`);
   if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message('github.listing'), answer.status);
-  const found = (answer.json as unknown[]).map(toPullRequest).find((pr) => pr !== null && pr.head === head && pr.base === base);
+  const found = (answer.json as unknown[]).map(toPullRequest).find((pr) => pr !== null && pr.head === head && pr.base === base && pr.headRepository?.toLowerCase() === target.repository.toLowerCase());
   return found ?? null;
 }
 
@@ -144,8 +146,8 @@ export async function closePullRequestAtHead(target: GitHubRepository, number: n
  * it is now.
  *
  * Another run can open the same pull request between the look and the open:
- * GitHub then refuses the second with 422. When a pull request from `head`
- * into `base` is open after that refusal, it is the one to use.
+ * GitHub then refuses the second with 422. When a pull request from this
+ * repository's `head` into `base` is open after that refusal, it is the one to use.
  */
 export async function ensurePullRequest(
   target: GitHubRepository,
@@ -174,13 +176,14 @@ async function useOpen(target: GitHubRepository, open: PullRequest, spec: NewPul
 }
 
 function toPullRequest(value: unknown): PullRequest | null {
-  const pr = value as { number?: unknown; html_url?: unknown; title?: unknown; body?: unknown; head?: { ref?: unknown }; base?: { ref?: unknown } } | null;
+  const pr = value as { number?: unknown; html_url?: unknown; title?: unknown; body?: unknown; head?: { ref?: unknown; repo?: { full_name?: unknown } | null }; base?: { ref?: unknown } } | null;
   if (pr === null || typeof pr !== 'object' || typeof pr.number !== 'number') return null;
   if (typeof pr.head?.ref !== 'string' || typeof pr.base?.ref !== 'string') return null;
   return {
     number: pr.number,
     url: typeof pr.html_url === 'string' ? pr.html_url : '',
     head: pr.head.ref,
+    headRepository: typeof pr.head.repo?.full_name === 'string' ? pr.head.repo.full_name : null,
     base: pr.base.ref,
     title: typeof pr.title === 'string' ? pr.title : '',
     body: typeof pr.body === 'string' ? pr.body : '',
