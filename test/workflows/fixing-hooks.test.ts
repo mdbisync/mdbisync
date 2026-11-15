@@ -42,13 +42,13 @@ for (const file of process.argv.slice(2)) writeFileSync(file, readFileSync(file,
   await git.run(['checkout', '--quiet', 'main']);
   const temp = join(fixture.root, 'runner-temp');
   await mkdir(temp);
-  const workflow = parse(await readFile(new URL('../../examples/pre-commit.yml', import.meta.url), 'utf8'));
-  const steps = workflow.jobs['pre-commit'].steps as Array<{ name?: string; run?: string }>;
+  const workflow = parse(await readFile(new URL('../../examples/pre-commit.yml', import.meta.url), 'utf8')) as { jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }> };
+  const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
   const env: NodeJS.ProcessEnv = { ...process.env, RUNNER_TEMP: temp, PRE_COMMIT_HOME: join(temp, 'cache'), SAME_REPOSITORY: 'true', GITHUB_OUTPUT: join(temp, 'outputs') };
-  const run = (name: string) => {
+  const run = (name: string, cwd = git.dir) => {
     const script = steps.find((step) => step.name === name)?.run;
     assert.ok(script);
-    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], { cwd: git.dir, env, encoding: 'utf8', timeout: 60_000 });
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], { cwd, env, encoding: 'utf8', timeout: 60_000 });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stdout + result.stderr);
   };
@@ -60,6 +60,13 @@ for (const file of process.argv.slice(2)) writeFileSync(file, readFileSync(file,
   assert.match(await readFile(join(git.dir, 'unstable.md'), 'utf8'), /\| :-- \|/);
   run('Check the fixed tree in the same job');
   assert.equal(await git.text(['status', '--porcelain']), '');
+
+  // The publish job checks out the pull request's head on a fresh runner and applies the handed-over fix there.
+  const publisher = await fixture.clone('publisher');
+  await publisher.run(['checkout', '--quiet', 'main']);
+  run('Apply the checked fix', publisher.dir);
+  assert.equal(await publisher.text(['rev-parse', 'HEAD^{tree}']), await git.text(['rev-parse', 'HEAD^{tree}']));
+  assert.equal(await publisher.text(['show', '-s', '--format=%B', 'HEAD']), await git.text(['show', '-s', '--format=%B', 'HEAD']));
 
   const files: Array<{ path: string; hooks?: string[] }> = [{ path: 'unstable.md' }];
   await nameFixingHooks(git, 'HEAD', files);

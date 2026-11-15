@@ -450,16 +450,30 @@ never passes.
 Copy [examples/pre-commit.yml](../examples/pre-commit.yml) to
 `.github/workflows/pre-commit.yml` in the synchronized repository. On every
 pull request it runs the whole pre-commit configuration, commits the fixes
-to the pull request branch and runs the checks again in the same job, so the
-branch reaches `main` in Linear's form. Details:
+to the pull request branch and runs the checks again, so the branch reaches
+`main` in Linear's form. Details:
 
-- A pull request from a fork cannot take a push: the job fails and prints a
-  ready-to-apply patch.
-- The job checks out the exact head of the pull request; if the branch moves
+- The hooks are the pull request's own code, so they run in the
+  `pre-commit hooks` job, which can only read the repository and holds no
+  write token. A second job, `pre-commit fixes`, pushes the fix on a fresh
+  runner: it runs none of the pull request's code and applies the fix only
+  when it changes files the branch already tracks as regular files (no new,
+  deleted, renamed or linked files, no mode changes), with a commit message
+  that keeps only the hook ids. A fix outside those limits fails that job;
+  apply it by hand.
+- The `pre-commit` job passes only when the hooks passed and their fix, if
+  any, was pushed: require `pre-commit` in the branch rules.
+- A pull request from a fork cannot take a push: the hooks job fails and
+  prints a ready-to-apply patch.
+- The jobs use the exact head of the pull request; if the branch moves
   before the push, the push fails without overwriting the newer commits.
-- It publishes the `pre-commit` check on the fixing commit too; require that
-  check in the branch rules. A fork pull request without fixes keeps the
-  job's own check.
+- It publishes all three checks on the fixing commit too. A pull request
+  without fixes shows `pre-commit fixes` as skipped.
+- Neither job uses a package-manager cache: a cache the hooks job saved
+  would reach the job that pushes.
+- On self-hosted runners, the jobs are kept apart only when each job gets a
+  fresh runner (ephemeral runners); otherwise the hooks can leave files
+  behind for the next job on that machine.
 - A push with the workflow's token starts no other workflows, so the
   repository's other CI must be started on the fixing commit: give each of
   those workflows a `workflow_dispatch:` trigger and list their files in the
