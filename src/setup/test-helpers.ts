@@ -82,6 +82,8 @@ export interface FakePullRequest {
   title: string;
   body: string;
   head: string;
+  /** Defaults to owner/repo; a fork can share its owner and branch name. */
+  headRepository?: string;
   base: string;
   state: 'open' | 'closed';
   merged: boolean;
@@ -373,7 +375,7 @@ async function pullRequests(world: FakeWorld, method: string, rest: string, init
   if (body.head === undefined) return undefined;
   if (world.github.missing.has('pull_requests:write')) return json(403, { message: 'Resource not accessible by integration' });
   if (world.github.refusePullRequests) return json(422, { message: 'Validation Failed' });
-  if (store.some((pr) => pr.state === 'open' && pr.head === body.head && pr.base === body.base)) {
+  if (store.some((pr) => pr.state === 'open' && pr.head === body.head && pr.base === body.base && (pr.headRepository ?? 'owner/repo') === 'owner/repo')) {
     return json(422, { message: 'Validation Failed', errors: [{ message: 'A pull request already exists' }] });
   }
   world.writes.push(`${method} ${path}`);
@@ -468,7 +470,7 @@ function read(pr: FakePullRequest): FakePullRequest {
 }
 
 function pullRequestNode(pr: FakePullRequest) {
-  return { number: pr.number, html_url: `https://github.test/owner/repo/pull/${pr.number}`, state: pr.state, head: { ref: pr.head }, base: { ref: pr.base }, title: pr.title, body: pr.body };
+  return { number: pr.number, html_url: `https://github.test/owner/repo/pull/${pr.number}`, state: pr.state, head: { ref: pr.head, repo: { full_name: pr.headRepository ?? 'owner/repo' } }, base: { ref: pr.base }, title: pr.title, body: pr.body };
 }
 
 async function linear(world: FakeWorld, path: string, init: RequestInit | undefined): Promise<Response> {

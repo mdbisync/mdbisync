@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PullRequestError, closePullRequestAtHead, ensurePullRequest, openPullRequest, updatePullRequest } from './github.ts';
+import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, openPullRequest, updatePullRequest } from './github.ts';
 import { mergePullRequest } from './merge.ts';
 
 /** A GitHub that answers every request with `status` and `body`. */
@@ -43,7 +43,7 @@ describe('pull request writes', () => {
 });
 
 describe('ensuring the sync pull request', () => {
-  const node = (body: string) => ({ number: 7, html_url: 'https://github.test/pull/7', head: { ref: 'sync' }, base: { ref: 'main' }, title: 'Sync', body });
+  const node = (body: string) => ({ number: 7, html_url: 'https://github.test/pull/7', head: { ref: 'sync', repo: { full_name: 'owner/repo' } }, base: { ref: 'main' }, title: 'Sync', body });
 
   /** A GitHub where another run opens the pull request between this run's look and its open. */
   function racing(open: unknown[] | Response, openAnswer: { status: number; body: unknown }) {
@@ -62,7 +62,7 @@ describe('ensuring the sync pull request', () => {
   it('uses the pull request another run opened when GitHub refuses a duplicate', async () => {
     const same = racing([node('Body.')], { status: 422, body: { message: 'Validation Failed', errors: [{ message: 'A pull request already exists for owner:sync.' }] } });
     const kept = await ensurePullRequest(same.target, spec);
-    assert.deepEqual(kept, { pullRequest: { number: 7, url: 'https://github.test/pull/7', head: 'sync', base: 'main', title: 'Sync', body: 'Body.' }, opened: false, updated: false });
+    assert.deepEqual(kept, { pullRequest: { number: 7, url: 'https://github.test/pull/7', head: 'sync', headRepository: 'owner/repo', base: 'main', title: 'Sync', body: 'Body.' }, opened: false, updated: false });
     assert.deepEqual(same.calls, ['GET', 'POST', 'GET']);
 
     // The other run's description is replaced with this run's, as for any open pull request.
@@ -72,6 +72,17 @@ describe('ensuring the sync pull request', () => {
     assert.equal(updated.updated, true);
     assert.equal(updated.pullRequest.body, 'Body.');
     assert.deepEqual(other.calls, ['GET', 'POST', 'GET', 'PATCH']);
+  });
+
+  it('ignores forks and missing repository identity, even after a duplicate refusal', async () => {
+    for (const repo of [undefined, null, {}, { full_name: 7 }, { full_name: 'owner/fork' }, { full_name: 'other/repo' }]) {
+      const foreign = { ...node('Other body.'), head: { ref: 'sync', repo } };
+      const { target } = answering(200, [foreign]);
+      assert.equal(await findOpenPullRequest(target, 'sync', 'main'), null);
+      const race = racing([foreign], { status: 422, body: { message: 'Validation Failed' } });
+      await assert.rejects(ensurePullRequest(race.target, spec), (error: unknown) => error instanceof PullRequestError && error.status === 422);
+      assert.deepEqual(race.calls, ['GET', 'POST', 'GET']);
+    }
   });
 
   it('still fails on a refusal when no pull request is open, and on other statuses without looking again', async () => {
