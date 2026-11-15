@@ -103,7 +103,8 @@ describe('workflow templates rendered for a run', () => {
     for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['pre-commit']]) {
       const rendered = parse(renderForRun(readTemplate(file), RUN)) as { on: Record<string, unknown> };
       assert.deepEqual(Object.keys(rendered.on), Object.keys((parse(readTemplate(file)) as { on: Record<string, unknown> }).on), file);
-      assert.ok(jobsOf(renderForRun(readTemplate(file), RUN)).every((job) => (job as { if?: string }).if === undefined), file);
+      // Each job keeps the template's own condition, with no guard added.
+      assert.deepEqual(jobsOf(renderForRun(readTemplate(file), RUN)).map((job) => (job as { if?: string }).if), jobsOf(readTemplate(file)).map((job) => (job as { if?: string }).if), file);
     }
   });
 
