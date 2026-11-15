@@ -201,7 +201,12 @@ function contentProblem(content: Buffer): 'binary' | 'stored-in-lfs' | null {
 }
 
 function isMarkdown(entry: TreeEntry): boolean {
-  return entry.path.endsWith(MARKDOWN_EXTENSION) && entry.path.length > MARKDOWN_EXTENSION.length && !entry.path.endsWith(`/${MARKDOWN_EXTENSION}`);
+  return isMarkdownPath(entry.path);
+}
+
+/** A path the sync may hold a document at: a named `.md` file. */
+export function isMarkdownPath(path: string): boolean {
+  return path.endsWith(MARKDOWN_EXTENSION) && path.length > MARKDOWN_EXTENSION.length && !path.endsWith(`/${MARKDOWN_EXTENSION}`);
 }
 
 /** A file whose bytes git stores as they are: not a symlink or a submodule. */

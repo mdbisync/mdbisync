@@ -573,6 +573,47 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/duplicate.md'), 'Corrected body.\n');
   });
 
+  it('never writes a document over a hook script that a forged reserved path names', async () => {
+    // A security hook runs a script the tracked branch keeps under a mapped folder. The recorded Linear tree does not
+    // hold the script, so its path looks free, and the reserved ids, which any writer of the state refs can change,
+    // reserve it for a new document. Its text would replace the script before the hook runs it.
+    const marker = join(fixture.root, 'hook-canary');
+    await fixture.seed({
+      '.pre-commit-config.yaml': `repos:
+  - repo: local
+    hooks:
+      - id: support-check
+        alias: security
+        name: Support check
+        entry: node docs/scan.mjs
+        language: system
+`,
+      'docs/scan.mjs': 'process.exitCode = 0;\n',
+    });
+    await refresh();
+    const state = context.fetched.state;
+    // A Markdown path the tracked branch does not hold is no claim either: the new document was not created from it.
+    const forged = new Map([['docs/scan.mjs', 'forged'], ['docs/notes.mjs', 'forged-new'], ['docs/elsewhere.md', 'forged-markdown']]);
+    const next = await commitIds(context.git, state.ids, await readIds(context.git, state.ids), IDENTITY, {reserved: forged});
+    assert.equal((await pushAtomic(context.git, config, [{ref: stateRef(config, 'ids'), expected: state.ids, next}])).ok, true);
+    await refresh();
+    const payload = `import('node:fs').then((fs) => fs.writeFileSync(${JSON.stringify(marker)}, 'ran'));\n`;
+    world.linear.documents.push(
+      {id: 'forged', title: 'scan', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
+      {id: 'forged-new', title: 'notes', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
+      {id: 'forged-markdown', title: 'report', projectId: 'project-api', content: 'A report.\n', createdAt: '2026-01-02T00:00:00Z'},
+    );
+    const result = await run();
+    await assert.rejects(readFile(marker), {code: 'ENOENT'}, 'a document never becomes hook code');
+    const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.includes('docs/scan.mjs') && !paths.includes('docs/notes.mjs'), 'a reserved path that is not a document path is not used');
+    // The documents still come in, at the paths their titles name.
+    assert.equal(await text('docs/scan.md'), payload);
+    assert.equal(await text('docs/notes.md'), payload);
+    assert.equal(await text('docs/report.md'), 'A report.\n');
+    assert.ok(!paths.includes('docs/elsewhere.md'));
+  });
+
   it('blocks a secret before any object write, saves appearance and restores it on correction', async () => {
     await fixture.seed({
       '.pre-commit-config.yaml': `repos:
@@ -675,6 +716,10 @@ describe('capture from Linear', () => {
   }
 
   it('keeps links to an image-blocked reserved document as Linear URLs', async () => {
+    // The new document was created from this file, and the answer was lost: the id stays reserved for its path.
+    await fixture.seed({'docs/future.md': 'Future.\n'});
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
     const state = context.fetched.state;
     const reserved = new Map([['docs/future.md', 'future-document']]);
     const next = await commitIds(context.git, state.ids, await readIds(context.git, state.ids), IDENTITY, {reserved});

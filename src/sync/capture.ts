@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { isMap, parseDocument, stringify } from 'yaml';
-import { loadMapping, placeOf, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
+import { isMarkdownPath, loadMapping, placeOf, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
@@ -174,7 +174,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const byId = new Map([...ids].map(([path, entry]) => [entry.id, { path, entry }]));
     // A new document's id is reserved for its path until it is mapped. Documents an earlier run wrote may link to it, and
     // its create may have landed with the answer lost: the reserved path is where it belongs.
-    const reservedById = new Map([...reserved].filter(([path, id]) => !ids.has(path) && !byId.has(id)).map(([path, id]) => [id, path]));
+    // The reserved ids come from refs any writer can move, so a reserved path is only a claim: it counts only for a
+    // Markdown file the tracked branch holds, the file the new document was created from, never a script beside it.
+    const reservedById = new Map([...reserved].filter(([path, id]) => !ids.has(path) && !byId.has(id) && isMarkdownPath(path) && mapping.files.has(path)).map(([path, id]) => [id, path]));
     const occupied = new Set([...entries.map((entry) => entry.path), ...ids.keys()]);
     const annotationHead = (path: string): string | undefined => {
       if (posix.basename(path) !== 'README.md' || !mapping.zones.has(folderOf(path))) return undefined;
@@ -281,7 +283,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const destination = (doc: LinearDocument, occupied: ReadonlySet<string>, allocated: ReadonlyMap<string, string> = new Map()) => {
       if (retained.has(doc.id)) return retained.get(doc.id)!;
       const own = reservedById.get(doc.id);
-      if (own !== undefined && !occupied.has(own) && !allocated.has(own) && !invalidZone(doc, own)) return own;
+      // And only where the sync would put this document itself: its title's own spelling, with no alias of a taken path.
+      if (own !== undefined && !occupied.has(own) && !allocated.has(own) && !invalidZone(doc, own)
+        && documentPath(folderFor(doc)!, doc.title, doc.id, occupied, own, (path) => invalidZone(doc, path)) === own) return own;
       const old = byId.get(doc.id);
       const available = new Set(occupied);
       if (old !== undefined && (!allocated.has(old.path) || allocated.get(old.path) === doc.id)) available.delete(old.path);

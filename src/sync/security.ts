@@ -5,8 +5,10 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { Git, type Oid, listTree, readBlobs, checkRepoPath } from '../state/index.ts';
+import { Git, type Oid, listTree, readBlobs, checkRepoPath, parseLfsPointer } from '../state/index.ts';
+import { createHash } from 'node:crypto';
 import { readHookConfig, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
+import { isMarkdownPath } from '../mapping/index.ts';
 import { message } from '../messages.ts';
 
 export interface SecurityFinding { hook: string; line: number }
@@ -50,6 +52,22 @@ export async function securityHookIds(git: Git, tracked: Oid): Promise<string[]>
   const config = readHookConfig(read.code === 0 ? read.stdout.toString('utf8') : null);
   if (config.invalid !== undefined) throw new Error(message('sync.invalid-security-config'));
   return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+}
+
+/** Whether the tracked files that differ from the index after the writes are all Markdown documents or same assets. */
+async function onlyDocumentsChanged(scratch: Git, dir: string, files: ReadonlyMap<string, FileContent>): Promise<boolean> {
+  const changed = (await scratch.run(['diff', '--name-only', '--no-renames', '-z'])).stdout.toString('utf8').split('\0').filter((path) => path !== '');
+  for (const path of changed) {
+    if (isMarkdownPath(path)) continue;
+    const pointer = parseLfsPointer((await scratch.run(['cat-file', 'blob', `:${path}`])).stdout);
+    const content = files.get(path);
+    if (pointer === null || content === undefined) return false;
+    const bytes = contentBytes(content);
+    if (pointer.size !== bytes.length || pointer.oid !== createHash('sha256').update(bytes).digest('hex')) return false;
+    // The file must hold what the candidate wrote: an alias written after it could have replaced it.
+    if (!(await readFile(join(dir, path))).equals(bytes)) return false;
+  }
+  return true;
 }
 
 /** Uses the tracked branch's configuration and support files, never a Linear-supplied config. */
@@ -98,6 +116,11 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
           await mkdir(dirname(join(dir, path)), { recursive: true });
           await writeFile(join(dir, path), contentBytes(content));
         }
+        // The hooks run the tracked branch's scripts and read its support files: a candidate replaces none of them,
+        // so its text never becomes code the hooks run. Git, not the path's spelling, says which tracked files the
+        // writes changed, so an alias the file system resolves to one (by case or otherwise) is caught as well. Only
+        // documents may change, and an asset kept in LFS by the bytes its pointer names.
+        if (!await onlyDocumentsChanged(scratch, dir, files)) return [{ hook: SECURITY_ALIAS, line: 1 }];
         // Index-inspecting hooks see the candidate too. This repository has no remote.
         await scratch.run(['add', '--force', '--', ...files.keys()]);
         const findings: SecurityFinding[] = [];

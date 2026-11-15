@@ -22,6 +22,7 @@ export {
   annotationFiles,
   candidateFiles,
   collectAnnotations,
+  isMarkdownPath,
   isRegularFile,
   loadMapping,
   mapFiles,
