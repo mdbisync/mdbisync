@@ -389,13 +389,13 @@ export class LinearClient {
         comments: { nodes: Array<{ id: string; user: { id: string } | null; documentContent: { document: { id: string } | null } | null }> };
       }>(
         operation, 'query',
-        `query ${operation}($ids: [ID!]!) {
+        `query ${operation}($ids: [ID!]!, $first: Int!) {
           viewer { id }
-          comments(first: 250, includeArchived: true, filter: { id: { in: $ids } }) {
+          comments(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
             nodes { id user { id } documentContent { document { id } } }
           }
         }`,
-        { ids: batch },
+        { ids: batch, first: batch.length },
       );
       for (const comment of data.comments.nodes) {
         if (!requested.has(comment.id) || found.has(comment.id)

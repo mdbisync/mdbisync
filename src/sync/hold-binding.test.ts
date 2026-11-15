@@ -6,7 +6,7 @@ import { pullRequestHarness } from './pull-request-test-helpers.ts';
 describe('saved hold comment ownership', () => {
   const h = pullRequestHarness();
   for (const mismatch of ['document', 'author']) {
-    for (const action of ['clear', 'update', 'repaint', 'recover']) {
+    for (const action of ['clear', 'update', 'repaint', 'recover', 'create']) {
       it(`rejects a forged ${mismatch} before a hold ${action}`, async () => {
         const path = 'eng/notes/plan.md';
         await h.suspendOne();
@@ -23,19 +23,25 @@ describe('saved hold comment ownership', () => {
         entry.saved!.hold!.id = forgedId;
         entry.suspended!.noticeId = forgedId;
         if (action === 'recover') entry.saved!.hold!.posted = false;
+        if (action === 'create') delete entry.saved!.hold;
         if (action === 'repaint') document.icon = ':book:';
         await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify(ids));
         if (action === 'clear') h.checksOn(await h.rev(h.SUSPENDED), h.PASSED);
         if (action === 'update') h.checksOn(await h.rev(h.SUSPENDED), [{ name: 'format', status: 'completed', conclusion: 'failure' }]);
+        // Linear refuses a create for a known id atomically. Its recovery
+        // lookup must reject the unrelated comment before repaint or update.
+        const creates = action === 'create' ? h.onMutation('CommentOnDocument', () => h.refusal('conflict on insert of Comment')) : undefined;
         const before = structuredClone(comment);
         const icon = document.icon;
         const run = await h.sync();
         assert.equal(run.report.pullRequest?.holdMarks?.code, 'write-failed');
-        assert.equal(run.report.pullRequest?.holdMarks?.failure?.operation, 'FindComments');
-        assert.match(run.report.pullRequest?.holdMarks?.failure?.error ?? '', /LinearError/);
+        assert.equal(run.report.pullRequest?.holdMarks?.failure?.operation, action === 'create' ? 'CommentOnDocument' : 'FindComments');
+        assert.match(run.report.pullRequest?.holdMarks?.failure?.error ?? '', action === 'create' ? /INPUT_ERROR/ : /LinearError/);
+        if (creates !== undefined) assert.equal(creates.calls, 1);
         assert.deepEqual(comment, before);
         assert.equal(document.icon, icon);
         assert.deepEqual(run.writes.filter((write) => !write.includes(' ')), []);
+        assert.deepEqual(run.report.writes.linear, {});
       });
     }
   }

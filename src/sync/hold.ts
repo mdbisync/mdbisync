@@ -281,6 +281,9 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
   result.deferred = work.length - chosen.length;
   // Comments are written only for the chosen documents: the rest read nothing this run.
   for (const item of chosen) if (item.kind === 'set') Object.assign(item, await bodyOf(item.path, item.entry));
+  // A notice without a saved receipt is created before its decoration changes.
+  // Create cannot overwrite an existing id; recovery checks its remote owner.
+  const creating = new Set<Work>(chosen.filter((item) => item.kind === 'set' && item.entry.saved?.hold === undefined));
 
   let expected = options.state.ids;
   const persist = async () => {
@@ -317,7 +320,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
       expected.set(id, documentId);
     };
     for (const item of chosen) {
-      expect((item.entry.saved?.hold as HoldNotice).id, item.entry.id);
+      if (!creating.has(item)) expect((item.entry.saved?.hold as HoldNotice).id, item.entry.id);
       if (item.kind === 'set' && item.previous !== undefined) expect(item.previous.id, item.entry.id);
     }
     const found = await linear.documentCommentIds(expected);
@@ -360,11 +363,11 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
       }
       if (!document.documentContentId) continue;
       if (item.kind === 'set') {
+        // The id was chosen before the suspension's push and never posted by this sync: create it directly,
+        // and a refused duplicate checks its document and author before updating it.
+        await linear.ensureDocumentComment(document.documentContentId, item.body as string, hold.id, true, true);
         const mark = MARKS.suspended;
         if (document.icon !== mark.icon || document.color !== mark.color) await linear.updateDocument(document.id, mark);
-        // The id was chosen before the suspension's push and never posted by this sync: create it directly,
-        // and a create Linear refuses because the id exists finds it and updates its text.
-        await linear.ensureDocumentComment(document.documentContentId, item.body as string, hold.id, true, true);
         ids.set(path, withHold(item.entry, { ...hold, posted: true }));
         result.set.push(path);
       } else {

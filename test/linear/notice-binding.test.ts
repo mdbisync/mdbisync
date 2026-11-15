@@ -63,6 +63,7 @@ for (const invalid of [false, true]) {
     fake.operations.set('FindComments', (request) => {
       const ids = request.variables?.ids as string[];
       assert.ok(ids.length <= 250);
+      assert.equal(request.variables?.first, ids.length);
       return { body: { data: { viewer: { id: 'integration-one' }, comments: { nodes: ids.map((id) => ({
         id, user: { id: invalid && id === 'comment-250' ? 'person-other' : 'integration-one' },
         documentContent: { document: { id: expected.get(id) } },
