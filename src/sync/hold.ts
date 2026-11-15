@@ -66,7 +66,7 @@ export interface HoldMarksResult {
   cleared: string[];
   /** Documents left for a later run by the limit. */
   deferred: number;
-  /** Suspended documents in Linear's trash or archived: they hold no mark. */
+  /** Suspended documents in Linear's trash, archived or outside the configured places: they hold no mark. */
   removed: string[];
   /**
    * Released documents whose comment Linear refused to resolve (it is gone, or Linear will not change it), with
@@ -180,8 +180,12 @@ export function holdComment(checks: readonly CheckFailure[], timedOut: readonly 
 }
 
 type Work =
-  /** `document` is absent for one in Linear's trash, archived or gone: its comment is resolved, its decoration left alone. */
-  | { kind: 'clear'; path: string; entry: IdEntry; document?: LinearDocument }
+  /**
+   * `document` is absent for one in Linear's trash, archived or gone: its comment is resolved, its decoration left
+   * alone. `unplaced` is one the capture did not find in a configured place (gone, or outside them): the sync
+   * changes nothing in Linear for it, and only forgets the hold.
+   */
+  | { kind: 'clear'; path: string; entry: IdEntry; document?: LinearDocument; unplaced?: true }
   | { kind: 'repaint'; path: string; entry: IdEntry; document: LinearDocument }
   | { kind: 'set'; path: string; entry: IdEntry; document: LinearDocument; body?: string; failure?: string; previous?: HoldNotice }
   | { kind: 'update'; path: string; entry: IdEntry; document: LinearDocument; body: string; failure?: string };
@@ -250,7 +254,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     if (document === undefined || document.trashed || document.archivedAt !== null) {
       if (episode !== undefined) result.removed.push(path);
       // Released while in the trash: its comment is resolved (or Linear's refusal reported) before the write step may drop the entry.
-      else work.push({ kind: 'clear', path, entry });
+      else work.push({ kind: 'clear', path, entry, ...(document === undefined ? { unplaced: true as const } : {}) });
       continue;
     }
     if (episode === undefined) {
@@ -320,7 +324,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
       expected.set(id, documentId);
     };
     for (const item of chosen) {
-      if (!creating.has(item)) expect((item.entry.saved?.hold as HoldNotice).id, item.entry.id);
+      if (!creating.has(item) && !(item.kind === 'clear' && item.unplaced)) expect((item.entry.saved?.hold as HoldNotice).id, item.entry.id);
       if (item.kind === 'set' && item.previous !== undefined) expect(item.previous.id, item.entry.id);
     }
     const found = await linear.documentCommentIds(expected);
@@ -337,7 +341,8 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
       current = item;
       const { document, path } = item;
       if (item.kind === 'clear') {
-        const resolved = await resolveCleared(checked, item.entry.saved?.hold as HoldNotice, item.entry.id);
+        // A document the capture did not place is not the sync's to change: its comment is left as it is.
+        const resolved = item.unplaced ? undefined : await resolveCleared(checked, item.entry.saved?.hold as HoldNotice, item.entry.id);
         const { hold: _hold, ...saved } = item.entry.saved as NonNullable<IdEntry['saved']>;
         // A conflict or blocked notice still stands: its own mark comes back. Otherwise the document's own decoration.
         const mark = saved.notice === undefined ? { icon: saved.icon, color: saved.color } : MARKS[saved.notice.kind];
@@ -347,7 +352,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
         if (document === undefined && item.entry.releaseBase === undefined && !(await inLinearTip(path))) ids.delete(path);
         else ids.set(path, saved.notice === undefined ? rest : { ...rest, saved });
         if (resolved === true) result.cleared.push(path);
-        else (result.unresolved ??= []).push({ path, error: resolved });
+        else if (resolved !== undefined) (result.unresolved ??= []).push({ path, error: resolved });
         continue;
       }
       if (document === undefined) continue;

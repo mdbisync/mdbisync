@@ -11,6 +11,7 @@ import { after, before, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { SETUP_FAILED_EXIT_CODE, USAGE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
+import { MARKUP_TEXTS, tableRows } from '../run/summary-test-helpers.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Git } from '../state/index.ts';
 import { type FakeLfsServer, type Fixture, countLocalLfsObjects, createFixture, fakeLfsServer } from '../state/test-helpers.ts';
@@ -167,6 +168,17 @@ describe('initial sync dry run', () => {
     assert.equal(graphql.length, 2);
     assert.equal(world.minted, 1);
     assert.equal(world.revoked, 1);
+  });
+
+  it('shows Linear titles that hold Markdown or HTML as their own text in the job summary', async () => {
+    const world = fakeWorld();
+    world.linear.documents = MARKUP_TEXTS.map((title, index) => ({ id: `doc-markup-${index}`, title, teamId: 'team-eng', createdAt: `2026-01-01T00:00:${String(index + 10)}Z` }));
+    const result = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const paths = MARKUP_TEXTS.map((title) => `eng/${title}.md`).sort();
+    assert.deepEqual((await readReport()).summary?.plan.trash, paths);
+    const rows = tableRows(await readFile(summaryFile(), 'utf8')).filter((row) => row[1] === 'team "ENG"' && row[2]?.startsWith('doc-markup-'));
+    assert.deepEqual(rows.map((row) => row[0]).sort(), paths);
   });
 
   it('L1-13 (dry run): every lint error and both colliding files are left out, with their rules', async () => {

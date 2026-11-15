@@ -147,7 +147,8 @@ describe('setup check failures L5-01 to L5-05', () => {
       const summary = renderSetupSummary(report);
       assert.ok(summary.includes(`How to fix it: ${link}`), summary);
       const row = summary.split('\n').find((line) => line.includes('| FAILED |')) ?? '';
-      assert.match(row, scenario.names);
+      // The detail cell escapes Markdown's characters (`pull\_requests`); read it as the text it shows.
+      assert.match(row.replace(/\\(.)/g, '$1'), scenario.names);
       assert.ok(row.includes(`([how to fix](${link}))`), row);
 
       const outcome = { operation: 'sync', ok: false, code: report.code, setup: report } as OperationOutcome;

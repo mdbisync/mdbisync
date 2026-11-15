@@ -270,6 +270,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   if (containerListing === undefined) return result;
   // A separate const: the hoisted `adoptableDocuments` below does not see the narrowing above.
   const containers: Map<string, LinearDocument[]> = containerListing;
+  /** The documents Linear lists in the configured places now, trash and archive included. */
+  const inPlaces = new Set([...containers.values()].flat().map((document) => document.id));
   await findGoneRestores();
   for (const path of merge.conflicts) if (merge.result.has(path) || merge.linear.has(path) || ids.has(path)) result.skipped.push({ path, reason: 'conflict' });
   for (const entry of merge.held) result.skipped.push({ path: entry.from, reason: 'renamed-to-unwritable' });
@@ -316,11 +318,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   /** Why the reserved ids could not be checked: those creates could be refused or collide, so they wait for the next run. */
   let unchecked: LinearError | undefined;
   try {
-    const listed = new Set([...containers.values()].flat().map((document) => document.id));
     const saved = [...new Set([...usingReserved].map((path) => reserved.get(path) as string))];
-    for (const id of saved) if (listed.has(id)) taken.add(id);
+    for (const id of saved) if (inPlaces.has(id)) taken.add(id);
     // A document moved out of the targets is not in their listing.
-    const unlisted = saved.filter((id) => !listed.has(id));
+    const unlisted = saved.filter((id) => !inPlaces.has(id));
     if (unlisted.length > 0) for (const document of await linear.getDocuments(unlisted, { withContent: false })) taken.add(document.id);
   } catch (error) {
     if (error instanceof LinearStoppedError) {
@@ -874,6 +875,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   async function restore(change: CreateChange, file: SideFile, body: string, removed: LinearDocument | undefined): Promise<boolean> {
     if (removed === undefined) return skip(change.path, 'missing-in-linear');
     const seen = options.captured?.get(removed.id);
+    // The id comes from the ids state, which anyone who can push its ref may write: only a document Linear places
+    // in a configured place (its trash and archive included) is the sync's to restore. The capture placed it (also
+    // in a place an annotation change left this run), or the configured containers list it now. Any other stays.
+    if (seen === undefined && !inPlaces.has(removed.id)) return skip(change.path, 'missing-in-linear');
     const changed = seen === undefined
       // Without the capture's read, only a document still in trash is known to be as the capture left it.
       ? !removed.trashed && removed.archivedAt === null

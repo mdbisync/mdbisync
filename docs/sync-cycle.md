@@ -318,7 +318,8 @@ check, each shortened to 200 characters. Text that repeats document
 content is omitted; raw CI logs are never copied. When the failure
 changes, the same comment is edited. At most 50 documents have their
 suspended mark or comment changed per run; the rest follow in later runs.
-Documents in Linear's trash or archived have no mark.
+Documents in Linear's trash or archived, or outside the configured places,
+have no mark.
 
 A suspended document is frozen both ways: later Linear edits go only to
 the suspended pull request, and tracked-branch edits are not written to
@@ -448,7 +449,7 @@ The suspended lane and its marks add these lines when applicable:
 | The suspended documents' comments in Linear wait: | A check failed on the suspended head but still runs on the tracked tip; the comments wait for that result. |
 | Suspended documents in Linear: | Counts documents marked, comments updated and marks cleared. |
 | more suspended documents get their mark or comment in a later run | Counts deferred documents, at most 50 changed per run. |
-| Suspended documents in Linear's trash or archived, without a mark: | Lists documents that cannot receive a mark. |
+| Suspended documents in Linear's trash, archived or outside the configured places, without a mark: | Lists documents that cannot receive a mark. |
 | GitHub did not give the annotations of | Comments name those checks without annotations; a later run can retry. |
 | The suspended marks did not finish | Gives the stopping code and, for a failed write, its operation, the document's path, the error's class, Linear's code and HTTP status, and Linear's message on one line; the report's `pullRequest.holdMarks.failure` also keeps Linear's request id. A message that repeats the comment the request sent is withheld. A later run goes on. |
 

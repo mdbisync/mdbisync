@@ -385,7 +385,7 @@ function faultFacts(outcome: OperationOutcome, stop: WriteStop | undefined, fail
     writtenDocuments: recorded.size,
     writesAfterLimit: outcome.writesAfterStop ?? 0,
     failedWriteRecorded: failed.some((entry) => recorded.has(entry.path)),
-    endpointLimitHeadersPresent: endpointHeaders.length > 0 && endpointHeaders.every((name) => outcome.summary.includes(`| ${name} |`)),
+    endpointLimitHeadersPresent: endpointHeaders.length > 0 && endpointHeaders.every((name) => outcome.summary.includes(`| ${cell(name)} |`)),
     rejectedDocumentNamed: rejected.length > 0 && rejected.every((entry) => outcome.summary.includes(cell(entry.path))),
   };
 }

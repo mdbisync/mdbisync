@@ -53,7 +53,11 @@ export interface CaptureResult {
   stopped?: StopReason;
   /** The state refs after capture, or the input snapshot if its push lost the lease. */
   state: StateSnapshot;
-  /** Metadata for every observed document; selected changes also have content. Never serialize these. */
+  /**
+   * Metadata for every observed document Linear places in a configured place (trash and archive included);
+   * selected changes also have content. A known id read outside them is left out: the ids state alone does not
+   * let a later step mark or restore it. Never serialize these.
+   */
   documents: Map<string, LinearDocument>;
   blocked: Array<{ id: string; path: string; findings: BlockedFinding[] }>;
   changed: string[];
@@ -251,7 +255,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if ('projectId' in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) retained.set(id, old.path);
     }
     const folderFor = (doc: LinearDocument) => folders.get(placeKeyOf(doc));
-    const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && (folderFor(doc) !== undefined || retained.has(doc.id));
+    // Linear's own answer for where a document is, never the ids state, decides whether the sync may change it: a
+    // known id is only a path's claim, and anyone who can push the state refs can make that claim.
+    const placed = (doc: LinearDocument) => folderFor(doc) !== undefined || retained.has(doc.id);
+    const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && placed(doc);
     const normalizedTime = cursorTime;
     // A document still at the update time a run recorded it with is in the record as Linear holds it.
     const recordedTimes = await readRecorded(git, state.ids);
@@ -289,9 +296,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(doc.id);
       return old !== undefined && (!live(doc) || destination(doc, occupied) !== old.path);
     })) selected = [...listed.values()];
-    const documents = new Map<string, LinearDocument>(listed);
+    const documents = new Map<string, LinearDocument>([...listed].filter(([, doc]) => placed(doc)));
     const work = new Map<string, LinearDocument>();
-    for (const doc of await linear.getDocuments(selected.filter(live).map((doc) => doc.id), { withContent: true })) { documents.set(doc.id, doc); work.set(doc.id, doc); }
+    // A document moved out of the places between the listing and this read is not taken into the map.
+    for (const doc of await linear.getDocuments(selected.filter(live).map((doc) => doc.id), { withContent: true })) {
+      if (placed(doc)) documents.set(doc.id, doc);
+      else documents.delete(doc.id);
+      work.set(doc.id, doc);
+    }
     // Keep metadata for out-of-scope documents; never infer deletion from a missing page.
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
     result.documents = documents;
@@ -349,9 +361,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
-          // A retained entry (a suspended tombstone) keeps its saved decoration: give it back only once.
+          // A retained entry (a suspended tombstone) keeps its saved decoration: give it back only once, and only to a
+          // document in the trash or archive of a configured place. One outside them is not the sync's to decorate.
           const saved = old.entry.saved;
-          if (saved !== undefined && options.stageOnly !== true && (doc.icon !== saved.icon || doc.color !== saved.color)) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
+          if (saved !== undefined && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
           const changedFile = removeBody(old.path);
           const retained = keptForLane(old.entry);
           if (!retained) ids.delete(old.path);

@@ -114,7 +114,7 @@ describe('the sync cycle page', () => {
       "The suspended documents' comments in Linear wait:",
       'Suspended documents in Linear:',
       'more suspended documents get their mark or comment in a later run',
-      "Suspended documents in Linear's trash or archived, without a mark:",
+      "Suspended documents in Linear's trash, archived or outside the configured places, without a mark:",
       'GitHub did not give the annotations of',
       'The suspended marks did not finish',
       'it merges after the suspended pull request, whose checks still run.',

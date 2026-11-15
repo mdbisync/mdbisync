@@ -692,7 +692,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     const counts = [[marks.set.length, 'marked'], [marks.updated.length, 'comments updated'], [marks.cleared.length, 'cleared']].filter(([count]) => (count as number) > 0).map(([count, what]) => `${count} ${what}`);
     if (counts.length > 0) lines.push(`Suspended documents in Linear: ${counts.join(', ')}.`, '');
     if (marks.deferred > 0) lines.push(`${marks.deferred} more suspended documents get their mark or comment in a later run (at most ${HOLD_MARK_LIMIT} per run).`, '');
-    if (marks.removed.length > 0) lines.push(`Suspended documents in Linear's trash or archived, without a mark: ${marks.removed.map((path) => `\`${path}\``).join(', ')}.`, '');
+    if (marks.removed.length > 0) lines.push(`Suspended documents in Linear's trash, archived or outside the configured places, without a mark: ${marks.removed.map((path) => `\`${path}\``).join(', ')}.`, '');
     if (marks.unresolved !== undefined) lines.push(`Linear refused to resolve the suspension comment of released documents: ${marks.unresolved.map(({ path, error }) => `\`${path}\` (${error})`).join(', ')}. The comment stays as it is, and no later run tries again.`, '');
     if (marks.unreadAnnotations !== undefined) lines.push(`GitHub did not give the annotations of ${marks.unreadAnnotations.map((name) => `\`${name}\``).join(', ')}; the comments name those checks without them.`, '');
     if (marks.code !== undefined) lines.push(`The suspended marks did not finish (${holdFailureText(marks.code, marks.failure)}); a later run goes on.`, '');

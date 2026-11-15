@@ -172,7 +172,8 @@ describe('the commit identity of the sync', () => {
   it('stops before writing when GitHub has no account for the App slug', async () => {
     const result = await runCli(['initial-sync'], { env: env({ MDBISYNC_APP_SLUG: 'other-app', MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true', GITHUB_STEP_SUMMARY: join(fixture.root, 'summary.md') }), cwd, fetch: fakeFetch(world) });
     assert.notEqual(result.exitCode, 0);
-    assert.match(await readFile(join(fixture.root, 'summary.md'), 'utf8'), /GitHub has no App account other-app\[bot\]/);
+    // The setup summary's detail cell escapes the brackets.
+    assert.match(await readFile(join(fixture.root, 'summary.md'), 'utf8'), /GitHub has no App account other-app\\\[bot\\\]/);
     assert.deepEqual(world.writes, []);
     assert.deepEqual(await syncCommits(), []);
   });
