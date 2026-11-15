@@ -540,10 +540,10 @@ export async function readSyncPushed(git: Git, commit: Oid | null): Promise<Push
     throw new Error(message('state.invalid-json', { file: SYNC_PUSHED_FILE, commit }));
   }
   const head = data?.head;
+  if (typeof head !== 'string' || !/^[0-9a-f]{40,64}$/.test(head)) throw new Error(message('state.invalid-entry', { file: SYNC_PUSHED_FILE }));
+  // A signature in any other form is no signature: the record counts as none where it is used.
   const mac = data?.mac;
-  if (typeof head !== 'string' || !/^[0-9a-f]{40,64}$/.test(head)
-    || (mac !== undefined && (typeof mac !== 'string' || !PUSHED_MAC.test(mac)))) throw new Error(message('state.invalid-entry', { file: SYNC_PUSHED_FILE }));
-  return mac === undefined ? { head } : { head, mac };
+  return typeof mac === 'string' && PUSHED_MAC.test(mac) ? { head, mac } : { head };
 }
 
 /**
@@ -610,7 +610,7 @@ function isIdEntry(value: unknown): value is IdEntry {
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(episode.noticeId)
       || (episode.head !== undefined && (typeof episode.head !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.head)))
       || (episode.pushed !== undefined && (typeof episode.pushed !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.pushed)))
-      || (episode.pushedMac !== undefined && (typeof episode.pushedMac !== 'string' || !PUSHED_MAC.test(episode.pushedMac)))
+      || (episode.pushedMac !== undefined && typeof episode.pushedMac !== 'string')
       || !Array.isArray(episode.paths) || !episode.paths.every((path) => typeof path === 'string')
       || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === 'string')
       || (episode.timedOut !== undefined && (!Array.isArray(episode.timedOut) || !episode.timedOut.every((name) => typeof name === 'string')))) return false;

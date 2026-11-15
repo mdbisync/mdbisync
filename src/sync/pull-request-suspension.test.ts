@@ -451,22 +451,20 @@ describe('sync: pull request suspension', () => {
     const recorded = await ids() as Record<string, { suspended?: { pushed?: string } }>;
     for (const entry of Object.values(recorded)) if (entry.suspended !== undefined) entry.suspended.pushed = forged;
     await h.editRef('refs/mdbisync/ids', 'ids.json', `${JSON.stringify(recorded, null, 2)}\n`, 'Record');
-    checksOn(forged, [{ name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
+    const status: FakeCheck = { name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 };
+    checksOn(forged, [status]);
     h.editHeadNote('mdbisync/suspended', () => '');
     const start = await rev('refs/heads/main');
-    const waiting = await sync({ MDBISYNC_MERGE_WITHOUT_CHECKS: 'false' });
+    const checked = { MDBISYNC_MERGE_WITHOUT_CHECKS: 'false' };
+    const waiting = await sync(checked);
     assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
     assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released a head whose checks never ran');
     assert.equal(await rev('refs/heads/main'), start);
-    // A push of the sync's own (a Linear edit of the held document) is recorded and ends the history again.
-    const transport = fakeFetch(h.world);
-    h.fetchOverride = async (input, init) => {
-      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
-      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [...PASSED, { name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
-      return transport(input, init);
-    };
-    await editInLinear(path, '# Plan\n\nHeld Linear edit, second.\n');
-    const released = await sync({ MDBISYNC_MERGE_WITHOUT_CHECKS: 'false', MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+    // The sync's own commit on top runs the checks again; its record holds from run to run, and once they pass it releases.
+    const again = await rev(SUSPENDED);
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P%n%s', again]), `${forged}\nRun the checks again on suspended changes`);
+    checksOn(again, [...PASSED, status]);
+    const released = await sync(checked);
     assert.ok(released.report.pullRequest?.suspended?.released, 'did not release the sync\'s own push once its checks passed');
   });
 

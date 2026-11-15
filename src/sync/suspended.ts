@@ -16,6 +16,8 @@ import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNa
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
 export const SET_ASIDE_MESSAGE = 'Set aside suspended changes';
 export const LINEAR_INTAKE_MESSAGE = "Take Linear's changes to suspended documents";
+/** A commit of the sync's own on a suspended head whose earlier checks are unknown: its push runs the checks again. */
+export const SUSPENDED_CHECKS_AGAIN_MESSAGE = 'Run the checks again on suspended changes';
 
 export interface SuspendedResult {
   paths: string[];
@@ -254,6 +256,12 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
         bases.linear = linear;
       }
     }
+  }
+  // A head whose earlier checks the branch's history does not show (no head the sync signed a record of pushing is below
+  // it: the branch was rewritten, or the record was written before records were signed) gets a commit of the sync's
+  // own on top, with the same files, as on the normal lane: its push runs the checks again and is recorded.
+  if (head === previous && !(await expectedChecks(options.github, head, [], { body: undefined, git, base: tracked, pushed: lastPushed(context, options, ids) })).complete) {
+    head = await commit(context, options, await git.text(['rev-parse', `${head}^{tree}`]), [head], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear));
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
