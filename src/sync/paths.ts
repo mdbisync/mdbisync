@@ -11,18 +11,28 @@ import { isGitDirectoryName } from '../state/objects.ts';
  */
 export const PATH_RULE = 'percent-encode-unsafe-segments' satisfies PathRule;
 
+const escapeFirst = (text: string) => text === '' ? '%00' : `%${text.charCodeAt(0).toString(16).toUpperCase()}${text.slice(1)}`;
+
+/**
+ * Keeps a name below common file-system byte limits: a longer one becomes its first 40 characters and a hash of
+ * `source`. The shortened name is checked again, since without the code points HFS+ ignores, `git` and a hash of
+ * digits read as the Git directory's short name `git~<n>`.
+ */
+function shorten(name: string, source: string): string {
+  if (Buffer.byteLength(name) <= 180) return name;
+  const short = `${[...name].slice(0, 40).join('')}~${createHash('sha256').update(source).digest('hex').slice(0, 16)}`;
+  return isGitDirectoryName(short) ? escapeFirst(short) : short;
+}
+
 /** Titles are slash paths. Encode unsafe segments without allowing traversal or platform aliases. */
 export function titlePath(title: string): string {
   return title.normalize('NFC').split('/').map((part) => {
     let safe = part.replace(/[%\\\u0000-\u001f\u007f:*?"<>|]/g, (char) => char === '*' ? '%2A' : encodeURIComponent(char));
-    const escapeFirst = (text: string) => text === '' ? '%00' : `%${text.charCodeAt(0).toString(16).toUpperCase()}${text.slice(1)}`;
     if (safe === '' || safe === '.' || safe === '..' || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(safe)) safe = escapeFirst(safe);
     safe = safe.replace(/[. ]+$/, (suffix) => [...suffix].map((char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`).join(''));
     // Checked after the trailing dots and spaces are encoded, so `.git.` keeps its earlier name `.git%2E`.
     if (isGitDirectoryName(safe) || safe.toLowerCase() === '.github') safe = escapeFirst(safe);
-    // Keep every segment below common file-system byte limits.
-    if (Buffer.byteLength(safe) > 180) safe = `${[...safe].slice(0, 40).join('')}~${createHash('sha256').update(part).digest('hex').slice(0, 16)}`;
-    return safe;
+    return shorten(safe, part);
   }).join('/');
 }
 
@@ -49,7 +59,7 @@ export function documentPath(folder: string, title: string, id: string, occupied
   const suffix = createHash('sha256').update(id).digest('hex').slice(0, 12);
   // A conflicting ancestor may be a file; flatten the title in that case.
   const flattened = titlePath(title).replaceAll('/', '%2F');
-  const flat = Buffer.byteLength(flattened) > 180 ? `${[...flattened].slice(0, 40).join('')}~${createHash('sha256').update(title).digest('hex').slice(0, 16)}` : flattened;
+  const flat = shorten(flattened, title);
   if (previous !== undefined && !conflicts(previous)) {
     const prefix = inFolder(folder, `${flat}~${suffix}`);
     if (previous === `${prefix}.md` || (previous.startsWith(`${prefix}-`) && /^\d+\.md$/.test(previous.slice(prefix.length + 1)))) return previous;

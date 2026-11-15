@@ -20,6 +20,7 @@ import { loadMapping } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { NEUTRAL_IDENTITY } from '../state/index.ts';
 import { Git, commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
+import { isGitDirectoryName } from '../state/objects.ts';
 import { type SecurityGate } from '../sync/security.ts';
 import { LINK_VARIANT_LINKS, capture } from '../sync/capture.ts';
 import { candidateKey } from '../sync/staged.ts';
@@ -156,6 +157,21 @@ describe('initial sync from Linear to the tracked branch', () => {
       assert.ok(paths.includes(`${folder ? `${folder}/` : ''}${path}.md`), paths.join(', '));
     }
     assert.deepEqual(world.linear.documents.map((document) => document.title), titles);
+  });
+
+  it('imports a title whose shortened segment would name the Git directory under an escaped name, beside an ordinary document', async () => {
+    const world = fakeWorld();
+    // HFS+ ignores U+200C, and the hash of this long segment starts with digits only: shortened, it would read as `git~9361948027816177`.
+    const title = `git${'\u200c'.repeat(37)}${'x'.repeat(80)}31/note`;
+    world.linear.documents = [...linearDocuments(), doc('doc-shortened', title, { projectId: 'project-api' }, `# Note\n\n${CANARY}`)];
+    const { result } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    const paths = await files('refs/heads/mdbisync/linear');
+    assert.ok(!paths.some((path) => path.split('/').some(isGitDirectoryName)), paths.join(', '));
+    const ids = await readIds();
+    assert.equal(ids[`eng/notes/%67it${'\u200c'.repeat(37)}~9361948027816177/note.md`], 'doc-shortened');
+    assert.equal(ids['eng/notes/faq.md'], 'doc-faq');
+    assert.equal(world.linear.documents.at(-1)?.title, title);
   });
 
   /** A person merges the pull request with a merge commit. */

@@ -24,6 +24,13 @@ import { buildTree, checkRepoPath, isGitDirectoryName } from '../state/objects.t
 
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
+/**
+ * A title whose first segment is too long for a file name: it is shortened to its first 40 characters and a hash.
+ * HFS+ ignores U+200C, and this segment's hash starts with digits only, so the shortened name reads as
+ * `git~9361948027816177`, a short name of the Git directory.
+ */
+const SHORTENED_GIT_TITLE = `git${'\u200c'.repeat(37)}${'x'.repeat(80)}31/note`;
+
 const TREE = {
   'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
   'other/README.md': '---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n',
@@ -393,6 +400,30 @@ describe('capture from Linear', () => {
     assert.equal(ids.get('docs/%47IT~1/hooks/post-checkout.md')?.id, 'hook');
     const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
     assert.ok(!paths.some((path) => path.split('/').some(isGitDirectoryName)), paths.join(', '));
+  });
+
+  for (const staged of [false, true]) it(`captures a title whose shortened segment would name the Git directory${staged ? ' in the stage step' : ''}, beside an ordinary document`, async () => {
+    world.linear.documents.push(
+      { id: 'shortened', title: SHORTENED_GIT_TITLE, content: 'Shortened.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' },
+      { id: 'ordinary', title: 'ordinary', content: 'Ordinary.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z' },
+    );
+    const path = `docs/%67it${'\u200c'.repeat(37)}~9361948027816177/note.md`;
+    if (staged) {
+      // The stage step checks every path it stages, as the staging gate does.
+      const paths = new Set<string>();
+      const result = await capture(context, { config, state: context.fetched.state, identity: IDENTITY, stageOnly: true, security: { configured: true, check: async (files) => { for (const name of files.keys()) { checkRepoPath(name); paths.add(name); } return []; } } });
+      assert.ok(result.ok);
+      assert.deepEqual([...paths].sort(), [path, 'docs/ordinary.md']);
+      return;
+    }
+    const result = await run();
+    assert.ok(result.ok);
+    assert.equal(await text(path), 'Shortened.\n');
+    assert.equal(await text('docs/ordinary.md'), 'Ordinary.\n');
+    const ids = await readIds(context.git, result.state.ids);
+    assert.equal(ids.get(path)?.id, 'shortened');
+    const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.some((name) => name.split('/').some(isGitDirectoryName)), paths.join(', '));
   });
 
   it('moves a document away from an earlier path that names the Git directory', async () => {
@@ -1107,6 +1138,20 @@ it('makes safe title paths and deterministic collision names', () => {
   assert.equal(titlePath('.github./x'), '.github%2E/x');
   assert.equal(titlePath('.github-notes/x'), '.github-notes/x');
   assert.equal(titlePath('GIT~1/hooks'), '%47IT~1/hooks');
+  // A segment shortened for its length is checked again: the shortened name would name the Git directory.
+  assert.ok(isGitDirectoryName(`git${'\u200c'.repeat(37)}~9361948027816177`), 'the test title shortens to a Git directory name');
+  assert.equal(titlePath(SHORTENED_GIT_TITLE), `%67it${'\u200c'.repeat(37)}~9361948027816177/note`);
+  const first = documentPath('docs', SHORTENED_GIT_TITLE, 'one', new Set());
+  const taken = documentPath('docs', SHORTENED_GIT_TITLE, 'one', new Set([first]));
+  assert.notEqual(taken, first);
+  // A title flattened next to a file is shortened as a whole and checked again too: its hash starts with digits only.
+  const flattened = `git${'\u200c'.repeat(37)}/${'y'.repeat(80)}304`;
+  const beside = documentPath('docs', flattened, 'one', new Set(['docs/git' + '\u200c'.repeat(37)]));
+  assert.equal(beside, `docs/%67it${'\u200c'.repeat(37)}~9789717049867131~${createHash('sha256').update('one').digest('hex').slice(0, 12)}.md`);
+  for (const path of [first, taken, beside]) {
+    assert.ok(!path.split('/').some(isGitDirectoryName), path);
+    checkRepoPath(path);
+  }
   assert.equal(titlePath('git~1x/page'), 'git~1x/page');
   // Names that were already safe keep the file name they had.
   assert.equal(titlePath('.git./x'), '.git%2E/x');
