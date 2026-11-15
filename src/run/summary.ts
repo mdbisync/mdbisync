@@ -18,10 +18,11 @@ export function placeLabel(place: Place): string {
  * next space or `<`, escapes included, so it is left as written: the link
  * shows its own target and nothing inside it is read as markup. The
  * punctuation GitHub leaves out of the link at its end stays as written too,
- * since there it can neither open emphasis nor start a link. Two rare cases
+ * since there it can neither open emphasis nor start a link. A few rare cases
  * show a backslash instead of a change of markup: a pipe inside a URL, which
- * must stay escaped to keep the row, and an entity reference (`&amp;`) right
- * at a URL's end.
+ * must stay escaped to keep the row; a backslash inside a URL, where the
+ * written part ends and the rest is escaped as usual; and an entity reference
+ * (`&amp;`) right at a URL's end.
  */
 export function cell(text: string): string {
   const flat = text.replace(/[\r\n]+/g, ' ');
@@ -30,22 +31,28 @@ export function cell(text: string): string {
   for (const match of flat.matchAll(BARE_URL)) {
     const url = linkedPart(match[0]);
     const tail = match[0].slice(url.length);
-    result += escapeMarkup(flat.slice(done, match.index)) + url.replace(/\|/g, '\\|') + tail.replace(/&/g, '\\&');
+    result += escapeMarkup(flat.slice(done, match.index)) + escape(url, /[\\|]/g) + escape(tail, /[\\&]/g);
     done = match.index + match[0].length;
   }
   return result + escapeMarkup(flat.slice(done));
 }
 
+/** Backslash-escapes the characters `chars` matches; it always matches the backslash, so no escape is undone. */
+function escape(text: string, chars: RegExp): string {
+  return text.replace(chars, (char) => `\\${char}`);
+}
+
 function escapeMarkup(text: string): string {
-  return text.replace(/[\\`*_~[\]<>!&|$@#]/g, (char) => `\\${char}`);
+  return escape(text, /[\\`*_~[\]<>!&|$@#]/g);
 }
 
 /**
  * A bare URL as GitHub-flavored Markdown finds one: `http://`, `https://` or
  * `www.` after the start, a space, `(`, `*`, `_` or `~`, then a domain with a
- * dot, then everything up to the next space or `<`.
+ * dot, then everything up to the next space or `<`. The part kept as written
+ * ends before a backslash, so a pipe after it cannot lose its escape.
  */
-const BARE_URL = /(?<=^|[\s(*_~])(?:https?:\/\/|www\.)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+[^\s<]*/gi;
+const BARE_URL = /(?<=^|[\s(*_~])(?:https?:\/\/|www\.)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+[^\s<\\]*/gi;
 
 /** The part GFM links: it leaves out trailing punctuation, an unmatched `)` and a trailing entity reference. */
 function linkedPart(url: string): string {

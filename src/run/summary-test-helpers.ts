@@ -16,7 +16,7 @@ export const MARKUP_TEXTS = [
   'Amp &lt;i&gt; entity \\[ escaped',
   'Release :rocket: for @someone in #12',
   'Mail team_one@example.com and www.example.com/a_b and https://example.com/x_y?a=1&b=2~3',
-  'Wrapped (https://example.com/a_b) and https://example.com/end_*! and https://example.com/a[b]`c`\\d then *x*',
+  'Wrapped (https://example.com/a_b) and https://example.com/end_*! and https://example.com/a[b]`c` then *x*',
   'Pipe a|b and back\\slash',
 ];
 

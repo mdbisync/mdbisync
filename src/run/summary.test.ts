@@ -21,6 +21,11 @@ describe('cell', () => {
     assert.equal(cell('xhttps://example.com/a_b'), 'xhttps://example.com/a\\_b');
   });
 
+  it('keeps a row one row when a URL holds a backslash before a pipe', () => {
+    assert.equal(cell('https://example.com/a\\|b'), 'https://example.com/a\\\\\\|b');
+    for (const text of ['https://example.com/a\\|b c', 'see www.example.com/x\\\\|y|z']) assert.equal(roundTrip(text)[1]?.length, 1, text);
+  });
+
   it('leaves ordinary paths readable as they are', () => {
     assert.equal(cell('eng/backend/notes-2026.md'), 'eng/backend/notes-2026.md');
   });
