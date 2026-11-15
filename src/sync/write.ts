@@ -37,6 +37,7 @@ import {
   type IdEntry,
   type IdMap,
   type Oid,
+  type PushedRecord,
   type RefUpdate,
   type StateConfig,
   type StateSnapshot,
@@ -1059,9 +1060,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const trailers = [...recordedTrailers(asWritten), ...(keptMoved ? keptAnnotationsTrailers(kept) : [])];
     const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}\n\n${trailers.join('\n')}`;
     const createBranch = options.createSyncBranch === true && commit !== linearTip;
-    const idsOf = (syncPushed?: Oid) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...(syncPushed === undefined ? {} : { syncPushed }) });
+    const idsOf = (syncPushed?: PushedRecord) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...(syncPushed === undefined ? {} : { syncPushed }) });
     // The ids record the branch's head as the sync's own push, only together with that push.
-    let recordedIds = await idsOf(createBranch ? commit : undefined);
+    let recordedIds = await idsOf(createBranch ? context.pushedKey.record(branchRef(options.config.syncBranch), commit) : undefined);
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
     // documents to relink, before they are changes) leaves the rest to the next run.
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};

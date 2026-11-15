@@ -672,7 +672,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       message: trailers.length === 0 ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}\n\n${trailers.join('\n')}`,
       always: markersMoved || (await readInitialSyncProgress(git, expected.ids)) !== null,
       // The sync branch moves to the record with this commit: the ids name it as the sync's own push.
-      ...(moveSync ? { syncPushed: commit } : {}),
+      ...(moveSync ? { syncPushed: context.pushedKey.record(branchRef(options.config.syncBranch), commit) } : {}),
     });
     // The cache records each downloaded file, so the sync never uploads it again.
     const finalUploads: UploadMap = new Map(uploads);

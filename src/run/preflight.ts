@@ -18,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress, suspendedBranch } from '../state/index.ts';
+import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, PushedKey, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress, suspendedBranch } from '../state/index.ts';
 import { type CheckClock } from '../pull-request/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
@@ -37,6 +37,8 @@ export interface RunContext {
   linear: LinearClient;
   /** Who the run's commits are by: the App's bot account, read in the setup check. */
   identity: CommitIdentity;
+  /** Signs the heads the run records as its own pushes; keyed by the Linear app's secret, which only the sync holds. */
+  pushedKey: PushedKey;
 }
 
 export interface PreflightOutcome {
@@ -138,7 +140,7 @@ export async function runPreflight(
       try {
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
         setup = report;
-        if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY });
+        if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY, pushedKey: new PushedKey(inputs.linear.clientSecret, inputs.github.repository) });
         return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       } catch (error) {
         // Linear stopped the client (a rate limit, a budget running low) outside the steps that record their progress.

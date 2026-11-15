@@ -252,7 +252,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A head whose earlier checks the history does not show is never kept: the sync's next push (Linear's changes, or
     // a commit that runs the checks again, below) is what lets it merge again.
     const checkedExpectation = async () => {
-      const known = await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: await readSyncPushed(git, options.state.ids) });
+      const known = await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) });
       return known.complete ? checkExpectation(options, known.checks) : null;
     };
     const keepCheckedHead = open !== null && pending && suspended?.waiting !== true && noted === null
@@ -320,7 +320,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // on top, with the same tree. Its push starts the repository's whole CI and is recorded, so the pull request can
     // merge without waiting for a Linear change.
     if (head === sync && pending && options.state.ids !== null
-      && !(await expectedChecks(github, sync as Oid, [], { body: open?.body, git, base: tracked, pushed: await readSyncPushed(git, options.state.ids) })).complete) {
+      && !(await expectedChecks(github, sync as Oid, [], { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) })).complete) {
       head = await commitTree(git, { base: headTree as string, changes: new Map(), parents: [sync as Oid], message: CHECKS_AGAIN_MESSAGE, identity, skipIfUnchanged: false });
     }
 
@@ -339,7 +339,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const since = headSince(open?.body, head, new Date());
     // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
     // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
-    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync] } : { body: open?.body, git, base: tracked, pushed: await readSyncPushed(git, options.state.ids) });
+    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync] } : { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) });
     const stillHeld = hold === null ? null : { ...hold, head };
     // Whoever added commits to the sync branch, the sync merges only changes to synchronized documents and their assets.
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);
@@ -509,6 +509,15 @@ async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boo
 }
 
 /**
+ * The last head the sync's state records it pushed on the sync branch, once the record's signature proves the sync
+ * wrote it; none for a record someone else wrote (the state's refs are open to anyone who may push) or one written
+ * before records were signed. Without it a head's earlier checks are unknown, and the sync pushes a commit of its own.
+ */
+async function ownPushed(context: RunContext, options: PullRequestOptions): Promise<Oid | undefined> {
+  return context.pushedKey.verified(branchRef(options.config.syncBranch), await readSyncPushed(context.git, options.state.ids));
+}
+
+/**
  * Pushes `next` to the sync branch together with the id state that records it as the sync's own head, both or neither:
  * the checks expected of a later head are read down to it (see `expectedChecks`), and a commit someone else pushed
  * never takes its place.
@@ -517,7 +526,7 @@ async function pushSyncBranch(context: RunContext, options: PullRequestOptions, 
   const { git } = context;
   const ids = options.state.ids;
   const updates: RefUpdate[] = [{ ref: branchRef(options.config.syncBranch), expected, next }];
-  const idsTip = ids === null ? null : await commitLaneIds(context, ids, await readIds(git, ids), 'Sync: record the sync branch head', options.identity, next);
+  const idsTip = ids === null ? null : await commitLaneIds(context, ids, await readIds(git, ids), 'Sync: record the sync branch head', options.identity, context.pushedKey.record(branchRef(options.config.syncBranch), next));
   if (idsTip !== null) updates.push({ ref: stateRef(options.config, 'ids'), expected: ids, next: idsTip });
   const pushed = await pushAtomic(git, options.config, updates);
   if (pushed.ok && idsTip !== null) options.state.ids = idsTip;

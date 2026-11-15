@@ -18,7 +18,7 @@ import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { LinearClient } from '../linear/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
-import { NEUTRAL_IDENTITY } from '../state/index.ts';
+import { NEUTRAL_IDENTITY, PushedKey } from '../state/index.ts';
 import { Git, commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { isGitDirectoryName } from '../state/objects.ts';
 import { type SecurityGate } from '../sync/security.ts';
@@ -1285,7 +1285,7 @@ describe('the security gate of an initial sync from Linear', () => {
         },
       };
       const { result } = await confirmLinearToGit(
-        { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY },
+        { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY, pushedKey: new PushedKey('client-secret', 'owner/repo') },
         { config, github: { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) }, security, stopAfterDocuments: undefined },
       );
       assert.equal(result.complete, true, result.code);
@@ -1325,7 +1325,7 @@ describe('the security gate of an initial sync from Linear', () => {
     const linear = new LinearClient({ token: 'test', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
     const { targets } = await resolveTargets(linear, mapping.zones.values());
     assert.ok(targets);
-    const context = { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY };
+    const context = { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY, pushedKey: new PushedKey('client-secret', 'owner/repo') };
     const github = { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) };
     const hooks = (files: ReadonlyMap<string, FileContent>) => ([...files.values()].some((content) => refused(contentBytes(content).toString())) ? [{ hook: 'privacy-check', line: 1 }] : []);
     const passed = new Map<string, Buffer[]>();
@@ -1491,7 +1491,7 @@ describe('the security gate of an initial sync from Linear', () => {
         const mapping = await loadMapping(git, fetched.tracked);
         const { targets } = await resolveTargets(linear, mapping.zones.values());
         assert.ok(targets);
-        const context = { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY };
+        const context = { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY, pushedKey: new PushedKey('client-secret', 'owner/repo') };
         const staged = new Set<string>();
         await capture(context, { config, state: fetched.state, identity: NEUTRAL_IDENTITY, stageOnly: true, security: { configured: true, check: async (files) => { staged.add(candidateKey(files)); return []; } } });
         return capture(context, { config, state: fetched.state, identity: NEUTRAL_IDENTITY, security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : refused(files) ? [{ hook: 'privacy-check', line: 1 }] : []) } });
@@ -1534,7 +1534,7 @@ describe('the security gate of an initial sync from Linear', () => {
       },
     };
     const { result } = await confirmLinearToGit(
-      { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY },
+      { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY, pushedKey: new PushedKey('client-secret', 'owner/repo') },
       { config, github: { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) }, security, stopAfterDocuments: undefined },
     );
     assert.equal(result.complete, true, result.code);

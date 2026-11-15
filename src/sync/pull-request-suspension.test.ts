@@ -437,6 +437,39 @@ describe('sync: pull request suspension', () => {
     assert.ok(released.report.pullRequest?.suspended?.released);
   });
 
+  // The episodes in the sync's state are a ref anyone who may push can rewrite: naming a head there as the sync's own
+  // push, rebuilt on the tracked branch so no earlier check is below it, does not end the suspended branch's history.
+  it('does not release a head someone else recorded as its own push on the suspended branch', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne(path);
+    await sync();
+    const held = await rev(SUSPENDED);
+    const env = { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
+    const message = await h.fixture.remote.text(['show', '-s', '--format=%B', held]);
+    const forged = await h.fixture.remote.text(['commit-tree', `${held}^{tree}`, '-p', await rev('refs/heads/main'), '-m', message], { env });
+    await h.forcePush(SUSPENDED, forged);
+    const recorded = await ids() as Record<string, { suspended?: { pushed?: string } }>;
+    for (const entry of Object.values(recorded)) if (entry.suspended !== undefined) entry.suspended.pushed = forged;
+    await h.editRef('refs/mdbisync/ids', 'ids.json', `${JSON.stringify(recorded, null, 2)}\n`, 'Record');
+    checksOn(forged, [{ name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
+    h.editHeadNote('mdbisync/suspended', () => '');
+    const start = await rev('refs/heads/main');
+    const waiting = await sync({ MDBISYNC_MERGE_WITHOUT_CHECKS: 'false' });
+    assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+    assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released a head whose checks never ran');
+    assert.equal(await rev('refs/heads/main'), start);
+    // A push of the sync's own (a Linear edit of the held document) is recorded and ends the history again.
+    const transport = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => {
+      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
+      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [...PASSED, { name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
+      return transport(input, init);
+    };
+    await editInLinear(path, '# Plan\n\nHeld Linear edit, second.\n');
+    const released = await sync({ MDBISYNC_MERGE_WITHOUT_CHECKS: 'false', MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+    assert.ok(released.report.pullRequest?.suspended?.released, 'did not release the sync\'s own push once its checks passed');
+  });
+
   it('does not release a suspended batch on a commit status named after the check run its earlier head ran', async () => {
     const path = 'eng/notes/plan.md';
     await suspendOne(path);

@@ -7,7 +7,7 @@ import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
 import { oneLine, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
-import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type StateConfig, type StateSnapshot } from '../state/index.ts';
+import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure } from '../pull-request/index.ts';
@@ -113,15 +113,15 @@ async function includeCapturedAssets(git: Git, linear: Oid, ids: IdMap, paths: S
   }
 }
 
-async function persistIds(context: RunContext, options: LaneOptions, ids: IdMap, syncPushed?: Oid): Promise<Oid> {
+async function persistIds(context: RunContext, options: LaneOptions, ids: IdMap, syncPushed?: PushedRecord): Promise<Oid> {
   return commitLaneIds(context, options.state.ids, ids, 'Sync: suspended document ids', options.identity, syncPushed);
 }
 
 /**
  * Commits the id map on `parent`, keeping its other state files (reserved ids and the like); with `syncPushed`, as the
- * head the sync pushes on the sync branch together with this commit.
+ * head the sync pushes on the sync branch together with this commit, signed.
  */
-export async function commitLaneIds(context: RunContext, parent: Oid | null, ids: IdMap, message: string, identity?: CommitIdentity, syncPushed?: Oid): Promise<Oid> {
+export async function commitLaneIds(context: RunContext, parent: Oid | null, ids: IdMap, message: string, identity?: CommitIdentity, syncPushed?: PushedRecord): Promise<Oid> {
   const {git} = context;
   return commitIds(git, parent, ids, identity ?? context.identity, { message, reserved: await readReservedIds(git, parent), superseded: await readSupersededIds(git, parent), written: await readWrittenHashes(git, parent), ...(syncPushed === undefined ? {} : { syncPushed }) });
 }
@@ -130,18 +130,20 @@ async function push(context: RunContext, options: LaneOptions, ids: IdMap, head:
   // Keep one copy of the complete lane path set, rather than N copies in a batch of N documents.
   const paths = suspendedPaths(ids);
   // Only a push that moves the suspended branch is the sync's own head; a run that finds someone else's commit there
-  // keeps the earlier one.
-  const own = updateLane && head !== expected ? head : lastPushed(ids);
+  // keeps the earlier one, as it was recorded. The sync signs the heads it pushes (see `PushedKey`).
+  const own = updateLane && head !== expected ? context.pushedKey.record(branchRef(suspendedBranch(options.config)), head) : recordedPushed(ids);
   let first = true;
   for (const [path, entry] of ids) if (entry.suspended !== undefined) {
     entry.suspended.paths = first ? [...paths].sort() : [path];
     entry.suspended.head = head;
-    if (own === undefined) delete entry.suspended.pushed;
-    else entry.suspended.pushed = own;
+    delete entry.suspended.pushed;
+    delete entry.suspended.pushedMac;
+    if (own !== undefined) entry.suspended.pushed = own.head;
+    if (own?.mac !== undefined) entry.suspended.pushedMac = own.mac;
     first = false;
   }
   // A normal head this push moves the sync branch to is the sync's own, recorded with it.
-  const idsTip = await persistIds(context, options, ids, normal?.next);
+  const idsTip = await persistIds(context, options, ids, normal === undefined ? undefined : context.pushedKey.record(branchRef(options.config.syncBranch), normal.next));
   const updates = [
     { ref: stateRef(options.config, 'ids'), expected: options.state.ids, next: idsTip },
     { ref: stateRef(options.config, 'linear'), expected: options.state.linear, next: options.state.linear as Oid },
@@ -156,9 +158,19 @@ async function push(context: RunContext, options: LaneOptions, ids: IdMap, head:
   return pushed.updated.length > 0;
 }
 
-/** The last head the sync itself pushed on the suspended branch, as its episodes record it. */
-function lastPushed(ids: IdMap): Oid | undefined {
-  return [...ids.values()].find((entry) => entry.suspended?.pushed !== undefined)?.suspended?.pushed;
+/** The last head the sync itself pushed on the suspended branch, as its episodes record it, with its signature. */
+function recordedPushed(ids: IdMap): PushedRecord | undefined {
+  const episode = [...ids.values()].find((entry) => entry.suspended?.pushed !== undefined)?.suspended;
+  if (episode?.pushed === undefined) return undefined;
+  return episode.pushedMac === undefined ? { head: episode.pushed } : { head: episode.pushed, mac: episode.pushedMac };
+}
+
+/**
+ * That head, once its signature proves the sync recorded it; none for a record someone else wrote (the state's refs
+ * are open to anyone who may push) or one written before records were signed: the earlier checks are then unknown.
+ */
+function lastPushed(context: RunContext, options: LaneOptions, ids: IdMap): Oid | undefined {
+  return context.pushedKey.verified(branchRef(suspendedBranch(options.config)), recordedPushed(ids));
 }
 
 async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap, paths: ReadonlySet<string>, checks: string[], timedOut: string[] = []): Promise<void> {
@@ -255,7 +267,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
   // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`). The episodes record
   // the last head the sync pushed on this branch, also a single-parent commit (a Linear intake): the history stops there.
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body, git, base: tracked, pushed: lastPushed(ids) });
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
   // As in the normal lane: whoever added commits to this branch, the sync merges only synchronized documents and their
   // assets. Read before the checks, so a head the sync will not merge neither holds the normal lane nor marks documents.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];

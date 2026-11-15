@@ -343,7 +343,7 @@ describe('sync: pull request checks', () => {
     await editInLinear(path, '# Plan\n\nFirst edit.\n');
     await sync();
     // The sync records the head it pushed in its own state, beside the document ids.
-    assert.deepEqual(JSON.parse(await show('refs/mdbisync/ids:sync-pushed.json')), { head: await rev(SYNC_BRANCH) });
+    assert.equal((JSON.parse(await show('refs/mdbisync/ids:sync-pushed.json')) as { head: string }).head, await rev(SYNC_BRANCH));
     checksOn(await rev(SYNC_BRANCH), [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'failure' }]);
     // Linear's state below its tip: the tip is the branch's head itself.
     await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nChanged.\n', 'Merge', await rev(parent === 'main' ? 'refs/heads/main' : 'refs/mdbisync/linear~1'));
@@ -384,8 +384,57 @@ describe('sync: pull request checks', () => {
     assert.equal(run.report.pullRequest?.branchMoved, true, 'did not run the checks again');
     const again = run.report.pullRequest?.merged ? (await h.fixture.remote.text(['show', '-s', '--format=%P', await rev('refs/heads/main')])).split(' ')[1]! : await rev(SYNC_BRANCH);
     assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P%n%s', again]), `${rebuilt}\nRun the checks again on the sync branch`);
-    assert.deepEqual(JSON.parse(await show('refs/mdbisync/ids:sync-pushed.json')), { head: again });
+    assert.equal((JSON.parse(await show('refs/mdbisync/ids:sync-pushed.json')) as { head: string }).head, again);
     assert.ok(run.report.pullRequest?.merged, 'did not merge once the checks passed on the new head');
+  });
+
+  // The sync's state is a ref anyone who may push can rewrite: a record naming a head the sync never pushed proves
+  // nothing. Such a head, rebuilt on the tracked branch so no earlier check is below it, with a status of its own and
+  // the description's note cleared, gets a commit of the sync's own on top, whose checks must pass before it merges.
+  it('does not take a head someone else recorded as its own push for one it pushed', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'tests', status: 'completed', conclusion: 'failure' }]);
+    const env = { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
+    const forged = await h.fixture.remote.text(['commit-tree', `${await rev(SYNC_BRANCH)}^{tree}`, '-p', h.start, '-m', 'Rebuilt'], { env });
+    await h.forcePush(SYNC_BRANCH, forged);
+    const recorded = JSON.parse(await show('refs/mdbisync/ids:sync-pushed.json')) as Record<string, unknown>;
+    await editRef('refs/mdbisync/ids', 'sync-pushed.json', `${JSON.stringify({ ...recorded, head: forged })}\n`, 'Record');
+    checksOn(forged, [{ name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
+    h.editHeadNote('mdbisync/linear', () => '');
+    const checked = { MDBISYNC_MERGE_WITHOUT_CHECKS: 'false', MDBISYNC_MERGE_GRACE_SECONDS: '20' };
+    const run = await sync(checked);
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.pullRequest?.merged, null, 'merged a head whose checks never ran');
+    assert.equal(await rev('refs/heads/main'), h.start);
+    const again = await rev(SYNC_BRANCH);
+    assert.equal(run.report.pullRequest?.branchMoved, true, 'did not run the checks again');
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P%n%s', again]), `${forged}\nRun the checks again on the sync branch`);
+    assert.equal((JSON.parse(await show('refs/mdbisync/ids:sync-pushed.json')) as { head: string }).head, again);
+    // The record of the sync's own push holds from run to run: once the checks of that push pass, it merges.
+    checksOn(again, [{ name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const merged = await sync(checked);
+    assert.equal(merged.report.pullRequest?.branchMoved, false);
+    assert.ok(merged.report.pullRequest?.merged);
+  });
+
+  // A record written before the sync signed its records proves nothing either: one push of its own replaces it.
+  it('runs the checks again once over a record of its own push that is not signed', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    const head = await rev(SYNC_BRANCH);
+    checksOn(head, [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
+    await editRef('refs/mdbisync/ids', 'sync-pushed.json', `${JSON.stringify({ head })}\n`, 'Record');
+    const run = await sync({ MDBISYNC_MERGE_WITHOUT_CHECKS: 'false' });
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.pullRequest?.merged, null);
+    const again = await rev(SYNC_BRANCH);
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P', again]), head);
+    checksOn(again, [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const merged = await sync({ MDBISYNC_MERGE_WITHOUT_CHECKS: 'false' });
+    assert.ok(merged.report.pullRequest?.merged);
   });
 
   // Anyone who may write commit statuses can name one after a check run; only the check's own publisher proves it ran.

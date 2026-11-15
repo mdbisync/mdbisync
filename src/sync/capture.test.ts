@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY, remoteRef } from '../state/test-helpers.ts';
-import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs } from '../state/index.ts';
+import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs, PushedKey } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { LinearClient, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
@@ -59,7 +59,7 @@ describe('capture from Linear', () => {
       uploads: await commitUploads(git, null, new Map(), IDENTITY),
     };
     assert.equal((await pushAtomic(git, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })))).ok, true);
-    context = { git, fetched: await fetchState(git, config), mapping, targets, linear, identity: IDENTITY };
+    context = { git, fetched: await fetchState(git, config), mapping, targets, linear, identity: IDENTITY, pushedKey: new PushedKey('client-secret', 'owner/repo') };
   });
   afterEach(() => fixture.cleanup());
   const run = () => capture(context, { config, state: context.fetched.state, identity: IDENTITY });

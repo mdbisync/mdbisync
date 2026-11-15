@@ -283,10 +283,14 @@ remain after release; its presence alone does not mean a batch is on hold.
   head the sync itself pushed there, which its state records, from git and
   GitHub. A commit someone else pushed never counts as the sync's, whatever
   its parents: a merge of the tracked branch made by hand does not end the
-  history. When that head is more than 50 commits below, no longer in the
-  branch's history (the branch was rewritten), or not recorded yet (a pull
-  request the sync last pushed before it recorded its heads), the head does
-  not merge: the sync adds a commit of its own with the same files, `Run
+  history. The state's refs are open to anyone who may push, so the sync
+  signs each record with a key derived from `linear-client-secret`, which
+  only the sync holds, and bound to the repository and the branch; a
+  record without a valid signature counts as none. When that head is more
+  than 50 commits below, no longer in the branch's history (the branch was
+  rewritten), or not recorded yet (a pull request the sync last pushed
+  before it signed its records, or after `linear-client-secret` changed),
+  the head does not merge: the sync adds a commit of its own with the same files, `Run
   the checks again on the sync branch`, whose push runs the checks again.
   A head the sync pushes itself starts the repository's whole CI, so it
   expects only what the head it was pushed on registered, besides
