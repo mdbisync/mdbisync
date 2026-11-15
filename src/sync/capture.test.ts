@@ -67,6 +67,37 @@ describe('capture from Linear', () => {
   const refresh = async () => { context.fetched = await fetchState(context.git, config); };
   const text = async (path: string) => (await fixture.remote.run(['show', `${stateRef(config, 'linear')}:${path}`])).stdout.toString('utf8');
 
+  it('leaves deeply nested documents out while capturing an unrelated document on repeated runs', async () => {
+    const nested = '> '.repeat(130) + 'nesting-canary';
+    world.linear.documents[0]!.content = nested;
+    world.linear.documents.push(
+      {id: 'deep-new', title: 'deep', content: nested, projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'},
+      {id: 'ordinary', title: 'ordinary', content: 'Ordinary update.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z'},
+    );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await run();
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.leftOut.sort((a, b) => a.id.localeCompare(b.id)), [{id: 'deep-new', rule: 'markdown-complexity'}, {id: 'plan', rule: 'markdown-complexity'}]);
+      assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+      assert.equal(await text('docs/ordinary.md'), 'Ordinary update.\n');
+      assert.ok(!JSON.stringify(result.leftOut).includes('nesting-canary'));
+      assert.equal(world.linear.comments.size, 0);
+      await refresh();
+    }
+  });
+
+  it('captures a corrected document even when its accepted legacy body exceeds the depth limit', async () => {
+    const previous = context.fetched.state.linear!;
+    const legacy = await commitTree(context.git, {parents: [previous], base: previous, changes: new Map([['docs/plan.md', '> '.repeat(130) + 'legacy-canary']]), message: 'Legacy state', identity: IDENTITY});
+    assert.equal((await pushAtomic(context.git, config, [{ref: stateRef(config, 'linear'), expected: previous, next: legacy}])).ok, true);
+    await refresh();
+    world.linear.documents[0]!.content = 'Corrected.\n';
+    const result = await run();
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.leftOut, []);
+    assert.equal(await text('docs/plan.md'), 'Corrected.\n');
+  });
+
   it('captures through the CLI and omits document bodies from its report and summary', async () => {
     await fixture.seed({'.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n'});
     world.linear.documents[0]!.content = 'Private body canary.\n';

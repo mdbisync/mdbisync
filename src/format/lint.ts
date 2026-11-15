@@ -5,7 +5,7 @@
 
 import type { Definition, Root } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
-import { end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
@@ -57,7 +57,14 @@ export function lintText(file: string, text: string, options: LintOptions = {}):
   };
   const content = body.replace(/\r\n?/g, '\n');
   if ([...content].length > CONTENT_LIMIT) report('content-too-long', 1);
-  const tree = parse(content);
+  let tree: Root;
+  try {
+    tree = parse(content);
+  } catch (error) {
+    if (!(error instanceof MarkdownLimitError)) throw error;
+    report('markdown-complexity', 1);
+    return findings;
+  }
   lintTree(file, tree, content, report, options);
   return findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
 }

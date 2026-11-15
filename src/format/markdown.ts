@@ -64,8 +64,37 @@ export function lineCount(text: string): number {
   return count;
 }
 
+// Keep downstream renderers and structural comparisons within a safe depth,
+// and cap work even for a shallow document with many small nodes.
+export const MARKDOWN_MAX_DEPTH = 128;
+export const MARKDOWN_MAX_NODES = 500_000;
+
+export class MarkdownLimitError extends Error {
+  readonly limit: 'depth' | 'nodes';
+  constructor(limit: 'depth' | 'nodes') {
+    super(`Markdown exceeds the ${limit} limit.`);
+    this.name = 'MarkdownLimitError';
+    this.limit = limit;
+  }
+}
+
 export function parse(body: string, mdastExtensions: Extension[] = []): Root {
-  return fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
+  const tree = fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
+  // Validate before returning the tree to any recursive renderer or comparer.
+  visit(tree, () => {});
+  return tree;
+}
+
+/** An old accepted body can be too complex to use as a comparison baseline. */
+export function markdownBaseline(body: string | undefined): string | undefined {
+  if (body === undefined) return undefined;
+  try {
+    parse(body);
+    return body;
+  } catch (error) {
+    if (!(error instanceof MarkdownLimitError)) throw error;
+    return undefined;
+  }
 }
 
 /**
@@ -116,11 +145,30 @@ export function line(node: Nodes): number {
 
 /** Visits a node and all its descendants, parents before children, with their ancestors. */
 export function visit(node: Nodes, enter: (node: Nodes, ancestors: readonly Nodes[]) => void, ancestors: Nodes[] = []): void {
-  enter(node, ancestors);
-  if ('children' in node) {
-    ancestors.push(node);
-    for (const child of node.children) visit(child, enter, ancestors);
-    ancestors.pop();
+  const parents = [...ancestors];
+  const stack: Array<{ node: Nodes; next: number }> = [];
+  let count = 0;
+  for (;;) {
+    if (parents.length > MARKDOWN_MAX_DEPTH) throw new MarkdownLimitError('depth');
+    if (++count > MARKDOWN_MAX_NODES) throw new MarkdownLimitError('nodes');
+    enter(node, parents);
+    if ('children' in node && node.children.length > 0) {
+      stack.push({ node, next: 1 });
+      parents.push(node);
+      node = node.children[0]!;
+      continue;
+    }
+    // Keep one frame per ancestor, rather than queueing every sibling.
+    while (stack.length > 0) {
+      const frame = stack.at(-1)!;
+      if ('children' in frame.node && frame.next < frame.node.children.length) {
+        node = frame.node.children[frame.next++]!;
+        break;
+      }
+      stack.pop();
+      parents.pop();
+    }
+    if (stack.length === 0) return;
   }
 }
 

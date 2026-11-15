@@ -143,6 +143,7 @@ reasons:
 
 The confirmed run can leave out a few more: a file whose text grows past
 Linear's length limit when its links are rewritten (`content-too-long`), or
+whose Markdown exceeds the traversal limits (`markdown-complexity`), or
 whose LFS object still cannot be read (`upload-unreadable`), for example
 because the LFS server could not be reached during the dry run or answered
 with an error other than not having the object. Each rule and

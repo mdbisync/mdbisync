@@ -401,7 +401,7 @@ moved out of the synchronized projects, and the old paths of documents
 renamed or moved in Linear (a rename counts once as captured and once as
 removed); *blocked* documents got the
 [blocked mark](#the-blocked-mark); *left out* documents were not taken this
-run (`attachment-budget`, `capture-translation`, `download-retry` or `security-unchecked`,
+run (`markdown-complexity`, `attachment-budget`, `capture-translation`, `download-retry` or `security-unchecked`,
 [files left out](troubleshooting.md#files-left-out)). Lines that follow
 only when they apply:
 

@@ -12,6 +12,7 @@ import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.t
 import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
+import { MarkdownLimitError } from '../format/markdown.ts';
 import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, NEUTRAL_IDENTITY, buildTree, checkRepoPath, commitTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
 import { message } from '../messages.ts';
 import { type FileLeftOutRule } from '../codes.ts';
@@ -419,8 +420,13 @@ async function linkedFiles(git: Git, commits: readonly Oid[], path: string): Pro
     const blob = await git.run(['cat-file', 'blob', `${commit}:${path}`], { okCodes: [0, 128] });
     // The commit removed the file: that version links nothing.
     if (blob.code !== 0) continue;
-    for (const link of findFileLinks(path, splitFile(blob.stdout.toString('utf8')).body, () => true)) {
-      if (!link.target.endsWith(MARKDOWN_EXTENSION)) linked.add(link.target);
+    try {
+      for (const link of findFileLinks(path, splitFile(blob.stdout.toString('utf8')).body, () => true)) {
+        if (!link.target.endsWith(MARKDOWN_EXTENSION)) linked.add(link.target);
+      }
+    } catch (error) {
+      // Unsupported history cannot serve as a synchronized baseline.
+      if (!(error instanceof MarkdownLimitError)) throw error;
     }
   }
   return [...linked];
@@ -553,17 +559,27 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
       git: version(gitFiles, gitPath),
       linear: version(linearFiles, linearPath),
     };
-    const result: StructuralResult = await resolveStructural(versions);
+    let result: StructuralResult;
+    let gone: StructuralSummary | undefined;
+    try {
+      result = await resolveStructural(versions);
+      if (result.kind === 'linear-deleted-git-changed' && result.path !== null) {
+        gone = (await resolveStructural({ ...versions, linearGone: true })).summary as StructuralSummary;
+      }
+    } catch (error) {
+      if (!(error instanceof MarkdownLimitError)) throw error;
+      out.unresolved.push(...involved);
+      continue;
+    }
     for (const path of involved) changes.set(path, null);
     if (result.path !== null && result.text !== null) changes.set(result.path, result.text);
     if (linearPath !== null && result.path !== null && result.path !== linearPath) out.moves.set(linearPath, result.path);
     if (linearPath !== null && result.linear.comment !== undefined) out.comments.set(linearPath, result.linear.comment);
     let summary = result.summary;
     if (result.kind === 'linear-deleted-git-changed' && result.path !== null) {
-      const gone = (await resolveStructural({ ...versions, linearGone: true })).summary as StructuralSummary;
       const id = basePath === null ? undefined : await knownId(basePath);
-      if (id !== undefined) out.restores.set(result.path, { id, gone });
-      else summary = gone;
+      if (id !== undefined) out.restores.set(result.path, { id, gone: gone! });
+      else summary = gone!;
     }
     if (result.path !== null && result.conflicts.length > 0) out.marked.push(result.path);
     if (summary !== null) out.decided.push({ path: result.path ?? basePath ?? (involved[0] as string), summary });

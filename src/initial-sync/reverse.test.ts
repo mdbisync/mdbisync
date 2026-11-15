@@ -139,6 +139,20 @@ describe('initial sync from Linear to the tracked branch', () => {
   };
   const linearMutations = (world: FakeWorld) => world.writes.filter((write) => !write.includes(' '));
 
+  it('keeps a deeply nested document out of initial import while recording valid neighbors', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    world.linear.documents.find((document) => document.id === 'doc-plan')!.content = '> '.repeat(130) + CANARY;
+    world.linear.documents.push(doc('doc-deep', 'deep', {projectId: 'project-api'}, '> '.repeat(130) + CANARY));
+    const {result, report} = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.linearToGit?.leftOutAtRecord.some(({path, rule}) => path === 'eng/notes/deep.md' && rule === 'markdown-complexity'));
+    assert.equal(await show('refs/heads/mdbisync/linear:eng/notes/plan.md'), TREE['eng/notes/plan.md']);
+    assert.match(await show('refs/heads/mdbisync/linear:eng/notes/faq.md'), /FAQ/);
+    assert.ok(!(await files('refs/heads/mdbisync/linear')).includes('eng/notes/deep.md'));
+    assert.deepEqual(linearMutations(world), []);
+  });
+
   for (const folder of ['', 'eng/notes']) it(`encodes reserved GitHub title segments on import into ${folder || 'the root'}`, async () => {
     if (folder === '') await fixture.seed({
       'README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
