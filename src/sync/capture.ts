@@ -674,24 +674,33 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
     : [{targets: [...candidates.keys()], allOnly: false}];
   const order = [...candidates].sort(([a], [b]) => Number(options.refused?.has(a) === true) - Number(options.refused?.has(b) === true));
   const staged = new Map<string, Set<string>>();
+  // The candidates whose text a pass's targets leave as it is, by the targets: a later pass over the same targets skips them.
+  const unlinked = new Map<readonly string[], Set<string>>();
   for (const pass of passes) {
+    const passUnlinked = unlinked.get(pass.targets) ?? new Set<string>();
+    unlinked.set(pass.targets, passUnlinked);
     for (const [id, candidate] of order) {
+      if (passUnlinked.has(id)) continue;
       if (budget.sets <= 0) { budget.short = true; return; }
       const accepted = candidate.files.get(candidate.path) as string;
       // The candidate's text with the `rejected` targets' fallback links; undefined once the budget is spent.
-      const without = (rejected: readonly string[]): string | undefined => {
+      // With `free`, a text that cannot be staged (the accepted one, or the one the file already holds) costs
+      // nothing: candidates that link none of the targets, or whose text is already recorded, cannot use up
+      // the budget of the others on every run while the cursor holds. Their work stays one text per pass.
+      const without = (rejected: readonly string[], free = false): string | undefined => {
         const cost = accepted.length + documentIds.size + rejected.length;
         if (budget.work < cost) { budget.short = true; return undefined; }
         const targets = new Map(documentIds);
         reset(new Set(rejected), targets);
         const text = textOf(candidate, targets);
-        budget.work -= cost + Math.max(0, text.length - accepted.length);
+        if (!(free && (text === accepted || options.settled?.(candidate, text) === true))) budget.work -= cost + Math.max(0, text.length - accepted.length);
         return text;
       };
       const others = pass.targets.filter((other) => other !== id);
       if (others.length === 0) continue;
-      const all = without(others);
-      if (all === undefined || all === accepted) continue;
+      const all = without(others, true);
+      if (all === undefined) continue;
+      if (all === accepted) { passUnlinked.add(id); continue; }
       // The targets it links, found by halving the groups whose rejection changes its text: a text that links
       // a few of many candidates costs a few texts per link, not one per candidate. A group's change is in one
       // of its halves: when the first leaves the text as it is, the second has the group's text.

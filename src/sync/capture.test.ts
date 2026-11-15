@@ -1165,13 +1165,13 @@ it('stores the whole content in LFS whatever file the working copy holds at its 
 
 describe('staged texts with rejected link targets', () => {
   /** Documents where `links(i)` lists the documents document `i` links, and a text function that counts its work. */
-  const corpus = (count: number, links: (index: number) => number[]) => {
+  const corpus = (count: number, links: (index: number) => number[], pad: (index: number) => number = () => 0) => {
     const paths = Array.from({ length: count }, (_, i) => `docs/d${String(i).padStart(3, '0')}.md`);
     const documentIds = new Map(paths.map((path, i) => [path, `d${String(i).padStart(3, '0')}`]));
     const candidates = new Map(paths.map((path, i) => [documentIds.get(path)!, { index: i, path, files: new Map<string, FileContent>() }]));
     const work = { texts: 0, characters: 0, resets: 0 };
     const textOf = (candidate: { index: number }, targets: ReadonlyMap<string, string>) => {
-      const text = links(candidate.index).map((i) => (targets.has(paths[i]!) ? `[d](./d${i}.md)` : `[d](https://linear.app/team/document/d${i})`)).join('\n') + '\n';
+      const text = links(candidate.index).map((i) => (targets.has(paths[i]!) ? `[d](./d${i}.md)` : `[d](https://linear.app/team/document/d${i})`)).join('\n') + '\n' + 'x'.repeat(pad(candidate.index));
       work.texts += 1;
       work.characters += text.length;
       return text;
@@ -1277,6 +1277,20 @@ describe('staged texts with rejected link targets', () => {
     const next = stagedFor(corpus(refusedCount + later, links(later)).variants({ refused, settled: (candidate, text) => recorded.has(candidate.path) && rejectedIn(new Map([[candidate.path, text]])).join() === '0' }));
     assert.equal(next.length, later - linkVariantBudget().sets);
     assert.ok(next.every((set) => !recorded.has([...set.keys()][0])));
+  });
+
+  it('spends no work on texts it cannot stage, so a later document reaches its text while the cursor holds', () => {
+    // The first document is refused. Before the one that links it come large documents: half of them link nothing,
+    // half link the refused one and already hold their text with it rejected. Together they cost more than the budget,
+    // and the later document is as large as they are.
+    const large = 50;
+    const links = (index: number) => (index > large / 2 ? [0] : []);
+    const pad = (index: number) => (index >= 1 ? 30_000 : 0);
+    const { variants } = corpus(large + 2, links, pad);
+    const settled = (candidate: { index: number; path: string }, text: string) => candidate.index <= large && rejectedIn(new Map([[candidate.path, text]])).join() === '0';
+    const budget: LinkVariantBudget = { sets: Number.MAX_SAFE_INTEGER, work: 1_000_000 };
+    const sets = [...variants({ refused: new Set(['d000']), settled, budget })];
+    assert.deepEqual(sets.map((set) => [[...set.keys()][0], rejectedIn(set)]), [['docs/d051.md', [0]]]);
   });
 
   it('does not stage a text the file already holds', () => {
