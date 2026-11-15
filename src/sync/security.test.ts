@@ -118,6 +118,9 @@ it("never passes a candidate path to pre-commit as an option, so the repository'
 it("never lets a candidate replace a script or support file the tracked branch keeps, in process or staged", async () => {
   const fixture = await createFixture();
   let gate: Awaited<ReturnType<typeof securityGate>> | undefined;
+  // The gate's scratch folder goes in this fixture's folder, where the canary below would leave its marker.
+  const tmp = process.env.TMPDIR;
+  process.env.TMPDIR = fixture.root;
   try {
     const script = 'process.exitCode = 0;\n';
     await fixture.seed({
@@ -139,7 +142,9 @@ it("never lets a candidate replace a script or support file the tracked branch k
     const git = await fixture.clone('support');
     const tracked = await git.text(['rev-parse', 'origin/main']);
     const marker = join(fixture.root, 'hook-canary');
-    const payload = `import('node:fs').then((fs) => fs.writeFileSync(${JSON.stringify(marker)}, 'ran'));\n`;
+    // A fixed canary: run as a hook, it writes a marker beside the gate's scratch folder, which this test keeps in its
+    // own fixture folder.
+    const payload = "import('node:fs').then((fs) => fs.writeFileSync('../hook-canary', 'ran'));\n";
     const refused = [
       new Map([['docs/scan.mjs', payload]]),
       new Map([['docs/plan.md', 'A document.\n'], ['docs/scan.mjs', payload]]),
@@ -176,5 +181,9 @@ it("never lets a candidate replace a script or support file the tracked branch k
     for (const files of refused) assert.ok((await answers.check(files))!.length > 0);
     for (const files of accepted) assert.deepEqual(await answers.check(files), []);
     await assert.rejects(readFile(marker), {code: 'ENOENT'}, 'candidate text never runs as a hook script');
-  } finally { await gate?.close?.(); await fixture.cleanup(); }
+  } finally {
+    if (tmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmp;
+    await gate?.close?.();
+    await fixture.cleanup();
+  }
 });

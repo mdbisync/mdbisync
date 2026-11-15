@@ -597,13 +597,19 @@ describe('capture from Linear', () => {
     const next = await commitIds(context.git, state.ids, await readIds(context.git, state.ids), IDENTITY, {reserved: forged});
     assert.equal((await pushAtomic(context.git, config, [{ref: stateRef(config, 'ids'), expected: state.ids, next}])).ok, true);
     await refresh();
-    const payload = `import('node:fs').then((fs) => fs.writeFileSync(${JSON.stringify(marker)}, 'ran'));\n`;
+    // A fixed canary: run as a hook, it writes a marker beside the gate's scratch folder, which this test keeps in its
+    // own fixture folder.
+    const payload = "import('node:fs').then((fs) => fs.writeFileSync('../hook-canary', 'ran'));\n";
     world.linear.documents.push(
       {id: 'forged', title: 'scan', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
       {id: 'forged-new', title: 'notes', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
       {id: 'forged-markdown', title: 'report', projectId: 'project-api', content: 'A report.\n', createdAt: '2026-01-02T00:00:00Z'},
     );
-    const result = await run();
+    const tmp = process.env.TMPDIR;
+    process.env.TMPDIR = fixture.root;
+    let result: Awaited<ReturnType<typeof run>>;
+    try { result = await run(); }
+    finally { if (tmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmp; }
     await assert.rejects(readFile(marker), {code: 'ENOENT'}, 'a document never becomes hook code');
     const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
     assert.ok(!paths.includes('docs/scan.mjs') && !paths.includes('docs/notes.mjs'), 'a reserved path that is not a document path is not used');
