@@ -3,7 +3,7 @@
 
 import { isDeepStrictEqual } from 'node:util';
 import type { Nodes, Root } from 'mdast';
-import { fromMarkdown } from 'mdast-util-from-markdown';
+import { fromMarkdown, type Extension } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
@@ -64,8 +64,8 @@ export function lineCount(text: string): number {
   return count;
 }
 
-export function parse(body: string): Root {
-  return fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+export function parse(body: string, mdastExtensions: Extension[] = []): Root {
+  return fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
 }
 
 /**

@@ -17,7 +17,8 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
-import { end, parse, resolveTarget, splitFile, start, visit } from '../format/markdown.ts';
+import type { Handle } from 'mdast-util-from-markdown';
+import { parse, resolveTarget, splitFile, visit } from '../format/markdown.ts';
 import { LinearError, LinearStoppedError } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
 import {
@@ -520,15 +521,30 @@ type DestinationNode = Extract<Nodes, { type: 'link' | 'image' | 'definition' }>
 type Range = { from: number; to: number };
 
 /**
- * Every link, image and definition with the place of its destination's text,
- * without (`range`) and with (`outer`) its angle brackets, in document order.
+ * Explicit link, image and definition destinations, without (`range`) and
+ * with (`outer`) their angle brackets, in document order. Reference uses,
+ * autolinks and empty destinations without brackets have no range of their own.
  */
 export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range }> {
   const result: Array<{ node: DestinationNode; range: Range; outer: Range }> = [];
-  visit(parse(body), (node) => {
+  const ranges = new Map<DestinationNode, { range: Range; outer: Range }>();
+  // The parser skips one leading BOM before counting source offsets.
+  const offset = body.startsWith('\uFEFF') ? 1 : 0;
+  // These tokens belong to the current link, image or definition. Taking their
+  // positions during the document parse avoids searching or reparsing labels.
+  const destination: Handle = function (token) {
+    const node = this.stack.at(-1);
+    if (node?.type !== 'link' && node?.type !== 'image' && node?.type !== 'definition') return;
+    const from = token.start.offset + offset;
+    const to = token.end.offset + offset;
+    const angle = body[from] === '<';
+    ranges.set(node, { range: { from: from + Number(angle), to: to - Number(angle) }, outer: { from, to } });
+  };
+  const tree = parse(body, [{ enter: { resourceDestination: destination, definitionDestination: destination } }]);
+  visit(tree, (node) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
-    const found = destinationRange(body, node);
-    if (found !== null) result.push({ node, range: { from: found.from, to: found.to }, outer: { from: found.outerFrom, to: found.outerTo } });
+    const found = ranges.get(node);
+    if (found !== undefined) result.push({ node, ...found });
   });
   return result.sort((a, b) => a.range.from - b.range.from);
 }
@@ -542,64 +558,6 @@ function replaceRanges(text: string, replacements: ReadonlyArray<{ from: number;
   return result;
 }
 
-
-/**
- * Where the destination's text is in a link, image or definition node,
- * without and with its angle brackets. Each `](` (or `]:`) in the node is tried in turn,
- * and a candidate counts only when the parser reads it as the node's own
- * destination, escapes and character references included; so brackets in
- * the link text or alt text cannot misplace it. Null when none matches
- * (a reference link, whose destination is in its definition).
- */
-function destinationRange(body: string, node: DestinationNode): { from: number; to: number; outerFrom: number; outerTo: number } | null {
-  const nodeEnd = end(node);
-  const opener = node.type === 'definition' ? ']:' : '](';
-  let found: { from: number; to: number; outerFrom: number; outerTo: number } | null = null;
-  for (let at = body.indexOf(opener, start(node)); at !== -1 && at < nodeEnd; at = body.indexOf(opener, at + 1)) {
-    const range = destinationAt(body, at + 2, nodeEnd);
-    if (range === null || parsedDestination(body.slice(range.outerFrom, range.outerTo)) !== node.url) continue;
-    // A definition's label holds no `]:`, so its first match is its destination. A link's or
-    // image's text comes before its destination and may hold a link to the same file, so the
-    // last match is the node's own.
-    found = range;
-    if (node.type === 'definition') break;
-  }
-  return found;
-}
-
-/** The destination text starting at `position` (after optional spaces), with and without angle brackets. */
-function destinationAt(body: string, position: number, limit: number): { from: number; to: number; outerFrom: number; outerTo: number } | null {
-  while (position < limit && /[ \t\r\n]/.test(body[position] as string)) position += 1;
-  if (body[position] === '<') {
-    const close = body.indexOf('>', position + 1);
-    return close === -1 || close > limit ? null : { from: position + 1, to: close, outerFrom: position, outerTo: close + 1 };
-  }
-  const from = position;
-  let depth = 0;
-  while (position < limit) {
-    const char = body[position] as string;
-    if (char === '\\') {
-      position += 2;
-      continue;
-    }
-    if (/\s/.test(char)) break;
-    if (char === '(') depth += 1;
-    if (char === ')') {
-      if (depth === 0) break;
-      depth -= 1;
-    }
-    position += 1;
-  }
-  const to = Math.min(position, limit);
-  return to > from ? { from, to, outerFrom: from, outerTo: to } : null;
-}
-
-/** The URL the parser reads from a destination's text. */
-function parsedDestination(destination: string): string | undefined {
-  const paragraph = parse(`[x](${destination})`).children[0];
-  const link = paragraph?.type === 'paragraph' ? paragraph.children[0] : undefined;
-  return link?.type === 'link' ? link.url : undefined;
-}
 
 const CONTENT_TYPES: Record<string, string> = {
   png: 'image/png',

@@ -40,7 +40,7 @@ const A_BODY = [
   '',
   'The [report](<files/report 2026.pdf>), [the same](files/report%202026.pdf) and [its page](files/report%202026.pdf#page=2).',
   '',
-  '[Other](b.md), [site](https://example.com/x.png), [missing](gone.png) and [section](#a).',
+  `[Other](b.md), [site](https://example.com/x.png), [${'\\]('.repeat(16)}\`code ](sample)\`](https://example.com/x.png), [missing](gone.png) and [section](#a).`,
 ].join('\n');
 const B_BODY = `# B\n\n![Diagram](../media/diagram.png)\n\n![Pixel](./pixel.png)\n\n${CANARY}`;
 const SHARED = ['c1', 'c2', 'c3', 'c4', 'c5'];

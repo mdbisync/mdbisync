@@ -27,11 +27,13 @@ it('downloads new uploads next to the document, reuses content hashes and preser
     const hash = createHash('sha256').update('image').digest('hex');
     let gets = 0;
     const fetcher: typeof fetch = async () => { gets++; return new Response('image'); };
-    const content = `![Image](${url})\n\n[Site](https://example.com/guide)\n\n\`![code](${url})\`\n`;
+    const site = `[${'\\]('.repeat(16)}\`code ](sample)\`](https://example.com/guide)`;
+    const content = `![Image](${url})\n\n[Site](https://example.com/guide)\n\n${site}\n\n\`![code](${url})\`\n`;
     const cached = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', content, new Map([[hash, url]]), fetcher);
     assert.equal(gets, 0);
     assert.equal(cached.files.size, 0);
     assert.ok(cached.body.startsWith('![Image](existing.png)'));
+    assert.ok(cached.body.includes(site));
     assert.ok(cached.body.includes('[Site](https://example.com/guide)'));
     assert.ok(cached.body.includes(`\`![code](${url})\``));
     const otherUrl = 'https://uploads.linear.app/workspace/new.png';
