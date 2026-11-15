@@ -370,26 +370,43 @@ export class LinearClient {
 
   /** Whether an integration comment exists on this document (including archived comments). */
   async commentExists(id: string, documentId: string): Promise<boolean> {
-    const data = await this.request<{
-      viewer: { id: string } | null;
-      comments: { nodes: Array<{ id: string; user: { id: string } | null; documentContent: { document: { id: string } | null } | null }> };
-    }>(
-      'FindComment', 'query',
-      `query FindComment($id: ID!) {
-        viewer { id }
-        comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) {
-          nodes { id user { id } documentContent { document { id } } }
+    return (await this.#documentCommentIds(new Map([[id, documentId]]), 'FindComment')).has(id);
+  }
+
+  /** Authorize a batch before any notice mutation, without a read per hold. */
+  async documentCommentIds(expected: ReadonlyMap<string, string>): Promise<Set<string>> {
+    return this.#documentCommentIds(expected, 'FindComments');
+  }
+
+  async #documentCommentIds(expected: ReadonlyMap<string, string>, operation: 'FindComment' | 'FindComments'): Promise<Set<string>> {
+    const found = new Set<string>();
+    const ids = [...expected.keys()];
+    for (let offset = 0; offset < ids.length; offset += MAX_PAGE_SIZE) {
+      const batch = ids.slice(offset, offset + MAX_PAGE_SIZE);
+      const requested = new Set(batch);
+      const data = await this.request<{
+        viewer: { id: string } | null;
+        comments: { nodes: Array<{ id: string; user: { id: string } | null; documentContent: { document: { id: string } | null } | null }> };
+      }>(
+        operation, 'query',
+        `query ${operation}($ids: [ID!]!) {
+          viewer { id }
+          comments(first: 250, includeArchived: true, filter: { id: { in: $ids } }) {
+            nodes { id user { id } documentContent { document { id } } }
+          }
+        }`,
+        { ids: batch },
+      );
+      for (const comment of data.comments.nodes) {
+        if (!requested.has(comment.id) || found.has(comment.id)
+          || comment.documentContent?.document?.id !== expected.get(comment.id)
+          || !data.viewer?.id || comment.user?.id !== data.viewer.id) {
+          throw new LinearError(operation, message('linear.comment-mismatch'));
         }
-      }`,
-      { id },
-    );
-    const comment = data.comments.nodes[0];
-    if (!comment) return false;
-    if (comment.id !== id || comment.documentContent?.document?.id !== documentId
-      || !data.viewer?.id || comment.user?.id !== data.viewer.id) {
-      throw new LinearError('FindComment', message('linear.comment-mismatch'));
+        found.add(comment.id);
+      }
     }
-    return true;
+    return found;
   }
 
   /**

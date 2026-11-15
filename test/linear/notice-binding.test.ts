@@ -54,3 +54,23 @@ for (const mismatch of ['document', 'author', 'missing-author', 'missing-documen
     });
   }
 }
+
+for (const invalid of [false, true]) {
+  test(`comment ownership batches include every requested id across pages: ${invalid ? 'reject a mismatch' : 'accept owned comments'}`, async (t) => {
+    const fake = await new FakeLinear().start();
+    t.after(() => fake.stop());
+    const expected = new Map(Array.from({ length: 251 }, (_, index) => [`comment-${index}`, `document-${index}`]));
+    fake.operations.set('FindComments', (request) => {
+      const ids = request.variables?.ids as string[];
+      assert.ok(ids.length <= 250);
+      return { body: { data: { viewer: { id: 'integration-one' }, comments: { nodes: ids.map((id) => ({
+        id, user: { id: invalid && id === 'comment-250' ? 'person-other' : 'integration-one' },
+        documentContent: { document: { id: expected.get(id) } },
+      })) } } } };
+    });
+    const linear = new LinearClient({ token: 'test-token', baseUrl: fake.url });
+    if (invalid) await assert.rejects(linear.documentCommentIds(expected), /identity does not match/);
+    else assert.deepEqual(await linear.documentCommentIds(expected), new Set(expected.keys()));
+    assert.deepEqual(fake.received.map((request) => request.operation), ['FindComments', 'FindComments']);
+  });
+}

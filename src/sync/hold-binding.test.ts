@@ -31,7 +31,8 @@ describe('saved hold comment ownership', () => {
         const icon = document.icon;
         const run = await h.sync();
         assert.equal(run.report.pullRequest?.holdMarks?.code, 'write-failed');
-        assert.match(run.report.pullRequest?.holdMarks?.failure?.message ?? '', /identity does not match/);
+        assert.equal(run.report.pullRequest?.holdMarks?.failure?.operation, 'FindComments');
+        assert.match(run.report.pullRequest?.holdMarks?.failure?.error ?? '', /LinearError/);
         assert.deepEqual(comment, before);
         assert.equal(document.icon, icon);
         assert.deepEqual(run.writes.filter((write) => !write.includes(' ')), []);

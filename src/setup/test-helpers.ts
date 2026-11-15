@@ -539,14 +539,18 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
-  if (operationName === 'FindComment') {
-    const id = variables.id as string;
-    const comment = world.linear.comments.get(id);
-    const document = world.linear.documents.find((d) => contentIdOf(d) === comment?.documentContentId);
-    return json(200, { data: { viewer: { id: 'integration-one' }, comments: { nodes: comment === undefined ? [] : [{
-      id, user: { id: comment.userId === undefined ? 'integration-one' : comment.userId },
-      documentContent: { document: document === undefined ? null : { id: document.id } },
-    }] } } });
+  if (operationName === 'FindComment' || operationName === 'FindComments') {
+    const ids = variables.ids as string[];
+    const nodes = ids.flatMap((id) => {
+      const comment = world.linear.comments.get(id);
+      if (comment === undefined) return [];
+      const document = world.linear.documents.find((d) => contentIdOf(d) === comment.documentContentId);
+      return [{
+        id, user: { id: comment.userId === undefined ? 'integration-one' : comment.userId },
+        documentContent: { document: document === undefined ? null : { id: document.id } },
+      }];
+    });
+    return json(200, { data: { viewer: { id: 'integration-one' }, comments: { nodes } } });
   }
   if (operationName === 'FindDocumentComment') {
     const id = variables.id as string;

@@ -15,6 +15,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { type HoldNotice, type IdEntry, type Oid, type StateConfig, type StateSnapshot, listTree, pushAtomic, readIds, stateRef } from '../state/index.ts';
 import { MARKS, resolveHold } from './marks.ts';
 import { commitLaneIds } from './suspended.ts';
+import { message } from '../messages.ts';
 
 /** The most documents whose suspended mark or comment changes in one run; the rest follow in later runs. */
 export const HOLD_MARK_LIMIT = 50;
@@ -40,7 +41,7 @@ export interface HoldFailure {
   timedOut?: string[];
 }
 
-export type HoldClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment' | 'updateDocumentComment' | 'resolveComment' | 'commentExists'>;
+export type HoldClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment' | 'updateDocumentComment' | 'resolveComment' | 'documentCommentIds'>;
 
 
 export interface HoldMarksOptions {
@@ -310,11 +311,30 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
   };
   let current: Work | undefined;
   try {
+    const expected = new Map<string, string>();
+    const expect = (id: string, documentId: string) => {
+      if (expected.has(id) && expected.get(id) !== documentId) throw new LinearError('FindComments', message('linear.comment-mismatch'));
+      expected.set(id, documentId);
+    };
+    for (const item of chosen) {
+      expect((item.entry.saved?.hold as HoldNotice).id, item.entry.id);
+      if (item.kind === 'set' && item.previous !== undefined) expect(item.previous.id, item.entry.id);
+    }
+    const found = await linear.documentCommentIds(expected);
+    // The batch is fully authorized before its first mutation. Resolutions
+    // reuse those checked results instead of repeating one read per comment.
+    const checked = {
+      commentExists: async (id: string, documentId: string) => {
+        if (expected.get(id) !== documentId) throw new LinearError('FindComments', message('linear.comment-mismatch'));
+        return found.has(id);
+      },
+      resolveComment: (id: string) => linear.resolveComment(id),
+    };
     for (const item of chosen) {
       current = item;
       const { document, path } = item;
       if (item.kind === 'clear') {
-        const resolved = await resolveCleared(linear, item.entry.saved?.hold as HoldNotice, item.entry.id);
+        const resolved = await resolveCleared(checked, item.entry.saved?.hold as HoldNotice, item.entry.id);
         const { hold: _hold, ...saved } = item.entry.saved as NonNullable<IdEntry['saved']>;
         // A conflict or blocked notice still stands: its own mark comes back. Otherwise the document's own decoration.
         const mark = saved.notice === undefined ? { icon: saved.icon, color: saved.color } : MARKS[saved.notice.kind];
@@ -328,18 +348,14 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
         continue;
       }
       if (document === undefined) continue;
-      // Even a posted receipt can be forged. Authorize both the old and new
-      // comment before resolving either or repainting the document.
       const hold = item.entry.saved?.hold as HoldNotice;
-      await linear.commentExists(hold.id, item.entry.id);
-      if (item.kind === 'set' && item.previous !== undefined) await linear.commentExists(item.previous.id, item.entry.id);
       if (item.kind === 'repaint') {
         await linear.updateDocument(document.id, MARKS.suspended);
         result.updated.push(path);
         continue;
       }
       if (item.kind === 'set' && item.previous !== undefined) {
-        await resolveHold(linear, item.previous, item.entry.id);
+        await resolveHold(checked, item.previous, item.entry.id);
         ids.set(path, item.entry);
       }
       if (!document.documentContentId) continue;
@@ -373,7 +389,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
  * forgotten, so it never stalls the step run after run. An outage, a stop, or a refusal of the token, its scope
  * or the rate still ends the step, and a later run tries again.
  */
-async function resolveCleared(linear: HoldClient, hold: HoldNotice, documentId: string): Promise<true | string> {
+async function resolveCleared(linear: Pick<LinearClient, 'resolveComment' | 'commentExists'>, hold: HoldNotice, documentId: string): Promise<true | string> {
   try {
     await resolveHold(linear, hold, documentId);
     return true;
