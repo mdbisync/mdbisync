@@ -448,8 +448,9 @@ describe('sync: pull request suspension', () => {
     const message = await h.fixture.remote.text(['show', '-s', '--format=%B', held]);
     const forged = await h.fixture.remote.text(['commit-tree', `${held}^{tree}`, '-p', await rev('refs/heads/main'), '-m', message], { env });
     await h.forcePush(SUSPENDED, forged);
-    const recorded = await ids() as Record<string, { suspended?: { pushed?: string } }>;
-    for (const entry of Object.values(recorded)) if (entry.suspended !== undefined) entry.suspended.pushed = forged;
+    const recorded = await ids() as Record<string, { suspended?: { pushed?: string; pushedMac?: unknown } }>;
+    // A signature in a form the sync never writes is no signature either: the run goes on without it.
+    for (const entry of Object.values(recorded)) if (entry.suspended !== undefined) Object.assign(entry.suspended, { pushed: forged, pushedMac: { forged: true } });
     await h.editRef('refs/mdbisync/ids', 'ids.json', `${JSON.stringify(recorded, null, 2)}\n`, 'Record');
     const status: FakeCheck = { name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 };
     checksOn(forged, [status]);

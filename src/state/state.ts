@@ -332,7 +332,7 @@ export interface SuspensionEpisode {
    * recorded it (see `PushedKey`).
    */
   pushed?: Oid;
-  /** The sync's signature of `pushed` on the suspended branch. */
+  /** The sync's signature of `pushed` on the suspended branch; a value in any other form is no signature. */
   pushedMac?: string;
   /** Paths of this episode; one entry also holds former names and assets for the lane. */
   paths: string[];
@@ -610,7 +610,6 @@ function isIdEntry(value: unknown): value is IdEntry {
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(episode.noticeId)
       || (episode.head !== undefined && (typeof episode.head !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.head)))
       || (episode.pushed !== undefined && (typeof episode.pushed !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.pushed)))
-      || (episode.pushedMac !== undefined && typeof episode.pushedMac !== 'string')
       || !Array.isArray(episode.paths) || !episode.paths.every((path) => typeof path === 'string')
       || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === 'string')
       || (episode.timedOut !== undefined && (!Array.isArray(episode.timedOut) || !episode.timedOut.every((name) => typeof name === 'string')))) return false;

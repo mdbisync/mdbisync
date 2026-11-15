@@ -164,7 +164,9 @@ async function push(context: RunContext, options: LaneOptions, ids: IdMap, head:
 function recordedPushed(ids: IdMap): PushedRecord | undefined {
   const episode = [...ids.values()].find((entry) => entry.suspended?.pushed !== undefined)?.suspended;
   if (episode?.pushed === undefined) return undefined;
-  return episode.pushedMac === undefined ? { head: episode.pushed } : { head: episode.pushed, mac: episode.pushedMac };
+  // A signature in any other form is no signature (`PushedKey.verified` also checks its form).
+  const mac: unknown = episode.pushedMac;
+  return typeof mac === 'string' ? { head: episode.pushed, mac } : { head: episode.pushed };
 }
 
 /**
