@@ -368,14 +368,28 @@ export class LinearClient {
     return comment;
   }
 
-  /** Whether a comment with this id exists (resolved or archived ones too). */
-  async commentExists(id: string): Promise<boolean> {
-    const data = await this.request<{ comments: { nodes: Array<{ id: string }> } }>(
+  /** Whether an integration comment exists on this document (including archived comments). */
+  async commentExists(id: string, documentId: string): Promise<boolean> {
+    const data = await this.request<{
+      viewer: { id: string } | null;
+      comments: { nodes: Array<{ id: string; user: { id: string } | null; documentContent: { document: { id: string } | null } | null }> };
+    }>(
       'FindComment', 'query',
-      `query FindComment($id: ID!) { comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id } } }`,
+      `query FindComment($id: ID!) {
+        viewer { id }
+        comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) {
+          nodes { id user { id } documentContent { document { id } } }
+        }
+      }`,
       { id },
     );
-    return data.comments.nodes.some((comment) => comment.id === id);
+    const comment = data.comments.nodes[0];
+    if (!comment) return false;
+    if (comment.id !== id || comment.documentContent?.document?.id !== documentId
+      || !data.viewer?.id || comment.user?.id !== data.viewer.id) {
+      throw new LinearError('FindComment', message('linear.comment-mismatch'));
+    }
+    return true;
   }
 
   /**
@@ -401,16 +415,21 @@ export class LinearClient {
    */
   async ensureDocumentComment(documentContentId: string, body: string, id: string, updateExisting = false, createFirst = false): Promise<{ id: string; created: boolean }> {
     const find = async (): Promise<boolean> => {
-      const data = await this.request<{ comments: { nodes: Array<{ id: string; documentContentId: string | null }> } }>(
+      const data = await this.request<{
+        viewer: { id: string } | null;
+        comments: { nodes: Array<{ id: string; documentContentId: string | null; user: { id: string } | null }> };
+      }>(
         'FindDocumentComment', 'query',
         `query FindDocumentComment($id: ID!) {
-          comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id documentContentId } }
+          viewer { id }
+          comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id documentContentId user { id } } }
         }`,
         { id },
       );
       const comment = data.comments.nodes[0];
       if (!comment) return false;
-      if (comment.id !== id || comment.documentContentId !== documentContentId) {
+      if (comment.id !== id || comment.documentContentId !== documentContentId
+        || !data.viewer?.id || comment.user?.id !== data.viewer.id) {
         throw new LinearError('FindDocumentComment', message('linear.comment-mismatch'));
       }
       return true;

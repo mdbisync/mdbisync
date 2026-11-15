@@ -18,12 +18,12 @@ export const CONFLICT_COMMENT = 'This document contains conflicting versions. Ed
 export const BLOCKED_COMMENT = 'Security checks rejected this document. Fix the listed findings and sync again.';
 
 /**
- * Resolves an episode's comment before its id is forgotten. A comment never
- * confirmed posted may still exist (its create's answer was lost, or the run
- * died before recording it): it is looked up and resolved when found.
+ * Resolves an episode's comment before its id is forgotten. Every receipt
+ * needs a remote ownership check, including comments not confirmed posted
+ * because a create response or its saved receipt was lost.
  */
-export async function resolveHold(linear: Pick<LinearClient, 'resolveComment' | 'commentExists'>, hold: HoldNotice): Promise<void> {
-  if (hold.posted || await linear.commentExists(hold.id)) await linear.resolveComment(hold.id);
+export async function resolveHold(linear: Pick<LinearClient, 'resolveComment' | 'commentExists'>, hold: HoldNotice, documentId: string): Promise<void> {
+  if (await linear.commentExists(hold.id, documentId)) await linear.resolveComment(hold.id);
 }
 
 /** A released episode's comment still to be resolved: its entry stays, even when its document is gone, until the hold step resolves it. */
@@ -126,12 +126,20 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
 
   // Suspension decorations are reconciled after the lane's state push.
   if (entry.suspended !== undefined && blocked.length === 0) return result;
+  // Saved ids and receipts are untrusted. Authorize every existing comment
+  // this reconciliation may change before changing a comment or decoration.
+  const body = state === 'clear' ? '' : state === 'conflict' ? CONFLICT_COMMENT : blockedComment(blocked);
+  const bodyHash = createHash('sha256').update(body).digest('hex');
+  const previousNotice = entry.saved?.notice;
+  const changesDecoration = state !== 'clear' && (document.icon !== MARKS[state].icon || document.color !== MARKS[state].color);
+  const changesNotice = previousNotice !== undefined && (previousNotice.kind !== state || !previousNotice.posted || previousNotice.bodyHash !== bodyHash || changesDecoration);
+  const noticeExists = changesNotice ? await linear.commentExists(previousNotice.id, document.id) : false;
   // A released episode whose comment the hold step has not reached yet (the per-run limit, a failed write).
   if (releasedHold(entry) && entry.saved !== undefined) {
     // Nothing else to show: the hold step clears it and reports it, within its limit.
     if (state === 'clear' && entry.saved.notice === undefined) return result;
     // A conflict or blocked mark (new, or one that has just cleared) takes it over: the comment is resolved before its mark goes.
-    await resolveHold(linear, entry.saved.hold as HoldNotice);
+    await resolveHold(linear, entry.saved.hold as HoldNotice, document.id);
     const { hold: _hold, ...saved } = entry.saved;
     entry = { ...entry, saved };
     await persistEntry(entry);
@@ -141,7 +149,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   if (entry.saved?.notice !== undefined && entry.saved.notice.kind !== state) {
     // A person can delete the notice before fixing the document. Check for
     // its absence; failed reads or resolutions retain the notice for retry.
-    if (await linear.commentExists(entry.saved.notice.id)) await linear.resolveComment(entry.saved.notice.id);
+    if (noticeExists) await linear.resolveComment(entry.saved.notice.id);
     if (entry.saved.notice.kind === 'conflict') options.onConflictNotice?.('resolved');
   }
 
@@ -158,8 +166,6 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   }
 
   if (!document.documentContentId) throw new Error(message('sync.needs-comment-target'));
-  const body = state === 'conflict' ? CONFLICT_COMMENT : blockedComment(blocked);
-  const bodyHash = createHash('sha256').update(body).digest('hex');
   const saved = entry.saved ?? { icon: document.icon, color: document.color };
   const previous = saved.notice;
   const notice = previous?.kind === state

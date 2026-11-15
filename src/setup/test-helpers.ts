@@ -189,7 +189,7 @@ export interface FakeWorld {
     urlKey: string;
     uploads: FakeUpload[];
     /** Comments on documents, by comment id. */
-    comments: Map<string, { documentContentId: string; body: string; resolved?: boolean }>;
+    comments: Map<string, { documentContentId: string; body: string; resolved?: boolean; userId?: string | null }>;
     /** Projects removed with `projectDelete`; their documents stay, archived. */
     deletedProjects?: string[];
     /**
@@ -541,12 +541,17 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
   if (operationName === 'FindComment') {
     const id = variables.id as string;
-    return json(200, { data: { comments: { nodes: world.linear.comments.has(id) ? [{ id }] : [] } } });
+    const comment = world.linear.comments.get(id);
+    const document = world.linear.documents.find((d) => contentIdOf(d) === comment?.documentContentId);
+    return json(200, { data: { viewer: { id: 'integration-one' }, comments: { nodes: comment === undefined ? [] : [{
+      id, user: { id: comment.userId === undefined ? 'integration-one' : comment.userId },
+      documentContent: { document: document === undefined ? null : { id: document.id } },
+    }] } } });
   }
   if (operationName === 'FindDocumentComment') {
     const id = variables.id as string;
     const comment = world.linear.comments.get(id);
-    return json(200, { data: { comments: { nodes: comment === undefined ? [] : [{ id, documentContentId: comment.documentContentId }] } } });
+    return json(200, { data: { viewer: { id: 'integration-one' }, comments: { nodes: comment === undefined ? [] : [{ id, documentContentId: comment.documentContentId, user: { id: comment.userId === undefined ? 'integration-one' : comment.userId } }] } } });
   }
   if (operationName === 'GetDocuments') {
     // Read by id: trashed documents are included, unknown ids are absent.

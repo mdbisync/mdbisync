@@ -4,10 +4,9 @@
 // is set after the push that records the episodes, its comment is edited
 // when a later failure reads differently, and both clear at release.
 //
-// Linear's request budget is the scarce one: a mark set or cleared costs a
-// document two requests (icon, comment), a changed comment one, and no
-// document is read for it (the capture's listing holds icon, color and the
-// comment target). At most `HOLD_MARK_LIMIT` documents change per run.
+// Linear's request budget is the scarce one: the capture supplies document
+// metadata, but saved comments need an ownership read before any mutation.
+// At most `HOLD_MARK_LIMIT` documents change per run.
 
 import { createHash } from 'node:crypto';
 import { LinearError, LinearGraphQLError, LinearHttpError, LinearStoppedError, describeLinearError, isTransientLinearError, type LinearClient, type LinearDocument } from '../linear/index.ts';
@@ -315,7 +314,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
       current = item;
       const { document, path } = item;
       if (item.kind === 'clear') {
-        const resolved = await resolveCleared(linear, item.entry.saved?.hold as HoldNotice);
+        const resolved = await resolveCleared(linear, item.entry.saved?.hold as HoldNotice, item.entry.id);
         const { hold: _hold, ...saved } = item.entry.saved as NonNullable<IdEntry['saved']>;
         // A conflict or blocked notice still stands: its own mark comes back. Otherwise the document's own decoration.
         const mark = saved.notice === undefined ? { icon: saved.icon, color: saved.color } : MARKS[saved.notice.kind];
@@ -329,17 +328,21 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
         continue;
       }
       if (document === undefined) continue;
+      // Even a posted receipt can be forged. Authorize both the old and new
+      // comment before resolving either or repainting the document.
+      const hold = item.entry.saved?.hold as HoldNotice;
+      await linear.commentExists(hold.id, item.entry.id);
+      if (item.kind === 'set' && item.previous !== undefined) await linear.commentExists(item.previous.id, item.entry.id);
       if (item.kind === 'repaint') {
         await linear.updateDocument(document.id, MARKS.suspended);
         result.updated.push(path);
         continue;
       }
       if (item.kind === 'set' && item.previous !== undefined) {
-        await resolveHold(linear, item.previous);
+        await resolveHold(linear, item.previous, item.entry.id);
         ids.set(path, item.entry);
       }
       if (!document.documentContentId) continue;
-      const hold = item.entry.saved?.hold as HoldNotice;
       if (item.kind === 'set') {
         const mark = MARKS.suspended;
         if (document.icon !== mark.icon || document.color !== mark.color) await linear.updateDocument(document.id, mark);
@@ -370,9 +373,9 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
  * forgotten, so it never stalls the step run after run. An outage, a stop, or a refusal of the token, its scope
  * or the rate still ends the step, and a later run tries again.
  */
-async function resolveCleared(linear: HoldClient, hold: HoldNotice): Promise<true | string> {
+async function resolveCleared(linear: HoldClient, hold: HoldNotice, documentId: string): Promise<true | string> {
   try {
-    await resolveHold(linear, hold);
+    await resolveHold(linear, hold, documentId);
     return true;
   } catch (error) {
     if (!refusesComment(error)) throw error;
@@ -426,7 +429,7 @@ function withHold(entry: IdEntry, hold: HoldNotice, document?: LinearDocument): 
   return { ...entry, saved: { ...saved, hold } };
 }
 
-/** The number of documents whose suspended mark or comment changed: each may cost two Linear requests (I9). */
+/** The number of documents whose suspended mark or comment changed (I9). */
 export function holdChanges(result: HoldMarksResult | undefined): number {
   return result === undefined ? 0 : result.set.length + result.updated.length + result.cleared.length + (result.unresolved?.length ?? 0);
 }

@@ -355,6 +355,7 @@ test('a released suspension comment is left to the hold step, like a suspended o
 
 test('a conflict mark resolves a released suspension comment before it takes the document', async () => {
   const world = new World();
+  world.comments.set('22222222-2222-4222-8222-222222222222', 'On hold.');
   const hold = { id: '22222222-2222-4222-8222-222222222222', bodyHash: 'a'.repeat(64), posted: true };
   world.entry = { id: 'document-one', saved: { icon: ':fire:', color: '#123456', hold } };
   await world.reconcile();
@@ -367,6 +368,7 @@ test('a conflict mark resolves a released suspension comment before it takes the
 
 test('a cleared conflict takes over a released suspension comment, so the document gets its own icon back at once', async () => {
   const world = new World();
+  world.comments.set('22222222-2222-4222-8222-222222222222', 'On hold.');
   world.document.content = 'Plain text.\n';
   world.document.icon = MARKS.conflict.icon;
   world.document.color = MARKS.conflict.color;

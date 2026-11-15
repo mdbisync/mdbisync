@@ -8,10 +8,10 @@ const id = '11111111-1111-4111-8111-111111111111';
 async function world(t: { after: (callback: () => Promise<void>) => void }) {
   const fake = await new FakeLinear().start();
   t.after(() => fake.stop());
-  const comments = new Map<string, { id: string; documentContentId: string }>();
+  const comments = new Map<string, { id: string; documentContentId: string; user?: { id: string } }>();
   fake.operations.set('FindDocumentComment', (request) => {
     const found = comments.get(String(request.variables?.id));
-    return { body: { data: { comments: { nodes: found ? [found] : [] } } } };
+    return { body: { data: { viewer: { id: 'integration-one' }, comments: { nodes: found ? [{ ...found, user: found.user ?? { id: 'integration-one' } }] : [] } } } };
   });
   fake.operations.set('CommentOnDocument', (request) => {
     const input = request.variables?.input as { id: string; documentContentId: string; body: string };
@@ -87,6 +87,13 @@ test('existing comment ids belonging to another document are rejected before wri
   comments.set(id, { id, documentContentId: 'other-content' });
   await assert.rejects(linear.ensureDocumentComment('content-one', 'Resolve the conflicting text.', id), /identity does not match/);
   assert.equal(fake.received.filter((request) => request.operation === 'CommentOnDocument').length, 0);
+});
+
+test('existing comment ids belonging to another author are rejected before updating', async (t) => {
+  const { fake, comments, linear } = await world(t);
+  comments.set(id, { id, documentContentId: 'content-one', user: { id: 'person-other' } });
+  await assert.rejects(linear.ensureDocumentComment('content-one', 'Updated notice.', id, true), /identity does not match/);
+  assert.deepEqual(fake.received.map((request) => request.operation), ['FindDocumentComment']);
 });
 
 test('a mismatched creation response is not hidden by a later lookup', async (t) => {
