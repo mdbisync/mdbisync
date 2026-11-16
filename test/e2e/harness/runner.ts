@@ -10,7 +10,7 @@ import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts'
 import { parse, visit } from '../../../src/format/markdown.ts';
 import { contentTypeOf, destinations, resolveTarget } from '../../../src/initial-sync/uploads.ts';
 import { isRegularFile, MARKDOWN_EXTENSION } from '../../../src/mapping/index.ts';
-import { Git, lfsReader, listTree, parseLfsPointer, readBlobs, readIds, type LfsRead } from '../../../src/state/index.ts';
+import { Git, GitLfsMissingError, lfsReader, listTree, parseLfsPointer, readBlobs, readIds, requireGitLfs, type LfsRead } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { REF_MOVES, runChecks, snapshotRefs, recordRefs, startRefHistory, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
@@ -298,6 +298,20 @@ export function runTeamZones(tree: Pick<RunTree, 'teams'>, teams: ReadonlyMap<st
  */
 export function requireLiveConfig(config: TestConfig): void {
   if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
+}
+
+/**
+ * A live run needs git-lfs on this host: the corpus keeps images and
+ * attachments in LFS. Without it the engine stops at the first file it reads
+ * from there, so the run is blocked before admission, with nothing created.
+ */
+export async function requireHostGitLfs(): Promise<void> {
+  try {
+    await requireGitLfs(new Git(process.cwd()));
+  } catch (error) {
+    if (error instanceof GitLfsMissingError) throw new EnvBlockedError('git-lfs does not run on this host; the corpus keeps images and attachments in LFS');
+    throw error;
+  }
 }
 
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], deadline: SetupDeadline, grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
@@ -953,6 +967,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   try {
     if (scenario.setup.state !== 'offline') {
       requireLiveConfig(deps.config);
+      await requireHostGitLfs();
       // Before admission and setup: an actions scenario without the release under test must create nothing.
       if (scenario.mode === 'actions') requiredActionSha();
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');

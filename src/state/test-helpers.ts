@@ -3,15 +3,29 @@
 // seeding working copy, and clones made the way the engine makes them.
 
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Git } from './index.ts';
 
 export const IDENTITY = { name: 'State Test', email: 'state-test@example.com' };
+
+/**
+ * A PATH that has git but not git-lfs, as on a host without git-lfs: one
+ * folder with a script that runs this host's git by its full path. `remove`
+ * deletes the folder.
+ */
+export async function pathWithoutGitLfs(): Promise<{ path: string; remove(): Promise<void> }> {
+  const git = (process.env.PATH ?? '').split(delimiter).map((entry) => join(entry, 'git')).find((path) => existsSync(path));
+  if (git === undefined) throw new Error('git is not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'no-git-lfs-'));
+  await writeFile(join(dir, 'git'), `#!/bin/sh\nexec '${git}' "$@"\n`, { mode: 0o755 });
+  return { path: dir, remove: () => rm(dir, { recursive: true, force: true }) };
+}
 
 export interface Fixture {
   root: string;

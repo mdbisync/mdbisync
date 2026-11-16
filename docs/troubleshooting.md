@@ -419,6 +419,7 @@ the message. Most come from the workflow's configuration:
 | `the staged candidates come from another version of the action`, `the staged manifest names a file that is not a content hash` | Pin the `stage` and `apply` steps to the same release, and let nothing else write to the runner's temporary folder between them. |
 | `invalid security hook configuration` | Fix the hooks marked `alias: security` in `.pre-commit-config.yaml`. |
 | `security hooks require pre-commit on PATH; install pre-commit before capture` | Install `pre-commit` before the mdbisync step (the example workflows do). |
+| `files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync` | Install `git-lfs` on the runner, or repair it so `git lfs version` runs. GitHub's hosted runners have it. |
 | `the tracked branch "<branch>" does not exist on remote "<remote>"` | Set `tracked-branch` to a branch that exists. |
 
 ## `init` errors

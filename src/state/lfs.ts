@@ -4,6 +4,7 @@
 // store are not downloaded again.
 
 import { createHash } from 'node:crypto';
+import { message } from '../messages.ts';
 import { type Git, GitError, type Oid } from './git.ts';
 
 export interface LfsPointer {
@@ -58,7 +59,9 @@ export type LfsRead = (pointer: LfsPointer, path: string) => Promise<LfsReadResu
  * Returns a function that reads LFS objects from `remote`, downloading an
  * object only when the local LFS store lacks it. Content whose hash or size
  * differs from the pointer is refused, and so are pointers with extensions.
- * The function never throws for a missing or broken object.
+ * The function never throws for a missing or broken object, but it throws
+ * `GitLfsMissingError` when a read fails because git-lfs does not run on
+ * this host.
  */
 export async function lfsReader(git: Git, remote: string): Promise<LfsRead> {
   // git-lfs prefers the current branch's remote to `remote.lfsdefault`, so
@@ -66,7 +69,41 @@ export async function lfsReader(git: Git, remote: string): Promise<LfsRead> {
   const remoteArgs = ['-c', `remote.lfsdefault=${remote}`];
   const branch = await git.run(['symbolic-ref', '--quiet', '--short', 'HEAD'], { okCodes: [0, 1, 128] });
   if (branch.code === 0) remoteArgs.push('-c', `branch.${branch.stdout.toString('utf8').trim()}.remote=${remote}`);
-  return (pointer, path) => readLfsObject(git, remoteArgs, pointer, path);
+  // Asked only after a read failed, and once per reader.
+  let installed: Promise<boolean> | undefined;
+  const runs = () => (installed ??= gitLfsRuns(git));
+  return (pointer, path) => readLfsObject(git, remoteArgs, pointer, path, runs);
+}
+
+/**
+ * git-lfs does not run on this host (not installed, or broken). Without it,
+ * every file stored in LFS would read as a missing object, so a document that
+ * links one would be left out as unreadable on every run: the sync would then
+ * never record the merge with the tracked branch, and its other changes (a
+ * conflict among them) would never reach git. A host's missing tool stops the
+ * run instead; catch-all handlers for one document's failure rethrow it.
+ */
+export class GitLfsMissingError extends Error {
+  constructor() {
+    super(message('lfs.needs-git-lfs'));
+    this.name = 'GitLfsMissingError';
+  }
+}
+
+/** Whether `git lfs version` runs on this host. */
+async function gitLfsRuns(git: Git): Promise<boolean> {
+  try {
+    await git.run(['lfs', 'version']);
+    return true;
+  } catch (error) {
+    if (error instanceof GitError) return false;
+    throw error;
+  }
+}
+
+/** Throws `GitLfsMissingError` unless git-lfs runs on this host. */
+export async function requireGitLfs(git: Git): Promise<void> {
+  if (!(await gitLfsRuns(git))) throw new GitLfsMissingError();
 }
 
 /**
@@ -81,8 +118,9 @@ export async function lfsReader(git: Git, remote: string): Promise<LfsRead> {
  * answers that it does not have it (404) or no longer has it (410); another
  * error for an object (a rate limit, a server error) may pass, so the
  * object is not counted. When the request fails as a whole (no server, no
- * access, git-lfs not installed), no object is known to be missing: the
- * run's read finds them.
+ * access), no object is known to be missing: the run's read finds them.
+ * When it fails because git-lfs does not run here, it throws
+ * `GitLfsMissingError`, as the run's read would.
  *
  * A remote reached as a local path or `file://` URL has no batch API: git-lfs
  * reports nothing for it, so none of its objects counts as missing.
@@ -99,16 +137,20 @@ export async function missingLfsObjects(git: Git, remote: string, blobs: readonl
   try {
     stderr = (await git.run([...settings, 'lfs', 'fetch', '--dry-run', remote, tree], { okCodes: [0, 2] })).stderr;
   } catch (error) {
-    if (error instanceof GitError) return missing;
-    throw error;
+    if (!(error instanceof GitError)) throw error;
+    await requireGitLfs(git);
+    return missing;
   }
   // git-lfs names each object the server refused with its id and the status: `[<oid>] Object does not exist: [404] …`.
   for (const match of stderr.matchAll(/^\[([0-9a-f]{64})\] [^\n]*\[(404|410)\]/gm)) missing.add(match[1] as string);
   return missing;
 }
 
-/** @param path the file's path, used only in git-lfs's own messages */
-async function readLfsObject(git: Git, remoteArgs: readonly string[], pointer: LfsPointer, path: string): Promise<LfsReadResult> {
+/**
+ * @param path the file's path, used only in git-lfs's own messages
+ * @param runs whether git-lfs runs on this host, asked after a failed read
+ */
+async function readLfsObject(git: Git, remoteArgs: readonly string[], pointer: LfsPointer, path: string, runs: () => Promise<boolean>): Promise<LfsReadResult> {
   if (pointer.extensions) {
     return { ok: false, reason: `LFS object ${pointer.oid} uses LFS extensions, which are not supported` };
   }
@@ -121,10 +163,9 @@ async function readLfsObject(git: Git, remoteArgs: readonly string[], pointer: L
     });
     content = result.stdout;
   } catch (error) {
-    if (error instanceof GitError) {
-      return { ok: false, reason: `LFS object ${pointer.oid} could not be read (exit code ${error.code})` };
-    }
-    throw error;
+    if (!(error instanceof GitError)) throw error;
+    if (!(await runs())) throw new GitLfsMissingError();
+    return { ok: false, reason: `LFS object ${pointer.oid} could not be read (exit code ${error.code})` };
   }
   if (content.length !== pointer.size || createHash('sha256').update(content).digest('hex') !== pointer.oid) {
     return { ok: false, reason: `LFS object ${pointer.oid} is missing or does not match its pointer` };

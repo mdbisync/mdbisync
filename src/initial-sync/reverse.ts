@@ -49,6 +49,7 @@ import {
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   NEUTRAL_IDENTITY,
   branchRef,
+  GitLfsMissingError,
   parseLfsPointer,
   isAncestor,
   commitIds,
@@ -491,7 +492,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         bodies.set(entry.path, captured);
       } catch (error) {
         // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload), ends the run, as in the capture.
-        if (error instanceof LinearError) throw error;
+        if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
         // An image the capture would block (not an upload, a dead, oversized or unsupported one): the
         // document's text does not enter git. This sync writes nothing to Linear, so the first sync
         // after the merge reads the document again and marks it there.

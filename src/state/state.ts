@@ -692,7 +692,8 @@ export type FileRead =
  * Reads files of `commit` by path. Files stored in LFS are downloaded, and
  * only those asked for. A file that is missing, not a regular file, or whose
  * LFS object cannot be read gets `ok: false` with the reason; the others are
- * still read.
+ * still read. On a host where git-lfs does not run, a read from LFS throws
+ * `GitLfsMissingError` instead (`lfsReader`).
  */
 export async function readFiles(git: Git, config: StateConfig, commit: Oid, paths: readonly string[]): Promise<Map<string, FileRead>> {
   const wanted = new Set(paths);
