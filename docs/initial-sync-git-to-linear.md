@@ -150,6 +150,11 @@ with an error other than not having the object. Each rule and
 what to do about it is in
 [troubleshooting.md](troubleshooting.md#files-left-out).
 
+During later syncs, a new document linking an LFS object confirmed absent
+from the remote (404/410) can be left out while the other changes are
+recorded. After pushing the object, commit an edit to the document or
+linked file to retry it. Transient read errors still retry on the next run.
+
 ### Container document capacity
 
 A Linear team or project holds at most `document-cap` documents (1,000 by

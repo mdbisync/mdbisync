@@ -92,7 +92,7 @@ interface LinkedFile {
   lfs: boolean;
   /** An LFS pointer that names LFS extensions: its object cannot be read. */
   extensions: boolean;
-  /** An LFS object the remote's LFS server does not have: known to the dry run only, which asks the server. */
+  /** An LFS object the remote's LFS server confirmed it does not have. */
   absent: boolean;
 }
 
@@ -407,7 +407,13 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
   const uploadMissing = async (path: string, targets: readonly string[]) => {
     const { git, uploads } = context as TransformContext;
     const own = await readFiles(filesToRead(targets, linked, uploads));
-    if (!Array.isArray(own)) throw new LeaveOutError(UPLOAD_UNREADABLE, message('initial-sync.upload-unreadable', { file: own.target, reason: own.unreadable }), [own.target]);
+    if (!Array.isArray(own)) {
+      // A failed read alone can be transient. Only the batch API's 404/410 confirms that the remote lacks it.
+      const entry = files.get(own.target) as TreeEntry;
+      const file = linked.get(own.target) as LinkedFile;
+      if (!file.absent) file.absent = (await missingLfsObjects(git, options.config.remote, [entry.oid])).has(file.hash);
+      throw new LeaveOutError(UPLOAD_UNREADABLE, message('initial-sync.upload-unreadable', { file: own.target, reason: own.unreadable }), [own.target], { missingLfsObject: file.absent });
+    }
     if (own.length === 0) return;
 
     const batch = [...own];

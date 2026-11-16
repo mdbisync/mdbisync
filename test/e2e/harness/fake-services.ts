@@ -26,6 +26,8 @@ import { runStep, watchRun, STEP_ACTIONS } from './steps.ts';
 import { refreshView } from './subjects.ts';
 
 export interface FakeServiceOptions {
+  /** Local fake LFS endpoint used by the engine clone. */
+  lfsUrl?: string;
   /** Adjusts the fake world before anything runs. */
   prepare?: (world: FakeWorld) => void;
   /** Reads the run once its checks ran, while its fixture still exists. */
@@ -119,6 +121,7 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
     // The engine's working clone is made as a live run makes it: checked out, without LFS content.
     const engine = await sandbox.clone(names, join(fixture.root, 'engine'));
     const person = await sandbox.clone(names, join(fixture.root, 'person'));
+    if (options.lfsUrl !== undefined) await engine.run(['config', 'lfs.url', options.lfsUrl]);
     const ctx = {
       scenario, names, runDir: fixture.root, sandbox, live: {
         sandbox, rest, repository: 'owner/repo', githubToken: 'app-token', githubTokenSource: 'app', app, editors: { 'editor-a': app, 'editor-b': app },
