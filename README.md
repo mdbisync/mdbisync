@@ -3,19 +3,6 @@
   <img alt="mdbisync: Linear docs and git, in sync. Inside your perimeter." src="docs/images/hero-light.svg">
 </picture>
 
-<p align="center">
-  <a href="https://mdbisync.com/security">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://mdbisync.com/badge/security-dark.svg">
-      <img alt="Security scan of the latest release: high and critical findings per tool" src="https://mdbisync.com/badge/security.svg">
-    </picture>
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://mdbisync.com/security">Security reports</a> · <a href="https://mdbisync.com/security/dependencies">Dependency scan</a>
-</p>
-
 Two-way sync between Linear documents and Markdown in your repository. It runs
 as a GitHub Action under apps you create: no server, no webhook, no key we
 hold.
@@ -147,6 +134,27 @@ and git's path beats Linear's title
   than 250,000 characters is left out whole: it stays in git only and is
   listed in the run summary until fixed.
 - The repository must be on GitHub.
+
+## Security
+
+Every final release is reviewed before it is built: by two frontier language
+models (Fable and Astra), by GitHub CodeQL and by a dependency scan. The image
+counts the open findings of severity high and critical for each; the release
+report also lists every dismissed finding with its reason and the risks we
+accept.
+
+<p align="center">
+  <a href="https://mdbisync.com/security">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://mdbisync.com/badge/security-dark.svg">
+      <img alt="Security scan of the latest release: high and critical findings per tool" src="https://mdbisync.com/badge/security.svg">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://mdbisync.com/security">Security reports</a> · <a href="https://mdbisync.com/security/dependencies">Dependency scan</a>
+</p>
 
 ## Setup
 
