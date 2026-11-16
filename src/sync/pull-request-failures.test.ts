@@ -344,10 +344,12 @@ describe('sync: pull request failures', () => {
     assert.equal(openPullRequests().length, 1, 'GitHub opened it before it answered 500');
 
     h.world.github.serverError = (request) => (request === 'PUT /pulls/1/merge' ? 'after' : undefined);
+    // The run looks again after the 500 and finds the merge GitHub applied.
     const merge = await sync();
-    assert.equal(merge.result.exitCode, INCOMPLETE_EXIT_CODE, merge.result.stderr);
-    assert.equal(merge.report.pullRequest?.status, 500);
+    assert.equal(merge.result.exitCode, 0, merge.result.stderr);
+    assert.equal(merge.report.pullRequest?.code, undefined);
     assert.equal(h.world.github.pullRequests[0]?.merged, true, 'GitHub merged it before it answered 500');
+    assert.equal(merge.report.pullRequest?.merged, h.world.github.pullRequests[0]?.mergeCommit);
 
     delete h.world.github.serverError;
     const after = await sync();

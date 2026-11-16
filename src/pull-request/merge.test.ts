@@ -253,6 +253,25 @@ describe('mergePullRequest', () => {
     assert.deepEqual(await mergePullRequest(clocked, 1, SHA), { merged: false, status: 405, reason: IN_PROGRESS });
     delete world.github.serverError;
 
+    // A server error on the merge: the run looks again and finds the merge GitHub went on with.
+    Object.assign(pr, { state: 'open', merged: false, mergeCommit: undefined });
+    reads = 0;
+    landAfter = 2;
+    world.github.pullRequestHead = async (read) => {
+      reads += 1;
+      if (reads >= landAfter) Object.assign(read, { state: 'closed', merged: true, mergeCommit: 'c'.repeat(40) });
+      return SHA;
+    };
+    world.github.merge = async () => ({ status: 502, message: 'Server Error' });
+    assert.deepEqual(await mergePullRequest(clocked, 1, SHA), { merged: true, sha: 'c'.repeat(40), late: true });
+    // One that does not land within the minute stays a server error.
+    Object.assign(pr, { state: 'open', merged: false, mergeCommit: undefined });
+    elapsed = 0;
+    landAfter = Infinity;
+    await assert.rejects(mergePullRequest(clocked, 1, SHA), (error: unknown) => error instanceof PullRequestError && error.status === 502);
+    assert.equal(elapsed, 60_000);
+    world.github.merge = async () => ({ status: 405, message: IN_PROGRESS });
+
     // Any other 405 is no merge in progress: nothing is read.
     Object.assign(pr, { state: 'open' });
     reads = 0;

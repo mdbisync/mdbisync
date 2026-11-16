@@ -326,7 +326,7 @@ export async function waitForChecks(target: GitHubRepository, sha: string, secon
 }
 
 export type MergeOutcome =
-  /** `late`: GitHub first answered that a merge was already in progress, and that merge landed while the run looked again. */
+  /** `late`: GitHub first answered with a server error or that a merge was already in progress, and a merge landed while the run looked again. */
   | { merged: true; sha: string; late?: true }
   /** GitHub would not merge: the head moved (409), the pull request cannot be merged now (405), or it is not open (422). */
   | { merged: false; status: number; reason: string };
@@ -351,10 +351,10 @@ export function mergeInProgress(refusal: { status?: number | undefined; reason?:
 
 /**
  * Merges a pull request with a merge commit, only while its head is still
- * `sha`, the commit whose checks the caller read. When GitHub answers that a
- * merge is already in progress, it looks again, for up to
- * `MERGE_IN_PROGRESS_WAIT_SECONDS`, whether the pull request merged; the
- * refusal stands while it has not.
+ * `sha`, the commit whose checks the caller read. When GitHub answers with a
+ * server error, or that a merge is already in progress, it looks again, for
+ * up to `MERGE_IN_PROGRESS_WAIT_SECONDS`, whether the pull request merged;
+ * the error or the refusal stands while it has not.
  */
 export async function mergePullRequest(target: GitHubRepository, number: number, sha: string): Promise<MergeOutcome> {
   const answer = await request(target, 'PUT', `/pulls/${number}/merge`, { merge_method: 'merge', sha }, { kind: 'merged', accepted: 200 });
@@ -365,6 +365,11 @@ export async function mergePullRequest(target: GitHubRepository, number: number,
     if (!mergeInProgress(refused)) return refused;
     const landed = await awaitMerge(target, number, MERGE_IN_PROGRESS_WAIT_SECONDS);
     return landed === null ? refused : { merged: true, sha: landed, late: true };
+  }
+  // GitHub answers a merge that takes longer than about ten seconds with a server error, and may still finish it.
+  if (answer.status >= 500) {
+    const landed = await awaitMerge(target, number, MERGE_IN_PROGRESS_WAIT_SECONDS);
+    if (landed !== null) return { merged: true, sha: landed, late: true };
   }
   throw new PullRequestError(message('github.merging'), answer.status);
 }
