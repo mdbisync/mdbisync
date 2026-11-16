@@ -3,8 +3,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { type Git, missingLfsObjects, parseLfsPointer } from './index.ts';
-import { type FakeLfsServer, type Fixture, countLocalLfsObjects, createFixture, fakeLfsServer } from './test-helpers.ts';
+import { message } from '../messages.ts';
+import { Git, GitLfsMissingError, lfsReader, missingLfsObjects, parseLfsPointer, requireGitLfs } from './index.ts';
+import { type FakeLfsServer, type Fixture, countLocalLfsObjects, createFixture, fakeLfsServer, pathWithoutGitLfs } from './test-helpers.ts';
 
 const OID = 'a'.repeat(64);
 const pointer = (body: string): Buffer => Buffer.from(`version https://git-lfs.github.com/spec/v1\n${body}`);
@@ -126,5 +127,40 @@ describe('LFS objects missing from the remote', () => {
     const plain = await fixture.clone('plain');
     assert.deepEqual(await missingLfsObjects(plain, 'origin', [blobs.get('gone.bin') as string]), new Set());
     assert.equal(await countLocalLfsObjects(plain), 0);
+  });
+});
+
+describe('LFS reads on a host without git-lfs', () => {
+  let fixture: Fixture;
+  let noLfs: Awaited<ReturnType<typeof pathWithoutGitLfs>>;
+  before(async () => {
+    fixture = await createFixture();
+    await fixture.seed({ 'image.png': `version https://git-lfs.github.com/spec/v1\noid sha256:${OID}\nsize 3\n` });
+    noLfs = await pathWithoutGitLfs();
+  });
+  after(async () => {
+    await noLfs.remove();
+    await fixture.cleanup();
+  });
+
+  it('stops the read instead of finding the object unreadable', async () => {
+    const clone = await fixture.clone('without-lfs');
+    const withoutLfs = new Git(clone.dir, { PATH: noLfs.path });
+    const read = await lfsReader(withoutLfs, 'origin');
+    await assert.rejects(read({ oid: OID, size: 3, extensions: false }, 'image.png'), (error) => error instanceof GitLfsMissingError && error.message === message('lfs.needs-git-lfs'));
+    await assert.rejects(requireGitLfs(withoutLfs), GitLfsMissingError);
+    // A pointer with LFS extensions is refused without git-lfs, as before.
+    assert.deepEqual(await read({ oid: OID, size: 3, extensions: true }, 'image.png'), { ok: false, reason: `LFS object ${OID} uses LFS extensions, which are not supported` });
+    // The same repository with git-lfs: a missing object is unreadable, as before.
+    await requireGitLfs(clone);
+    const found = await (await lfsReader(clone, 'origin'))({ oid: OID, size: 3, extensions: false }, 'image.png');
+    assert.equal(found.ok, false);
+  });
+
+  it('stops the dry run\'s question about missing objects', async () => {
+    const clone = await fixture.clone('without-lfs-dry-run');
+    const withoutLfs = new Git(clone.dir, { PATH: noLfs.path });
+    const blob = await clone.text(['rev-parse', 'origin/main:image.png']);
+    await assert.rejects(missingLfsObjects(withoutLfs, 'origin', [blob]), GitLfsMissingError);
   });
 });

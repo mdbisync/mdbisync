@@ -317,7 +317,7 @@ the reason is fixed. The summaries list each with its rules:
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |
 | `stored-in-lfs` | The Markdown file itself is stored in Git LFS. | Store Markdown files in git directly. |
 | `upload-too-large` | The document links a file over Linear's 10 MB upload limit. | Make the file smaller, or link it from somewhere else. |
-| `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. |
+| `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. For a new document left out after a confirmed missing object (404/410), also commit an edit to the document or linked file to retry it. |
 | `image-blocked` | From Linear: an image or file the document embeds is not an upload of the workspace (an external URL, a `data:` URI, a path), or its upload is gone, over 10 MB, redirected or not a supported type; or a new link names a repository file other than a Markdown document by its relative path. The file keeps the tracked branch's text. | Upload the files in Linear instead of linking them. The first sync after the initial sync (once its pull request, if any, is merged) marks the document and comments which images to fix. |
 | `download-failed` | From Linear: a file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed next to it. The file keeps the tracked branch's text. | Nothing; the next sync reads the document again. If it repeats, check the run's log for the asset error. |
 | `security-hook` | From Linear: a hook marked `alias: security` flagged the document's text or a file it embeds. In an initial sync, that text can hold the Linear URL of a linked document that was left out. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear, or bring in the linked document. |
@@ -419,6 +419,7 @@ the message. Most come from the workflow's configuration:
 | `the staged candidates come from another version of the action`, `the staged manifest names a file that is not a content hash` | Pin the `stage` and `apply` steps to the same release, and let nothing else write to the runner's temporary folder between them. |
 | `invalid security hook configuration` | Fix the hooks marked `alias: security` in `.pre-commit-config.yaml`. |
 | `security hooks require pre-commit on PATH; install pre-commit before capture` | Install `pre-commit` before the mdbisync step (the example workflows do). |
+| `files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync` | Install `git-lfs` on the runner, or repair it so `git lfs version` runs. GitHub's hosted runners have it. |
 | `the tracked branch "<branch>" does not exist on remote "<remote>"` | Set `tracked-branch` to a branch that exists. |
 
 ## `init` errors

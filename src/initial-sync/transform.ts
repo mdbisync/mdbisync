@@ -39,11 +39,15 @@ export class LeaveOutError extends Error {
   /** The files that caused it, by repository path (a file over the upload limit). */
   readonly files: readonly string[];
 
-  constructor(rule: LeftOutAtWriteRule, message: string, files: readonly string[] = []) {
+  /** The failed upload names an LFS object confirmed absent from its remote. */
+  readonly missingLfsObject: boolean;
+
+  constructor(rule: LeftOutAtWriteRule, message: string, files: readonly string[] = [], options: { missingLfsObject?: boolean } = {}) {
     super(message);
     this.name = 'LeaveOutError';
     this.rule = rule;
     this.files = files;
+    this.missingLfsObject = options.missingLfsObject ?? false;
   }
 }
 

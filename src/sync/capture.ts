@@ -17,7 +17,7 @@ import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type IdEntry, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
@@ -406,7 +406,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (old !== undefined) documentIds.delete(old.path);
         documentIds.set(path, doc.id);
       } catch (error) {
-        if (error instanceof LinearError) throw error;
+        if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
         if (error instanceof ImageBlockedError) {
           const security = await gate.check(new Map([[path, head + (doc.content ?? '')]]));
           if (security === null) {

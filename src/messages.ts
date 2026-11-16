@@ -139,6 +139,7 @@ export const MESSAGES = {
   'config.prefix-outside-refs': 'refPrefix "{prefix}" must start with "refs/" and name a folder under it',
   'config.prefix-reserved': 'refPrefix "{prefix}" must not be under refs/heads, refs/tags or refs/remotes',
   'git.failed': 'git {args} failed with exit code {code}: {stderr}',
+  'lfs.needs-git-lfs': 'files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync',
   'objects.missing': 'git object {oid} is missing',
   'objects.not-blob': 'git object {oid} is a {type}, not a blob',
   'objects.invalid-path': 'invalid repository path {path}',

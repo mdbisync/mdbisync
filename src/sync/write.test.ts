@@ -4,6 +4,7 @@
 // to Linear and records it on `linear`.
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -14,7 +15,7 @@ import { type RunReport } from '../run/finish.ts';
 import { Git } from '../state/index.ts';
 import { fixText } from '../format/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, createFixture, fakeLfsServer } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
 const CANARY = 'kx-5b1e0a94';
@@ -699,6 +700,56 @@ describe('sync: the tracked branch to Linear', () => {
       assert.equal(again.report.complete, false);
       assert.deepEqual(again.report.sync?.leftOutAtWrite, first.report.sync?.leftOutAtWrite);
       assert.deepEqual(again.report.sync?.updated, []);
+    });
+  }
+
+  for (const create of [false, true]) for (const status of [404, 410, 503]) {
+    it(`an LFS object refused with ${status} for a ${create ? 'new' : 'existing'} document ${!create || status === 503 ? 'retries' : 'allows the merge record'}`, async () => {
+      const content = Buffer.from('recoverable diagram bytes');
+      const oid = createHash('sha256').update(content).digest('hex');
+      const server = await fakeLfsServer([content]);
+      try {
+        server.objectErrors.set(oid, status);
+        await new Git(cwd).run(['config', 'lfs.url', server.url]);
+        await new Git(cwd).run(['config', 'lfs.transfer.maxretries', '0']);
+        const path = create ? 'eng/notes/new-figure.md' : 'eng/notes/figure.md';
+        const before = create ? undefined : (await documentOf(path)).content;
+        const leftOut = create && status !== 503;
+        const text = `# New figure\n\n![Diagram](../media/new.png)\n`;
+        await commit({
+          [path]: text,
+          'eng/media/new.png': `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`,
+          'eng/notes/review.md': '# Review\n\nIndependent edit.\n',
+        });
+        const first = await sync();
+        assert.equal(first.result.exitCode, 0, first.result.stderr);
+        assert.equal(first.report.complete, leftOut);
+        assert.deepEqual(first.report.sync?.leftOutAtWrite, [{ path, rule: 'upload-unreadable', files: ['eng/media/new.png'] }]);
+        assert.deepEqual(first.report.sync?.updated, ['eng/notes/review.md']);
+        assert.ok(first.summary.includes(`| ${path} | upload-unreadable |`));
+        if (create) assert.equal((await ids())[path], undefined);
+        else assert.equal((await documentOf(path)).content, before);
+        const reserved = create ? JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json'))[path] : undefined;
+        if (create) assert.ok(reserved);
+        if (leftOut) {
+          assert.equal(await rev('refs/mdbisync/linear^2'), await rev('refs/heads/main'));
+          assert.equal(await show(`refs/mdbisync/linear:${path}`), text);
+          await assertIdempotent();
+        } else if (create) {
+          await assert.rejects(show(`refs/mdbisync/linear:${path}`));
+        }
+        server.objectErrors.clear();
+        // A confirmed absence is left out until git changes; a transient refusal retries without a git edit.
+        if (leftOut) await commit({ [path]: text + '\nAvailable now.\n' });
+        const recovered = await sync();
+        assert.equal(recovered.result.exitCode, 0, recovered.result.stderr);
+        assert.equal(recovered.report.complete, true);
+        assert.deepEqual(create ? recovered.report.sync?.created : recovered.report.sync?.updated, [path]);
+        if (create) assert.equal((await documentOf(path)).id, reserved);
+        await assertIdempotent();
+      } finally {
+        await server.close();
+      }
     });
   }
 

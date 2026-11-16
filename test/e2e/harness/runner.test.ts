@@ -7,6 +7,7 @@ import { LinearClient } from '../../../src/linear/index.ts';
 import type { EngineResult } from './engine.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
+import { pathWithoutGitLfs } from '../../../src/state/test-helpers.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
 import { budgetHolds, reportedConflictNotices, reportedHoldChanges, compare, firstDifference, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
@@ -482,6 +483,23 @@ describe('runner', () => {
     const [result] = await runScenarios([byId('L1-04')], deps({ missing: [] }), 4);
     assert.equal(result?.result, 'env-blocked');
     assert.match(result?.reason ?? '', /no Linear app is configured/);
+  });
+
+  it('blocks a live scenario on a host without git-lfs before admission', async () => {
+    // Without git-lfs every image of the slice is unreadable, so each sync stays partial: the conflicted setup
+    // of L6-03 then never reaches the tracked branch.
+    const noLfs = await pathWithoutGitLfs();
+    const saved = process.env.PATH;
+    process.env.PATH = noLfs.path;
+    try {
+      const [result] = await runScenarios([byId('L6-03')], deps({ missing: [] }), 1);
+      assert.equal(result?.result, 'env-blocked');
+      assert.match(result?.reason ?? '', /git-lfs does not run on this host/);
+    } finally {
+      if (saved === undefined) delete process.env.PATH;
+      else process.env.PATH = saved;
+      await noLfs.remove();
+    }
   });
 
   it('blocks a live scenario without the sandbox repository before it touches the shared admission', async () => {
