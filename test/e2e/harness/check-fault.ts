@@ -34,12 +34,28 @@ type WaitOptions = { timeoutMs?: number; pollMs?: number | undefined; signal?: A
 /** The default bound of every wait for a marker check. */
 export const CHECK_WAIT_MS = 5 * 60_000;
 
+/** Extra reads after GitHub server errors, counted across the whole wait. */
+const CHECK_SERVER_ERROR_RETRIES = 2;
+
 /** Polls the check until `done` accepts its state; at the deadline, `timedOut` names the error. */
 async function pollCheck(rest: SandboxRest, sha: string, done: (actual: string) => boolean, timedOut: (reading: CheckReading) => Error, options: WaitOptions): Promise<string> {
   const deadline = Date.now() + (options.timeoutMs ?? CHECK_WAIT_MS);
+  let serverErrors = 0;
   for (;;) {
     options.signal?.throwIfAborted();
-    const reading = await readCheck(rest, sha);
+    let reading: CheckReading;
+    try {
+      reading = await readCheck(rest, sha);
+    } catch (error) {
+      if (!(error instanceof GitHubError) || error.status < 500 || error.status >= 600
+        || serverErrors >= CHECK_SERVER_ERROR_RETRIES || Date.now() >= deadline) throw error;
+      const backoff = (options.pollMs ?? 2_000) * 2 ** serverErrors;
+      serverErrors += 1;
+      const remaining = deadline - Date.now();
+      await sleep(Math.min(backoff, remaining), undefined, { signal: options.signal });
+      if (backoff >= remaining || Date.now() >= deadline) throw error;
+      continue;
+    }
     if (done(reading.actual)) return reading.actual;
     if (Date.now() >= deadline) throw timedOut(reading);
     await sleep(options.pollMs ?? 2_000, undefined, { signal: options.signal });
