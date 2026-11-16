@@ -11,7 +11,7 @@ import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { detectConflicts, MARKERS } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { FAKE_APP_SLUG, type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
+import { type Fixture, createFixture, mergeOnGitHub, remoteRef } from '../state/test-helpers.ts';
 import { type CheckClock } from '../pull-request/index.ts';
 
 export const CANARY = 'kx-3c9d1e72';
@@ -75,7 +75,8 @@ export function pullRequestHarness() {
     concurrentSyncMove = false;
     world.github.checks = new Map();
     world.github.merge = mergeOnRemote;
-    world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
+    // A pull request whose branch was deleted still answers; its head then shows no commit here.
+    world.github.pullRequestHead = async (pr) => (await remoteRef(fixture, `refs/heads/${pr.head}`)) ?? '';
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
     assert.equal(initial.result.exitCode, 0, initial.result.stderr);
     start = await rev('refs/heads/main');
