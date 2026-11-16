@@ -86,6 +86,15 @@ export function renderRunMarkdown(report: HarnessReport): string {
       for (const mark of marked) lines.push(`| ${result.id} | ${mapped} | ${cell(mark.path)} | ${mark.icon}/${mark.color} | ${mark.saved === null ? 'none' : `${mark.saved.icon ?? 'none'}/${mark.saved.color ?? 'none'}`} | ${mark.comments} |`);
     }
   }
+  const gates = report.results.filter((result) => result.imageGate !== undefined);
+  if (gates.length > 0) {
+    lines.push('', '## Image gate', '', 'What Linear stored for the blocked image, and for an upload, the HTTP status of the same authenticated download the sync makes.', '',
+      '| Scenario | Run | Stored destination | Upload status |', '| --- | --- | --- | --- |');
+    for (const result of gates) {
+      const { storedDestination, uploadStatus } = result.imageGate!;
+      lines.push(`| ${result.id} | ${result.runId} | ${storedDestination} | ${uploadStatus === undefined ? 'n/a' : uploadStatus ?? 'request failed'} |`);
+    }
+  }
   return `${lines.join('\n')}\n`;
 }
 

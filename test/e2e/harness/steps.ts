@@ -35,7 +35,7 @@ import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflict
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
-import { commentsWithState, imagePlace, placeLabel, withoutImage } from './image-gate.ts';
+import { commentsWithState, destinationKind, imageGateRecord, imagePlace, placeLabel, withoutImage } from './image-gate.ts';
 import { initFiles } from './init-files.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -1984,7 +1984,7 @@ const LINEAR: Record<string, Executor> = {
   },
   // An integration writes a relative image path into a synced document through the API (L2-42). The image's
   // place and line in the text Linear stored are the notice line the sync must give; Linear may keep the path
-  // or turn it into an upload of its own, and which it did is recorded.
+  // or turn it into an upload of its own, and which it did is recorded (the kind only, never the URL).
   'linear.image-path': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
     let written = '';
@@ -1996,7 +1996,7 @@ const LINEAR: Record<string, Executor> = {
     const place = imagePlace(stored, written);
     // Linear dropping the image is no answer about the sync: the scenario cannot check its gate.
     if (place === null) throw new Error('Linear stored the document without the written image');
-    ctx.observations.set('imageGate.blocked', { path, token: written, storedDestination: place.url });
+    ctx.observations.set('imageGate.blocked', { path, token: written, storedDestination: destinationKind(place.url) });
     ctx.observations.set('expected.blockedImageLines', [placeLabel(place)]);
   },
   // How the blocked document looks before the editor fixes it (L2-42), then the fix: the image is removed.
@@ -2004,10 +2004,13 @@ const LINEAR: Record<string, Executor> = {
     const world = live(ctx);
     const blocked = ctx.observations.get('imageGate.blocked') as { path: string; token: string } | undefined;
     if (blocked === undefined) throw new Error('linear.remove-image needs a linear.image-path step first');
-    const { id, icon, color } = await linearContent(ctx, blocked.path);
+    const { id, content, icon, color } = await linearContent(ctx, blocked.path);
     ctx.observations.set('blocked.icon', icon);
     ctx.observations.set('blocked.color', color);
     ctx.observations.set('blocked.comments', (await commentsWithState(world.app, id)).map((comment) => comment.body));
+    // The text the sync blocked: what Linear stored for the image and, for an upload, what the sync's download gets.
+    const record = await imageGateRecord(world.app, content, blocked.token);
+    if (record !== null) ctx.observations.set('imageGate.record', record);
     await editorEdit(ctx, editorOf(args), blocked.path, (text) => {
       const fixed = withoutImage(text, blocked.token);
       // A fix that changes nothing would leave the document blocked for a reason in the harness, not the sync.

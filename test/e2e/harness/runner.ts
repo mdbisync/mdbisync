@@ -933,6 +933,7 @@ export function resultOf(
     ...(ctx.observations.has('zone.trash') ? { teamZoneTrash: ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> } : {}),
     ...(ctx.proxy === null ? {} : { answerSizes: answerSizes(ctx.proxy.requests) }),
     ...(ctx.observations.has('conflictMarks') ? { conflictMarks: ctx.observations.get('conflictMarks') as NonNullable<ScenarioResult['conflictMarks']> } : {}),
+    ...(ctx.observations.has('imageGate.record') ? { imageGate: ctx.observations.get('imageGate.record') as NonNullable<ScenarioResult['imageGate']> } : {}),
   };
 }
 

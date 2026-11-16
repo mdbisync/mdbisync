@@ -47,6 +47,52 @@ export function imagePlace(text: string, token: string): (ImagePlace & { url: st
   return { image: index + 1, total: images.length, line: found.line, url: found.url };
 }
 
+/**
+ * What Linear stored where the harness wrote a relative image path: the path
+ * kept, an upload of Linear's own, or something else. Only the kind is kept,
+ * never the destination: an upload URL is signed.
+ */
+export type StoredDestination = 'relative-path' | 'upload' | 'other';
+
+/** Where the blocked image points in the text the sync read, and for an upload, the HTTP status it answers. */
+export interface ImageGateRecord {
+  storedDestination: StoredDestination;
+  /** The status of the same authenticated GET the sync makes for an upload; null when the request failed. */
+  uploadStatus?: number | null;
+}
+
+export function destinationKind(url: string): StoredDestination {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    // No scheme: a path. A path from the root or a protocol-relative URL is not the relative path the harness wrote.
+    return url.startsWith('/') || url.startsWith('\\') ? 'other' : 'relative-path';
+  }
+  return parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.username === '' && parsed.password === '' && parsed.port === '' ? 'upload' : 'other';
+}
+
+/**
+ * The record of the blocked image whose alt text holds `token` in `text`.
+ * For an upload, the app fetches it as the sync does (its transport's
+ * authenticated upload GET, redirects not followed) and keeps the status
+ * alone. Null when the image is not in the text.
+ */
+export async function imageGateRecord(app: Pick<LinearClient, 'transport'>, text: string, token: string): Promise<ImageGateRecord | null> {
+  const place = imagePlace(text, token);
+  if (place === null) return null;
+  const storedDestination = destinationKind(place.url);
+  if (storedDestination !== 'upload') return { storedDestination };
+  try {
+    const response = await app.transport.fetchUpload(place.url, { signal: AbortSignal.timeout(30_000) });
+    await response.body?.cancel().catch(() => {});
+    return { storedDestination, uploadStatus: response.status };
+  } catch {
+    // The error could quote the URL: only that the request failed is kept.
+    return { storedDestination, uploadStatus: null };
+  }
+}
+
 /** The label a notice gives an image: `Image N of M (line L)`. */
 export function placeLabel(place: ImagePlace): string {
   return `Image ${place.image} of ${place.total} (line ${place.line})`;

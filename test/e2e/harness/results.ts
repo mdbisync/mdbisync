@@ -102,6 +102,8 @@ export interface ScenarioResult {
   answerSizes?: Record<string, import('./request-accounting.ts').AnswerSize>;
   /** The mapped documents Linear shows with the conflict mark after the checks; absent when the run did not reach them or the read failed. */
   conflictMarks?: { mapped: number; marked: import('./subjects.ts').ConflictMarkRecord[] };
+  /** The image-gate scenario's blocked image: the kind of destination Linear stored and, for an upload, its HTTP status; never the URL. */
+  imageGate?: import('./image-gate.ts').ImageGateRecord;
 }
 
 export const EXPECTED_RED_FILE = fileURLToPath(new URL('../expected-red.json', import.meta.url));
