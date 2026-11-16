@@ -76,3 +76,15 @@ async function onTracked(git: Git, config: StateConfig, tracked: Oid, merged: st
   if ((await git.run(['merge-base', '--is-ancestor', merged, tip], { okCodes: [0, 1, 128] })).code !== 0) return 'absent';
   return (await git.text(['rev-parse', `${merged}^1`])) === tracked ? 'checked' : 'unchecked';
 }
+
+/**
+ * Whether the merge commit `merged`, which `verifyMerge` found on the tracked
+ * branch, merged `head`. A merge GitHub already had in progress when the run
+ * asked for its own was asked for by an earlier run, for the head of that
+ * time; when the branch moved since, it merged an older head.
+ */
+export async function mergedHead(git: Git, merged: string, head: Oid): Promise<boolean> {
+  // A commit without a second parent (a person's squash merge) merged no head of the sync's.
+  const parent = await git.run(['rev-parse', '--verify', '--quiet', `${merged}^2`], { okCodes: [0, 1] });
+  return parent.code === 0 && parent.stdout.toString('utf8').trim() === head;
+}

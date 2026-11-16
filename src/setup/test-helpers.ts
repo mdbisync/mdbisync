@@ -87,6 +87,8 @@ export interface FakePullRequest {
   base: string;
   state: 'open' | 'closed';
   merged: boolean;
+  /** Its merge commit, once merged through the merge endpoint or by a test. */
+  mergeCommit?: string;
   /**
    * Its head branch was deleted. GitHub then closes the pull request itself,
    * a little later, and answers 422 to any change of its state.
@@ -402,7 +404,7 @@ async function mergeRequest(world: FakeWorld, method: string, rest: string, init
   const answer = world.github.merge === undefined ? { status: 405 } : await world.github.merge(pr, body.sha);
   if ('status' in answer) return json(answer.status, { message: answer.message ?? 'Pull Request is not mergeable' });
   world.writes.push(`${method} ${rest}`);
-  Object.assign(pr, { state: 'closed', merged: true });
+  Object.assign(pr, { state: 'closed', merged: true, mergeCommit: answer.sha });
   return json(200, { sha: answer.sha, merged: true, message: 'Pull Request successfully merged' });
 }
 
@@ -515,7 +517,7 @@ function read(pr: FakePullRequest): FakePullRequest {
 }
 
 function pullRequestNode(pr: FakePullRequest) {
-  return { number: pr.number, html_url: `https://github.test/owner/repo/pull/${pr.number}`, state: pr.state, head: { ref: pr.head, repo: { full_name: pr.headRepository ?? 'owner/repo' } }, base: { ref: pr.base }, title: pr.title, body: pr.body };
+  return { number: pr.number, html_url: `https://github.test/owner/repo/pull/${pr.number}`, state: pr.state, head: { ref: pr.head, repo: { full_name: pr.headRepository ?? 'owner/repo' } }, base: { ref: pr.base }, title: pr.title, body: pr.body, merged: pr.merged, merge_commit_sha: pr.merged ? pr.mergeCommit ?? null : null };
 }
 
 async function linear(world: FakeWorld, path: string, init: RequestInit | undefined): Promise<Response> {

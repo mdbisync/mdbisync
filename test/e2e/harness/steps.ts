@@ -29,7 +29,7 @@ import { findDrift } from '../../probe/record.ts';
 import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, contentCanaries, editsFound, expectsDocument, holdsToken, lostEdits, readSides, recordRefs, snapshotRefs, bodyOf, type Sides } from './checks.ts';
 import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
-import type { CheckState } from '../../../src/pull-request/merge.ts';
+import { type CheckState, mergeInProgress } from '../../../src/pull-request/merge.ts';
 import { CHECK_NAME, CHECK_WORKFLOW_PATH, readCheckState } from '../../corpus/check-workflow.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
@@ -312,6 +312,23 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
 export const SETTLE_SERVER_ERROR_RETRIES = 2;
 
 /**
+ * How many runs of one settle may end on a merge GitHub still has in progress
+ * before it fails the settle. Each such run already looked again for a minute.
+ */
+export const SETTLE_MERGE_IN_PROGRESS_RETRIES = 4;
+
+/** Whether a run's report says GitHub refused a merge of either lane because an earlier merge still runs. */
+export function mergeStillInProgress(report: Readonly<Record<string, unknown>> | null | undefined): boolean {
+  const lane = (path: readonly string[]) => {
+    const status = field(report, [...path, 'status']);
+    const reason = field(report, [...path, 'reason']);
+    return field(report, [...path, 'code']) === 'merge-refused'
+      && mergeInProgress({ status: typeof status === 'number' ? status : undefined, reason: typeof reason === 'string' ? reason : undefined });
+  };
+  return lane(['pullRequest']) || lane(['pullRequest', 'suspended']);
+}
+
+/**
  * Runs the sync until a run changes nothing more (at most `limit` runs). A
  * run that changed nothing while its open sync pull request still waits for
  * a check has not settled: the next run, once the check completes, may merge
@@ -329,12 +346,19 @@ export const SETTLE_SERVER_ERROR_RETRIES = 2;
  * on top of `limit`, for at most `SETTLE_SERVER_ERROR_RETRIES` such runs;
  * one more fails the settle with that error. The failed runs stay among the
  * scenario's results for its checks.
+ *
+ * A run that ended while GitHub still had a merge of the sync pull request in
+ * progress (`mergeStillInProgress`, usually after such a server error) has
+ * not settled either: the merge may still land, or a later run merges.
+ * Settle runs again, on top of `limit`, for at most
+ * `SETTLE_MERGE_IN_PROGRESS_RETRIES` such runs; one more fails the settle.
  */
 export async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4, runOnce: () => Promise<void> = () => settleRun(ctx, args)): Promise<void> {
   let waits = 0;
   let merges = 0;
   let serverErrors = 0;
-  for (let attempt = 0; attempt < limit + waits + merges + serverErrors; attempt += 1) {
+  let inProgress = 0;
+  for (let attempt = 0; attempt < limit + waits + merges + serverErrors + inProgress; attempt += 1) {
     const count = ctx.engine.results.length;
     await runOnce();
     // Only a run this attempt recorded is judged: an earlier step's failed run is not this settle's.
@@ -351,8 +375,17 @@ export async function settle(ctx: RunContext, args: Record<string, unknown> = {}
       continue;
     }
     const report = result?.report;
+    if (mergeStillInProgress(report)) {
+      if (inProgress >= SETTLE_MERGE_IN_PROGRESS_RETRIES) {
+        throw new ProductError(`run.settle: GitHub still had a merge of the sync pull request in progress after ${inProgress + 1} runs, more than the ${SETTLE_MERGE_IN_PROGRESS_RETRIES} the settle runs again after`);
+      }
+      inProgress += 1;
+      ctx.observations.set('settle.mergeInProgressRuns', Number(ctx.observations.get('settle.mergeInProgressRuns') ?? 0) + 1);
+      ctx.log(`run.settle: GitHub still has a merge of the sync pull request in progress; running again (${inProgress} of ${SETTLE_MERGE_IN_PROGRESS_RETRIES})`);
+      continue;
+    }
     if (report?.['changed'] !== false) {
-      const last = attempt + 1 === limit + waits + merges + serverErrors;
+      const last = attempt + 1 === limit + waits + merges + serverErrors + inProgress;
       if (last && typeof field(report, ['pullRequest', 'merged']) === 'string' && merges < limit) merges += 1;
       else if (last) ctx.log(`settle: the last of ${String(attempt + 1)} runs still changed; the scenario did not settle`);
       continue;

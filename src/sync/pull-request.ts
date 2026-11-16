@@ -38,6 +38,7 @@ import {
   PullRequestError,
   ensurePullRequest,
   findOpenPullRequest,
+  mergeInProgress,
   mergePullRequest,
   readChecks,
   waitForChecks,
@@ -66,7 +67,7 @@ import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_ME
 import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold } from './deadline.ts';
 import { LaneMoved, LaneConflict, commitLaneIds, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
-import { destinationHolds, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
+import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
 import { oneLine, unverifiedList, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { message } from '../messages.ts';
 import { type PullRequestCode } from '../codes.ts';
@@ -142,7 +143,7 @@ export interface PullRequestResult {
    * Why the step did not do all it could this run. Waiting for checks is not
    * one: a later run merges.
    * - `conflict`: `linear` and the tracked branch change the same lines, which the write step merges with markers for the next run; or a conflicting file on the sync branch is no document, so it cannot hold markers and a person merges it.
-   * - `merge-refused`: GitHub would not merge (the head moved, or the pull request cannot be merged now); a later run tries again.
+   * - `merge-refused`: GitHub would not merge (the head moved, the pull request cannot be merged now, or an earlier merge of it is still in progress); a later run tries again.
    * - `merge-blocked`: GitHub refused the merge for the same reason as an earlier run, on the same head and tracked branch; a setup error, a person must change what blocks it.
    * - `checks-missing`: past the deadline, the head still lacks an expected check, or has no checks while the sync may not merge without them; a setup error, a person must make the checks run.
    * - `initial-pull-request-pending`: the sync branch holds the record of an initial sync from Linear that a person has not merged.
@@ -433,6 +434,9 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (!merge.merged) {
       const refusal: MergeRefusal = { head, base: tracked, status: merge.status, reason: merge.reason };
       const refused = { ...result, status: merge.status, reason: merge.reason };
+      // GitHub still runs an earlier merge of this pull request, one it answered with a server error: no refusal of
+      // this head. It is not noted, so a later run that meets it again does not take it for a repeated refusal.
+      if (mergeInProgress(merge)) return { ...refused, code: 'merge-refused' };
       if (earlier !== null && earlier.status === refusal.status && earlier.reason === refusal.reason) return { ...refused, code: 'merge-blocked' };
       try {
         await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal, { head, since, held: stillHeld, checks: expected.observed }) });
@@ -445,6 +449,8 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A change between that read and the merge is found here; the merge cannot be taken back, so a person is told.
     const misplaced = await verifyMerge(git, config, github, pullRequest.number, tracked, merge.sha);
     if (misplaced !== null) return { ...result, code: 'merge-misplaced', misplaced };
+    // A merge an earlier run asked for may have merged an older head: a later run takes in what it left.
+    if (merge.late === true && !(await mergedHead(git, merge.sha, head))) return { ...result, code: 'state-moved' };
     result.merged = merge.sha;
     result.pullRequest = null;
     return result;

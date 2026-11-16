@@ -4,7 +4,7 @@
 // private repository on GitHub Free cannot have.
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { type CheckClock, type GitHubRepository, PullRequestError, request } from './github.ts';
+import { type CheckClock, type GitHubRepository, PullRequestError, readPullRequest, request } from './github.ts';
 import { actionsJobs, type WorkflowIdentity } from './actions.ts';
 import { message } from '../messages.ts';
 
@@ -326,25 +326,74 @@ export async function waitForChecks(target: GitHubRepository, sha: string, secon
 }
 
 export type MergeOutcome =
-  | { merged: true; sha: string }
+  /** `late`: GitHub first answered that a merge was already in progress, and that merge landed while the run looked again. */
+  | { merged: true; sha: string; late?: true }
   /** GitHub would not merge: the head moved (409), the pull request cannot be merged now (405), or it is not open (422). */
   | { merged: false; status: number; reason: string };
 
 /** The longest reason kept from GitHub's answer. */
 const REASON_LENGTH = 300;
 
+/** How long a run looks again whether a merge GitHub says is already in progress lands. */
+export const MERGE_IN_PROGRESS_WAIT_SECONDS = 60;
+/** The pause between those looks. */
+const MERGE_IN_PROGRESS_PAUSE_MS = 5000;
+
+/**
+ * Whether GitHub refused a merge because an earlier merge of the same pull
+ * request still runs: HTTP 405 "Merge already in progress". GitHub answers so
+ * after it answered that earlier merge with a server error. The pull request
+ * may still merge, so the refusal decides nothing about its head.
+ */
+export function mergeInProgress(refusal: { status?: number | undefined; reason?: string | undefined }): boolean {
+  return refusal.status === 405 && /^merge already in progress\b/i.test(refusal.reason ?? '');
+}
+
 /**
  * Merges a pull request with a merge commit, only while its head is still
- * `sha`, the commit whose checks the caller read.
+ * `sha`, the commit whose checks the caller read. When GitHub answers that a
+ * merge is already in progress, it looks again, for up to
+ * `MERGE_IN_PROGRESS_WAIT_SECONDS`, whether the pull request merged; the
+ * refusal stands while it has not.
  */
 export async function mergePullRequest(target: GitHubRepository, number: number, sha: string): Promise<MergeOutcome> {
   const answer = await request(target, 'PUT', `/pulls/${number}/merge`, { merge_method: 'merge', sha }, { kind: 'merged', accepted: 200 });
   const body = answer.json as { merged?: unknown; sha?: unknown; message?: unknown } | null;
   if (answer.status === 200 && body !== null && body.merged === true && typeof body.sha === 'string') return { merged: true, sha: body.sha };
   if (answer.status === 405 || answer.status === 409 || answer.status === 422) {
-    return { merged: false, status: answer.status, reason: refusalReason(body?.message) };
+    const refused = { merged: false as const, status: answer.status, reason: refusalReason(body?.message) };
+    if (!mergeInProgress(refused)) return refused;
+    const landed = await awaitMerge(target, number, MERGE_IN_PROGRESS_WAIT_SECONDS);
+    return landed === null ? refused : { merged: true, sha: landed, late: true };
   }
   throw new PullRequestError(message('github.merging'), answer.status);
+}
+
+/**
+ * Reads the pull request until GitHub shows it merged, for up to `seconds` on
+ * the target's clock, and returns its merge commit; null when it is still
+ * open, or closed without a merge, at the end.
+ */
+async function awaitMerge(target: GitHubRepository, number: number, seconds: number): Promise<string | null> {
+  const clock = target.clock ?? REAL_CLOCK;
+  const deadline = clock.now() + seconds * 1000;
+  // Also cap the reads independently of the clock and API latency.
+  for (let read = 0; read <= Math.ceil((seconds * 1000) / MERGE_IN_PROGRESS_PAUSE_MS); read += 1) {
+    let pr: Awaited<ReturnType<typeof readPullRequest>>;
+    try {
+      pr = await readPullRequest(target, number);
+    } catch (error) {
+      // A failed look leaves the refusal as it was: a later run looks again.
+      if (error instanceof PullRequestError) return null;
+      throw error;
+    }
+    if (pr.mergeCommit !== null) return pr.mergeCommit;
+    if (pr.state === 'closed') return null;
+    const now = clock.now();
+    if (now >= deadline) break;
+    await clock.sleep(Math.min(MERGE_IN_PROGRESS_PAUSE_MS, deadline - now));
+  }
+  return null;
 }
 
 /**

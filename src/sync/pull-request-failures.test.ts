@@ -4,7 +4,11 @@ import assert from 'node:assert/strict';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
 import { describe, it } from 'node:test';
+import { mergeOnGitHub } from '../state/test-helpers.ts';
 import { pullRequestHarness, CANARY, SYNC_BRANCH } from './pull-request-test-helpers.ts';
+
+// GitHub's answer while a merge it answered with a server error still runs.
+const IN_PROGRESS = 'Merge already in progress';
 
 describe('sync: pull request failures', () => {
   const h = pullRequestHarness();
@@ -25,6 +29,119 @@ describe('sync: pull request failures', () => {
     const again = await sync();
     assert.equal(again.result.exitCode, 0, again.result.stderr);
     assert.deepEqual(again.writes, ['PUT /pulls/1/merge']);
+  });
+
+  it('"Merge already in progress" after a server error on the merge is no repeated refusal: the runs look again until the merge goes through', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nMerged after a server error. ${CANARY}\n`);
+    await sync();
+    // GitHub answers the first merge 502 and keeps that merge in progress for two more runs, which never lands; then
+    // it merges again.
+    let calls = 0;
+    h.world.github.merge = async (pr, sha) => {
+      calls += 1;
+      if (calls === 1) return { status: 502, message: 'Server Error' };
+      if (calls <= 3) return { status: 405, message: IN_PROGRESS };
+      return mergeOnRemote(pr, sha);
+    };
+    const failed = await sync();
+    assert.equal(failed.result.exitCode, INCOMPLETE_EXIT_CODE, failed.result.stderr);
+    assert.equal(failed.report.pullRequest?.code, 'github-failed');
+    assert.equal(failed.report.pullRequest?.status, 502);
+
+    for (const run of [1, 2]) {
+      const waiting = await sync();
+      assert.equal(waiting.result.exitCode, 0, `run ${run}: ${waiting.result.stderr}`);
+      assert.equal(waiting.report.pullRequest?.code, 'merge-refused', `run ${run}`);
+      assert.equal(waiting.report.pullRequest?.reason, IN_PROGRESS);
+      assert.ok(waiting.summary.includes(`(HTTP 405: \`${IN_PROGRESS}\`); a later run tries again`), waiting.summary);
+      assert.deepEqual(waiting.writes, [], `run ${run}: the merge in progress is not noted on the pull request`);
+      assert.ok(waiting.clock.now() >= 60_000, `run ${run} looked again for a minute (${waiting.clock.now()} ms)`);
+    }
+    assert.ok(!h.world.github.pullRequests[0]?.body.includes('merge refused'), 'no refusal is noted');
+
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.deepEqual(merged.writes, ['PUT /pulls/1/merge']);
+    assert.equal(typeof merged.report.pullRequest?.merged, 'string');
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Merged after a server error\./);
+  });
+
+  it('a merge already in progress that lands while the run looks again counts as the run\'s merge', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nLanded while looking. ${CANARY}\n`);
+    await sync();
+    // A read of the pull request lands a pending merge; the next read shows it.
+    let landing: (() => Promise<void>) | undefined;
+    const headOf = h.world.github.pullRequestHead!;
+    h.world.github.pullRequestHead = async (pr) => {
+      const land = landing;
+      landing = undefined;
+      await land?.();
+      return headOf(pr);
+    };
+    let calls = 0;
+    h.world.github.merge = async (pr, sha) => {
+      calls += 1;
+      if (calls === 1) return { status: 502, message: 'Server Error' };
+      // The merge the 502 hid lands only after the run asked again.
+      landing = async () => {
+        const landed = await mergeOnRemote(pr, sha);
+        if ('sha' in landed) Object.assign(pr, { state: 'closed', merged: true, mergeCommit: landed.sha });
+      };
+      return { status: 405, message: IN_PROGRESS };
+    };
+    const failed = await sync();
+    assert.equal(failed.report.pullRequest?.status, 502);
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.equal(merged.report.pullRequest?.code, undefined, JSON.stringify(merged.report.pullRequest));
+    assert.equal(merged.report.pullRequest?.merged, h.world.github.pullRequests[0]?.mergeCommit);
+    assert.deepEqual(merged.writes, [], 'GitHub did not accept a merge of this run');
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Landed while looking\./);
+
+    delete h.world.github.merge;
+    const after = await sync();
+    assert.equal(after.result.exitCode, 0, after.result.stderr);
+    assert.equal(after.report.pullRequest?.needed, false);
+    assert.deepEqual(after.writes, []);
+  });
+
+  it('a merge already in progress that lands with an older head of the sync branch is not taken for this run\'s merge', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nFirst head. ${CANARY}\n`);
+    await sync();
+    const first = await rev(SYNC_BRANCH);
+    let calls = 0;
+    h.world.github.merge = async (pr, sha) => {
+      calls += 1;
+      if (calls === 1) return { status: 502, message: 'Server Error' };
+      if (sha === first) return mergeOnRemote(pr, sha);
+      // GitHub finishes the merge the 502 hid, of the first head, while this run asks to merge the second.
+      await h.fixture.remote.run(['update-ref', 'refs/heads/old-head', first, '']);
+      const landed = await mergeOnGitHub(h.fixture, { head: 'old-head', base: pr.base, number: pr.number }, first);
+      await h.fixture.remote.run(['update-ref', '-d', 'refs/heads/old-head']);
+      if ('sha' in landed) Object.assign(pr, { state: 'closed', merged: true, mergeCommit: landed.sha });
+      return { status: 405, message: IN_PROGRESS };
+    };
+    assert.equal((await sync()).report.pullRequest?.status, 502);
+
+    await editInLinear('combined/page-2.md', `# Page 2\n\nSecond head. ${CANARY}\n`);
+    assert.equal((await sync()).report.pullRequest?.branchMoved, true);
+    assert.notEqual(await rev(SYNC_BRANCH), first, 'the run pushed a second head');
+    const moved = await sync();
+    assert.equal(moved.report.pullRequest?.code, 'state-moved', JSON.stringify(moved.report.pullRequest));
+    assert.equal(moved.report.pullRequest?.merged, null);
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /First head\./);
+
+    h.world.github.merge = mergeOnRemote;
+    // The next run opens a pull request for what the older head's merge left out; the one after merges it.
+    const reopened = await sync();
+    assert.equal(reopened.result.exitCode, 0, reopened.result.stderr);
+    assert.equal(reopened.report.pullRequest?.code, undefined);
+    assert.deepEqual(reopened.writes, ['POST /pulls']);
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.deepEqual(merged.writes, ['PUT /pulls/2/merge']);
+    assert.equal(h.world.github.pullRequests.length, 2);
+    assert.match(await show('refs/heads/main:combined/page-2.md'), /Second head\./);
   });
 
   it('a merge rule the App cannot satisfy fails the second run that meets it, with GitHub\'s reason; the merge follows once the rule is fixed', async () => {

@@ -206,6 +206,61 @@ describe('mergePullRequest', () => {
     assert.doesNotThrow(() => encodeURIComponent(astral.reason));
   });
 
+  it('looks again, for a bounded time, whether a merge GitHub says is already in progress lands', async () => {
+    const IN_PROGRESS = 'Merge already in progress';
+    const { world, repo } = target([]);
+    const pr = { number: 1, title: 't', body: 'b', head: 'sync', base: 'main', state: 'open' as 'open' | 'closed', merged: false };
+    world.github.pullRequests.push(pr);
+    world.github.merge = async () => ({ status: 405, message: IN_PROGRESS });
+    let elapsed = 0;
+    let reads = 0;
+    let landAfter = Infinity;
+    world.github.pullRequestHead = async (read) => {
+      reads += 1;
+      if (reads >= landAfter) Object.assign(read, { state: 'closed', merged: true, mergeCommit: 'b'.repeat(40) });
+      return SHA;
+    };
+    const clocked = { ...repo, clock: { now: () => elapsed, sleep: async (ms: number) => { elapsed += ms; }, timeout: () => new AbortController().signal } };
+
+    // Never lands: the refusal stands after a minute of reads.
+    assert.deepEqual(await mergePullRequest(clocked, 1, SHA), { merged: false, status: 405, reason: IN_PROGRESS });
+    assert.equal(elapsed, 60_000);
+    assert.equal(reads, 13);
+
+    // Lands at the third read: the run sees its merge commit.
+    elapsed = 0;
+    reads = 0;
+    landAfter = 3;
+    assert.deepEqual(await mergePullRequest(clocked, 1, SHA), { merged: true, sha: 'b'.repeat(40), late: true });
+    assert.equal(reads, 4);
+
+    // Closed without a merge: the run stops looking.
+    Object.assign(pr, { state: 'open', merged: false, mergeCommit: undefined });
+    elapsed = 0;
+    reads = 0;
+    landAfter = Infinity;
+    world.github.pullRequestHead = async (read) => {
+      reads += 1;
+      read.state = 'closed';
+      return SHA;
+    };
+    assert.deepEqual(await mergePullRequest(clocked, 1, SHA), { merged: false, status: 405, reason: IN_PROGRESS });
+    assert.equal(reads, 2);
+
+    // A failed look leaves the refusal: GitHub may be failing already, and a later run looks again.
+    Object.assign(pr, { state: 'open' });
+    world.github.serverError = (request) => (request === 'GET /pulls/1' ? 'before' : undefined);
+    assert.deepEqual(await mergePullRequest(clocked, 1, SHA), { merged: false, status: 405, reason: IN_PROGRESS });
+    delete world.github.serverError;
+
+    // Any other 405 is no merge in progress: nothing is read.
+    Object.assign(pr, { state: 'open' });
+    reads = 0;
+    world.github.merge = async () => ({ status: 405, message: 'Required status check "ci" is expected.' });
+    assert.equal((await mergePullRequest(clocked, 1, SHA)).merged, false);
+    assert.equal(reads, 0);
+  });
+
   it('a request whose fake throws for another reason keeps that error', async () => {
     const { world, repo } = target([]);
     world.github.pullRequests.push({ number: 1, title: 't', body: 'b', head: 'sync', base: 'main', state: 'open', merged: false });

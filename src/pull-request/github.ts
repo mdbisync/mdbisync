@@ -177,21 +177,25 @@ async function useOpen(target: GitHubRepository, open: PullRequest, spec: NewPul
   return { pullRequest: await updatePullRequest(target, open.number, spec), opened: false, updated: true };
 }
 
-/** A pull request as GitHub shows it now: whether it is open, and the branch it merges into. */
+/** A pull request as GitHub shows it now: whether it is open, the branch it merges into, and its merge. */
 export interface PullRequestState {
   state: 'open' | 'closed';
   /** The branch it merges into now; a person who can push may change it at any time, until it is merged. */
   base: string;
+  /** Its merge commit once GitHub merged it; null while it is not merged. */
+  mergeCommit: string | null;
 }
 
-/** Reads one pull request's state and base branch now. */
+/** Reads one pull request's state, base branch and merge now. */
 export async function readPullRequest(target: GitHubRepository, number: number): Promise<PullRequestState> {
   const answer = await request(target, 'GET', `/pulls/${number}`);
-  const pr = answer.json as { state?: unknown; base?: { ref?: unknown } | null } | null;
+  const pr = answer.json as { state?: unknown; base?: { ref?: unknown } | null; merged?: unknown; merge_commit_sha?: unknown } | null;
   if (answer.status !== 200 || pr === null || (pr.state !== 'open' && pr.state !== 'closed') || typeof pr.base?.ref !== 'string') {
     throw new PullRequestError(message('github.reading-pull-request'), answer.status);
   }
-  return { state: pr.state, base: pr.base.ref };
+  // On an open pull request `merge_commit_sha` names GitHub's test merge, not a merge.
+  const mergeCommit = pr.merged === true && typeof pr.merge_commit_sha === 'string' ? pr.merge_commit_sha : null;
+  return { state: pr.state, base: pr.base.ref, mergeCommit };
 }
 
 function toPullRequest(value: unknown): PullRequest | null {

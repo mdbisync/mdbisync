@@ -4,9 +4,9 @@ import { randomUUID } from 'node:crypto';
 import { splitFile } from '../format/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
-import { destinationHolds, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
+import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
 import { oneLine, unverifiedNote, unverifiedPaths } from './head-check.ts';
-import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
+import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergeInProgress, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { checkpoint } from '../test-hooks.ts';
 import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
@@ -323,6 +323,9 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (!(await destinationHolds(git, options.config, options.github, pullRequest.number, tracked))) return { ...result, waiting: true };
   const merged = await mergePullRequest(options.github, pullRequest.number, head);
   if (!merged.merged) {
+    // GitHub still runs an earlier merge of this pull request: no refusal of this head, and not noted (see the normal lane).
+    // The lane still waits, so the normal lane does not move the tracked branch under a merge that may yet land.
+    if (mergeInProgress(merged)) return { ...result, code: 'merge-refused', status: merged.status, reason: merged.reason, waiting: true };
     const repeated = earlier !== null && Number(earlier[3]) === merged.status && earlier[4] === encodeURIComponent(merged.reason);
     const code = repeated ? 'merge-blocked' : 'merge-refused';
     if (!repeated) await updatePullRequest(options.github, pullRequest.number, {
@@ -334,6 +337,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // A change between that read and the merge is found here: the documents stay suspended and a person is told.
   const misplaced = await verifyMerge(git, options.config, options.github, pullRequest.number, tracked, merged.sha);
   if (misplaced !== null) return { ...result, code: 'merge-misplaced', misplaced };
+  // A merge an earlier run asked for may have merged an older head: the documents stay suspended for a later run.
+  if (merged.late === true && !(await mergedHead(git, merged.sha, head))) return { ...result, waiting: true };
   return release(context, options, ids, paths, head, bases.linear, merged.sha);
 }
 
