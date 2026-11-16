@@ -79,6 +79,9 @@ What both commands leave alone:
   `==highlight==`, `^superscript^`, definition lists, `> [!NOTE]` alerts,
   Mermaid and other code fences, two-space line breaks, and escapes that
   matter (`\*`, `\[`).
+  [How documents look in Linear](#how-documents-look-in-linear) shows
+  how Linear's editor displays some of them: alerts as callouts, Mermaid
+  as diagrams, `<details>` as literal text.
 
 ## What `fix` changes
 
@@ -146,6 +149,41 @@ Inline text:
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`.
 - An escaped `#` inside a line loses its escape: `a \# b` becomes `a # b`.
+
+## How documents look in Linear
+
+A synchronized document is read and edited in Linear's editor. These
+observations come from opening the documents of the test bank in that
+editor after a sync and reading what it displays. They describe Linear's
+display only: the text Linear stores and gives back is what the sections
+above describe, so a construct that looks different here still round-trips.
+
+| Construct | What Linear's editor shows |
+| --- | --- |
+| Headings, `#` and setext | Headings of the same level. |
+| Bullet, nested and numbered lists | Lists with their nesting; a numbered list keeps its start number. |
+| Task lists | Checkboxes with each item's checked state, also when nested or inside a quote. |
+| Quotes | Quotes, including a quote inside a quote and a list inside a quote. |
+| Code fence with a language | A code block labelled with that language. |
+| Code fence without a language | A code block whose label Linear guesses from the content (one short sample was labelled "CSS"). The stored text has no language. |
+| Mermaid fence | The rendered diagram, also several in one document and one inside a list item. A diagram Linear cannot parse shows its source with Linear's parse error. |
+| Tables | Tables with all their rows and columns (30 columns checked), bold and strikethrough in cells, and images in cells. |
+| Images | The image at its own size, served from Linear's upload storage: PNG, JPEG, animated GIF, WebP, SVG, BMP and ICO, also inside list items and table cells. An empty alt text stays empty. |
+| Files (PDF, CSV, JSON, text, ZIP) | A link to the uploaded file; a list of such links shows as file cards with the name and size. |
+| Unicode | Chinese, Arabic, emoji with joiners and flags as written; a shortcode Linear knows shows as its emoji. |
+| `> [!NOTE]` and other alerts | A callout block. |
+| `<details>` | Its HTML as literal text, not a collapsible section. |
+| Right-to-left text | Paragraphs laid out left to right (checked with Arabic). |
+
+Images and files show only when the sync could upload them: a document
+that links a file over Linear's upload limit or a file the run cannot read
+is left out (`upload-too-large`, `upload-unreadable`, see
+[files left out](troubleshooting.md#files-left-out)). The sync also leaves
+out a document whose image has a title, is not a file of the repository or
+names a missing file, until the document or its image is fixed: see
+[`image-title`](#image-title),
+[`image-not-in-repository`](#image-not-in-repository) and
+[`image-file-missing`](#image-file-missing).
 
 ## Lint rules
 

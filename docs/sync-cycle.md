@@ -156,6 +156,25 @@ they do not remove the re-read-to-write race or establish a sustained-load
 limit. For a critical edit where that residual risk is unacceptable, stop
 ongoing sync, wait for the active run to finish, edit, then enable it again.
 
+In Linear's editor itself, checks in a browser lost no typed character
+while sync runs that wrote nothing to the document read and captured it:
+neither with one person typing, nor with two people typing at the same
+place. Text typed after a run captured the document reaches git with the
+next run. These checks do not cover a run writing into the document being
+typed in: that is the race above.
+
+A run sees an edit only once Linear has saved it, and Linear saves some
+edits late:
+
+- An image pasted or dropped into a document showed at once, but the
+  editor kept it unsaved for about two and a half minutes (the browser
+  warned of unsaved changes when leaving the page). A run in that time
+  found nothing to capture; the first run after Linear saved it captured
+  the document and the image.
+- Opening a document that holds a table can make the editor save it once,
+  without changing its text. The sync compares text, so it records no
+  change for it and does not skip the document.
+
 ## Overlapping runs
 
 The supplied sync and initial-sync workflows use the same repository-scoped
