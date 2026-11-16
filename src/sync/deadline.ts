@@ -11,7 +11,7 @@
 // there under the same name is not the batch's fault, and the lane is held.
 
 import { CommitNotFoundError } from '../pull-request/merge.ts';
-import { type WorkflowIdentity, workflowRevision } from '../pull-request/actions.ts';
+import { type MovedJobSource, type WorkflowIdentity, workflowRevision } from '../pull-request/actions.ts';
 import { type CheckExpectation, type CheckFailure, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, checkState, readCommitChecks } from '../pull-request/index.ts';
 import { type Git, type Oid } from '../state/index.ts';
 
@@ -118,23 +118,27 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
   }
   // A head the sync itself authenticated may incorporate a trusted workflow
   // update from the tracked branch. Child heads never rebind this evidence.
+  // Such a head expects its own revision whatever the earlier one was, so a
+  // job whose pull request moved on from its head binds by its file alone.
   if ('pushedFrom' in earlier || (complete && earlier.pushed === head)) {
     const revisions = new Map<string, string | undefined>();
-    const current = await registeredChecks(github, head);
+    // Only verified identities of the head: a stand-in is no evidence of what ran.
+    const current = (await registeredChecks(github, head)).filter((entry) => entry.moved === undefined);
     for (const check of observed) {
-      if (!check.workflow || check.workflow.event === 'dynamic') continue;
-      const path = check.workflow.path;
+      const ran = check.moved ?? check.workflow;
+      if (!ran || ran.event === 'dynamic') continue;
+      const path = ran.path;
       if (!revisions.has(path)) {
         const verified = current.find((entry) => entry.name === check.name && entry.workflow?.path === path &&
           entry.publisher?.kind === check.publisher?.kind && entry.publisher?.id === check.publisher?.id)?.workflow;
         revisions.set(path, verified?.revision ?? await workflowRevision(github, head, path));
       }
       const revision = revisions.get(path);
-      check.workflow = revision === undefined ? null : { ...check.workflow, revision };
+      check.workflow = revision === undefined ? null : { path, event: ran.event, revision };
     }
   }
   // A note for unlisted checks ("3 more check runs") is no check name: such a head was never read as passed.
-  const listed = distinct(observed.filter(({ name }) => !/^[0-9]+ more (check runs|commit statuses)$/.test(name)));
+  const listed = distinct(observed.filter(({ name }) => !/^[0-9]+ more (check runs|commit statuses)$/.test(name)).map(({ moved: _moved, ...check }) => check));
   return { checks: distinct([...listed, ...required.map((name) => ({ name }))]), observed: listed, complete };
 }
 
@@ -175,7 +179,13 @@ function distinct(checks: readonly ExpectedCheck[]): ExpectedCheck[] {
  */
 async function registeredChecks(github: GitHubRepository, sha: Oid): Promise<ExpectedCheck[]> {
   try {
-    return (await commitChecks(github, sha)).checks.map(({ name, publisher, workflow }) => ({ name, publisher, ...(workflow === undefined ? {} : { workflow }) }));
+    return (await commitChecks(github, sha)).checks.map(({ name, publisher, workflow, moved }) => {
+      if (workflow !== null || moved === undefined) return { name, publisher, ...(workflow === undefined ? {} : { workflow }) };
+      // A job whose pull request moved on from this head: expected at its stand-in blob when it has one (see
+      // `MovedJobSource`), else unverifiable; a head the sync pushed itself binds it by its file alone.
+      const { standIn, ...source } = moved;
+      return { name, publisher, workflow: standIn === undefined ? null : { ...source, revision: standIn }, moved: source };
+    });
   } catch (error) {
     // A noted commit GitHub does not know (a note a person changed) has no checks to carry over.
     if (error instanceof CommitNotFoundError) return [];

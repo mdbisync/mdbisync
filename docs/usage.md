@@ -282,6 +282,15 @@ remain after release; its presence alone does not mean a batch is on hold.
   For pull-request runs it infers a blob from GitHub's reported PR association
   and holds missing or ambiguous evidence. That association can change after
   execution: this guard does not verify the executed PR workflow revision.
+  GitHub names a pull request's current head there, so once a new head is
+  pushed (or the pull request closes), an earlier head's job has no
+  inferred blob, and it never counts as passed itself. The sync's own next
+  head expects that check from the same workflow path at its own blob, as
+  for any earlier check. A head someone else pushed expects it at the blob
+  the earlier head holds, but only while the pull request's base holds the
+  same blob; otherwise the head waits until the sync pushes the branch
+  again. Any other unknown blob (both sides changed the file, another
+  base) stays unverifiable.
   A genuine job proves its identity and result; the workflow remains
   responsible for what it tests. When the sync advances its own branch, it
   refreshes blob expectations for workflow updates from the tracked branch.

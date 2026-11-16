@@ -5,7 +5,7 @@
 
 import { setTimeout as sleep } from 'node:timers/promises';
 import { type CheckClock, type GitHubRepository, PullRequestError, readPullRequest, request } from './github.ts';
-import { actionsJobs, type WorkflowIdentity } from './actions.ts';
+import { actionsJobs, type MovedJobSource, type WorkflowIdentity } from './actions.ts';
 import { message } from '../messages.ts';
 
 /** Check run conclusions that let a merge go ahead. */
@@ -57,6 +57,11 @@ export interface ExpectedCheck {
   publisher?: CheckPublisher;
   /** Actions checks also identify the workflow that ran; null means unverifiable. */
   workflow?: WorkflowIdentity | null;
+  /**
+   * Read from GitHub only, never from a note: the verified file of a job whose pull request moved on from its head.
+   * `workflow` is then its stand-in or null, and only a head the sync pushed itself binds it, to its own revision.
+   */
+  moved?: Omit<MovedJobSource, 'standIn'>;
 }
 
 /** What a commit must show beyond the checks registered on it before it counts as passed. */
@@ -75,6 +80,8 @@ export interface CommitCheck {
   name: string;
   publisher: CheckPublisher;
   workflow?: WorkflowIdentity | null;
+  /** With a null `workflow`: the genuine job's verified source when its pull request moved on from this head. */
+  moved?: MovedJobSource;
   outcome: 'pending' | 'failed' | 'passed';
   /** For a failed check: an https link to its run, when GitHub gave one. */
   url?: string;
@@ -154,8 +161,9 @@ export async function readCommitChecks(target: GitHubRepository, sha: string, op
         }
         if (job?.name !== name) job = undefined;
         check.workflow = job?.workflow ?? null;
-        // A successful check payload cannot override the actual job result.
-        if (check.outcome === 'passed') check.outcome = job?.outcome ?? 'pending';
+        if (job?.moved !== undefined) check.moved = job.moved;
+        // A successful check payload cannot override the actual job result, and a job of an unknown revision never passes.
+        if (check.outcome === 'passed') check.outcome = job?.workflow ? job.outcome : 'pending';
       }
       checks.push(check);
     }

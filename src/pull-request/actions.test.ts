@@ -122,6 +122,43 @@ describe('Actions job provenance', () => {
     assert.equal(runs[0]!.html_url, runs[1]!.html_url);
   });
 
+  it('never passes a job whose pull request moved on from its head, and stands in its blob only where the base agrees', async () => {
+    const path = '.github/workflows/ci.yml';
+    const base = 'd'.repeat(40);
+    // GitHub names the pull request's current head, and its base's current tip, in the run's association.
+    const movedOn = (baseBlob: string) => target((url, body) => {
+      if (url.includes('/actions/runs?')) Object.assign(body.workflow_runs[0].pull_requests[0], { head: { sha: 'b'.repeat(40) } }, { base: { ...body.workflow_runs[0].pull_requests[0].base, sha: base } });
+      if (url.includes('/contents/') && new URL(url).searchParams.get('ref') === base) body.sha = baseBlob;
+      return body;
+    });
+    const [same] = (await readCommitChecks(movedOn('b'.repeat(40)), SHA, { creators: false })).checks;
+    assert.equal(same?.outcome, 'pending', 'a job of an unknown revision passed');
+    assert.equal(same?.workflow, null);
+    assert.deepEqual(same?.moved, { path, event: 'pull_request', standIn: 'b'.repeat(40) });
+    const [changed] = (await readCommitChecks(movedOn('c'.repeat(40)), SHA, { creators: false })).checks;
+    assert.deepEqual(changed?.moved, { path, event: 'pull_request' }, 'stood in a blob the base no longer agrees with');
+    // A closed pull request leaves no association: moved, with nothing to compare a stand-in with.
+    const closed = target((url, body) => {
+      if (url.includes('/actions/runs?')) body.workflow_runs[0].pull_requests = [];
+      if (url.includes('/jobs?')) body.jobs[0].conclusion = 'failure';
+      return body;
+    });
+    const [gone] = (await readCommitChecks(closed, SHA, { creators: false })).checks;
+    assert.deepEqual(gone?.moved, { path, event: 'pull_request' });
+    assert.equal((await readChecks(closed, SHA)).state, 'pending', 'a job of an unknown revision decided the outcome');
+    // Any other unknown revision stays unverifiable, with no source at all.
+    for (const rewrite of [
+      (body: any) => { body.workflow_runs[0].pull_requests.push(body.workflow_runs[0].pull_requests[0]); },
+      (body: any) => { Object.assign(body.workflow_runs[0].pull_requests[0], { head: { sha: 'b'.repeat(40) }, base: { ...body.workflow_runs[0].pull_requests[0].base, ref: 'other' } }); },
+    ]) {
+      const [check] = (await readCommitChecks(target((url, body) => { if (url.includes('/actions/runs?')) rewrite(body); return body; }), SHA, { creators: false })).checks;
+      assert.equal(check?.workflow, null);
+      assert.equal(check?.moved, undefined);
+    }
+    const known = (await readCommitChecks(target((_url, body) => body), SHA, { creators: false })).checks[0];
+    assert.equal(known?.moved, undefined, 'a known identity also carried a moved source');
+  });
+
   it('does not trust missing or malformed provenance, and fails on denied Actions reads', async () => {
     for (const endpoint of ['/actions/runs?', '/jobs?', '/contents/']) {
       const repo = target((path, body) => path.includes(endpoint) ? {} : body);

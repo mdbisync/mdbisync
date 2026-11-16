@@ -101,7 +101,11 @@ export interface FakePullRequest {
 /** A check run or commit status on a commit in the fake repository. */
 export interface FakeCheck {
   /** No workflow for a synthetic check; otherwise a genuine job by default. */
-  workflow?: false | { path?: string; revision?: string; event?: string; head?: string; repository?: string; baseBranch?: string };
+  /**
+   * `pullRequestHead` and `pullRequestBase`: the head and base tip the run's pull request association names, as GitHub
+   * names the pull request's current ones; the run's own head by default.
+   */
+  workflow?: false | { path?: string; revision?: string; event?: string; head?: string; repository?: string; baseBranch?: string; pullRequestHead?: string; pullRequestBase?: string };
   name: string;
   /** Check runs: `queued`, `in_progress` or `completed`; commit statuses use `pending` or `completed`. */
   status: 'queued' | 'in_progress' | 'pending' | 'completed';
@@ -452,7 +456,7 @@ function actionsEvidence(world: FakeWorld, method: string, rest: string, repo: s
     const runs = check === undefined || check.workflow === false ? [] : [{ id: suite, workflow_id: 42, check_suite_id: suite,
       head_sha: settings.head ?? sha, path: settings.path ?? '.github/workflows/ci.yml', event: settings.event ?? 'pull_request',
       head_repository: { full_name: settings.repository ?? repo.slice(7) },
-      pull_requests: [{ head: { sha }, base: { sha, ref: settings.baseBranch ?? 'main', repo: { url: `${GITHUB_API}${repo}` } } }] }];
+      pull_requests: [{ head: { sha: settings.pullRequestHead ?? sha }, base: { sha: settings.pullRequestBase ?? sha, ref: settings.baseBranch ?? 'main', repo: { url: `${GITHUB_API}${repo}` } } }] }];
     return json(200, { total_count: runs.length, workflow_runs: runs });
   }
   const jobs = /^\/actions\/runs\/(\d+)\/jobs\?/.exec(rest);

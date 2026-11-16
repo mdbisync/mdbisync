@@ -110,6 +110,33 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
           const held = markerRuns.get(sha);
           return Response.json({ workflow_runs: held !== undefined ? [held] : [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed', conclusion: 'failure' }] });
         }
+        if (url.includes('/actions/runs?')) {
+          // As on GitHub, a run's pull requests are the open ones from its branch, named with their current heads and
+          // base tips: once a pull request moves on from a head, the association no longer names that head. A commit
+          // pushed to the tracked branch (its first-parent line) ran for its push; any other commit ran for the pull
+          // request of the branch it was pushed to, approximated by that branch's first-parent line.
+          const response = await transport(String(input).replace('https://api.github.com', GITHUB_API), init);
+          const data = await response.json() as { workflow_runs: Array<Record<string, any>> };
+          const tip = async (branch: string) => (await fixture.remote.text(['rev-parse', `refs/heads/${branch}`])).trim();
+          const pushedTo = async (branch: string, sha: string) => {
+            const line = await fixture.remote.run(['rev-list', '--first-parent', `refs/heads/${branch}`], { okCodes: [0, 128] });
+            return line.code === 0 && line.stdout.toString('utf8').split('\n').includes(sha);
+          };
+          for (const run of data.workflow_runs) {
+            const sha = String(run.head_sha);
+            if (await pushedTo(names.trackedBranch, sha)) {
+              Object.assign(run, { event: 'push', pull_requests: [] });
+              continue;
+            }
+            const repo = run.pull_requests?.[0]?.base?.repo;
+            const associated = [];
+            for (const pr of world.github.pullRequests) {
+              if (pr.state === 'open' && await pushedTo(pr.head, sha)) associated.push({ head: { sha: await tip(pr.head) }, base: { sha: await tip(pr.base), ref: pr.base, repo } });
+            }
+            run.pull_requests = associated;
+          }
+          return Response.json(data, { status: response.status });
+        }
         const cancel = /\/actions\/runs\/(\d+)\/cancel$/.exec(url);
         if (cancel !== null) {
           assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
