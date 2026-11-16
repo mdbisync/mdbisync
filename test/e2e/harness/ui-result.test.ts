@@ -229,7 +229,7 @@ describe('UI checklist answers', () => {
     const checklist = renderUiChecklist(blocked, runNames(RUN), { live: null, runDir: 'run' });
     assert.match(checklist, /^2\. \[ \] As editor-a: Open the blocked document[^\n]*`ui\.blocked`[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) linear\.remove-secret: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was blocked: the red Cross icon is gone[^\n]*`AfterFix`/m);
     // Each value's name says which of the two items it belongs to.
-    for (const subject of uiValueSubjects(blocked)) assert.match(subject, /^ui\.blocked|AfterFix$/);
+    for (const subject of uiValueSubjects(blocked)) assert.match(subject, /^ui\.(?:blocked\w+|\w+AfterFix)$/);
   });
 
   it('asks the link check (L6-12) to click both links to the notes and record what they did', () => {
