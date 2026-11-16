@@ -1,6 +1,6 @@
 // The pre-commit template pushes its fixes with the workflow's own token, which
-// starts no other workflow. Its "Start the other CI on the fixing commit" step
-// starts the workflows the repository lists on the pull request's branch, so
+// starts no other workflow. Its "Start genuine CI on the fixing commit" step
+// starts itself and the workflows the repository lists on the pull request's branch, so
 // the fixing commit runs the same checks as the commit before it.
 
 import assert from 'node:assert/strict';
@@ -15,11 +15,11 @@ interface Step { name?: string; if?: string; env?: Record<string, string>; run?:
 
 interface Job { name?: string; needs?: string[]; if?: string; permissions: Record<string, string>; steps: Step[] }
 
-const workflow = parse(await readFile(new URL('../../examples/pre-commit.yml', import.meta.url), 'utf8')) as { jobs: Record<string, Job> };
+const workflow = parse(await readFile(new URL('../../examples/pre-commit.yml', import.meta.url), 'utf8')) as { on: Record<string, unknown>; jobs: Record<string, Job> };
 // The publish job pushes the fix; the hooks job holds no token (hook-isolation.test.ts).
 const job = workflow.jobs['publish']!;
 const names = job.steps.map((step) => step.name);
-const step = job.steps.find((item) => item.name === 'Start the other CI on the fixing commit')!;
+const step = job.steps.find((item) => item.name === 'Start genuine CI on the fixing commit')!;
 
 /** Runs the step with a `curl` that records its arguments instead of calling GitHub. */
 async function start(workflows: string): Promise<{ status: number | null; output: string; calls: string[] }> {
@@ -27,7 +27,7 @@ async function start(workflows: string): Promise<{ status: number | null; output
   try {
     const log = join(dir, 'calls');
     await writeFile(join(dir, 'curl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\n`, { mode: 0o755 });
-    const env = { PATH: `${dir}${delimiter}${process.env.PATH}`, GH_TOKEN: 'token', REPOSITORY: 'owner/repo', HEAD_BRANCH: 'mdbisync/linear', WORKFLOWS: workflows };
+    const env = { PATH: `${dir}${delimiter}${process.env.PATH}`, GH_TOKEN: 'token', REPOSITORY: 'owner/repo', HEAD_BRANCH: 'mdbisync/linear', WORKFLOWS: workflows, WORKFLOW_REF: 'owner/repo/.github/workflows/pre-commit.yml@refs/heads/mdbisync/linear' };
     const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', step.run!], { env, encoding: 'utf8', timeout: 30_000 });
     assert.ifError(result.error);
     const calls = await readFile(log, 'utf8').then((text) => text.split('\n').filter(Boolean), () => []);
@@ -38,26 +38,28 @@ async function start(workflows: string): Promise<{ status: number | null; output
 }
 
 describe('pre-commit template: CI on the fixing commit', () => {
-  it('starts the listed workflows only after a push of fixes, while the fixing commit\'s check is pending', () => {
+  it('starts genuine CI only after a successful pull-request fix is pushed', () => {
     assert.ok(step, 'the step is missing');
     // The publish job runs only for a same-repository pull request whose hooks changed files.
     assert.match(job.if ?? '', /needs\.hooks\.outputs\.changed == 'true'/);
     assert.match(job.if ?? '', /head\.repo\.full_name == github\.repository/);
-    assert.equal(step.if, "${{ vars.MDBISYNC_CI_WORKFLOWS != '' }}");
+    assert.equal(step.if, undefined, 'the formatter itself must always run on the fixing head');
+    assert.match(job.if ?? '', /github\.event_name == 'pull_request'/);
+    assert.match(job.if ?? '', /needs\.hooks\.result == 'success'/);
     assert.equal(step.env?.WORKFLOWS, '${{ vars.MDBISYNC_CI_WORKFLOWS }}');
-    // After the fixing commit's check is marked pending: a failed start then fails that check, which the sync sees.
-    assert.ok(names.indexOf('Mark the fixing commit pending') < names.indexOf(step.name), 'it starts CI before the fixing commit has its check');
-    assert.ok(names.indexOf(step.name) < names.indexOf('Publish result on the fixing commit'));
+    assert.ok(names.indexOf('Push fixes') < names.indexOf(step.name), 'CI started before the fix was pushed');
+    assert.equal(job.permissions.checks, undefined);
     assert.equal(job.permissions.actions, 'write');
     assert.deepEqual(Object.keys(workflow.jobs), ['hooks', 'publish', 'pre-commit']);
   });
 
-  it('gives the fixing commit a check under each job\'s name, since each job leaves one on the earlier head', () => {
-    // The sync merges no head that lacks a check its earlier heads show.
-    const checks = Object.entries(workflow.jobs).map(([id, each]) => each.name ?? id);
-    const mark = job.steps.find((item) => item.name === 'Mark the fixing commit pending')!.run!;
-    const created = /for name in ((?:'[^']+' ?)+); do/.exec(mark)?.[1]?.match(/'[^']+'/g)?.map((name) => name.slice(1, -1));
-    assert.deepEqual(created, checks);
+  it('dispatches its own workflow even when the repository has no other CI', async () => {
+    assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
+    const { status, output, calls } = await start('');
+    assert.equal(status, 0, output);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0]!, /actions\/workflows\/pre-commit.yml\/dispatches/);
+    assert.doesNotMatch(calls[0]!, /check-runs/);
   });
 
   it('keeps `pre-commit` the check to require: it fails unless the hooks passed and their fix, if any, was published', () => {
@@ -77,7 +79,7 @@ describe('pre-commit template: CI on the fixing commit', () => {
   it('dispatches each listed workflow on the pull request branch', async () => {
     const { status, output, calls } = await start('tests.yml, lint.yaml\nbuild.yml');
     assert.equal(status, 0, output);
-    assert.deepEqual(calls.map((call) => /\/actions\/workflows\/([^/]+)\/dispatches/.exec(call)?.[1]), ['tests.yml', 'lint.yaml', 'build.yml']);
+    assert.deepEqual(calls.map((call) => /\/actions\/workflows\/([^/]+)\/dispatches/.exec(call)?.[1]), ['pre-commit.yml', 'tests.yml', 'lint.yaml', 'build.yml']);
     for (const call of calls) assert.ok(call.includes('--data {"ref":"mdbisync/linear"}'), call);
   });
 

@@ -4,12 +4,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FAKE_ACTIONS_APP_ID, FAKE_CI_ACCOUNT_ID, GITHUB_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { PullRequestError } from '../pull-request/github.ts';
 import { Git } from '../state/index.ts';
 import { checkExpectation, checksMissing, expectedChecks, headNote, headSince, mainVerdict, pastDeadline, readRedMainNote, redMainNote } from './deadline.ts';
 
 const HEAD = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
 const ACTIONS = { kind: 'run', id: FAKE_ACTIONS_APP_ID } as const;
+const RUN = { publisher: ACTIONS, workflow: { path: '.github/workflows/ci.yml', revision: 'b'.repeat(40), event: 'pull_request' as const } };
 const CI_ACCOUNT = { kind: 'status', id: FAKE_CI_ACCOUNT_ID } as const;
 
 describe('the checks a head must pass', () => {
@@ -42,7 +44,7 @@ describe('the checks a head must pass', () => {
     // A moved branch: every check registered on the noted head, whatever its state, is expected on the new head from
     // the publisher that registered it there. The configured name is expected from any publisher but never noted, so
     // removing it from the configuration ends it.
-    const registered = [build, { name: 'lint', publisher: CI_ACCOUNT }, { name: 'pre-commit', publisher: ACTIONS }, { name: 'tests', publisher: ACTIONS }];
+    const registered = [build, { name: 'lint', publisher: CI_ACCOUNT }, { name: 'pre-commit', ...RUN }, { name: 'tests', ...RUN }];
     assert.deepEqual(await expectedChecks(github, HEAD, ['deploy'], { body: noted, ...alone }), { checks: [build, { name: 'deploy' }, ...registered.slice(1)], observed: registered, complete: true });
   });
 
@@ -60,7 +62,7 @@ describe('the checks a head must pass', () => {
     ]]]) } }) };
     assert.deepEqual((await expectedChecks(both, HEAD, ['tests'], { pushedFrom: [OTHER] })).checks, [
       { name: 'tests' },
-      { name: 'tests', publisher: ACTIONS },
+      { name: 'tests', ...RUN },
       { name: 'tests', publisher: { kind: 'status', id: 666 } },
     ]);
   });
@@ -87,8 +89,8 @@ describe('the checks a head must pass', () => {
       local.github.checks = checks;
       const reader = { ...github, fetch: fakeFetch(local) };
       const branch = { git, base, pushed: linear };
-      const formatter = { name: 'pre-commit', publisher: ACTIONS };
-      const both = [formatter, { name: 'tests', publisher: ACTIONS }];
+      const formatter = { name: 'pre-commit', ...RUN };
+      const both = [formatter, { name: 'tests', ...RUN }];
       // Two formatter fixes in a row: `tests`, which ran on the sync's head below them, is expected on both.
       for (const body of [undefined, `Text\n${headNote(fix2, since)}\n`]) {
         assert.deepEqual(await expectedChecks(reader, fix2, [], { body, ...branch }), { checks: both, observed: both, complete: true });
@@ -119,9 +121,28 @@ describe('the checks a head must pass', () => {
   });
 
   it('expects of a head the sync pushed what the commits it pushed on registered, not the older note', async () => {
-    const registered = [{ name: 'lint', publisher: CI_ACCOUNT }, { name: 'pre-commit', publisher: ACTIONS }, { name: 'tests', publisher: ACTIONS }];
+    const registered = [{ name: 'lint', publisher: CI_ACCOUNT }, { name: 'pre-commit', ...RUN }, { name: 'tests', ...RUN }];
     assert.deepEqual(await expectedChecks(github, HEAD, [], { pushedFrom: [OTHER] }), { checks: registered, observed: registered, complete: true });
     assert.deepEqual(await expectedChecks(github, HEAD, ['deploy'], { pushedFrom: [] }), { checks: [{ name: 'deploy' }], observed: [], complete: true });
+  });
+
+  it('rebinds workflow revisions only on heads authenticated as the sync own push', async () => {
+    const local = fakeWorld();
+    local.github.checks = new Map([
+      [OTHER, [{ name: 'tests', status: 'completed', conclusion: 'success' }]],
+      [HEAD, [{ name: 'tests', status: 'completed', conclusion: 'success', workflow: {
+        path: '.github/workflows/ci.yml', revision: 'c'.repeat(40),
+      } }]],
+    ]);
+    const repo = { ...github, fetch: fakeFetch(local) };
+    const fresh = await expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER] });
+    assert.equal(fresh.checks[0]?.workflow?.revision, 'c'.repeat(40));
+    const child = await expectedChecks(repo, HEAD, [], { body: undefined,
+      git: { text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40), pushed: OTHER });
+    assert.equal(child.checks[0]?.workflow?.revision, 'b'.repeat(40), 'a child rebound the trusted revision');
+    const own = await expectedChecks(repo, HEAD, [], { body: headNote(HEAD, since, fresh.observed),
+      git: { text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
+    assert.deepEqual(own.checks, fresh.checks, 'the next run revived a stale revision');
   });
 
   it('ignores a noted head GitHub does not know, a name that does not decode and a malformed publisher', async () => {
@@ -129,6 +150,17 @@ describe('the checks a head must pass', () => {
     const failing = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) => String(input).includes(unknown) ? new Response('{"message":"No commit found"}', { status: 422 }) : github.fetch(input, init) };
     const body = `<!-- head: sha=${unknown} since=${since.toISOString()} checks=%E0%A4%A,lint@app:3,lint@run:01,lint@run:-1,pre-commit@run:0,tests,tests@status:42 -->`;
     assert.deepEqual((await expectedChecks(failing, HEAD, [], { body, ...alone })).checks, [{ name: 'pre-commit', publisher: { kind: 'run', id: 0 } }, { name: 'tests' }, { name: 'tests', publisher: { kind: 'status', id: 42 } }]);
+  });
+
+  it('never drops earlier check expectations when provenance or status reads return not found', async () => {
+    for (const endpoint of ['/actions/runs?', '/statuses?']) {
+      for (const status of [404, 422]) {
+        const repo = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) =>
+          String(input).includes(endpoint) ? Response.json({}, { status }) : github.fetch(input, init) };
+        await assert.rejects(expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER] }),
+          (error: unknown) => error instanceof PullRequestError && error.status === status);
+      }
+    }
   });
 
   it('tells a head that waits only for unregistered checks from one whose checks still run', () => {

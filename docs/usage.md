@@ -267,17 +267,34 @@ remain after release; its presence alone does not mean a batch is on hold.
   check expected from an earlier head counts only from the publisher that
   registered it there: a check run from the same GitHub App, or a commit
   status from the same account. A commit status or another App's check run
-  under the same name does not stand in for it. Workflows in the repository
-  all publish as the same GitHub Actions App, so this tells your CI apart
-  from other Apps and accounts, not one of your workflows from another. A
+  under the same name does not stand in for it. An Actions check must also
+  belong to a genuine workflow job in this repository on the exact head:
+  the sync reads its check suite, workflow run and job, and uses the job's
+  result. It binds an earlier check to the same workflow path. `push`,
+  `pull_request` and `workflow_dispatch` are supported validation triggers,
+  so a formatter fix can run real CI by dispatch and a later sync push can
+  use normal CI again. GitHub-managed CodeQL default setup and Code Quality
+  also count, bound to their provider-generated workflow identity and genuine
+  jobs on this head. Synthetic checks created with `checks: write` do not
+  count, even with the same name and Actions App.
+
+  As an additional consistency guard, the sync compares workflow file blobs.
+  For pull-request runs it infers a blob from GitHub's reported PR association
+  and holds missing or ambiguous evidence. That association can change after
+  execution: this guard does not verify the executed PR workflow revision.
+  A genuine job proves its identity and result; the workflow remains
+  responsible for what it tests. When the sync advances its own branch, it
+  refreshes blob expectations for workflow updates from the tracked branch.
+  Keep dispatch jobs as strict as the corresponding push or pull-request
+  jobs, including their inputs and conditions. A
   CI that posts statuses from a different account on each build (the
   pusher's token, say) never meets an expectation from the previous
   account, and a check whose publisher GitHub does not name (a deleted
   account) is never met either: both end in `checks-missing` until the
   sync pushes the branch again. A name in `required-checks`
   that never registered on an earlier head counts from any publisher. The
-  expected checks and their publishers are kept in a hidden HTML note in
-  the pull request description. A person can edit that note, so it only
+  expected checks, publishers and workflow identities are kept in a hidden
+  HTML note in the pull request description. A person can edit that note, so it only
   adds checks: whatever it says, the sync also reads the checks registered
   on the branch's first-parent commits below the head, down to the last
   head the sync itself pushed there, which its state records, from git and
@@ -310,8 +327,8 @@ remain after release; its presence alone does not mean a batch is on hold.
   (default `60`, range `10`–`1440`) after the sync pushed a head count as
   failed. The CLI uses `MDBISYNC_CHECK_DEADLINE_MINUTES`. The sync never
   reruns a check; a check rerun on the same head counts by its latest result.
-  Configure retries for flaky checks in your own CI. The App needs no
-  Actions permission; its permissions remain those in the
+  Configure retries for flaky checks in your own CI. The App needs Actions
+  read access to verify job provenance; see the
   [quickstart](quickstart.md#github-app). The push time for each head is
   kept in a hidden HTML note in the pull request description; a new head
   starts a new deadline. An expected check that never registers, or a

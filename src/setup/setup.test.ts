@@ -73,13 +73,13 @@ describe('GitHub access', () => {
     const result = await checkGitHub(target(world));
     assert.equal(result.access.state, 'passed');
     assert.equal(result.mergeCommits.state, 'passed');
-    // The repository, five permission probes and the rules on the two sync branches.
-    assert.equal(world.requests.length, 8);
+    // The repository, six permission probes and the rules on the two sync branches.
+    assert.equal(world.requests.length, 9);
     assert.deepEqual(world.writes, []);
   });
 
   it('names each missing permission', async () => {
-    for (const permission of ['contents:write', 'pull_requests:write', 'workflows:write', 'checks:read', 'statuses:read']) {
+    for (const permission of ['contents:write', 'pull_requests:write', 'workflows:write', 'checks:read', 'statuses:read', 'actions:read']) {
       const world = fakeWorld();
       world.github.missing.add(permission);
       const result = await checkGitHub(target(world));
@@ -224,7 +224,7 @@ describe('the App account', () => {
     assert.equal(result.app.detail, 'commits name the App sync-app[bot]');
     assert.deepEqual(result.identity, FAKE_APP_IDENTITY);
     assert.ok(world.requests.includes(`GET ${GITHUB_API}/users/sync-app%5Bbot%5D`));
-    assert.equal(world.requests.length, 9);
+    assert.equal(world.requests.length, 10);
     assert.deepEqual(world.writes, []);
   });
 

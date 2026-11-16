@@ -10,7 +10,9 @@
 // the checks of the tracked branch's tip are read: a check that also failed
 // there under the same name is not the batch's fault, and the lane is held.
 
-import { type CheckExpectation, type CheckFailure, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, PullRequestError, checkState, readCommitChecks } from '../pull-request/index.ts';
+import { CommitNotFoundError } from '../pull-request/merge.ts';
+import { type WorkflowIdentity, workflowRevision } from '../pull-request/actions.ts';
+import { type CheckExpectation, type CheckFailure, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, checkState, readCommitChecks } from '../pull-request/index.ts';
 import { type Git, type Oid } from '../state/index.ts';
 
 export const DEFAULT_CHECK_DEADLINE_MINUTES = 60;
@@ -21,7 +23,7 @@ const HEAD_NOTE = /^<!-- head: sha=([0-9a-f]{40,64}) since=([0-9]{4}-[0-9]{2}-[0
 const RED_MAIN_NOTE = /^<!-- red main: head=([0-9a-f]{40,64}) main=([0-9a-f]{40,64}) checks=([^\s]*) -->\r?$/m;
 
 /** A noted check: its URI-encoded name and, after `@`, its publisher (`run:<app id>` or `status:<account id>`). */
-const NOTED_CHECK = /^([^@]*)(?:@(run|status):(0|[1-9][0-9]{0,14}))?$/;
+const NOTED_CHECK = /^([^@]*)(?:@(run|status):(0|[1-9][0-9]{0,14}))?(?:~(.*))?$/;
 
 /**
  * The hidden note that says since when the head has waited for its checks,
@@ -35,7 +37,8 @@ export function headNote(head: Oid, since: Date, checks: readonly ExpectedCheck[
 
 function notedCheck(check: ExpectedCheck): string {
   const name = encodeURIComponent(check.name);
-  return check.publisher === undefined ? name : `${name}@${check.publisher.kind}:${check.publisher.id}`;
+  const from = check.publisher === undefined ? name : `${name}@${check.publisher.kind}:${check.publisher.id}`;
+  return check.workflow === undefined ? from : `${from}~${encodeURIComponent(JSON.stringify(check.workflow))}`;
 }
 
 /** The checks a pull request's head must pass beyond those registered on it. */
@@ -99,6 +102,11 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
           if (noted === null) continue;
           const check: ExpectedCheck = { name: decodeURIComponent(noted[1] as string) };
           if (noted[2] !== undefined) check.publisher = { kind: noted[2] as 'run' | 'status', id: Number(noted[3]) };
+          if (noted[4] !== undefined) {
+            const workflow = JSON.parse(decodeURIComponent(noted[4])) as Partial<WorkflowIdentity> | null;
+            check.workflow = workflow && typeof workflow.path === 'string' && typeof workflow.revision === 'string' &&
+              ['push', 'pull_request', 'workflow_dispatch', 'dynamic'].includes(String(workflow.event)) ? workflow as WorkflowIdentity : null;
+          }
           observed.push(check);
         } catch {
           // A name a person broke names nothing, as above.
@@ -106,6 +114,23 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
       }
       const noted = note[1] as Oid;
       if (noted !== head) observed.push(...await registeredChecks(github, noted));
+    }
+  }
+  // A head the sync itself authenticated may incorporate a trusted workflow
+  // update from the tracked branch. Child heads never rebind this evidence.
+  if ('pushedFrom' in earlier || (complete && earlier.pushed === head)) {
+    const revisions = new Map<string, string | undefined>();
+    const current = await registeredChecks(github, head);
+    for (const check of observed) {
+      if (!check.workflow || check.workflow.event === 'dynamic') continue;
+      const path = check.workflow.path;
+      if (!revisions.has(path)) {
+        const verified = current.find((entry) => entry.name === check.name && entry.workflow?.path === path &&
+          entry.publisher?.kind === check.publisher?.kind && entry.publisher?.id === check.publisher?.id)?.workflow;
+        revisions.set(path, verified?.revision ?? await workflowRevision(github, head, path));
+      }
+      const revision = revisions.get(path);
+      check.workflow = revision === undefined ? null : { ...check.workflow, revision };
     }
   }
   // A note for unlisted checks ("3 more check runs") is no check name: such a head was never read as passed.
@@ -150,10 +175,10 @@ function distinct(checks: readonly ExpectedCheck[]): ExpectedCheck[] {
  */
 async function registeredChecks(github: GitHubRepository, sha: Oid): Promise<ExpectedCheck[]> {
   try {
-    return (await commitChecks(github, sha)).checks.map(({ name, publisher }) => ({ name, publisher }));
+    return (await commitChecks(github, sha)).checks.map(({ name, publisher, workflow }) => ({ name, publisher, ...(workflow === undefined ? {} : { workflow }) }));
   } catch (error) {
     // A noted commit GitHub does not know (a note a person changed) has no checks to carry over.
-    if (error instanceof PullRequestError && (error.status === 404 || error.status === 422)) return [];
+    if (error instanceof CommitNotFoundError) return [];
     throw error;
   }
 }

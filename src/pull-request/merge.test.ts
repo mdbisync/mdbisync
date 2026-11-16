@@ -259,7 +259,7 @@ describe('waitForChecks', () => {
       const { result, elapsed, world } = await scenario(() => [{ name: 'ci', status: 'queued' }], seconds);
       assert.equal(result.state, 'pending');
       assert.equal(elapsed, seconds * 1000);
-      assert.equal(world.requests.length, Math.ceil(seconds / 5) * 2);
+      assert.equal(world.requests.length, Math.ceil(seconds / 5) * 5);
     }
   });
   it('reports a failure immediately even if another check runs', async () => {

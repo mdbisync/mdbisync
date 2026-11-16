@@ -89,7 +89,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         if (sha !== undefined) {
           const { mode, target } = await stateOf(sha);
           const passed = mode === 'passed' || (mode === 'flaky' && (attempts.get(sha) ?? 1) > 1) || (mode === 'document' && target !== undefined && (await show(sha, target))?.includes('Approved for review.') === true);
-          const check = checks.get(sha) ?? { name: 'format', status: 'completed' };
+          const check = checks.get(sha) ?? { name: 'format', status: 'completed', workflow: { path: CHECK_WORKFLOW_PATH, baseBranch: names.trackedBranch } };
           const sleeping = mode === 'pending';
           const busy = await runner();
           const own = markerRuns.get(sha);

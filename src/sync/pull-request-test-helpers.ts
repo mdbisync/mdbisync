@@ -191,7 +191,9 @@ export function pullRequestHarness() {
   }
 
   const SUSPENDED = 'refs/heads/mdbisync/suspended';
-  const FAILED: FakeCheck[] = [{ name: 'ci', status: 'completed', conclusion: 'failure' }];
+  // A reused failure has the same report text; its authenticated job id still
+  // differs on each head. Tests of changing reports use their own check fixtures.
+  const FAILED: FakeCheck[] = [{ name: 'ci', status: 'completed', conclusion: 'failure', url: 'https://github.test/owner/repo/runs/1' }];
   const PASSED: FakeCheck[] = [{ name: 'ci', status: 'completed', conclusion: 'success' }];
   async function suspendOne(path = 'eng/notes/plan.md', content = '# Plan\n\nHeld Linear edit.\n') {
     await editInLinear(path, content);
@@ -231,7 +233,7 @@ export function pullRequestHarness() {
   }
   /** No request asked GitHub to rerun or cancel a workflow run or check (the sync never reruns a check). */
   const assertNoRerun = () => {
-    for (const request of githubRequests) assert.doesNotMatch(request, /\/actions\/|rerun|rerequest|cancel/, request);
+    for (const request of githubRequests) assert.doesNotMatch(request, /^(?!GET ).*\/actions\/|rerun|rerequest|cancel/, request);
   };
 
   /** Suspends the plan, then trashes its document in Linear, so the batch releases while it is in the trash. */

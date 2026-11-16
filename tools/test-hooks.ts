@@ -110,33 +110,26 @@ try {
   assert.equal(await readFile(page, 'utf8'), fixed);
   assert.equal(git(scratch, 'ls-tree', '--name-only', 'HEAD').includes('hook-runs.txt'), false);
 
-  // Exercise the exact check-run payloads without using a GitHub credential.
+  // Exercise the exact dispatch payloads without using a GitHub credential.
   const stubBin = join(temporary, 'bin');
   await mkdir(stubBin);
   const capture = join(temporary, 'curl-args');
   await writeFile(join(stubBin, 'curl'), `#!/bin/sh
-printf '%s\\n' "$@" > "$CAPTURE_FILE"
-printf '{"id":123}\\n'
+printf '%s\\n' "$@" >> "$CAPTURE_FILE"
 `, { mode: 0o755 });
   const apiVars = { ...vars, PATH: `${stubBin}:${process.env.PATH}`, CAPTURE_FILE: capture,
-    REPOSITORY: 'example/repository', CHECKED_SHA: git(scratch, 'rev-parse', 'HEAD'),
-    RUN_URL: 'https://example.com/run', CHECK_IDS: '123 124', HOOKS_RESULT: 'success', JOB_STATUS: 'success' };
-  run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', script('Mark the fixing commit pending')], apiVars);
-  let request = (await readFile(capture, 'utf8')).trim().split('\n');
-  // One check per job of the workflow, the required one last.
-  assert.deepEqual(JSON.parse(request.at(-1)!), { name: 'pre-commit', head_sha: apiVars.CHECKED_SHA, status: 'in_progress', details_url: apiVars.RUN_URL });
-  assert.match(await readFile(vars.GITHUB_OUTPUT, 'utf8'), /ids=123 123 123\n/);
-  for (const outcome of ['success', 'failure', 'cancelled']) {
-    run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', script('Publish result on the fixing commit')], { ...apiVars, HOOKS_RESULT: outcome });
-    request = (await readFile(capture, 'utf8')).trim().split('\n');
-    const dataIndex = request.indexOf('--data');
-    assert.ok(dataIndex > 0, 'curl payload follows the endpoint URL');
-    const endpoint = new URL(request[dataIndex - 1]!);
-    assert.equal(endpoint.origin, 'https://api.github.com');
-    // The last of the two checks; each gets the same conclusion.
-    assert.equal(endpoint.pathname, '/repos/example/repository/check-runs/124');
-    assert.deepEqual(JSON.parse(request.at(-1)!), { status: 'completed', conclusion: outcome === 'success' ? 'success' : 'failure' });
-  }
+    REPOSITORY: 'example/repository', HEAD_BRANCH: 'topic', WORKFLOWS: 'tests.yml',
+    WORKFLOW_REF: 'example/repository/.github/workflows/pre-commit.yml@refs/heads/topic@v2' };
+  run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', script('Start genuine CI on the fixing commit')], apiVars);
+  const requests = await readFile(capture, 'utf8');
+  assert.match(requests, /actions\/workflows\/pre-commit.yml\/dispatches/);
+  assert.match(requests, /actions\/workflows\/tests.yml\/dispatches/);
+  assert.equal(requests.split('"ref":"topic"').length - 1, 2);
+  assert.doesNotMatch(requests, /check-runs/);
+  assert.equal(workflow.jobs.publish.permissions.checks, undefined);
+  assert.match(workflow.jobs.publish.if, /github.event_name == 'pull_request'/);
+  assert.match(workflow.jobs.publish.if, /needs.hooks.result == 'success'/);
+  assert.doesNotMatch(workflow.jobs.hooks.steps.find((step: { name?: string }) => step.name === 'Commit fixes or show the fork patch').env.SAME_REPOSITORY, /workflow_dispatch/);
 
   // A contributor can push while hooks run. A normal push must preserve it.
   const contributor = join(temporary, 'contributor');
@@ -167,7 +160,7 @@ printf '{"id":123}\\n'
   await writeFile(page, '*one* and a note[^1].\n\n[^1]: Not supported.\n');
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', collect], vars);
   assert.match(run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', check], vars, 1), /footnote/);
-  console.log('CI scripts: whole config, fix commit/push, same-job checks, fork patch, concurrent push refusal and lint refusal passed');
+  console.log('CI scripts: whole config, fix commit/push, genuine dispatch, fork patch, concurrent push refusal and lint refusal passed');
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

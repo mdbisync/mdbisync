@@ -10,6 +10,9 @@ describe('saved hold comment ownership', () => {
       it(`rejects a forged ${mismatch} before a hold ${action}`, async () => {
         const path = 'eng/notes/plan.md';
         await h.suspendOne();
+        // Observe the suspended head's distinct job before corrupting saved
+        // ownership, so repaint checks an otherwise settled hold.
+        await h.sync();
         const document = await h.documentOf(path);
         const other = await h.documentOf('combined/guide.md');
         const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json')) as Record<string, IdEntry>;

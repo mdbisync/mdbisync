@@ -54,6 +54,7 @@ export const PERMISSION_PROBES: readonly Probe[] = [
   },
   { permission: 'checks:read', method: 'GET', path: (commit) => `/commits/${commit}/check-runs?per_page=1` },
   { permission: 'statuses:read', method: 'GET', path: (commit) => `/commits/${commit}/statuses?per_page=1` },
+  { permission: 'actions:read', method: 'GET', path: () => '/actions/runs?per_page=1' },
 ];
 
 export interface GitHubCheck {
@@ -68,7 +69,7 @@ export interface GitHubCheck {
 
 /**
  * Probes the token's permissions and the repository's merge setting, reads
- * the App's bot account and the rules on each sync branch. At most nine
+ * the App's bot account and the rules on each sync branch. At most ten
  * requests with the two sync branches, no writes.
  */
 export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
