@@ -138,7 +138,9 @@ and git's path beats Linear's title
 ## Security
 
 Every final release is reviewed before it is built: by two frontier language
-models (Fable and Astra), by GitHub CodeQL and by a dependency scan. The image
+models (Fable and Astra) and by GitHub CodeQL, whose results are in the
+[security reports](https://mdbisync.com/security/report), and by a
+[dependency scan](https://mdbisync.com/security/dependencies). The image
 counts the open findings of severity high and critical for each; the release
 report also lists every dismissed finding with its reason and the risks we
 accept. The dependency scan runs again every six hours on the latest release,
@@ -155,10 +157,6 @@ Each release also carries an SPDX SBOM of its bundled packages
       <img alt="Security scan of the latest release: high and critical findings per tool" src="https://mdbisync.com/badge/security.svg">
     </picture>
   </a>
-</p>
-
-<p align="center">
-  <a href="https://mdbisync.com/security/report">Security reports</a> · <a href="https://mdbisync.com/security/dependencies">Dependency scan</a>
 </p>
 
 ## Setup

@@ -149,6 +149,12 @@ async function scanResults(api: Client, repo: string, sourceSha: string): Promis
       if (!latest.has(category)) latest.set(category, analysis);
     }
     const used = [...latest.values()];
+    // Alerts show only their newest instance. Once a later analysis of a review
+    // category reached main, the alerts describe that commit, not the source.
+    for (const analysis of used) {
+      const newest = own.find((other) => other.category === analysis.category);
+      if (newest !== analysis) throw new Error(`A later ${scan.label} analysis (${String(newest!.commit_sha)}) replaced the one of the source commit; the alerts no longer describe this release`);
+    }
     // An analysis GitHub could not process holds no alerts; it must never read as a clean scan.
     const failed = used.filter((analysis) => typeof analysis.error === 'string' && analysis.error !== '');
     if (failed.length > 0) throw new Error(`The ${scan.label} analysis of ${String(failed[0]!.commit_sha)} failed: ${String(failed[0]!.error)}`);
@@ -160,9 +166,11 @@ async function scanResults(api: Client, repo: string, sourceSha: string): Promis
     result.commits = [...new Set(used.map((analysis) => analysis.commit_sha as string))];
     const categories = new Set(used.map((analysis) => String(analysis.category ?? '')));
     const toolNames = new Set(used.map((analysis) => fields(analysis.tool).name));
+    // An alert belongs to the release while one of the analyzed commits is its newest instance.
     const belongs = (alert: Json) => {
       const instance = fields(alert.most_recent_instance);
-      return toolNames.has(fields(alert.tool).name) && categories.has(String(instance.category ?? ''));
+      return toolNames.has(fields(alert.tool).name) && categories.has(String(instance.category ?? ''))
+        && result.commits.includes(String(instance.commit_sha));
     };
     for (const alert of open.filter(belongs)) {
       const severity = severityOf(alert);
@@ -170,9 +178,8 @@ async function scanResults(api: Client, repo: string, sourceSha: string): Promis
       else if (severity === 'high') result.high += 1;
       else result.lower += 1;
     }
-    // A dismissed finding belongs to the release while the analyzed commit still reports it.
     result.dismissed = dismissed
-      .filter((alert) => belongs(alert) && result.commits.includes(String(fields(alert.most_recent_instance).commit_sha)))
+      .filter(belongs)
       .map((alert) => {
         const rule = fields(alert.rule);
         const title = [rule.description, rule.name, rule.id].find((value) => typeof value === 'string' && value.trim() !== '') as string | undefined;
