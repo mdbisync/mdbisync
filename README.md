@@ -12,6 +12,10 @@
   </a>
 </p>
 
+<p align="center">
+  <a href="https://mdbisync.com/security">Security reports</a> · <a href="https://mdbisync.com/security/dependencies">Dependency scan</a>
+</p>
+
 Two-way sync between Linear documents and Markdown in your repository. It runs
 as a GitHub Action under apps you create: no server, no webhook, no key we
 hold.
