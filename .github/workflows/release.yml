@@ -62,8 +62,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           # The workflow token cannot read secret scanning alerts; without this read-only token the gate refuses.
           SECRET_SCANNING_TOKEN: ${{ secrets.SECRET_SCANNING_READ_TOKEN }}
-          # The GitHub account id whose token posts the security-gate status; the gate refuses one from anyone else.
-          SECURITY_GATE_CREATOR_ID: '16704707'
+          # The user id of the bot user of the GitHub App that posts the security-gate status and may
+          # write nothing but commit statuses; the gate refuses the status from anyone else.
+          SECURITY_GATE_CREATOR_ID: '357280908'
           DEPENDENCY_RESULT: ${{ runner.temp }}/dependencies/dependency-result.json
         run: node src/release/gate.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA"
       # The report job reads the result, and the draft release carries the status as its first dependency scan.

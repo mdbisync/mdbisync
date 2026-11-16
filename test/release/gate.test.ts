@@ -15,7 +15,7 @@ const repo = 'example/project';
 const source = 'a'.repeat(40);
 const later = 'b'.repeat(40);
 const older = 'c'.repeat(40);
-const scanner = { login: 'scanner', id: 4242, type: 'User' };
+const scanner = { login: 'scanner[bot]', id: 4242, type: 'Bot' };
 const intruder = { login: 'someone-else', id: 777, type: 'User' };
 
 const dependabot = `/repos/${repo}/dependabot/alerts?state=open&severity=medium,high,critical&per_page=100`;
@@ -117,7 +117,7 @@ test('the gate refuses a green security-gate status posted by another account, e
     { context: 'security-gate', state: 'success', description: 'No open findings', creator: scanner },
   ] };
   await withApi(routes, async (apiUrl) => {
-    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by someone-else (id 777), not by the configured account (id 4242)`]);
+    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by someone-else (id 777), not by the configured App bot user (id 4242)`]);
   });
 });
 
@@ -134,14 +134,24 @@ test('the gate passes a newer trusted status over an older one from another acco
 
 test('the gate names a creator without a numeric id by login only', async () => {
   const routes = cleanRoutes();
-  routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [{ context: 'security-gate', state: 'success', creator: { login: 'scanner', id: '4242' } }] };
+  routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [{ context: 'security-gate', state: 'success', creator: { login: 'scanner[bot]', id: '4242', type: 'Bot' } }] };
   await withApi(routes, async (apiUrl) => {
-    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by scanner, not by the configured account (id 4242)`]);
+    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by scanner[bot], not by the configured App bot user (id 4242)`]);
+  });
+});
+
+test('the gate refuses a person whose user id equals the configured bot user id', async () => {
+  const routes = cleanRoutes();
+  routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [
+    { context: 'security-gate', state: 'success', description: 'No open findings', creator: { login: 'namesake', id: scanner.id, type: 'User' } },
+  ] };
+  await withApi(routes, async (apiUrl) => {
+    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by namesake (id 4242), not by the configured App bot user (id 4242)`]);
   });
 });
 
 test('the creator id setting accepts plain digits only', () => {
-  assert.equal(parseCreatorId('16704707'), 16704707);
+  assert.equal(parseCreatorId('357280908'), 357280908);
   for (const bad of [undefined, '', ' 7', '7 ', '0', '07', '-7', '0x10', '1e3', '1.5', 'scanner']) {
     assert.ok(Number.isNaN(parseCreatorId(bad)), String(bad));
   }
@@ -151,7 +161,7 @@ test('the gate refuses a security-gate status without a creator', async () => {
   const routes = cleanRoutes();
   routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [{ context: 'security-gate', state: 'success', creator: null }] };
   await withApi(routes, async (apiUrl) => {
-    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by an unknown account, not by the configured account (id 4242)`]);
+    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by an unknown user, not by the configured App bot user (id 4242)`]);
   });
 });
 
@@ -277,7 +287,7 @@ test('the gate rejects a malformed repository or source commit before any reques
   await assert.rejects(releaseGate({ repository: repo, sourceSha: 'main', token: 't', statusCreatorId }), /full lowercase commit SHA/);
   await assert.rejects(releaseGate({ repository: repo, sourceSha: source, token: '', statusCreatorId }), /token is required/);
   for (const bad of [Number.NaN, 0, -1, 1.5]) {
-    await assert.rejects(releaseGate({ repository: repo, sourceSha: source, token: 't', statusCreatorId: bad }), /status creator as a positive GitHub account id/);
+    await assert.rejects(releaseGate({ repository: repo, sourceSha: source, token: 't', statusCreatorId: bad }), /status creator as a positive GitHub user id/);
   }
 });
 
