@@ -60,6 +60,16 @@ async function secretScanningAlerts(api: Client, repo: string, token: string | u
   return `${alerts.length} open secret scanning alert(s): ${alerts.map((alert) => `#${String(alert.number)}`).join(', ')}`;
 }
 
+// The npm dependencies are checked by dependency-scan.ts; Dependabot alerts still cover the other
+// ecosystems it watches (the pinned pre-commit requirements, GitHub Actions).
+async function otherDependabotAlerts(api: Client, repo: string): Promise<string | undefined> {
+  const alerts = await api.list(`/repos/${repo}/dependabot/alerts?state=open&severity=${BLOCKING_SEVERITIES.join(',')}&per_page=100`, 'Dependabot alerts');
+  const blocking = alerts.filter((alert) => fields(fields(alert.dependency).package).ecosystem !== 'npm'
+    && BLOCKING_SEVERITIES.includes(String(fields(alert.security_advisory).severity)));
+  if (blocking.length === 0) return undefined;
+  return `${blocking.length} open Dependabot alert(s) of medium or higher outside npm: ${blocking.map((alert) => `#${String(alert.number)}`).join(', ')}`;
+}
+
 // The dependency check of the source (dependency-scan.ts), run in the same job just before the gate.
 async function dependencies(path: string | undefined, sha: string): Promise<string | undefined> {
   if (!path) return 'the dependencies were not checked: no dependency scan result was given';
@@ -116,6 +126,7 @@ export async function releaseGate(options: GateOptions): Promise<string[]> {
     codeScanningAlerts(api, repository),
     secretScanningAlerts(api, repository, secretScanningToken),
     dependencies(dependencyResult, sourceSha),
+    otherDependabotAlerts(api, repository),
     codeqlCoverage(api, repository, sourceSha),
   ];
   const reasons: string[] = [];

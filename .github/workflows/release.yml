@@ -31,6 +31,8 @@ jobs:
       contents: read
       statuses: read
       security-events: read
+      # Dependabot alerts of the ecosystems the npm dependency check does not cover.
+      vulnerability-alerts: read
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       SOURCE_SHA: ${{ inputs.source-sha }}

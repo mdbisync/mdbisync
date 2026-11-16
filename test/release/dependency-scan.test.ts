@@ -103,10 +103,10 @@ test('a clean lock file of a release: no advisories, and a green status that nam
 test('excepted advisories leave the counts, keep their reason in the report, and stop applying after their review date', async () => {
   const repo = repository({ '.': 'vulnerable' });
   const exceptionsText = exceptionsFile(
-    { advisory: 'GHSA-xvch-5gv4-984h', package: 'minimist', reason: 'Only a *test* tool | reads it', review: '2027-01-31' },
-    { advisory: 'GHSA-35jh-r3h4-6jhm', package: 'lodash', reason: 'Expired one', review: '2026-11-15' },
+    { advisory: 'GHSA-xvch-5gv4-984h', package: 'minimist', lockFile: 'package-lock.json', reason: 'Only a *test* tool | reads it', review: '2027-01-31' },
+    { advisory: 'GHSA-35jh-r3h4-6jhm', package: 'lodash', lockFile: 'package-lock.json', reason: 'Expired one', review: '2026-11-15' },
     // An exception for another package does not cover the advisory where it reaches lodash.
-    { advisory: 'GHSA-r5fr-rjxr-66jc', package: 'lodash-es', reason: 'Other package', review: '2027-01-31' },
+    { advisory: 'GHSA-r5fr-rjxr-66jc', package: 'lodash-es', lockFile: 'package-lock.json', reason: 'Other package', review: '2027-01-31' },
   );
   try {
     const result = await check({
@@ -117,21 +117,21 @@ test('excepted advisories leave the counts, keep their reason in the report, and
     assert.deepEqual(result.excepted.map((advisory) => advisory.id), ['GHSA-xvch-5gv4-984h']);
     assert.deepEqual(result.expiredExceptions.map((exception) => exception.advisory), ['GHSA-35jh-r3h4-6jhm']);
     const summary = renderSummary(result);
-    assert.match(summary, /\| minimist \| Only a \\\*test\\\* tool \\\| reads it \| 2027-01-31 \|/);
-    assert.match(summary, /GHSA-35jh-r3h4-6jhm for lodash, review was due 2026-11-15/);
+    assert.match(summary, /\| minimist \(package\\-lock\\\.json\) \| Only a \\\*test\\\* tool \\\| reads it \| 2027-01-31 \|/);
+    assert.match(summary, /GHSA-35jh-r3h4-6jhm for lodash \(package\\-lock\\\.json\), review was due 2026-11-15/);
   } finally {
     repo.cleanup();
   }
 });
 
 test('the exceptions on the review date itself still apply', () => {
-  const { active, expired } = parseExceptions(exceptionsFile({ advisory: 'GHSA-xvch-5gv4-984h', package: 'minimist', reason: 'r', review: today }), today);
+  const { active, expired } = parseExceptions(exceptionsFile({ advisory: 'GHSA-xvch-5gv4-984h', package: 'minimist', lockFile: 'package-lock.json', reason: 'r', review: today }), today);
   assert.equal(active.length, 1);
   assert.equal(expired.length, 0);
 });
 
 test('a malformed exceptions file is refused, never read as no exceptions', () => {
-  const entry = { advisory: 'GHSA-xvch-5gv4-984h', package: 'minimist', reason: 'r', review: '2027-01-31' };
+  const entry = { advisory: 'GHSA-xvch-5gv4-984h', package: 'minimist', lockFile: 'package-lock.json', reason: 'r', review: '2027-01-31' };
   for (const [text, message] of [
     ['not json', /not valid JSON/],
     ['[]', /"exceptions" list/],
@@ -140,17 +140,37 @@ test('a malformed exceptions file is refused, never read as no exceptions', () =
     [exceptionsFile({ ...entry, reason: ' ' }), /"reason"/],
     [exceptionsFile({ ...entry, review: '2027-02-30' }), /"review" must be a date/],
     [exceptionsFile({ ...entry, expires: '2027-01-01' }), /unknown fields: expires/],
-    [exceptionsFile(entry, entry), /repeats GHSA-xvch-5gv4-984h for minimist/],
+    [exceptionsFile({ ...entry, lockFile: '../package-lock.json' }), /"lockFile" must be the repository path/],
+    [exceptionsFile({ ...entry, lockFile: 'yarn.lock' }), /"lockFile" must be the repository path/],
+    [exceptionsFile({ ...entry, reason: 'x'.repeat(201) }), /at most 200 characters/],
+    [exceptionsFile(entry, entry), /repeats GHSA-xvch-5gv4-984h for minimist in package-lock\.json/],
   ] as const) {
     assert.throws(() => parseExceptions(text, today), message, text);
   }
 });
 
 test('the repository exceptions file is valid', () => {
+  // Validity only: an entry past its review date is reported by the scheduled scan, not by every pull request.
   const text = readFileSync(new URL(`../../${EXCEPTIONS_FILE}`, import.meta.url), 'utf8');
   const { active, expired } = parseExceptions(text, '2000-01-01');
-  assert.equal(expired.length, 0);
-  assert.ok(active.length >= 0);
+  assert.equal(expired.length, 0, 'every entry has a review date');
+  assert.ok(active.every((exception) => /package-lock\.json$/.test(exception.lockFile)));
+});
+
+test('an exception covers its package only in the lock file it names', () => {
+  const advisory = (lockFile: string) => ({ lockFile, audit: { vulnerabilities: {
+    glob: { via: [{ source: 1, name: 'glob', title: 'glob issue', url: 'https://github.com/advisories/GHSA-3g3m-2fjr-6pw4', severity: 'high', range: '*' }] },
+  } } });
+  const exceptions = parseExceptions(exceptionsFile({ advisory: 'GHSA-3g3m-2fjr-6pw4', package: 'glob', lockFile: 'test/harness/package-lock.json', reason: 'harness only', review: '2027-01-31' }), today);
+  const input = { target: 'main', commit: 'a'.repeat(40), release: null, checked: '2026-11-16T00:00:00Z', exceptions };
+  const harnessOnly = evaluate({ ...input, audits: [advisory('test/harness/package-lock.json')] });
+  assert.deepEqual(harnessOnly.open, []);
+  assert.match(renderSummary(harnessOnly), /\| glob \(test\\\/harness\\\/package\\-lock\\\.json\) \| harness only \|/);
+  // The same advisory reaching the shipped lock file stays open, with every place it reaches.
+  const both = evaluate({ ...input, audits: [advisory('test/harness/package-lock.json'), advisory('package-lock.json')] });
+  assert.deepEqual(both.open.map((a) => a.packages.map((p) => p.lockFile)), [['package-lock.json', 'test/harness/package-lock.json']]);
+  assert.deepEqual(both.excepted, []);
+  assert.equal(blocking(both).length, 1);
 });
 
 test('an advisory reached through many packages and lock files counts once, at its highest severity', () => {
@@ -171,7 +191,7 @@ test('an advisory reached through many packages and lock files counts once, at i
   const result = evaluate({
     target: 'main', commit: 'a'.repeat(40), release: null, checked: '2026-11-16T00:00:00Z',
     audits: [{ lockFile: 'tools/package-lock.json', audit: bundled }, { lockFile: 'package-lock.json', audit: elsewhere }],
-    exceptions: parseExceptions(exceptionsFile({ advisory: 'GHSA-3g3m-2fjr-6pw4', package: 'glob', reason: 'bundled', review: '2027-01-31' }), today),
+    exceptions: parseExceptions(exceptionsFile({ advisory: 'GHSA-3g3m-2fjr-6pw4', package: 'glob', lockFile: 'tools/package-lock.json', reason: 'bundled', review: '2027-01-31' }), today),
   });
   assert.deepEqual(result.counts, { critical: 0, high: 1, moderate: 0, low: 1, info: 0 });
   assert.deepEqual(result.open.map((advisory) => [advisory.id, advisory.severity, advisory.packages.map((p) => `${p.lockFile}:${p.name}`)]), [

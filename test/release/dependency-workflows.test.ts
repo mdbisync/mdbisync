@@ -95,6 +95,8 @@ test('dependency review reads the exceptions of the base commit and allows only 
       { advisory: 'GHSA-xvch-5gv4-984h', package: 'b', reason: 'r', review: '2999-01-01' },
       { advisory: 'GHSA-35jh-r3h4-6jhm', package: 'c', reason: 'r', review: '2000-01-01' },
       { advisory: 'GHSA-29mw-wpgm-hmr9\nx=y', package: 'd', reason: 'r', review: '2999-01-01' },
+      { advisory: 'GHSA-r5fr-rjxr-66jc', package: 'e', reason: 'r', review: 'never' },
+      { advisory: 'GHSA-xxjr-mmjv-4gpg', package: 'f', reason: 'r', review: 3000 },
     ] })), 'ghsas=GHSA-xvch-5gv4-984h\n');
     // The repository's own file gives every advisory still before its review date.
     cpSync(new URL(`../../${EXCEPTIONS_FILE}`, import.meta.url), join(directory, 'real.json'));

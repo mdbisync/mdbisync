@@ -31,10 +31,13 @@ const ADVISORY_ID = /^GHSA(?:-[23456789cfghjmpqrvwx]{4}){3}$/;
 const ADVISORY_URL = /^https:\/\/github\.com\/advisories\/(GHSA(?:-[23456789cfghjmpqrvwx]{4}){3})$/;
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const LOCK_FILE = /^(?:[A-Za-z0-9._-]+\/)*package-lock\.json$/;
 
 export interface Exception {
   advisory: string;
   package: string;
+  // The lock file the exception is limited to.
+  lockFile: string;
   reason: string;
   // The date by which the exception is reviewed again. After it, the exception no longer applies.
   review: string;
@@ -108,16 +111,19 @@ export function parseExceptions(text: string, today: string): Exceptions {
   list.forEach((entry: unknown, index) => {
     const where = `${EXCEPTIONS_FILE}, exception ${index + 1}`;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`${where} is not an object`);
-    const { advisory, package: name, reason, review, ...rest } = entry as Record<string, unknown>;
+    const { advisory, package: name, lockFile, reason, review, ...rest } = entry as Record<string, unknown>;
     if (Object.keys(rest).length > 0) throw new Error(`${where} has unknown fields: ${Object.keys(rest).join(', ')}`);
     if (typeof advisory !== 'string' || !ADVISORY_ID.test(advisory)) throw new Error(`${where}: "advisory" must be a GHSA id`);
     if (typeof name !== 'string' || !PACKAGE_NAME.test(name)) throw new Error(`${where}: "package" must be an npm package name`);
+    if (typeof lockFile !== 'string' || !LOCK_FILE.test(lockFile) || lockFile.split('/').some((part) => part === '.' || part === '..')) {
+      throw new Error(`${where}: "lockFile" must be the repository path of a package-lock.json`);
+    }
     if (typeof reason !== 'string' || reason.trim() === '' || reason.length > 200) throw new Error(`${where}: "reason" must be a text of at most 200 characters`);
     if (typeof review !== 'string' || !isDate(review)) throw new Error(`${where}: "review" must be a date such as 2027-01-31`);
-    const key = `${advisory} ${name}`;
-    if (seen.has(key)) throw new Error(`${where} repeats ${advisory} for ${name}`);
+    const key = `${advisory} ${name} ${lockFile}`;
+    if (seen.has(key)) throw new Error(`${where} repeats ${advisory} for ${name} in ${lockFile}`);
     seen.add(key);
-    const exception = { advisory, package: name, reason: reason.trim(), review };
+    const exception = { advisory, package: name, lockFile, reason: reason.trim(), review };
     (review < today ? result.expired : result.active).push(exception);
   });
   return result;
@@ -198,10 +204,11 @@ export function evaluate(input: ScanInput): Result {
   const open: Advisory[] = [];
   const excepted: Excepted[] = [];
   for (const advisory of advisories) {
-    const covering = (name: string) => input.exceptions.active.filter((e) => e.advisory === advisory.id && e.package === name);
-    if (advisory.packages.every((affected) => covering(affected.name).length > 0)) {
-      const used = advisory.packages.flatMap((affected) => covering(affected.name));
-      excepted.push({ ...advisory, exceptions: [...new Map(used.map((e) => [`${e.advisory} ${e.package}`, e])).values()] });
+    // An exception covers the package it names in the lock file it names, nowhere else.
+    const covering = (affected: Affected) => input.exceptions.active.filter((e) => e.advisory === advisory.id && e.package === affected.name && e.lockFile === affected.lockFile);
+    if (advisory.packages.every((affected) => covering(affected).length > 0)) {
+      const used = advisory.packages.flatMap(covering);
+      excepted.push({ ...advisory, exceptions: [...new Map(used.map((e) => [`${e.advisory} ${e.package} ${e.lockFile}`, e])).values()] });
     } else {
       open.push(advisory);
     }
@@ -282,15 +289,15 @@ export function renderSummary(result: Result): string {
   if (result.excepted.length === 0) {
     lines.push('None applied.', '');
   } else {
-    lines.push('| Advisory | Severity | Package | Reason | Review by |', '| --- | --- | --- | --- | --- |');
+    lines.push('| Advisory | Severity | Package (lock file) | Reason | Review by |', '| --- | --- | --- | --- | --- |');
     for (const advisory of result.excepted) {
-      for (const exception of advisory.exceptions) lines.push(`| ${advisoryCell(advisory)} | ${advisory.severity} | ${literal(exception.package)} | ${literal(exception.reason)} | ${exception.review} |`);
+      for (const exception of advisory.exceptions) lines.push(`| ${advisoryCell(advisory)} | ${advisory.severity} | ${literal(exception.package)} (${literal(exception.lockFile)}) | ${literal(exception.reason)} | ${exception.review} |`);
     }
     lines.push('');
   }
   if (result.expiredExceptions.length > 0) {
     lines.push('Past their review date, so no longer applied:', '');
-    for (const exception of result.expiredExceptions) lines.push(`- ${exception.advisory} for ${literal(exception.package)}, review was due ${exception.review}`);
+    for (const exception of result.expiredExceptions) lines.push(`- ${exception.advisory} for ${literal(exception.package)} (${literal(exception.lockFile)}), review was due ${exception.review}`);
     lines.push('');
   }
   return `${lines.join('\n')}\n`;
@@ -367,10 +374,8 @@ export async function check(options: CheckOptions): Promise<Result> {
   validateSha(commit);
   const exceptions = parseExceptions(options.exceptionsText, now.toISOString().slice(0, 10));
   const audit = options.audit ?? npmAudit;
-  const audits = [];
-  for (const lockFile of await lockFilesAt(options.repository, commit)) {
-    audits.push({ lockFile, audit: await audit(options.repository, commit, lockFile) });
-  }
+  const lockFiles = await lockFilesAt(options.repository, commit);
+  const audits = await Promise.all(lockFiles.map(async (lockFile) => ({ lockFile, audit: await audit(options.repository, commit, lockFile) })));
   return evaluate({ target: options.target, commit, release: options.release, checked: now.toISOString().replace(/\.\d{3}Z$/, 'Z'), audits, exceptions });
 }
 
@@ -405,9 +410,11 @@ if (import.meta.main) {
   const commit = releaseTag === undefined ? option(args, '--commit')! : await releaseSource(repository, releaseTag);
   const release = releaseTag ?? version ?? null;
   const result = await check({ repository, commit, target, release, exceptionsText: await readFile(EXCEPTIONS_FILE, 'utf8') });
+  // The status is made before anything is written, and written before the result, so a result never exists without it.
+  const status = release !== null && runUrl !== undefined ? releaseStatus(result, runUrl) : undefined;
   await mkdir(output, { recursive: true });
+  if (status !== undefined) await writeFile(join(output, STATUS_FILE), `${JSON.stringify(status, null, 2)}\n`);
   await writeFile(join(output, RESULT_FILE), `${JSON.stringify(result, null, 2)}\n`);
-  if (release !== null && runUrl !== undefined) await writeFile(join(output, STATUS_FILE), `${JSON.stringify(releaseStatus(result, runUrl), null, 2)}\n`);
   const summary = renderSummary(result);
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, summary);

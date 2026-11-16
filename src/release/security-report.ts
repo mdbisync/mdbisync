@@ -15,8 +15,6 @@ import { validateSha, validateVersion } from './package.ts';
 export const REPORT_FILE = 'security-report.md';
 export const SUMMARY_FILE = 'security-summary.json';
 export const SUMMARY_SCHEMA = 1;
-export { literal };
-
 export const ACCEPTED_RISKS_FILE = 'security/accepted-risks.md';
 
 type ToolId = 'fable' | 'astra' | 'codeql' | 'dependencies';

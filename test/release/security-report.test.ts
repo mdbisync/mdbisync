@@ -4,7 +4,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { evaluate, parseExceptions, type Result as DependencyResult } from '../../src/release/dependency-scan.ts';
-import { ACCEPTED_RISKS_FILE, acceptedRiskEntries, literal, securityReport, toolName } from '../../src/release/security-report.ts';
+import { literal } from '../../src/release/markdown-text.ts';
+import { ACCEPTED_RISKS_FILE, acceptedRiskEntries, securityReport, toolName } from '../../src/release/security-report.ts';
 
 const repo = 'example/project';
 const source = 'a'.repeat(40);
