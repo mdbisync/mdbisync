@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"보고서가 준비되었습니다.","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-88094a7b","marks":{"attribution":"user"}}]}
-  ]
-}

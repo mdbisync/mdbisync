@@ -1,5 +1,0 @@
-- [ ] Launch
-  - [X] Write notes
-  - [ ] Update site
-
-Ref kx-4fda3abe
