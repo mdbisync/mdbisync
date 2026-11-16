@@ -1,0 +1,17 @@
+{
+  "about": "Dependency advisories the project accepts for a named package, with the reason. This file is the only place an exception lives: the dependency check of every release, the scheduled dependency scan and the pull request dependency review all read it, and the scan report lists every entry. An exception applies only to the advisory and package it names, and only until its review date; after that the advisory counts again until the entry is reviewed and its date moved, or removed. An alert dismissed in the repository's security tab is recorded here in the same change.",
+  "exceptions": [
+    {
+      "advisory": "GHSA-3g3m-2fjr-6pw4",
+      "package": "glob",
+      "reason": "Only in the npm that the end-to-end test harness installs to run Node-based hooks; mdbisync does not ship it. Remove once npm bundles glob 14.0.2 or newer.",
+      "review": "2027-02-16"
+    },
+    {
+      "advisory": "GHSA-g3hv-75wg-m249",
+      "package": "minimatch",
+      "reason": "Only in the npm that the end-to-end test harness installs to run Node-based hooks; mdbisync does not ship it. Remove once npm bundles minimatch 11.0.1 or newer.",
+      "review": "2027-02-16"
+    }
+  ]
+}

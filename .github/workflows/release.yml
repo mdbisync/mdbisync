@@ -31,17 +31,30 @@ jobs:
       contents: read
       statuses: read
       security-events: read
-      vulnerability-alerts: read
     env:
+      RELEASE_VERSION: ${{ inputs.version }}
       SOURCE_SHA: ${{ inputs.source-sha }}
     steps:
       # The gate runs from main's current workflow commit, never from the source being released.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The source is checked out only for its lock files; none of its code runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-sha }}
+          path: source
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+      # The same dependency check as the scheduled dependency scan. A failed check leaves no result,
+      # which the gate step names as a reason together with any other.
+      - name: Check the dependencies of the source
+        continue-on-error: true
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node src/release/dependency-scan.ts --repository source --commit "$SOURCE_SHA" --target "release $RELEASE_VERSION" --version "$RELEASE_VERSION" --run-url "$RUN_URL" --output "$RUNNER_TEMP/dependencies"
       - name: Check the security gate
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -49,7 +62,15 @@ jobs:
           SECRET_SCANNING_TOKEN: ${{ secrets.SECRET_SCANNING_READ_TOKEN }}
           # The GitHub account id whose token posts the security-gate status; the gate refuses one from anyone else.
           SECURITY_GATE_CREATOR_ID: '16704707'
+          DEPENDENCY_RESULT: ${{ runner.temp }}/dependencies/dependency-result.json
         run: node src/release/gate.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA"
+      # The report job reads the result, and the draft release carries the status as its first dependency scan.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dependency-scan
+          path: ${{ runner.temp }}/dependencies
+          retention-days: 90
+          if-no-files-found: error
 
   # A final version's security report and the summary behind the README's security image, read
   # right after the gate passed. A report that cannot be written stops the release before its tag.
@@ -60,7 +81,6 @@ jobs:
     permissions:
       contents: read
       security-events: read
-      vulnerability-alerts: read
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       SOURCE_SHA: ${{ inputs.source-sha }}
@@ -72,10 +92,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dependency-scan
+          path: ${{ runner.temp }}/dependencies
       - name: Write the security report
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node src/release/security-report.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/security"
+        run: node src/release/security-report.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/dependencies/dependency-result.json" "$RUNNER_TEMP/security"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: security-report
@@ -303,7 +327,8 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           node src/release/tag.ts "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/release"
 
-  # A final version gets a draft GitHub Release that carries its security report and summary.
+  # A final version gets a draft GitHub Release that carries its security report and summary, its
+  # SPDX SBOM and its dependency status, which the scheduled dependency scan later replaces in place.
   # It stays a draft until a maintainer publishes it. It runs no repository code.
   publish:
     needs: [report, tag]
@@ -318,14 +343,23 @@ jobs:
         with:
           name: security-report
           path: ${{ runner.temp }}/security
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-sbom
+          path: ${{ runner.temp }}/sbom
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dependency-scan
+          path: ${{ runner.temp }}/dependencies
       - name: Create the draft release with the security report
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$RELEASE_VERSION" --draft --verify-tag --title "$RELEASE_VERSION" \
-            --notes 'The security report of this release is attached as security-report.md.' \
-            "$RUNNER_TEMP/security/security-report.md" "$RUNNER_TEMP/security/security-summary.json"
+            --notes 'The security report of this release is attached as security-report.md and its SPDX SBOM as sbom.spdx.json.' \
+            "$RUNNER_TEMP/security/security-report.md" "$RUNNER_TEMP/security/security-summary.json" \
+            "$RUNNER_TEMP/sbom/sbom.spdx.json" "$RUNNER_TEMP/dependencies/dependency-scan.json"
 
   # A run that created no tag must not end as success, even when every job before it was skipped.
   tagged:

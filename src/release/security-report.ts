@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { client, type Client, fields, type Json } from './github-api.ts';
+import { type Result as DependencyResult, readResult } from './dependency-scan.ts';
+import { literal } from './markdown-text.ts';
 import { validateSha, validateVersion } from './package.ts';
 
 // The public security report of a final release, and the machine-readable
@@ -13,6 +15,8 @@ import { validateSha, validateVersion } from './package.ts';
 export const REPORT_FILE = 'security-report.md';
 export const SUMMARY_FILE = 'security-summary.json';
 export const SUMMARY_SCHEMA = 1;
+export { literal };
+
 export const ACCEPTED_RISKS_FILE = 'security/accepted-risks.md';
 
 type ToolId = 'fable' | 'astra' | 'codeql' | 'dependencies';
@@ -94,6 +98,8 @@ export interface ReportOptions {
   token: string;
   // The Markdown of the accepted risks, as the repository keeps it.
   acceptedRisks: string;
+  // The dependency check of the source commit, as the release gate ran it.
+  dependencies: DependencyResult;
   date?: string | undefined;
   apiUrl?: string | undefined;
 }
@@ -123,21 +129,6 @@ export function toolName(name: unknown, version: unknown): string {
   const full = suffix === '' || base.endsWith(suffix) ? base : `${base} ${suffix}`;
   if (!/^[\p{L}\p{N}][\p{L}\p{N} .+_-]{0,39}$/u.test(full)) throw new Error(`Unexpected tool name from the scan: ${JSON.stringify(full)}`);
   return full;
-}
-
-/**
- * Untrusted text (a finding's title, as a scanner wrote it) as literal text
- * in a Markdown table cell: one line, links removed, every ASCII punctuation
- * character backslash-escaped so nothing in it becomes markup, and at most
- * 200 characters.
- */
-export function literal(text: string): string {
-  const plain = text
-    .replace(/\s+/g, ' ')
-    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, '(link removed)')
-    .trim();
-  const short = [...plain].length > 200 ? `${[...plain].slice(0, 199).join('')}…` : plain;
-  return short.replace(/[!-/:-@[-`{-~]/g, (char) => `\\${char}`);
 }
 
 async function scanResults(api: Client, repo: string, sourceSha: string): Promise<ScanResult[]> {
@@ -191,15 +182,6 @@ async function scanResults(api: Client, repo: string, sourceSha: string): Promis
       .sort((a, b) => rank(a.severity) - rank(b.severity) || a.title.localeCompare(b.title));
     return result;
   });
-}
-
-async function dependencyCounts(api: Client, repo: string): Promise<{ high: number; critical: number }> {
-  const alerts = await api.list(`/repos/${repo}/dependabot/alerts?state=open&severity=high,critical&per_page=100`, 'Dependabot alerts');
-  const severity = (alert: Json) => fields(alert.security_advisory).severity;
-  return {
-    high: alerts.filter((alert) => severity(alert) === 'high').length,
-    critical: alerts.filter((alert) => severity(alert) === 'critical').length,
-  };
 }
 
 /** The accepted risks as entries of the report: each `## ` entry of the repository's file, one level down. */
@@ -258,7 +240,9 @@ export async function securityReport(options: ReportOptions): Promise<{ report: 
   if (version.includes('-')) throw new Error('A security report is written only for a final version');
   if (!token) throw new Error('A GitHub token is required');
   const api = client(options.apiUrl ?? 'https://api.github.com', token, 'mdbisync-release-report');
-  const [scans, dependencies] = await Promise.all([scanResults(api, repository, sourceSha), dependencyCounts(api, repository)]);
+  if (options.dependencies.commit !== sourceSha) throw new Error(`The dependency scan checked ${options.dependencies.commit}, not ${sourceSha}`);
+  const scans = await scanResults(api, repository, sourceSha);
+  const dependencies = { high: options.dependencies.counts.high, critical: options.dependencies.counts.critical };
   const date = options.date ?? new Date().toISOString().slice(0, 10);
   const summary: Summary = {
     schema: SUMMARY_SCHEMA,
@@ -275,12 +259,13 @@ export async function securityReport(options: ReportOptions): Promise<{ report: 
 }
 
 if (import.meta.main) {
-  const [repository, sourceSha, version, output] = process.argv.slice(2);
-  if (!repository || !sourceSha || !version || !output) throw new Error('Usage: security-report.ts OWNER/REPOSITORY SOURCE_SHA VERSION OUTPUT_DIRECTORY (token in GITHUB_TOKEN)');
+  const [repository, sourceSha, version, dependencyResult, output] = process.argv.slice(2);
+  if (!repository || !sourceSha || !version || !dependencyResult || !output) throw new Error('Usage: security-report.ts OWNER/REPOSITORY SOURCE_SHA VERSION DEPENDENCY_RESULT OUTPUT_DIRECTORY (token in GITHUB_TOKEN)');
   const { report, summary } = await securityReport({
     repository, sourceSha, version,
     token: process.env.GITHUB_TOKEN ?? '',
     acceptedRisks: await readFile(ACCEPTED_RISKS_FILE, 'utf8'),
+    dependencies: await readResult(dependencyResult),
     apiUrl: process.env.GITHUB_API_URL,
   });
   await mkdir(output, { recursive: true });

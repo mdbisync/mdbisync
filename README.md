@@ -141,10 +141,15 @@ Every final release is reviewed before it is built: by two frontier language
 models (Fable and Astra), by GitHub CodeQL and by a dependency scan. The image
 counts the open findings of severity high and critical for each; the release
 report also lists every dismissed finding with its reason and the risks we
-accept.
+accept. The dependency scan runs again every six hours on the latest release,
+so its count follows advisories published after the release; the advisories it
+excepts are listed with their reasons in
+[`security/dependency-exceptions.json`](security/dependency-exceptions.json).
+Each release also carries an SPDX SBOM of its bundled packages
+(`sbom.spdx.json`).
 
 <p align="center">
-  <a href="https://mdbisync.com/security">
+  <a href="https://mdbisync.com/security/report">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://mdbisync.com/badge/security-dark.svg">
       <img alt="Security scan of the latest release: high and critical findings per tool" src="https://mdbisync.com/badge/security.svg">
@@ -153,7 +158,7 @@ accept.
 </p>
 
 <p align="center">
-  <a href="https://mdbisync.com/security">Security reports</a> · <a href="https://mdbisync.com/security/dependencies">Dependency scan</a>
+  <a href="https://mdbisync.com/security/report">Security reports</a> · <a href="https://mdbisync.com/security/dependencies">Dependency scan</a>
 </p>
 
 ## Setup

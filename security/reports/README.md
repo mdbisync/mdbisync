@@ -9,3 +9,10 @@ here, named after the release (for example `v0.1.0.md`).
 Each report lists the scans that ran on the release, their versions, the open
 findings of severity critical and high, every dismissed finding with its
 reason, and the [accepted risks](../accepted-risks.md).
+
+The dependencies are not part of a report: a release can gain a known
+vulnerability long after it was built, so they are checked again every six
+hours by the "Dependency scan" workflow. Its latest run is the current
+dependency report of the latest release, and the release asset
+`dependency-scan.json` holds that run's counts. The release also carries
+`sbom.spdx.json`, the SPDX SBOM of its bundled packages.

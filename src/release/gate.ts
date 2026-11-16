@@ -1,4 +1,5 @@
 import { appendFile } from 'node:fs/promises';
+import { blocking as blockingAdvisories, readResult } from './dependency-scan.ts';
 import { client, type Client, fields, type Json, ReadError } from './github-api.ts';
 import { validateSha } from './package.ts';
 
@@ -18,6 +19,8 @@ export interface GateOptions {
   statusCreatorId: number;
   // The workflow token cannot read secret scanning alerts; a separate read-only token can.
   secretScanningToken?: string | undefined;
+  // The result file of the dependency check of the source commit.
+  dependencyResult?: string | undefined;
   apiUrl?: string | undefined;
 }
 
@@ -57,11 +60,16 @@ async function secretScanningAlerts(api: Client, repo: string, token: string | u
   return `${alerts.length} open secret scanning alert(s): ${alerts.map((alert) => `#${String(alert.number)}`).join(', ')}`;
 }
 
-async function dependabotAlerts(api: Client, repo: string): Promise<string | undefined> {
-  const alerts = await api.list(`/repos/${repo}/dependabot/alerts?state=open&severity=${BLOCKING_SEVERITIES.join(',')}&per_page=100`, 'Dependabot alerts');
-  const blocking = alerts.filter((alert) => BLOCKING_SEVERITIES.includes(String(fields(alert.security_advisory).severity)));
-  if (blocking.length === 0) return undefined;
-  return `${blocking.length} open Dependabot alert(s) of medium or higher: ${blocking.map((alert) => `#${String(alert.number)}`).join(', ')}`;
+// The dependency check of the source (dependency-scan.ts), run in the same job just before the gate.
+async function dependencies(path: string | undefined, sha: string): Promise<string | undefined> {
+  if (!path) return 'the dependencies were not checked: no dependency scan result was given';
+  const result = await readResult(path).catch((error: unknown) => {
+    throw new ReadError(`Cannot read the dependency scan result: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  if (result.commit !== sha) return `the dependency scan checked ${result.commit}, not ${sha}`;
+  const found = blockingAdvisories(result);
+  if (found.length === 0) return undefined;
+  return `${found.length} open dependency advisor${found.length === 1 ? 'y' : 'ies'} of moderate or higher: ${found.map((advisory) => `${advisory.id} (${advisory.severity})`).join(', ')}`;
 }
 
 async function codeqlCoverage(api: Client, repo: string, sha: string): Promise<string | undefined> {
@@ -97,7 +105,7 @@ export function parseCreatorId(value: string | undefined): number {
 }
 
 export async function releaseGate(options: GateOptions): Promise<string[]> {
-  const { repository, sourceSha, token, statusCreatorId, secretScanningToken } = options;
+  const { repository, sourceSha, token, statusCreatorId, secretScanningToken, dependencyResult } = options;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('Expected a repository such as owner/name');
   validateSha(sourceSha);
   if (!token) throw new Error('A GitHub token is required');
@@ -107,7 +115,7 @@ export async function releaseGate(options: GateOptions): Promise<string[]> {
     gateStatus(api, repository, sourceSha, statusCreatorId),
     codeScanningAlerts(api, repository),
     secretScanningAlerts(api, repository, secretScanningToken),
-    dependabotAlerts(api, repository),
+    dependencies(dependencyResult, sourceSha),
     codeqlCoverage(api, repository, sourceSha),
   ];
   const reasons: string[] = [];
@@ -126,12 +134,13 @@ export async function releaseGate(options: GateOptions): Promise<string[]> {
 
 if (import.meta.main) {
   const [repository, sourceSha] = process.argv.slice(2);
-  if (!repository || !sourceSha) throw new Error('Usage: gate.ts OWNER/REPOSITORY SOURCE_SHA (token in GITHUB_TOKEN, status creator id in SECURITY_GATE_CREATOR_ID)');
+  if (!repository || !sourceSha) throw new Error('Usage: gate.ts OWNER/REPOSITORY SOURCE_SHA (token in GITHUB_TOKEN, status creator id in SECURITY_GATE_CREATOR_ID, dependency scan result in DEPENDENCY_RESULT)');
   const reasons = await releaseGate({
     repository, sourceSha,
     token: process.env.GITHUB_TOKEN ?? '',
     statusCreatorId: parseCreatorId(process.env.SECURITY_GATE_CREATOR_ID),
     secretScanningToken: process.env.SECRET_SCANNING_TOKEN || undefined,
+    dependencyResult: process.env.DEPENDENCY_RESULT || undefined,
     apiUrl: process.env.GITHUB_API_URL,
   });
   const summary = reasons.length === 0

@@ -362,22 +362,34 @@ test('the attestation subjects are every file of the release tree, by path', () 
 test('the report job reads alerts with read-only permissions and uploads the report and the summary', () => {
   const job = jobs.report!;
   assert.equal(job.if, undefined, 'it runs only after a passed gate, so only for a final version on main');
-  assert.deepEqual(job.permissions, { contents: 'read', 'security-events': 'read', 'vulnerability-alerts': 'read' });
+  assert.deepEqual(job.permissions, { contents: 'read', 'security-events': 'read' });
   assert.equal(job.steps[0]!.with!['persist-credentials'], false);
+  // The dependency counts are the gate's own check of the source, handed on as an artifact.
+  const download = job.steps.find((step) => step.uses?.startsWith('actions/download-artifact@'))!;
+  assert.deepEqual(download.with, { name: 'dependency-scan', path: '${{ runner.temp }}/dependencies' });
   const write = job.steps.find((step) => step.name === 'Write the security report')!;
-  assert.equal(write.run, 'node src/release/security-report.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/security"');
+  assert.equal(write.run, 'node src/release/security-report.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/dependencies/dependency-result.json" "$RUNNER_TEMP/security"');
   const upload = job.steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'))!;
   assert.equal(upload.with!.name, 'security-report');
   assert.equal(upload.with!['if-no-files-found'], 'error');
   assert.equal(upload.with!['retention-days'], 1, 'the draft release keeps the files; the artifact only hands them on');
 });
 
-test('the publish job only drafts a release from the existing tag, with the report and the summary, and runs no repository code', () => {
+test('the publish job only drafts a release from the existing tag, with the report, the summary, the SBOM and the dependency status, and runs no repository code', () => {
   const job = jobs.publish!;
   assert.equal(job.if, undefined, 'it runs only after the report and the tag succeeded, so only for a final version');
   assert.deepEqual(job.permissions, { contents: 'write' });
   assert.ok(job.steps.every((step) => !step.uses?.startsWith('actions/checkout@') && !/\bnode\b|\bnpm\b/.test(step.run ?? '')));
   const create = job.steps.find((step) => step.name === 'Create the draft release with the security report')!;
   assert.match(create.run!, /^gh release create "\$RELEASE_VERSION" --draft --verify-tag /);
-  assert.match(create.run!, /"\$RUNNER_TEMP\/security\/security-report\.md" "\$RUNNER_TEMP\/security\/security-summary\.json"\s*$/);
+  assert.match(create.run!, /"\$RUNNER_TEMP\/security\/security-report\.md" "\$RUNNER_TEMP\/security\/security-summary\.json" \\\n\s*"\$RUNNER_TEMP\/sbom\/sbom\.spdx\.json" "\$RUNNER_TEMP\/dependencies\/dependency-scan\.json"\s*$/);
+  const downloads = job.steps.filter((step) => step.uses?.startsWith('actions/download-artifact@')).map((step) => [step.with!.name, step.with!.path]);
+  assert.deepEqual(downloads, [
+    ['security-report', '${{ runner.temp }}/security'],
+    ['release-sbom', '${{ runner.temp }}/sbom'],
+    ['dependency-scan', '${{ runner.temp }}/dependencies'],
+  ]);
+  // The SBOM is attached as the very file the attest job signed.
+  const sbom = jobs.build!.steps.find((step) => step.with?.name === 'release-sbom')!;
+  assert.equal(sbom.with!.path, '${{ runner.temp }}/sbom.spdx.json');
 });

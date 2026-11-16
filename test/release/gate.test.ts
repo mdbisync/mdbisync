@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
+import { evaluate, parseExceptions } from '../../src/release/dependency-scan.ts';
 import { parseCreatorId, releaseGate } from '../../src/release/gate.ts';
 import { validateVersion } from '../../src/release/package.ts';
 
@@ -13,6 +17,20 @@ const later = 'b'.repeat(40);
 const older = 'c'.repeat(40);
 const scanner = { login: 'scanner', id: 4242, type: 'User' };
 const intruder = { login: 'someone-else', id: 777, type: 'User' };
+
+// Dependency scan results as the gate job's scan step writes them.
+const results = mkdtempSync(join(tmpdir(), 'gate-dependencies-'));
+function dependencyResult(name: string, commit: string, audit: unknown): string {
+  const result = evaluate({
+    target: 'release v1.0.0', commit, release: 'v1.0.0', checked: '2026-11-16T00:00:00Z',
+    audits: [{ lockFile: 'package-lock.json', audit }], exceptions: parseExceptions('{"exceptions":[]}', '2026-11-16'),
+  });
+  const path = join(results, `${name}.json`);
+  writeFileSync(path, JSON.stringify(result));
+  return path;
+}
+const advisory = (id: string, name: string, severity: string) => ({ source: 1, name, title: `${name} issue`, url: `https://github.com/advisories/${id}`, severity, range: '*' });
+const cleanDependencies = dependencyResult('clean', source, { vulnerabilities: {} });
 
 interface Reply { status?: number; body: unknown; link?: string }
 type Routes = Record<string, Reply>;
@@ -30,7 +48,6 @@ function cleanRoutes(): Routes {
       { number: 8, rule: { severity: 'note', security_severity_level: null } },
     ] },
     [`/repos/${repo}/secret-scanning/alerts?state=open&per_page=100`]: { body: [] },
-    [`/repos/${repo}/dependabot/alerts?state=open&severity=medium,high,critical&per_page=100`]: { body: [] },
     [`/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&tool_name=CodeQL&per_page=100`]: { body: [
       { category: '/language:javascript-typescript', commit_sha: source },
       { category: '/language:actions', commit_sha: later },
@@ -59,8 +76,8 @@ async function withApi(routes: Routes, run: (apiUrl: string, seen: IncomingMessa
   }
 }
 
-function gate(apiUrl: string, secretScanningToken = 'secret-read') {
-  return releaseGate({ repository: repo, sourceSha: source, token: 'workflow', statusCreatorId: scanner.id, secretScanningToken, apiUrl });
+function gate(apiUrl: string, secretScanningToken = 'secret-read', dependencies: string | null = cleanDependencies) {
+  return releaseGate({ repository: repo, sourceSha: source, token: 'workflow', statusCreatorId: scanner.id, secretScanningToken, dependencyResult: dependencies ?? undefined, apiUrl });
 }
 
 test('the gate passes a green status, no blocking alerts and CodeQL analyses that include the source', async () => {
@@ -153,18 +170,32 @@ test('the gate refuses an open code scanning alert of severity error without a s
   });
 });
 
-test('the gate refuses open secret scanning and Dependabot alerts, naming each reason', async () => {
+test('the gate refuses open secret scanning alerts and dependency advisories of moderate or higher, naming each reason', async () => {
   const routes = cleanRoutes();
   routes[`/repos/${repo}/secret-scanning/alerts?state=open&per_page=100`] = { body: [{ number: 1 }] };
-  routes[`/repos/${repo}/dependabot/alerts?state=open&severity=medium,high,critical&per_page=100`] = { body: [
-    { number: 4, security_advisory: { severity: 'high' } },
-    { number: 5, security_advisory: { severity: 'low' } },
-  ] };
+  const vulnerable = dependencyResult('vulnerable', source, { vulnerabilities: {
+    a: { via: [advisory('GHSA-xvch-5gv4-984h', 'a', 'moderate')] },
+    b: { via: [advisory('GHSA-35jh-r3h4-6jhm', 'b', 'high'), 'a'] },
+    c: { via: [advisory('GHSA-29mw-wpgm-hmr9', 'c', 'low')] },
+  } });
   await withApi(routes, async (apiUrl) => {
-    assert.deepEqual(await gate(apiUrl), [
+    assert.deepEqual(await gate(apiUrl, 'secret-read', vulnerable), [
       '1 open secret scanning alert(s): #1',
-      '1 open Dependabot alert(s) of medium or higher: #4',
+      '2 open dependency advisories of moderate or higher: GHSA-35jh-r3h4-6jhm (high), GHSA-xvch-5gv4-984h (moderate)',
     ]);
+  });
+});
+
+test('the gate refuses without a dependency scan result of the source commit', async () => {
+  await withApi(cleanRoutes(), async (apiUrl) => {
+    assert.deepEqual(await gate(apiUrl, 'secret-read', null), ['the dependencies were not checked: no dependency scan result was given']);
+    const missing = join(results, 'missing.json');
+    const reasons = await gate(apiUrl, 'secret-read', missing);
+    assert.equal(reasons.length, 1);
+    assert.match(reasons[0]!, /^Cannot read the dependency scan result: ENOENT/);
+    writeFileSync(join(results, 'other.json'), '{"schema":2}');
+    assert.deepEqual(await gate(apiUrl, 'secret-read', join(results, 'other.json')), [`Cannot read the dependency scan result: ${join(results, 'other.json')} is not a dependency scan result`]);
+    assert.deepEqual(await gate(apiUrl, 'secret-read', dependencyResult('older', older, { vulnerabilities: {} })), [`the dependency scan checked ${older}, not ${source}`]);
   });
 });
 
@@ -196,24 +227,24 @@ test('the gate refuses a CodeQL category whose latest analysis failed, and finds
 
 test('the gate names an answer that is not JSON and an unreachable API as reasons instead of stopping', async () => {
   const routes = cleanRoutes();
-  routes[`/repos/${repo}/dependabot/alerts?state=open&severity=medium,high,critical&per_page=100`] = { body: undefined };
+  routes[`/repos/${repo}/secret-scanning/alerts?state=open&per_page=100`] = { body: undefined };
   await withApi(routes, async (apiUrl) => {
     const reasons = await gate(apiUrl);
-    assert.deepEqual(reasons, ['Cannot read Dependabot alerts: the API did not return JSON']);
+    assert.deepEqual(reasons, ['Cannot read secret scanning alerts: the API did not return JSON']);
   });
   const reasons = await gate('http://127.0.0.1:9');
-  assert.equal(reasons.length, 5);
+  assert.equal(reasons.length, 4);
   assert.ok(reasons.every((reason) => reason.startsWith('Cannot read ')), reasons.join('\n'));
 });
 
 test('the gate refuses when it cannot read a check, and without a secret scanning token', async () => {
   const routes = cleanRoutes();
-  routes[`/repos/${repo}/dependabot/alerts?state=open&severity=medium,high,critical&per_page=100`] = { status: 403, body: { message: 'Resource not accessible by integration' } };
+  routes[`/repos/${repo}/code-scanning/alerts?state=open&ref=refs/heads/main&per_page=100`] = { status: 403, body: { message: 'Resource not accessible by integration' } };
   delete routes[`/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&tool_name=CodeQL&per_page=100`];
   await withApi(routes, async (apiUrl, seen) => {
     assert.deepEqual(await gate(apiUrl, ''), [
+      'Cannot read code scanning alerts: HTTP 403 Resource not accessible by integration',
       'secret scanning alerts were not read: no token with Secret scanning alerts read access was given',
-      'Cannot read Dependabot alerts: HTTP 403 Resource not accessible by integration',
       'Cannot read CodeQL analyses: HTTP 404 Not Found',
     ]);
     assert.ok(!seen.some((request) => request.url?.includes('secret-scanning')));
@@ -245,10 +276,18 @@ test('release.yml gates final versions only and builds a final version only afte
   for (const version of ['v0.1.0-rc.1', 'v1.0.0-beta']) assert.ok(validateVersion(version).includes('-'));
   assert.equal(validateVersion('v1.2.3'), '1.2.3');
   assert.equal(gateJob.if, "github.ref == 'refs/heads/main' && !contains(inputs.version, '-')");
-  assert.deepEqual(gateJob.permissions, { contents: 'read', statuses: 'read', 'security-events': 'read', 'vulnerability-alerts': 'read' });
-  const step = gateJob.steps.at(-1);
+  assert.deepEqual(gateJob.permissions, { contents: 'read', statuses: 'read', 'security-events': 'read' });
+  const step = gateJob.steps.find((candidate: { name?: string }) => candidate.name === 'Check the security gate');
   assert.equal(step.run, 'node src/release/gate.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA"');
-  assert.deepEqual(Object.keys(step.env).sort(), ['GITHUB_TOKEN', 'SECRET_SCANNING_TOKEN', 'SECURITY_GATE_CREATOR_ID']);
+  assert.deepEqual(Object.keys(step.env).sort(), ['DEPENDENCY_RESULT', 'GITHUB_TOKEN', 'SECRET_SCANNING_TOKEN', 'SECURITY_GATE_CREATOR_ID']);
+  // The dependency check runs on the source's lock files only, from main's code, and a failed check reaches the gate as a reason.
+  const scan = gateJob.steps.find((candidate: { name?: string }) => candidate.name === 'Check the dependencies of the source');
+  assert.equal(scan['continue-on-error'], true);
+  assert.ok(gateJob.steps.indexOf(scan) < gateJob.steps.indexOf(step));
+  assert.match(scan.run, /^node src\/release\/dependency-scan\.ts --repository source --commit "\$SOURCE_SHA" /);
+  assert.equal(step.env.DEPENDENCY_RESULT, '${{ runner.temp }}/dependencies/dependency-result.json');
+  const source = gateJob.steps.find((candidate: { with?: { path?: string } }) => candidate.with?.path === 'source');
+  assert.deepEqual(source.with, { ref: '${{ inputs.source-sha }}', path: 'source', 'persist-credentials': false });
   assert.match(step.env.SECURITY_GATE_CREATOR_ID, /^[1-9][0-9]*$/);
   assert.equal(gateJob.steps[0].with['persist-credentials'], false);
   assert.equal(tests.needs, 'gate');

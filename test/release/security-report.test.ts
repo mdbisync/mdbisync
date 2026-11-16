@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
+import { evaluate, parseExceptions, type Result as DependencyResult } from '../../src/release/dependency-scan.ts';
 import { ACCEPTED_RISKS_FILE, acceptedRiskEntries, literal, securityReport, toolName } from '../../src/release/security-report.ts';
 
 const repo = 'example/project';
@@ -47,7 +48,6 @@ function routes(): Routes {
       // Dismissed on an older commit and no longer reported: not part of this release.
       alert(fable, 'fable', 'critical', { dismissed_reason: 'false positive' }, older),
     ],
-    [`/repos/${repo}/dependabot/alerts?state=open&severity=high,critical&per_page=100`]: [],
   };
 }
 
@@ -66,7 +66,15 @@ async function withApi(replies: Routes, run: (apiUrl: string) => Promise<void>):
 }
 
 const acceptedRisks = await readFile(new URL(`../../${ACCEPTED_RISKS_FILE}`, import.meta.url), 'utf8');
-const report = (apiUrl: string, version = 'v0.1.0') => securityReport({ repository: repo, sourceSha: source, version, token: 't', acceptedRisks, apiUrl, date: '2026-11-16' });
+// The dependency check of the source, as the release gate ran it.
+function dependencyScan(vulnerabilities: Record<string, unknown> = {}, commit = source): DependencyResult {
+  return evaluate({
+    target: 'release v0.1.0', commit, release: 'v0.1.0', checked: '2026-11-16T00:00:00Z',
+    audits: [{ lockFile: 'package-lock.json', audit: { vulnerabilities } }], exceptions: parseExceptions('{"exceptions":[]}', '2026-11-16'),
+  });
+}
+const advisory = (id: string, name: string, severity: string) => ({ source: 1, name, title: 't', url: `https://github.com/advisories/${id}`, severity });
+const report = (apiUrl: string, version = 'v0.1.0', dependencies = dependencyScan()) => securityReport({ repository: repo, sourceSha: source, version, token: 't', acceptedRisks, dependencies, apiUrl, date: '2026-11-16' });
 
 test('the summary names each scan that ran with the version from its run, in display order, with high and critical counts', async () => {
   await withApi(routes(), async (apiUrl) => {
@@ -91,11 +99,14 @@ test('open findings of severity high and critical are counted per tool, lower on
     // An alert of another tool or category counts for none of the shown tools.
     alert({ name: 'Other' }, 'other', 'critical'),
   ];
-  replies[`/repos/${repo}/dependabot/alerts?state=open&severity=high,critical&per_page=100`] = [
-    { security_advisory: { severity: 'critical' } }, { security_advisory: { severity: 'high' } }, { security_advisory: { severity: 'high' } },
-  ];
+  // Each advisory counts once, at its own severity; a package vulnerable only through another adds nothing.
+  const dependencies = dependencyScan({
+    a: { via: [advisory('GHSA-xvch-5gv4-984h', 'a', 'critical'), advisory('GHSA-35jh-r3h4-6jhm', 'a', 'high')] },
+    b: { via: [advisory('GHSA-r5fr-rjxr-66jc', 'b', 'high'), advisory('GHSA-29mw-wpgm-hmr9', 'b', 'moderate'), 'a'] },
+    c: { via: ['a', 'b'] },
+  });
   await withApi(replies, async (apiUrl) => {
-    const { summary, report: markdown } = await report(apiUrl);
+    const { summary, report: markdown } = await report(apiUrl, 'v0.1.0', dependencies);
     assert.deepEqual(summary.tools.map(({ id, high, critical }) => [id, high, critical]), [
       ['fable', 1, 2], ['astra', 0, 0], ['codeql', 1, 0], ['dependencies', 2, 1],
     ]);
@@ -159,8 +170,10 @@ test('the generated files hold nothing private: no dismissal comments, private l
 
 test('the report is refused for a pre-release, a malformed input or an unexpected tool name', async () => {
   await assert.rejects(report('http://127.0.0.1:1', 'v0.1.0-rc.1'), /only for a final version/);
-  await assert.rejects(securityReport({ repository: 'a/b/c', sourceSha: source, version: 'v0.1.0', token: 't', acceptedRisks }), /owner\/name/);
-  await assert.rejects(securityReport({ repository: repo, sourceSha: source, version: 'v0.1.0', token: '', acceptedRisks }), /token is required/);
+  const dependencies = dependencyScan();
+  await assert.rejects(securityReport({ repository: 'a/b/c', sourceSha: source, version: 'v0.1.0', token: 't', acceptedRisks, dependencies }), /owner\/name/);
+  await assert.rejects(securityReport({ repository: repo, sourceSha: source, version: 'v0.1.0', token: '', acceptedRisks, dependencies }), /token is required/);
+  await assert.rejects(report('http://127.0.0.1:1', 'v0.1.0', dependencyScan({}, older)), new RegExp(`dependency scan checked ${older}, not ${source}`));
   const replies = routes();
   replies[`/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&per_page=100`] = [
     { category: 'fable', commit_sha: source, tool: { name: '<b>Fable</b>', version: '5.2' } },
