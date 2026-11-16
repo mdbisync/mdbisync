@@ -3,6 +3,15 @@
   <img alt="mdbisync: Linear docs and git, in sync. Inside your perimeter." src="docs/images/hero-light.svg">
 </picture>
 
+<p align="center">
+  <a href="https://mdbisync.com/security">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://mdbisync.com/badge/security-dark.svg">
+      <img alt="Security scan of the latest release: high and critical findings per tool" src="https://mdbisync.com/badge/security.svg">
+    </picture>
+  </a>
+</p>
+
 Two-way sync between Linear documents and Markdown in your repository. It runs
 as a GitHub Action under apps you create: no server, no webhook, no key we
 hold.

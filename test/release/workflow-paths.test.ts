@@ -117,50 +117,66 @@ function simulate(ref: string, version: string, outcomes: Partial<Record<string,
 }
 
 const main = 'refs/heads/main';
-const passing = { gate: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success' } as const;
+const passing = { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', publish: 'success' } as const;
 
-test('release.yml has the gate, test, build, attest, tag and final check jobs in that order', () => {
-  assert.deepEqual(Object.keys(jobs), ['gate', 'test', 'build', 'attest', 'tag', 'tagged']);
+test('release.yml has the gate, report, test, build, attest, tag, publish and final check jobs in that order', () => {
+  assert.deepEqual(Object.keys(jobs), ['gate', 'report', 'test', 'build', 'attest', 'tag', 'publish', 'tagged']);
+  assert.deepEqual(needsOf('report'), ['gate']);
   assert.deepEqual(needsOf('test'), ['gate']);
   assert.deepEqual(needsOf('build'), ['gate', 'test']);
-  assert.deepEqual(needsOf('attest'), ['gate', 'build']);
-  assert.deepEqual(needsOf('tag'), ['gate', 'build', 'attest']);
+  assert.deepEqual(needsOf('attest'), ['gate', 'report', 'build']);
+  assert.deepEqual(needsOf('tag'), ['gate', 'report', 'build', 'attest']);
+  assert.deepEqual(needsOf('publish'), ['report', 'tag']);
   assert.deepEqual(needsOf('tagged'), ['tag']);
   assert.deepEqual(jobs.tagged!.permissions, {});
 });
 
-test('the tag job itself requires a passed gate and attestations for a final version, whatever the build condition says', () => {
-  const tags = (version: string, gate: Result, attest: Result) => evaluate(jobs.tag!.if!, {
-    ref: main, version, cancelled: false, upstream: ['gate', 'build', 'attest'],
-    results: new Map<string, Result>([['gate', gate], ['build', 'success'], ['attest', attest]]),
+test('the tag job itself requires a passed gate, a security report and attestations for a final version, whatever the build condition says', () => {
+  const tags = (version: string, gate: Result, attest: Result, report: Result = gate) => evaluate(jobs.tag!.if!, {
+    ref: main, version, cancelled: false, upstream: ['gate', 'report', 'build', 'attest'],
+    results: new Map<string, Result>([['gate', gate], ['report', report], ['build', 'success'], ['attest', attest]]),
   });
-  for (const gate of ['failure', 'skipped', 'cancelled'] as const) assert.equal(tags('v0.1.0', gate, 'success'), false, gate);
+  for (const gate of ['failure', 'skipped', 'cancelled'] as const) assert.equal(tags('v0.1.0', gate, 'success', 'success'), false, gate);
   for (const attest of ['failure', 'skipped', 'cancelled'] as const) assert.equal(tags('v0.1.0', 'success', attest), false, attest);
+  for (const report of ['failure', 'skipped', 'cancelled'] as const) assert.equal(tags('v0.1.0', 'success', 'success', report), false, report);
   assert.equal(tags('v0.1.0', 'success', 'success'), true);
   assert.equal(tags('v0.1.0-rc.9', 'skipped', 'skipped'), true);
 });
 
 test('a pre-release skips the gate and the attestations, then builds and tags', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', passing);
-  assert.deepEqual(results, { gate: 'skipped', test: 'success', build: 'success', attest: 'skipped', tag: 'success', tagged: 'success' });
+  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'success', build: 'success', attest: 'skipped', tag: 'success', publish: 'skipped', tagged: 'success' });
   assert.equal(conclusion, 'success');
 });
 
-test('a final release that passed the gate tests, builds, attests and tags', () => {
+test('a final release that passed the gate writes its security report, tests, builds, attests, tags and drafts its release', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', passing);
-  assert.deepEqual(results, { gate: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', tagged: 'success' });
+  assert.deepEqual(results, { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', publish: 'success', tagged: 'success' });
   assert.equal(conclusion, 'success');
 });
 
 test('a final release that failed the gate tests, builds, attests and tags nothing and fails', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, gate: 'failure' });
-  assert.deepEqual(results, { gate: 'failure', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'failure' });
+  assert.deepEqual(results, { gate: 'failure', report: 'skipped', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'failure' });
   assert.equal(conclusion, 'failure');
 });
 
 test('a final release whose attestation failed tags nothing and fails', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, attest: 'failure' });
-  assert.deepEqual(results, { gate: 'success', test: 'success', build: 'success', attest: 'failure', tag: 'skipped', tagged: 'failure' });
+  assert.deepEqual(results, { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'failure', tag: 'skipped', publish: 'skipped', tagged: 'failure' });
+  assert.equal(conclusion, 'failure');
+});
+
+test('a final release whose security report failed signs nothing, tags nothing, drafts no release and fails', () => {
+  const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, report: 'failure' });
+  assert.deepEqual(results, { gate: 'success', report: 'failure', test: 'success', build: 'success', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'failure' });
+  assert.equal(conclusion, 'failure');
+});
+
+test('a final release whose draft release failed keeps its tag and fails', () => {
+  const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, publish: 'failure' });
+  assert.equal(results.tag, 'success');
+  assert.equal(results.tagged, 'success');
   assert.equal(conclusion, 'failure');
 });
 
@@ -177,7 +193,7 @@ test('a failed test shard builds, attests and tags nothing, for a pre-release an
 
 test('a cancelled test shard builds and tags nothing and the run ends cancelled', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', { ...passing, test: 'cancelled' });
-  assert.deepEqual(results, { gate: 'skipped', test: 'cancelled', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'skipped' });
+  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'cancelled', build: 'skipped', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'skipped' });
   assert.equal(conclusion, 'cancelled');
 });
 
@@ -228,14 +244,14 @@ test('a failed tag fails the run', () => {
 
 test('a cancelled build tags nothing and the run ends cancelled, without a failed check', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', { ...passing, build: 'cancelled' });
-  assert.deepEqual(results, { gate: 'skipped', test: 'success', build: 'cancelled', attest: 'skipped', tag: 'skipped', tagged: 'skipped' });
+  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'success', build: 'cancelled', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'skipped' });
   assert.equal(conclusion, 'cancelled');
 });
 
 test('a run outside main skips every release job and does not end as success', () => {
   for (const version of ['v0.1.0-rc.9', 'v0.1.0']) {
     const { results, conclusion } = simulate('refs/heads/other', version, passing);
-    assert.deepEqual(results, { gate: 'skipped', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'failure' }, version);
+    assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'failure' }, version);
     assert.equal(conclusion, 'failure', version);
   }
 });
@@ -263,7 +279,7 @@ test('only a final version writes and uploads the SBOM, after the release tree i
 
 test('the attest job signs provenance and the SBOM for the release files with only the permissions it needs', () => {
   const job = jobs.attest!;
-  assert.equal(job.if, undefined, 'it runs only when the gate and the build succeeded, so only for a final version');
+  assert.equal(job.if, undefined, 'it runs only when the gate, the security report and the build succeeded, so only for a final version');
   assert.deepEqual(job.permissions, { 'id-token': 'write', attestations: 'write' });
   const downloads = job.steps.filter((step) => step.uses?.startsWith('actions/download-artifact@')).map((step) => step.with!.name);
   assert.deepEqual(downloads, ['release-tree', 'release-sbom']);
@@ -341,4 +357,27 @@ test('the attestation subjects are every file of the release tree, by path', () 
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('the report job reads alerts with read-only permissions and uploads the report and the summary', () => {
+  const job = jobs.report!;
+  assert.equal(job.if, undefined, 'it runs only after a passed gate, so only for a final version on main');
+  assert.deepEqual(job.permissions, { contents: 'read', 'security-events': 'read', 'vulnerability-alerts': 'read' });
+  assert.equal(job.steps[0]!.with!['persist-credentials'], false);
+  const write = job.steps.find((step) => step.name === 'Write the security report')!;
+  assert.equal(write.run, 'node src/release/security-report.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/security"');
+  const upload = job.steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'))!;
+  assert.equal(upload.with!.name, 'security-report');
+  assert.equal(upload.with!['if-no-files-found'], 'error');
+  assert.equal(upload.with!['retention-days'], 1, 'the draft release keeps the files; the artifact only hands them on');
+});
+
+test('the publish job only drafts a release from the existing tag, with the report and the summary, and runs no repository code', () => {
+  const job = jobs.publish!;
+  assert.equal(job.if, undefined, 'it runs only after the report and the tag succeeded, so only for a final version');
+  assert.deepEqual(job.permissions, { contents: 'write' });
+  assert.ok(job.steps.every((step) => !step.uses?.startsWith('actions/checkout@') && !/\bnode\b|\bnpm\b/.test(step.run ?? '')));
+  const create = job.steps.find((step) => step.name === 'Create the draft release with the security report')!;
+  assert.match(create.run!, /^gh release create "\$RELEASE_VERSION" --draft --verify-tag /);
+  assert.match(create.run!, /"\$RUNNER_TEMP\/security\/security-report\.md" "\$RUNNER_TEMP\/security\/security-summary\.json"\s*$/);
 });
