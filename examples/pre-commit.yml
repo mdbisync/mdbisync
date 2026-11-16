@@ -5,12 +5,13 @@ name: Pre-commit
 
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pre-commit-${{ github.event.pull_request.number }}
+  group: pre-commit-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -29,8 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -119,7 +120,7 @@ jobs:
       - name: Commit fixes or show the fork patch
         id: fixes
         env:
-          SAME_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          SAME_REPOSITORY: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         shell: bash
         run: |
           git -c core.fsmonitor=false -c core.hooksPath=/dev/null add --update
@@ -180,24 +181,23 @@ jobs:
           overwrite: true # A re-run of all jobs uploads it again.
           retention-days: 1
 
-  # Pushes the hooks' fix to a same-repository pull request and publishes its
-  # checks. The only job with a write token: it starts on a fresh runner,
+  # Pushes the hooks' fix to a same-repository branch and starts genuine CI
+  # on that head. The only job with a write token: it starts on a fresh runner,
   # never runs the pull request's code (no hooks, no repository scripts or
   # git hooks) and applies the fix only after checking it as data.
   publish:
     name: pre-commit fixes
     needs: hooks
-    if: ${{ !cancelled() && needs.hooks.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.hooks.result == 'success' && needs.hooks.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write # Push the fixing commit to the pull request branch.
-      checks: write # Attach the result to the fixing commit too.
-      actions: write # Start the workflows MDBISYNC_CI_WORKFLOWS lists on the fixing commit.
+      actions: write # Start this workflow and the other CI on the fixing commit.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -251,51 +251,28 @@ jobs:
       - name: Push fixes
         env:
           GH_TOKEN: ${{ github.token }}
-          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           # No repository-configured subprocess hooks while credentials exist.
           authorization=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= \
               -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" \
               push origin "HEAD:refs/heads/$HEAD_BRANCH"
-      - name: Mark the fixing commit pending
-        id: fixed-check
+      - name: Start genuine CI on the fixing commit
+        # A GITHUB_TOKEN push starts no workflows. Dispatch this workflow
+        # again and the configured CI so every result belongs to a real job
+        # on the fixed head. Synthetic check runs are not proof of CI.
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          CHECKED_SHA: ${{ steps.fixes.outputs.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        shell: bash
-        run: |
-          # A GITHUB_TOKEN push starts no workflow, so the fixing commit gets
-          # this run's checks: each job's, by the names the earlier head has.
-          # Each id is kept once created, so the last step completes every
-          # check that exists even when a later one could not be created.
-          ids=()
-          for name in 'pre-commit hooks' 'pre-commit fixes' 'pre-commit'; do
-            payload=$(node -e 'console.log(JSON.stringify({name: process.argv[1], head_sha: process.env.CHECKED_SHA, status: "in_progress", details_url: process.env.RUN_URL}))' "$name")
-            response=$(curl --fail-with-body --silent --show-error \
-              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$REPOSITORY/check-runs" --data "$payload")
-            id=$(node -e 'const id=JSON.parse(process.argv[1]).id; if (!Number.isSafeInteger(id)) process.exit(1); console.log(id)' "$response")
-            ids+=("$id")
-            echo "ids=${ids[*]}" >> "$GITHUB_OUTPUT"
-          done
-      - name: Start the other CI on the fixing commit
-        # A GITHUB_TOKEN push starts no other workflow, so the fixing commit lacks
-        # the repository's other checks, and the sync merges no head that lacks a
-        # check its earlier heads ran. List those workflows' files, each with a
-        # `workflow_dispatch:` trigger, in the repository variable
-        # MDBISYNC_CI_WORKFLOWS (for example `tests.yml lint.yml`). It runs once
-        # the fixing commit's checks are pending, so a failed start fails them.
-        if: ${{ vars.MDBISYNC_CI_WORKFLOWS != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
           WORKFLOWS: ${{ vars.MDBISYNC_CI_WORKFLOWS }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
         shell: bash
         run: |
+          own_workflow=${WORKFLOW_REF#*/.github/workflows/}
+          own_workflow=${own_workflow%%@*}
+          WORKFLOWS="$own_workflow $WORKFLOWS"
           read -ra workflows <<< "$(printf '%s' "$WORKFLOWS" | tr ',\r\n' '   ')"
           for workflow in "${workflows[@]}"; do
             if [[ ! "$workflow" =~ ^[A-Za-z0-9._-]+\.ya?ml$ ]]; then
@@ -308,28 +285,6 @@ jobs:
             curl --fail-with-body --silent --show-error \
               -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/$REPOSITORY/actions/workflows/$workflow/dispatches" --data "$payload"
-          done
-      - name: Publish result on the fixing commit
-        if: ${{ always() && steps.fixed-check.outputs.ids != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CHECK_IDS: ${{ steps.fixed-check.outputs.ids }}
-          HOOKS_RESULT: ${{ needs.hooks.result }}
-          JOB_STATUS: ${{ job.status }}
-        shell: bash
-        run: |
-          # The hooks job's final pass on the fixed tree decides, with this job's steps.
-          conclusion=failure
-          if [[ "$HOOKS_RESULT" == success && "$JOB_STATUS" == success ]]; then
-            conclusion=success
-          fi
-          payload=$(node -e 'console.log(JSON.stringify({status: "completed", conclusion: process.argv[1]}))' "$conclusion")
-          for id in $CHECK_IDS; do
-            [[ "$id" =~ ^[0-9]+$ ]] || exit 1
-            curl --fail-with-body --silent --show-error --request PATCH \
-              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$REPOSITORY/check-runs/$id" --data "$payload"
           done
 
   # The check to require: it passes only when the hooks passed and their fix,

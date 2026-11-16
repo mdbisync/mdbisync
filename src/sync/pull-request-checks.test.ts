@@ -277,7 +277,7 @@ describe('sync: pull request checks', () => {
     assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
     assert.equal(await rev('refs/heads/main'), h.start);
     // The description carries the expectation, so a later run that reads only the fixed head still asks for `tests`.
-    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID}~[^, ]+,tests@run:${FAKE_ACTIONS_APP_ID}~[^, ]+ -->`));
     const again = await sync();
     assert.equal(again.report.pullRequest?.merged, null);
     assert.deepEqual(again.report.pullRequest?.checks?.missing, ['tests']);
@@ -318,6 +318,28 @@ describe('sync: pull request checks', () => {
     assert.ok(merged.report.pullRequest?.merged);
   });
 
+  it('requires genuine workflow jobs on a formatter child before merging', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    const main = await rev('refs/heads/main');
+    for (const workflow of [false, { path: '.github/workflows/other.yml' },
+      { path: '.github/workflows/ci.yml', revision: 'c'.repeat(40) }, { event: 'workflow_run' },
+      { head: main }, { repository: 'other/repo' }] satisfies NonNullable<FakeCheck['workflow']>[]) {
+      checksOn(fixed, [{ name: 'tests', status: 'completed', conclusion: 'success', workflow }]);
+      h.editHeadNote('mdbisync/linear', () => '');
+      const waiting = await sync();
+      assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+      assert.equal(waiting.report.pullRequest?.merged, null, `merged with ${JSON.stringify(workflow)}`);
+      assert.equal(await rev('refs/heads/main'), main);
+    }
+    checksOn(fixed, [{ name: 'tests', status: 'completed', conclusion: 'success', workflow: { event: 'workflow_dispatch' } }]);
+    const merged = await sync();
+    assert.ok(merged.report.pullRequest?.merged, 'genuine CI on the document-only formatter fix did not merge');
+  });
+
   // Both hold together: with the note gone, the checks read from the branch's history keep their publishers too.
   it('does not let a commit status stand in for an earlier check run when the head note is deleted', async () => {
     const path = 'eng/notes/plan.md';
@@ -333,7 +355,7 @@ describe('sync: pull request checks', () => {
     assert.equal(run.report.pullRequest?.merged, null, 'a commit status stood in for `tests` once the note was gone');
     assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
     assert.equal(await rev('refs/heads/main'), h.start);
-    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID}~[^, ]+,tests@run:${FAKE_ACTIONS_APP_ID}~[^, ]+ -->`));
   });
 
   // A merge's parents are whatever its author chose: anyone who may push to the sync branch can make one look like the
@@ -456,7 +478,7 @@ describe('sync: pull request checks', () => {
     assert.deepEqual(app.report.pullRequest?.checks?.missing, ['tests']);
     assert.equal(await rev('refs/heads/main'), h.start);
     // The description keeps who must publish each check, so the binding holds in runs that read only the fixed head.
-    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID}~[^, ]+,tests@run:${FAKE_ACTIONS_APP_ID}~[^, ]+ -->`));
     checksOn(fixed, [formatter, { name: 'tests', status: 'completed', conclusion: 'success' }]);
     const merged = await sync();
     assert.ok(merged.report.pullRequest?.merged);

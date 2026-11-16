@@ -30,7 +30,14 @@ export async function serveFakes(answer: typeof fetch): Promise<Served> {
       try {
         const body = Buffer.concat(chunks).toString('utf8');
         const reply = served.fault?.(body) ?? (await answer(target, { method, headers, ...(method === 'GET' || method === 'HEAD' ? {} : { body }) }));
-        const bytes = Buffer.from(await reply.arrayBuffer());
+        let bytes = Buffer.from(await reply.arrayBuffer());
+        // API identity links must use the same origin as the client's API
+        // target, including when the fakes are reached through this proxy.
+        if (bytes.length > 0 && path.startsWith('/github/') && reply.headers.get('content-type')?.includes('application/json')) {
+          bytes = Buffer.from(JSON.stringify(JSON.parse(bytes.toString('utf8')), (_key, value: unknown) =>
+            typeof value === 'string' && value.startsWith(`${GITHUB_API}/`)
+              ? `${served.url}/github${value.slice(GITHUB_API.length)}` : value));
+        }
         await served.hold?.(method, path, bytes.toString('utf8'));
         response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
         response.end(bytes);

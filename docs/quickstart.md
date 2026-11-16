@@ -96,7 +96,7 @@ names the rights this needs). The
 sync's own commits name the App's bot account (`<app>[bot]`) as their
 author, so GitHub shows them with the App's name and avatar.
 
-[Create the App under your account](https://github.com/settings/apps/new?description=Two-way+sync+between+Linear+documents+and+Markdown+in+this+repository.&url=https%3A%2F%2Fgithub.com%2Fmdbisync%2Fmdbisync&public=false&webhook_active=false&contents=write&pull_requests=write&workflows=write&checks=read&statuses=read):
+[Create the App under your account](https://github.com/settings/apps/new?description=Two-way+sync+between+Linear+documents+and+Markdown+in+this+repository.&url=https%3A%2F%2Fgithub.com%2Fmdbisync%2Fmdbisync&public=false&webhook_active=false&contents=write&pull_requests=write&workflows=write&checks=read&statuses=read&actions=read):
 the link opens GitHub's new-App form with these settings filled in. It
 creates the App under your personal account, which can be installed only
 there. When an organization owns your docs repository, the App must
@@ -118,6 +118,7 @@ file is for tools that automate App creation.
 | Pull requests | Read and write |
 | Workflows | Read and write |
 | Checks | Read-only |
+| Actions | Read-only |
 | Commit statuses | Read-only |
 | Where can this App be installed | Only on this account |
 
@@ -477,7 +478,7 @@ layers.
 | --- | --- | --- | --- | --- |
 | Before push | People and agents | on `git commit` and `git push`, after `pre-commit install` | all hooks of that stage | no: a clone without `pre-commit install`, or `--no-verify`, skips them |
 | Before push | The sync | on every change from Linear, before it pushes | hooks marked `alias: security` | yes: a rejected document is not pushed and is marked in Linear |
-| In CI | The `pre-commit` workflow | on every pull request, the sync's included | all hooks, in a job that can only read; a separate job commits their fixes to the pull request with the workflow's own token (it asks for `contents: write`, `checks: write` and `actions: write` in its `permissions:`) and runs none of the pull request's code | yes, where `pre-commit` is a required check on `main`; the sync merges its pull request only after its checks pass |
+| In CI | The `pre-commit` workflow | on every pull request, the sync's included | all hooks, in a job that can only read; a separate job commits their fixes to the pull request with the workflow's own token (it asks for `contents: write` and `actions: write` in its `permissions:`) and runs none of the pull request's code | yes, where `pre-commit` is a required check on `main`; the sync merges its pull request only after its checks pass |
 
 The first layer keeps secrets and personal data from Linear off GitHub;
 the second catches what a person's machine skipped. Hooks that fix
@@ -522,8 +523,9 @@ checks GitHub reports as pending can stay that way after a head is pushed.
 A required check that never registers is invisible to this deadline:
 GitHub may refuse the merge instead; check workflow filters and required
 check names. The sync never reruns a check: configure flaky-check retries
-in your own CI. The App's permissions above stay as they are; it needs no
-Actions permission.
+in your own CI. The App needs Actions read access to verify that checks
+belong to genuine workflow jobs on the exact head. Existing installations must approve that
+permission before upgrading.
 
 When the same check fails on the tracked branch's tip (`main` by default),
 the normal pull request is held instead: no document marks or Linear

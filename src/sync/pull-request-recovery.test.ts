@@ -206,6 +206,9 @@ describe('sync: pull request recovery', () => {
 
   it('reports an idle failed suspended head as unchanged', async () => {
     await suspendOne();
+    // Record the distinct job on the new suspended head before observing
+    // an idle repeat; the shared failure report itself has not changed.
+    await sync();
     const run = await sync();
     assert.equal(run.report.changed, false);
     assert.deepEqual(run.report.writes.git, {});

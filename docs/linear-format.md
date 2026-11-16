@@ -514,13 +514,16 @@ to the pull request branch and runs the checks again, so the branch reaches
   that keeps only the hook ids. A fix outside those limits fails that job;
   apply it by hand.
 - The `pre-commit` job passes only when the hooks passed and their fix, if
-  any, was pushed: require `pre-commit` in the branch rules.
+  any, passed its final hook check and was pushed: require `pre-commit` in the branch rules.
 - A pull request from a fork cannot take a push: the hooks job fails and
   prints a ready-to-apply patch.
 - The jobs use the exact head of the pull request; if the branch moves
   before the push, the push fails without overwriting the newer commits.
-- It publishes all three checks on the fixing commit too. A pull request
-  without fixes shows `pre-commit fixes` as skipped.
+- It dispatches this workflow again on the fixing commit, so all three
+  checks come from genuine jobs on that head. It creates no synthetic checks.
+  Dispatch runs only verify the fixed head: if hooks change it again, the
+  run fails with a patch instead of pushing or dispatching again. A pull
+  request without fixes shows `pre-commit fixes` as skipped.
 - Neither job uses a package-manager cache: a cache the hooks job saved
   would reach the job that pushes.
 - On self-hosted runners, the jobs are kept apart only when each job gets a
@@ -530,8 +533,16 @@ to the pull request branch and runs the checks again, so the branch reaches
   repository's other CI must be started on the fixing commit: give each of
   those workflows a `workflow_dispatch:` trigger and list their files in the
   repository variable `MDBISYNC_CI_WORKFLOWS` (for example
-  `tests.yml lint.yml`, separated by spaces or commas). The job starts them
-  on the pull request's branch after it pushes a fix. Until those checks pass
+  `tests.yml lint.yml`, separated by spaces or commas). The job starts this
+  workflow and the listed ones on the pull request's branch after it pushes a fix. Until those checks pass
   on the fixing commit, the sync does not merge its pull request: it expects
   every check that ran on the pull request's earlier heads
   ([the sync pull request](usage.md#the-sync-pull-request)).
+
+Dispatch runs must enforce the same checks as pull-request runs; do not make
+their tests optional through dispatch inputs or event conditions. The sync
+verifies the workflow path and exact head as well as each job's check-run
+identity. Its additional file-blob guard does not prove which PR workflow
+revision executed ([check verification](usage.md#the-sync-pull-request)).
+Updating the formatter example requires enabling its `workflow_dispatch`
+trigger on the default branch too.

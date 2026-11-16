@@ -5,6 +5,7 @@
 
 import { setTimeout as sleep } from 'node:timers/promises';
 import { type CheckClock, type GitHubRepository, PullRequestError, request } from './github.ts';
+import { actionsJobs, type WorkflowIdentity } from './actions.ts';
 import { message } from '../messages.ts';
 
 /** Check run conclusions that let a merge go ahead. */
@@ -13,6 +14,9 @@ const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 const MAX_PAGES = 10;
 const PAGE_SIZE = 100;
 const REAL_CLOCK: CheckClock = { now: () => performance.now(), sleep: (ms) => sleep(ms), timeout: (ms) => AbortSignal.timeout(ms) };
+
+/** Only the first commit-check response can establish that the commit itself is unknown. */
+export class CommitNotFoundError extends PullRequestError {}
 
 export interface CheckState {
   /** `passed`: every check finished and passed (also when there are none); `pending`: some still run; `failed`: one finished and failed. */
@@ -51,6 +55,8 @@ export interface ExpectedCheck {
   name: string;
   /** Absent for a configured name: a check of that name from any publisher counts. */
   publisher?: CheckPublisher;
+  /** Actions checks also identify the workflow that ran; null means unverifiable. */
+  workflow?: WorkflowIdentity | null;
 }
 
 /** What a commit must show beyond the checks registered on it before it counts as passed. */
@@ -68,6 +74,7 @@ export interface CheckExpectation {
 export interface CommitCheck {
   name: string;
   publisher: CheckPublisher;
+  workflow?: WorkflowIdentity | null;
   outcome: 'pending' | 'failed' | 'passed';
   /** For a failed check: an https link to its run, when GitHub gave one. */
   url?: string;
@@ -125,17 +132,32 @@ export async function readCommitChecks(target: GitHubRepository, sha: string, op
   const unlisted: string[] = [];
   let seen = 0;
   let hasRuns = false;
+  const suites = new Map<number, Awaited<ReturnType<typeof actionsJobs>>>();
   for (let page = 1; ; page += 1) {
     const answer = await request(target, 'GET', `/commits/${sha}/check-runs?per_page=${PAGE_SIZE}&page=${page}`);
     const body = answer.json as { total_count?: unknown; check_runs?: unknown } | null;
     if (answer.status !== 200 || body === null || typeof body.total_count !== 'number' || !Array.isArray(body.check_runs)) {
-      throw new PullRequestError(message('github.reading-check-runs'), answer.status);
+      const ErrorType = page === 1 && (answer.status === 404 || answer.status === 422) ? CommitNotFoundError : PullRequestError;
+      throw new ErrorType(message('github.reading-check-runs'), answer.status);
     }
     hasRuns ||= body.total_count > 0;
-    for (const run of body.check_runs as Array<{ id?: unknown; name?: unknown; status?: unknown; conclusion?: unknown; html_url?: unknown; app?: { id?: unknown } | null }>) {
+    for (const run of body.check_runs as Array<{ id?: unknown; name?: unknown; status?: unknown; conclusion?: unknown; html_url?: unknown; app?: { id?: unknown; slug?: unknown } | null; check_suite?: { id?: unknown } | null }>) {
       const name = typeof run.name === 'string' ? run.name : 'unnamed check';
       const outcome = run.status !== 'completed' ? 'pending' : typeof run.conclusion === 'string' && PASSING_CONCLUSIONS.has(run.conclusion) ? 'passed' : 'failed';
-      checks.push(commitCheck(name, outcome, publisher('run', run.app?.id), run.html_url, run.id));
+      const check = commitCheck(name, outcome, publisher('run', run.app?.id), run.html_url, run.id);
+      if (run.app?.slug === 'github-actions') {
+        const suite = run.check_suite?.id;
+        let job;
+        if (Number.isSafeInteger(suite) && (suite as number) > 0) {
+          if (!suites.has(suite as number)) suites.set(suite as number, await actionsJobs(target, sha, suite as number));
+          job = suites.get(suite as number)?.get(run.id as number);
+        }
+        if (job?.name !== name) job = undefined;
+        check.workflow = job?.workflow ?? null;
+        // A successful check payload cannot override the actual job result.
+        if (check.outcome === 'passed') check.outcome = job?.outcome ?? 'pending';
+      }
+      checks.push(check);
     }
     seen += body.check_runs.length;
     if (seen >= body.total_count) break;
@@ -197,6 +219,12 @@ function commitCheck(name: string, outcome: CommitCheck['outcome'], from: CheckP
 
 /** Whether a check comes from the publisher an expected check names; any does when it names none, none when it is unknown. */
 function publishedBy(check: CommitCheck, expected: ExpectedCheck): boolean {
+  if (expected.workflow !== undefined) {
+    const actual = check.workflow;
+    const wanted = expected.workflow;
+    if (!actual || !wanted || actual.path !== wanted.path || actual.revision !== wanted.revision ||
+        ((actual.event === 'dynamic') !== (wanted.event === 'dynamic'))) return false;
+  }
   if (expected.publisher === undefined) return true;
   return expected.publisher.id > 0 && check.publisher.kind === expected.publisher.kind && check.publisher.id === expected.publisher.id;
 }
