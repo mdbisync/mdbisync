@@ -233,7 +233,10 @@ export function pullRequestHarness() {
   }
   /** No request asked GitHub to rerun or cancel a workflow run or check (the sync never reruns a check). */
   const assertNoRerun = () => {
-    for (const request of githubRequests) assert.doesNotMatch(request, /^(?!GET ).*\/actions\/|rerun|rerequest|cancel/, request);
+    for (const request of githubRequests) {
+      assert.doesNotMatch(request, /rerun|rerequest|cancel/, request);
+      if (!request.startsWith('GET ')) assert.doesNotMatch(request, /\/actions\//, request);
+    }
   };
 
   /** Suspends the plan, then trashes its document in Linear, so the batch releases while it is in the trash. */
