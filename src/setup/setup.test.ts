@@ -32,7 +32,7 @@ const PRE_COMMIT = `repos:
         entry: 'TESTKEY-[0-9a-f]{24}'
 `;
 
-const target = (world: ReturnType<typeof fakeWorld>) => ({ repository: 'owner/repo', token: 'gh-token', commit: 'a'.repeat(40), apiUrl: GITHUB_API, syncBranches: SYNC_BRANCHES, fetch: fakeFetch(world) });
+const target = (world: ReturnType<typeof fakeWorld>) => ({ repository: 'owner/repo', token: 'gh-token', commit: 'a'.repeat(40), apiUrl: GITHUB_API, syncBranches: SYNC_BRANCHES, fetch: fakeFetch(world), readRetryDelaysMs: [0, 0] });
 
 function mapping(annotations: RepositoryMapping['annotations']): RepositoryMapping {
   return { annotations, zones: resolveZones(annotations).zones, problems: [], documents: [], unsynced: [], leftOut: [], files: new Set<string>() };
@@ -111,6 +111,84 @@ describe('GitHub access', () => {
   });
 });
 
+describe('GitHub server errors in the setup check', () => {
+  /** Answers `fault` to requests whose URL ends with `path`, `times` times; the fake world answers the rest. */
+  const faulty = (world: ReturnType<typeof fakeWorld>, method: string, path: string, times: number, fault: () => Response) => {
+    const seen: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if ((init?.method ?? 'GET') === method && url.endsWith(path)) {
+        seen.push(url);
+        if (seen.length <= times) return fault();
+      }
+      return fakeFetch(world)(input, init);
+    };
+    return { fetchImpl, seen };
+  };
+  const badGateway = () => new Response('<html>502</html>', { status: 502 });
+
+  it('reads a permission probe again after a 502 and passes', async () => {
+    const world = fakeWorld();
+    const { fetchImpl, seen } = faulty(world, 'GET', '/actions/runs?per_page=1', 1, badGateway);
+    const result = await checkGitHub({ ...target(world), fetch: fetchImpl });
+    assert.equal(result.access.state, 'passed');
+    assert.equal(seen.length, 2);
+  });
+
+  it('reads the repository again after a 503 or a network failure and passes', async () => {
+    for (const fault of [
+      () => new Response('{}', { status: 503 }),
+      () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) }); },
+      () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error('getaddrinfo EAI_AGAIN'), { code: 'EAI_AGAIN' }) }); },
+      // The answer's headers arrive, then the connection fails while the body does.
+      () => new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('terminated')); } }), { status: 200 }),
+    ]) {
+      const world = fakeWorld();
+      const { fetchImpl, seen } = faulty(world, 'GET', '/repos/owner/repo', 1, fault);
+      const result = await checkGitHub({ ...target(world), fetch: fetchImpl });
+      assert.equal(result.access.state, 'passed');
+      assert.equal(result.mergeCommits.state, 'passed');
+      assert.equal(seen.length, 2);
+    }
+  });
+
+  it('stops the run with the same message when the 5xx persists', async () => {
+    const world = fakeWorld();
+    const { fetchImpl, seen } = faulty(world, 'GET', '/actions/runs?per_page=1', Infinity, badGateway);
+    await assert.rejects(checkGitHub({ ...target(world), fetch: fetchImpl }), { message: 'GitHub answered HTTP 502 while checking actions:read' });
+    // The first read and its two repeats.
+    assert.equal(seen.length, 3);
+    const repository = faulty(fakeWorld(), 'GET', '/repos/owner/repo', Infinity, badGateway);
+    await assert.rejects(checkGitHub({ ...target(fakeWorld()), fetch: repository.fetchImpl }), /GitHub answered HTTP 502 while reading the repository/);
+    assert.equal(repository.seen.length, 3);
+  });
+
+  it('stops on a persistent network failure, and does not repeat a timeout', async () => {
+    const reset = () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) }); };
+    const resets = faulty(fakeWorld(), 'GET', '/repos/owner/repo', Infinity, reset);
+    await assert.rejects(checkGitHub({ ...target(fakeWorld()), fetch: resets.fetchImpl }), /fetch failed/);
+    assert.equal(resets.seen.length, 3);
+    const timeout = () => { throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); };
+    const timeouts = faulty(fakeWorld(), 'GET', '/repos/owner/repo', Infinity, timeout);
+    await assert.rejects(checkGitHub({ ...target(fakeWorld()), fetch: timeouts.fetchImpl }), { name: 'TimeoutError' });
+    assert.equal(timeouts.seen.length, 1);
+  });
+
+  it('never repeats a write probe', async () => {
+    for (const [method, path, permission] of [
+      ['POST', '/git/blobs', 'contents:write'],
+      ['POST', '/pulls', 'pull_requests:write'],
+      ['PUT', '/contents/.github/workflows/setup-check.yml', 'workflows:write'],
+    ] as const) {
+      const world = fakeWorld();
+      const { fetchImpl, seen } = faulty(world, method, path, Infinity, badGateway);
+      await assert.rejects(checkGitHub({ ...target(world), fetch: fetchImpl }), { message: `GitHub answered HTTP 502 while checking ${permission}` });
+      assert.equal(seen.length, 1, permission);
+      assert.deepEqual(world.writes, []);
+    }
+  });
+});
+
 describe('the rules on the sync branches', () => {
   const rulesRequests = (world: ReturnType<typeof fakeWorld>) => world.requests.filter((request) => request.includes('/rules/branches/'));
 
@@ -179,7 +257,8 @@ describe('the rules on the sync branches', () => {
       state: 'warning',
       detail: 'GitHub answered HTTP 500 while reading the rules of mdbisync/linear; the sync branches may not be kept to the App',
     });
-    assert.equal(rulesRequests(world).length, 1);
+    // A server error is read again twice before the warning; the first branch's warning ends the check.
+    assert.equal(rulesRequests(world).length, 3);
 
     const limited = fakeWorld();
     const fetchImpl = fakeFetch(limited);

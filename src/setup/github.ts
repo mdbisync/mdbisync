@@ -9,6 +9,7 @@
 // metadata access can): whether creating, updating and deleting them is
 // restricted, as a ruleset that keeps them to the App does.
 
+import { setTimeout } from 'node:timers/promises';
 import { type CommitIdentity, NEUTRAL_IDENTITY } from '../state/index.ts';
 import { type CheckResult, failed, notChecked, passed, warning } from './report.ts';
 import { message } from '../messages.ts';
@@ -27,7 +28,16 @@ export interface GitHubTarget {
   /** The sync branches whose rules are read: the sync branch and its suspended branch. */
   syncBranches: readonly string[];
   fetch?: typeof fetch;
+  /** The waits before each repeat of a read after a server error or a reset connection. */
+  readRetryDelaysMs?: readonly number[] | undefined;
 }
+
+/**
+ * A read that GitHub answers with a server error (5xx), or whose connection
+ * fails, is asked again after each of these waits; the last answer
+ * stands. Writes are never repeated.
+ */
+export const GITHUB_READ_RETRY_DELAYS_MS: readonly number[] = [1_000, 4_000];
 
 interface Probe {
   permission: string;
@@ -69,8 +79,9 @@ export interface GitHubCheck {
 
 /**
  * Probes the token's permissions and the repository's merge setting, reads
- * the App's bot account and the rules on each sync branch. At most ten
- * requests with the two sync branches, no writes.
+ * the App's bot account and the rules on each sync branch. Ten requests with
+ * the two sync branches, no writes; a read that meets a server error or a
+ * network failure is sent up to twice more.
  */
 export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
   const request = requester(target);
@@ -197,7 +208,7 @@ async function checkApp(target: GitHubTarget): Promise<{ app: CheckResult; ident
 function requester(target: GitHubTarget, prefix = `/repos/${target.repository}`) {
   const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}${prefix}`;
   const fetchImpl = target.fetch ?? fetch;
-  return async (method: string, path: string, body?: Record<string, unknown>): Promise<Answer> => {
+  const send = async (method: string, path: string, body?: Record<string, unknown>): Promise<Answer> => {
     const response = await fetchImpl(`${base}${path}`, {
       method,
       headers: {
@@ -209,14 +220,42 @@ function requester(target: GitHubTarget, prefix = `/repos/${target.repository}`)
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(30_000),
     });
+    // A connection that fails while the body arrives throws here, like one
+    // that fails before the answer, so the read can be repeated.
+    const text = await response.text();
     let json: unknown = null;
     try {
-      json = await response.json();
+      json = JSON.parse(text);
     } catch {
       // A body that is not JSON carries nothing the check needs.
     }
     return { status: response.status, headers: response.headers, json };
   };
+  const delays = target.readRetryDelaysMs ?? GITHUB_READ_RETRY_DELAYS_MS;
+  return async (method: 'GET' | 'POST' | 'PUT', path: string, body?: Record<string, unknown>): Promise<Answer> => {
+    // The write probes send bodies GitHub rejects before creating anything,
+    // but they are sent once all the same: only reads are repeated.
+    if (method !== 'GET') return send(method, path, body);
+    for (let attempt = 0; ; attempt += 1) {
+      const outcome = await send(method, path).then((answer) => ({ answer }), (error: unknown) => ({ error }));
+      const transient = 'answer' in outcome ? outcome.answer.status >= 500 && outcome.answer.status <= 599 : isNetworkFailure(outcome.error);
+      const delay = delays[attempt];
+      if (!transient || delay === undefined) {
+        if ('answer' in outcome) return outcome.answer;
+        throw outcome.error;
+      }
+      await setTimeout(delay);
+    }
+  };
+}
+
+/**
+ * What fetch throws when the connection fails before an answer: a reset, a
+ * refused connection, a failed name lookup. A timeout is not among them:
+ * repeating a read that already waited 30 s would only stretch the run.
+ */
+function isNetworkFailure(error: unknown): boolean {
+  return error instanceof TypeError;
 }
 
 interface Answer {
