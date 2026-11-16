@@ -181,6 +181,26 @@ test('a release scan whose analysis GitHub could not process refuses the report 
   });
 });
 
+test('only alerts whose newest instance is an analyzed commit count, and a later review analysis refuses the report', async () => {
+  const later = 'b'.repeat(40);
+  const replies = routes();
+  replies[`/repos/${repo}/code-scanning/alerts?state=open&ref=refs/heads/main&per_page=100`] = [
+    alert(fable, 'fable', 'critical'),
+    alert(fable, 'fable', 'high', {}, later),
+  ];
+  await withApi(replies, async (apiUrl) => {
+    const { summary } = await report(apiUrl);
+    assert.deepEqual(summary.tools.find((tool) => tool.id === 'fable'), { id: 'fable', name: 'Fable 5.2', high: 0, critical: 1 });
+  });
+  replies[`/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&per_page=100`] = [
+    { category: 'fable', commit_sha: later, tool: { name: 'Fable', version: '5.3' } },
+    ...(replies[`/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&per_page=100`] as unknown[]),
+  ];
+  await withApi(replies, async (apiUrl) => {
+    await assert.rejects(report(apiUrl), /A later Fable review analysis \(b{40}\) replaced the one of the source commit/);
+  });
+});
+
 test('dismissed findings are listed from the most severe, with an unknown severity last', async () => {
   const replies = routes();
   replies[`/repos/${repo}/code-scanning/alerts?state=dismissed&ref=refs/heads/main&per_page=100`] = [
