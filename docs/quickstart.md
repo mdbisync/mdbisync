@@ -162,7 +162,36 @@ installation accepted them.
 If `main` is protected by a rule that requires approving reviews, the
 sync cannot merge its own pull request: add the App to that rule's bypass
 list: Settings → Rules → Rulesets → the ruleset → Bypass list → Add
-bypass → your App → Save changes.
+bypass → your App, set its mode to **For pull requests only** (not
+**Always allow**) → Save changes.
+
+### Keep the App's bypass to `main`
+
+Anyone who can push may change the branch a pull request merges into,
+also the sync's own. Before every merge the sync reads its pull request
+again and merges only while it still targets `main` at the commit the
+sync checked; if that changes in the moment between this read and
+GitHub's merge, the run reports where the merge went
+(`merge-misplaced`). What GitHub lets such a merge do depends on your
+rules, so set them up this way:
+
+- Put the App on the bypass list of the ruleset that protects `main`
+  only. That ruleset should target `main` alone: a ruleset with the App
+  on its bypass list that also covers other branches lets a retargeted
+  sync pull request into them past their rules.
+- Give that bypass the mode **For pull requests only**, never **Always
+  allow**: the App then merges pull requests past the rule but cannot
+  push to `main` directly.
+- On every protected branch that requires reviews, turn on **Dismiss
+  stale pull request approvals when new commits are pushed** (in a
+  ruleset, under the pull request rule). GitHub applies the rules of the
+  branch a pull request targets when it merges, and this keeps an
+  approval given for one branch from carrying over to another after a
+  retarget.
+
+With these rules, a sync pull request someone retargets to another
+protected branch is held by that branch's own rules, and an unprotected
+branch was already open to the person who retargeted it.
 
 ### Who may push to the sync branches
 

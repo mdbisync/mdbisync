@@ -54,7 +54,8 @@ export async function fetchState(git: Git, config: StateConfig): Promise<Fetched
   return { tracked: (await read(tracked)) as Oid, sync: await read(sync), suspended: await read(suspended), state };
 }
 
-async function lsRemote(git: Git, remote: string, refs: readonly string[]): Promise<Map<string, Oid>> {
+/** The remote's values of exactly these refs; a ref the remote lacks is absent. */
+export async function lsRemote(git: Git, remote: string, refs: readonly string[]): Promise<Map<string, Oid>> {
   const output = await git.text(['ls-remote', '--refs', remote, ...refs]);
   const wanted = new Set(refs);
   const result = new Map<string, Oid>();

@@ -75,6 +75,7 @@ export const MESSAGES = {
   'run.not-finished': '{command}: not finished ({code}); run it again with the same inputs',
   'run.revoke-failed': "the run's Linear token could not be revoked: {reason}",
   'run.container-not-read': 'container documents were not read',
+  'pull-request.merge-misplaced': 'setup error ({code}): GitHub merged a sync pull request into {where}, not onto the tracked branch commit the sync checked; a person checks that branch',
   'pull-request.merge-blocked': 'setup error ({code}): GitHub refuses again to merge the sync pull request ({refusal})',
   'pull-request.checks-missing': 'setup error ({code}): the sync pull request waited past the check deadline for checks that never started ({checks})',
   'pull-request.initial-pending': 'stopped short ({code}): an initial sync from Linear waits for a person to merge it',

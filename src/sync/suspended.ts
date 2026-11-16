@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { splitFile } from '../format/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
+import { destinationHolds, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
 import { oneLine, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -44,11 +45,13 @@ export interface SuspendedResult {
   normalClosePending?: boolean;
   changed?: boolean;
   conflicts?: string[];
-  code?: 'github-failed' | 'merge-refused' | 'merge-blocked' | 'checks-missing' | 'head-unverified';
+  code?: 'github-failed' | 'merge-refused' | 'merge-blocked' | 'checks-missing' | 'head-unverified' | 'merge-misplaced';
   /** For `checks-missing`: the expected checks never registered on the head; empty when it has no checks at all. */
   missing?: string[];
   /** For `head-unverified`: the files the merge would change that the sync does not merge by itself. */
   unverified?: string[];
+  /** For `merge-misplaced`: the branch GitHub merged the suspended pull request into and its merge commit. */
+  misplaced?: MisplacedMerge;
   status?: number;
   reason?: string;
 }
@@ -312,10 +315,11 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (checks.state === 'pending' && expired && checksMissing(checks, expectation)) return { ...result, code: 'checks-missing', missing: checks.missing ?? [] };
   if (checks.state !== 'passed') return result;
   if (!(await isAncestor(git, tracked, head))) return result;
-  const remoteTip = (await git.text(['ls-remote', '--refs', options.config.remote, branchRef(options.config.trackedBranch)])).split('\t')[0];
-  if (remoteTip !== tracked) return { ...result, waiting: true };
   // Earlier checks the branch's history does not show within the bound may not have run: wait for the sync's next push.
   if (!expected.complete) return { ...result, waiting: true };
+  // Read again right before the merge: a pull request retargeted since the check, or a tracked branch that moved, waits
+  // for a later run to check it again.
+  if (!(await destinationHolds(git, options.config, options.github, pullRequest.number, tracked))) return { ...result, waiting: true };
   const merged = await mergePullRequest(options.github, pullRequest.number, head);
   if (!merged.merged) {
     const repeated = earlier !== null && Number(earlier[3]) === merged.status && earlier[4] === encodeURIComponent(merged.reason);
@@ -326,7 +330,9 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     });
     return { ...result, code, status: merged.status, reason: merged.reason };
   }
-  await git.run(['fetch', '--no-tags', '--no-write-fetch-head', options.config.remote, branchRef(options.config.trackedBranch)]);
+  // A change between that read and the merge is found here: the documents stay suspended and a person is told.
+  const misplaced = await verifyMerge(git, options.config, options.github, pullRequest.number, tracked, merged.sha);
+  if (misplaced !== null) return { ...result, code: 'merge-misplaced', misplaced };
   return release(context, options, ids, paths, head, bases.linear, merged.sha);
 }
 
