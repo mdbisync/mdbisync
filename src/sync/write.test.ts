@@ -146,6 +146,31 @@ describe('sync: the tracked branch to Linear', () => {
   };
   const body = (path: string, text: string) => text.slice(text.indexOf(`# `));
 
+  it('keeps an over-nested Linear document out of writes while updating a valid neighbor', async () => {
+    const path = 'eng/notes/plan.md';
+    const nested = '> '.repeat(130) + CANARY;
+    const document = await documentOf(path);
+    document.content = nested;
+    touch(document);
+    await commit({[path]: '# Plan\n\nGit update.\n', 'eng/notes/review.md': '# Review\n\nValid update.\n'});
+    const {report} = await sync();
+    assert.ok(report.sync?.leftOutAtWrite.some((entry) => entry.path === path && entry.rule === 'markdown-complexity'));
+    assert.equal(document.content, nested);
+    assert.equal((await documentOf('eng/notes/review.md')).content, '# Review\n\nValid update.\n');
+  });
+
+  it('leaves an over-nested merge conflict unresolved while updating a valid neighbor', async () => {
+    const path = 'eng/notes/plan.md';
+    const document = await documentOf(path);
+    document.content = '# Plan\n\nLinear update.\n';
+    touch(document);
+    await commit({[path]: '> '.repeat(130) + CANARY, 'eng/notes/review.md': '# Review\n\nValid update.\n'});
+    const {report} = await sync();
+    assert.ok(report.sync?.skipped.some((entry) => entry.path === path && entry.reason === 'conflict'));
+    assert.equal(document.content, '# Plan\n\nLinear update.\n');
+    assert.equal((await documentOf('eng/notes/review.md')).content, '# Review\n\nValid update.\n');
+  });
+
   /** Every live document holds its file's body; no title twice in a place. */
   async function assertConverged() {
     const map = await ids();

@@ -67,6 +67,37 @@ describe('capture from Linear', () => {
   const refresh = async () => { context.fetched = await fetchState(context.git, config); };
   const text = async (path: string) => (await fixture.remote.run(['show', `${stateRef(config, 'linear')}:${path}`])).stdout.toString('utf8');
 
+  it('leaves deeply nested documents out while capturing an unrelated document on repeated runs', async () => {
+    const nested = '> '.repeat(130) + 'nesting-canary';
+    world.linear.documents[0]!.content = nested;
+    world.linear.documents.push(
+      {id: 'deep-new', title: 'deep', content: nested, projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'},
+      {id: 'ordinary', title: 'ordinary', content: 'Ordinary update.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z'},
+    );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await run();
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.leftOut.sort((a, b) => a.id.localeCompare(b.id)), [{id: 'deep-new', rule: 'markdown-complexity'}, {id: 'plan', rule: 'markdown-complexity'}]);
+      assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+      assert.equal(await text('docs/ordinary.md'), 'Ordinary update.\n');
+      assert.ok(!JSON.stringify(result.leftOut).includes('nesting-canary'));
+      assert.equal(world.linear.comments.size, 0);
+      await refresh();
+    }
+  });
+
+  it('captures a corrected document even when its accepted legacy body exceeds the depth limit', async () => {
+    const previous = context.fetched.state.linear!;
+    const legacy = await commitTree(context.git, {parents: [previous], base: previous, changes: new Map([['docs/plan.md', '> '.repeat(130) + 'legacy-canary']]), message: 'Legacy state', identity: IDENTITY});
+    assert.equal((await pushAtomic(context.git, config, [{ref: stateRef(config, 'linear'), expected: previous, next: legacy}])).ok, true);
+    await refresh();
+    world.linear.documents[0]!.content = 'Corrected.\n';
+    const result = await run();
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.leftOut, []);
+    assert.equal(await text('docs/plan.md'), 'Corrected.\n');
+  });
+
   it('captures through the CLI and omits document bodies from its report and summary', async () => {
     await fixture.seed({'.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n'});
     world.linear.documents[0]!.content = 'Private body canary.\n';
@@ -573,6 +604,53 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/duplicate.md'), 'Corrected body.\n');
   });
 
+  it('never writes a document over a hook script that a forged reserved path names', async () => {
+    // A security hook runs a script the tracked branch keeps under a mapped folder. The recorded Linear tree does not
+    // hold the script, so its path looks free, and the reserved ids, which any writer of the state refs can change,
+    // reserve it for a new document. Its text would replace the script before the hook runs it.
+    const marker = join(fixture.root, 'hook-canary');
+    await fixture.seed({
+      '.pre-commit-config.yaml': `repos:
+  - repo: local
+    hooks:
+      - id: support-check
+        alias: security
+        name: Support check
+        entry: node docs/scan.mjs
+        language: system
+`,
+      'docs/scan.mjs': 'process.exitCode = 0;\n',
+    });
+    await refresh();
+    const state = context.fetched.state;
+    // A Markdown path the tracked branch does not hold is no claim either: the new document was not created from it.
+    const forged = new Map([['docs/scan.mjs', 'forged'], ['docs/notes.mjs', 'forged-new'], ['docs/elsewhere.md', 'forged-markdown']]);
+    const next = await commitIds(context.git, state.ids, await readIds(context.git, state.ids), IDENTITY, {reserved: forged});
+    assert.equal((await pushAtomic(context.git, config, [{ref: stateRef(config, 'ids'), expected: state.ids, next}])).ok, true);
+    await refresh();
+    // A fixed canary: run as a hook, it writes a marker beside the gate's scratch folder, which this test keeps in its
+    // own fixture folder.
+    const payload = "import('node:fs').then((fs) => fs.writeFileSync('../hook-canary', 'ran'));\n";
+    world.linear.documents.push(
+      {id: 'forged', title: 'scan', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
+      {id: 'forged-new', title: 'notes', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
+      {id: 'forged-markdown', title: 'report', projectId: 'project-api', content: 'A report.\n', createdAt: '2026-01-02T00:00:00Z'},
+    );
+    const tmp = process.env.TMPDIR;
+    process.env.TMPDIR = fixture.root;
+    let result: Awaited<ReturnType<typeof run>>;
+    try { result = await run(); }
+    finally { if (tmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmp; }
+    await assert.rejects(readFile(marker), {code: 'ENOENT'}, 'a document never becomes hook code');
+    const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.includes('docs/scan.mjs') && !paths.includes('docs/notes.mjs'), 'a reserved path that is not a document path is not used');
+    // The documents still come in, at the paths their titles name.
+    assert.equal(await text('docs/scan.md'), payload);
+    assert.equal(await text('docs/notes.md'), payload);
+    assert.equal(await text('docs/report.md'), 'A report.\n');
+    assert.ok(!paths.includes('docs/elsewhere.md'));
+  });
+
   it('blocks a secret before any object write, saves appearance and restores it on correction', async () => {
     await fixture.seed({
       '.pre-commit-config.yaml': `repos:
@@ -675,6 +753,10 @@ describe('capture from Linear', () => {
   }
 
   it('keeps links to an image-blocked reserved document as Linear URLs', async () => {
+    // The new document was created from this file, and the answer was lost: the id stays reserved for its path.
+    await fixture.seed({'docs/future.md': 'Future.\n'});
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
     const state = context.fetched.state;
     const reserved = new Map([['docs/future.md', 'future-document']]);
     const next = await commitIds(context.git, state.ids, await readIds(context.git, state.ids), IDENTITY, {reserved});

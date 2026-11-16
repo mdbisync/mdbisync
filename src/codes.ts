@@ -53,18 +53,18 @@ export const LEFT_OUT_RULES = ['duplicate-title', 'title-too-long'] as const;
 export type LeftOutRule = (typeof LEFT_OUT_RULES)[number];
 
 /** Why an initial sync to Linear leaves a document out while writing it. */
-export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'upload-too-large', 'upload-unreadable'] as const;
+export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'markdown-complexity', 'upload-too-large', 'upload-unreadable'] as const;
 export type LeftOutAtWriteRule = (typeof LEFT_OUT_AT_WRITE_RULES)[number];
 
 /** Every rule a synchronized file can be left out by, in a plan or a sync. */
 export type FileLeftOutRule = LintRule | UnsyncedReason | LeftOutRule | LeftOutAtWriteRule;
 
 /** Why an initial sync from Linear leaves a file out of its record, or keeps the tracked one. */
-export const RECORD_LEFT_OUT_RULES = ['attachment-budget', 'download-failed', 'image-blocked', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;
+export const RECORD_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'download-failed', 'image-blocked', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;
 export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
 
 /** Why the sync's capture leaves a Linear document out. */
-export const CAPTURE_LEFT_OUT_RULES = ['attachment-budget', 'capture-translation', 'download-retry', 'security-unchecked'] as const;
+export const CAPTURE_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'capture-translation', 'download-retry', 'security-unchecked'] as const;
 export type CaptureLeftOutRule = (typeof CAPTURE_LEFT_OUT_RULES)[number];
 
 /** The rule a file name read from Linear follows. */
