@@ -102,6 +102,13 @@ Linear's upload limit, is left out: it stays in git, and the run summary
 lists it under **Left out** with the rule that stopped it, until it is
 fixed.
 
+A new document linking an LFS object the remote confirms is absent
+(404/410) is also left out, so the other changes can be recorded. The
+summary names the document and linked file with `upload-unreadable`.
+After pushing the object, commit an edit to the document or linked file
+to retry it. Transient read failures and changes to existing documents
+remain pending and retry on the next run.
+
 When both sides changed the same document between two runs, git merges the
 two edits. Edits of different paragraphs both arrive on both sides; edits
 of the same lines become a conflict, written into the document on both

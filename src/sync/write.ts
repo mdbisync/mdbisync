@@ -32,7 +32,7 @@ import { projectKey } from '../setup/index.ts';
 import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, keptAnnotationsTrailers, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
 import { linkDestinations, resolveRelative } from '../initial-sync/links.ts';
-import { UPLOAD_TOO_LARGE } from '../initial-sync/uploads.ts';
+import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../initial-sync/uploads.ts';
 import {
   type CommitIdentity,
   type IdEntry,
@@ -64,7 +64,7 @@ import { stableId } from './stable-id.ts';
 import { suspendedPaths } from './suspended.ts';
 import { recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
-import { type FileLeftOutRule, type LeftOutAtWriteRule, type SkipReason, type WriteCode } from '../codes.ts';
+import { type FileLeftOutRule, type SkipReason, type WriteCode } from '../codes.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
 export const PARTIAL_RECORD_MESSAGE = "Sync: Linear's state, part of the tracked branch taken in";
@@ -113,7 +113,7 @@ export type { SkipReason } from '../codes.ts';
 
 export interface WriteResult {
   capacity?: ContainerCapacity[];
-  /** Every change was made (or, for a new document, left out for a file over the upload limit) and recorded with a merge commit, or there was nothing to take in. */
+  /** Every change was made (or, for a new document, left out for an oversized file or a confirmed missing LFS object) and recorded with a merge commit, or there was nothing to take in. */
   complete: boolean;
   /** Something was written to Linear or a state ref moved. */
   changed: boolean;
@@ -366,22 +366,22 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   /** Paths of the merge result whose changes were not made: the record keeps the `linear` tip's version. */
   const notDone: DocumentChange[] = [];
   /**
-   * New documents left out while writing because a linked file is over the upload limit. Like a file the lint
-   * leaves out, each stays in git only until it is fixed there, so it does not keep the run from completing: a
+   * New documents left out while writing because a linked file is over the upload limit or confirmed absent.
+   * Like a file the lint leaves out, each stays in git only until it is fixed there, so it does not keep the run from completing: a
    * later run cannot write it either. A merge record holds the merge result's version, so the file joins once git
    * changes it; a partial record keeps the tip's, as for every change not made.
    */
   const leftOutNew: CreateChange[] = [];
   /**
-   * Whether a change left out at write counts as done (see `leftOutNew`). Only a file over the upload limit: git
-   * alone fixes it, while an unreadable file (an LFS object not pushed yet, a failed read) can turn readable with
-   * no git change, so its document waits for the next run. Only a document Linear does not hold yet: for an
+   * Whether a change left out at write counts as done (see `leftOutNew`). A file over the upload limit or an
+   * LFS object confirmed absent from the remote: the document joins after a git edit. Other unreadable files
+   * can recover, so their documents wait for the next run. Only a document Linear does not hold yet: for an
    * existing one (an update, a restore, an adoption) a merge record would hold git's text while Linear holds the
    * old one, and a later Linear edit of it would then undo git's change. Not a README: a kept annotation README
    * recorded with its new body would count as kept and never be written.
    */
-  const leftOutForGood = (change: DocumentChange, rule: LeftOutAtWriteRule): change is CreateChange =>
-    rule === UPLOAD_TOO_LARGE && change.kind === 'create' && change.restore === undefined && !adoptable.has(change.path)
+  const leftOutForGood = (change: DocumentChange, error: LeaveOutError): change is CreateChange =>
+    (error.rule === UPLOAD_TOO_LARGE || (error.rule === UPLOAD_UNREADABLE && error.missingLfsObject)) && change.kind === 'create' && change.restore === undefined && !adoptable.has(change.path)
     && change.path !== 'README.md' && !change.path.endsWith('/README.md');
   // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
   // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
@@ -520,7 +520,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
           }
           if (error instanceof LeaveOutError) {
             result.leftOutAtWrite.push(error.files.length > 0 ? { path, rule: error.rule, files: [...error.files] } : { path, rule: error.rule });
-            if (leftOutForGood(change, error.rule)) leftOutNew.push(change);
+            if (leftOutForGood(change, error)) leftOutNew.push(change);
             else notDone.push(change);
             continue;
           }
