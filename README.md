@@ -144,7 +144,7 @@ report also lists every dismissed finding with its reason and the risks we
 accept.
 
 <p align="center">
-  <a href="https://mdbisync.com/security">
+  <a href="https://mdbisync.com/security/report">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://mdbisync.com/badge/security-dark.svg">
       <img alt="Security scan of the latest release: high and critical findings per tool" src="https://mdbisync.com/badge/security.svg">
@@ -153,7 +153,7 @@ accept.
 </p>
 
 <p align="center">
-  <a href="https://mdbisync.com/security">Security reports</a> · <a href="https://mdbisync.com/security/dependencies">Dependency scan</a>
+  <a href="https://mdbisync.com/security/report">Security reports</a> · <a href="https://mdbisync.com/security/dependencies">Dependency scan</a>
 </p>
 
 ## Setup
