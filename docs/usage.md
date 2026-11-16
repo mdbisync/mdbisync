@@ -389,10 +389,10 @@ A failed build leaves existing pins unchanged.
 
 A final version such as `v0.1.0` is built the same way, but only after a
 security gate passes. The gate refuses the build unless the source commit
-has a `security-gate` commit status of `success` posted by the account whose
-id the workflow sets in `SECURITY_GATE_CREATOR_ID` (only the newest status of
-that context counts: a later one from another account refuses the release
-until the scan posts again), `main` has no open code
+has a `security-gate` commit status of `success` posted by the GitHub App
+bot user whose id the workflow sets in `SECURITY_GATE_CREATOR_ID` (only the
+newest status of that context counts: a later one from anyone else refuses
+the release until the scan posts again), `main` has no open code
 scanning alert of medium or higher severity (or of severity error), no open
 Dependabot alert of medium or higher, and no open secret scanning alert, and
 CodeQL's latest analysis of each category on `main` succeeded and includes
@@ -405,6 +405,16 @@ to the branch `main`, require the repository owner's review, turn off
 environment secret. Remove any repository secret of the same name. Only
 the gate job uses this environment; without the token the gate refuses.
 Pre-release builds do not run the gate.
+
+The `security-gate` status comes from a GitHub App installed on this
+repository alone with one repository permission, **Commit statuses: read and
+write**. Its private key, and any installation token made from it, can post
+the status, so keep the key where only the scan that posts the status can
+use it. `SECURITY_GATE_CREATOR_ID` holds the App's bot user id, not the App
+id: read it with `gh api 'users/<app-slug>[bot]' --jq .id`. The gate also
+requires that user to be a bot, so a person's account with the same number
+never passes. A status posted before the setting changed does not count;
+scan the source commit again.
 
 Use the **release commit SHA**, which differs from the source SHA, in both
 configuration files. Replace the placeholder with the summary's 40-character

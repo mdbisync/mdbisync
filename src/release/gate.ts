@@ -12,8 +12,9 @@ export interface GateOptions {
   repository: string;
   sourceSha: string;
   token: string;
-  // The GitHub account id whose token posts the security-gate status. A
-  // status of that context from anyone else refuses the release.
+  // The user id of the GitHub App bot user that posts the security-gate
+  // status (not the App id). A status of that context from anyone else
+  // refuses the release.
   statusCreatorId: number;
   // The workflow token cannot read secret scanning alerts; a separate read-only token can.
   secretScanningToken?: string | undefined;
@@ -94,12 +95,15 @@ async function gateStatus(api: Client, repo: string, sha: string, creatorId: num
   const statuses = await api.list(`/repos/${repo}/commits/${sha}/statuses?per_page=100`, 'commit statuses');
   const latest = statuses.find((status) => status.context === GATE_STATUS);
   if (latest === undefined) return `${GATE_STATUS} status is missing on ${sha}`;
-  // Anyone with write access to statuses can post this context; only the configured account is trusted.
+  // Anyone with write access to statuses can post this context; only the
+  // configured GitHub App bot user is trusted. The type check refuses a
+  // person's account whose id happens to equal the setting, as when an App
+  // id is entered by mistake instead of its bot user's id.
   const creator = fields(latest.creator);
-  if (creator.id !== creatorId) {
-    const login = typeof creator.login === 'string' ? creator.login : 'an unknown account';
+  if (creator.id !== creatorId || creator.type !== 'Bot') {
+    const login = typeof creator.login === 'string' ? creator.login : 'an unknown user';
     const who = typeof creator.id === 'number' ? `${login} (id ${creator.id})` : login;
-    return `${GATE_STATUS} status on ${sha} was posted by ${who}, not by the configured account (id ${creatorId})`;
+    return `${GATE_STATUS} status on ${sha} was posted by ${who}, not by the configured App bot user (id ${creatorId})`;
   }
   if (latest.state === 'success') return undefined;
   const description = typeof latest.description === 'string' && latest.description !== '' ? `: ${latest.description}` : '';
@@ -159,7 +163,7 @@ async function codeqlCoverage(api: Client, repo: string, sha: string): Promise<s
   return failed.length === 0 ? undefined : `the latest CodeQL analysis on main does not cover ${sha}: ${failed.join('; ')}`;
 }
 
-// The account id from the workflow's setting: digits only, so '0x10', '1e3' or ' 7' never name another account.
+// The bot user id from the workflow's setting: digits only, so '0x10', '1e3' or ' 7' never name another user.
 export function parseCreatorId(value: string | undefined): number {
   return /^[1-9][0-9]*$/.test(value ?? '') ? Number(value) : Number.NaN;
 }
@@ -169,7 +173,7 @@ export async function releaseGate(options: GateOptions): Promise<string[]> {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('Expected a repository such as owner/name');
   validateSha(sourceSha);
   if (!token) throw new Error('A GitHub token is required');
-  if (!Number.isSafeInteger(statusCreatorId) || statusCreatorId <= 0) throw new Error(`Expected the ${GATE_STATUS} status creator as a positive GitHub account id`);
+  if (!Number.isSafeInteger(statusCreatorId) || statusCreatorId <= 0) throw new Error(`Expected the ${GATE_STATUS} status creator as a positive GitHub user id`);
   const api = client(options.apiUrl ?? 'https://api.github.com', token);
   const checks = [
     gateStatus(api, repository, sourceSha, statusCreatorId),
