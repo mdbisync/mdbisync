@@ -66,6 +66,7 @@ import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_ME
 import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold } from './deadline.ts';
 import { LaneMoved, LaneConflict, commitLaneIds, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
+import { destinationHolds, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
 import { oneLine, unverifiedList, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { message } from '../messages.ts';
 import { type PullRequestCode } from '../codes.ts';
@@ -145,13 +146,16 @@ export interface PullRequestResult {
    * - `merge-blocked`: GitHub refused the merge for the same reason as an earlier run, on the same head and tracked branch; a setup error, a person must change what blocks it.
    * - `checks-missing`: past the deadline, the head still lacks an expected check, or has no checks while the sync may not merge without them; a setup error, a person must make the checks run.
    * - `initial-pull-request-pending`: the sync branch holds the record of an initial sync from Linear that a person has not merged.
-   * - `state-moved`: the sync branch moved while this run worked.
+   * - `state-moved`: the sync branch moved while this run worked, or the pull request's base or the tracked branch changed after the sync checked the merge.
    * - `github-failed`: GitHub refused or failed a request, or no answer came; `status` is its HTTP status, absent when no answer came.
    * - `head-unverified`: the merge would change files other than synchronized documents and their assets (`unverified`); the sync leaves the pull request to a person.
+   * - `merge-misplaced`: GitHub merged the pull request somewhere other than on the tracked branch commit the sync checked (`misplaced`): its base or the tracked branch changed between the sync's last read and the merge. A setup error: a person checks the branch that took the merge.
    */
   code?: PullRequestCode;
   /** For `head-unverified`: the files the merge would change that the sync does not merge by itself. */
   unverified?: string[];
+  /** For `merge-misplaced`: the branch GitHub merged the pull request into and its merge commit. */
+  misplaced?: MisplacedMerge;
   /** GitHub's HTTP status for `merge-refused`, `merge-blocked` and `github-failed`. */
   status?: number;
   /** GitHub's reason for `merge-refused` and `merge-blocked`, on one line; empty when it gave none. */
@@ -176,6 +180,9 @@ export interface PullRequestFailure {
 }
 
 export function pullRequestFailure(result: PullRequestResult | undefined): PullRequestFailure | null {
+  // A merge that landed where the sync did not check it comes first: it already changed a branch.
+  const misplaced = result?.misplaced ?? result?.suspended?.misplaced;
+  if (misplaced !== undefined) return { kind: 'setup', code: 'merge-misplaced', message: message('pull-request.merge-misplaced', { code: 'merge-misplaced', where: misplacedText(misplaced) }) };
   if (result?.suspended?.code === 'merge-blocked') return {kind:'setup', code:'merge-blocked', message:message('pull-request.merge-blocked', {code:'merge-blocked', refusal:refusalText(result.suspended)})};
   if (result?.suspended?.code === 'checks-missing') return { kind: 'setup', code: 'checks-missing', message: message('pull-request.checks-missing', { code: 'checks-missing', checks: missingText(result.suspended.missing ?? []) }) };
   if (result?.code === 'checks-missing') return { kind: 'setup', code: result.code, message: message('pull-request.checks-missing', { code: result.code, checks: missingText(result.checks?.missing ?? []) }) };
@@ -210,11 +217,15 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   const linear = options.state.linear;
   const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [] };
   if (suspended !== undefined) result.suspended = suspended;
-  // The suspended lane's `checks-missing` is its own: `pullRequestFailure` and the summary read it from `suspended`.
-  if (suspended?.code !== undefined && suspended.code !== 'checks-missing') result.code = suspended.code;
+  // The suspended lane's `checks-missing` and `merge-misplaced` are its own: `pullRequestFailure` and the summary read
+  // them from `suspended`.
+  if (suspended?.code !== undefined && suspended.code !== 'checks-missing' && suspended.code !== 'merge-misplaced') result.code = suspended.code;
   if (suspended?.status !== undefined) result.status = suspended.status;
   if (suspended?.reason !== undefined) result.reason = suspended.reason;
   if (linear === null || suspended?.normalClosePending === true) return result;
+  // A suspended merge that landed where the sync did not check it stops this run's pull request step: a person looks
+  // first, and the next run checks the sync's changes again.
+  if (suspended?.code === 'merge-misplaced') return result;
 
   const frozen = suspendedPaths(await readIds(git, options.state.ids));
   // Mask before merging, so frozen paths cannot conflict or restart normal checks.
@@ -415,6 +426,9 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     }
     // Earlier checks the branch's history does not show within the bound may not have run: wait for the sync's next push.
     if (!expected.complete) return result;
+    // Read again right before the merge: a pull request retargeted since the check, or a tracked branch that moved,
+    // is checked again by a later run.
+    if (!(await destinationHolds(git, config, github, pullRequest.number, tracked))) return { ...result, code: 'state-moved' };
     const merge = await mergePullRequest(github, pullRequest.number, head);
     if (!merge.merged) {
       const refusal: MergeRefusal = { head, base: tracked, status: merge.status, reason: merge.reason };
@@ -428,6 +442,9 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       }
       return { ...refused, code: 'merge-refused' };
     }
+    // A change between that read and the merge is found here; the merge cannot be taken back, so a person is told.
+    const misplaced = await verifyMerge(git, config, github, pullRequest.number, tracked, merge.sha);
+    if (misplaced !== null) return { ...result, code: 'merge-misplaced', misplaced };
     result.merged = merge.sha;
     result.pullRequest = null;
     return result;
@@ -650,6 +667,19 @@ function readRefusal(body: string): MergeRefusal | null {
   return { head: note[1] as Oid, base: note[2] as Oid, status: Number(note[3]), reason };
 }
 
+/** The branch that took a misplaced merge, as code, and its merge commit; someone else named the branch. */
+function misplacedText(misplaced: MisplacedMerge): string {
+  const branch = misplaced.branch === null ? 'a branch GitHub did not name' : `\`${oneLine(misplaced.branch).replaceAll('`', '?')}\``;
+  return `${branch} at \`${misplaced.commit.slice(0, 12)}\``;
+}
+
+function misplacedSummary(what: string, link: string, misplaced: MisplacedMerge | undefined): string {
+  const where = misplaced === undefined ? 'another branch' : misplacedText(misplaced);
+  return `GitHub merged ${what}${link} into ${where}, not onto the tracked branch commit the sync had checked: its base or the tracked branch changed between the sync's last look and the merge.`;
+}
+
+const MISPLACED_ADVICE = "A merge cannot be taken back by the sync. Check what reached that branch and revert it if it should not be there; keep the GitHub App's bypass to the tracked branch's ruleset, in its \"For pull requests only\" mode. The next run checks the sync's changes again.";
+
 /**
  * `HTTP 405: reason`, or the status alone when GitHub gave no reason. The
  * reason is quoted as code, so Markdown, HTML and mentions in it do not render.
@@ -678,6 +708,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     lines.push(hold.released ? 'Released the suspended batch.' : `Suspended changes${link}: ${hold.paths.map((path) => `\`${path}\``).join(', ')}.`, '');
     if (hold.code === 'head-unverified') lines.push(`The suspended pull request also changes files that are not synchronized documents or their assets: ${unverifiedList(hold.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from its branch.`, '');
     if (hold.code === 'merge-refused' || hold.code === 'merge-blocked') lines.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, '');
+    if (hold.code === 'merge-misplaced') lines.push(`Setup error: ${misplacedSummary('the suspended pull request', link, hold.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, '');
     if (hold.code === 'checks-missing') lines.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold.missing ?? [])}).`, CHECKS_MISSING_ADVICE, '');
     if (hold.normalClosePending === true) lines.push('The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.', '');
     if (hold.code === 'github-failed' && hold.normalClosePending !== true) lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
@@ -717,6 +748,9 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     case 'merge-refused':
       lines.push(`GitHub did not merge the sync pull request ${link} (${refusalText(result)}); a later run tries again.`);
       break;
+    case 'merge-misplaced':
+      lines.push(`Setup error: ${misplacedSummary('the sync pull request', ` ${link}`, result.misplaced)}`, MISPLACED_ADVICE);
+      break;
     case 'merge-blocked':
       lines.push(
         `Setup error: GitHub refused again to merge the sync pull request ${link}, on the same head and for the same reason as an earlier run (${refusalText(result)}).`,
@@ -736,7 +770,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       lines.push(`The sync pull request ${link} also changes files that are not synchronized documents or their assets: ${unverifiedList(result.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from the sync branch. Linear's changes keep joining it.`);
       break;
     case 'state-moved':
-      lines.push('The sync branch moved while this run worked; the next run updates the sync pull request.');
+      lines.push('The sync branch moved while this run worked, or the sync pull request no longer targeted the tracked branch at the commit the sync checked right before its merge; the next run updates the sync pull request.');
       break;
     case 'github-failed':
       lines.push(

@@ -9,6 +9,8 @@ export {
   ensurePullRequest,
   findOpenPullRequest,
   openPullRequest,
+  type PullRequestState,
+  readPullRequest,
   updatePullRequest,
 } from './github.ts';
 export { type CheckAnnotation, type CheckExpectation, type CheckFailure, type CheckState, type CommitChecks, type ExpectedCheck, type MergeOutcome, checkState, mergePullRequest, readAnnotations, readChecks, readCommitChecks, waitForChecks } from './merge.ts';

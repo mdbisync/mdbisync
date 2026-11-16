@@ -59,6 +59,7 @@ export {
   commitUploads,
   fetchState,
   pushAtomic,
+  lsRemote,
   readFiles,
   readIds,
   readUploads,

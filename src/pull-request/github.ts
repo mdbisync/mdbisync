@@ -175,6 +175,23 @@ async function useOpen(target: GitHubRepository, open: PullRequest, spec: NewPul
   return { pullRequest: await updatePullRequest(target, open.number, spec), opened: false, updated: true };
 }
 
+/** A pull request as GitHub shows it now: whether it is open, and the branch it merges into. */
+export interface PullRequestState {
+  state: 'open' | 'closed';
+  /** The branch it merges into now; a person who can push may change it at any time, until it is merged. */
+  base: string;
+}
+
+/** Reads one pull request's state and base branch now. */
+export async function readPullRequest(target: GitHubRepository, number: number): Promise<PullRequestState> {
+  const answer = await request(target, 'GET', `/pulls/${number}`);
+  const pr = answer.json as { state?: unknown; base?: { ref?: unknown } | null } | null;
+  if (answer.status !== 200 || pr === null || (pr.state !== 'open' && pr.state !== 'closed') || typeof pr.base?.ref !== 'string') {
+    throw new PullRequestError(message('github.reading-pull-request'), answer.status);
+  }
+  return { state: pr.state, base: pr.base.ref };
+}
+
 function toPullRequest(value: unknown): PullRequest | null {
   const pr = value as { number?: unknown; html_url?: unknown; title?: unknown; body?: unknown; head?: { ref?: unknown; repo?: { full_name?: unknown } | null }; base?: { ref?: unknown } } | null;
   if (pr === null || typeof pr !== 'object' || typeof pr.number !== 'number') return null;

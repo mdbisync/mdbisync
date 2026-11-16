@@ -71,8 +71,11 @@ fetch the refs, and the sync writes nothing of its own into your files.
 3. The same run takes the change towards git (step 2): it opens the sync
    pull request **Changes from Linear**, or adds the change to the open
    one, and waits a short grace period for its checks.
-4. When every check on the pull request's head has passed, the sync merges
-   it with a merge commit. The tracked branch now holds the change.
+4. When every check on the pull request's head has passed, the sync reads
+   the pull request again and merges it with a merge commit, only while it
+   still targets the tracked branch and that branch is still at the
+   commit the sync checked the merge against; otherwise a later run checks
+   it again. The tracked branch now holds the change.
 5. That merge is a push to the tracked branch, so it starts another run.
    That run finds Linear and git equal and writes nothing.
 
@@ -286,6 +289,19 @@ refuses it, the run reports `merge-refused`; a later run that meets the
 same refusal on the same head, with the tracked branch unmoved, reports
 the setup error `merge-blocked`. Nothing is suspended or marked in Linear.
 Check workflow filters and the required-check names if this happens.
+
+Right before it merges, the sync reads the pull request and the tracked
+branch again: a pull request someone retargeted to another branch, or a
+tracked branch that moved since the sync checked the merge, is not
+merged, and a later run checks again. A change in the moment between
+that read and GitHub's merge cannot be stopped, since GitHub's merge
+names no branch: the sync then checks where the merge commit landed, and
+when it is not on the tracked branch on top of the commit it checked,
+the run reports the setup error `merge-misplaced` with the branch that
+took the merge. A suspended batch stays suspended. See
+[keep the App's bypass to `main`](quickstart.md#keep-the-apps-bypass-to-main)
+for the rules that keep such a merge from reaching another protected
+branch.
 
 The batch joins the one **Suspended changes from Linear** pull request.
 The normal branch records `Set aside suspended changes` and its pull
