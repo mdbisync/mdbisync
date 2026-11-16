@@ -100,6 +100,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "ui.assert-dom": ["actor"],
   "ui.follow-document-links": ["actor"],
   "ui.inspect-blocked": ["actor"],
+  "ui.inspect-cleared": ["actor"],
   "ui.inspect-conflict": ["actor"],
   "ui.inspect-rendering": ["actor", "coverAllConstructs", "group", "sampleCount"],
   "ui.paste-image": ["actor"],

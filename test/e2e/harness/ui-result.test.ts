@@ -219,6 +219,19 @@ describe('UI checklist answers', () => {
     assert.match(renderUiChecklist(byId('L6-05'), runNames(RUN), { live: null, runDir: 'run' }), /^- `ui\.resolvedText` \(compared with `tracked\.body`\)\n  - value:$/m);
   });
 
+  it('has the blocked-mark check (L6-04) remove the secret and settle between seeing the mark and seeing it clear', () => {
+    const blocked = byId('L6-04');
+    assert.deepEqual(blocked.steps.map((step) => `${step.kind}.${step.action}`), ['ui.verify-editor', 'ui.inspect-blocked', 'linear.remove-secret', 'run.settle', 'ui.inspect-cleared']);
+    assert.deepEqual(uiValueSubjects(blocked), ['ui.blockedIcon', 'ui.blockedMarkColor', 'ui.blockedCommentVisible', 'ui.markClearedAfterFix', 'ui.blockCommentOpenAfterFix']);
+    // The harness checks the cleared state on its own too, not only through the session's answers.
+    const harnessChecks = blocked.checks.assertions.filter((assertion) => !assertion.subject.startsWith('ui.')).map((assertion) => [assertion.subject, assertion.expected]);
+    assert.deepEqual(harnessChecks.slice(-3), [['blocked.secretOccurrencesOnGithub', 0], ['blocked.securityMarkCleared', true], ['blocked.openSecurityNotices', 0]]);
+    const checklist = renderUiChecklist(blocked, runNames(RUN), { live: null, runDir: 'run' });
+    assert.match(checklist, /^2\. \[ \] As editor-a: Open the blocked document[^\n]*`ui\.blocked`[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) linear\.remove-secret: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was blocked: the red Cross icon is gone[^\n]*`AfterFix`/m);
+    // Each value's name says which of the two items it belongs to.
+    for (const subject of uiValueSubjects(blocked)) assert.match(subject, /^ui\.blocked|AfterFix$/);
+  });
+
   it('asks the link check (L6-12) to click both links to the notes and record what they did', () => {
     const links = byId('L6-12');
     assert.deepEqual(links.setup.fixtures, ['document-links']);

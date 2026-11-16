@@ -1688,13 +1688,16 @@ class FakeLinear {
     return { assetUrl: `https://uploads.linear.app/test/${input.filename}` };
   }
 
+  /** Comment bodies the sync resolved. */
+  resolved = new Set<string>();
+
   /** Ids of the documents each `RunComments` answer held, in order: how often the canary scan read each one. */
   commentReads: string[] = [];
 
   async request<T>(operation: string, _kind: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
     this.requests.push(operation);
     if (operation === 'DocumentComments' || operation === 'BlockedComments') {
-      return { document: { comments: { nodes: (this.comments.get(String(variables.id)) ?? []).map((body, index) => ({ body, createdAt: new Date(index).toISOString() })) } } } as T;
+      return { document: { comments: { nodes: (this.comments.get(String(variables.id)) ?? []).map((body, index) => ({ body, resolvedAt: this.resolved.has(body) ? new Date(index).toISOString() : null, createdAt: new Date(index).toISOString() })) } } } as T;
     }
     if (operation === 'RunComments') {
       // The filter shapes the canary scan sends: by project, or by team with a title prefix or a list of ids.
@@ -2833,6 +2836,26 @@ describe('linear executors', () => {
     // A wrong color still fails L2-35.
     ctx.observations.set('blocked.color', '#4cb782');
     assert.deepEqual((await scenarioAssertions(ctx, 'L2-35', mark)).get('blocked.color'), false);
+    // A second fix finds no access key sentence: a harness error, not a document left blocked.
+    await assert.rejects(runStep(ctx, { kind: 'linear', action: 'remove-secret', args: {} }), /found no access key sentence/);
+  });
+
+  it('read whether the blocked document cleared after the fix (L6-04)', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const id = ids['eng/platform/plan.md']?.id as string;
+    await runStep(ctx, { kind: 'linear', action: 'edit', args: { target: 'eng/platform/plan.md', fixture: 'fake-secret' } });
+    const blocked = linear.documents.get(id) as LinearDocument;
+    Object.assign(blocked, { icon: 'Cross', color: '#EB5757' });
+    const notice = 'Security checks rejected this document. Fix the listed findings and sync again.\n\n- Hook `test-secret`, line 3';
+    linear.comments.set(id, [notice]);
+    const cleared = ['blocked.securityMarkCleared', 'blocked.openSecurityNotices'];
+    // Still blocked: the mark is there and its notice open.
+    assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map(cleared.map((subject) => [subject, false])));
+    // The sync restored the document's own icon and resolved its notice.
+    Object.assign(blocked, { icon: null, color: null });
+    linear.resolved.add(notice);
+    refreshView(ctx);
+    assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map(cleared.map((subject) => [subject, true])));
   });
 
   /** Whether each assertion of scenario `id` on `subjects` holds in `ctx`, compared as the runner compares them. */

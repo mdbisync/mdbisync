@@ -32,7 +32,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { HOLD_FAILED, HOLD_TIMED_OUT } from '../../../src/sync/hold.ts';
-import { MARKS } from '../../../src/sync/marks.ts';
+import { BLOCKED_COMMENT, MARKS } from '../../../src/sync/marks.ts';
 import type { WriteCall } from '../../../src/pull-request/github.ts';
 import { detectConflicts } from '../../../src/merge/index.ts';
 import type { PullRequest } from './github.ts';
@@ -740,6 +740,16 @@ function blockedImagePath(ctx: RunContext): string {
   const blocked = ctx.observations.get('imageGate.blocked') as { path: string } | undefined;
   if (blocked === undefined) throw new Error('the scenario has no linear.image-path step');
   return blocked.path;
+}
+
+/** The document the fake-secret edit blocked, as it is now. */
+async function securityBlockedDocument(env: Env): Promise<LinearDocument> {
+  const path = observed(env.ctx, 'secret.path') as string;
+  const view = await env.view();
+  const id = view.ids.get(path)?.id;
+  const document = id === undefined ? undefined : view.documents.get(id);
+  if (document === undefined) throw new ProductError(`the blocked document ${path} is missing`);
+  return document;
 }
 
 async function pullRequestsSinceStart(ctx: RunContext) {
@@ -1852,6 +1862,18 @@ export const SUBJECTS: Record<string, Compute> = {
     return count;
   },
 
+  // --- a security block fixed in the browser check (L6-04) ------------------------------------
+  // Its start already shows the block (the setup typed the secret), so the document is read as it is now.
+  // The blocked document no longer has the blocked mark's icon and color.
+  'blocked.securityMarkCleared': async (env) => {
+    const document = await securityBlockedDocument(env);
+    return document.icon !== MARKS.blocked.icon || document.color !== MARKS.blocked.color;
+  },
+  // Security notices on the blocked document that are not resolved; the sync resolves its notice once the secret is gone.
+  'blocked.openSecurityNotices': async (env) => {
+    const document = await securityBlockedDocument(env);
+    return (await commentsWithState(live(env.ctx).app, document.id)).filter((comment) => comment.body.includes(BLOCKED_COMMENT) && comment.resolvedAt === null).length;
+  },
   // --- the image gate through the API path (L2-42) ---------------------------------------------
   // The labels (`Image N of M (line L)`) the sync's image notices gave before the fix.
   'blocked.imageLines': async (env) => noticeImageLabels(observed(env.ctx, 'blocked.comments') as string[]),

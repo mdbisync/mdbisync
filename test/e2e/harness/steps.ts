@@ -2066,7 +2066,12 @@ const LINEAR: Record<string, Executor> = {
       'BlockedComments', 'query', 'query BlockedComments($id: String!) { document(id: $id) { comments(first: 100) { nodes { body } } } }', { id },
     );
     ctx.observations.set('blocked.comments', (data.document?.comments.nodes ?? []).map((comment) => comment.body));
-    await editorEdit(ctx, editorOf(args), path, (text) => text.replace(` Access key ${secret}.`, ''));
+    await editorEdit(ctx, editorOf(args), path, (text) => {
+      const fixed = text.replace(` Access key ${secret}.`, '');
+      // A fix that changes nothing would leave the document blocked for a reason in the harness, not the sync.
+      if (fixed === text) throw new Error('linear.remove-secret found no access key sentence in the blocked document');
+      return fixed;
+    });
   },
 };
 
@@ -2283,7 +2288,7 @@ const OTHER: Record<string, Executor> = {
 };
 
 const UI_ACTIONS = [
-  'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
+  'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-cleared', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
   'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write', 'ui.type-two-editors', 'ui.verify-editor',
 ];
 

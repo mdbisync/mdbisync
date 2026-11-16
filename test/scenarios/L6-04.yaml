@@ -27,13 +27,20 @@
       }
     },
     {
+      "kind": "linear",
+      "action": "remove-secret",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
       "kind": "run",
       "action": "settle",
       "args": {}
     },
     {
       "kind": "ui",
-      "action": "assert-dom",
+      "action": "inspect-cleared",
       "args": {
         "actor": "editor-a"
       }
@@ -71,19 +78,67 @@
     },
     "assertions": [
       {
-        "subject": "ui.icon",
+        "subject": "ui.blockedIcon",
         "operator": "equal",
         "expected": "Cross"
       },
       {
-        "subject": "ui.markColor",
+        "subject": "ui.blockedMarkColor",
         "operator": "equal",
         "expected": "red"
       },
       {
-        "subject": "ui.blockCommentVisible",
+        "subject": "ui.blockedCommentVisible",
         "operator": "equal",
         "expected": true
+      },
+      {
+        "subject": "blocked.icon",
+        "operator": "equal",
+        "expected": "Cross"
+      },
+      {
+        "subject": "blocked.color",
+        "operator": "equal",
+        "expected": "red"
+      },
+      {
+        "subject": "blocked.commentFields",
+        "operator": "contains-all",
+        "expected": [
+          "hook",
+          "line"
+        ]
+      },
+      {
+        "subject": "blocked.commentContainsSecret",
+        "operator": "equal",
+        "expected": false
+      },
+      {
+        "subject": "blocked.secretOccurrencesOnGithub",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "blocked.securityMarkCleared",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "blocked.openSecurityNotices",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "ui.markClearedAfterFix",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "ui.blockCommentOpenAfterFix",
+        "operator": "equal",
+        "expected": false
       }
     ]
   }
