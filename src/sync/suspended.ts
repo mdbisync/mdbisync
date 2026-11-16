@@ -8,6 +8,7 @@ import { destinationHolds, type MisplacedMerge, verifyMerge } from './merge-dest
 import { oneLine, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
+import { checkpoint } from '../test-hooks.ts';
 import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
@@ -390,6 +391,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
   const normal = await commit(context, options, await git.text(['rev-parse', `${tracked}^{tree}`]), [failed, tracked], SET_ASIDE_MESSAGE);
+  // Everything this suspension publishes is decided and nothing of it is published yet: a crash here leaves no trace.
+  await checkpoint('before-suspension-push');
   await push(context, options, ids, head, previous, { expected: failed, next: normal });
   const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
   // The new head joins the failed batch and the earlier suspended head: it expects what both registered.

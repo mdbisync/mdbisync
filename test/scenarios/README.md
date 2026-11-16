@@ -300,10 +300,12 @@ Run the same steps and I1–I9 assertions against local Git and fake services:
 node --test test/e2e/harness/suspended-specs.test.ts
 ```
 
-L5-34 remains selectable for planning, but its offline execution is explicitly
-skipped until the engine exposes `before-suspension-push`. Its spec names the
-required crash window; substituting an earlier checkpoint would exercise a
-different failure.
+L5-34 pauses a run at `before-suspension-push`, where the failed batch's whole
+suspension is decided and its one atomic push is next, and kills it there. The
+killed run leaves no suspended branch, no episodes and no mark or comment; the
+next run suspends the whole batch and posts one comment per document. Offline,
+the run that the scenario does not wait for is an engine process that reaches
+the same fakes through a local server, so the kill is a real one.
 
 ## Sync-branch reconciliation
 

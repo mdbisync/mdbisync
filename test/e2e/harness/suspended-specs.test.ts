@@ -15,21 +15,24 @@ import { colorLabel, CONFLICT_MARK } from './conflicts.ts';
 import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
 import { faultChecks, rerunCheckAsPerson, type WorkflowRun } from './check-fault.ts';
 import type { RunContext } from './context.ts';
-import { engineInputs, type EngineResult } from './engine.ts';
+import { engineInputs, startEngine, type EngineResult, type RunningEngine } from './engine.ts';
+import { type Served, serveFakes } from './fake-server.ts';
 import { SETUP_FIXTURES, type FixtureTools } from './fixtures.ts';
 import { SandboxRest } from './github.ts';
 import { runNames } from './isolation.ts';
-import { OwnershipLedger } from './ownership.ts';
+import { ownedDocuments, OwnershipLedger } from './ownership.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
-import { runStep, watchRun, STEP_ACTIONS } from './steps.ts';
+import { CHECKPOINT_TIMEOUT_MS, ENGINE_TIMEOUT_MS, runStep, watchRun, STEP_ACTIONS } from './steps.ts';
 import { BEFORE_VIEW, refreshView, takeStartView } from './subjects.ts';
 
 // L2-40 holds its pull request check with a marker on the tracked branch,
 // whose push job sleeps on the same single runner.
 for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id === 'L2-40' || /^L5-(2[3-9]|3[0-5])$/.test(s.id))) {
-  it(`${scenario.id}: live steps and assertions on fake services`, { timeout: 180_000, skip: scenario.id === 'L5-34' ? 'requires the engine checkpoint before-suspension-push' : false }, async (t) => {
+  it(`${scenario.id}: live steps and assertions on fake services`, { timeout: 180_000 }, async (t) => {
     const fixture = await createFixture();
+    const servers: Served[] = [];
+    const engines: RunningEngine[] = [];
     try {
       const names = runNames('aaaaaa');
       const count = scenario.id === 'L5-35' ? 65 : 3;
@@ -228,6 +231,55 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
           }
         });
       };
+      // A run the scenario does not wait for (`wait: false`) is an engine process that a step can kill at its paused
+      // checkpoint, as live. It reaches the same fakes through a local server, which logs its Linear requests for I9
+      // as the in-process runs' transport does.
+      const startPausedSync = async (args: Record<string, unknown>) => {
+        const checkpoint = ctx.engine.pausedAt;
+        if (checkpoint === undefined) throw new Error('an asynchronous run needs a paused checkpoint');
+        const requests: LogEntry[] = [];
+        const server = await serveFakes(async (input, init) => {
+          const startedAt = new Date();
+          const reply = await fetchImpl(input, init);
+          const url = String(input);
+          if (url.startsWith(LINEAR_API)) {
+            const oauth = /\/oauth\/(token|revoke)/.exec(url);
+            const body = oauth === null ? JSON.parse(String(init?.body ?? '{}')) as { operationName?: string; query?: string } : {};
+            requests.push({
+              operation: oauth === null ? body.operationName ?? 'unknown' : `oauth.${oauth[1]}`,
+              kind: oauth !== null ? 'oauth' : /^\s*mutation\b/.test(body.query ?? '') ? 'mutation' : 'query',
+              attempt: 1, status: reply.status, durationMs: Date.now() - startedAt.getTime(),
+              startedAt: startedAt.toISOString(), finishedAt: new Date().toISOString(), rateLimitHeaders: {},
+            });
+          }
+          return reply;
+        });
+        servers.push(server);
+        const reportFile = join(fixture.root, 'report.json');
+        const summaryFile = join(fixture.root, 'summary.md');
+        // A killed run writes no report: never let it read the one an earlier run left.
+        await rm(reportFile, { force: true });
+        await rm(summaryFile, { force: true });
+        ctx.observations.set('pause.ownedBefore', new Set(ownedDocuments(ctx.owned).keys()));
+        const runId = ctx.engine.results.length;
+        const started = startEngine({
+          names, command: 'sync', cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: 'client-id', linearClientSecret: 'client-secret', githubToken: 'app-token' },
+          reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: { ...ctx.engine.env, MDBISYNC_GITHUB_API_URL: `${server.url}/github` },
+          timeoutMs: ENGINE_TIMEOUT_MS, linearUrl: `${server.url}/linear`, mergeGraceSeconds: Number(args.mergeGraceSeconds ?? 0),
+          ...(typeof args.checkDeadlineMinutes === 'number' ? { checkDeadlineMinutes: args.checkDeadlineMinutes } : {}), signal: t.signal,
+        });
+        const running = { ...started, done: started.done.then((result) => ({ ...result, remote: { runId, runAttempt: 1, linearEngine: true, requests } }) as EngineResult) };
+        engines.push(running);
+        ctx.engine.pending = running;
+        if (!await ctx.checkpoints.waitReached(checkpoint, { timeoutMs: CHECKPOINT_TIMEOUT_MS, exited: running.done })) {
+          running.kill();
+          delete ctx.engine.pending;
+          const result = await running.done;
+          ctx.engine.results.push(result);
+          assert.fail(`the engine did not reach ${checkpoint}: ${result.stderr}`);
+        }
+        ctx.observations.set('pause.reachedAt', Date.now());
+      };
       // L2-40's marker on the tracked branch is committed before the initial sync, as live.
       if (scenario.setup.fixtures.includes('pending-check')) await SETUP_FIXTURES['pending-check']!.beforeSync!(ctx, ctx.live!, {} as FixtureTools);
       await sync('initial-sync');
@@ -245,7 +297,8 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
               await sync('sync', step.args);
               if (ctx.engine.results.at(-1)?.report?.['changed'] === false) break;
             }
-          } else await sync('sync', step.args);
+          } else if (step.args.wait === false) await startPausedSync(step.args);
+          else await sync('sync', step.args);
         } else if (step.action === 'rerun-suspended-check') {
           await rerunCheckAsPerson(ctx, new SandboxRest({ owner: 'owner', repo: 'repo' }, 'person-token', fetchImpl));
         } else if (step.kind === 'fault' && step.action === 'checks') {
@@ -266,6 +319,13 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         assert.deepEqual([...markerRuns.values()].filter((run) => run.cancelledBy === 'person').map((run) => run.branch), [suspendedBranch(resolveStateConfig(names))]);
       }
       assert.equal(await runner(), undefined, 'a pending marker job still holds the runner');
+      // L5-34: the killed run left no report of its own, and I9 counts the Linear requests it sent before the kill.
+      if (scenario.id === 'L5-34') {
+        const killed = ctx.engine.results[ctx.engine.setupRuns + 1];
+        assert.equal(killed?.signal, 'SIGKILL');
+        assert.equal(killed?.report, null);
+        assert.ok((killed?.remote?.requests.length ?? 0) > 0, 'the killed run logged no Linear request');
+      }
       // L5-35: the held document with a conflict from git ends with the conflict mark.
       if (scenario.id === 'L5-35') {
         const conflicted = world.linear.documents.find((d) => d.title.endsWith('item-03'));
@@ -279,6 +339,12 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         const outcomes = await runChecks(ctx);
         for (const outcome of outcomes) assert.equal(outcome.ok, true, JSON.stringify(outcome));
       } finally { STEP_ACTIONS['run.sync'] = original!; }
-    } finally { await fixture.cleanup(); }
+    } finally {
+      // A run a failed step left paused stops before its servers and its clone go.
+      for (const running of engines) running.kill();
+      await Promise.all(engines.map((running) => running.done));
+      for (const server of servers) await server.close();
+      await fixture.cleanup();
+    }
   });
 }

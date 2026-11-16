@@ -1,6 +1,6 @@
-// Races inside a sync run and its pull request (L4-01 to L4-09), and the run the token
-// scenario kills (L5-20), against a local git remote and
-// a fake GitHub and Linear served over HTTP. Every run is a real engine
+// Races inside a sync run and its pull request (L4-01 to L4-09), the run the token
+// scenario kills (L5-20) and the run killed before its suspension push (L5-34),
+// against a local git remote and a fake GitHub and Linear served over HTTP. Every run is a real engine
 // process in its own clone, as a workflow job is: a test pauses it at a
 // checkpoint (test hooks on), acts as a person meanwhile, then resumes it or
 // kills it; two runs can overlap. After each scenario the next runs settle
@@ -13,13 +13,12 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { type AddressInfo } from 'node:net';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, describe, it, type TestContext } from 'node:test';
 import { CheckpointControl, KILLED_RUN_CHECKPOINT } from '../../test/e2e/harness/checkpoints.ts';
+import { type Served, serveFakes } from '../../test/e2e/harness/fake-server.ts';
 import { cleanupKilledTokens } from '../../test/e2e/harness/token-cleanup.ts';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
@@ -52,7 +51,7 @@ const TREE: Record<string, string> = {
   '.pre-commit-config.yaml': PRE_COMMIT,
 };
 
-const STATE_REFS = ['refs/mdbisync/linear', 'refs/mdbisync/ids', 'refs/mdbisync/uploads', 'refs/heads/mdbisync/linear'] as const;
+const STATE_REFS = ['refs/mdbisync/linear', 'refs/mdbisync/ids', 'refs/mdbisync/uploads', 'refs/heads/mdbisync/linear', 'refs/heads/mdbisync/suspended'] as const;
 const RUN_TIMEOUT_MS = 60_000;
 /**
  * How many scenarios run side by side. Each has its own repository, fake
@@ -257,9 +256,10 @@ async function scenario(t: TestContext) {
     assert.equal(new Set(keys).size, keys.length, 'a document exists twice');
   }
 
-  /** I3: every commit the tracked branch gained is the person's or a merge of the sync branch. */
+  /** I3: every commit the tracked branch gained is the person's or a merge of the sync or suspended branch. */
   async function assertTrackedHistory(): Promise<void> {
-    const syncHeads = history.get('refs/heads/mdbisync/linear') ?? [];
+    // A released suspended batch is a sync merge as well, of the suspended branch.
+    const syncHeads = [...history.get('refs/heads/mdbisync/linear') ?? [], ...history.get('refs/heads/mdbisync/suspended') ?? []];
     const lines = (await fixture.remote.text(['rev-list', '--first-parent', '--parents', `${start}..refs/heads/main`])).split('\n').filter(Boolean);
     for (const line of lines) {
       const [commit, ...parents] = line.split(' ');
@@ -619,6 +619,62 @@ describe('sync: races inside a run', { timeout: 240_000, concurrency: CONCURRENC
     assert.equal(world.github.pullRequests.length, 1);
   });
 
+  it('L5-34: a run killed after deciding a suspension and before its push publishes none of it; the next run suspends the whole batch once', async (t) => {
+    const { world, startRun, reached, sync, rev, remoteRef, ids, documentOf, editInLinear, assertSettled } = await scenario(t);
+    // GitHub shows a pull request's head as its branch on the remote, so the run can close the set-aside normal one.
+    world.github.pullRequestHead = async (pr) => (await remoteRef(`refs/heads/${pr.head}`)) ?? '';
+    await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
+    const opened = await sync();
+    assert.equal(opened.code, 0, opened.stderr);
+    const failed = await rev('refs/heads/mdbisync/linear');
+    world.github.checks?.set(failed, [{ name: 'format', status: 'completed', conclusion: 'failure' }]);
+    const held = await documentOf(REVIEW);
+    const own = { icon: held.icon ?? null, color: held.color ?? null };
+    const comments = () => [...world.linear.comments.values()].filter((comment) => comment.documentContentId === `content-${held.id}`);
+    const episodes = async () => Object.entries(await ids()).filter(([, entry]) => 'suspended' in entry).map(([path]) => path);
+    const before = { ids: await remoteRef('refs/mdbisync/ids'), linear: await remoteRef('refs/mdbisync/linear') };
+
+    const running = await startRun('before-suspension-push');
+    await reached(running, 'before-suspension-push');
+    running.kill();
+    const killed = await running.ended;
+    assert.equal(killed.signal, 'SIGKILL');
+    assert.equal(killed.report, null);
+    // Nothing of the suspension is published: no suspended branch, no episodes, the failed batch still on the sync
+    // branch with its pull request open, and no mark or comment in Linear.
+    assert.equal(await remoteRef('refs/heads/mdbisync/suspended'), null);
+    assert.equal(await rev('refs/heads/mdbisync/linear'), failed);
+    assert.deepEqual({ ids: await remoteRef('refs/mdbisync/ids'), linear: await remoteRef('refs/mdbisync/linear') }, before);
+    assert.deepEqual(await episodes(), []);
+    assert.deepEqual(world.github.pullRequests.map((pr) => [pr.head, pr.state]), [['mdbisync/linear', 'open']]);
+    const untouched = await documentOf(REVIEW);
+    assert.deepEqual({ icon: untouched.icon ?? null, color: untouched.color ?? null }, own);
+    assert.deepEqual(comments(), []);
+
+    // The next run publishes the whole suspension and its one comment.
+    const rerun = await sync();
+    assert.equal(rerun.code, 0, rerun.stderr);
+    assert.deepEqual(rerun.report?.pullRequest?.suspended?.paths, [REVIEW]);
+    assert.equal(rerun.hooks.reached('before-suspension-push'), 1);
+    assert.notEqual(await remoteRef('refs/heads/mdbisync/suspended'), null);
+    assert.deepEqual(await episodes(), [REVIEW]);
+    assert.deepEqual(rerun.report?.pullRequest?.holdMarks?.set, [REVIEW]);
+    assert.equal(comments().length, 1);
+    // The failed batch is set aside on the sync branch in the same push and its pull request closed.
+    assert.equal(await rev('refs/heads/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+
+    // A green suspended head releases the lane; the comment stays the only one.
+    world.github.checks?.set(await rev('refs/heads/mdbisync/suspended'), [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+    const released = await sync();
+    assert.equal(released.code, 0, released.stderr);
+    assert.ok(released.report?.pullRequest?.suspended?.released, JSON.stringify(released.report?.pullRequest?.suspended));
+    await assertSettled(['Findings, edited in Linear.']);
+    assert.equal(comments().length, 1);
+    assert.equal(comments()[0]?.resolved, true);
+    assert.deepEqual(await episodes(), []);
+  });
+
   it('L5-20: on a converged setup a run killed where the token scenario kills it leaves its token, and post revokes it', async (t) => {
     const { fixture, world, server, env, startRun, reached, settle } = await scenario(t);
     // The precondition of the scenario: a sync with nothing to write still reaches the checkpoint, never before-write.
@@ -715,47 +771,7 @@ describe('sync: races inside a run', { timeout: 240_000, concurrency: CONCURRENC
 });
 
 /** Serves the fake world over HTTP for engine processes: `/github/...` and `/linear/...`. */
-interface Served {
-  url: string;
-  /** Answers a request before the fake world does, for a fault; undefined lets the world answer. */
-  fault?: (body: string) => Response | undefined;
-  /** Holds an answer before it is sent, to order two runs' requests; undefined sends it at once. */
-  hold?: (method: string, path: string, text: string) => Promise<void>;
-  close: () => Promise<void>;
-}
-
-async function serve(world: FakeWorld): Promise<Served> {
-  const answer = fakeFetch(world);
-  const served: Served = { url: '', close: async () => {} };
-  const server = createServer((request, response) => {
-    const chunks: Buffer[] = [];
-    request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', async () => {
-      const path = request.url ?? '/';
-      const target = path.startsWith('/github/') ? `${GITHUB_API}${path.slice('/github'.length)}` : `${LINEAR_API}${path.slice('/linear'.length)}`;
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(request.headers)) if (typeof value === 'string' && name !== 'host' && name !== 'content-length') headers.set(name, value);
-      const method = request.method ?? 'GET';
-      try {
-        const body = Buffer.concat(chunks).toString('utf8');
-        const reply = served.fault?.(body) ?? (await answer(target, { method, headers, ...(method === 'GET' || method === 'HEAD' ? {} : { body }) }));
-        const bytes = Buffer.from(await reply.arrayBuffer());
-        await served.hold?.(method, path, bytes.toString('utf8'));
-        response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
-        response.end(bytes);
-      } catch (error) {
-        console.error(JSON.stringify(error instanceof Error ? error.stack ?? error.message : String(error)));
-        response.writeHead(500, { 'content-type': 'text/plain' });
-        response.end('Request failed');
-      }
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
-  served.url = `http://127.0.0.1:${port}`;
-  served.close = () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
-  return served;
-}
+const serve = (world: FakeWorld): Promise<Served> => serveFakes(fakeFetch(world));
 
 it('the fake server logs request failures as a single escaped line', async (t) => {
   const server = await serve(fakeWorld());

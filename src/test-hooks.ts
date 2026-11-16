@@ -23,6 +23,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
  * Every checkpoint the engine offers, in the order of a sync run:
  *
  * - after-capture-push-before-pr: Linear's changes are on `linear`; the sync pull request is next.
+ * - before-suspension-push: a failed batch's whole suspension is decided; its one atomic push is next, so the
+ *   suspended branch, the episodes and the set-aside head are not published yet, nor any mark or comment in Linear.
  * - after-local-merge-before-record: the tracked branch is merged locally, from the commit fetched at the start.
  * - before-write: in a sync run, before the first re-read, so an edit made here is seen and its document skipped.
  *   An initial sync reads nothing again: there it marks the moment just before its first write.
@@ -32,6 +34,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
  */
 export const CHECKPOINTS = [
   'after-capture-push-before-pr',
+  'before-suspension-push',
   'after-local-merge-before-record',
   'before-write',
   'after-reread-before-write',
