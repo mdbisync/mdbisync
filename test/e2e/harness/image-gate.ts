@@ -7,6 +7,7 @@
 // result being checked. The notice line is read back from Linear's comments.
 import { line, parse, visit } from '../../../src/format/markdown.ts';
 import type { LinearClient } from '../../../src/linear/index.ts';
+import { isUpload } from '../../../src/sync/assets.ts';
 import { IMAGE_BLOCKED_COMMENT } from '../../../src/sync/marks.ts';
 
 /** An image's place among a document's images and its Markdown line, as a notice names it. */
@@ -48,28 +49,32 @@ export function imagePlace(text: string, token: string): (ImagePlace & { url: st
 }
 
 /**
- * What Linear stored where the harness wrote a relative image path: the path
- * kept, an upload of Linear's own, or something else. Only the kind is kept,
- * never the destination: an upload URL is signed.
+ * What Linear stored where the harness wrote a relative image path: that
+ * path kept as written, an upload of Linear's own, or something else (a
+ * changed or emptied path, another host). Only the kind is kept, never the
+ * destination: an upload URL is signed.
  */
 export type StoredDestination = 'relative-path' | 'upload' | 'other';
 
 /** Where the blocked image points in the text the sync read, and for an upload, the HTTP status it answers. */
 export interface ImageGateRecord {
   storedDestination: StoredDestination;
-  /** The status of the same authenticated GET the sync makes for an upload; null when the request failed. */
+  /**
+   * The HTTP status of the same authenticated GET the sync's download makes; null when the request failed.
+   * The status alone: the sync's size and type checks on the body are not applied.
+   */
   uploadStatus?: number | null;
 }
 
-export function destinationKind(url: string): StoredDestination {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    // No scheme: a path. A path from the root or a protocol-relative URL is not the relative path the harness wrote.
-    return url.startsWith('/') || url.startsWith('\\') ? 'other' : 'relative-path';
-  }
-  return parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.username === '' && parsed.password === '' && parsed.port === '' ? 'upload' : 'other';
+/** The relative image path the `linear.image-path` step writes. */
+export function writtenImagePath(token: string): string {
+  return `../images/plan-${token}.png`;
+}
+
+/** The kind of `url`, an image destination Linear stored where the harness wrote `written`. */
+export function destinationKind(url: string, written: string): StoredDestination {
+  if (isUpload(url)) return 'upload';
+  return url === written ? 'relative-path' : 'other';
 }
 
 /**
@@ -81,7 +86,7 @@ export function destinationKind(url: string): StoredDestination {
 export async function imageGateRecord(app: Pick<LinearClient, 'transport'>, text: string, token: string): Promise<ImageGateRecord | null> {
   const place = imagePlace(text, token);
   if (place === null) return null;
-  const storedDestination = destinationKind(place.url);
+  const storedDestination = destinationKind(place.url, writtenImagePath(token));
   if (storedDestination !== 'upload') return { storedDestination };
   try {
     const response = await app.transport.fetchUpload(place.url, { signal: AbortSignal.timeout(30_000) });

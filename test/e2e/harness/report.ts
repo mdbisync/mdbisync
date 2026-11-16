@@ -88,7 +88,7 @@ export function renderRunMarkdown(report: HarnessReport): string {
   }
   const gates = report.results.filter((result) => result.imageGate !== undefined);
   if (gates.length > 0) {
-    lines.push('', '## Image gate', '', 'What Linear stored for the blocked image, and for an upload, the HTTP status of the same authenticated download the sync makes.', '',
+    lines.push('', '## Image gate', '', 'What Linear stored for the blocked image (the relative path as written, an upload, or other), and for an upload, the HTTP status of the same authenticated download the sync makes (the status only).', '',
       '| Scenario | Run | Stored destination | Upload status |', '| --- | --- | --- | --- |');
     for (const result of gates) {
       const { storedDestination, uploadStatus } = result.imageGate!;

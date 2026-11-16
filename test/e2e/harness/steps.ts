@@ -35,7 +35,7 @@ import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflict
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
-import { commentsWithState, destinationKind, imageGateRecord, imagePlace, placeLabel, withoutImage } from './image-gate.ts';
+import { commentsWithState, destinationKind, imageGateRecord, imagePlace, placeLabel, withoutImage, writtenImagePath } from './image-gate.ts';
 import { initFiles } from './init-files.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -1990,13 +1990,15 @@ const LINEAR: Record<string, Executor> = {
     let written = '';
     await editorEdit(ctx, editorOf(args), path, (text, token) => {
       written = token;
-      return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n\n![plan ${token}](../images/plan-${token}.png)\n`;
+      return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n\n![plan ${token}](${writtenImagePath(token)})\n`;
     });
     const stored = ctx.observations.get('edited.linearStoredBody') as string;
     const place = imagePlace(stored, written);
     // Linear dropping the image is no answer about the sync: the scenario cannot check its gate.
     if (place === null) throw new Error('Linear stored the document without the written image');
-    ctx.observations.set('imageGate.blocked', { path, token: written, storedDestination: destinationKind(place.url) });
+    ctx.observations.set('imageGate.blocked', { path, token: written });
+    // The report's record until linear.remove-image reads the text the sync blocked; a run that stops before then keeps this one.
+    ctx.observations.set('imageGate.record', { storedDestination: destinationKind(place.url, writtenImagePath(written)) });
     ctx.observations.set('expected.blockedImageLines', [placeLabel(place)]);
   },
   // How the blocked document looks before the editor fixes it (L2-42), then the fix: the image is removed.
@@ -2004,12 +2006,14 @@ const LINEAR: Record<string, Executor> = {
     const world = live(ctx);
     const blocked = ctx.observations.get('imageGate.blocked') as { path: string; token: string } | undefined;
     if (blocked === undefined) throw new Error('linear.remove-image needs a linear.image-path step first');
-    const { id, content, icon, color } = await linearContent(ctx, blocked.path);
+    const { id, icon, color } = await linearContent(ctx, blocked.path);
     ctx.observations.set('blocked.icon', icon);
     ctx.observations.set('blocked.color', color);
     ctx.observations.set('blocked.comments', (await commentsWithState(world.app, id)).map((comment) => comment.body));
-    // The text the sync blocked: what Linear stored for the image and, for an upload, what the sync's download gets.
-    const record = await imageGateRecord(world.app, content, blocked.token);
+    // The text the sync blocked, read as the app the sync runs as: what Linear stored for the image and, for an
+    // upload, the status the sync's download gets for that URL.
+    const [seen] = await world.app.getDocuments([id], { withContent: true });
+    const record = await imageGateRecord(world.app, seen?.content ?? '', blocked.token);
     if (record !== null) ctx.observations.set('imageGate.record', record);
     await editorEdit(ctx, editorOf(args), blocked.path, (text) => {
       const fixed = withoutImage(text, blocked.token);

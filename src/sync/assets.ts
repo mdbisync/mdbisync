@@ -22,7 +22,8 @@ export class AttachmentBudgetError extends Error {
 }
 export const ATTACHMENT_LIMITS = Object.freeze({documentCount: 32, documentBytes: 32 * 1024 * 1024, runCount: 256, runBytes: 256 * 1024 * 1024});
 const LIMIT = 10 * 1024 * 1024;
-function isUpload(url: string): boolean {
+/** Whether `url` is on Linear's upload host, the only destination the sync downloads. */
+export function isUpload(url: string): boolean {
   try { const parsed = new URL(url); return parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.username === '' && parsed.password === '' && parsed.port === ''; }
   catch { return false; }
 }

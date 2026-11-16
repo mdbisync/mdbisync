@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { RunContext } from './context.ts';
 import { DOCUMENTS, runOnFakeServices } from './fake-services.ts';
-import { commentsWithState, destinationKind, imageGateRecord, imagePlace, isImageNotice, noticeImageLabels, placeLabel, withoutImage } from './image-gate.ts';
+import { commentsWithState, destinationKind, imageGateRecord, imagePlace, isImageNotice, noticeImageLabels, placeLabel, withoutImage, writtenImagePath } from './image-gate.ts';
 import { renderRunMarkdown } from './report.ts';
 import { resultOf } from './runner.ts';
 import { INIT_FILES, initArguments, initRelease, readmeBody, withoutAnnotation } from './init-files.ts';
@@ -97,11 +97,13 @@ describe('the API-path image gate', () => {
   });
 
   it('names the kind of destination Linear stored, never the destination', () => {
-    assert.equal(destinationKind('../images/plan-x1.png'), 'relative-path');
-    assert.equal(destinationKind('images/plan.png'), 'relative-path');
-    assert.equal(destinationKind('https://uploads.linear.app/c/d/plan.png?signature=s'), 'upload');
-    for (const other of ['/images/plan.png', '//uploads.linear.app/c/d/plan.png', 'http://uploads.linear.app/c/d/plan.png', 'https://uploads.linear.app:8443/c/d/plan.png', 'https://example.com/plan.png', 'data:image/png;base64,AAAA']) {
-      assert.equal(destinationKind(other), 'other', other);
+    const written = writtenImagePath('x1');
+    assert.equal(written, '../images/plan-x1.png');
+    assert.equal(destinationKind(written, written), 'relative-path');
+    assert.equal(destinationKind('https://uploads.linear.app/c/d/plan.png?signature=s', written), 'upload');
+    // A path Linear changed or emptied is not the path kept.
+    for (const other of ['images/plan-x1.png', '', '#', '/images/plan-x1.png', '//uploads.linear.app/c/d/plan.png', 'http://uploads.linear.app/c/d/plan.png', 'https://uploads.linear.app:8443/c/d/plan.png', 'https://example.com/plan.png', 'data:image/png;base64,AAAA']) {
+      assert.equal(destinationKind(other, written), 'other', other);
     }
   });
 
@@ -160,12 +162,37 @@ describe('the API-path image gate', () => {
         const notices = (await commentsWithState(ctx.live!.app, ctx.observations.get('target.id') as string)).filter((comment) => isImageNotice(comment.body));
         assert.deepEqual(notices, [], 'the uploaded image\'s document got no image notice');
         // The fake keeps the written path; the report names its kind, never the path.
-        assert.equal((ctx.observations.get('imageGate.blocked') as { storedDestination: string }).storedDestination, 'relative-path');
         assert.deepEqual(resultOf(ctx, { result: 'pass' }, { startedAt: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true } }).imageGate, { storedDestination: 'relative-path' });
       },
     });
     allHold(outcomes, [...INVARIANTS, 'tracked.uploadedImage', 'blocked.icon', 'blocked.color', 'blocked.imageLines', 'blocked.openImageNotices', 'blocked.marksRestored', 'tracked.body', 'pullRequests.lintFindings']);
     assert.equal(blockedComments.filter(isImageNotice).length, 1, 'one image notice before the fix');
+  });
+
+  it('L2-42 where Linear turns the written path into an upload that answers 404: the report names the upload and the status', { timeout: 240_000 }, async (t) => {
+    const dead = 'https://uploads.linear.app/fake-workspace/plan-dead.png';
+    let downloads = 0;
+    const outcomes = await runOnFakeServices(t, scenario('L2-42'), DOCUMENTS, {
+      intercept: (url, init) => {
+        // Linear stores an upload of its own in place of the written path, as it did in some live runs.
+        if (typeof init?.body === 'string' && /\.\.\/images\/plan-/.test(init.body)) init.body = init.body.replace(/\.\.\/images\/plan-[a-z0-9-]+\.png/g, dead);
+        if (url === dead) {
+          downloads += 1;
+          return new Response('', { status: 404 });
+        }
+        return undefined;
+      },
+      inspect: async (ctx: RunContext) => {
+        const record = ctx.observations.get('imageGate.record');
+        assert.deepEqual(record, { storedDestination: 'upload', uploadStatus: 404 });
+        const result = resultOf(ctx, { result: 'pass' }, { startedAt: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true } });
+        assert.deepEqual(result.imageGate, { storedDestination: 'upload', uploadStatus: 404 });
+        assert.doesNotMatch(JSON.stringify(result), /fake-workspace/, 'the result keeps no upload URL');
+      },
+    });
+    // The sync downloaded it too and blocked the document; the fix clears it.
+    assert.ok(downloads >= 2, 'the sync and the harness both requested the upload');
+    allHold(outcomes, ['blocked.icon', 'blocked.color', 'blocked.imageLines', 'blocked.openImageNotices', 'blocked.marksRestored']);
   });
 
   it('L2-42 without the fix: the notice stays open and the marks stay, so the clear subjects fail', { timeout: 240_000 }, async (t) => {
