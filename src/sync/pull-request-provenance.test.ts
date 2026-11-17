@@ -132,8 +132,12 @@ describe('sync: pull request head check', () => {
     assert.equal(await rev(branch), head, 'no new tree outside the document scope may be pushed');
     let pr = h.openPullRequests().find(pr => `refs/heads/${pr.head}` === branch)!;
     assert.match(pr.body, /The sync does not merge this pull request:/);
-    pr.state = 'closed';
     await editRef(branch, 'tools/example.sh', 'echo example\n');
+    await sync();
+    assert.equal((pr.body.match(/The sync does not merge this pull request:/g) ?? []).length, 1);
+    assert.match(pr.body, /tools\/example.sh/);
+    pr.state = 'closed';
+    await editRef(branch, 'tools/other.sh', 'echo other\n');
     await sync();
     pr = h.openPullRequests().find(pr => `refs/heads/${pr.head}` === branch)!;
     assert.ok(pr, 'a closed pull request is replaced for the existing unsafe branch');
