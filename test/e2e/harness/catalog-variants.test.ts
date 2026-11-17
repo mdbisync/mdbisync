@@ -232,7 +232,9 @@ describe('the API-path image gate', () => {
         for (const subject of ['observed-original', 'proposed-link', 'tracked-link', 'stored-link']) {
           const pairs = JSON.parse(readFileSync(join(ctx.runDir, `image-repair-${subject}.json`), 'utf8'));
           assert.equal(pairs.length, subject === 'observed-original' ? 2 : 1);
-          assert.equal(pairs.every((pair: { sameMarkdown: boolean }) => pair.sameMarkdown), subject !== 'stored-link');
+          if (subject === 'stored-link' || subject === 'proposed-link') {
+            assert.equal(pairs.every((pair: { sameMarkdown: boolean }) => pair.sameMarkdown), subject === 'proposed-link', subject);
+          }
         }
         const stored = JSON.parse(readFileSync(join(ctx.runDir, 'image-repair-stored-link.json'), 'utf8'))[0];
         assert.match(stored.expected, /\[plan /);
@@ -253,6 +255,12 @@ describe('the API-path image gate', () => {
         const proposal = ctx.observations.get('imageRepair.proposal') as { proposed: string; description: string };
         ctx.observations.set('imageRepair.proposal', {...proposal, proposed: source.body, description: ''});
       } },
+      inspect: async (ctx) => {
+        const pair = JSON.parse(readFileSync(join(ctx.runDir, 'image-repair-proposed-link.json'), 'utf8'))[0];
+        assert.equal(pair.sameMarkdown, false);
+        assert.match(pair.actual, /!\[plan /);
+        assert.doesNotMatch(pair.expected, /!\[plan /);
+      },
     });
     const outcome = (name: string) => outcomes.find((candidate) => candidate.name === name);
     assert.equal(outcome('imageRepair.proposedLink')?.ok, false);

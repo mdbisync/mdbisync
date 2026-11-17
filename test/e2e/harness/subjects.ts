@@ -1882,13 +1882,13 @@ export const SUBJECTS: Record<string, Compute> = {
     return imageRepairComparison(env.ctx.runDir, 'observed-original', [
       { expected: source.body, actual: proposal.content },
       { expected: source.body, actual: proposal.recorded },
-    ]);
+    ], env.ctx.log);
   },
   'imageRepair.proposedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
     return imageRepairComparison(env.ctx.runDir, 'proposed-link', [
       { expected: source.expected, actual: (observed(env.ctx, 'imageRepair.proposal') as ImageRepairProposal).proposed },
-    ]);
+    ], env.ctx.log);
   },
   'imageRepair.listedInPr': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
@@ -1902,13 +1902,13 @@ export const SUBJECTS: Record<string, Compute> = {
   'imageRepair.trackedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
     const content = fileBody(await env.view(), source.path);
-    return imageRepairComparison(env.ctx.runDir, 'tracked-link', [{ expected: source.expected, actual: content }]);
+    return imageRepairComparison(env.ctx.runDir, 'tracked-link', [{ expected: source.expected, actual: content }], env.ctx.log);
   },
   'imageRepair.storedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
     const view = await env.view();
     const content = view.documents.get(view.ids.get(source.path)?.id ?? '')?.content;
-    return imageRepairComparison(env.ctx.runDir, 'stored-link', [{ expected: source.expected, actual: content }]);
+    return imageRepairComparison(env.ctx.runDir, 'stored-link', [{ expected: source.expected, actual: content }], env.ctx.log);
   },
   'imageRepair.marksUnchanged': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;

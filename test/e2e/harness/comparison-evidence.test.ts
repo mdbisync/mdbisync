@@ -19,6 +19,24 @@ it('keeps complete link syntax and long differing lines without retaining signed
   assert.equal(difference, `line 2: file ${JSON.stringify(redactUploadUrls(plain))}, document ${JSON.stringify(redactUploadUrls(angle))}`);
   assert.doesNotMatch(difference, /private-value|example|…/);
   assert.equal(redactUploadUrls('![plan](../images/plan.png)'), '![plan](../images/plan.png)');
+  for (const links of [`[a](${url})[b](${url}2)`, `[![plan](${url})](${url}2)`]) {
+    const redactedLinks = redactUploadUrls(links);
+    assert.doesNotMatch(redactedLinks, /signature|private-value|example/);
+    assert.equal((redactedLinks.match(/redacted-/g) ?? []).length, 2);
+  }
+  assert.doesNotMatch(redactUploadUrls('https://user:password@example.com/file?token=other-secret'), /user:password|other-secret/);
+  for (const destination of [
+    '<https://uploads.linear.app/example/plan).png?signature=private-value>',
+    "<https://uploads.linear.app/example/plan's.png?signature=private-value>",
+    '<https://uploads.linear.app/example/plan image.png?signature=private-value>',
+    'https://uploads.linear.app/example/plan\\).png?signature=private-value',
+    "https://uploads.linear.app/example/plan's.png?signature=private-value",
+  ]) {
+    const redactedLink = redactUploadUrls(`[plan](${destination} "Title")`);
+    assert.doesNotMatch(redactedLink, /signature|private-value|example|plan image/);
+    assert.match(redactedLink, / "Title"\)$/);
+    assert.equal(redactedLink.includes('(<'), destination.startsWith('<'));
+  }
 });
 
 it('records every original comparison, including Markdown-equivalent spellings and missing content', (t) => {
@@ -35,4 +53,8 @@ it('records every original comparison, including Markdown-equivalent spellings a
   ]), false);
   assert.deepEqual(JSON.parse(readFileSync(join(dir, 'image-repair-observed-original.json'), 'utf8')).map((pair: { sameMarkdown: boolean }) => pair.sameMarkdown), [false, false]);
   assert.doesNotMatch(readFileSync(join(dir, 'image-repair-observed-original.json'), 'utf8'), /private-value|example/);
+  const warnings: string[] = [];
+  assert.equal(imageRepairComparison(join(dir, 'missing'), 'stored-link', [{ expected, actual }], message => warnings.push(message)), true);
+  assert.equal(imageRepairComparison(join(dir, 'missing'), 'stored-link', [{ expected, actual: null }], message => warnings.push(message)), false);
+  assert.deepEqual(warnings, Array(2).fill('image-repair-stored-link.json not written: ENOENT'));
 });
