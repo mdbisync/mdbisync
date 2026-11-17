@@ -14,7 +14,7 @@ import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, rea
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure } from '../pull-request/index.ts';
-import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict } from './deadline.ts';
+import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict, type RequiredCheck } from './deadline.ts';
 
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
 export const SET_ASIDE_MESSAGE = 'Set aside suspended changes';
@@ -66,7 +66,7 @@ export interface LaneOptions {
   mergeGraceSeconds?: number | undefined;
   checkDeadlineMinutes?: number | undefined;
   /** Check names every head must pass before it merges, besides those registered on it. */
-  requiredChecks?: readonly string[] | undefined;
+  requiredChecks?: readonly RequiredCheck[] | undefined;
   /** A head with no checks at all may merge. */
   mergeWithoutChecks?: boolean | undefined;
 }
@@ -294,7 +294,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
   // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`). The episodes record
   // the last head the sync pushed on this branch, also a single-parent commit (a Linear intake): the history stops there.
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous], base: tracked } : { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
   // As in the normal lane: whoever added commits to this branch, the sync merges only synchronized documents and their
   // assets. Read before the checks, so a head the sync will not merge neither holds the normal lane nor marks documents.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
@@ -420,7 +420,7 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   await push(context, options, ids, head, previous, { expected: failed, next: normal });
   const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
   // The new head joins the failed batch and the earlier suspended head: it expects what both registered.
-  const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous === null ? [failed] : [previous, failed] });
+  const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous === null ? [failed] : [previous, failed], base: tracked });
   // A batch joining a suspended head that holds someone else's non-document change keeps it waiting for a person.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
   const held = unverified.length === 0 ? '' : `${unverifiedNote(unverified)}\n\n`;

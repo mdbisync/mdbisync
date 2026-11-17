@@ -58,7 +58,7 @@ inputs:
     required: false
     default: "60"
   required-checks:
-    description: "Check names every sync pull request head must pass before the sync merges it, one per line. An absent one keeps the head waiting; past the check deadline the run reports checks-missing. Empty requires only the checks registered on the head and on its earlier heads."
+    description: "Checks every sync pull request head must pass before the sync merges it, one per line, each with the publisher it must come from: `<name> @ actions:<workflow file>`, `<name> @ app:<App id>` or `<name> @ status:<account id>`. A check from another publisher does not count. An absent one keeps the head waiting; past the check deadline the run reports checks-missing. Empty requires only the checks registered on the head and on its earlier heads."
     required: false
     default: ""
   merge-without-checks:

@@ -3,17 +3,20 @@ import { describe, it } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FAKE_ACTIONS_APP_ID, FAKE_CI_ACCOUNT_ID, GITHUB_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { FAKE_ACTIONS_APP_ID, FAKE_CI_ACCOUNT_ID, type FakeCheck, GITHUB_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { PullRequestError } from '../pull-request/github.ts';
 import { readChecks } from '../pull-request/index.ts';
 import { Git } from '../state/index.ts';
-import { checkExpectation, checksMissing, expectedChecks, headNote, headSince, mainVerdict, pastDeadline, readRedMainNote, redMainNote } from './deadline.ts';
+import { checkExpectation, checksMissing, type EarlierHeads, expectedChecks, type RequiredCheck, headNote, headSince, mainVerdict, pastDeadline, readRedMainNote, redMainNote } from './deadline.ts';
 
 const HEAD = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
 const ACTIONS = { kind: 'run', id: FAKE_ACTIONS_APP_ID } as const;
 const RUN = { publisher: ACTIONS, workflow: { path: '.github/workflows/ci.yml', revision: 'b'.repeat(40), event: 'pull_request' as const } };
 const CI_ACCOUNT = { kind: 'status', id: FAKE_CI_ACCOUNT_ID } as const;
+/** Configured checks: a commit status of the repository's CI account. */
+const TESTS = { name: 'tests', publisher: CI_ACCOUNT };
+const DEPLOY = { name: 'deploy', publisher: CI_ACCOUNT };
 
 describe('the checks a head must pass', () => {
   const since = new Date('2026-11-10T11:00:00.000Z');
@@ -37,21 +40,21 @@ describe('the checks a head must pass', () => {
   });
 
   it('expects the configured checks, the noted ones, and those of the noted head once the branch moved', async () => {
-    assert.deepEqual(await expectedChecks(github, HEAD, ['tests'], { body: undefined, ...alone }), { checks: [{ name: 'tests' }], observed: [], complete: true });
+    assert.deepEqual(await expectedChecks(github, HEAD, [TESTS], { body: undefined, ...alone }), { checks: [TESTS], observed: [], complete: true });
     const build = { name: 'ci / build', publisher: ACTIONS };
     const noted = `Text\n${headNote(OTHER, since, [build])}\n`;
     // The same head: its own registered checks count anyway, so only the note's checks are added, with their publishers.
     assert.deepEqual(await expectedChecks(github, OTHER, [], { body: noted, ...alone }), { checks: [build], observed: [build], complete: true });
     // A moved branch: every check registered on the noted head, whatever its state, is expected on the new head from
-    // the publisher that registered it there. The configured name is expected from any publisher but never noted, so
-    // removing it from the configuration ends it.
+    // the publisher that registered it there. The configured check is expected from its configured publisher but never
+    // noted, so removing it from the configuration ends it.
     const registered = [build, { name: 'lint', publisher: CI_ACCOUNT }, { name: 'pre-commit', ...RUN }, { name: 'tests', ...RUN }];
-    assert.deepEqual(await expectedChecks(github, HEAD, ['deploy'], { body: noted, ...alone }), { checks: [build, { name: 'deploy' }, ...registered.slice(1)], observed: registered, complete: true });
+    assert.deepEqual(await expectedChecks(github, HEAD, [DEPLOY], { body: noted, ...alone }), { checks: [build, DEPLOY, ...registered.slice(1)], observed: registered, complete: true });
   });
 
   it('expects a check whose publisher GitHub did not name from that unknown publisher, never from anyone', async () => {
     const unnamed = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) => String(input).includes('/statuses?') ? Response.json([]) : github.fetch(input, init) };
-    const { checks } = await expectedChecks(unnamed, HEAD, [], { pushedFrom: [OTHER] });
+    const { checks } = await expectedChecks(unnamed, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) });
     assert.deepEqual(checks.find(({ name }) => name === 'lint'), { name: 'lint', publisher: { kind: 'status', id: 0 } });
     assert.match(headNote(HEAD, since, checks), /checks=lint@status:0,/);
   });
@@ -61,9 +64,9 @@ describe('the checks a head must pass', () => {
       { name: 'tests', status: 'completed', conclusion: 'success' },
       { name: 'tests', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 },
     ]]]) } }) };
-    assert.deepEqual((await expectedChecks(both, HEAD, ['tests'], { pushedFrom: [OTHER] })).checks, [
-      { name: 'tests' },
+    assert.deepEqual((await expectedChecks(both, HEAD, [TESTS], { pushedFrom: [OTHER], base: 'f'.repeat(40) })).checks, [
       { name: 'tests', ...RUN },
+      TESTS,
       { name: 'tests', publisher: { kind: 'status', id: 666 } },
     ]);
   });
@@ -123,8 +126,8 @@ describe('the checks a head must pass', () => {
 
   it('expects of a head the sync pushed what the commits it pushed on registered, not the older note', async () => {
     const registered = [{ name: 'lint', publisher: CI_ACCOUNT }, { name: 'pre-commit', ...RUN }, { name: 'tests', ...RUN }];
-    assert.deepEqual(await expectedChecks(github, HEAD, [], { pushedFrom: [OTHER] }), { checks: registered, observed: registered, complete: true });
-    assert.deepEqual(await expectedChecks(github, HEAD, ['deploy'], { pushedFrom: [] }), { checks: [{ name: 'deploy' }], observed: [], complete: true });
+    assert.deepEqual(await expectedChecks(github, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) }), { checks: registered, observed: registered, complete: true });
+    assert.deepEqual(await expectedChecks(github, HEAD, [DEPLOY], { pushedFrom: [], base: 'f'.repeat(40) }), { checks: [DEPLOY], observed: [], complete: true });
   });
 
   it('rebinds workflow revisions only on heads authenticated as the sync own push', async () => {
@@ -136,7 +139,7 @@ describe('the checks a head must pass', () => {
       } }]],
     ]);
     const repo = { ...github, fetch: fakeFetch(local) };
-    const fresh = await expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER] });
+    const fresh = await expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) });
     assert.equal(fresh.checks[0]?.workflow?.revision, 'c'.repeat(40));
     const child = await expectedChecks(repo, HEAD, [], { body: undefined,
       git: { text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40), pushed: OTHER });
@@ -166,7 +169,7 @@ describe('the checks a head must pass', () => {
     // The sync's own push binds its own revision, as for a known identity, also in a later run on the same head,
     // whatever the base holds.
     for (const bound of [world('c'.repeat(40)), world('c'.repeat(40), 'e'.repeat(40))]) {
-      const fresh = await expectedChecks(bound, HEAD, [], { pushedFrom: [OTHER] });
+      const fresh = await expectedChecks(bound, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) });
       assert.deepEqual(fresh.checks, at('c'.repeat(40)), 'the sync own push expected an unverifiable check');
       assert.equal((await readChecks(bound, HEAD, checkExpectation({}, fresh.checks))).state, 'passed');
       const own = await expectedChecks(bound, HEAD, [], { body: headNote(HEAD, since, fresh.observed), ...history, pushed: HEAD });
@@ -188,6 +191,46 @@ describe('the checks a head must pass', () => {
     assert.equal((await readChecks(based, HEAD, checkExpectation({}, held.checks))).state, 'pending', 'the earlier head\'s blob stood in against the base');
   });
 
+  // A new branch has no earlier heads: a configured check is met only by its configured publisher, never by its name.
+  it('meets a configured check only from its configured publisher', async () => {
+    const path = '.github/workflows/ci.yml';
+    const BASE = '9'.repeat(40);
+    const state = async (registered: FakeCheck[], required: RequiredCheck[], baseRevision = 'c'.repeat(40)) => {
+      const local = fakeWorld();
+      local.github.checks = new Map([[HEAD, registered], [BASE, [{ name: 'other', status: 'completed', conclusion: 'success', workflow: { path, revision: baseRevision } }]]]);
+      const repo = { ...github, fetch: fakeFetch(local) };
+      // A head the sync pushes in this run, and one it pushed in an earlier run, with no earlier heads below either.
+      const earlier: EarlierHeads[] = [{ pushedFrom: [], base: BASE }, { body: undefined, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: BASE, pushed: HEAD }];
+      const [now, later] = await Promise.all(earlier.map(async (heads) => (await readChecks(repo, HEAD, checkExpectation({}, (await expectedChecks(repo, HEAD, required, heads)).checks))).state));
+      assert.equal(now, later, 'a new head and the same head in a later run disagreed');
+      return now;
+    };
+    const passed = { name: 'tests', status: 'completed', conclusion: 'success' } as const;
+    const job = (revision: string): FakeCheck => ({ ...passed, workflow: { path, revision } });
+    const actions = [{ name: 'tests', workflow: path }];
+    assert.equal(await state([job('c'.repeat(40))], actions), 'passed');
+    // A workflow file changed on the branch alone, a tracked branch without the file, another file, a synthetic check
+    // run of the Actions App, a commit status: none is the configured job.
+    assert.equal(await state([job('d'.repeat(40))], actions), 'pending', 'a workflow changed on the branch met its own check');
+    assert.equal(await state([job('c'.repeat(40))], [{ name: 'tests', workflow: '.github/workflows/other.yml' }]), 'pending');
+    assert.equal(await state([{ ...passed, workflow: false }], actions), 'pending');
+    assert.equal(await state([{ ...passed, commitStatus: true }], actions), 'pending');
+    // Another App's check run, or a status from another account.
+    const app = [{ name: 'tests', publisher: { kind: 'run' as const, id: 77 } }];
+    assert.equal(await state([{ ...passed, app: 77 }], app), 'passed');
+    assert.equal(await state([{ ...passed, app: 78 }], app), 'pending');
+    assert.equal(await state([{ ...passed, commitStatus: true, creator: 77 }], app), 'pending');
+    // The Actions App's id never vouches for a check run without its workflow: any workflow token may create one.
+    const actionsApp = [{ name: 'tests', publisher: ACTIONS }];
+    assert.equal(await state([job('c'.repeat(40))], actionsApp), 'pending');
+    assert.equal(await state([{ ...passed, workflow: false }], actionsApp), 'pending');
+    const status = [{ name: 'tests', publisher: CI_ACCOUNT }];
+    assert.equal(await state([{ ...passed, commitStatus: true }], status), 'passed');
+    assert.equal(await state([{ ...passed, commitStatus: true, creator: 666 }], status), 'pending');
+    // A later status from another account replaces the configured account's failure in the combined status: still unmet.
+    assert.equal(await state([{ ...passed, commitStatus: true, creator: 666, history: [{ state: 'failure', creator: FAKE_CI_ACCOUNT_ID }] }], status), 'pending');
+  });
+
   it('ignores a noted head GitHub does not know, a name that does not decode and a malformed publisher', async () => {
     const unknown = 'c'.repeat(40);
     const failing = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) => String(input).includes(unknown) ? new Response('{"message":"No commit found"}', { status: 422 }) : github.fetch(input, init) };
@@ -200,7 +243,7 @@ describe('the checks a head must pass', () => {
       for (const status of [404, 422]) {
         const repo = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) =>
           String(input).includes(endpoint) ? Response.json({}, { status }) : github.fetch(input, init) };
-        await assert.rejects(expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER] }),
+        await assert.rejects(expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) }),
           (error: unknown) => error instanceof PullRequestError && error.status === status);
       }
     }

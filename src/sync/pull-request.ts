@@ -65,7 +65,7 @@ import {
   commitTree,
 } from '../state/index.ts';
 import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_MESSAGE_LENGTH, linkTarget, plainLine } from './hold.ts';
-import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold } from './deadline.ts';
+import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
 import { LaneMoved, LaneConflict, commitLaneIds, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
@@ -97,7 +97,7 @@ export interface PullRequestOptions {
   /** Minutes a head's checks may stay pending before its batch is suspended; `DEFAULT_CHECK_DEADLINE_MINUTES` when absent. */
   checkDeadlineMinutes?: number | undefined;
   /** Check names every head must pass before it merges, besides those registered on it. */
-  requiredChecks?: readonly string[] | undefined;
+  requiredChecks?: readonly RequiredCheck[] | undefined;
   /** A head with no checks at all may merge; otherwise it waits for one, and past the deadline it is a setup error. */
   mergeWithoutChecks?: boolean | undefined;
 }
@@ -376,7 +376,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const since = headSince(open?.body, head, new Date());
     // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
     // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
-    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync] } : { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) });
+    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], base: tracked } : { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) });
     const stillHeld = hold === null ? null : { ...hold, head };
     // Whoever added commits to the sync branch, the sync merges only changes to synchronized documents and their assets.
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);

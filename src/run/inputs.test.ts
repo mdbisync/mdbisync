@@ -79,11 +79,21 @@ it('validates the check deadline from 10 to 1440 minutes, and leaves it to the d
   assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r' }), {}).checkDeadlineMinutes, undefined);
 });
 
-it('reads required checks one per line, commas kept in a name, and merging without checks as true or false', () => {
+it('reads required checks one per line with their publishers, commas kept in a name, and merging without checks as true or false', () => {
   const read = (extra: Record<string, string>) => readInputs(given({ ...REQUIRED, repository: 'o/r', ...extra }), {});
-  assert.deepEqual(read({ 'required-checks': 'tests\r\ntest (ubuntu-latest, 24)\nlint\n\ntests' }).requiredChecks, ['tests', 'test (ubuntu-latest, 24)', 'lint']);
+  const list = 'tests @ actions:.github/workflows/ci.yml\r\ntest (ubuntu-latest, 24) @ actions:.github/workflows/matrix.yaml\nlint@app:77\n\na @ b @ status:2001\ntests @ actions:.github/workflows/ci.yml';
+  assert.deepEqual(read({ 'required-checks': list }).requiredChecks, [
+    { name: 'tests', workflow: '.github/workflows/ci.yml' },
+    { name: 'test (ubuntu-latest, 24)', workflow: '.github/workflows/matrix.yaml' },
+    { name: 'lint', publisher: { kind: 'run', id: 77 } },
+    { name: 'a @ b', publisher: { kind: 'status', id: 2001 } },
+  ]);
   assert.equal(read({}).requiredChecks, undefined);
-  for (const bad of ['tests\u0007', 'x'.repeat(256)]) assert.throws(() => read({ 'required-checks': bad }), /required-checks must list check names/);
+  // A name alone is refused: any account that may write commit statuses could meet it.
+  for (const bad of ['tests', 'tests @', 'tests @ app:0', 'tests @ app:01', 'tests @ status:x', 'tests @ user:1', '@ app:1', 'tests @ actions:ci.yml',
+    'tests @ actions:.github/workflows/sub/ci.yml', 'tests @ actions:.github/workflows/ci.json', 'tests\u0007 @ app:1', `${'x'.repeat(256)} @ app:1`]) {
+    assert.throws(() => read({ 'required-checks': bad }), (error) => error instanceof InputError && error.message.includes('must name each check with the publisher') && error.message.endsWith(bad.trim()), bad);
+  }
   assert.equal(read({ 'merge-without-checks': 'true' }).mergeWithoutChecks, true);
   assert.equal(read({ 'merge-without-checks': 'false' }).mergeWithoutChecks, false);
   assert.equal(read({}).mergeWithoutChecks, undefined);

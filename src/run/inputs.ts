@@ -5,7 +5,7 @@
 import { DIRECTIONS, type Direction } from '../initial-sync/summary.ts';
 import { type StateConfig, StateConfigError, resolveStateConfig } from '../state/index.ts';
 import { message } from '../messages.ts';
-import { MAX_CHECK_DEADLINE_MINUTES, MIN_CHECK_DEADLINE_MINUTES } from '../sync/deadline.ts';
+import { MAX_CHECK_DEADLINE_MINUTES, MIN_CHECK_DEADLINE_MINUTES, type RequiredCheck, requiredCheck } from '../sync/deadline.ts';
 
 export const INPUT_NAMES = [
   'linear-client-id',
@@ -43,8 +43,8 @@ export interface RunInputs {
   mergeGraceSeconds?: number;
   /** Minutes a head's checks may stay pending before its batch is suspended. */
   checkDeadlineMinutes?: number;
-  /** Check names every sync pull request head must pass, besides those registered on it. */
-  requiredChecks?: string[];
+  /** Checks every sync pull request head must pass, besides those registered on it, each from its configured publisher. */
+  requiredChecks?: RequiredCheck[];
   /** A sync pull request head with no checks at all may merge. */
   mergeWithoutChecks?: boolean;
 }
@@ -127,7 +127,7 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
     inputs.checkDeadlineMinutes = Number(deadline);
   }
   const requiredChecks = value('required-checks');
-  if (requiredChecks !== '') inputs.requiredChecks = checkNames(requiredChecks);
+  if (requiredChecks !== '') inputs.requiredChecks = checkList(requiredChecks);
   const unchecked = value('merge-without-checks');
   if (unchecked !== '') {
     if (unchecked !== 'true' && unchecked !== 'false') throw new InputError(message('inputs.merge-without-checks'));
@@ -139,12 +139,18 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
 /** The longest check name GitHub takes for a check run or a status context. */
 const CHECK_NAME_LENGTH = 255;
 
-/** Check names, one per line (a matrix job's name holds commas); each once, in the order given. */
-function checkNames(list: string): string[] {
-  const names = [...new Set(list.split(/\r?\n/).map((name) => name.trim()).filter(Boolean))];
-  // eslint-disable-next-line no-control-regex
-  if (names.some((name) => name.length > CHECK_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(name))) throw new InputError(message('inputs.required-checks'));
-  return names;
+/**
+ * Checks, one per line (a matrix job's name holds commas), each with the publisher it must come from; each once, in
+ * the order given. A name alone is refused: anyone who may write commit statuses can post one under any name.
+ */
+function checkList(list: string): RequiredCheck[] {
+  const lines = [...new Set(list.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))];
+  return lines.map((line) => {
+    const check = requiredCheck(line);
+    // eslint-disable-next-line no-control-regex
+    if (check === undefined || check.name.length > CHECK_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(check.name)) throw new InputError(message('inputs.required-checks', { line }));
+    return check;
+  });
 }
 
 function stateConfig(trackedBranch: string, syncBranch: string, refPrefix: string): StateConfig {

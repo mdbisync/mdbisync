@@ -53,7 +53,7 @@ export interface CheckPublisher {
 /** A check a commit must pass: its name and, when known, the publisher it must come from. */
 export interface ExpectedCheck {
   name: string;
-  /** Absent for a configured name: a check of that name from any publisher counts. */
+  /** Absent with a `workflow` (an Actions job); absent with neither, a check of that name from any publisher counts. */
   publisher?: CheckPublisher;
   /** Actions checks also identify the workflow that ran; null means unverifiable. */
   workflow?: WorkflowIdentity | null;
@@ -225,8 +225,13 @@ function commitCheck(name: string, outcome: CommitCheck['outcome'], from: CheckP
   return check;
 }
 
-/** Whether a check comes from the publisher an expected check names; any does when it names none, none when it is unknown. */
+/**
+ * Whether a check comes from the publisher an expected check names; any does when it names neither a publisher nor a
+ * workflow, none when it is unknown. An Actions check run meets only an expectation of its workflow: any workflow's
+ * token may create check runs of the Actions App under any name.
+ */
 function publishedBy(check: CommitCheck, expected: ExpectedCheck): boolean {
+  if (expected.workflow === undefined && check.workflow !== undefined) return false;
   if (expected.workflow !== undefined) {
     const actual = check.workflow;
     const wanted = expected.workflow;

@@ -304,8 +304,8 @@ protection's list needs an App permission the sync does not ask for
 (only rulesets are readable without it), and a required check that never
 registers is a repository setting, not a fault of the batch's documents.
 The sync expects, besides the checks registered on a head, every check
-registered on the pull request's earlier heads and every name in
-`required-checks`, and it merges no head with no checks at all unless
+registered on the pull request's earlier heads and every check in
+`required-checks` from its configured publisher, and it merges no head with no checks at all unless
 `merge-without-checks` is `true`. A check expected from an earlier head
 counts only from the publisher that registered it there (the same GitHub
 App for a check run, the same account for a commit status), so a

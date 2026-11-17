@@ -12,7 +12,7 @@
 
 import { CommitNotFoundError } from '../pull-request/merge.ts';
 import { type MovedJobSource, type WorkflowIdentity, workflowRevision } from '../pull-request/actions.ts';
-import { type CheckExpectation, type CheckFailure, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, checkState, readCommitChecks } from '../pull-request/index.ts';
+import { type CheckExpectation, type CheckFailure, type CheckPublisher, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, checkState, readCommitChecks } from '../pull-request/index.ts';
 import { type Git, type Oid } from '../state/index.ts';
 
 export const DEFAULT_CHECK_DEADLINE_MINUTES = 60;
@@ -41,13 +41,33 @@ function notedCheck(check: ExpectedCheck): string {
   return check.workflow === undefined ? from : `${from}~${encodeURIComponent(JSON.stringify(check.workflow))}`;
 }
 
+/**
+ * A check named in `required-checks`, with the publisher it must come from:
+ * a job of a workflow file in `.github/workflows/`, a check run of a GitHub
+ * App, or a commit status from an account. Anyone who may write commit
+ * statuses can post one under any name, so a name alone is never enough.
+ */
+export type RequiredCheck = { name: string; publisher: CheckPublisher } | { name: string; workflow: string };
+
+const REQUIRED_CHECK = /^(.+?)\s*@\s*(?:(app|status):([1-9][0-9]{0,14})|actions:(\.github\/workflows\/[^/\\\x00-\x1f]+\.ya?ml))$/;
+
+/** One line of `required-checks` (`<name> @ actions:<workflow file>`, `@ app:<App id>` or `@ status:<account id>`); undefined for anything else. */
+export function requiredCheck(line: string): RequiredCheck | undefined {
+  const match = REQUIRED_CHECK.exec(line.trim());
+  if (match === null) return undefined;
+  const name = (match[1] as string).trim();
+  if (match[4] !== undefined) return { name, workflow: match[4] };
+  const id = Number(match[3]);
+  return Number.isSafeInteger(id) ? { name, publisher: { kind: match[2] === 'app' ? 'run' : 'status', id } } : undefined;
+}
+
 /** The checks a pull request's head must pass beyond those registered on it. */
 export interface ExpectedChecks {
   /** Every check the head must pass: those observed and the configured ones; sorted, each once. */
   checks: ExpectedCheck[];
   /**
    * The checks registered on earlier heads, with their publishers, which the
-   * description notes. Never the configured ones: a name removed from
+   * description notes. Never the configured ones: a check removed from
    * `required-checks` stops counting.
    */
   observed: ExpectedCheck[];
@@ -61,9 +81,9 @@ export interface ExpectedChecks {
 /**
  * Where a head's earlier checks are read: the description's note together with the branch's own history above `base`
  * (the tracked branch) down to `pushed`, the head the sync's own state records it last pushed on this branch; or the
- * commits the sync pushed it on this run.
+ * commits the sync pushed it on this run. `base` is also where a configured Actions check's workflow file is read.
  */
-export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined } | { pushedFrom: readonly Oid[] };
+export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined } | { pushedFrom: readonly Oid[]; base: Oid };
 
 /** How many commits below a head are searched for a commit the sync made. */
 const EARLIER_HEAD_DEPTH = 50;
@@ -84,7 +104,7 @@ const EARLIER_HEAD_DEPTH = 50;
  *   repository's whole CI, so a check that no longer runs (a renamed job)
  *   stays expected for one more push of the sync at most, never for good.
  */
-export async function expectedChecks(github: GitHubRepository, head: Oid, required: readonly string[], earlier: EarlierHeads): Promise<ExpectedChecks> {
+export async function expectedChecks(github: GitHubRepository, head: Oid, required: readonly RequiredCheck[], earlier: EarlierHeads): Promise<ExpectedChecks> {
   const observed: ExpectedCheck[] = [];
   let complete = true;
   if ('pushedFrom' in earlier) {
@@ -120,7 +140,8 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
   // update from the tracked branch. Child heads never rebind this evidence.
   // Such a head expects its own revision whatever the earlier one was, so a
   // job whose pull request moved on from its head binds by its file alone.
-  if ('pushedFrom' in earlier || (complete && earlier.pushed === head)) {
+  const own = 'pushedFrom' in earlier || (complete && earlier.pushed === head);
+  if (own) {
     const revisions = new Map<string, string | undefined>();
     // Only verified identities of the head: a stand-in is no evidence of what ran.
     const current = (await registeredChecks(github, head)).filter((entry) => entry.moved === undefined);
@@ -139,7 +160,21 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
   }
   // A note for unlisted checks ("3 more check runs") is no check name: such a head was never read as passed.
   const listed = distinct(observed.filter(({ name }) => !/^[0-9]+ more (check runs|commit statuses)$/.test(name)).map(({ moved: _moved, ...check }) => check));
-  return { checks: distinct([...listed, ...required.map((name) => ({ name }))]), observed: listed, complete };
+  // A configured Actions check binds to its workflow file as the tracked branch holds it: a file changed on the sync
+  // branch alone (by anyone who may push there) never vouches for its own jobs. A pull request job runs the file as
+  // the merge with the tracked branch holds it, which is the tracked branch's own blob unless the branch changed it.
+  const configured: ExpectedCheck[] = [];
+  const blobs = new Map<string, string | undefined>();
+  for (const check of required) {
+    if ('publisher' in check) {
+      configured.push({ name: check.name, publisher: check.publisher });
+      continue;
+    }
+    if (!blobs.has(check.workflow)) blobs.set(check.workflow, await workflowRevision(github, earlier.base, check.workflow));
+    const revision = blobs.get(check.workflow);
+    configured.push({ name: check.name, workflow: revision === undefined ? null : { path: check.workflow, event: 'push', revision } });
+  }
+  return { checks: distinct([...listed, ...configured]), observed: listed, complete };
 }
 
 /**

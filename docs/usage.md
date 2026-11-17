@@ -270,8 +270,8 @@ remain after release; its presence alone does not mean a batch is on hold.
   first.
 - Besides the checks registered on a head, the sync expects every check
   that was registered on the pull request's earlier heads, and every name in
-  `required-checks`. A head that lacks one of them waits for it, as for a
-  pending check. A commit pushed with a workflow's own `GITHUB_TOKEN` (a
+  `required-checks`, each from its configured publisher. A head that
+  lacks one of them waits for it, as for a pending check. A commit pushed with a workflow's own `GITHUB_TOKEN` (a
   formatter's fix, say) starts no other workflow, so without this rule it
   would carry only that workflow's check and merge past the others. A
   check expected from an earlier head counts only from the publisher that
@@ -310,8 +310,10 @@ remain after release; its presence alone does not mean a batch is on hold.
   pusher's token, say) never meets an expectation from the previous
   account, and a check whose publisher GitHub does not name (a deleted
   account) is never met either: both end in `checks-missing` until the
-  sync pushes the branch again. A name in `required-checks`
-  that never registered on an earlier head counts from any publisher. The
+  sync pushes the branch again. A check in `required-checks`
+  counts only from the publisher configured for it ([required
+  checks](#required-checks)), also on a new branch with no earlier
+  heads. The
   expected checks, publishers and workflow identities are kept in a hidden
   HTML note in the pull request description. A person can edit that note, so it only
   adds checks: whatever it says, the sync also reads the checks registered
@@ -333,7 +335,7 @@ remain after release; its presence alone does not mean a batch is on hold.
   A head the sync pushes itself starts the repository's whole CI, so it
   expects only what the head it was pushed on registered, besides
   `required-checks`: a check that no longer runs (a renamed job) stays
-  expected for at most one more push of the sync. A name removed from
+  expected for at most one more push of the sync. A check removed from
   `required-checks` stops counting at once.
   Checks still running at the end of this grace period leave the merge to a later run.
   Grace periods of 15 seconds or less defer merging because they leave no
@@ -412,6 +414,41 @@ remain after release; its presence alone does not mean a batch is on hold.
   on the sync branch is kept as it is. Only a conflicting file that is not a
   synchronized document, which cannot hold markers, still waits for you to
   merge the tracked branch into the sync branch.
+
+### Required checks
+
+`required-checks` lists, one per line, checks that every sync pull
+request head must pass before the sync merges it. Anyone who may write
+commit statuses in the repository can post one under any name, so each
+line names the check together with the publisher it must come from:
+
+```yaml
+required-checks: |
+  test (ubuntu-latest, 24) @ actions:.github/workflows/ci.yml
+  security @ app:57789
+  deploy-preview @ status:1234567
+```
+
+- `<name> @ actions:<workflow file>`: a GitHub Actions job of that name,
+  run by that workflow file in `.github/workflows/`. The sync verifies
+  the job's workflow run on the head, and the workflow file as the
+  tracked branch holds it: a job of a file changed on the sync branch
+  alone does not count, nor a check run that a workflow created with
+  `checks: write`. The name is the job's name as GitHub shows it on the
+  pull request, without the workflow's name.
+- `<name> @ app:<App id>`: a check run of the GitHub App with that id
+  (`gh api apps/<app slug> --jq .id`). Use `actions:` for GitHub
+  Actions: its App id is not accepted for a job.
+- `<name> @ status:<account id>`: a commit status of that context
+  created by the account with that id (`gh api users/<login> --jq .id`),
+  usually your CI service's bot or token owner.
+
+A check from anyone else under the same name does not count, also on a
+new sync branch that has no earlier heads, and also when it is the
+latest status of that context. A line without a publisher stops the run
+with an input error. A check that never comes from its publisher keeps
+the head waiting; past the check deadline the run reports
+`checks-missing`.
 
 ## Release builds and pins
 

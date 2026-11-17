@@ -15,6 +15,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { type StateConfig } from '../state/index.ts';
 import { type SecurityGate } from './security.ts';
 import { type PullRequestResult, syncPullRequest } from './pull-request.ts';
+import { type RequiredCheck } from './deadline.ts';
 import { type WriteResult, writeTrackedToLinear } from './write.ts';
 import { holdChanges, reconcileHoldMarks } from './hold.ts';
 
@@ -22,7 +23,7 @@ export interface CycleOptions {
   documentCap?: number | undefined;
   mergeGraceSeconds?: number | undefined;
   checkDeadlineMinutes?: number | undefined;
-  requiredChecks?: readonly string[] | undefined;
+  requiredChecks?: readonly RequiredCheck[] | undefined;
   mergeWithoutChecks?: boolean | undefined;
   config: StateConfig;
   /** The repository the sync pull request is in, with the token the run acts as. */

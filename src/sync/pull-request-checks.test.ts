@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { MARKS } from './marks.ts';
 import { SETUP_FAILED_EXIT_CODE } from '../commands.ts';
-import { FAKE_ACTIONS_APP_ID, type FakeCheck, fakeFetch } from '../setup/test-helpers.ts';
+import { FAKE_ACTIONS_APP_ID, FAKE_CI_ACCOUNT_ID, type FakeCheck, fakeFetch } from '../setup/test-helpers.ts';
 import { IDENTITY } from '../state/test-helpers.ts';
 import { DEFAULT_MERGE_GRACE_SECONDS } from './pull-request.ts';
 import { DEFAULT_CHECK_DEADLINE_MINUTES } from './deadline.ts';
@@ -549,7 +549,7 @@ describe('sync: pull request checks', () => {
   });
 
   it('waits for a configured required check that is not registered, and merges once it passes', async () => {
-    const required = { MDBISYNC_REQUIRED_CHECKS: 'tests\nlint' };
+    const required = { MDBISYNC_REQUIRED_CHECKS: 'tests @ actions:.github/workflows/ci.yml\nlint @ actions:.github/workflows/ci.yml' };
     await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
     await sync(required);
     const head = await rev(SYNC_BRANCH);
@@ -560,6 +560,32 @@ describe('sync: pull request checks', () => {
     checksOn(head, [{ name: 'tests', status: 'completed', conclusion: 'success' }, { name: 'lint', status: 'completed', conclusion: 'success' }]);
     const merged = await sync(required);
     assert.ok(merged.report.pullRequest?.merged);
+  });
+
+  // A new sync branch has no earlier heads to bind a configured check to its publisher: only the configuration can.
+  it('does not let a commit status from an unconfigured account meet a configured check on a new branch', async () => {
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
+    const forged = { name: 'tests', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 } as const;
+    const transport = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => {
+      if (String(input).includes('/check-runs?') && h.world.github.pullRequests.length > 0) checksOn(await rev(SYNC_BRANCH), [forged]);
+      return transport(input, init);
+    };
+    // A name without its publisher is an input error: the run stops before it reads anything, and writes no report.
+    const writes = h.world.writes.length;
+    await assert.rejects(cli('sync', { MDBISYNC_REQUIRED_CHECKS: 'tests', MDBISYNC_MERGE_GRACE_SECONDS: '25' }), { code: 'ENOENT' },
+      'a configured check named without its publisher was accepted');
+    assert.equal(h.world.writes.length, writes);
+    assert.equal(await rev('refs/heads/main'), h.start);
+    const bound = await cli('sync', { MDBISYNC_REQUIRED_CHECKS: 'tests @ status:2001', MDBISYNC_MERGE_GRACE_SECONDS: '25' });
+    assert.equal(bound.result.exitCode, 0, bound.result.stderr);
+    assert.equal(bound.report.pullRequest?.merged, null, 'a status from an unconfigured account met a configured check');
+    assert.deepEqual(bound.report.pullRequest?.checks?.missing, ['tests']);
+    assert.equal(await rev('refs/heads/main'), h.start);
+    checksOn(await rev(SYNC_BRANCH), [{ ...forged, creator: FAKE_CI_ACCOUNT_ID }]);
+    h.fetchOverride = undefined;
+    const merged = await sync({ MDBISYNC_REQUIRED_CHECKS: 'tests @ status:2001' });
+    assert.ok(merged.report.pullRequest?.merged, 'a status from the configured account did not meet its check');
   });
 
   // The sync's own push starts the repository's whole CI: a check that stopped running (a renamed job) is not
@@ -610,9 +636,9 @@ describe('sync: pull request checks', () => {
 
   it('stops expecting a configured check once it is removed from the configuration', async () => {
     await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
-    await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset' });
+    await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset @ actions:.github/workflows/ci.yml' });
     checksOn(await rev(SYNC_BRANCH), [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
-    const waiting = await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset' });
+    const waiting = await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset @ actions:.github/workflows/ci.yml' });
     assert.deepEqual(waiting.report.pullRequest?.checks?.missing, ['tset']);
     const merged = await sync();
     assert.ok(merged.report.pullRequest?.merged, 'a name removed from required-checks still held the head');
