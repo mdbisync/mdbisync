@@ -165,4 +165,32 @@ describe('the assets folder beside the documents', () => {
     assert.equal(moved.files.size, 0);
     assert.equal(moved.body, '![Chart](../old/assets/chart.png)\n');
   });
+
+  it('reserves a copy name when it is chosen, also for uploads the cache does not know', async () => {
+    const fixture = await createFixture();
+    try {
+      const tree = { 'a/plan.md': '![Chart](assets/chart.png)\n', 'a/assets/chart.png': png, 'b/spec.md': '![Chart](assets/chart.png)\n', 'b/assets/chart.png': other };
+      await fixture.seed(tree);
+      const git = await fixture.clone('assets-folder-uncached');
+      const base = await git.text(['rev-parse', 'origin/main']);
+      const otherHash = createHash('sha256').update(other).digest('hex');
+      const otherUrl = 'https://uploads.linear.app/workspace/other.png';
+      const capture = createAssetCapture(git, config, base, async (input) => new Response(String(input) === otherUrl ? other : png));
+      try {
+        const first = await capture('new/plan.md', `![Chart](${url})\n`, new Map(), tree['a/plan.md'], 'a/plan.md');
+        const second = await capture('new/spec.md', `![Chart](${otherUrl})\n`, new Map(), tree['b/spec.md'], 'b/spec.md');
+        assert.deepEqual([...first.files.keys()], ['new/assets/chart.png']);
+        assert.deepEqual([...second.files.keys()], [`new/assets/${otherHash}.png`]);
+        assert.deepEqual(contentBytes(second.files.get(`new/assets/${otherHash}.png`)!), other);
+        assert.equal(second.body, `![Chart](assets/${otherHash}.png)\n`);
+      } finally { capture.close(); }
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('never copies onto a folder or another entry at the chosen name', async () => {
+    const tree = { 'old/plan.md': '![Chart](assets/chart.png)\n', 'old/assets/chart.png': png, 'new/assets/chart.png/notes.txt': 'A folder.\n' };
+    const moved = await captured(tree, 'new/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]), { body: tree['old/plan.md'], path: 'old/plan.md' });
+    assert.deepEqual([...moved.files.keys()], [`new/assets/${pngHash}.png`]);
+    assert.equal(moved.body, `![Chart](assets/${pngHash}.png)\n`);
+  });
 });

@@ -205,13 +205,18 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   const pathHashes = new Map<string, string>();
   // Every path of the tree that is not a folder: an `assets` entry that is a file or a symbolic link is no folder to write into.
   const notFolders = new Set<string>();
-  // Copies this run already placed, by path: two documents moved into one folder must not take one name for different bytes.
+  // Every folder of the tree: a copy never replaces one.
+  const folders = new Set<string>();
+  // Copies this run chose, by path, as soon as it chose them: two copies must not take one name for different bytes.
   const placed = new Map<string, string>();
   let indexed = false;
   const index = async () => {
     if (indexed) return;
     const tree = await listTree(git, base);
-    for (const entry of tree) notFolders.add(entry.path);
+    for (const entry of tree) {
+      notFolders.add(entry.path);
+      for (let folder = posix.dirname(entry.path); folder !== '.' && !folders.has(folder); folder = posix.dirname(folder)) folders.add(folder);
+    }
     // Markdown files are documents the same run may rewrite or remove, never a downloaded file's home.
     const entries = tree.filter((entry) => entry.type === 'blob' && ['100644', '100755'].includes(entry.mode) && !entry.path.toLowerCase().endsWith('.md'));
     for (let at = 0; at < entries.length;) {
@@ -299,8 +304,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       if (same !== undefined) return same;
       for (const name of [posix.basename(source), `${hash}${posix.extname(source)}`]) {
         const target = posix.join(assetsFolder, name);
-        const existing = pathHashes.get(target) ?? placed.get(target);
-        if (existing === undefined || existing === hash) return target;
+        // Any other entry at that path (a symbolic link, a Markdown file, a folder) holds other content.
+        const existing = pathHashes.get(target) ?? placed.get(target) ?? (notFolders.has(target) || folders.has(target) ? '' : undefined);
+        if (existing === hash) return target;
+        if (existing === undefined) { placed.set(target, hash); return target; }
       }
       return undefined;
     };
@@ -376,7 +383,6 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
           if (!admitsCapturedFile(assetPath, read.content)) { rejected.set(node.url, 'unsupported-type'); continue; }
           if (!counted.has(assetPath)) { documentBytes += read.content.length; counted.add(assetPath); }
           if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
-          placed.set(assetPath, hash!);
           files.set(assetPath, read.content);
         }
       }
@@ -413,7 +419,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
           if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
           assetPath = posix.join(assetsFolder, `${hash}${extension}`);
           // A file or symbolic link named `assets` stays: the document waits until its author moves it.
-          if (!assetsUsable || pathHashes.has(assetPath)) throw new Error(message('assets.destination-exists'));
+          if (!assetsUsable || notFolders.has(assetPath) || folders.has(assetPath)) throw new Error(message('assets.destination-exists'));
         }
         // Each document owns its candidate bytes until its security check passes.
         files.set(assetPath, asset.file);
