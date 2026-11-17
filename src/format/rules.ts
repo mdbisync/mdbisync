@@ -21,6 +21,7 @@ export const LINT_RULES = {
   'block-first-in-list-item': 'A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item.',
   'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it.',
   'image-file-missing': 'An image must name a file that exists in the repository, not a folder or a Markdown document.',
+  'upload-file-refused': 'A file named as the sync names a captured upload fails the upload check: documents that link it are blocked when they change in Linear.',
 } as const;
 
 export type LintRule = keyof typeof LINT_RULES;

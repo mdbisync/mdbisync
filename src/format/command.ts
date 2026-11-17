@@ -2,10 +2,12 @@
 // searched for `.md` files), checked or rewritten into Linear's form.
 
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 import { fixText } from './fix.ts';
 import { duplicateTitles, linkedFileCheck, lintText } from './lint.ts';
-import type { Finding } from './rules.ts';
+import { LINT_RULES, type Finding } from './rules.ts';
+import { parseLfsPointer } from '../state/lfs.ts';
+import { admitsCapturedFile, isCaptureName } from '../sync/upload-type.ts';
 
 export interface CommandResult {
   readonly exitCode: number;
@@ -25,6 +27,11 @@ export const USAGE_ERROR = 2;
  * of the given tree or into a loop.
  */
 export function markdownFiles(paths: readonly string[], cwd: string = process.cwd()): string[] {
+  return filesUnder(paths, cwd, (path) => path.endsWith('.md'));
+}
+
+/** Regular files under the paths whose file name `accept` takes, as `markdownFiles` finds them. */
+function filesUnder(paths: readonly string[], cwd: string, accept: (path: string) => boolean): string[] {
   const found = new Set<string>();
   const walk = (absolute: string): void => {
     const stat = lstatSync(absolute);
@@ -32,12 +39,27 @@ export function markdownFiles(paths: readonly string[], cwd: string = process.cw
       for (const name of readdirSync(absolute).sort()) {
         if (!SKIPPED_FOLDERS.has(name)) walk(join(absolute, name));
       }
-    } else if (stat.isFile() && absolute.endsWith('.md')) {
+    } else if (stat.isFile() && accept(basename(absolute))) {
       found.add(relative(cwd, absolute).split(sep).join('/'));
     }
   };
   for (const path of paths.length > 0 ? paths : ['.']) walk(resolve(cwd, path));
   return [...found].sort();
+}
+
+/**
+ * Files under the paths named as a capture names an upload whose bytes the
+ * upload check now refuses: an earlier, weaker check admitted them. They
+ * stay in the repository until a person removes or replaces them.
+ */
+function refusedUploads(paths: readonly string[], cwd: string): Finding[] {
+  return filesUnder(paths, cwd, isCaptureName)
+    .filter((file) => {
+      const bytes = readFileSync(join(cwd, file));
+      // Without its Git LFS object the file's bytes are not here to check.
+      return parseLfsPointer(bytes) === null && !admitsCapturedFile(file, bytes);
+    })
+    .map((file) => ({ file, line: 1, rule: 'upload-file-refused' as const, message: LINT_RULES['upload-file-refused'] }));
 }
 
 /** A usage problem in the paths, or undefined: options are not supported, every path must exist. */
@@ -86,7 +108,7 @@ export function runLint(paths: readonly string[], cwd: string = process.cwd()): 
   const problem = badPaths(paths, cwd);
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
-  const findings = lintAll(files, cwd);
+  const findings = [...lintAll(files, cwd), ...refusedUploads(paths, cwd)];
   const failing = new Set(findings.map((finding) => finding.file)); // duplicate titles included
   const unfixed = files.filter((file) => {
     if (failing.has(file)) return false;
@@ -103,7 +125,7 @@ export function runFix(paths: readonly string[], cwd: string = process.cwd()): C
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
   // A file with a lint finding, a colliding title included, is left as it is: its author decides.
-  const before = lintAll(files, cwd);
+  const before = [...lintAll(files, cwd), ...refusedUploads(paths, cwd)];
   const failing = new Set(before.map((finding) => finding.file));
   const changed: string[] = [];
   for (const file of files) {

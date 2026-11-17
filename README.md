@@ -106,7 +106,10 @@ and git's path beats Linear's title
   identified from their bytes. SVGs with `script` or `foreignObject` elements,
   animation elements, event attributes, `xml:base` or non-fragment `href`
   references are blocked. Files already
-  in the repository keep working. Downloaded files use the detected extension, regardless of
+  in the repository keep working, except a file an earlier sync captured
+  (named `<sha256>.<ext>`) that the check now refuses: a document that links
+  it again from Linear is blocked, and `mdbisync lint` names the file
+  (`upload-file-refused`) for you to remove or replace. Downloaded files use the detected extension, regardless of
   the upload URL or declared content type. Unreadable uploads (including redirects)
   and files larger than 10 MB block the document with a comment. Access errors
   stop capture; temporary download failures leave the document unmarked and

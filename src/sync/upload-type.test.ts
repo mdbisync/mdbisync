@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { it } from 'node:test';
-import { uploadExtension } from './upload-type.ts';
+import { admitsCapturedFile, isCaptureName, uploadExtension } from './upload-type.ts';
 
 for (const [file, extension] of [
   ['pixel.png', '.png'], ['photo.jpg', '.jpg'], ['blink.gif', '.gif'],
@@ -91,4 +91,16 @@ it('reads WebM DocType structurally, including longer length encodings', () => {
   assert.equal(uploadExtension(Buffer.concat([header, Buffer.from([0x88]), docType])), '.webm');
   const matroska = Buffer.concat([Buffer.from([0x42,0x82,0x88]),Buffer.from('matroska'),Buffer.from([0x42,0x83,0x87,0x42,0x82,0x84,0x77,0x65,0x62,0x6d])]);
   assert.equal(uploadExtension(Buffer.concat([header,Buffer.from([0x80 | matroska.length]),matroska])), null);
+});
+
+it('re-checks only files named as a capture names an upload', async () => {
+  const hash = 'a'.repeat(64);
+  const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
+  const xhtml = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><iframe xmlns="http://www.w3.org/1999/xhtml" src="javascript:alert(1)"/></svg>');
+  assert.equal(isCaptureName(`docs/${hash}.svg`), true);
+  for (const name of [`docs/${hash}.html`, `docs/${hash.toUpperCase()}.svg`, `docs/${hash}.svg.svg`, `docs/${hash.slice(1)}.svg`, 'docs/logo.svg']) assert.equal(isCaptureName(name), false, name);
+  assert.equal(admitsCapturedFile(`docs/${hash}.png`, png), true);
+  assert.equal(admitsCapturedFile(`docs/${hash}.svg`, xhtml), false, 'bytes the check now refuses');
+  assert.equal(admitsCapturedFile(`docs/${hash}.svg`, png), false, 'a type that disagrees with the extension');
+  assert.equal(admitsCapturedFile('docs/logo.svg', xhtml), true, 'a file a person named came through git');
 });
