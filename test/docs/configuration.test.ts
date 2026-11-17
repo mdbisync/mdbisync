@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { parseOperation } from '../../src/action/main.ts';
 import { COMMANDS } from '../../src/commands.ts';
-import { INIT_SECURITY_FLAGS, INIT_USAGE, INIT_VALUE_FLAGS } from '../../src/init/command.ts';
+import { INIT_LFS_FLAGS, INIT_SECURITY_FLAGS, INIT_USAGE, INIT_VALUE_FLAGS } from '../../src/init/command.ts';
 import { MINIMUM_RELEASE } from '../../src/init/releases.ts';
 import templates from '../../src/init/workflows.json' with { type: 'json' };
 import { PROJECT_KEY, TEAM_KEY } from '../../src/mapping/annotations.ts';
@@ -115,7 +115,7 @@ describe('configuration reference', () => {
   });
 
   it('lists every init flag, as init accepts and its help shows them', () => {
-    const accepted = [...INIT_VALUE_FLAGS, ...INIT_SECURITY_FLAGS].sort();
+    const accepted = [...INIT_VALUE_FLAGS, ...INIT_SECURITY_FLAGS, ...INIT_LFS_FLAGS].sort();
     assert.deepEqual([...byName(table(PAGE, 'init')).keys()].sort(), accepted);
     assert.deepEqual([...new Set(INIT_USAGE.match(/--[a-z][a-z-]+/g))].sort(), accepted, 'init --help');
   });

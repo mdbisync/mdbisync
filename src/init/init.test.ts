@@ -150,10 +150,14 @@ test('init --help names the oldest release it writes', async () => {
 test('init prompts only through an explicit terminal prompt and accepts team-only folders', async (t) => {
   const cwd = await fixture(t);
   const { runInit } = await import('./command.ts');
-  const answers = [sha, 'guides', 'Planning', '', 'no'];
-  const result = await runInit([], { cwd, prompt: async () => answers.shift() ?? assert.fail('unexpected question') });
+  const { LFS_ATTRIBUTES } = await import('./command.ts');
+  const answers = [sha, 'guides', 'Planning', '', 'no', 'yes'];
+  const questions: string[] = [];
+  const result = await runInit([], { cwd, prompt: async (question) => { questions.push(question); return answers.shift() ?? assert.fail('unexpected question'); } });
   assert.equal(result.exitCode, 0, result.stderr);
   assert.equal(answers.length, 0);
+  assert.equal(questions.at(-1), 'Store embedded images and files in Git LFS? [y/N] ');
+  assert.equal(await readFile(join(cwd, '.gitattributes'), 'utf8'), `${LFS_ATTRIBUTES.join('\n')}\n`);
 });
 
 test('init rejects an orphan project or nested team before writing files', async (t) => {
@@ -205,7 +209,7 @@ test('guided setup permits an inherited or existing team without writing an empt
     const cwd = await fixture(t);
     await mkdir(join(cwd, 'guides/sub'), { recursive: true });
     await writeFile(join(cwd, 'guides/README.md'), '---\nlinear-team: Planning\n---\n# Notes\n');
-    const answers = [sha, '', 'no'];
+    const answers = [sha, '', 'no', 'no'];
     const result = await runInit(['--folder', inherited ? 'guides/sub' : 'guides', '--project', 'Roadmap'], {
       cwd, prompt: async () => answers.shift() ?? assert.fail('unexpected question'),
     });
@@ -251,4 +255,55 @@ test('annotations retain a leading BOM, CRLF body and long unrelated scalars; ne
     if (frontMatter) assert.ok(after.includes(`description: ${scalar.trim()}\r\n`));
     assert.match(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), /repos:\n\s+- repo:/);
   }
+});
+
+test('init --lfs adds the extension and assets-folder lines once, keeping the attributes already there', async (t) => {
+  const { LFS_ATTRIBUTES } = await import('./command.ts');
+  assert.ok(LFS_ATTRIBUTES.includes('**/assets/** filter=lfs diff=lfs merge=lfs -text'));
+  assert.ok(LFS_ATTRIBUTES.includes('*.png filter=lfs diff=lfs merge=lfs -text'));
+  assert.ok(!LFS_ATTRIBUTES.some((line) => line.includes('.md')), 'Markdown never goes to LFS');
+
+  const fresh = await fixture(t);
+  const result = await runCli([...flags, '--lfs'], { cwd: fresh });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(await readFile(join(fresh, '.gitattributes'), 'utf8'), `${LFS_ATTRIBUTES.join('\n')}\n`);
+  assert.match(result.stdout, /git lfs install/);
+
+  const kept = await fixture(t);
+  const own = '# ours\n*.psd binary\n*.png  filter=lfs diff=lfs merge=lfs -text\n**/assets/** filter=lfs diff=lfs merge=lfs -text';
+  await writeFile(join(kept, '.gitattributes'), own);
+  assert.equal((await runCli([...flags, '--lfs'], { cwd: kept })).exitCode, 0);
+  const written = await readFile(join(kept, '.gitattributes'), 'utf8');
+  const added = LFS_ATTRIBUTES.filter((line) => !line.startsWith('*.png ') && !line.startsWith('**/assets/**'));
+  assert.equal(written, `${own}\n${added.join('\n')}\n`);
+  assert.equal((await runCli([...flags, '--lfs'], { cwd: kept })).exitCode, 0);
+  assert.equal(await readFile(join(kept, '.gitattributes'), 'utf8'), written, 'a second run adds nothing');
+
+  for (const choice of [[], ['--no-lfs']]) {
+    const none = await fixture(t);
+    const quiet = await runCli([...flags, ...choice], { cwd: none });
+    assert.equal(quiet.exitCode, 0, quiet.stderr);
+    await assert.rejects(readFile(join(none, '.gitattributes')), { code: 'ENOENT' });
+    assert.doesNotMatch(quiet.stdout, /git lfs install/);
+  }
+  const twice = await runCli([...flags, '--lfs', '--no-lfs'], { cwd: await fixture(t) });
+  assert.equal(twice.exitCode, 2);
+  assert.match(twice.stderr, /^init: choose Git LFS once/);
+});
+
+test('the lines init --lfs writes send every assets file and listed image to LFS, and Markdown nowhere', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  const { LFS_ATTRIBUTES } = await import('./command.ts');
+  const cwd = await mkdtemp(join(tmpdir(), 'init-lfs-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  assert.equal(spawnSync('git', ['init', '-q'], { cwd }).status, 0);
+  await writeFile(join(cwd, '.gitattributes'), `${LFS_ATTRIBUTES.join('\n')}\n`);
+  const paths = ['assets/a.bin', 'team/assets/0123.xyz', 'team/deep/assets/b.svg', 'team/chart.png', 'team/photo.jpeg', 'team/doc.md', 'team/notes.txt', 'README.md'];
+  const result = spawnSync('git', ['check-attr', 'filter', '--', ...paths], { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const filters = Object.fromEntries(result.stdout.trim().split('\n').map((line) => { const [path, , value] = line.split(': '); return [path, value]; }));
+  assert.deepEqual(filters, {
+    'assets/a.bin': 'lfs', 'team/assets/0123.xyz': 'lfs', 'team/deep/assets/b.svg': 'lfs', 'team/chart.png': 'lfs', 'team/photo.jpeg': 'lfs',
+    'team/doc.md': 'unspecified', 'team/notes.txt': 'unspecified', 'README.md': 'unspecified',
+  });
 });

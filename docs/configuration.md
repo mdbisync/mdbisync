@@ -113,10 +113,12 @@ environment variables; secrets never go in arguments.
 | `--project` | none | The folder's Linear project; its team may come from a folder above. |
 | `--security-hooks` | off | Adds the two security hook examples (Docker needed where they run). |
 | `--no-security-hooks` | on | Adds none; give one of the two to make the choice explicit. |
+| `--lfs` | off | Adds to `.gitattributes` the Git LFS lines for embedded files: one per image and document type the sync takes from Linear (`*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp`, `*.avif`, `*.pdf`, `*.mp4`, `*.webm`, `*.svg`) and `**/assets/** filter=lfs diff=lfs merge=lfs -text` for every `assets/` folder. Lines already there are kept and not repeated. |
+| `--no-lfs` | on | Leaves `.gitattributes` as it is: your own attributes decide what goes to LFS. |
 
 With a terminal attached and the release SHA, a folder, or a folder's
 team or project missing, `init` asks for those, and then whether to add
-the security hook examples. It changes local files only.
+the security hook examples and the Git LFS lines. It changes local files only.
 
 The workflows `init` writes are made for the release their examples pin,
 `v0.1.0-rc.9`, and pass action inputs that earlier releases lack. `init`

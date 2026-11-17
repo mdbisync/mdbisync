@@ -334,8 +334,8 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
 `image-in-link`, `table-alignment`, `link-title`, `image-title`,
 `code-in-emphasis`, `hard-break-backslash`, `git-conflict-marker`,
-`url-in-html`, `block-first-in-list-item`, `image-not-in-repository` and
-`image-file-missing`. Each is described, with its fix, in
+`url-in-html`, `block-first-in-list-item`, `image-not-in-repository`,
+`image-file-missing` and `document-in-assets-folder`. Each is described, with its fix, in
 [linear-format.md](linear-format.md#lint-rules).
 
 External http(s) and path images, and image uploads answering 404 or 410,
@@ -439,7 +439,7 @@ the message. Most come from the workflow's configuration:
 | --- | --- |
 | `run init at the repository root` | Run it in the folder that holds `.git`. |
 | `provide --folder with --team and/or --project` | Name at least one folder, each with a team or project. |
-| `unknown option: <flag>`, `<flag> needs a value`, `<flag> must follow --folder`, `<flag> was given twice for a folder`, `<flag> was given twice`, `choose security hooks once` | Fix the flags; `mdbisync init --help` lists them. |
+| `unknown option: <flag>`, `<flag> needs a value`, `<flag> must follow --folder`, `<flag> was given twice for a folder`, `<flag> was given twice`, `choose security hooks once`, `choose Git LFS once` | Fix the flags; `mdbisync init --help` lists them. |
 | `--release-sha must be a full 40-character commit SHA`, `--release-version must be a version such as v1.2.3` | Give the release commit SHA and version (see [usage.md](usage.md#release-builds-and-pins)). |
 | `release <version> is older than <minimum>, the release these workflows are written for and checked against. Use <minimum> or later` | Pick `<minimum>` or a later release (see [`init`](configuration.md#init)): the workflows pass action inputs that the older release lacks. |
 | `paths must stay inside the repository`, `setup destinations must not contain symlinks`, `a setup folder path names a regular file` | Give folder paths inside the repository, without symbolic links. |

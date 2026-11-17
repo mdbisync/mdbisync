@@ -278,7 +278,9 @@ Replace `docs`, `ENG` and `Handbook` with your folder, the Linear team
 own `--team` and `--project` for each folder you sync; a folder below an
 annotated one may give only `--project` and inherits the team. Give
 `--security-hooks` or `--no-security-hooks`, as you chose in
-[Security hooks](#security-hooks). Every flag:
+[Security hooks](#security-hooks). Add `--lfs` to store images and other
+embedded files in Git LFS (install Git LFS and run `git lfs install`
+first). Every flag:
 [`init`](configuration.md#init).
 
 It writes:
@@ -290,6 +292,7 @@ It writes:
 | `.github/workflows/pre-commit.yml` | The `pre-commit` check on every pull request |
 | `.pre-commit-config.yaml` | The `linear-format` hook, and the security hook examples if you asked for them |
 | `<folder>/README.md` | Each folder's annotation, in its front matter |
+| `.gitattributes` | With `--lfs` only: Git LFS lines for the image and document types, and `**/assets/**` for the `assets/` folders where the sync puts files from Linear |
 
 When the repository has other CI (tests, linters), the pre-commit
 workflow starts it on the commits it pushes, which a push with the

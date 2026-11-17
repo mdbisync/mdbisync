@@ -44,6 +44,14 @@ private-key pattern hook. Docker must be available wherever those hooks
 run. Review these examples for your repository's privacy requirements;
 without security hooks, runs warn that content is pushed unchecked.
 
+Use `--lfs` to store embedded files in Git LFS: `init` adds to
+`.gitattributes` a line for each image and document type the sync takes
+from Linear, for files you commit anywhere, and
+`**/assets/** filter=lfs diff=lfs merge=lfs -text`, so every file the
+sync writes into an `assets/` folder goes to LFS whatever its extension.
+Lines already there are kept. Without `--lfs`, your own `.gitattributes`
+decides, as for any commit.
+
 Flags work without a terminal. With a terminal attached, `init` asks for
 missing setup choices. It changes local files only and prints the remaining
 admin steps: apps, secrets, merge commits, local hook installation and the

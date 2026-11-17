@@ -21,6 +21,7 @@ export const LINT_RULES = {
   'block-first-in-list-item': 'A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item.',
   'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it.',
   'image-file-missing': 'An image must name a file that exists in the repository, not a folder or a Markdown document.',
+  'document-in-assets-folder': 'A Markdown document cannot be inside a folder named assets, which holds the files documents embed.',
 } as const;
 
 export type LintRule = keyof typeof LINT_RULES;

@@ -17,16 +17,30 @@ import { MINIMUM_RELEASE, OLDER_RELEASES, RELEASE_PIN } from './releases.ts';
 export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
   --folder <path> --team <name> [--project <name>]   Repeat for each folder
   --security-hooks | --no-security-hooks           Optional examples (requires Docker)
+  --lfs | --no-lfs                                 Store embedded files in Git LFS (.gitattributes)
 The release must be ${MINIMUM_RELEASE.version} or later: the workflows use its action inputs.
 Existing files and annotations are preserved; conflicting values must be resolved first.
 `;
 
-/** The flags `init` accepts: the ones that take a value, then the security choice. */
+/** The flags `init` accepts: the ones that take a value, then the security and the Git LFS choices. */
 export const INIT_VALUE_FLAGS = ['--release-sha', '--release-version', '--folder', '--team', '--project'] as const;
 export const INIT_SECURITY_FLAGS = ['--security-hooks', '--no-security-hooks'] as const;
+export const INIT_LFS_FLAGS = ['--lfs', '--no-lfs'] as const;
+
+export const GITATTRIBUTES = '.gitattributes';
+const LFS = 'filter=lfs diff=lfs merge=lfs -text';
+/**
+ * The `.gitattributes` lines `init --lfs` adds: one per file type the sync
+ * admits from Linear (and `.jpeg`), for files authored anywhere in git, and
+ * the `assets/` folders the sync writes into, whatever a file's extension.
+ */
+export const LFS_ATTRIBUTES: readonly string[] = [
+  ...['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'pdf', 'mp4', 'webm', 'svg'].map((extension) => `*.${extension} ${LFS}`),
+  `**/assets/** ${LFS}`,
+];
 
 interface Folder { path: string; team?: string; project?: string }
-interface Settings { sha?: string; version?: string; security?: boolean; folders: Folder[] }
+interface Settings { sha?: string; version?: string; security?: boolean; lfs?: boolean; folders: Folder[] }
 export interface InitOptions { cwd?: string; prompt?: (question: string) => Promise<string> }
 class InitError extends Error {}
 
@@ -37,6 +51,11 @@ function parseArgs(args: readonly string[]): Settings {
     if ((INIT_SECURITY_FLAGS as readonly string[]).includes(flag ?? '')) {
       if (settings.security !== undefined) throw new InitError(message('init.security-twice'));
       settings.security = flag === '--security-hooks';
+      continue;
+    }
+    if ((INIT_LFS_FLAGS as readonly string[]).includes(flag ?? '')) {
+      if (settings.lfs !== undefined) throw new InitError(message('init.lfs-twice'));
+      settings.lfs = flag === '--lfs';
       continue;
     }
     if (!(INIT_VALUE_FLAGS as readonly string[]).includes(flag ?? '')) throw new InitError(message('init.unknown-option', { option: String(flag) }));
@@ -108,6 +127,17 @@ function annotate(text: string, folder: Folder): string {
   return opening + doc.toString({ lineWidth: 0 }).replace(/\n/g, eol) + text.slice(opening.length + fm.yaml.length);
 }
 
+/** The repository's attributes with every missing LFS line added after its own lines, which stay as they are. */
+function lfsAttributes(text: string | undefined): string {
+  const before = text ?? '';
+  const eol = before.includes('\r\n') ? '\r\n' : '\n';
+  const present = new Set(before.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, ' ')));
+  const missing = LFS_ATTRIBUTES.filter((line) => !present.has(line));
+  if (!missing.length) return before;
+  const lead = before === '' || before.endsWith('\n') ? '' : eol;
+  return `${before}${lead}${missing.join(eol)}${eol}`;
+}
+
 // The image digest pins the scanner's bytes as well as its version.
 export const SCANNER_IMAGE = 'ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f';
 function hookConfig(text: string | undefined, settings: Settings): string {
@@ -174,6 +204,7 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
         }
       }
       settings.security ??= /^(y|yes)$/i.test((await ask('Include security hook examples (requires Docker)? [y/N] ')).trim());
+      settings.lfs ??= /^(y|yes)$/i.test((await ask('Store embedded images and files in Git LFS? [y/N] ')).trim());
     }
     checkRelease(settings);
     if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || (!folder.team && !folder.project))) throw new InitError(message('init.needs-folder'));
@@ -195,6 +226,7 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       });
     }
     await queue(PRE_COMMIT_CONFIG, (before) => hookConfig(before, settings));
+    if (settings.lfs) await queue(GITATTRIBUTES, lfsAttributes);
     for (const folder of settings.folders) await queue(join(folder.path, ANNOTATION_FILE), (before) => annotate(before ?? '', folder));
     // Include existing parent annotations when a project inherits its team.
     const contents = new Map<string, string>();
@@ -235,7 +267,7 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text);
     }
-    return { exitCode: 0, stderr: '', stdout: `${changes.size ? `Wrote ${changes.size} repository files.` : 'Repository files are already initialized.'}\n\nRemaining admin steps:\n1. Create a Linear OAuth app with read,write client credentials; set repository secrets MDBISYNC_LINEAR_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_SECRET.\n2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set variable MDBISYNC_APP_CLIENT_ID and secret MDBISYNC_APP_PRIVATE_KEY.\n3. Allow merge commits; configure required checks for main.\n4. Install Node 24 and pre-commit; run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.\n5. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.\n` };
+    return { exitCode: 0, stderr: '', stdout: `${changes.size ? `Wrote ${changes.size} repository files.` : 'Repository files are already initialized.'}\n\nRemaining admin steps:\n1. Create a Linear OAuth app with read,write client credentials; set repository secrets MDBISYNC_LINEAR_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_SECRET.\n2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set variable MDBISYNC_APP_CLIENT_ID and secret MDBISYNC_APP_PRIVATE_KEY.\n3. Allow merge commits; configure required checks for main.\n4. Install Node 24 and pre-commit; run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? ' Install Git LFS and run git lfs install.' : ''}\n5. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.\n` };
   } catch (error) {
     if (!(error instanceof InitError)) throw error;
     return { exitCode: 2, stdout: '', stderr: `init: ${error.message}\n\n${INIT_USAGE}` };

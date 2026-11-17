@@ -448,6 +448,21 @@ where that one is found.
 
 Instead, fix the path, or add the missing file in the same change.
 
+### `document-in-assets-folder`
+
+A Markdown document cannot be inside a folder named assets, which holds the
+files documents embed. The sync writes each file it takes from Linear into
+an `assets/` folder beside the document that embeds it, and a repository's
+`**/assets/**` line in `.gitattributes` can store that whole folder in Git
+LFS, so a document there would not stay text. The name is matched exactly:
+`Assets` or `old-assets` is an ordinary folder.
+
+```text
+guides/assets/notes.md
+```
+
+Instead, move the document out of the `assets` folder.
+
 ## Install the hook
 
 The repository publishes two pre-commit hooks:

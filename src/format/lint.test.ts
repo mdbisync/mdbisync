@@ -82,6 +82,15 @@ describe('lint rules', () => {
     assert.deepEqual(lintText('doc.md', text, { linkedFileExists }).map((f) => [f.rule, f.line]), [['image-file-missing', 3]]);
   });
 
+  it('refuses a document inside a folder named assets, by its path alone', () => {
+    for (const file of ['assets/notes.md', 'team/assets/notes.md', 'team/assets/deeper/notes.md', 'team\\assets\\notes.md']) {
+      assert.deepEqual(lintText(file, 'Text.').map((f) => [f.rule, f.line, f.message]), [['document-in-assets-folder', 1, LINT_RULES['document-in-assets-folder']]], file);
+    }
+    for (const file of ['assets.md', 'team/assets.md', 'team/Assets/notes.md', 'team/my-assets/notes.md', 'team/assets-old/notes.md']) {
+      assert.deepEqual(lintText(file, 'Text.'), [], file);
+    }
+  });
+
   it('counts front matter lines', () => {
     const findings = lintText('doc.md', '---\ntitle: x\n---\n\nH~2~O');
     assert.deepEqual(findings.map((f) => [f.rule, f.line]), [['subscript', 5]]);
@@ -136,6 +145,22 @@ describe('lint and fix commands', () => {
     assert.equal(runLint([join(dir, 'docs', 'kept.md')], dir).exitCode, 0);
     assert.deepEqual(runLint(['--help'], dir), { exitCode: 2, stdout: '', stderr: 'unknown option: --help\n' });
     assert.deepEqual(runFix(['nowhere'], dir), { exitCode: 2, stdout: '', stderr: 'no such file or folder: nowhere\n' });
+  });
+
+  it('lint and fix refuse a document inside an assets folder and leave it unchanged', () => {
+    const folder = join(dir, 'team');
+    try {
+      mkdirSync(join(folder, 'assets'), { recursive: true });
+      writeFileSync(join(folder, 'assets', 'notes.md'), '- a\n');
+      writeFileSync(join(folder, 'assets', 'chart.png'), 'png');
+      writeFileSync(join(folder, 'doc.md'), '![Chart](assets/chart.png)');
+      const message = `team/assets/notes.md:1: document-in-assets-folder: ${LINT_RULES['document-in-assets-folder']}\n`;
+      assert.deepEqual(runLint(['team'], dir), { exitCode: 1, stdout: message, stderr: '' });
+      assert.equal(runFix(['team'], dir).exitCode, 1);
+      assert.equal(readFileSync(join(folder, 'assets', 'notes.md'), 'utf8'), '- a\n');
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 
   it('lint and fix agree on a hash header without losing cell text', () => {

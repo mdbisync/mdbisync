@@ -27,6 +27,7 @@ export const MESSAGES = {
 
   // `init`.
   'init.security-twice': 'choose security hooks once',
+  'init.lfs-twice': 'choose Git LFS once',
   'init.unknown-option': 'unknown option: {option}',
   'init.needs-value': '{option} needs a value',
   'init.must-follow-folder': '{option} must follow --folder',
