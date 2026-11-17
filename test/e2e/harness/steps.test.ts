@@ -2840,6 +2840,21 @@ describe('linear executors', () => {
     await assert.rejects(runStep(ctx, { kind: 'linear', action: 'remove-secret', args: {} }), /found no access key sentence/);
   });
 
+  it('wait until Linear has saved a pasted image before the settle, and only so long (L6-09)', async () => {
+    const { ctx, linear, ids } = await fakeRun({ files: { 'eng/platform/pictured.md': '# Pictured\n\nA photo of the shelf.\n\n![Shelf](shelf.png)\n' } });
+    ctx.checkPollMs = 1;
+    const document = linear.documents.get(ids['eng/platform/pictured.md']?.id as string) as LinearDocument;
+    // The file's own image is not a new one: with nothing more saved, the wait ends at its bound.
+    document.content = '# Pictured\n\nA photo of the shelf.\n\n![Shelf](https://uploads.linear.app/a/shelf.png)\n';
+    await assert.rejects(
+      runStep(ctx, { kind: 'linear', action: 'await-image', args: { actor: 'editor-a', target: 'eng/platform/pictured.md', timeoutSeconds: 0 } }),
+      /held no image beyond the 1 of its file 0 seconds after the paste/,
+    );
+    // Linear saves the paste a moment later: the wait sees it and returns.
+    setTimeout(() => { document.content += '\n![image.png](https://uploads.linear.app/a/pasted.png)\n'; }, 20);
+    await runStep(ctx, { kind: 'linear', action: 'await-image', args: { actor: 'editor-a', target: 'eng/platform/pictured.md', timeoutSeconds: 5 } });
+  });
+
   it('read whether the blocked document cleared after the fix (L6-04)', async () => {
     const { ctx, linear, ids } = await fakeRun();
     const id = ids['eng/platform/plan.md']?.id as string;

@@ -71,7 +71,9 @@ export function engineRuns(scenario: Scenario): number {
       // The scheduled runs; an hourly check's drain runs are scheduled runs too, so they add none.
       return count + Math.floor(Number(step.args.durationSeconds ?? 86400) / Number(step.args.scheduleSeconds ?? 300));
     }
-    return count + (step.action === 'settle' ? 4 : 1);
+    // A settle with a typing window runs syncs back to back through it first, each taking ten seconds or more.
+    if (step.action === 'settle') return count + 4 + Math.ceil(Number(step.args.typingSeconds ?? 0) / 10);
+    return count + 1;
   }, 0);
   return setup + steps + (scenario.checks.invariants.I6.required ? 1 : 0);
 }

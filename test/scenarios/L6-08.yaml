@@ -35,13 +35,16 @@
         "actors": [
           "editor-a",
           "editor-b"
-        ]
+        ],
+        "durationSeconds": 60
       }
     },
     {
       "kind": "run",
       "action": "settle",
-      "args": {}
+      "args": {
+        "typingSeconds": 90
+      }
     },
     {
       "kind": "ui",

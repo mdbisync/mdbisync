@@ -35,6 +35,7 @@ import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflict
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
+import { TYPING_METRICS } from './ui-checklist.ts';
 import { commentsWithState, destinationKind, imageGateRecord, imagePlace, placeLabel, withoutImage, writtenImagePath, type ImageRepairSource } from './image-gate.ts';
 import { initFiles } from './init-files.ts';
 import { newRunId } from './isolation.ts';
@@ -352,8 +353,19 @@ export function mergeStillInProgress(report: Readonly<Record<string, unknown>> |
  * not settled either: the merge may still land, or a later run merges.
  * Settle runs again, on top of `limit`, for at most
  * `SETTLE_MERGE_IN_PROGRESS_RETRIES` such runs; one more fails the settle.
+ *
+ * With `typingSeconds`, a UI session types while the runs go on (L6-06 to
+ * L6-08): settle first runs one sync after another until that many seconds
+ * have passed since the step began, whatever they change, and only then
+ * settles as above. The checklist has the session finish typing inside that
+ * window, so the typing falls among the runs and the settling runs capture
+ * its end. The window's start, end and runs are kept as
+ * `settle.typingWindow` for the evidence.
  */
-export async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4, runOnce: () => Promise<void> = () => settleRun(ctx, args)): Promise<void> {
+export async function settle(
+  ctx: RunContext, args: Record<string, unknown> = {}, limit = 4, runOnce: () => Promise<void> = () => settleRun(ctx, args), now: () => number = Date.now,
+): Promise<void> {
+  if (typeof args.typingSeconds === 'number') await typingWindow(ctx, args.typingSeconds, runOnce, now);
   let waits = 0;
   let merges = 0;
   let serverErrors = 0;
@@ -393,6 +405,23 @@ export async function settle(ctx: RunContext, args: Record<string, unknown> = {}
     if (waits >= limit || !(await waitForSyncPullRequestChecks(ctx, report))) return;
     waits += 1;
   }
+}
+
+/** Runs syncs back to back until `seconds` have passed, at least one; see `settle`. */
+async function typingWindow(ctx: RunContext, seconds: number, runOnce: () => Promise<void>, now: () => number): Promise<void> {
+  const start = now();
+  const end = start + seconds * 1000;
+  ctx.log(`run.settle: running syncs for ${seconds} seconds while the UI session types`);
+  let runs = 0;
+  let at = start;
+  do {
+    await runOnce();
+    runs += 1;
+    at = now();
+  } while (at < end);
+  const window = { startedAt: new Date(start).toISOString(), endedAt: new Date(at).toISOString(), runs };
+  ctx.observations.set('settle.typingWindow', window);
+  ctx.log(`run.settle: typing window ${window.startedAt} to ${window.endedAt}, ${runs} run(s); settling now`);
 }
 
 async function settleRun(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
@@ -1849,6 +1878,17 @@ export function retireDiscarded(ctx: RunContext, conflicted: string, resolved: s
   }
 }
 
+/** How long `linear.await-image` waits for Linear to save a pasted image; it has taken about three minutes. */
+export const IMAGE_SAVE_TIMEOUT_SECONDS = 300;
+
+/** How often `linear.await-image` reads the document when the run sets no poll interval. */
+const IMAGE_SAVE_POLL_MS = 5_000;
+
+/** Markdown images in a text: `![alt](link)`. */
+function imageCount(text: string): number {
+  return [...text.matchAll(/!\[[^\]]*\]\([^)\s]+/g)].length;
+}
+
 /** A tracked document's current content in Linear, read as an editor. */
 async function linearContent(ctx: RunContext, path: string): Promise<{ id: string; content: string; icon: string | null; color: string | null }> {
   const world = live(ctx);
@@ -2112,6 +2152,30 @@ const LINEAR: Record<string, Executor> = {
       return resolved;
     });
   },
+  // L6-09: Linear can hold an image pasted in its editor as an unsaved change for minutes, so a settle at once
+  // finds nothing to capture. Wait, bounded, until the document's saved content holds more images than its
+  // tracked file.
+  'linear.await-image': async (ctx, args) => {
+    const path = targetPath(ctx, args.target);
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const tracked = imageCount(await readWorking(git, path));
+    const timeoutSeconds = typeof args.timeoutSeconds === 'number' ? args.timeoutSeconds : IMAGE_SAVE_TIMEOUT_SECONDS;
+    const deadline = Date.now() + timeoutSeconds * 1000;
+    const id = await documentId(ctx, path);
+    const editor = live(ctx).editors[editorOf(args)];
+    for (;;) {
+      const [document] = await editor.getDocuments([id], { withContent: true });
+      if (document === undefined) throw new ProductError('a recorded document does not exist in Linear');
+      const saved = imageCount(document.content ?? '');
+      if (saved > tracked) {
+        ctx.log(`linear.await-image: Linear saved the document with ${saved} image(s), its file has ${tracked}`);
+        return;
+      }
+      if (Date.now() >= deadline) throw new Error(`linear.await-image: Linear's saved document held no image beyond the ${tracked} of its file ${timeoutSeconds} seconds after the paste was answered`);
+      await delay(ctx.checkPollMs ?? IMAGE_SAVE_POLL_MS, undefined, { signal: ctx.signal });
+    }
+  },
   'linear.remove-one-marker': async (ctx, args) => {
     await editorEdit(ctx, editorOf(args), targetPath(ctx, args.target), (text) => {
       if (!text.split('\n').includes(MARKERS.end)) throw new ProductError('the document holds no end marker');
@@ -2360,8 +2424,8 @@ const OTHER: Record<string, Executor> = {
 };
 
 const UI_ACTIONS = [
-  'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-cleared', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
-  'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write', 'ui.type-two-editors', 'ui.verify-editor',
+  'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-cleared', 'ui.inspect-conflict', 'ui.inspect-released', 'ui.inspect-rendering',
+  'ui.inspect-suspended', 'ui.paste-image', 'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write', 'ui.type-two-editors', 'ui.verify-editor',
 ];
 
 /** Every step action the schema knows, with its executor. UI steps are run by the UI session, not here. */
@@ -2422,6 +2486,21 @@ const UI_AFTERMATH: Record<string, Executor> = {
 
 export async function afterUiStep(ctx: RunContext, step: Step): Promise<void> {
   await UI_AFTERMATH[`${step.kind}.${step.action}`]?.(ctx, step.args);
+  reportTypingMetrics(ctx);
+}
+
+/**
+ * The typing outcome a session measured where the sync writes (L6-07), with the run's typing window, goes into the
+ * report once the session recorded it, whichever item it answered with the values.
+ */
+function reportTypingMetrics(ctx: RunContext): void {
+  const measured = Object.entries(TYPING_METRICS).filter(([, subject]) => ctx.observations.has(subject));
+  if (measured.length === 0) return;
+  const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+  for (const [name, subject] of measured) metrics[name] = ctx.observations.get(subject);
+  const window = ctx.observations.get('settle.typingWindow');
+  if (window !== undefined) metrics.typingWindow = window;
+  ctx.observations.set('metrics', metrics);
 }
 
 export async function runStep(ctx: RunContext, step: Step): Promise<void> {
