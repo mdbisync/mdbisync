@@ -37,6 +37,7 @@ import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../initial-sync/uploads.ts'
 import { unverifiedPaths } from './head-check.ts';
 import {
   type CommitIdentity,
+  type Git,
   type IdEntry,
   type IdMap,
   type Oid,
@@ -266,7 +267,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const pendingRepairs = new Set<string>();
   for (const [path, entry] of ids) {
     if (entry.pullRewrite?.source === undefined || frozen.has(path)) continue;
-    if (!(await isAncestor(git, entry.pullRewrite.source, tracked))) {
+    if (!(await isAncestor(git, entry.pullRewrite.source, tracked)) || !(await repairMerged(git, entry.pullRewrite.source, tracked, path, entry.pullRewrite.replacement))) {
       pendingRepairs.add(path);
       result.skipped.push({path, reason: 'pull-repair-pending'});
     }
@@ -1197,4 +1198,19 @@ function pathsOf(change: DocumentChange): string[] {
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Whether the tracked branch took in a repair: a commit since its capture brought the replacement to the path. A
+ * pull request that held the document (the hooks had not passed its replacement) still merges that capture, so the
+ * capture being an ancestor alone does not say the repair arrived.
+ */
+async function repairMerged(git: Git, source: Oid, tracked: Oid, path: string, replacement: string): Promise<boolean> {
+  const blob = await git.text(['hash-object', '--stdin'], { input: replacement });
+  const commits = (await git.text(['log', '--format=%H', `--find-object=${blob}`, `${source}..${tracked}`])).split('\n').filter((line: string) => line !== '');
+  for (const commit of commits) {
+    const found = await git.run(['rev-parse', '--verify', '--quiet', `${commit}:${path}`], { okCodes: [0, 1, 128] });
+    if (found.code === 0 && found.stdout.toString('utf8').trim() === blob) return true;
+  }
+  return false;
 }
