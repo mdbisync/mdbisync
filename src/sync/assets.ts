@@ -282,25 +282,29 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     // Files the sync takes from Linear live in an `assets/` folder beside the documents that embed them.
     const assetsFolder = posix.join(posix.dirname(path), ASSETS_FOLDER);
     const assetsUsable = !notFolders.has(assetsFolder);
+    /** The capture of these bytes in the document's own `assets/` folder: a file there named by their hash. */
+    const captureOf = (hash: string): string | undefined => (hashPaths.get(hash) ?? []).find((candidate) =>
+      posix.dirname(candidate) === assetsFolder && isCaptureName(candidate) && posix.basename(candidate).startsWith(hash));
     /**
-     * The repository file holding these bytes: the one the previous text linked, else one in the
-     * document's own `assets/` folder, else the last in tree order. A file from git stays where it is.
+     * The repository file holding these bytes: the one the previous text linked, else their capture in the
+     * document's own `assets/` folder, else a file the previous text linked that could not be read (its
+     * download restores it). Any other file with equal bytes is never linked: an upload would otherwise
+     * bind the document to a repository file its text never named, and every later version of that file
+     * would be uploaded to Linear with it.
      */
-    const place = (hash: string): string | undefined => {
-      const paths = hashPaths.get(hash) ?? [];
-      return preferredPaths.get(hash) ?? paths.find((candidate) => posix.dirname(candidate) === assetsFolder) ?? paths.at(-1);
-    };
+    const place = (hash: string): string | undefined => preferredPaths.get(hash) ?? captureOf(hash) ?? unreadableLinks.get(hash);
     // A document moved to another folder takes copies of the files it linked in its old `assets/` folder,
     // by their path in the new one; the old file stays for the documents that still link it.
     const copies = new Map<string, string>();
     const oldAssetsFolder = posix.join(posix.dirname(previousPath), ASSETS_FOLDER);
     /**
-     * Where the copy of `source` goes in the new `assets/`: a file there with the same bytes, else its own name,
+     * Where the copy of `source` goes in the new `assets/`: the capture of the same bytes there, else its own name,
      * else its hash with its extension; none when every name holds other bytes, and the old file stays linked.
      */
     const copyTarget = (source: string, hash: string): string | undefined => {
       if (!assetsUsable) return undefined;
-      const same = (hashPaths.get(hash) ?? []).find((candidate) => posix.dirname(candidate) === assetsFolder);
+      // Another file there with equal bytes is not one the document linked, so it is never taken for the copy.
+      const same = captureOf(hash);
       if (same !== undefined) return same;
       // A name in the capture form names its content: a file edited in git since its capture is copied under its new hash,
       // so a later download of the original bytes can take the original name.
@@ -316,6 +320,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       return undefined;
     };
     const preferredPaths = new Map<string, string>();
+    // Files the previous text linked that cannot be read now (a Git LFS object that is missing), by their hash.
+    const unreadableLinks = new Map<string, string>();
     // How the previous text wrote each link to a file of the repository, by the file's hash and the link's
     // query and fragment: a link to the same file keeps that spelling. Every upload takes it alike, whether the
     // cache knew its URL or it was downloaded, so the text never depends on the cache (a first initial sync
@@ -323,7 +329,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const spellings = new Map<string, string[]>();
     if (previousBody !== undefined) {
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
-        if (await reusable(link.target) === 'unreadable') continue;
+        if (await reusable(link.target) === 'unreadable') {
+          const hash = pathHashes.get(link.target)!;
+          if (!unreadableLinks.has(hash)) unreadableLinks.set(hash, link.target);
+          continue;
+        }
         const hash = pathHashes.get(link.target)!;
         const moved = assetsFolder !== oldAssetsFolder && posix.dirname(link.target) === oldAssetsFolder;
         // Equal bytes under two old names share one copy, so every link names a file that is written.
@@ -394,6 +404,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         let asset = downloaded.get(url);
         if (asset === undefined) {
           try {
+            // A cached URL off the upload host is never downloaded: without a file the document linked, it stays out.
+            if (!isUpload(url)) { rejected.set(node.url, 'unreadable'); continue; }
             const failure = failed.get(url);
             if (failure !== undefined) throw failure;
             if (runCount >= limits.runCount || runBytes >= limits.runBytes || documentBytes >= limits.documentBytes) throw new AttachmentBudgetError();

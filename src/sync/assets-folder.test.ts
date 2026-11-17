@@ -1,6 +1,6 @@
 // Where capture puts a file it takes from Linear: the `assets/` folder beside
-// the document, a file already in the repository where it is, and a moved
-// document's `assets/` files copied into its new folder.
+// the document, the file the document's previous text linked where it is, and
+// a moved document's `assets/` files copied into its new folder.
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -52,19 +52,35 @@ describe('the assets folder beside the documents', () => {
     assert.equal(result.body, `![Pasted](assets/${pngHash}.png)\n`);
   });
 
-  it('links a file from git where its author put it, preferring the copy in the document folder', async () => {
-    const elsewhere = await captured({ 'docs/plan.md': 'Plan.\n', 'docs/images/chart.png': png }, 'docs/plan.md', `![Chart](${url})\n`);
-    assert.deepEqual([...elsewhere.files.keys()], ['docs/images/chart.png'], 'the same bytes, at the place git has them');
-    assert.equal(elsewhere.body, '![Chart](images/chart.png)\n');
+  it('never links an upload to a repository file with equal bytes that the previous text did not link', async () => {
+    // A Linear member who knows a repository file's bytes uploads them: the link must not name that file,
+    // or every later version of it would be uploaded to Linear with the document.
+    const elsewhere = await captured({ 'docs/plan.md': 'Plan.\n', 'docs/images/chart.png': png, 'config/key.png': png }, 'docs/plan.md', `![Chart](${url})\n`);
+    assert.deepEqual([...elsewhere.files.keys()], [`docs/assets/${pngHash}.png`]);
+    assert.deepEqual(elsewhere.files.get(`docs/assets/${pngHash}.png`), png);
+    assert.equal(elsewhere.body, `![Chart](assets/${pngHash}.png)\n`);
 
-    const tree = { 'docs/plan.md': 'Plan.\n', 'docs/assets/chart.png': png, 'other/assets/chart.png': png, 'zeta/chart.png': png };
-    const own = await captured(tree, 'docs/plan.md', `![Chart](${url})\n`);
-    assert.deepEqual([...own.files.keys()], ['docs/assets/chart.png']);
-    assert.equal(own.body, '![Chart](assets/chart.png)\n');
+    // Also when the cache maps the bytes to the upload and the link is an ordinary file link.
+    const mapped = await captured({ 'docs/plan.md': 'Plan.\n', 'config/key.png': png }, 'docs/plan.md', `[Chart](${url})\n`, new Map([[pngHash, url]]));
+    assert.equal(mapped.downloads, 1);
+    assert.deepEqual([...mapped.files.keys()], [`docs/assets/${pngHash}.png`]);
+    assert.equal(mapped.body, `[Chart](assets/${pngHash}.png)\n`);
 
-    const mapped = await captured(tree, 'docs/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]));
-    assert.equal(mapped.downloads, 0);
-    assert.equal(mapped.body, '![Chart](assets/chart.png)\n');
+    // A file in the document's own assets folder under another name is a repository file too.
+    const own = await captured({ 'docs/plan.md': 'Plan.\n', 'docs/assets/chart.png': png, 'other/assets/chart.png': png }, 'docs/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]));
+    assert.deepEqual([...own.files.keys()], [`docs/assets/${pngHash}.png`]);
+    assert.equal(own.body, `![Chart](assets/${pngHash}.png)\n`);
+  });
+
+  it('links the file the previous text linked, and the capture of the same bytes in the document folder', async () => {
+    const tree = { 'docs/plan.md': '![Chart](images/chart.png)\n', 'docs/images/chart.png': png, [`docs/assets/${pngHash}.png`]: png };
+    const linked = await captured(tree, 'docs/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]), { body: tree['docs/plan.md'], path: 'docs/plan.md' });
+    assert.equal(linked.downloads, 0);
+    assert.equal(linked.body, '![Chart](images/chart.png)\n');
+
+    const captureCopy = await captured(tree, 'docs/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]));
+    assert.equal(captureCopy.downloads, 0);
+    assert.equal(captureCopy.body, `![Chart](assets/${pngHash}.png)\n`);
   });
 
   it('copies the files a moved document linked in its old assets folder into the new one', async () => {
@@ -135,11 +151,17 @@ describe('the assets folder beside the documents', () => {
     assert.equal(moved.body, '![A](assets/a.png)\n\n![B](assets/a.png)\n');
   });
 
-  it('links equal bytes the new folder already has instead of copying them', async () => {
-    const tree = { 'old/plan.md': '![Chart](assets/chart.png)\n', 'old/assets/chart.png': png, 'new/assets/logo.png': png };
+  it('links the capture of equal bytes the new folder already has, never another file there', async () => {
+    const tree = { 'old/plan.md': '![Chart](assets/chart.png)\n', 'old/assets/chart.png': png, [`new/assets/${pngHash}.png`]: png };
     const moved = await captured(tree, 'new/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]), { body: tree['old/plan.md'], path: 'old/plan.md' });
     assert.equal(moved.files.size, 0);
-    assert.equal(moved.body, '![Chart](assets/logo.png)\n');
+    assert.equal(moved.body, `![Chart](assets/${pngHash}.png)\n`);
+
+    // A file the document never linked, though its bytes are equal, is not taken: the copy gets its own name.
+    const unlinked = { 'old/plan.md': tree['old/plan.md'], 'old/assets/chart.png': png, 'new/assets/secret.png': png };
+    const other = await captured(unlinked, 'new/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]), { body: tree['old/plan.md'], path: 'old/plan.md' });
+    assert.deepEqual([...other.files.keys()], ['new/assets/chart.png']);
+    assert.equal(other.body, '![Chart](assets/chart.png)\n');
   });
 
   it('keeps linking the old file when every name in the new folder holds other bytes', async () => {

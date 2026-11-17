@@ -21,26 +21,27 @@ const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', impor
 it('downloads new uploads into the assets folder beside the document, reuses content hashes and preserves ordinary links', async () => {
   const fixture = await createFixture();
   try {
-    await fixture.seed({'docs/plan.md': 'Plan.\n', 'docs/existing.png': Buffer.from('image')});
+    const hash = createHash('sha256').update(png).digest('hex');
+    await fixture.seed({'docs/plan.md': 'Plan.\n', [`docs/assets/${hash}.png`]: png});
     const git = await fixture.clone('assets');
     const base = await git.text(['rev-parse', 'origin/main']);
     const url = 'https://uploads.linear.app/workspace/image.png';
-    const hash = createHash('sha256').update('image').digest('hex');
     let gets = 0;
-    const fetcher: typeof fetch = async () => { gets++; return new Response('image'); };
+    const fetcher: typeof fetch = async () => { gets++; return new Response(png); };
     const site = `[${'\\]('.repeat(16)}\`code ](sample)\`](https://example.com/guide)`;
     const content = `![Image](${url})\n\n[Site](https://example.com/guide)\n\n${site}\n\n\`![code](${url})\`\n`;
     const cached = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', content, new Map([[hash, url]]), fetcher);
     assert.equal(gets, 0);
     assert.equal(cached.files.size, 0);
-    assert.ok(cached.body.startsWith('![Image](existing.png)'));
+    assert.ok(cached.body.startsWith(`![Image](assets/${hash}.png)`));
     assert.ok(cached.body.includes(site));
     assert.ok(cached.body.includes('[Site](https://example.com/guide)'));
     assert.ok(cached.body.includes(`\`![code](${url})\``));
     const otherUrl = 'https://uploads.linear.app/workspace/new.png';
-    const fresh = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${otherUrl})`, new Map(), async () => new Response(png));
-    const newHash = createHash('sha256').update(png).digest('hex');
-    assert.deepEqual(fresh.files.get(`docs/assets/${newHash}.png`), png);
+    const other = Buffer.concat([png, Buffer.from('other')]);
+    const fresh = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${otherUrl})`, new Map(), async () => new Response(other));
+    const newHash = createHash('sha256').update(other).digest('hex');
+    assert.deepEqual(fresh.files.get(`docs/assets/${newHash}.png`), other);
     assert.equal(fresh.uploads.get(newHash), otherUrl);
   } finally { await fixture.cleanup(); }
 });
@@ -112,9 +113,8 @@ it('restores cached upload spellings before restricting new downloads to the upl
     const result = await read('docs/plan.md', current, new Map([[hash, url]]), previous);
     assert.equal(result.body, previous);
     assert.equal(result.files.size, 0);
-    const fresh = await read('docs/other.md', current, new Map([[hash, url]]));
-    assert.equal(fresh.body, '[Image](<image.png?download=1#page=2>)\n');
-    assert.equal(fresh.files.size, 0);
+    // Another document never linked that file: the cached URL does not give it the file, and is not downloaded.
+    await assert.rejects(read('docs/other.md', current, new Map([[hash, url]])), (error: unknown) => error instanceof ImageBlockedError && error.findings.some((finding) => finding.reason === 'unreadable'));
     const image = await read('docs/plan.md', `!${current}`, new Map([[hash, url]]), previous);
     assert.equal(image.body, `[Image](${url}?download=1#page=2)\n`);
 
@@ -266,7 +266,7 @@ it('counts upload images and repeated reference occurrences without treating lin
   assert.deepEqual(imageLinks('![Good][asset]\n\n[asset]: https://uploads.linear.app/a.png\n').images, []);
 });
 
-it('uses detected extensions despite MIME type and URL, and reuses unrecognized tracked bytes', async () => {
+it('uses detected extensions despite MIME type and URL, and never links unrecognized bytes to a tracked file', async () => {
   const fixture = await createFixture();
   try {
     const existing = Buffer.from('<html>Already tracked</html>');
@@ -280,13 +280,12 @@ it('uses detected extensions despite MIME type and URL, and reuses unrecognized 
       assert.equal(result.body, `![Image](assets/${hash}.jpg)`);
       assert.deepEqual([...result.files], [[`docs/assets/${hash}.jpg`, jpeg]]);
     }
+    // The bytes of a tracked file the document never linked are a new upload, and fail its type check.
     const url = 'https://uploads.linear.app/existing.png';
-    const result = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${url})`, new Map(), async () => new Response(existing));
-    assert.equal(result.body, '![Image](../assets/existing.html)');
+    const unsupported = (error: unknown) => error instanceof ImageBlockedError && error.findings.some((finding) => finding.reason === 'unsupported-type');
+    await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${url})`, new Map(), async () => new Response(existing)), unsupported);
     const hash = createHash('sha256').update(existing).digest('hex');
-    const mapped = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${url})`, new Map([[hash,url]]), async () => {throw new Error('Unexpected download');});
-    assert.equal(mapped.body, result.body);
-    assert.equal(mapped.files.size, 0);
+    await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${url})`, new Map([[hash,url]]), async () => new Response(existing)), unsupported);
   } finally {await fixture.cleanup();}
 });
 
@@ -478,7 +477,7 @@ it('counts cached query variants as one attachment, matching download identity',
     const url = 'https://uploads.linear.app/image';
     const hash = createHash('sha256').update(png).digest('hex');
     const capture = createAssetCapture(git, resolveStateConfig({}), base, async () => { throw new Error('Unexpected download'); });
-    const result = await capture('plan.md', Array.from({length:33}, (_, i) => `![Image](${url}?width=${i})`).join('\n'), new Map([[hash,url]]));
+    const result = await capture('plan.md', Array.from({length:33}, (_, i) => `![Image](${url}?width=${i})`).join('\n'), new Map([[hash,url]]), '![Image](image.png)\n');
     assert.equal(result.files.size, 0);
     assert.match(result.body, /image\.png\?width=32/);
   } finally { await fixture.cleanup(); }
@@ -519,20 +518,20 @@ it('blocks a link typed in Linear to a repository file the previous text did not
 it('encodes a restored link\'s fragment, so it cannot end the link and add another', async () => {
   const fixture = await createFixture();
   try {
-    await fixture.seed({'docs/plan.md': 'Plan.\n', 'docs/existing.png': Buffer.from('image')});
+    const hash = createHash('sha256').update(png).digest('hex');
+    await fixture.seed({'docs/plan.md': 'Plan.\n', [`docs/assets/${hash}.png`]: png});
     const git = await fixture.clone('fragment');
     const base = await git.text(['rev-parse', 'origin/main']);
     const url = 'https://uploads.linear.app/workspace/image.png';
-    const hash = createHash('sha256').update('image').digest('hex');
     // One link in Linear's text; its decoded fragment spells a second one.
     const content = `[File](${url}#x\\)\\[y\\]\\(../secret.csv)`;
     assert.deepEqual(destinations(content).length, 1);
     const captured = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', content, new Map([[hash, url]]), async () => { throw new Error('a cached link must not be downloaded'); });
-    assert.deepEqual(destinations(captured.body).map(({ node }) => node.url), ['existing.png#x%29%5By%5D%28../secret.csv']);
+    assert.deepEqual(destinations(captured.body).map(({ node }) => node.url), [`assets/${hash}.png#x%29%5By%5D%28../secret.csv`]);
     // Query separators stay; an `&` that would read as a character reference does not, and an encoded one stays encoded.
     const query = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `[File](${url}?download=1&page=2&amp;lt;x&q=a%26b#a&b)`, new Map([[hash, url]]), async () => { throw new Error('a cached link must not be downloaded'); });
-    assert.equal(query.body, '[File](existing.png?download=1&page=2%26lt;x&q=a%26b#a&b)');
-    assert.deepEqual(destinations(query.body).map(({ node }) => node.url), ['existing.png?download=1&page=2%26lt;x&q=a%26b#a&b']);
+    assert.equal(query.body, `[File](assets/${hash}.png?download=1&page=2%26lt;x&q=a%26b#a&b)`);
+    assert.deepEqual(destinations(query.body).map(({ node }) => node.url), [`assets/${hash}.png?download=1&page=2%26lt;x&q=a%26b#a&b`]);
   } finally { await fixture.cleanup(); }
 });
 

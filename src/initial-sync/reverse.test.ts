@@ -437,11 +437,12 @@ describe('initial sync from Linear to the tracked branch', () => {
   });
 
   it('L1R-04: downloads the files documents embed into the assets folder beside them, stored as .gitattributes decides, linked relatively and cached', async () => {
-    await fixture.seed({ '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n' });
+    // The tracked plan links the diagram the branch already holds (committed before the LFS pattern).
+    await fixture.seed({ '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n', 'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\n![Diagram](diagram.png)\n` });
     const world = fakeWorld();
     const shot = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
     const spec = Buffer.from('%PDF-1.4 a specification');
-    // The same bytes as a file the tracked branch already holds (committed before the LFS pattern).
+    // The same bytes as that linked file.
     const diagram = Buffer.from(TREE['eng/notes/diagram.png'] as string);
     const upload = (name: string, contentType: string, bytes: Buffer) => {
       const assetUrl = `${UPLOADS_HOST}/${world.linear.uploads.length}/${name}`;
@@ -462,7 +463,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.linearToGit?.leftOutAtRecord, []);
     const head = 'refs/mdbisync/linear';
-    // Next to the document, named by content hash, linked relatively; a file the branch holds is linked, not copied.
+    // Next to the document, named by content hash, linked relatively; a file the tracked text links is linked, not copied.
     assert.equal(await show(`${head}:eng/ops/runbook.md`), `# Runbook\n\n![Shot](assets/${sha(shot)}.png)\n\nRead [the spec](assets/${sha(spec)}.pdf#page=2).`);
     assert.equal(await show(`${head}:eng/notes/plan.md`), `---\nowner: platform\n---\n\n# Plan\n\n![Diagram](diagram.png)`);
     const tree = await files(head);

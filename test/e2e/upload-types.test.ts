@@ -94,14 +94,14 @@ it('blocks a document that reuses a captured file the stricter check now refuses
   const fixture = await createFixture();
   const config = resolveStateConfig({});
   try {
-    // An SVG the earlier deny-list admitted, stored under the name a capture gives, and a static one.
+    // An SVG the earlier deny-list admitted, stored where and as a capture stores it, and a static one.
     const old = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><iframe xmlns="http://www.w3.org/1999/xhtml" src="javascript:alert(1)"/></svg>');
     const shapes = await readFile(new URL('../fixtures/assets/shapes.svg',import.meta.url));
     const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
     await fixture.seed({
       'docs/README.md':'---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
       'docs/mapped.md':'Mapped.\n','docs/copied.md':'Copied.\n','docs/static.md':'Static.\n',
-      [`docs/${hash(old)}.svg`]:old,[`docs/${hash(shapes)}.svg`]:shapes,
+      [`docs/assets/${hash(old)}.svg`]:old,[`docs/assets/${hash(shapes)}.svg`]:shapes,
       '.pre-commit-config.yaml':'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n',
     });
     const git = await fixture.clone('engine');
@@ -136,6 +136,6 @@ it('blocks a document that reuses a captured file the stricter check now refuses
     const show = (path: string) => fixture.remote.text(['show',`${stateRef(config,'linear')}:${path}`]);
     assert.equal(await show('docs/mapped.md'),'Mapped.');
     assert.equal(await show('docs/copied.md'),'Copied.');
-    assert.equal(await show('docs/static.md'),`Text.\n\n![Image](${hash(shapes)}.svg)`);
+    assert.equal(await show('docs/static.md'),`Text.\n\n![Image](assets/${hash(shapes)}.svg)`);
   } finally {await fixture.cleanup();}
 });
