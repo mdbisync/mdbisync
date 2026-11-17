@@ -450,21 +450,31 @@ export async function initialPullRequestPending(git: Git, state: { linear: Oid |
 }
 
 /**
- * The initial record from Linear that `linear` holds and the tracked branch
- * has not merged, when it changed its parent's tree; otherwise null. It is
- * found by its place in the history, not by the tip's subject: anyone who may
- * push can add commits to the state refs, so every commit after the record
- * is read, whoever wrote it. Only a merge into the tracked branch, or a new
- * initial sync (whose record starts again from the tracked branch), takes it
- * out of that history.
+ * The newest initial record from Linear that `linear` holds and the tracked
+ * branch has not merged, when it changed its parent's tree; otherwise null.
+ * See `pendingInitialRecords`.
  */
 export async function pendingInitialRecord(git: Git, state: { linear: Oid | null; tracked: Oid }): Promise<Oid | null> {
+  return (await pendingInitialRecords(git, state))[0] ?? null;
+}
+
+/**
+ * The initial records from Linear that `linear` holds and the tracked branch
+ * has not merged, and that changed their parent's tree, newest first. They are
+ * found by their place in the history, not by the tip's subject: anyone who
+ * may push can add commits to the state refs, so every commit after a record
+ * is read, whoever wrote it. Only a merge into the tracked branch, or a new
+ * initial sync (whose record starts again from the tracked branch), takes a
+ * record out of that history.
+ */
+export async function pendingInitialRecords(git: Git, state: { linear: Oid | null; tracked: Oid }): Promise<Oid[]> {
   const { linear, tracked } = state;
-  if (linear === null) return null;
+  if (linear === null) return [];
+  const records: Oid[] = [];
   for (const record of await unmergedInitialRecords(git, linear, tracked)) {
-    if (await initialRecordChangesParent(git, record)) return record;
+    if (await initialRecordChangesParent(git, record)) records.push(record);
   }
-  return null;
+  return records;
 }
 
 /**

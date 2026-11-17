@@ -21,6 +21,7 @@ export {
   INITIAL_SYNC_PROGRESS,
   initialPullRequestPending,
   pendingInitialRecord,
+  pendingInitialRecords,
   unmergedInitialRecords,
   initialRecordChangesParent,
   isAncestor,

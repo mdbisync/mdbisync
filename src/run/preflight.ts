@@ -18,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type CommitIdentity, type FetchedState, type Git, type Oid, NEUTRAL_IDENTITY, PushedKey, fetchState, initialPullRequestPending, isAncestor, pendingInitialRecord, readInitialSyncProgress, suspendedBranch } from '../state/index.ts';
+import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, PushedKey, fetchState, initialPullRequestPending, isAncestor, pendingInitialRecords, readInitialSyncProgress, suspendedBranch } from '../state/index.ts';
 import { type CheckClock } from '../pull-request/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
@@ -103,8 +103,12 @@ export async function runPreflight(
   } else if (options.refusePendingInitialPullRequest === true) {
     // A new initial sync to Linear may replace an abandoned snapshot once
     // its branch is deleted. A branch still carrying it must be removed first.
-    const record = fetched.sync === null ? null : await pendingInitialRecord(git, { linear: fetched.state.linear, tracked: fetched.tracked });
-    const pending = record !== null && (await isAncestor(git, record, fetched.sync as Oid));
+    let pending = false;
+    if (fetched.sync !== null) {
+      for (const record of await pendingInitialRecords(git, { linear: fetched.state.linear, tracked: fetched.tracked })) {
+        if (await isAncestor(git, record, fetched.sync)) pending = true;
+      }
+    }
     const refusal = checkSyncState(fetched.state, inputs.state, false, pending);
     if (refusal?.code === 'initial-pull-request-pending') return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   }

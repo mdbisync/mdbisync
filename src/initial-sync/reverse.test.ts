@@ -1112,6 +1112,24 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.writes.length, writes);
   });
 
+  it('an initial sync to Linear waits for a branch that carries an older unmerged record than the state ref\'s newest', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const record = await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear']);
+    const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+    // A newer record that changes its parent, which the sync branch does not carry, joined with the older one.
+    const newer = await fixture.remote.text(['commit-tree', `${record}^{tree}`, '-p', main, '-m', REVERSE_RECORD_MESSAGE]);
+    await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', await forge([newer, record], 'Sync: Linear changes')]);
+    const before = await refs();
+    const writes = world.writes.length;
+    const { result, report } = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
+    assert.equal(result.exitCode, NO_STATE_EXIT_CODE, result.stderr);
+    assert.equal(report.code, 'initial-pull-request-pending');
+    assert.deepEqual(await refs(), before);
+    assert.equal(world.writes.length, writes);
+  });
+
   it('refuses sync after the initial branch moves elsewhere, but lets a new initial sync to Linear replace the abandoned record', async () => {
     const world = fakeWorld();
     world.linear.documents = linearDocuments();

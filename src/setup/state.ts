@@ -16,8 +16,9 @@ export interface StateRefusal {
  * Returns the refusal when the sync has no state, or null when it may go on.
  * `initialSyncUnfinished`: the `ids` ref is at a progress commit of an
  * initial sync that stopped; its map may hold only part of the documents.
- * `initialPullRequestPending`: `linear` is an initial sync's record from
- * Linear that the tracked branch has not taken yet.
+ * `initialPullRequestPending`: `linear`'s history holds an initial sync's
+ * record from Linear that the tracked branch has not taken yet, wherever the
+ * tip has moved since.
  */
 export function checkSyncState(
   state: StateSnapshot,

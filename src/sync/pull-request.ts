@@ -517,12 +517,14 @@ async function isInitialRecord(git: Git, commit: Oid): Promise<boolean> {
  */
 async function holdsInitialRecord(git: Git, sync: Oid, tracked: Oid, own: Oid | undefined): Promise<boolean> {
   let chosen: Oid | undefined;
-  if (own !== undefined) {
+  // A head the clone no longer has (the branch was rewritten since) proves nothing either.
+  if (own !== undefined && (await git.run(['cat-file', '-e', `${own}^{commit}`], { okCodes: [0, 1, 128] })).code === 0) {
+    const made = new Set((await git.text(['rev-list', own, '--not', tracked])).split('\n'));
     const commits = (await git.text(['log', '--first-parent', '--format=%H %s', `${tracked}..${sync}`])).split('\n');
     for (const line of commits) {
       const separator = line.indexOf(' ');
       const commit = line.slice(0, separator);
-      if (line.slice(separator + 1) === SYNC_BRANCH_MERGE_MESSAGE && (await isAncestor(git, commit, own))) {
+      if (line.slice(separator + 1) === SYNC_BRANCH_MERGE_MESSAGE && made.has(commit)) {
         chosen = commit;
         break;
       }
