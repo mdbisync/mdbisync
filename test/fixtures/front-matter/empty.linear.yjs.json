@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Empty front matter","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-83b9828d","marks":{"attribution":"user"}}]}
-  ]
-}

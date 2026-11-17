@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"A literal backtick looks like ","marks":{"attribution":"user"}},{"text":"`","marks":{"attribution":"user","code":{}}},{"text":" inside code.","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-4a6b2264","marks":{"attribution":"user"}}]}
-  ]
-}
