@@ -54,12 +54,12 @@ describe('the assets folder beside the documents', () => {
 
   it('links a file from git where its author put it, preferring the copy in the document folder', async () => {
     const elsewhere = await captured({ 'docs/plan.md': 'Plan.\n', 'docs/images/chart.png': png }, 'docs/plan.md', `![Chart](${url})\n`);
-    assert.equal(elsewhere.files.size, 0);
+    assert.deepEqual([...elsewhere.files.keys()], ['docs/images/chart.png'], 'the same bytes, at the place git has them');
     assert.equal(elsewhere.body, '![Chart](images/chart.png)\n');
 
     const tree = { 'docs/plan.md': 'Plan.\n', 'docs/assets/chart.png': png, 'other/assets/chart.png': png, 'zeta/chart.png': png };
     const own = await captured(tree, 'docs/plan.md', `![Chart](${url})\n`);
-    assert.equal(own.files.size, 0);
+    assert.deepEqual([...own.files.keys()], ['docs/assets/chart.png']);
     assert.equal(own.body, '![Chart](assets/chart.png)\n');
 
     const mapped = await captured(tree, 'docs/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]));

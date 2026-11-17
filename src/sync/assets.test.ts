@@ -18,7 +18,7 @@ const createAssetCapture: typeof makeCapture = (...args) => { const capture = ma
 afterEach(() => { for (const capture of captures.splice(0)) capture.close(); });
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
-it('downloads new uploads next to the document, reuses content hashes and preserves ordinary links', async () => {
+it('downloads new uploads into the assets folder beside the document, reuses content hashes and preserves ordinary links', async () => {
   const fixture = await createFixture();
   try {
     await fixture.seed({'docs/plan.md': 'Plan.\n', 'docs/existing.png': Buffer.from('image')});
@@ -40,7 +40,7 @@ it('downloads new uploads next to the document, reuses content hashes and preser
     const otherUrl = 'https://uploads.linear.app/workspace/new.png';
     const fresh = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${otherUrl})`, new Map(), async () => new Response(png));
     const newHash = createHash('sha256').update(png).digest('hex');
-    assert.deepEqual(fresh.files.get(`docs/${newHash}.png`), png);
+    assert.deepEqual(fresh.files.get(`docs/assets/${newHash}.png`), png);
     assert.equal(fresh.uploads.get(newHash), otherUrl);
   } finally { await fixture.cleanup(); }
 });
@@ -277,8 +277,8 @@ it('uses detected extensions despite MIME type and URL, and reuses unrecognized 
     for (const suffix of ['png', 'md', 'html']) {
       const result = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](https://uploads.linear.app/file.${suffix})`, new Map(), async () => new Response(jpeg, {headers:{'content-type':'image/png'}}));
       const hash = createHash('sha256').update(jpeg).digest('hex');
-      assert.equal(result.body, `![Image](${hash}.jpg)`);
-      assert.deepEqual([...result.files], [[`docs/${hash}.jpg`, jpeg]]);
+      assert.equal(result.body, `![Image](assets/${hash}.jpg)`);
+      assert.deepEqual([...result.files], [[`docs/assets/${hash}.jpg`, jpeg]]);
     }
     const url = 'https://uploads.linear.app/existing.png';
     const result = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${url})`, new Map(), async () => new Response(existing));

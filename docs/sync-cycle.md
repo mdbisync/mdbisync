@@ -67,7 +67,9 @@ fetch the refs, and the sync writes nothing of its own into your files.
    another project moves the file to that project's folder; a trashed
    document, or one moved out of the synchronized projects, removes the
    file; a restored one brings it back. Images and files the document
-   embeds from Linear are downloaded next to it.
+   embeds from Linear are downloaded into the `assets/` folder beside it.
+   A document moved to another folder takes copies of the files it linked
+   in its old folder's `assets/`.
 3. The same run takes the change towards git (step 2): it opens the sync
    pull request **Changes from Linear**, or adds the change to the open
    one, and waits a short grace period for its checks.

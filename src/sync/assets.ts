@@ -28,6 +28,8 @@ export class AttachmentBudgetError extends Error {
 }
 export const ATTACHMENT_LIMITS = Object.freeze({documentCount: 32, documentBytes: 32 * 1024 * 1024, runCount: 256, runBytes: 256 * 1024 * 1024});
 const LIMIT = 10 * 1024 * 1024;
+/** The folder beside a document that holds the files the sync takes from Linear for it. */
+export const ASSETS_FOLDER = 'assets';
 /** Whether `url` is on Linear's upload host, the only destination the sync downloads. */
 export function isUpload(url: string): boolean {
   try { const parsed = new URL(url); return parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.username === '' && parsed.password === '' && parsed.port === ''; }
@@ -200,7 +202,8 @@ async function download(url: string, fetcher: typeof fetch, reads: LinearReads |
 
 /** One lazily built hash index per capture, read in bounded batches. */
 export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fetcher: typeof fetch = fetch, reads?: LinearReads, spool = new ContentSpool(), limits: {documentCount: number; documentBytes: number; runCount: number; runBytes: number} = ATTACHMENT_LIMITS) {
-  const hashPaths = new Map<string, string>();
+  // Every file of the tree with each content hash, in tree order.
+  const hashPaths = new Map<string, string[]>();
   const pathHashes = new Map<string, string>();
   let indexed = false;
   const index = async () => {
@@ -219,7 +222,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       for (const entry of batch) {
         const blob = blobs.get(entry.oid)!;
         const hash = parseLfsPointer(blob)?.oid ?? createHash('sha256').update(blob).digest('hex');
-        hashPaths.set(hash, entry.path);
+        hashPaths.set(hash, [...hashPaths.get(hash) ?? [], entry.path]);
         pathHashes.set(entry.path, hash);
       }
     }
@@ -228,10 +231,13 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   // A repository file an upload maps to is reused only when readable, and, if a capture named it, when its
   // bytes still pass the upload check: an earlier, weaker check may have admitted them.
   const reuse = new Map<string, 'unreadable' | 'admitted' | 'refused'>();
+  // The bytes of admitted files, kept only for a moved document's copies.
+  const admitted = new Map<string, Buffer>();
   const reusable = async (path: string) => {
     if (!reuse.has(path)) {
       const read = (await readFiles(git, config, base, [path])).get(path);
       reuse.set(path, read?.ok !== true ? 'unreadable' : admitsCapturedFile(path, read.content) ? 'admitted' : 'refused');
+      if (read?.ok === true && reuse.get(path) === 'admitted') admitted.set(path, read.content);
     }
     return reuse.get(path)!;
   };
@@ -267,6 +273,28 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const knownUpload = (url: string) => cachedUrls.some((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`));
     if (!sourceDestinations.some(({node}) => isUpload(node.url) || knownUpload(node.url))) return finish(body, files, additions);
     await index();
+    // Files the sync takes from Linear live in an `assets/` folder beside the documents that embed them.
+    const assetsFolder = posix.join(posix.dirname(path), ASSETS_FOLDER);
+    /**
+     * The repository file holding these bytes: the one the previous text linked, else one in the
+     * document's own `assets/` folder, else the last in tree order. A file from git stays where it is.
+     */
+    const place = (hash: string): string | undefined => {
+      const paths = hashPaths.get(hash) ?? [];
+      return preferredPaths.get(hash) ?? paths.find((candidate) => posix.dirname(candidate) === assetsFolder) ?? paths.at(-1);
+    };
+    // A document moved to another folder takes copies of the files it linked in its old `assets/` folder,
+    // by their path in the new one; the old file stays for the documents that still link it.
+    const copies = new Map<string, string>();
+    const oldAssetsFolder = posix.join(posix.dirname(previousPath), ASSETS_FOLDER);
+    const copyTarget = (source: string, hash: string): string => {
+      for (const name of [posix.basename(source), `${hash}${posix.extname(source)}`]) {
+        const target = posix.join(assetsFolder, name);
+        const existing = pathHashes.get(target);
+        if (existing === undefined || existing === hash) return target;
+      }
+      throw new Error(message('assets.destination-exists'));
+    };
     const preferredPaths = new Map<string, string>();
     // How the previous text wrote each link to a file of the repository, by the file's hash and the link's
     // query and fragment: a link to the same file keeps that spelling. Every upload takes it alike, whether the
@@ -277,8 +305,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
         if (await reusable(link.target) === 'unreadable') continue;
         const hash = pathHashes.get(link.target)!;
-        if (!preferredPaths.has(hash)) preferredPaths.set(hash, link.target);
-        const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), link.target).split('/').map(encodeURIComponent).join('/') + link.suffix;
+        const copied = assetsFolder !== oldAssetsFolder && posix.dirname(link.target) === oldAssetsFolder;
+        const target = copied ? copyTarget(link.target, hash) : link.target;
+        if (copied && !pathHashes.has(target)) copies.set(target, link.target);
+        if (!preferredPaths.has(hash)) preferredPaths.set(hash, target);
+        const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), target).split('/').map(encodeURIComponent).join('/') + link.suffix;
         const key = hash + link.suffix;
         if (!spellings.has(key)) spellings.set(key, []);
         spellings.get(key)!.push(previousPath !== path && link.written.startsWith('<') ? `<${raw}>` : raw);
@@ -321,11 +352,13 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       const url = cached ?? (hashAt === -1 ? node.url : node.url.slice(0, hashAt));
       const suffix = cached === undefined ? (hashAt === -1 ? '' : node.url.slice(hashAt)) : node.url.slice(cached.length);
       let hash = [...uploads].find(([, known]) => known === url)?.[0];
-      let assetPath = hash === undefined ? undefined : preferredPaths.get(hash) ?? hashPaths.get(hash);
+      let assetPath = hash === undefined ? undefined : place(hash);
       if (assetPath !== undefined) {
-        const state = await reusable(assetPath);
+        const source = copies.get(assetPath);
+        const state = await reusable(source ?? assetPath);
         if (state === 'refused') { rejected.set(node.url, 'unsupported-type'); continue; }
         if (state === 'unreadable') assetPath = undefined;
+        else if (source !== undefined) files.set(assetPath, admitted.get(source)!);
       }
       if (assetPath === undefined) {
         let asset = downloaded.get(url);
@@ -352,13 +385,13 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         if (!counted.has(url)) { documentBytes += asset.file.size; counted.add(url); }
         if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
         hash = asset.file.hash;
-        assetPath = preferredPaths.get(hash) ?? hashPaths.get(hash);
+        assetPath = place(hash);
         // The downloaded bytes are the file's bytes (same hash), so they are checked in its place.
         if (assetPath !== undefined && !admitsCapturedFile(assetPath, contentBytes(asset.file))) { rejected.set(node.url, 'unsupported-type'); continue; }
         if (assetPath === undefined) {
           const extension = uploadExtension(contentBytes(asset.file));
           if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
-          assetPath = posix.join(posix.dirname(path), `${hash}${extension}`);
+          assetPath = posix.join(assetsFolder, `${hash}${extension}`);
           if (pathHashes.has(assetPath)) throw new Error(message('assets.destination-exists'));
         }
         // Each document owns its candidate bytes until its security check passes.

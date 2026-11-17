@@ -53,7 +53,7 @@ describe('image repairs through the sync pull request', () => {
     const opened = await h.sync();
     assert.deepEqual(opened.report.capture?.blocked, []);
     const branch = await h.show(`${SYNC_BRANCH}:${path}`);
-    assert.match(branch, /!\[Kept\]\([a-f0-9]+\.png\)/);
+    assert.match(branch, /!\[Kept\]\(assets\/[a-f0-9]+\.png\)/);
     assert.match(branch, /\[Relative\]\(missing.png\)/);
     assert.match(branch, /\[Absolute\]\(\/missing.png\)/);
     assert.match(branch, /\[Nested\]\(https:\/\/example.com\/guide\)/);

@@ -462,7 +462,7 @@ Markdown files and do not. Files with other names came through git and are
 not checked. The sync never removes or rewrites the file itself.
 
 ```text
-docs/0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8.svg:1: upload-file-refused: …
+docs/assets/0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8.svg:1: upload-file-refused: …
 ```
 
 Instead, remove the file, or replace it with a file the check admits, and

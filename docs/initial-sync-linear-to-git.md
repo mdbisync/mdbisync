@@ -66,9 +66,9 @@ What it writes to git:
 - matched files get their document's text, keeping their front matter;
   documents without a file become new files; synchronized files without a
   document are removed, except annotation `README.md` files;
-- images and other files a document embeds from Linear are downloaded next to
-  it, named by their content's SHA-256 hash (`<hash>.png`), and linked
-  relatively. A file the branch already holds with the same content is linked
+- images and other files a document embeds from Linear are downloaded into
+  the `assets/` folder beside it, named by their content's SHA-256 hash
+  (`assets/<hash>.png`), and linked relatively. A file the branch already holds with the same content is linked
   instead of copied. The repository's `.gitattributes` decides whether a file
   goes to Git LFS, as for a person's commit. The sync records where each file
   came from, so it never uploads it to Linear again. Images pass the same
@@ -127,7 +127,7 @@ file keeps the tracked branch's text and stays tied to its document.
 | `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes. Reduce nesting or split the document; valid neighbors still import. |
 | `image-blocked` | An image or file the document embeds is one the sync blocks: not an upload of the workspace (an external URL, a `data:` URI, a path), or an upload that is gone, over 10 MB, redirected or not a supported type. The first sync afterwards marks the document and comments which images to fix. |
 | `attachment-budget` | More than 32 unique upload links or 32 MiB in one document, or 256 downloads or 256 MiB in the run. The document keeps its tracked text (or stays out if new). Reduce or split attachments and rerun. |
-| `download-failed` | A file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed next to it. The first sync afterwards reads the document again. |
+| `download-failed` | A file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed in its `assets/` folder. The first sync afterwards reads the document again. |
 | `front-matter-boundary` | The document's text starts with something that reads as front matter, so it would not stay the file's body. |
 | `title-not-a-path` | The new file would map back to another document or another folder's team or project. |
 | `security-hook` | A security hook reported a finding in the document's text or its files, including the Linear URL of a linked document that was left out. |

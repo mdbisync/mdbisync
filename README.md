@@ -90,8 +90,12 @@ and git's path beats Linear's title
 - **Folders as teams and projects:** the front matter of a folder's `README.md`
   maps it to a Linear team and project; deeper folders become title paths.
 - **Images and files:** files a document links are uploaded to Linear once;
-  supported images and documents pasted in Linear land next to the document, in
-  Git LFS when your `.gitattributes` says so. External HTTP(S) images, path
+  supported images and documents pasted in Linear land in an `assets/` folder
+  beside the document (`assets/<sha256>.png`), one per folder, in Git LFS
+  when your `.gitattributes` says so (`mdbisync init --lfs` adds the lines).
+  Files you committed keep their place; a document moved to another folder
+  takes copies of its `assets/` files. Lint refuses Markdown files inside an
+  `assets/` folder. External HTTP(S) images, path
   images and uploads returning 404 or 410 become ordinary links; an empty alt
   uses the URL as its label, and an image inside a link keeps the outer link.
   Empty images and `data:` images are removed. The sync pull request lists

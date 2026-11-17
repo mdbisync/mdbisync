@@ -435,7 +435,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal((await readIds())['handbook/README.md'], handbook()[0]?.id);
   });
 
-  it('L1R-04: downloads the files documents embed next to them, stored as .gitattributes decides, linked relatively and cached', async () => {
+  it('L1R-04: downloads the files documents embed into the assets folder beside them, stored as .gitattributes decides, linked relatively and cached', async () => {
     await fixture.seed({ '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n' });
     const world = fakeWorld();
     const shot = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
@@ -462,16 +462,16 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.deepEqual(report.linearToGit?.leftOutAtRecord, []);
     const head = 'refs/mdbisync/linear';
     // Next to the document, named by content hash, linked relatively; a file the branch holds is linked, not copied.
-    assert.equal(await show(`${head}:eng/ops/runbook.md`), `# Runbook\n\n![Shot](${sha(shot)}.png)\n\nRead [the spec](${sha(spec)}.pdf#page=2).`);
+    assert.equal(await show(`${head}:eng/ops/runbook.md`), `# Runbook\n\n![Shot](assets/${sha(shot)}.png)\n\nRead [the spec](assets/${sha(spec)}.pdf#page=2).`);
     assert.equal(await show(`${head}:eng/notes/plan.md`), `---\nowner: platform\n---\n\n# Plan\n\n![Diagram](diagram.png)`);
     const tree = await files(head);
-    assert.deepEqual(tree.filter((path) => /\.(png|pdf)$/.test(path)), [`eng/notes/diagram.png`, `eng/ops/${sha(shot)}.png`, `eng/ops/${sha(spec)}.pdf`].sort());
+    assert.deepEqual(tree.filter((path) => /\.(png|pdf)$/.test(path)), [`eng/notes/diagram.png`, `eng/ops/assets/${sha(shot)}.png`, `eng/ops/assets/${sha(spec)}.pdf`].sort());
     // `.gitattributes` routes PNG files to LFS: a pointer in git, the object in the remote's LFS store. The PDF is a plain file.
-    const pointer = await show(`${head}:eng/ops/${sha(shot)}.png`);
+    const pointer = await show(`${head}:eng/ops/assets/${sha(shot)}.png`);
     assert.equal(pointer, `version https://git-lfs.github.com/spec/v1\noid sha256:${sha(shot)}\nsize ${shot.length}`);
     const remoteDir = await fixture.remote.text(['rev-parse', '--absolute-git-dir']);
     assert.deepEqual(await readFile(join(remoteDir, 'lfs', 'objects', sha(shot).slice(0, 2), sha(shot).slice(2, 4), sha(shot))), shot);
-    assert.deepEqual((await fixture.remote.run(['show', `${head}:eng/ops/${sha(spec)}.pdf`])).stdout, spec);
+    assert.deepEqual((await fixture.remote.run(['show', `${head}:eng/ops/assets/${sha(spec)}.pdf`])).stdout, spec);
     // The upload cache maps each file's hash to its Linear URL.
     const uploads = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
     assert.equal(uploads[sha(shot)], shotUrl);
