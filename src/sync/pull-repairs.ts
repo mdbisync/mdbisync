@@ -19,7 +19,7 @@ export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: 
   for (const [path, entry] of pending) {
     const file = entries.get(path);
     if (!documents.has(path) || file === undefined || !isSyncedChange(path, file.mode, zones)) continue;
-    const source = file === undefined ? undefined : blobs.get(file.oid);
+    const source = blobs.get(file.oid);
     const repair = entry.pullRewrite!;
     if (source === undefined || createHash('sha256').update(source).digest('hex') !== repair.hash) continue;
     if (source.toString('utf8') === repair.replacement) continue;

@@ -130,6 +130,28 @@ describe('sync: pull request head check', () => {
     assert.equal(result?.code, 'head-unverified');
     assert.deepEqual(result?.unverified, [path]);
     assert.equal(await rev(branch), head, 'no new tree outside the document scope may be pushed');
+    let pr = h.openPullRequests().find(pr => `refs/heads/${pr.head}` === branch)!;
+    assert.match(pr.body, /The sync does not merge this pull request:/);
+    pr.state = 'closed';
+    await editRef(branch, 'tools/example.sh', 'echo example\n');
+    await sync();
+    pr = h.openPullRequests().find(pr => `refs/heads/${pr.head}` === branch)!;
+    assert.ok(pr, 'a closed pull request is replaced for the existing unsafe branch');
+    assert.equal((pr.body.match(/The sync does not merge this pull request:/g) ?? []).length, 1);
+    assert.match(pr.body, /tools\/example.sh/);
+  });
+
+  it('releases a merged suspended batch without pushing an unsafe normal head', async () => {
+    await suspendOne();
+    await editInLinear('combined/guide.md', '# Guide\n\nIndependent edit.\n');
+    await sync();
+    const normal = await editRef(SYNC_BRANCH, '.github/workflows/example.yml', 'name: Example\n');
+    passing(await rev(SUSPENDED));
+    const run = await sync();
+    assert.ok(run.report.pullRequest?.suspended?.released, 'the already merged batch must be released');
+    assert.equal(await rev(SYNC_BRANCH), normal);
+    assert.doesNotMatch(await h.show('refs/mdbisync/ids:ids.json'), /"suspended"/);
+    assert.match(await h.show('refs/heads/main:eng/notes/plan.md'), /Held Linear edit/);
   });
 
   it('a commit on a failing suspended branch is reported at once, its file named in the description, and the normal lane does not wait for it', async () => {

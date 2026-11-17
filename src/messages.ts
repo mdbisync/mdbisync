@@ -148,6 +148,7 @@ export const MESSAGES = {
   'state.not-fast-forward': 'refusing to move {ref} to a commit that does not descend from its current value',
   'state.same-ref-twice': 'a push names the same ref twice',
   'state.invalid-path-entry': '{file} has an invalid entry for a path',
+  'state.duplicate-document-id': '{file} maps a document id to more than one path',
   'state.invalid-entry': '{file} has an invalid entry',
   'state.file-missing': '{file} is missing in state commit {commit}',
   'state.invalid-json': '{file} in {commit} is not valid JSON',

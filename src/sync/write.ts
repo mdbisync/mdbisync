@@ -34,6 +34,7 @@ import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type Write
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
 import { linkDestinations, resolveRelative } from '../initial-sync/links.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../initial-sync/uploads.ts';
+import { unverifiedPaths } from './head-check.ts';
 import {
   type CommitIdentity,
   type IdEntry,
@@ -1115,7 +1116,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const kept = [...keptAnnotations].map((path) => merge.keptMoves.get(path) ?? path).filter((path) => merge.result.has(path) && !nextIds.has(path));
     const trailers = [...recordedTrailers(asWritten), ...(keptMoved ? keptAnnotationsTrailers(kept) : [])];
     const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}\n\n${trailers.join('\n')}`;
-    const createBranch = options.createSyncBranch === true && commit !== linearTip;
+    const createBranch = options.createSyncBranch === true && commit !== linearTip
+      && (await unverifiedPaths(git, tracked, commit, context.mapping.zones)).length === 0;
     const idsOf = (syncPushed?: PushedRecord) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...(syncPushed === undefined ? {} : { syncPushed }) });
     // The ids record the branch's head as the sync's own push, only together with that push.
     let recordedIds = await idsOf(createBranch ? context.pushedKey.record(branchRef(options.config.syncBranch), commit) : undefined);

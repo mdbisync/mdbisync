@@ -69,7 +69,7 @@ import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation
 import { LaneMoved, LaneConflict, commitLaneIds, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
-import { checkPushScope, UnverifiedHead, oneLine, unverifiedList, unverifiedNote, unverifiedPaths } from './head-check.ts';
+import { checkPushScope, UnverifiedHead, oneLine, unverifiedList, unverifiedNote, unverifiedPaths, withUnverifiedNote } from './head-check.ts';
 import { message } from '../messages.ts';
 import { type PullRequestCode } from '../codes.ts';
 
@@ -349,13 +349,16 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     let pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
     // An older Linear snapshot may lack files added on the tracked branch.
     // Carry that branch's files forward when the proposed merge is in scope.
-    if (head !== sync && pushUnverified.length > 0 && headTree !== null
+    if (head !== sync && hold === null && pushUnverified.length > 0 && headTree !== null
       && (await unverifiedPaths(git, tracked, headTree, context.mapping.zones)).length === 0) {
       head = await commitTree(git, {base: headTree, changes: new Map(), parents: [head, tracked], message: TRACKED_MERGE_MESSAGE, identity});
       pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
     }
     if (head !== sync && pushUnverified.length > 0) {
-      if (open !== null) result.pullRequest = {number: open.number, url: open.url, opened: false};
+      if (sync !== null) {
+        const {pullRequest, opened} = await ensurePullRequest(github, {head: config.syncBranch, base: config.trackedBranch, title: SYNC_PULL_REQUEST_TITLE, body: withUnverifiedNote(open?.body ?? '', pushUnverified)});
+        result.pullRequest = {number: pullRequest.number, url: pullRequest.url, opened};
+      }
       return {...result, code: 'head-unverified', unverified: pushUnverified};
     }
     if (head !== sync) {
@@ -798,7 +801,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       lines.push('The sync branch holds an initial sync from Linear that a person has not merged yet. The sync adds nothing to it and writes nothing to Linear until it is merged.');
       break;
     case 'head-unverified':
-      lines.push(`The sync pull request ${link} also changes files that are not synchronized documents or their assets: ${unverifiedList(result.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from the sync branch. Linear's changes keep joining it.`);
+      lines.push(`The sync pull request ${link} also changes files that are not synchronized documents or their assets: ${unverifiedList(result.unverified ?? [])}. The sync does not push or merge those changes; a person reviews and merges it, or removes those changes from the sync branch.`);
       break;
     case 'state-moved':
       lines.push('The sync branch moved while this run worked, or the sync pull request no longer targeted the tracked branch at the commit the sync checked right before its merge; the next run updates the sync pull request.');

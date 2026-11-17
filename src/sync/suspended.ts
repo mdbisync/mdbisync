@@ -6,7 +6,7 @@ import { splitFile } from '../format/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
-import { checkPushScope, oneLine, unverifiedNote, unverifiedPaths } from './head-check.ts';
+import { checkPushScope, oneLine, unverifiedNote, unverifiedPaths, withUnverifiedNote } from './head-check.ts';
 import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergeInProgress, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { checkpoint } from '../test-hooks.ts';
@@ -281,9 +281,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   const pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
   if (pushUnverified.length > 0) {
     const open = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
-    const note = unverifiedNote(pushUnverified);
-    if (open !== null && !(open.body ?? '').includes(note)) await updatePullRequest(options.github, open.number, {title: SUSPENDED_TITLE, body: `${open.body ?? ''}\n${note}\n`});
-    return {paths: [...paths].sort(), checks: [], code: 'head-unverified', unverified: pushUnverified, ...(open === null ? {} : {pullRequest: {number: open.number, url: open.url}})};
+    const pr = previous === null ? undefined : (await ensurePullRequest(options.github, {head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body: withUnverifiedNote(open?.body ?? '', pushUnverified)})).pullRequest;
+    return {paths: [...paths].sort(), checks: [], code: 'head-unverified', unverified: pushUnverified, ...(pr === undefined ? {} : {pullRequest: {number: pr.number, url: pr.url}})};
   }
   const changed = await push(context, options, ids, head, previous);
   const result: SuspendedResult = { paths: [...paths].sort(), checks: [], changed };
@@ -373,6 +372,9 @@ async function release(context: RunContext, options: LaneOptions, ids: IdMap, pa
     const side = await treeCommit(git, await takePaths(git, normal, tracked, paths), normal);
     const tree = await mergeTree(git, side, tracked, undefined, ids, options.state.ids);
     nextNormal = await commit(context, options, await takePaths(git, tree, tracked, paths), [normal, tracked], 'Take released changes from the tracked branch');
+    // The batch has already merged. Release its episodes even if an unrelated
+    // normal-branch edit prevents publishing a replacement normal head.
+    if ((await unverifiedPaths(git, tracked, nextNormal, context.mapping.zones)).length > 0) nextNormal = normal;
   }
   await push(context, options, ids, head, context.fetched.suspended ?? null,
     normal === null || nextNormal === normal ? undefined : { expected: normal, next: nextNormal as Oid }, false, tracked);

@@ -56,8 +56,9 @@ it('selects only mapped regular Markdown documents with an unambiguous id', asyn
       ];
       const ids: IdMap = new Map(reverse ? entries.reverse() : entries);
       assert.equal((await checkedPullView(git, base, ids, zones, IDENTITY, new Set(['docs/plan.md']))).commit, base);
-      const tip = await commitIds(git, null, ids, IDENTITY);
-      await assert.rejects(readIds(git, tip), /ids\.json has an invalid entry/);
+      await assert.rejects(commitIds(git, null, ids, IDENTITY), /ids\.json maps a document id to more than one path/);
+      const tip = await commitTree(git, {base, parents: [base], changes: new Map([['ids.json', JSON.stringify(Object.fromEntries(ids))]]), message: 'Record ambiguous ids', identity: IDENTITY});
+      await assert.rejects(readIds(git, tip), /ids\.json maps a document id to more than one path/);
     }
   } finally { await fixture.cleanup(); }
 });

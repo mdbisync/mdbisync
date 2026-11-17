@@ -90,6 +90,12 @@ export async function unverifiedPaths(git: Git, before: Oid | string, after: Oid
   return paths.sort();
 }
 
+/** Replace the previous scope notice rather than accumulating stale path lists. */
+export function withUnverifiedNote(body: string, paths: readonly string[]): string {
+  const kept = body.split('\n').filter(line => !line.startsWith('The sync does not merge this pull request:')).join('\n').trimEnd();
+  return `${kept}\n\n${unverifiedNote(paths)}\n`;
+}
+
 /** A proposed branch tree must be in scope before it can start workflows on a push. */
 export class UnverifiedHead extends Error {
   readonly paths: string[];

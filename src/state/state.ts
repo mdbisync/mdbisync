@@ -380,13 +380,20 @@ export type UploadMap = Map<string, string>;
 export async function readIds(git: Git, commit: Oid | null): Promise<IdMap> {
   const data = await readJsonFile(git, commit, IDS_FILE);
   const map: IdMap = new Map();
-  const seen = new Set<string>();
   for (const [path, value] of Object.entries(data)) {
-    if (!isIdEntry(value) || seen.has(value.id)) throw new Error(message('state.invalid-path-entry', { file: IDS_FILE }));
-    seen.add(value.id);
+    if (!isIdEntry(value)) throw new Error(message('state.invalid-path-entry', { file: IDS_FILE }));
     map.set(path, value);
   }
+  checkUniqueDocumentIds(map);
   return map;
+}
+
+function checkUniqueDocumentIds(ids: IdMap): void {
+  const seen = new Set<string>();
+  for (const entry of ids.values()) {
+    if (seen.has(entry.id)) throw new Error(message('state.duplicate-document-id', {file: IDS_FILE}));
+    seen.add(entry.id);
+  }
 }
 
 export async function readUploads(git: Git, commit: Oid | null): Promise<UploadMap> {
@@ -567,6 +574,7 @@ export async function commitIds(
   identity: CommitIdentity,
   options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string>; syncPushed?: PushedRecord } = {},
 ): Promise<Oid> {
+  checkUniqueDocumentIds(ids);
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry]));
   const files = new Map<string, unknown>([[IDS_FILE, data]]);
