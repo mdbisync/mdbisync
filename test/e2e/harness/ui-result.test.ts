@@ -321,6 +321,14 @@ describe('UI checklist answers', () => {
     assert.match(checklist, /^2\. \[ \] As editor-a: Open the suspended document: the red Cross icon[^\n]*`format`[^\n]*GitHub Actions job[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) fault\.checks: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was suspended: its own icon and color are back/m);
   });
 
+  it('holds the whole corpus (L6-13) for a look in the UI, with the rendering check of L6-02', () => {
+    const corpus = byId('L6-13');
+    assert.deepEqual([corpus.slice, corpus.mode, corpus.setup], ['full', 'ui', { state: 'converged', fixtures: ['full'], teamZoneLock: true }]);
+    assert.deepEqual(corpus.steps.map((step) => `${step.kind}.${step.action}`), ['ui.verify-editor', 'ui.inspect-rendering', 'run.settle', 'ui.assert-dom']);
+    assert.ok(Object.values(corpus.checks.invariants).every((invariant) => invariant.required));
+    assert.ok(uiValueSubjects(corpus).includes('ui.domConstructAssertionsPassed'));
+  });
+
   it('reads which scenario and run the checklist is for', () => {
     const { checklist } = heldRun();
     const answers = parseUiAnswers(checklist);

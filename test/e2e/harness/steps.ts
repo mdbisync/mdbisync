@@ -2471,9 +2471,12 @@ export function retireMissingFrom(ctx: Pick<RunContext, 'edits'>, path: string, 
 
 /** What the harness does once the UI session answered a UI step with pass. */
 const UI_AFTERMATH: Record<string, Executor> = {
-  // The session kept one version of the conflict: the other version's edits are gone on purpose.
+  // The session kept one version of the conflict: the other version's edits are gone on purpose. The resolved
+  // document (the setup's conflicted one by default) becomes the scenario's target unless a step recorded one
+  // before, so its subjects (`tracked.body`) read that one file.
   'ui.resolve-markers': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
     retireMissingFrom(ctx, path, (await linearContent(ctx, path)).content);
   },
   // No check reads whether the anchored link scrolled: keep the session's answer in the report (null when not given).
