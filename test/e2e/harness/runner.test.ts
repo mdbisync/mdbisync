@@ -141,7 +141,7 @@ describe('I1 differences', () => {
     assert.equal(firstDifference('a\r\n', 'a'), 'only the line breaks at the end differ (file ends "\\r\\n", document ends "")');
     assert.equal(firstDifference('One.\n\nTwo.', 'One.\n\nTwo, edited.'), 'line 3: file "Two.", document "Two, edited."');
     assert.equal(firstDifference('One.\n\nTwo.', 'One.'), 'line 2: file "", document (end)');
-    assert.match(firstDifference(`a\n${'x'.repeat(300)}`, 'a\ny'), /^line 2: file "x{120}…", document "y"$/);
+    assert.match(firstDifference(`a\n${'x'.repeat(300)}`, 'a\ny'), /^line 2: file "x{300}", document "y"$/);
   });
 });
 

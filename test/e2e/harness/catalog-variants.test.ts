@@ -2,6 +2,8 @@
 // the API-path image gate (L2-42), with their live steps and assertions on
 // fake services, through the harness's own step executors.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { RunContext } from './context.ts';
 import { DOCUMENTS, runOnFakeServices } from './fake-services.ts';
@@ -225,6 +227,16 @@ describe('the API-path image gate', () => {
           init.body = JSON.stringify(body);
         }
         return undefined;
+      },
+      inspect: async (ctx) => {
+        for (const subject of ['observed-original', 'proposed-link', 'tracked-link', 'stored-link']) {
+          const pairs = JSON.parse(readFileSync(join(ctx.runDir, `image-repair-${subject}.json`), 'utf8'));
+          assert.equal(pairs.length, subject === 'observed-original' ? 2 : 1);
+          assert.equal(pairs.every((pair: { sameMarkdown: boolean }) => pair.sameMarkdown), subject !== 'stored-link');
+        }
+        const stored = JSON.parse(readFileSync(join(ctx.runDir, 'image-repair-stored-link.json'), 'utf8'))[0];
+        assert.match(stored.expected, /\[plan /);
+        assert.match(stored.actual, /!\[plan /);
       },
     });
     const outcome = (name: string) => outcomes.find(candidate => candidate.name === name);

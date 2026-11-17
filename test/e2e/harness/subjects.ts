@@ -38,7 +38,8 @@ import { detectConflicts } from '../../../src/merge/index.ts';
 import type { PullRequest } from './github.ts';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { relativeLinkUrls } from '../../../src/format/index.ts';
-import { resolveTarget, sameMarkdown } from '../../../src/format/markdown.ts';
+import { resolveTarget } from '../../../src/format/markdown.ts';
+import { imageRepairComparison } from './comparison-evidence.ts';
 import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
@@ -1878,11 +1879,16 @@ export const SUBJECTS: Record<string, Compute> = {
   'imageRepair.observedOriginal': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
     const proposal = observed(env.ctx, 'imageRepair.proposal') as ImageRepairProposal;
-    return sameMarkdown(proposal.content, source.body) && sameMarkdown(proposal.recorded, source.body);
+    return imageRepairComparison(env.ctx.runDir, 'observed-original', [
+      { expected: source.body, actual: proposal.content },
+      { expected: source.body, actual: proposal.recorded },
+    ]);
   },
   'imageRepair.proposedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
-    return sameMarkdown((observed(env.ctx, 'imageRepair.proposal') as ImageRepairProposal).proposed, source.expected);
+    return imageRepairComparison(env.ctx.runDir, 'proposed-link', [
+      { expected: source.expected, actual: (observed(env.ctx, 'imageRepair.proposal') as ImageRepairProposal).proposed },
+    ]);
   },
   'imageRepair.listedInPr': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
@@ -1896,13 +1902,13 @@ export const SUBJECTS: Record<string, Compute> = {
   'imageRepair.trackedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
     const content = fileBody(await env.view(), source.path);
-    return content !== null && sameMarkdown(content, source.expected);
+    return imageRepairComparison(env.ctx.runDir, 'tracked-link', [{ expected: source.expected, actual: content }]);
   },
   'imageRepair.storedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
     const view = await env.view();
     const content = view.documents.get(view.ids.get(source.path)?.id ?? '')?.content;
-    return content !== undefined && content !== null && sameMarkdown(content, source.expected);
+    return imageRepairComparison(env.ctx.runDir, 'stored-link', [{ expected: source.expected, actual: content }]);
   },
   'imageRepair.marksUnchanged': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;

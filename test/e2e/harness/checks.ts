@@ -22,6 +22,7 @@ import { zoneConcurrent } from './concurrency.ts';
 import { RUN_ID_PATTERN } from './isolation.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { comparesTypedText } from './ui-checklist.ts';
+import { redactUploadUrls } from './comparison-evidence.ts';
 import { conflictMarks, encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
@@ -268,7 +269,7 @@ export const I1_DIFFERENCES_FILE = 'i1-differences.txt';
 
 /**
  * Where a file's expected document text and the document's text first differ, as one line: a final newline only,
- * or the first differing line on each side (shortened).
+ * or the full first differing line on each side, with signed upload URLs redacted.
  */
 export function firstDifference(expected: string, actual: string): string {
   if (withoutFinalLineBreaks(expected) === withoutFinalLineBreaks(actual)) {
@@ -278,7 +279,7 @@ export function firstDifference(expected: string, actual: string): string {
   const b = actual.split('\n');
   let line = 0;
   while (line < a.length && line < b.length && a[line] === b[line]) line += 1;
-  const show = (text: string | undefined) => (text === undefined ? '(end)' : JSON.stringify(text.length > 120 ? `${text.slice(0, 120)}…` : text));
+  const show = (text: string | undefined) => (text === undefined ? '(end)' : JSON.stringify(redactUploadUrls(text)));
   return `line ${line + 1}: file ${show(a[line])}, document ${show(b[line])}`;
 }
 
