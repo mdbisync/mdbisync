@@ -1,21 +1,32 @@
 import { execFileSync } from 'node:child_process';
 import { appendFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createReleaseCommit, validateVersion, verifyReleaseDirectory } from './package.ts';
+import { createReleaseCommit, validateSha, validateVersion, verifyReleaseDirectory } from './package.ts';
 
 // This step needs only Node and Git; dependency installation belongs to the build job.
 export async function tagRelease(sourceSha: string, version: string, directory: string, repository = process.cwd()): Promise<string> {
   validateVersion(version);
+  validateSha(sourceSha);
   const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args], { encoding: 'utf8' }).trim();
-  const head = git('rev-parse', 'HEAD');
-  if (head !== sourceSha) throw new Error('Source SHA must match the checked-out source');
+  const releaseRef = 'refs/heads/releases';
+  // ls-remote patterns also match ref-name tails. Read only the exact ref.
+  const remoteRef = (ref: string) => git('ls-remote', '--refs', 'origin', ref).split('\n')
+    .map(line => line.split(/\s+/)).find(([, name]) => name === ref)?.[0];
+  const remoteHead = () => remoteRef(releaseRef);
+  const previousRelease = remoteHead();
+  if (previousRelease !== undefined) {
+    validateSha(previousRelease);
+    git('fetch', '--no-tags', 'origin', previousRelease);
+  }
   git('merge-base', '--is-ancestor', sourceSha, 'origin/main');
-  const existing = git('ls-remote', '--tags', 'origin', `refs/tags/${version}`);
-  if (existing !== '') throw new Error('Release tag already exists; choose a new version');
+  if (remoteRef(`refs/tags/${version}`) !== undefined) throw new Error('Release tag already exists; choose a new version');
   await verifyReleaseDirectory(resolve(directory), sourceSha, version);
-  const releaseSha = await createReleaseCommit({ repository, directory: resolve(directory), sourceSha, version });
+  const releaseSha = await createReleaseCommit({ repository, directory: resolve(directory), sourceSha, version, previousRelease });
+  if (remoteHead() !== previousRelease) throw new Error('The releases branch moved; start a new release run');
   git('tag', '-a', version, releaseSha, '-m', `Release ${version}\n\nSource: ${sourceSha}`);
-  git('push', 'origin', `refs/tags/${version}:refs/tags/${version}`);
+  // An ordinary fast-forward push rejects a concurrent advance. Atomicity keeps
+  // the tag unpublished if either ref is rejected; neither ref is ever forced.
+  git('push', '--atomic', 'origin', `${releaseSha}:${releaseRef}`, `refs/tags/${version}:refs/tags/${version}`);
   return releaseSha;
 }
 

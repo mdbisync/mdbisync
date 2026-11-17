@@ -311,9 +311,9 @@ jobs:
       RELEASE_VERSION: ${{ inputs.version }}
       SOURCE_SHA: ${{ inputs.source-sha }}
     steps:
+      # Publish with the dispatched workflow's implementation even for an older source.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source-sha }}
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -322,7 +322,7 @@ jobs:
         with:
           name: release-tree
           path: ${{ runner.temp }}
-      - name: Create isolated release commit and new tag
+      - name: Append release commit to releases and create new tag
         run: |
           mkdir "$RUNNER_TEMP/release"
           tar -C "$RUNNER_TEMP/release" -xf "$RUNNER_TEMP/release.tar"

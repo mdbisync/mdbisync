@@ -119,6 +119,14 @@ function simulate(ref: string, version: string, outcomes: Partial<Record<string,
 const main = 'refs/heads/main';
 const passing = { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', publish: 'success' } as const;
 
+test('the tag writer runs from the dispatched workflow commit even when releasing older source', () => {
+  const checkout = jobs.tag!.steps.find(step => step.uses?.startsWith('actions/checkout@'))!;
+  assert.equal(checkout.with?.ref, undefined);
+  assert.equal(checkout.with?.['fetch-depth'], 0);
+  assert.equal(workflow.concurrency.group, 'release');
+  assert.equal(workflow.concurrency['cancel-in-progress'], false);
+});
+
 test('release.yml has the gate, report, test, build, attest, tag, publish and final check jobs in that order', () => {
   assert.deepEqual(Object.keys(jobs), ['gate', 'report', 'test', 'build', 'attest', 'tag', 'publish', 'tagged']);
   assert.deepEqual(needsOf('report'), ['gate']);

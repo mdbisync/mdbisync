@@ -143,11 +143,12 @@ export async function verifyReleaseDirectory(directory: string, sourceSha: strin
 }
 
 export async function createReleaseCommit(options: {
-  repository: string; directory: string; sourceSha: string; version: string;
+  repository: string; directory: string; sourceSha: string; version: string; previousRelease?: string | undefined;
 }): Promise<string> {
   const { repository, directory, sourceSha, version } = options;
   validateSha(sourceSha);
   validateVersion(version);
+  if (options.previousRelease !== undefined) validateSha(options.previousRelease);
   const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args], { encoding: 'utf8' }).trim();
   git('rev-parse', '--verify', `${sourceSha}^{commit}`);
   const gitDir = git('rev-parse', '--absolute-git-dir');
@@ -158,7 +159,8 @@ export async function createReleaseCommit(options: {
     }).trim();
     run('add', '--all', '--force', '.');
     const tree = run('write-tree');
-    return run('commit-tree', tree, '-p', sourceSha, '-m', `Release ${version}`);
+    const parents = options.previousRelease === undefined ? [] : ['-p', options.previousRelease];
+    return run('commit-tree', tree, ...parents, '-p', sourceSha, '-m', `Release ${version}`);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

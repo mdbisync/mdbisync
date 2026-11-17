@@ -352,8 +352,10 @@ export async function releaseSource(repository: string, tag: string): Promise<st
   const source = manifest.source;
   if (manifest.version !== tag || typeof source !== 'string') throw new Error(`release.json of ${tag} does not name its version and source`);
   validateSha(source);
-  // The release commit's parent is the source it was built from.
-  const parent = (await git(repository, 'rev-parse', `refs/tags/${tag}^{commit}^1`)).trim();
+  // Older tags and the first branch release have one source parent. Following
+  // releases have the previous release first and their exact source second.
+  const parents = (await git(repository, 'rev-list', '--parents', '-n', '1', `refs/tags/${tag}^{commit}`)).trim().split(/\s+/).slice(1);
+  const parent = parents.length === 1 ? parents[0] : parents.length === 2 ? parents[1] : undefined;
   if (parent !== source) throw new Error(`The release commit of ${tag} is not built on its recorded source ${source}`);
   return source;
 }

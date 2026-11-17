@@ -460,8 +460,10 @@ file counts, which the sync's next push of the branch starts.
 Maintainers dispatch **Build release** on `main`, supplying a new
 pre-release tag such as `v0.1.0-rc.1` and a full source SHA already on `main`.
 The workflow tests and bundles that source, verifies the CLI can install
-offline, and pushes a new annotated tag pointing to an isolated release
-commit. Its summary prints the release SHA. No generated files are added to
+offline, and atomically pushes the `releases` branch and a new annotated tag
+pointing to its release commit. Each release follows the previous release
+and records the exact source commit as its second parent (the first release
+has only its source parent). Its summary prints the release SHA. No generated files are added to
 `main`, no existing tag is replaced, and no GitHub Release is published.
 A failed build leaves existing pins unchanged.
 
@@ -536,9 +538,9 @@ first column as both pins:
 git ls-remote https://github.com/mdbisync/mdbisync 'refs/tags/v0.1.0-rc.9^{}'
 ```
 
-`pre-commit autoupdate` follows source history and cannot discover these
-isolated release commits. Keep the hook on an explicitly resolved release
-SHA.
+`pre-commit autoupdate` follows the default branch's source history and cannot
+discover these release commits on `releases`. Keep the hook on an explicitly
+resolved release SHA when updating it.
 
 The action's bundles include third-party packages under their own licenses;
 every release commit ships their license texts and notices in

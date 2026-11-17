@@ -59,7 +59,7 @@ jobs:
       - name: Check the dependencies of main
         id: main
         run: node src/release/dependency-scan.ts --repository . --commit HEAD --target main --output "$RUNNER_TEMP/scan/main"
-      # The release tag points to a release commit whose parent is the source it was built from.
+      # The release commit records its source as the sole parent or, on releases, its second parent.
       - name: Check the dependencies of the latest release
         id: release
         if: ${{ !cancelled() && steps.latest.outputs.tag != '' }}

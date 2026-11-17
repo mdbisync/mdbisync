@@ -95,11 +95,18 @@ test('release tree is self-contained and its tagged commit does not change main'
     assert.equal(git('show', `${release}:release.json`), (await readFile(join(output, 'release.json'), 'utf8')).trim());
     assert.equal(git('ls-tree', '-r', '--name-only', release).includes('unexpected.cjs'), false);
     const remote = join(root, 'remote.git');
+    const remoteRelease = () => git('ls-remote', '--heads', remote, 'refs/heads/releases').split('\n').map(line => line.split(/\s+/)).find(([, ref]) => ref === 'refs/heads/releases')?.[0];
     execFileSync('git', ['init', '--bare', remote], { stdio: 'pipe' });
     git('remote', 'add', 'origin', remote);
     git('push', '--set-upstream', 'origin', 'main');
+    // A ref-name tail match must never become the previous release.
+    const misleading = git('commit-tree', `${parent}^{tree}`, '-p', parent, '-m', 'Unrelated branch');
+    git('push', 'origin', `${misleading}:refs/heads/a/refs/heads/releases`);
     const tagged = await tagRelease(parent, options.version, output, source);
     assert.equal(git('rev-parse', `${options.version}^{commit}`), tagged);
+    assert.equal(remoteRelease(), tagged);
+    assert.equal(git('show', '-s', '--format=%P', tagged), parent);
+    assert.equal(git('rev-parse', `${tagged}^{tree}`), git('rev-parse', `${release}^{tree}`));
     // The documented update resolves the peeled annotated tag, never main.
     const resolved = git('ls-remote', remote, `refs/tags/${options.version}^{}`).split(/\s+/)[0]!;
     assert.equal(resolved, tagged);
@@ -110,6 +117,45 @@ test('release tree is self-contained and its tagged commit does not change main'
     assert.equal(execFileSync(process.execPath, [join(consumer, 'dist/cli.js')], { encoding: 'utf8' }).trim(), 'cli');
     assert.equal(git('rev-parse', 'main'), parent);
     await assert.rejects(tagRelease(parent, options.version, output, source), /already exists/);
+    const nextVersion = 'v0.1.0-rc.2';
+    const nextOutput = join(root, 'next-release');
+    // A new source commit, including a file that must never enter the release tree.
+    await writeFile(join(source, 'source-only.txt'), 'source');
+    git('add', '.');
+    git('commit', '-m', 'Update source fixture');
+    const nextSource = git('rev-parse', 'HEAD');
+    git('push', 'origin', 'main');
+    await stageRelease({ ...options, output: nextOutput, version: nextVersion, sourceSha: nextSource });
+    // The publisher can run from the workflow commit rather than the built source.
+    git('checkout', '--detach', parent);
+    const nextRelease = await tagRelease(nextSource, nextVersion, nextOutput, source);
+    assert.equal(git('show', '-s', '--format=%P', nextRelease), `${tagged} ${nextSource}`);
+    assert.equal(git('show', `${nextRelease}:release.json`), (await readFile(join(nextOutput, 'release.json'), 'utf8')).trim());
+    assert.equal(git('ls-tree', '-r', '--name-only', nextRelease).includes('source-only.txt'), false);
+    assert.deepEqual(git('rev-list', '--first-parent', nextRelease, `^${parent}`).split('\n'), [nextRelease, tagged]);
+    assert.equal(git('rev-parse', 'main'), nextSource);
+
+    // Tampering is refused before either remote ref is written.
+    const broken = join(root, 'broken-release');
+    await stageRelease({ ...options, output: broken, version: 'v0.1.0-rc.3', sourceSha: nextSource });
+    await writeFile(join(broken, 'dist/cli.js'), 'tampered');
+    await assert.rejects(tagRelease(nextSource, 'v0.1.0-rc.3', broken, source), /checksum/);
+    assert.equal(git('ls-remote', '--tags', remote, 'refs/tags/v0.1.0-rc.3'), '');
+    assert.equal(remoteRelease(), nextRelease);
+
+    // Advance the remote after the writer has read it, during push negotiation.
+    // Even this last-moment race must reject both refs, with no orphan tag.
+    const racing = join(root, 'racing-release');
+    await stageRelease({ ...options, output: racing, version: 'v0.1.0-rc.4', sourceSha: nextSource });
+    const concurrent = execFileSync('git', ['--git-dir', remote, '-c', 'user.name=Release Test', '-c', 'user.email=release@example.com', 'commit-tree', `${nextRelease}^{tree}`, '-p', nextRelease, '-m', 'Concurrent release'], { encoding: 'utf8' }).trim();
+    const hook = join(source, '.git/hooks/pre-push');
+    await writeFile(hook, `#!/bin/sh\ngit --git-dir='${remote}' update-ref refs/heads/releases ${concurrent} ${nextRelease}\n`, { mode: 0o755 });
+    await assert.rejects(tagRelease(nextSource, 'v0.1.0-rc.4', racing, source), (error: unknown) => {
+      assert.match(String((error as { stderr: string }).stderr), /atomic transaction failed/);
+      return true;
+    });
+    assert.equal(remoteRelease(), concurrent);
+    assert.equal(git('ls-remote', '--tags', remote, 'refs/tags/v0.1.0-rc.4'), '');
     assert.equal(execFileSync(process.execPath, [join(output, 'dist/cli.js')], { encoding: 'utf8' }).trim(), 'cli');
     await assert.rejects(stageRelease({ ...options, sourceSha: 'bad' }), /SHA/);
     await rm(join(source, 'dist/THIRD_PARTY_NOTICES.txt'));

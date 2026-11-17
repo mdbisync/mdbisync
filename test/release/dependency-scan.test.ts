@@ -225,16 +225,21 @@ test('every tracked package-lock.json is checked, and nothing else', async () =>
 test('a release is checked at the source its release commit records and is built on', async () => {
   const repo = repository({ '.': 'clean' });
   try {
-    const commitTree = (manifest: object, parent: string) => {
+    const commitTree = (manifest: object, parent: string, source?: string) => {
       const blob = execFileSync('git', ['-C', repo.directory, 'hash-object', '-w', '--stdin'], { input: `${JSON.stringify(manifest)}\n`, encoding: 'utf8' }).trim();
       const tree = execFileSync('git', ['-C', repo.directory, 'mktree'], { input: `100644 blob ${blob}\trelease.json\n`, encoding: 'utf8' }).trim();
-      return git(repo.directory, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit-tree', tree, '-p', parent, '-m', 'Release');
+      return git(repo.directory, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit-tree', tree, '-p', parent, ...(source === undefined ? [] : ['-p', source]), '-m', 'Release');
     };
     git(repo.directory, 'tag', 'v1.0.0', commitTree({ version: 'v1.0.0', source: repo.commit }, repo.commit));
     assert.equal(await releaseSource(repo.directory, 'v1.0.0'), repo.commit);
 
-    // A release commit whose recorded source is not its parent is refused.
+    // Following branch releases record their source as the second parent.
     const other = git(repo.directory, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit-tree', `${repo.commit}^{tree}`, '-m', 'other');
+    git(repo.directory, 'tag', 'v2.0.0', commitTree({ version: 'v2.0.0', source: repo.commit }, other, repo.commit));
+    assert.equal(await releaseSource(repo.directory, 'v2.0.0'), repo.commit);
+    git(repo.directory, 'tag', 'v2.0.1', commitTree({ version: 'v2.0.1', source: repo.commit }, repo.commit, other));
+    await assert.rejects(releaseSource(repo.directory, 'v2.0.1'), /not built on its recorded source/);
+    // A single-parent release must still have its recorded source as parent.
     git(repo.directory, 'tag', 'v1.0.1', commitTree({ version: 'v1.0.1', source: repo.commit }, other));
     await assert.rejects(releaseSource(repo.directory, 'v1.0.1'), /not built on its recorded source/);
     git(repo.directory, 'tag', 'v1.0.2', commitTree({ version: 'v1.0.1', source: repo.commit }, repo.commit));

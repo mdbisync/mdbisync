@@ -2,7 +2,7 @@
 // release commit, and a deployer copies them as they are. Every input a
 // template passes must be one that release's `action.yml` declares; an
 // input it lacks makes the copied workflow fail. The release commit is
-// not on `main` (release commits are isolated), so a shallow checkout
+// not on `main` (release commits live on `releases`), so a shallow checkout
 // cannot read it: PINNED_RELEASE records its inputs, and the last two
 // tests check that record against the release commit and its tag. CI
 // fetches the release tags for them and fails without them; elsewhere a
