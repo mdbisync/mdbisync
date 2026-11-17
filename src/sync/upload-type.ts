@@ -3,6 +3,26 @@ import { parseXml, XmlElement, type XmlNode } from '@rgrove/parse-xml';
 /** Every extension `uploadExtension` gives: the asset files a sync writes next to a document. */
 export const UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.png', '.jpg', '.gif', '.webp', '.pdf', '.avif', '.mp4', '.webm', '.svg']);
 
+/**
+ * Whether `path` is named as a capture names a downloaded upload: its content's
+ * SHA-256 in lowercase hex and an extension `uploadExtension` gives.
+ */
+export function isCaptureName(path: string): boolean {
+  const match = /^[0-9a-f]{64}(\.[a-z0-9]+)$/.exec(path.slice(path.lastIndexOf('/') + 1));
+  return match !== null && UPLOAD_EXTENSIONS.has(match[1]!);
+}
+
+/**
+ * Whether a file named as a capture names it still passes the upload check:
+ * its bytes are an admitted type and that type's extension is the file's.
+ * Files with other names are not uploads the sync admitted, and pass.
+ */
+export function admitsCapturedFile(path: string, bytes: Buffer): boolean {
+  if (!isCaptureName(path)) return true;
+  const extension = uploadExtension(bytes);
+  return extension !== null && path.endsWith(extension);
+}
+
 /** A signature identifies a type, not whether a media decoder can render it. */
 export function uploadExtension(bytes: Buffer): string | null {
   const starts = (signature: number[]) => bytes.subarray(0, signature.length).equals(Buffer.from(signature));

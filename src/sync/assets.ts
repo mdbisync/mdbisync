@@ -10,7 +10,7 @@ import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, par
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
 import { imageLinks } from './image-links.ts';
-import { uploadExtension } from './upload-type.ts';
+import { admitsCapturedFile, uploadExtension } from './upload-type.ts';
 
 export interface CapturedAssets {
   body: string;
@@ -225,10 +225,15 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     }
     indexed = true;
   };
-  const readable = new Map<string, boolean>();
-  const canRead = async (path: string) => {
-    if (!readable.has(path)) readable.set(path, (await readFiles(git, config, base, [path])).get(path)?.ok === true);
-    return readable.get(path)!;
+  // A repository file an upload maps to is reused only when readable, and, if a capture named it, when its
+  // bytes still pass the upload check: an earlier, weaker check may have admitted them.
+  const reuse = new Map<string, 'unreadable' | 'admitted' | 'refused'>();
+  const reusable = async (path: string) => {
+    if (!reuse.has(path)) {
+      const read = (await readFiles(git, config, base, [path])).get(path);
+      reuse.set(path, read?.ok !== true ? 'unreadable' : admitsCapturedFile(path, read.content) ? 'admitted' : 'refused');
+    }
+    return reuse.get(path)!;
   };
   const downloaded = new Map<string, {file: SpooledFile; type: string}>();
   let runCount = 0;
@@ -270,7 +275,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const spellings = new Map<string, string[]>();
     if (previousBody !== undefined) {
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
-        if (!await canRead(link.target)) continue;
+        if (await reusable(link.target) === 'unreadable') continue;
         const hash = pathHashes.get(link.target)!;
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, link.target);
         const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), link.target).split('/').map(encodeURIComponent).join('/') + link.suffix;
@@ -318,7 +323,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       let hash = [...uploads].find(([, known]) => known === url)?.[0];
       let assetPath = hash === undefined ? undefined : preferredPaths.get(hash) ?? hashPaths.get(hash);
       if (assetPath !== undefined) {
-        if (!await canRead(assetPath)) assetPath = undefined;
+        const state = await reusable(assetPath);
+        if (state === 'refused') { rejected.set(node.url, 'unsupported-type'); continue; }
+        if (state === 'unreadable') assetPath = undefined;
       }
       if (assetPath === undefined) {
         let asset = downloaded.get(url);
@@ -346,6 +353,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
         hash = asset.file.hash;
         assetPath = preferredPaths.get(hash) ?? hashPaths.get(hash);
+        // The downloaded bytes are the file's bytes (same hash), so they are checked in its place.
+        if (assetPath !== undefined && !admitsCapturedFile(assetPath, contentBytes(asset.file))) { rejected.set(node.url, 'unsupported-type'); continue; }
         if (assetPath === undefined) {
           const extension = uploadExtension(contentBytes(asset.file));
           if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
@@ -378,7 +387,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       const files: Array<{url:string; line:number}> = [];
       visit(tree, (node) => {
         const url = node.type === 'link' ? node.url : node.type === 'linkReference' ? definitions.get(node.identifier) : undefined;
-        if (url !== undefined && isUpload(url)) files.push({url, line:line(node)});
+        if (url !== undefined && (isUpload(url) || knownUpload(url))) files.push({url, line:line(node)});
       });
       files.forEach((file, index) => {
         const reason = rejected.get(file.url);

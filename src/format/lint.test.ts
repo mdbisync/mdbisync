@@ -292,3 +292,25 @@ describe('lint and fix commands', () => {
     assert.deepEqual(runLint([], dir), { exitCode: 0, stdout: '', stderr: '' });
   });
 });
+
+describe('upload-file-refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'format-uploads-'));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const hash = (char: string) => char.repeat(64);
+  mkdirSync(join(dir, 'docs'));
+  // Admitted by the earlier check: XHTML inside an SVG root.
+  writeFileSync(join(dir, 'docs', `${hash('a')}.svg`), '<svg xmlns="http://www.w3.org/2000/svg"><iframe xmlns="http://www.w3.org/1999/xhtml" src="javascript:alert(1)"/></svg>');
+  writeFileSync(join(dir, 'docs', `${hash('b')}.svg`), '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>');
+  writeFileSync(join(dir, 'docs', `${hash('c')}.png`), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  writeFileSync(join(dir, 'docs', `${hash('d')}.svg`), `version https://git-lfs.github.com/spec/v1\noid sha256:${hash('d')}\nsize 12\n`);
+  writeFileSync(join(dir, 'docs', 'logo.svg'), '<svg><script/></svg>');
+  writeFileSync(join(dir, 'docs', 'plan.md'), `![Image](${hash('a')}.svg)`);
+
+  it('names captured files the upload check refuses, and no file a person named or an LFS pointer', () => {
+    const message = LINT_RULES['upload-file-refused'];
+    const expected = `docs/${hash('a')}.svg:1: upload-file-refused: ${message}\ndocs/${hash('c')}.png:1: upload-file-refused: ${message}\n`;
+    assert.deepEqual(runLint([], dir), { exitCode: 1, stdout: expected, stderr: '' });
+    assert.deepEqual(runLint(['docs/plan.md'], dir), { exitCode: 0, stdout: '', stderr: '' }, 'the hooks pass Markdown files only');
+    assert.deepEqual(runFix(['docs'], dir), { exitCode: 1, stdout: expected, stderr: '' });
+  });
+});

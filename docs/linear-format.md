@@ -448,6 +448,26 @@ where that one is found.
 
 Instead, fix the path, or add the missing file in the same change.
 
+### `upload-file-refused`
+
+A file named as the sync names a captured upload fails the upload check:
+documents that link it are blocked when they change in Linear. When the
+sync captures a file uploaded in Linear, it names it by its content's
+SHA-256 and the extension of its type (`<sha256>.png`). A later sync checks
+such a file again before a document links it, and a file an earlier, weaker
+check admitted, such as an SVG with HTML inside it, no longer passes. `lint`
+reports every such file under the paths it checks, so `mdbisync lint` with
+no path checks the whole repository; the `linear-format` hooks pass only
+Markdown files and do not. Files with other names came through git and are
+not checked. The sync never removes or rewrites the file itself.
+
+```text
+docs/0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8.svg:1: upload-file-refused: …
+```
+
+Instead, remove the file, or replace it with a file the check admits, and
+change the documents that link it.
+
 ### `document-in-assets-folder`
 
 A Markdown document cannot be inside a folder named assets, which holds the
