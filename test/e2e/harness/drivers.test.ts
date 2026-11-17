@@ -144,6 +144,39 @@ describe('engine driver', () => {
     assert.equal(engineEnv({ ...call, mergeGraceSeconds: 60 })['MDBISYNC_MERGE_GRACE_SECONDS'], '60');
   });
 
+  it('keeps temporary files of the engine and its git children in TMPDIR', async () => {
+    const dir = fresh('engine-tmpdir-');
+    const temporary = join(dir, 'temporary');
+    mkdirSync(temporary);
+    const driver = join(dir, 'temporary.mjs');
+    writeFileSync(driver, `
+      import { mkdtempSync, rmSync } from 'node:fs';
+      import { tmpdir } from 'node:os';
+      import { join } from 'node:path';
+      import { spawnSync } from 'node:child_process';
+      const directory = mkdtempSync(join(tmpdir(), 'state-index-'));
+      try {
+        const git = spawnSync('git', ['-c', 'alias.temporary=!printf "%s" "$TMPDIR"', 'temporary'], { encoding: 'utf8' });
+        process.stdout.write(JSON.stringify({ directory, gitTemporary: git.stdout, gitStatus: git.status }));
+      } finally { rmSync(directory, { recursive: true }); }
+    `);
+    const call = {
+      command: 'sync' as const, names: runNames('4f1a9c'), cwd: dir, repository: 'o/r', hooksDir: dir,
+      reportFile: join(dir, 'r.json'), summaryFile: join(dir, 's.md'), linearUrl: 'http://127.0.0.1:1',
+      credentials: { linearClientId: '', linearClientSecret: '', githubToken: '' }, extraEnv: {}, timeoutMs: 30_000,
+    };
+    const env = { ...process.env, TMPDIR: temporary, MDBISYNC_ENGINE: driver, UNRELATED_SECRET: 'withheld' };
+    assert.equal(engineEnv(call, env).TMPDIR, temporary);
+    assert.equal(engineEnv(call, env).UNRELATED_SECRET, undefined);
+    const result = await runEngine(call, env);
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(dirname(output.directory), temporary);
+    assert.equal(output.gitTemporary, temporary);
+    assert.equal(output.gitStatus, 0);
+    assert.deepEqual(readdirSync(temporary), []);
+  });
+
   it('recognizes a command that answers "not implemented", and only that', async () => {
     const dir = fresh('engine-');
     const call = {

@@ -179,9 +179,18 @@ function recordResult(ctx: RunContext, result: EngineResult): void {
 /** Records an engine result; a "not implemented" answer stops the scenario. */
 function settleResult(ctx: RunContext, result: EngineResult): void {
   recordResult(ctx, result);
+  checkResult(ctx, result);
+}
+
+/** Stops on an incomplete invocation after its evidence has been recorded. */
+function checkResult(ctx: RunContext, result: EngineResult): void {
   ctx.signal.throwIfAborted();
   if (result.notImplemented) throw new NotImplementedError(result.command, 'the engine command');
   if (result.timedOut) throw new ProductError(`${result.command} did not finish within ${ENGINE_TIMEOUT_MS / 60_000} minutes`);
+  // Workflow logs include unrelated steps; their blockers need the failed-step proof in settleWorkflowRun.
+  if (result.remote === undefined && result.exitCode !== null && result.exitCode !== 0 && /\bENOSPC\b|No space left on device/.test(result.stderr)) {
+    throw new EnvBlockedError(`the engine's ${result.command} run ran out of disk space (ENOSPC: No space left on device)`);
+  }
 }
 
 /** Starts the engine and waits at `checkpoint`; false (after recording the result) when the engine ended first. */
@@ -882,7 +891,8 @@ const RUN: Record<string, Executor> = {
       calls.push({ ...call, cwd, reportFile: `${call.reportFile}.${index}`, summaryFile: `${call.summaryFile}.${index}` });
     }
     const results = await Promise.all(calls.map((call) => runEngine(call)));
-    for (const result of results) settleResult(ctx, result);
+    for (const result of results) recordResult(ctx, result);
+    for (const result of results) checkResult(ctx, result);
   },
   'run.probe': async (ctx) => {
     // The format probe (a test tool, not the engine) writes the fixture bank to
