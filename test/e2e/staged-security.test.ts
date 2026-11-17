@@ -278,7 +278,7 @@ for (const file of process.argv.slice(2)) {
   /** The documents written to Linear so far, counted as I9 counts them. */
   const written = () => world.writes.filter((operation) => /document(Create|Update)|(Create|Update)Document/i.test(operation)).length;
 
-  it('staged image rejection preserves a lint-clean tree and clears its notice after correction', async () => {
+  it('staged image repairs keep the observation and propose a lint-clean link version', async () => {
     Object.assign(world.linear.documents[0]!, {icon:'Fire', color:'#123456'});
     const images = [
       '![Image](https://example.com/a.png)',
@@ -290,19 +290,56 @@ for (const file of process.argv.slice(2)) {
       '![Image][asset]',
       '[![Image](https://example.com/a.png)](https://example.com)',
     ];
-    edit(images.join('\n\n') + '\n\n[asset]: relative.png\n');
+    const original = images.join('\n\n') + '\n\n[asset]: relative.png\n';
+    const repaired = [
+      '[Image](https://example.com/a.png)',
+      '[Image](http://example.com/a.png)',
+      '',
+      '[Image](relative.png)',
+      '[Image](/absolute.png)',
+      '',
+      '[Image](relative.png)',
+      '[Image](https://example.com)',
+    ].join('\n\n') + '\n\n[asset]: relative.png\n';
+    edit(original);
+    const before = written();
     await stagedRun('images');
-    assert.deepEqual((await report('images-apply')).capture.blocked.map(({id}) => id), ['plan']);
+    assert.deepEqual((await report('images-apply')).capture.blocked, []);
+    assert.deepEqual((await report('images-apply')).capture.leftOut, []);
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n' + original);
+    assert.equal(world.linear.documents[0]!.content, original, 'a proposal must not write the repair before merge');
+    assert.equal(written(), before);
+    assert.deepEqual([world.linear.documents[0]!.icon, world.linear.documents[0]!.color], ['Fire', '#123456']);
+    assert.equal(world.linear.comments.size, 0);
+    const branch = 'refs/heads/mdbisync/linear';
+    const proposed = (await fixture.remote.run(['show', `${branch}:docs/plan.md`])).stdout.toString('utf8');
+    assert.equal(proposed, '---\ncategory: work\n---\n\n' + repaired);
+    const description = world.github.pullRequests[0]!.body!;
+    for (let index = 0; index < images.length; index++) assert.ok(description.includes(`image ${index + 1} of 8 (line ${index * 2 + 1})`));
+    assert.equal((description.match(/image \d of 8 \(line/g) ?? []).length, 8);
+    const tree = await listTree(fixture.remote, branch);
+    const files = new Set(tree.map(({path}) => path));
+    const markdown = tree.filter(({path}) => path.endsWith('.md'));
+    const blobs = await readBlobs(fixture.remote, markdown.map(({oid}) => oid));
+    for (const {path, oid} of markdown) assert.deepEqual(lintInTree(path, blobs.get(oid)!.toString(), files), []);
+  });
+
+  it('staged file-link rejection preserves a lint-clean tree and clears its notice after correction', async () => {
+    Object.assign(world.linear.documents[0]!, {icon:'Fire', color:'#123456'});
+    const links = ['[File](relative.png)', '[File](other.png)'];
+    edit(links.join('\n\n') + '\n');
+    await stagedRun('files');
+    assert.deepEqual((await report('files-apply')).capture.blocked.map(({id}) => id), ['plan']);
     assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nOriginal.\n');
     assert.equal(world.linear.documents[0]!.icon, 'Cross');
     const notice = [...world.linear.comments.values()][0]!;
     assert.equal(world.linear.comments.size, 1);
-    assert.equal(notice.body, 'Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n' + images.map((_, index) => `- Image ${index + 1} of 8 (line ${index * 2 + 1}): not uploaded to this workspace. Upload the file instead of linking to it.`).join('\n'));
-    await stagedRun('images-again');
+    assert.equal(notice.body, 'Some files in this document cannot be synchronized. Fix the listed files and sync again.\n\n' + links.map((_, index) => `- File ${index + 1} of 2 (line ${index * 2 + 1}): not uploaded to this workspace. Upload the file instead of linking to it.`).join('\n'));
+    await stagedRun('files-again');
     assert.equal(world.linear.comments.size, 1);
     edit('[Site](https://example.com/a.png)\n');
-    await stagedRun('images-fixed');
-    assert.equal((await report('images-fixed-apply')).capture.blocked.length, 0);
+    await stagedRun('files-fixed');
+    assert.equal((await report('files-fixed-apply')).capture.blocked.length, 0);
     assert.equal(notice.resolved, true);
     assert.equal(world.linear.documents[0]!.icon, 'Fire');
     assert.equal(world.linear.documents[0]!.color, '#123456');
