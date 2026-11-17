@@ -516,6 +516,20 @@ describe('capture from Linear', () => {
     assert.equal(ids.has('docs/plan.md'), false);
   });
 
+  it('never places a new document inside an assets folder, and keeps its place on the next run', async () => {
+    world.linear.documents.push({ id: 'new', title: 'assets/notes', content: 'New.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
+    const first = await run();
+    const ids = await readIds(context.git, first.state.ids);
+    const path = [...ids].find(([, entry]) => entry.id === 'new')?.[0];
+    assert.ok(path !== undefined && path.startsWith('docs/') && !path.split('/').includes('assets'), path);
+    assert.equal(await text(path), 'New.\n');
+    const tree = new Set((await listTree(context.git, first.state.linear!)).map((entry) => entry.path));
+    assert.deepEqual(lintInTree(path, await text(path), tree), []);
+    await refresh();
+    const second = await run();
+    assert.equal(second.state.linear, first.state.linear, 'the next run moves nothing');
+  });
+
   it('removes trash and out-of-scope files and captures a restore', async () => {
     world.linear.documents[0]!.trashed = true;
     await run();
@@ -1215,6 +1229,14 @@ it('makes safe title paths and deterministic collision names', () => {
       assert.equal(documentPath(folder, title, 'one', new Set(), path), path);
     }
   }
+  // A title never places its document inside an `assets` folder below the annotated folder.
+  for (const title of ['assets/notes', 'guides/assets/notes']) {
+    const path = documentPath('docs', title, 'one', new Set());
+    assert.ok(path.startsWith('docs/') && !path.slice('docs/'.length).split('/').slice(0, -1).includes('assets'), path);
+    assert.equal(documentPath('docs', title, 'one', new Set(), path), path, 'the flattened place is kept');
+  }
+  assert.equal(documentPath('docs', 'Assets/notes', 'one', new Set()), 'docs/Assets/notes.md');
+  assert.equal(documentPath('team/assets', 'notes', 'one', new Set()), 'team/assets/notes.md', 'an annotated folder is not renamed');
   assert.equal(titlePath('.github'), '%2Egithub');
   assert.equal(titlePath('.github./x'), '.github%2E/x');
   assert.equal(titlePath('.github-notes/x'), '.github-notes/x');

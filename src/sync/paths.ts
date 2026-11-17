@@ -3,6 +3,7 @@ import { posix } from 'node:path';
 import { message } from '../messages.ts';
 import { type PathRule } from '../codes.ts';
 import { isGitDirectoryName } from '../state/objects.ts';
+import { inAssetsFolder } from '../format/lint.ts';
 
 /**
  * The name of the rule `titlePath` and `documentPath` follow, as run
@@ -50,7 +51,10 @@ export function pathKey(path: string): string { return path.normalize('NFC').toL
 /** Never overwrite an existing file, directory, or case-insensitive alias. */
 export function documentPath(folder: string, title: string, id: string, occupied: ReadonlySet<string>, previous?: string, invalid: (path: string) => boolean = () => false): string {
   const keys = [...occupied].map(pathKey);
-  const conflicts = (path: string) => invalid(path) || keys.some((key) => key === pathKey(path) || key.startsWith(`${pathKey(path)}/`) || pathKey(path).startsWith(`${key}/`));
+  // A title must not place its document inside an `assets` folder below the annotated folder: the sync keeps
+  // embedded files there, and lint refuses documents in it. Such a title is flattened like a taken one.
+  const inAssets = (path: string) => inAssetsFolder(folder === '' ? path : path.slice(folder.length + 1));
+  const conflicts = (path: string) => inAssets(path) || invalid(path) || keys.some((key) => key === pathKey(path) || key.startsWith(`${pathKey(path)}/`) || pathKey(path).startsWith(`${key}/`));
   let candidate = titleFile(folder, title);
   // An existing git-originated spelling already represents this title,
   // unless it would be read as an option or names the Git directory.
