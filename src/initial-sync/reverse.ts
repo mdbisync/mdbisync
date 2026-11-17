@@ -23,6 +23,7 @@
 //    files. The sync refuses to run until it is merged.
 
 import { type FileContent, contentBytes, ContentSpool } from '../state/content.ts';
+import { checkPushScope } from '../sync/head-check.ts';
 import { posix } from 'node:path';
 import { joinFile, splitFile } from '../format/index.ts';
 import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
@@ -678,6 +679,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     const syncOpen = fetched.sync !== null && fetched.sync !== commit && !(await isAncestor(git, fetched.sync, fetched.tracked));
     if (syncOpen && !(await isOwnRecord(fetched.sync as Oid))) return 'sync-branch-changed';
     const moveSync = fetched.sync !== commit && changesTracked;
+    if (moveSync) await checkPushScope(git, fetched.tracked, commit, context.mapping.zones);
 
     const synced = new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
