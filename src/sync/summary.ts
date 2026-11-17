@@ -10,6 +10,7 @@ import { type SkipReason } from './write.ts';
 
 /** Why a document was skipped, as the "Skipped" table says it. */
 export const SKIP_REASON_TEXTS: Record<SkipReason, string> = {
+  'pull-repair-pending': 'waiting for the pull request carrying its image or link repair to merge',
   'edited-in-linear': 'changed in Linear since it was read; the next run takes that change in and writes again',
   'missing-in-linear': 'not found in Linear, or in its trash; the next run takes that in',
   conflict: 'changed on both sides in a way git cannot merge; it is written when the conflict is resolved',

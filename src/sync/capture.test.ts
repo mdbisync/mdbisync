@@ -725,6 +725,32 @@ describe('capture from Linear', () => {
     });
   }
 
+  it('scans a removed image even when the repaired text equals the accepted file', async () => {
+    world.linear.documents[0]!.content = 'Original.\n\n![Discarded](data:text/plain,rejected-canary)\n';
+    let checks = 0;
+    const result = await capture(context, {config, state:context.fetched.state, security: {configured:true, check:async files => {
+      checks++;
+      return [...files.values()].some(content => String(content).includes('rejected-canary')) ? [{hook:'secret-check',line:3}] : [];
+    }}});
+    assert.ok(checks > 0);
+    assert.equal(result.blocked.length, 1);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+  });
+
+  it('preserves front matter containing image syntax and accepted link spelling', async () => {
+    const head = '---\nowner: "![meta](https://example.com/meta.png)"\n---\n\n';
+    const previous = context.fetched.state.linear!;
+    const baseline = await commitTree(context.git, {parents:[previous], base:previous, changes:new Map([['docs/plan.md', head + '[Chart](<https://example.com/chart.png>)\n']]), message:'Accepted spelling', identity:IDENTITY});
+    await pushAtomic(context.git, config, [{ref:stateRef(config,'linear'), expected:previous, next:baseline}]);
+    await refresh();
+    world.linear.documents[0]!.content = '![Chart](https://example.com/chart.png)\n';
+    const result = await run();
+    assert.deepEqual(result.leftOut, []);
+    const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
+    assert.equal(entry.pullRewrite?.replacement, head + '[Chart](<https://example.com/chart.png>)\n');
+    assert.equal(await text('docs/plan.md'), head + '![Chart](https://example.com/chart.png)\n');
+  });
+
   it('keeps links to an image-blocked reserved document as Linear URLs', async () => {
     // The new document was created from this file, and the answer was lost: the id stays reserved for its path.
     await fixture.seed({'docs/future.md': 'Future.\n'});

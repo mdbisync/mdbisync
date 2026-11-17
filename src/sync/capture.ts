@@ -26,6 +26,7 @@ import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
+import { readPlainFileProvenance } from './pull-repairs.ts';
 import { imageLinks } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
 import { trackedPlaces } from './tracked-places.ts';
@@ -164,7 +165,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) ids.set(path, entry);
+      const plainProvenance = await readPlainFileProvenance(git, base);
+      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) {
+        const plainFiles = plainProvenance.get(entry.id);
+        ids.set(path, plainFiles === undefined ? entry : {...entry, plainFiles: [...plainFiles]});
+      }
       // Files left out for a title another file has count too: they had a document as much as any other.
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
@@ -428,7 +433,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const recordedAsIs = (candidate: Candidate, text: string) => {
       const old = byId.get(candidate.doc.id);
       const {assets} = candidate;
-      return old?.path === candidate.path && old.entry.saved === undefined && previous.get(candidate.path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;
+      return assets.observedBody === undefined && old?.path === candidate.path && old.entry.saved === undefined && previous.get(candidate.path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;
     };
     // A rejected target may change other documents' relative links. Recheck
     // only bodies that change as targets fall back to their accepted paths.
@@ -476,7 +481,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (!recordedAsIs(candidate, text)) {
           // Upload URLs also enter the cache ref. Scan the original text so
           // localization cannot hide a secret embedded in a URL or its query.
-          const original = withNewUploadUrls(head + (doc.content ?? ''), assets.uploads, uploads);
+          const original = withNewUploadUrls(head + (doc.content ?? ''), assets.uploads, uploads) + ((assets.plainFiles?.length ?? 0) === 0 ? '' : `\n${assets.plainFiles!.join('\n')}\n`);
           if (original !== text) findings = await gate.check(new Map<string, FileContent>([[path, original], ...assets.files]));
           if (findings?.length === 0) findings = await gate.check(candidate.files);
           if (findings?.length === 0 && assets.observedBody !== undefined) {
@@ -574,6 +579,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const entry = {...old?.entry, id};
       delete entry.pullRewrite;
+      const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
+      if (plainFiles.length > 0) entry.plainFiles = plainFiles;
       const repaired = candidate.files.get(candidate.path)!;
       if (candidate.assets.observedBody !== undefined) {
         const observedCandidate = {...candidate, assets: {...candidate.assets, body: candidate.assets.observedBody}};
@@ -581,10 +588,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const observed = textOf(observedCandidate, documentIds);
         candidate.files.set(candidate.path, observed);
         const deadUploads = candidate.assets.deadUploads ?? [];
-        entry.pullRewrite = {hash: createHash('sha256').update(observed).digest('hex'), observedHash: createHash('sha256').update(candidate.doc.content ?? '').digest('hex'), deadUploads,
+        entry.pullRewrite = {hash: createHash('sha256').update(observed).digest('hex'), observedHash: createHash('sha256').update(candidate.doc.content ?? '').digest('hex'), replacement: String(repaired),
           images: imageLinks(candidate.doc.content ?? '', new Set(deadUploads)).images};
-        // The branch will apply this repair to the recorded source. Both forms passed the hooks above.
-        if (imageLinks(observed, new Set(deadUploads), new Set(entry.pullRewrite.images.map(image => image.image))).body !== repaired) throw new Error('Pull repair differs from checked content');
+        if (old?.entry.pullRewrite?.hash === entry.pullRewrite.hash && old.entry.pullRewrite.source !== undefined) entry.pullRewrite.source = old.entry.pullRewrite.source;
       }
       ids.set(candidate.path, entry);
       for (const [path, content] of candidate.files) {
@@ -612,7 +618,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
-    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes', identity });
+    const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
+    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes' + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
+    for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
+      ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});
+    }
     // Record a held removal, and a cleared one, so the next capture reads what this one held.
     // The cursor alone moves no ref: an edit that changes nothing in git (an icon, a color,
     // a comment) leaves every ref where it was, and the next capture reads those documents

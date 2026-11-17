@@ -345,8 +345,10 @@ export interface SuspensionEpisode {
 export interface IdEntry {
   /** The Linear document id. */
   id: string;
+  /** Targets introduced as path images in Linear; ordinary links to them must never upload files. */
+  plainFiles?: string[];
   /** A checked pull repair, bound to the exact recorded file; Linear still holds the source. */
-  pullRewrite?: { hash: string; observedHash: string; deadUploads: string[]; images: Array<{image: number; total: number; line: number}> };
+  pullRewrite?: { source?: Oid; hash: string; observedHash: string; replacement: string; images: Array<{image: number; total: number; line: number}> };
   /** The active hold; retained across renames and captured removals. */
   suspended?: SuspensionEpisode;
   /** First write after release must use this Linear commit as its base. */
@@ -605,6 +607,7 @@ function isIdEntry(value: unknown): value is IdEntry {
   if (typeof value !== 'object' || value === null) return false;
   const entry = value as Record<string, unknown>;
   if (typeof entry.id !== 'string' || entry.id === '') return false;
+  if (entry.plainFiles !== undefined && (!Array.isArray(entry.plainFiles) || !entry.plainFiles.every(path => typeof path === 'string'))) return false;
   if (entry.releasePaths !== undefined && (!Array.isArray(entry.releasePaths) || !entry.releasePaths.every((path) => typeof path === 'string'))) return false;
   if (entry.releaseBase !== undefined && (typeof entry.releaseBase !== 'string' || !/^[0-9a-f]{40,64}$/.test(entry.releaseBase))) return false;
   if (entry.suspended !== undefined) {
@@ -620,8 +623,9 @@ function isIdEntry(value: unknown): value is IdEntry {
   if (entry.pullRewrite !== undefined) {
     const repair = entry.pullRewrite as IdEntry['pullRewrite'];
     if (repair === null || typeof repair !== 'object' || !/^[0-9a-f]{64}$/.test(repair.hash)
+      || (repair.source !== undefined && (typeof repair.source !== 'string' || !/^[0-9a-f]{40,64}$/.test(repair.source)))
       || !/^[0-9a-f]{64}$/.test(repair.observedHash)
-      || !Array.isArray(repair.deadUploads) || !repair.deadUploads.every(url => typeof url === 'string')
+      || typeof repair.replacement !== 'string'
       || !Array.isArray(repair.images) || !repair.images.every(image => image !== null && typeof image === 'object' && [image.image, image.total, image.line].every(value => Number.isSafeInteger(value) && value > 0))) return false;
   }
   if (entry.saved === undefined) return true;

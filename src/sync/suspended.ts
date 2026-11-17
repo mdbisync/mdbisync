@@ -1,5 +1,6 @@
 // The suspended lane keeps its own merge bases: normal merges carry the
 // failed batch's history with its tree set aside, so topology is insufficient.
+import { checkedPullView } from './pull-repairs.ts';
 import { randomUUID } from 'node:crypto';
 import { splitFile } from '../format/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
@@ -83,16 +84,17 @@ export function suspendedPaths(ids: IdMap): Set<string> {
 const commit = (context: RunContext, options: LaneOptions, tree: Oid, parents: Oid[], message: string) => commitTree(context.git, {
   base: tree, changes: new Map(), parents, message, identity: options.identity ?? context.identity, skipIfUnchanged: false,
 });
-const note = (tracked: Oid, linear: Oid) => `\n\nTracked-base: ${tracked}\nLinear-base: ${linear}\n`;
+const note = (tracked: Oid, linear: Oid, view?: Oid) => `\n\nTracked-base: ${tracked}\nLinear-base: ${linear}\n${view === undefined || view === linear ? '' : `Linear-view: ${view}\n`}`;
 
-async function recordedBases(git: Git, head: Oid): Promise<{ tracked: Oid; linear: Oid }> {
+async function recordedBases(git: Git, head: Oid): Promise<{ tracked: Oid; linear: Oid; view?: Oid }> {
   // First-parent history ignores the batches joined as second parents and
   // also permits a person's ordinary commit at the tip of this branch.
   const log = await git.text(['log', '--first-parent', '-1', '--all-match', '--grep=^Tracked-base:', '--grep=^Linear-base:', '--format=%B', head]);
   const tracked = /^Tracked-base: ([0-9a-f]{40,64})$/m.exec(log)?.[1];
   const linear = /^Linear-base: ([0-9a-f]{40,64})$/m.exec(log)?.[1];
   if (tracked === undefined || linear === undefined) throw new LaneConflict('The suspended branch has no recorded bases');
-  return { tracked, linear };
+  const view = /^Linear-view: ([0-9a-f]{40,64})$/m.exec(log)?.[1];
+  return { tracked, linear, ...(view === undefined ? {} : {view}) };
 }
 
 async function mergeTree(git: Git, linear: Oid, other: Oid, base: Oid | undefined, ids: IdMap, idsTip: Oid | null): Promise<Oid> {
@@ -226,40 +228,43 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     if (previous === null || await isAncestor(git, previous, tracked)) return undefined;
     for (const path of await changedPaths(git, tracked, previous)) paths.add(path);
   }
+  const view = await checkedPullView(git, linear, new Map([...ids].filter(([path]) => paths.has(path))), options.identity ?? context.identity);
+  const intake = view.commit;
   let head = previous;
-  let bases: { tracked: Oid; linear: Oid };
+  let bases: { tracked: Oid; linear: Oid; view?: Oid };
   if (head === null) {
     const releasedHead = [...ids.values()].find((entry) => entry.suspended?.head !== undefined)?.suspended?.head;
     if (releasedHead !== undefined && await isAncestor(git, releasedHead, tracked)) {
       const previousBases = await recordedBases(git, releasedHead);
       return release(context, options, ids, paths, releasedHead, previousBases.linear, tracked);
     }
-    await includeCapturedAssets(git, linear, ids, paths);
-    head = await commit(context, options, await takePaths(git, tracked, linear, paths), [tracked], 'Restore suspended changes' + note(tracked, linear));
-    bases = { tracked, linear };
+    await includeCapturedAssets(git, intake, ids, paths);
+    head = await commit(context, options, await takePaths(git, tracked, intake, paths), intake === linear ? [tracked] : [tracked, intake], 'Restore suspended changes' + note(tracked, linear, intake));
+    bases = { tracked, linear, view: intake };
   } else {
     bases = await recordedBases(git, head);
     // Heal a run that died after GitHub merged but before the atomic state update.
     if (await isAncestor(git, head, tracked)) return release(context, options, ids, paths, head, bases.linear, tracked);
     if (bases.tracked !== tracked) {
-      head = await commit(context, options, await mergeTree(git, head, tracked, bases.tracked, ids, options.state.ids), [head, tracked], 'Merge the tracked branch into suspended changes' + note(tracked, bases.linear));
+      head = await commit(context, options, await mergeTree(git, head, tracked, bases.tracked, ids, options.state.ids), [head, tracked], 'Merge the tracked branch into suspended changes' + note(tracked, bases.linear, bases.view));
       bases.tracked = tracked;
     }
     // Discover documents a person's/CI's changes on this branch added to the batch.
     for (const path of await changedPaths(git, tracked, head)) paths.add(path);
     await addEpisodes(context, options, ids, paths, []);
     if (bases.linear !== linear) {
-      await includeCapturedAssets(git, linear, ids, paths);
+      await includeCapturedAssets(git, intake, ids, paths);
       // The intake never carries paths outside this lane. Mask them before
       // the merge, so their unrelated image/config conflicts cannot hold it.
-      const input = await treeCommit(git, await takePaths(git, head, linear, paths), linear);
-      const base = await treeCommit(git, await takePaths(git, head, bases.linear, paths), bases.linear);
+      const input = await treeCommit(git, await takePaths(git, head, intake, paths), linear);
+      const base = await treeCommit(git, await takePaths(git, head, bases.view ?? bases.linear, paths), bases.linear);
       const tree = await mergeTree(git, input, head, base, ids, options.state.ids);
       const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
       const selected = await takePaths(git, head, tree, paths);
       if (linearChanged || selected !== await git.text(['rev-parse', `${head}^{tree}`])) {
-        head = await commit(context, options, selected, [head], LINEAR_INTAKE_MESSAGE + note(tracked, linear));
+        head = await commit(context, options, selected, intake === linear ? [head] : [head, intake], LINEAR_INTAKE_MESSAGE + note(tracked, linear, intake));
         bases.linear = linear;
+        bases.view = intake;
       }
     }
   }
@@ -267,7 +272,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // it: the branch was rewritten, or the record was written before records were signed) gets a commit of the sync's
   // own on top, with the same files, as on the normal lane: its push runs the checks again and is recorded.
   if (head === previous && !(await expectedChecks(options.github, head, [], { body: undefined, git, base: tracked, pushed: lastPushed(context, options, ids) })).complete) {
-    head = await commit(context, options, await git.text(['rev-parse', `${head}^{tree}`]), [head], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear));
+    head = await commit(context, options, await git.text(['rev-parse', `${head}^{tree}`]), [head], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view));
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
@@ -286,7 +291,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // assets. Read before the checks, so a head the sync will not merge neither holds the normal lane nor marks documents.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
   const held = unverified.length === 0 ? '' : `\n${unverifiedNote(unverified)}\n`;
-  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${oneLine(path)}`).join('\n')}\n${held}${earlier === null ? '' : `\n${earlier[0]}\n`}\n${headNote(head, since, expected.observed)}\n`;
+  const repairs = view.notes.length === 0 ? '' : `\nImages converted to links or removed:\n${view.notes.join('\n')}\n`;
+  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${oneLine(path)}`).join('\n')}\n${repairs}${held}${earlier === null ? '' : `\n${earlier[0]}\n`}\n${headNote(head, since, expected.observed)}\n`;
   const { pullRequest, opened } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body,
   });
@@ -379,16 +385,18 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const paths = new Set(await changedPaths(git, tracked, batchTree));
   // The batch's own paths, before the lane's earlier ones join them: its failure describes only these.
   const batchPaths = [...paths].sort();
+  const view = await checkedPullView(git, linear, new Map([...ids].filter(([path]) => paths.has(path))), options.identity ?? context.identity);
+  const intake = view.commit;
   const previous = context.fetched.suspended ?? null;
   let head: Oid;
   // Never adopt an unrelated pre-existing branch, even when main contains it.
   if (previous !== null) await recordedBases(git, previous);
   if (previous === null || await isAncestor(git, previous, tracked)) {
-    head = await commit(context, options, batchTree, previous === null ? [failed, tracked] : [previous, failed, tracked], 'Suspend changes from Linear' + note(tracked, linear));
+    head = await commit(context, options, batchTree, previous === null ? [failed, tracked, ...(intake === linear ? [] : [intake])] : [previous, failed, tracked, ...(intake === linear ? [] : [intake])], 'Suspend changes from Linear' + note(tracked, linear, intake));
   } else {
     const bases = await recordedBases(git, previous);
-    const updated = bases.tracked === tracked ? previous : await commit(context, options, await mergeTree(git, previous, tracked, bases.tracked, ids, options.state.ids), [previous, tracked], 'Merge the tracked branch into suspended changes' + note(tracked, bases.linear));
-    head = await commit(context, options, await mergeTree(git, updated, batch, tracked, ids, options.state.ids), [updated, failed], 'Join suspended changes from Linear' + note(tracked, linear));
+    const updated = bases.tracked === tracked ? previous : await commit(context, options, await mergeTree(git, previous, tracked, bases.tracked, ids, options.state.ids), [previous, tracked], 'Merge the tracked branch into suspended changes' + note(tracked, bases.linear, bases.view));
+    head = await commit(context, options, await mergeTree(git, updated, batch, tracked, ids, options.state.ids), [updated, failed, ...(intake === linear ? [] : [intake])], 'Join suspended changes from Linear' + note(tracked, linear, intake));
   }
   for (const path of await changedPaths(git, tracked, head)) paths.add(path);
   // A comment written from the episode alone (a deferred mark) names the failed checks and the late ones apart.

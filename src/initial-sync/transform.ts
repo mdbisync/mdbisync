@@ -85,6 +85,8 @@ export interface TransformContext {
    * before the first write, and the same when a stopped run resumes.
    */
   documentIds: ReadonlyMap<string, string>;
+  /** File targets originating in repaired Linear path images, by document path. */
+  plainFiles?: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 /** Runs the transforms in order. */

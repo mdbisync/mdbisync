@@ -25,3 +25,13 @@ it('reports original image places and lines, including removed images', () => {
   assert.deepEqual(result.images, [{image:2,total:3,line:3},{image:3,total:3,line:5}]);
   assert.match(result.body, /\[Dead\]\(https:\/\/uploads.linear.app\/dead\)/);
 });
+
+it('keeps table cells intact when alt text contains a pipe', () => {
+  const source = '| Image | Note |\n| -- | -- |\n| ![A\\|B](https://example.com/chart.png) | Keep |\n';
+  const result = imageLinks(source).body;
+  assert.match(result, /\[A&#124;B\]/);
+  assert.match(result, /\| Keep \|/);
+});
+it('keeps a leading byte order mark while rewriting an image', () => {
+  assert.equal(imageLinks('\uFEFF![Chart](https://example.com/chart.png)').body, '\uFEFF[Chart](https://example.com/chart.png)');
+});

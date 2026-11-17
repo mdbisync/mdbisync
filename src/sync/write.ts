@@ -22,6 +22,7 @@
 
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
+import { posix } from 'node:path';
 import { documentPath } from './paths.ts';
 import { joinFile, sameMarkdown, splitFile } from '../format/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
@@ -48,6 +49,7 @@ import {
   pushAtomic,
   readBlobs,
   readIds,
+  isAncestor,
   readReservedIds,
   readSupersededIds,
   readUploads,
@@ -230,6 +232,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // next record, as a branch a person deleted does.
   const ids = await readIds(git, expected.ids);
   const frozen = suspendedPaths(ids);
+  const plainFiles = new Map([...ids].map(([path, entry]) => [path, new Set(entry.plainFiles ?? [])]));
   const releasing = [...ids.values()].some((entry) => entry.releaseBase !== undefined);
   for (const [path, entry] of ids) if (entry.suspended !== undefined) result.skipped.push({ path, reason: 'suspended' });
   const nothingNew = (await alreadyMerged(git, linearTip, tracked)) || (await mergedInitialRecord(git, linearTip, tracked));
@@ -259,8 +262,16 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
   if (nothingNew && !releasing) merge.changes.length = 0;
   // Frozen paths remain exactly as capture left them, including deletes and renames.
-  merge.changes = merge.changes.filter((change) => !pathsOf(change).some((path) => frozen.has(path)));
-  merge.unchanged = merge.unchanged.filter((change) => !frozen.has(change.from) && !frozen.has(change.to));
+  const pendingRepairs = new Set<string>();
+  for (const [path, entry] of ids) {
+    if (entry.pullRewrite?.source === undefined || frozen.has(path)) continue;
+    if (!(await isAncestor(git, entry.pullRewrite.source, tracked))) {
+      pendingRepairs.add(path);
+      result.skipped.push({path, reason: 'pull-repair-pending'});
+    }
+  }
+  merge.changes = merge.changes.filter((change) => !pathsOf(change).some((path) => frozen.has(path) || pendingRepairs.has(path)));
+  merge.unchanged = merge.unchanged.filter((change) => !frozen.has(change.from) && !frozen.has(change.to) && !pendingRepairs.has(change.from) && !pendingRepairs.has(change.to));
   result.leftOut = merge.leftOut;
   await nameFixingHooks(git, tracked, result.leftOut);
   // Anything from here may write (linked-file changes are found later too): capacity, adoption and
@@ -350,11 +361,20 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
 
   /** What Linear stores now for each path whose document this run wrote, with the body sent for it. */
   const stored = new Map<string, { content: string; sent: string; document: LinearDocument }>();
+  for (const change of [...merge.changes, ...merge.unchanged]) if (change.kind === 'keep' && change.from !== change.to) {
+    const plain = plainFiles.get(change.from);
+    if (plain !== undefined) {
+      const relocated = [...plain].map(target => posix.normalize(posix.join(posix.dirname(change.to), posix.relative(posix.dirname(change.from), target))));
+      plainFiles.set(change.to, new Set([...plain, ...relocated]));
+    }
+  }
   const nextIds: IdMap = new Map(ids);
   // A file that moved and kept its title, place and text (a renamed project folder): Linear needs nothing, the id map follows the file.
   for (const change of merge.unchanged) {
     if (change.from === change.to) continue;
-    nextIds.set(change.to, nextIds.get(change.from) as IdEntry);
+    const entry = nextIds.get(change.from) as IdEntry;
+    const plain = plainFiles.get(change.to);
+    nextIds.set(change.to, plain === undefined || plain.size === 0 ? entry : {...entry, plainFiles: [...plain]});
     nextIds.delete(change.from);
     documentIds.set(change.to, change.id);
   }
@@ -468,8 +488,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   };
   try {
     const plan = transformPlan();
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: candidate, linear, plan, uploads, documentIds });
-    for (const transform of tipTransforms) await transform.prepare?.({ git, tracked: linearTip, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads: tipUploads, documentIds });
+    for (const transform of transforms) await transform.prepare?.({ git, tracked: candidate, linear, plan, uploads, documentIds, plainFiles });
+    for (const transform of tipTransforms) await transform.prepare?.({ git, tracked: linearTip, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads: tipUploads, documentIds, plainFiles });
     await findLinkedFileChanges();
 
     const changes = merge.changes;
@@ -558,7 +578,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   result.decided = merge.decided.filter((entry) => !undone.has(entry.path));
 
   await checkpoint('after-write-before-record');
-  const allDone = notDone.length === 0 && merge.conflicts.length === 0 && merge.held.length === 0;
+  const allDone = notDone.length === 0 && merge.conflicts.length === 0 && merge.held.length === 0 && pendingRepairs.size === 0;
   const recorded = await record(allDone);
   if (recorded === null) {
     result.code = 'state-moved';
@@ -601,7 +621,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Comparing forms must not upload: an uncached file already needs a
     // write. Only the write loop sends its bytes and handles its failures.
     const comparisonTransforms = options.transforms?.() ?? [];
-    for (const transform of comparisonTransforms) await transform.prepare?.({ git, tracked: candidate, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads, documentIds });
+    for (const transform of comparisonTransforms) await transform.prepare?.({ git, tracked: candidate, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads, documentIds, plainFiles });
     for (const change of sameText) {
       const next = merge.result.get(change.to) as SideFile;
       const previous = merge.linear.get(change.from) as SideFile;
@@ -709,7 +729,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const baselineTransforms = options.transforms?.() ?? [];
     const plan: InitialSyncPlan = { create: [], overwrite: [], trash: [], leftOut: [] };
     for (const transform of baselineTransforms) {
-      await transform.prepare?.({ git, tracked: baseline.commit, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds });
+      await transform.prepare?.({ git, tracked: baseline.commit, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds, plainFiles });
     }
     return holdsVersion(document, baseline.file, baseline.text, baselineTransforms, false);
   }
@@ -840,7 +860,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     }
     const entry = nextIds.get(change.from);
     nextIds.delete(change.from);
-    nextIds.set(change.to, entry !== undefined && entry.id === change.id ? entry : { id: change.id });
+    const next = entry !== undefined && entry.id === change.id ? {...entry} : {id: change.id};
+    if (change.content) delete next.pullRewrite;
+    const plain = plainFiles.get(change.to);
+    if (plain !== undefined && plain.size > 0) next.plainFiles = [...plain];
+    nextIds.set(change.to, next);
     if (readBack !== undefined) await reconcileMark(change.to, readBack);
     if (change.content) result.updated.push(change.to);
     if (change.from !== change.to || change.title || change.place) result.relocated.push({ from: change.from, to: change.to });

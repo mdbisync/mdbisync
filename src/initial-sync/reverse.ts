@@ -489,13 +489,16 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         if (linksLinearDocuments(content)) needsLinkBase = true;
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
         const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, trackedBody);
+        // Initial import records only observations and writes nothing to Linear.
+        // Defer a repair to the next ordinary capture, whose PR also records its provenance.
+        if (captured.observedBody !== undefined) { imageBlocked.push(entry.path); continue; }
         bodies.set(entry.path, captured);
       } catch (error) {
         // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload), ends the run, as in the capture.
         if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
-        // An image the capture would block (not an upload, a dead, oversized or unsupported one): the
+        // An image that cannot be recorded here (a pending repair or a blocked upload): the
         // document's text does not enter git. This sync writes nothing to Linear, so the first sync
-        // after the merge reads the document again and marks it there.
+        // after the merge reads the document again and repairs or marks it there.
         if (error instanceof MarkdownLimitError) complexity.push(entry.path);
         else if (error instanceof AttachmentBudgetError) budget.push(entry.path);
         else if (error instanceof ImageBlockedError) imageBlocked.push(entry.path);

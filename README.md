@@ -96,7 +96,8 @@ and git's path beats Linear's title
   uses the URL as its label, and an image inside a link keeps the outer link.
   Empty images and `data:` images are removed. The sync pull request lists
   every changed image by its place and Markdown line; after merge, the link
-  version is written back to Linear. External images are never downloaded.
+  version is written back to Linear. External images are never downloaded;
+  repaired paths stay plain links and do not upload repository files.
   Links with schemes other than HTTP, HTTPS or mailto are removed with their
   text on pull and refused by lint on push. Paths and fragments are allowed.
   Unsafe or oversized uploads block the document with a red mark and a

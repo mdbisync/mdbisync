@@ -276,13 +276,13 @@ async function treeFiles(git: Git, tracked: Oid): Promise<{ files: Map<string, T
 }
 
 /** The files each document the plan creates or overwrites links (each once, in link order), from its text; documents without text or links are absent. */
-function plannedLinks(plan: InitialSyncPlan, files: ReadonlyMap<string, TreeEntry>, texts: ReadonlyMap<string, string>): Map<string, string[]> {
+function plannedLinks(plan: InitialSyncPlan, files: ReadonlyMap<string, TreeEntry>, texts: ReadonlyMap<string, string>, plainFiles?: ReadonlyMap<string, ReadonlySet<string>>): Map<string, string[]> {
   const isFile = (path: string) => files.has(path);
   const planned = new Map<string, string[]>();
   for (const { path } of [...plan.create, ...plan.overwrite]) {
     const text = texts.get(path);
     if (text === undefined) continue;
-    const targets = [...new Set(findFileLinks(path, splitFile(text).body, isFile).map((link) => link.target))];
+    const targets = [...new Set(uploadableLinks(path, splitFile(text).body, isFile, plainFiles?.get(path)).map((link) => link.target))];
     if (targets.length > 0) planned.set(path, targets);
   }
   return planned;
@@ -451,13 +451,13 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
         if (parseLfsPointer(blob) === null) texts.set(path, blob.toString('utf8'));
       }
       // The files each document to be written links, in the run's write order (by path), for the look-ahead batches.
-      for (const [path, targets] of plannedLinks(ctx.plan, files, texts)) planned.set(path, targets);
+      for (const [path, targets] of plannedLinks(ctx.plan, files, texts, ctx.plainFiles)) planned.set(path, targets);
       order.push(...[...planned.keys()].sort(compare));
     },
 
     async apply({ path, body }) {
       if (context === undefined) throw new Error(message('initial-sync.uploads-not-prepared'));
-      const fileLinks = findFileLinks(path, body, isFile);
+      const fileLinks = uploadableLinks(path, body, isFile, context.plainFiles?.get(path));
       if (fileLinks.length === 0) return body;
       const targets = [...new Set(fileLinks.map((link) => link.target))];
       await hashFiles(context.git, targets);
@@ -508,6 +508,23 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
     replacements.push({ ...outer, text: list[Math.min(index, list.length - 1)] as string });
   }
   return replaceRanges(body, replacements);
+}
+
+/** A repaired path is a plain link. Only a repository-authored image can authorize its upload. */
+function uploadableLinks(path: string, body: string, isFile: (path: string) => boolean, plain?: ReadonlySet<string>): FileLink[] {
+  const links = findFileLinks(path, body, isFile);
+  if (plain === undefined || plain.size === 0) return links;
+  const imageUrls = new Set<string>();
+  const labels = new Set<string>();
+  const definitions = new Map<string, string>();
+  visit(parse(body), node => {
+    if (node.type === 'image') imageUrls.add(node.url);
+    if (node.type === 'imageReference') labels.add(node.identifier);
+    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
+  });
+  for (const label of labels) { const url = definitions.get(label); if (url !== undefined) imageUrls.add(url); }
+  const images = new Set([...imageUrls].flatMap(url => { const target = resolveTarget(path, url); return target === null ? [] : [target]; }));
+  return links.filter(link => !plain.has(link.target) || images.has(link.target));
 }
 
 /** Links, images and link definitions in `body` whose destination is a file of the repository. */

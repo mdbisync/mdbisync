@@ -28,8 +28,7 @@
 // refusal on the same head and tracked branch is a setup error: nothing will
 // change until a person does.
 
-import { createHash } from 'node:crypto';
-import { imageLinks } from './image-links.ts';
+import { checkedPullView } from './pull-repairs.ts';
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import {
   type CheckExpectation,
@@ -61,8 +60,6 @@ import {
   branchRef,
   pushAtomic,
   readIds,
-  readBlobs,
-  listTree,
   readSyncPushed,
   stateRef,
   commitTree,
@@ -234,21 +231,9 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
   const ids = await readIds(git, options.state.ids);
   const frozen = suspendedPaths(ids);
-  const rewriteNotes: string[] = [];
-  const repairs = new Map<string, string>();
-  const entries = new Map((await listTree(git, linear)).map(entry => [entry.path, entry]));
-  for (const [path, entry] of ids) {
-    if (entry.pullRewrite === undefined || frozen.has(path)) continue;
-    const file = entries.get(path);
-    if (file?.type !== 'blob') continue;
-    const source = (await readBlobs(git, [file.oid])).get(file.oid)!;
-    if (createHash('sha256').update(source).digest('hex') !== entry.pullRewrite.hash) continue;
-    const repaired = imageLinks(source.toString('utf8'), new Set(entry.pullRewrite.deadUploads), new Set(entry.pullRewrite.images.map(image => image.image)));
-    if (repaired.body === source.toString('utf8')) continue;
-    repairs.set(path, repaired.body);
-    for (const image of entry.pullRewrite.images) rewriteNotes.push(`- ${oneLine(path)}: image ${image.image} of ${image.total} (line ${image.line}).`);
-  }
-  if (repairs.size > 0) linear = await commitTree(git, {base: linear, parents: [linear], changes: repairs, message: 'Turn image destinations into links', identity: options.identity ?? context.identity});
+  const view = await checkedPullView(git, linear, ids, options.identity ?? context.identity);
+  const rewriteNotes = view.notes;
+  linear = view.commit;
   // Mask before merging, so frozen paths cannot conflict or restart normal checks.
   const laneLinear = frozen.size === 0 ? linear : await treeCommit(git, await takePaths(git, linear, sync ?? tracked, frozen), linear);
   const trackedTree = await git.text(['rev-parse', `${tracked}^{tree}`]);

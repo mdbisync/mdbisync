@@ -11,6 +11,7 @@ function text(value: string): string {
 /** Rewrites parsed nodes only; code examples and unrelated source spelling stay intact. */
 export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new Set(), onlyImages?: ReadonlySet<number>) {
   const tree = parse(body);
+  const offset = body.startsWith('\uFEFF') ? 1 : 0;
   const definitions = new Map<string, string>();
   visit(tree, node => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url); });
   const images: ImageRewrite[] = [];
@@ -22,7 +23,7 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
     const enclosingRemoved = ancestors.some(parent => (parent.type === 'link' && !allowedLink(parent.url)) || (parent.type === 'linkReference' && !allowedLink(definitions.get(parent.identifier) ?? '')));
     if (node.type === 'link' || node.type === 'linkReference') {
       const url = node.type === 'link' ? node.url : definitions.get(node.identifier) ?? '';
-      if (!allowedLink(url) && !enclosingRemoved) edits.push({from: start(node), to: end(node), text: ''});
+      if (!allowedLink(url) && !enclosingRemoved) edits.push({from: start(node) + offset, to: end(node) + offset, text: ''});
       return;
     }
     if (node.type !== 'image' && node.type !== 'imageReference') return;
@@ -43,10 +44,11 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
         ? text(label)
         : toMarkdown({type: 'root', children: [{type: 'paragraph', children: [{type: 'link', url, children: [{type: 'text', value: label}]}]}]}, {resourceLink: true}).trimEnd();
     }
-    edits.push({from: start(node), to: end(node), text: replacement});
+    if (ancestors.some(parent => parent.type === 'tableCell')) replacement = replacement.replace(/\|/g, '&#124;');
+    edits.push({from: start(node) + offset, to: end(node) + offset, text: replacement});
   });
   // Remove unused dangerous definitions too: they must not survive as file-upload inputs.
-  visit(tree, node => { if (node.type === 'definition' && !allowedLink(node.url)) edits.push({from: start(node), to: end(node), text: ''}); });
+  visit(tree, node => { if (node.type === 'definition' && !allowedLink(node.url)) edits.push({from: start(node) + offset, to: end(node) + offset, text: ''}); });
   let result = body;
   for (const edit of edits.sort((a,b) => b.from - a.from)) result = result.slice(0, edit.from) + edit.text + result.slice(edit.to);
   return {body: result, images};

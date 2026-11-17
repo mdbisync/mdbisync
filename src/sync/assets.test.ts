@@ -535,3 +535,15 @@ it('encodes a restored link\'s fragment, so it cannot end the link and add anoth
     assert.deepEqual(destinations(query.body).map(({ node }) => node.url), ['existing.png?download=1&page=2%26lt;x&q=a%26b#a&b']);
   } finally { await fixture.cleanup(); }
 });
+
+it('repairs a dead cached upload with query and fragment suffixes', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('dead-query');
+    const base = await git.text(['rev-parse','origin/main']);
+    const url = 'https://uploads.linear.app/workspace/missing';
+    const result = await captureAssets(git, resolveStateConfig({}), base, 'plan.md', `![Chart](${url}?version=2#part)`, new Map([['a'.repeat(64),url]]), async () => new Response(null,{status:404}));
+    assert.equal(result.body, `[Chart](${url}?version=2#part)`);
+  } finally { await fixture.cleanup(); }
+});
