@@ -10,7 +10,7 @@ import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, par
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
 import { imageLinks } from './image-links.ts';
-import { ASSETS_FOLDER, admitsCapturedFile, uploadExtension } from './upload-type.ts';
+import { ASSETS_FOLDER, admitsCapturedFile, isCaptureName, uploadExtension } from './upload-type.ts';
 
 export interface CapturedAssets {
   body: string;
@@ -302,7 +302,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       if (!assetsUsable) return undefined;
       const same = (hashPaths.get(hash) ?? []).find((candidate) => posix.dirname(candidate) === assetsFolder);
       if (same !== undefined) return same;
-      for (const name of [posix.basename(source), `${hash}${posix.extname(source)}`]) {
+      // A name in the capture form names its content: a file edited in git since its capture is copied under its new hash,
+      // so a later download of the original bytes can take the original name.
+      const own = posix.basename(source);
+      const names = isCaptureName(own) && !own.startsWith(hash) ? [] : [own];
+      for (const name of [...names, `${hash}${posix.extname(source)}`]) {
         const target = posix.join(assetsFolder, name);
         // Any other entry at that path (a symbolic link, a Markdown file, a folder) holds other content.
         const existing = pathHashes.get(target) ?? placed.get(target) ?? (notFolders.has(target) || folders.has(target) ? '' : undefined);
@@ -419,7 +423,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
           if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
           assetPath = posix.join(assetsFolder, `${hash}${extension}`);
           // A file or symbolic link named `assets` stays: the document waits until its author moves it.
-          if (!assetsUsable || notFolders.has(assetPath) || folders.has(assetPath)) throw new Error(message('assets.destination-exists'));
+          const chosen = placed.get(assetPath);
+          if (!assetsUsable || notFolders.has(assetPath) || folders.has(assetPath) || (chosen !== undefined && chosen !== hash)) throw new Error(message('assets.destination-exists'));
+          placed.set(assetPath, hash);
         }
         // Each document owns its candidate bytes until its security check passes.
         files.set(assetPath, asset.file);

@@ -193,4 +193,17 @@ describe('the assets folder beside the documents', () => {
     assert.deepEqual([...moved.files.keys()], [`new/assets/${pngHash}.png`]);
     assert.equal(moved.body, `![Chart](assets/${pngHash}.png)\n`);
   });
+
+  it('copies a captured file edited in git under its new hash, so a fresh download keeps the original name', async () => {
+    // `old/assets/<hash of png>.png` was captured, then edited in git: it now holds `other`.
+    const otherHash = createHash('sha256').update(other).digest('hex');
+    const editedUrl = 'https://uploads.linear.app/workspace/edited.png';
+    const tree = { 'old/plan.md': `![Edited](assets/${pngHash}.png)\n`, [`old/assets/${pngHash}.png`]: other };
+    const body = `![Edited](${editedUrl})\n\n![Pasted](${url})\n`;
+    const moved = await captured(tree, 'new/plan.md', body, new Map([[otherHash, editedUrl]]), { body: tree['old/plan.md'], path: 'old/plan.md' });
+    assert.deepEqual([...moved.files.keys()].sort(), [`new/assets/${otherHash}.png`, `new/assets/${pngHash}.png`].sort());
+    assert.deepEqual(moved.files.get(`new/assets/${otherHash}.png`), other);
+    assert.deepEqual(moved.files.get(`new/assets/${pngHash}.png`), png);
+    assert.equal(moved.body, `![Edited](assets/${otherHash}.png)\n\n![Pasted](assets/${pngHash}.png)\n`);
+  });
 });
