@@ -5,6 +5,7 @@ import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
 import { describe, it } from 'node:test';
 import { mergeOnGitHub } from '../state/test-helpers.ts';
+import { SYNC_BRANCH_MERGE_MESSAGE } from './pull-request.ts';
 import { pullRequestHarness, CANARY, SYNC_BRANCH } from './pull-request-test-helpers.ts';
 
 // GitHub's answer while a merge it answered with a server error still runs.
@@ -409,7 +410,7 @@ describe('sync: pull request failures', () => {
     assert.match(await show('refs/heads/main:combined/page-2.md'), /Changed for the description\./);
   });
 
-  for (const reviewed of [false, true]) it(`never reuses a sync branch that holds an unmerged initial sync from Linear (reviewed: ${reviewed})`, async () => {
+  for (const above of ['nothing', 'a review commit', 'a commit with the sync merge subject'] as const) it(`never reuses a sync branch that holds an unmerged initial sync from Linear (above it: ${above})`, async () => {
     // The sync branch holds such a record, which changes the tracked branch and
     // which a person has not merged, while `linear` has moved on.
     const main = await rev('refs/heads/main');
@@ -418,7 +419,11 @@ describe('sync: pull request failures', () => {
     const record = await h.fixture.remote.text(['commit-tree', `${changed}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
       env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
     });
-    const head = reviewed ? await commitFile(record, 'combined/guide.md', blob) : record;
+    // Anyone who may push can write a merge with the subject the sync gives its own merges; it chooses no tree.
+    const forged = () => h.fixture.remote.text(['commit-tree', `${record}^{tree}`, '-p', record, '-p', main, '-m', SYNC_BRANCH_MERGE_MESSAGE], {
+      env: { GIT_AUTHOR_NAME: 'b', GIT_AUTHOR_EMAIL: 'b@example.com', GIT_COMMITTER_NAME: 'b', GIT_COMMITTER_EMAIL: 'b@example.com' },
+    });
+    const head = above === 'a review commit' ? await commitFile(record, 'combined/guide.md', blob) : above === 'nothing' ? record : await forged();
     await h.fixture.remote.run(['update-ref', SYNC_BRANCH, head]);
     h.world.github.pullRequests.push({ number: 1, title: 'Initial sync from Linear', body: '', head: 'mdbisync/linear', base: 'main', state: 'open', merged: false });
     await editInLinear('eng/notes/plan.md', `# Plan\n\nNot yet. ${CANARY}\n`);

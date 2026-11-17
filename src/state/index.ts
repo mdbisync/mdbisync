@@ -20,6 +20,8 @@ export {
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   INITIAL_SYNC_PROGRESS,
   initialPullRequestPending,
+  pendingInitialRecord,
+  unmergedInitialRecords,
   initialRecordChangesParent,
   isAncestor,
   initialSyncProgressMessage,

@@ -23,6 +23,7 @@ import { Git, commitTree, fetchState, resolveStateConfig } from '../state/index.
 import { isGitDirectoryName } from '../state/objects.ts';
 import { type SecurityGate } from '../sync/security.ts';
 import { LINK_VARIANT_LINKS, capture } from '../sync/capture.ts';
+import { SYNC_BRANCH_MERGE_MESSAGE } from '../sync/pull-request.ts';
 import { candidateKey } from '../sync/staged.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
 import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
@@ -1058,6 +1059,58 @@ describe('initial sync from Linear to the tracked branch', () => {
       assert.equal(mergeCalls, 0);
     });
   }
+
+  /** A commit anyone who may push can add, with `subject` and the tree of `parents[0]`. */
+  const forge = (parents: string[], subject: string) => fixture.remote.text(['commit-tree', `${parents[0]}^{tree}`, ...parents.flatMap((parent) => ['-p', parent]), '-m', subject], {
+    env: { GIT_AUTHOR_NAME: 'Someone', GIT_AUTHOR_EMAIL: 'someone@example.com', GIT_COMMITTER_NAME: 'Someone', GIT_COMMITTER_EMAIL: 'someone@example.com' },
+  });
+
+  for (const forged of ['state ref', 'state ref and sync branch', 'sync merge on both'] as const) {
+    it(`a commit appended after the unmerged initial record (${forged}) does not let the sync merge it`, async () => {
+      const world = fakeWorld();
+      world.linear.documents = linearDocuments();
+      let mergeCalls = 0;
+      world.github.merge = async () => {
+        mergeCalls += 1;
+        return { status: 500 };
+      };
+      assert.equal((await run(world)).result.exitCode, 0);
+      const record = await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear']);
+      const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+      const appended = forged === 'sync merge on both'
+        ? await forge([record, main], SYNC_BRANCH_MERGE_MESSAGE)
+        : await forge([record], 'Sync: Linear changes');
+      await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', appended]);
+      if (forged !== 'state ref') await fixture.remote.run(['update-ref', 'refs/heads/mdbisync/linear', appended]);
+      const before = await refs();
+      const writes = world.writes.length;
+
+      const refused = await run(world, {}, 'sync');
+      assert.equal(refused.result.exitCode, NO_STATE_EXIT_CODE, refused.result.stderr);
+      assert.equal(refused.report.code, 'initial-pull-request-pending');
+      // The preflight refuses, before the run captures or writes anything.
+      assert.match(refused.summary, /Closing the pull request or deleting its branch does not cancel/);
+      assert.deepEqual(await refs(), before, 'a remote ref moved');
+      assert.equal(world.writes.length, writes, 'the run wrote to an API');
+      assert.equal(mergeCalls, 0);
+      assert.ok((await files('refs/heads/main')).includes('eng/backend/notes.md'));
+    });
+  }
+
+  it('an initial sync to Linear still waits for a branch that carries the record after a commit is appended to the state ref', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const record = await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear']);
+    await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', await forge([record], 'Sync: Linear changes')]);
+    const before = await refs();
+    const writes = world.writes.length;
+    const { result, report } = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
+    assert.equal(result.exitCode, NO_STATE_EXIT_CODE, result.stderr);
+    assert.equal(report.code, 'initial-pull-request-pending');
+    assert.deepEqual(await refs(), before);
+    assert.equal(world.writes.length, writes);
+  });
 
   it('refuses sync after the initial branch moves elsewhere, but lets a new initial sync to Linear replace the abandoned record', async () => {
     const world = fakeWorld();

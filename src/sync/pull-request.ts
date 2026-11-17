@@ -50,8 +50,8 @@ import {
   type CommitIdentity,
   type Git,
   type IdMap,
-  INITIAL_SYNC_FROM_LINEAR_RECORD,
   initialRecordChangesParent,
+  unmergedInitialRecords,
   type Oid,
   type StateConfig,
   type PushResult,
@@ -261,7 +261,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   try {
     const open = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
     // That record can remove files from the tracked branch: a person merges its pull request, and nothing else may ride along.
-    if (open !== null && pending && (await holdsInitialRecord(git, sync as Oid, tracked))) return { ...result, code: 'initial-pull-request-pending' };
+    if (open !== null && pending && (await holdsInitialRecord(git, sync as Oid, tracked, await ownPushed(context, options)))) return { ...result, code: 'initial-pull-request-pending' };
 
     const identity = options.identity ?? context.identity;
     const noted = open === null ? null : readRefusal(open.body);
@@ -282,7 +282,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       && !(await needsTrackedMerge(git, tracked, sync as Oid, noted))
       && await checkedHeadReady(github, sync as Oid, await checkedExpectation());
     let head: Oid | null = sync;
-    if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid, tracked)))) {
+    if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid, tracked, await ownPushed(context, options))))) {
       // A merged branch can start again from Linear. An older initial
       // sync record left on this branch is also left out: its destructive
       // snapshot needs a person's approval. Ordinary unmerged changes stay on the branch,
@@ -508,25 +508,30 @@ async function isInitialRecord(git: Git, commit: Oid): Promise<boolean> {
 
 /**
  * Whether pending history still carries an initial snapshot that changes
- * tracked files. Review commits do not approve it; a sync merge ends the
- * search because `restart` has already selected a replacement tree.
+ * tracked files. Review commits do not approve it. A record is left behind
+ * only below a merge the sync itself made into this branch: `restart` gave
+ * that merge a tree without the snapshot. The sync's signed record of its own
+ * last head (`own`) proves which merges it made; a commit with the same
+ * subject that someone else pushed proves nothing, so the search goes on
+ * through it and through every parent.
  */
-async function holdsInitialRecord(git: Git, sync: Oid, tracked: Oid): Promise<boolean> {
-  // Review commits on an initial snapshot do not approve it. Follow the
-  // first-parent history until a sync merge, which already chose its tree.
-  const commits = (await git.text(['log', '--first-parent', '--format=%H %s', `${tracked}..${sync}`])).split('\n');
-  let record: Oid | undefined;
-  for (const line of commits) {
-    const separator = line.indexOf(' ');
-    const subject = line.slice(separator + 1);
-    if (subject === SYNC_BRANCH_MERGE_MESSAGE) break;
-    if (subject === INITIAL_SYNC_FROM_LINEAR_RECORD) {
-      record = line.slice(0, separator);
-      break;
+async function holdsInitialRecord(git: Git, sync: Oid, tracked: Oid, own: Oid | undefined): Promise<boolean> {
+  let chosen: Oid | undefined;
+  if (own !== undefined) {
+    const commits = (await git.text(['log', '--first-parent', '--format=%H %s', `${tracked}..${sync}`])).split('\n');
+    for (const line of commits) {
+      const separator = line.indexOf(' ');
+      const commit = line.slice(0, separator);
+      if (line.slice(separator + 1) === SYNC_BRANCH_MERGE_MESSAGE && (await isAncestor(git, commit, own))) {
+        chosen = commit;
+        break;
+      }
     }
   }
-  if (record === undefined) return false;
-  return initialRecordChangesParent(git, record);
+  for (const record of await unmergedInitialRecords(git, sync, tracked, chosen === undefined ? [] : [chosen])) {
+    if (await initialRecordChangesParent(git, record)) return true;
+  }
+  return false;
 }
 
 /** The tree of `into` with `from` merged in; null on a conflict. */
