@@ -21,7 +21,7 @@
 // adopted by its title.
 
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
 import { joinFile, sameMarkdown, splitFile } from '../format/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
@@ -758,6 +758,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;
+    const repair = ids.get(file.path)?.pullRewrite;
+    if (repair !== undefined && createHash('sha256').update(text).digest('hex') === repair.hash) {
+      return createHash('sha256').update(document.content ?? '').digest('hex') === repair.observedHash;
+    }
     let expected: string;
     try {
       expected = await transformBody(through, file.path, splitFile(text).body);

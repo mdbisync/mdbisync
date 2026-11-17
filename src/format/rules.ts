@@ -11,6 +11,7 @@ export const LINT_RULES = {
   'markdown-complexity': 'Markdown trees over 128 levels deep or 500,000 nodes are rejected.',
   'duplicate-title': 'Two files map to one document title.',
   'table-alignment': 'Table column alignment is dropped.',
+  'link-scheme': 'Links must use http, https, mailto, a path or a fragment.',
   'link-title': 'A link title is dropped.',
   'image-title': 'An image title is dropped from the Markdown.',
   'code-in-emphasis': 'Bold or italic around inline code is dropped from the code.',

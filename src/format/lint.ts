@@ -5,7 +5,7 @@
 
 import type { Definition, Root } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
-import { MarkdownLimitError, end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, MarkdownLimitError, end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
@@ -128,11 +128,13 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (body.slice(start(node), end(node)).includes('^[')) report('footnote', line(node));
         break;
       case 'link':
+        if (!allowedLink(node.url)) report('link-scheme', line(node));
         if (node.title) report('link-title', line(node));
         if (node.children.some((child) => child.type === 'image' || child.type === 'imageReference')) report('image-in-link', line(node));
         break;
       case 'linkReference': {
         const definition = definitions.get(node.identifier);
+        if (definition !== undefined && !allowedLink(definition.url)) report('link-scheme', line(node));
         if (definition?.title) report('link-title', line(node));
         if (node.children.some((child) => child.type === 'image' || child.type === 'imageReference')) report('image-in-link', line(node));
         break;

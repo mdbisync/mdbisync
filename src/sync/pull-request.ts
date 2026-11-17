@@ -28,6 +28,8 @@
 // refusal on the same head and tracked branch is a setup error: nothing will
 // change until a person does.
 
+import { createHash } from 'node:crypto';
+import { imageLinks } from './image-links.ts';
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import {
   type CheckExpectation,
@@ -59,6 +61,8 @@ import {
   branchRef,
   pushAtomic,
   readIds,
+  readBlobs,
+  listTree,
   readSyncPushed,
   stateRef,
   commitTree,
@@ -215,7 +219,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   }
   const tracked = fetched.tracked;
   const sync = fetched.sync;
-  const linear = options.state.linear;
+  let linear = options.state.linear;
   const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [] };
   if (suspended !== undefined) result.suspended = suspended;
   // The suspended lane's `checks-missing` and `merge-misplaced` are its own: `pullRequestFailure` and the summary read
@@ -228,7 +232,23 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   // first, and the next run checks the sync's changes again.
   if (suspended?.code === 'merge-misplaced') return result;
 
-  const frozen = suspendedPaths(await readIds(git, options.state.ids));
+  const ids = await readIds(git, options.state.ids);
+  const frozen = suspendedPaths(ids);
+  const rewriteNotes: string[] = [];
+  const repairs = new Map<string, string>();
+  const entries = new Map((await listTree(git, linear)).map(entry => [entry.path, entry]));
+  for (const [path, entry] of ids) {
+    if (entry.pullRewrite === undefined || frozen.has(path)) continue;
+    const file = entries.get(path);
+    if (file?.type !== 'blob') continue;
+    const source = (await readBlobs(git, [file.oid])).get(file.oid)!;
+    if (createHash('sha256').update(source).digest('hex') !== entry.pullRewrite.hash) continue;
+    const repaired = imageLinks(source.toString('utf8'), new Set(entry.pullRewrite.deadUploads), new Set(entry.pullRewrite.images.map(image => image.image)));
+    if (repaired.body === source.toString('utf8')) continue;
+    repairs.set(path, repaired.body);
+    for (const image of entry.pullRewrite.images) rewriteNotes.push(`- ${oneLine(path)}: image ${image.image} of ${image.total} (line ${image.line}).`);
+  }
+  if (repairs.size > 0) linear = await commitTree(git, {base: linear, parents: [linear], changes: repairs, message: 'Turn image destinations into links', identity: options.identity ?? context.identity});
   // Mask before merging, so frozen paths cannot conflict or restart normal checks.
   const laneLinear = frozen.size === 0 ? linear : await treeCommit(git, await takePaths(git, linear, sync ?? tracked, frozen), linear);
   const trackedTree = await git.text(['rev-parse', `${tracked}^{tree}`]);
@@ -359,7 +379,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       head: config.syncBranch,
       base: config.trackedBranch,
       title: SYNC_PULL_REQUEST_TITLE,
-      body: pullRequestBody(result.paths, earlier, { head, since, held: stillHeld, checks: expected.observed, unverified }),
+      body: pullRequestBody(result.paths, earlier, { head, since, held: stillHeld, checks: expected.observed, unverified, rewriteNotes }),
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
     if (unverified.length > 0) return { ...result, code: 'head-unverified', unverified };
@@ -378,7 +398,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       if (verdict.state === 'red') {
         result.redMain = verdict.checks;
         const hold: RedMainHold = { head, main: tracked, checks: verdict.checks.map(({ name }) => name) };
-        const body = pullRequestBody(result.paths, earlier, { head, since, held: hold, checks: expected.observed });
+        const body = pullRequestBody(result.paths, earlier, { head, since, held: hold, checks: expected.observed, rewriteNotes });
         try {
           if (body !== pullRequest.body) await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body });
         } catch (error) {
@@ -439,7 +459,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       if (mergeInProgress(merge)) return { ...refused, code: 'merge-refused' };
       if (earlier !== null && earlier.status === refusal.status && earlier.reason === refusal.reason) return { ...refused, code: 'merge-blocked' };
       try {
-        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal, { head, since, held: stillHeld, checks: expected.observed }) });
+        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal, { head, since, held: stillHeld, checks: expected.observed, rewriteNotes }) });
       } catch (error) {
         // The refusal is what this run reports; an unrecorded note only means a later run notes it again.
         if (!(error instanceof PullRequestError)) throw error;
@@ -631,7 +651,7 @@ function commitMerge(git: Git, tree: string, parents: [Oid, Oid], message: strin
 }
 
 /** Names, counts and GitHub's reason for a refused merge, and the notes on its head; never document content. */
-function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null; checks: readonly ExpectedCheck[]; unverified?: readonly string[] }): string {
+function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null; checks: readonly ExpectedCheck[]; unverified?: readonly string[]; rewriteNotes?: readonly string[] }): string {
   const lines = [
     'Changes made in Linear, on their way to this branch.',
     '',
@@ -642,6 +662,7 @@ function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null,
   // A file name holds no line break here: one could forge the hidden notes a later run reads back.
   if (paths.length > 0) lines.push('', ...paths.slice(0, LISTED_PATHS).map((path) => `- ${oneLine(path)}`));
   if (paths.length > LISTED_PATHS) lines.push(`- and ${paths.length - LISTED_PATHS} more`);
+  if (notes.rewriteNotes?.length) lines.push('', 'Images converted to links or removed:', ...notes.rewriteNotes);
   if (refusal !== null) {
     lines.push(
       '',

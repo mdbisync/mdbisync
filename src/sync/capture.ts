@@ -26,6 +26,7 @@ import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
+import { imageLinks } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
 import { trackedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
@@ -478,6 +479,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           const original = withNewUploadUrls(head + (doc.content ?? ''), assets.uploads, uploads);
           if (original !== text) findings = await gate.check(new Map<string, FileContent>([[path, original], ...assets.files]));
           if (findings?.length === 0) findings = await gate.check(candidate.files);
+          if (findings?.length === 0 && assets.observedBody !== undefined) {
+            const observedCandidate = {...candidate, assets: {...assets, body: assets.observedBody}};
+            delete observedCandidate.compared;
+            const observed = textOf(observedCandidate, documentIds);
+            if (observed !== text && observed !== original) findings = await gate.check(new Map([[path, observed], ...assets.files]));
+          }
         }
         if (findings === null) {
           // The hooks have not seen this text (the hooks step did not run,
@@ -565,7 +572,21 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      ids.set(candidate.path, old?.entry ?? {id});
+      const entry = {...old?.entry, id};
+      delete entry.pullRewrite;
+      const repaired = candidate.files.get(candidate.path)!;
+      if (candidate.assets.observedBody !== undefined) {
+        const observedCandidate = {...candidate, assets: {...candidate.assets, body: candidate.assets.observedBody}};
+        delete observedCandidate.compared;
+        const observed = textOf(observedCandidate, documentIds);
+        candidate.files.set(candidate.path, observed);
+        const deadUploads = candidate.assets.deadUploads ?? [];
+        entry.pullRewrite = {hash: createHash('sha256').update(observed).digest('hex'), observedHash: createHash('sha256').update(candidate.doc.content ?? '').digest('hex'), deadUploads,
+          images: imageLinks(candidate.doc.content ?? '', new Set(deadUploads)).images};
+        // The branch will apply this repair to the recorded source. Both forms passed the hooks above.
+        if (imageLinks(observed, new Set(deadUploads), new Set(entry.pullRewrite.images.map(image => image.image))).body !== repaired) throw new Error('Pull repair differs from checked content');
+      }
+      ids.set(candidate.path, entry);
       for (const [path, content] of candidate.files) {
         // A record can retain a git-only excluded file without sending it to
         // Linear. Compare against the last accepted state, not an intervening

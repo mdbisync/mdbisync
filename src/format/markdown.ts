@@ -187,3 +187,10 @@ export function resolveTarget(documentPath: string, url: string): string | null 
   if (joined === '.' || joined === '..' || joined.startsWith('../') || joined.endsWith('/')) return null;
   return joined;
 }
+
+/** Schemes accepted by synchronized links; paths and fragments have no scheme. */
+export function allowedLink(url: string): boolean {
+  // URL readers ignore ASCII whitespace and control characters in schemes.
+  const normalized = url.replace(/[\u0000-\u0020\u007f]/g, '');
+  return !/^[a-z][a-z\d+.-]*:/i.test(normalized) || /^(?:https?|mailto):/i.test(normalized);
+}

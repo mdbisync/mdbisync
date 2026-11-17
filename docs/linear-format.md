@@ -65,8 +65,8 @@ What both commands leave alone:
   spaces. Every image must be such a path to a file of the repository (see
   [`image-not-in-repository`](#image-not-in-repository)); links to web
   pages and other URLs are fine. In Linear, a link typed as a relative
-  path to a file other than a Markdown document is blocked like an image
-  that is not an upload (`image-blocked`): the sync would upload the file
+  path to a file other than a Markdown document is blocked (`image-blocked`):
+  the sync would upload the file
   it names, so only the repository chooses which files reach Linear. A
   link the file already had stays allowed.
 - **The sync's conflict markers.** A conflict the sync writes is ordinary
@@ -312,6 +312,16 @@ Table column alignment is dropped.
 ```
 
 Instead, use plain separators (`| -- | -- |`).
+
+### `link-scheme`
+
+Links must use http, https, mailto, a path or a fragment.
+
+```markdown
+[Unsupported](javascript:alert%281%29)
+```
+
+On pull, unsupported links are removed together with their text.
 
 ### `link-title`
 
