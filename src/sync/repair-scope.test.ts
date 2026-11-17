@@ -89,7 +89,31 @@ describe('repair state scope', () => {
     }
     assert.ok(!published.some((text) => text.includes(CANARY)), 'a repair the hooks refuse never reaches a branch');
     // The same forged state without the flagged text is applied: the check above sees the path the repair takes.
-    if (!flagged) assert.ok(published.includes(replacement), 'a repair the hooks pass is applied: ');
+    if (!flagged) assert.ok(published.includes(replacement), 'a repair the hooks pass is applied');
+  });
+
+  // The suspended lane takes in the view the same way; a forged lane repair cannot be kept across runs there, since
+  // the lane's hold mark makes each capture record the document again.
+  it('holds a repair the hooks refuse, then applies it once they pass it', async () => {
+    // The hook refuses the repaired text while the tracked branch's policy file says so.
+    await h.gitEdit('canary-check.mjs', `import {readFileSync} from 'node:fs'; if (readFileSync('policy.txt', 'utf8').trim() === 'deny') for (const file of process.argv.slice(2)) if (readFileSync(file, 'utf8').includes('Replaced text')) { console.log(file + ':1: found'); process.exitCode = 1; }`);
+    await h.gitEdit('policy.txt', 'deny\n');
+    await h.gitEdit('.pre-commit-config.yaml', await hookConfig());
+    const path = 'combined/guide.md';
+    const replacement = '# Guide\n\nReplaced text.\n';
+    const source = (await h.fixture.remote.run(['show', `refs/mdbisync/linear:${path}`])).stdout;
+    const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
+    const hash = createHash('sha256').update(source).digest('hex');
+    ids[path] = {...ids[path], pullRewrite: {hash, observedHash: hash, replacement, images: []}};
+    await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify(ids));
+    await h.editInLinear('combined/page-0.md', '# Page 0\n\nA new paragraph.\n');
+    const held = await h.sync();
+    assert.equal(held.result.exitCode, 0, held.result.stderr);
+    assert.notEqual(await h.show(`${SYNC_BRANCH}:${path}`), replacement);
+    await h.gitEdit('policy.txt', 'allow\n');
+    const passed = await h.sync();
+    assert.equal(passed.result.exitCode, 0, passed.result.stderr);
+    assert.equal(await h.show(`${SYNC_BRANCH}:${path}`), replacement);
   });
 
   it('does not recreate a missing sync branch from an out-of-scope Linear tree during write-back', async () => {

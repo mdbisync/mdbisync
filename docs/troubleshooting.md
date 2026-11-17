@@ -351,7 +351,8 @@ removed. The PR lists each image by place and line; after merge, the write
 step puts the repaired text into Linear. These repairs do not cause an
 `image-blocked` notice. Unsupported or oversized upload bytes remain blocked.
 A repaired text enters the pull request only after the repository's security
-hooks pass it; until then the pull request proposes the document as captured.
+hooks pass it. Until then the document stays out of the pull request, the
+summary lists it as `pull-repair-pending`, and each run asks the hooks again.
 
 The initial sync also lists:
 

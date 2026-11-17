@@ -26,7 +26,7 @@ import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
-import { readPlainFileProvenance } from './pull-repairs.ts';
+import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
 import { imageLinks } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
 import { trackedPlaces } from './tracked-places.ts';
@@ -489,6 +489,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
             delete observedCandidate.compared;
             const observed = textOf(observedCandidate, documentIds);
             if (observed !== text && observed !== original) findings = await gate.check(new Map([[path, observed], ...assets.files]));
+            // The pull request step asks about the repaired text alone (`repairSet`): with the downloaded files
+            // beside it, this run's check is another set, which the staged steps would not answer.
+            if (findings?.length === 0 && candidate.files.size > 1) findings = await gate.check(repairSet(path, text));
           }
         }
         if (findings === null) {

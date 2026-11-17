@@ -739,6 +739,21 @@ describe('capture from Linear', () => {
     });
   }
 
+  it('asks the hooks about a repaired text on its own when the document also brings a downloaded file', async () => {
+    // The pull request step asks about the repaired text alone; in the staged steps only a set staged here gets an answer.
+    world.linear.documents[0]!.content = '![New](https://uploads.linear.app/workspace/new.png)\n\n![Chart](https://example.com/chart.png)\n';
+    const sets: Array<Map<string, string>> = [];
+    const result = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response(png, {headers:{'content-type':'image/png'}}), security: {configured:true, check:async files => {
+      sets.push(new Map([...files].map(([path, content]) => [path, String(content)])));
+      return [];
+    }}});
+    assert.equal(result.ok, true);
+    const replacement = (await readIds(context.git, result.state.ids)).get('docs/plan.md')?.pullRewrite?.replacement;
+    assert.ok(replacement?.includes('[Chart](https://example.com/chart.png)'));
+    assert.ok(sets.some(set => set.size > 1 && set.get('docs/plan.md') === replacement), 'the text with its downloaded file');
+    assert.ok(sets.some(set => set.size === 1 && set.get('docs/plan.md') === replacement), 'the text alone');
+  });
+
   it('scans a removed image even when the repaired text equals the accepted file', async () => {
     world.linear.documents[0]!.content = 'Original.\n\n![Discarded](data:text/plain,rejected-canary)\n';
     let checks = 0;

@@ -4,11 +4,15 @@ import { type Git, type Oid, type IdMap, type IdEntry, type CommitIdentity, type
 import { candidateFiles, mapFiles, type Zone } from '../mapping/index.ts';
 import { isSyncedChange, oneLine } from './head-check.ts';
 import { type SecurityGate } from './security.ts';
+import { takePaths } from './merge.ts';
 
 /** The part of a security gate a repair needs: the hooks' answer for a set of files. */
 export type RepairGate = Pick<SecurityGate, 'check'>;
 
 type Repair = NonNullable<IdEntry['pullRewrite']>;
+
+/** The set of files the hooks see for a repair: its text alone, the same in every step that asks about it. */
+export const repairSet = (path: string, replacement: string): Map<string, string> => new Map([[path, replacement]]);
 
 /** The repairs a view would apply: mapped synchronized documents with a unique id, still holding the observed text. */
 async function pendingRepairs(git: Git, linear: Oid, ids: IdMap, zones: ReadonlyMap<string, Zone>, paths?: ReadonlySet<string>): Promise<Map<string, Repair>> {
@@ -36,20 +40,24 @@ async function pendingRepairs(git: Git, linear: Oid, ids: IdMap, zones: Readonly
 
 /**
  * The ids ref only stores a repair's text; it is not the text the hooks checked. Each replacement is applied only
- * when the tracked branch's security hooks pass its exact bytes. A refused or unanswered one stays out of this run,
- * like a repair that no longer matches its document.
+ * when the tracked branch's security hooks pass its exact bytes. The document of a refused or unanswered one keeps
+ * its version in `hold` (the branch the view is merged into), so neither the repair nor the observation it would
+ * replace is proposed: the write step leaves it waiting for its repair, and a later run asks again.
  */
-export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: ReadonlyMap<string, Zone>, identity: CommitIdentity, gate: RepairGate, paths?: ReadonlySet<string>): Promise<{commit: Oid; notes: string[]}> {
+export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: ReadonlyMap<string, Zone>, identity: CommitIdentity, gate: RepairGate, hold: Oid, paths?: ReadonlySet<string>): Promise<{commit: Oid; notes: string[]}> {
   const changes = new Map<string, string>();
+  const held = new Set<string>();
   const notes: string[] = [];
   for (const [path, repair] of await pendingRepairs(git, linear, ids, zones, paths)) {
-    const findings = await gate.check(new Map([[path, repair.replacement]]));
-    if (findings === null || findings.length > 0) continue;
+    const findings = await gate.check(repairSet(path, repair.replacement));
+    if (findings === null || findings.length > 0) { held.add(path); continue; }
     changes.set(path, repair.replacement);
     for (const image of repair.images) notes.push(`- ${oneLine(path)}: image ${image.image} of ${image.total} (line ${image.line}).`);
   }
-  if (changes.size === 0) return {commit: linear, notes};
-  const tree = await buildTree(git, linear, changes);
+  if (changes.size === 0 && held.size === 0) return {commit: linear, notes};
+  let tree = changes.size === 0 ? await git.text(['rev-parse', `${linear}^{tree}`]) : await buildTree(git, linear, changes);
+  if (held.size > 0) tree = await takePaths(git, tree, hold, held);
+  if (tree === await git.text(['rev-parse', `${linear}^{tree}`])) return {commit: linear, notes};
   const date = await git.text(['show', '-s', '--format=%cI', linear]);
   const commit = await git.text(['commit-tree', '--no-gpg-sign', tree, '-p', linear, '-m', 'Apply checked image and link repairs'], {env: {
     GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email,
@@ -63,7 +71,7 @@ export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: 
 export async function stagePullRepairs(git: Git, state: StateSnapshot, zones: ReadonlyMap<string, Zone>, gate: RepairGate): Promise<void> {
   if (state.linear === null) return;
   const repairs = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones);
-  for (const [path, repair] of repairs) await gate.check(new Map([[path, repair.replacement]]));
+  for (const [path, repair] of repairs) await gate.check(repairSet(path, repair.replacement));
 }
 
 /** Recover conservative plain-link provenance when the ids ref is rebuilt. */

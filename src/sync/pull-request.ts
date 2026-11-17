@@ -244,7 +244,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
 
   const ids = await readIds(git, options.state.ids);
   const frozen = suspendedPaths(ids);
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, sync ?? tracked);
   const rewriteNotes = view.notes;
   linear = view.commit;
   // Mask before merging, so frozen paths cannot conflict or restart normal checks.
