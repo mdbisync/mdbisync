@@ -4405,14 +4405,15 @@ describe('the setup check step (run.check)', () => {
   const FAILED_REPORT = { ...CHECK_REPORT, ok: false, code: 'setup-failed', exitStatus: 'setup-failed', setupChecks: FAILED_CHECKS };
   const DRY_RUN_REPORT = { operation: 'initial-sync', ok: true, code: null, complete: true, changed: false, summary: { plan: { paths: ['guides/start.md'] } }, writes: { linear: {}, git: {}, pullRequests: {} } };
 
-  type Answer = { report?: unknown; summary?: string; stderr?: string; exitCode: number };
+  type Answer = { report?: unknown; summary?: string; stdout?: string; stderr?: string; exitCode: number };
   /**
    * Runs `steps` with a fake engine that answers each command from `answers` and records how it was called.
    * A list answers a command's runs in turn, its last entry every later run. With `seen`, the calls are
    * also there when a step throws.
    */
-  async function withEngine(answers: Record<string, Answer | Answer[]>, steps: Array<{ kind?: 'run' | 'fault'; action: string; args: Record<string, unknown> }>, seen: { calls: Array<{ command: string }> } = { calls: [] }) {
+  async function withEngine(answers: Record<string, Answer | Answer[]>, steps: Array<{ kind?: 'run' | 'fault'; action: string; args: Record<string, unknown> }>, seen: { calls: Array<{ command: string }>; ctx?: RunContext } = { calls: [] }, check?: (ctx: RunContext) => Promise<unknown>) {
     const { ctx } = await fakeRun();
+    seen.ctx = ctx;
     mkdirSync(await ctx.engineClone(), { recursive: true });
     const calls = join(ctx.runDir, 'engine-calls.jsonl');
     const driver = join(ctx.runDir, 'fake-engine.mjs');
@@ -4426,6 +4427,7 @@ describe('the setup check step (run.check)', () => {
       appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ command, cwd: process.cwd(), inputs }) + '\\n');
       if (answer.report !== undefined) writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(answer.report));
       if (answer.summary !== undefined) writeFileSync(process.env.GITHUB_STEP_SUMMARY, answer.summary);
+      if (answer.stdout !== undefined) process.stdout.write(answer.stdout);
       if (answer.stderr !== undefined) process.stderr.write(answer.stderr);
       process.exitCode = answer.exitCode;
     `);
@@ -4433,6 +4435,7 @@ describe('the setup check step (run.check)', () => {
     process.env['MDBISYNC_ENGINE'] = driver;
     try {
       for (const step of steps) await runStep(ctx, { kind: 'run', ...step });
+      await check?.(ctx);
     } finally {
       if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
       else process.env['MDBISYNC_ENGINE'] = previous;
@@ -4441,6 +4444,54 @@ describe('the setup check step (run.check)', () => {
     }
     return { ctx, calls: seen.calls as Array<{ command: string; cwd: string; inputs: Record<string, string> }> };
   }
+
+  it('classifies disk exhaustion from a failed engine as env-blocked and stops later runs', async () => {
+    for (const diagnostic of ['ENOSPC: no space left on device', "fatal: Unable to create 'state-index/index.lock': No space left on device"]) {
+      const seen = { calls: [] as Array<{ command: string }> };
+      let error: unknown;
+      try {
+        await withEngine(
+          { sync: { stderr: diagnostic, exitCode: 1 }, check: { report: CHECK_REPORT, exitCode: 0 } },
+          [{ action: 'sync', args: {} }, { action: 'check', args: {} }], seen,
+        );
+      } catch (caught) { error = caught; }
+      for (const expectedRed of [false, true]) {
+        const outcome = classify(error, expectedRed);
+        assert.equal(outcome.result, 'env-blocked');
+        assert.match(outcome.reason ?? '', /ENOSPC.*No space left on device/);
+        assert.doesNotMatch(outcome.reason ?? '', /index.lock/);
+      }
+      assert.deepEqual(seen.calls.map(({ command }) => command), ['sync']);
+    }
+  });
+
+  it('propagates disk exhaustion from the I6 no-change run as env-blocked', async () => {
+    await assert.rejects(
+      withEngine({ sync: { stderr: 'ENOSPC', exitCode: 1 } }, [], undefined,
+        async (ctx) => {
+          mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
+          return INVARIANT_CHECKS.I6(ctx, async () => assert.fail('I6 does not read sides'));
+        }),
+      (error: unknown) => classify(error, true).result === 'env-blocked',
+    );
+  });
+
+  it('retains every parallel result before reporting disk exhaustion', async () => {
+    const seen: { calls: Array<{ command: string }>; ctx?: RunContext } = { calls: [] };
+    await assert.rejects(
+      withEngine({ sync: { stderr: 'ENOSPC', exitCode: 1 } }, [{ action: 'parallel', args: { count: 2 } }], seen),
+      EnvBlockedError,
+    );
+    assert.equal(seen.ctx?.engine.results.length, 2);
+    assert.equal(seen.ctx?.observations.get('runs.1.exitCode'), 1);
+  });
+
+  it('keeps ordinary engine failures and successful runs mentioning ENOSPC as check results', async () => {
+    for (const answer of [{ stderr: 'fatal: invalid object', exitCode: 1 }, { stderr: 'ENOSPC is not the outcome', exitCode: 0 }, { stdout: 'ENOSPC quoted in output', exitCode: 1 }]) {
+      const { ctx } = await withEngine({ sync: answer }, [{ action: 'sync', args: {} }]);
+      assert.equal(ctx.engine.results[0]?.exitCode, answer.exitCode);
+    }
+  });
 
   it('runs the engine check in the run clone with the run isolation and records it as the first run', async () => {
     const summary = '## Setup check\n\nEvery required item passed.\n';

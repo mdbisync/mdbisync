@@ -115,6 +115,7 @@ export function engineEnv(call: EngineCall, env: NodeJS.ProcessEnv = process.env
   return {
     PATH: hookNpmEnv(repositoryNpmDir(call.cwd), { PATH: env['PATH'] ?? '' }).PATH,
     HOME: env['HOME'],
+    TMPDIR: env['TMPDIR'],
     LANG: 'C.UTF-8',
     GIT_TERMINAL_PROMPT: '0',
     GIT_LFS_SKIP_SMUDGE: '1',
