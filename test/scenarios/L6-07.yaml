@@ -37,9 +37,18 @@
       }
     },
     {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "target": "first-paragraph"
+      }
+    },
+    {
       "kind": "run",
       "action": "settle",
-      "args": {}
+      "args": {
+        "typingSeconds": 90
+      }
     },
     {
       "kind": "ui",
@@ -68,7 +77,8 @@
         "required": true
       },
       "I6": {
-        "required": true
+        "required": false,
+        "reason": "Typing in the paragraph the sync writes can end in a conflict, one of the outcomes this scenario measures; an open conflict keeps the no-change run from being quiet."
       },
       "I7": {
         "required": true

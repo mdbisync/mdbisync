@@ -37,9 +37,18 @@
       }
     },
     {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "target": "first-paragraph"
+      }
+    },
+    {
       "kind": "run",
       "action": "settle",
-      "args": {}
+      "args": {
+        "typingSeconds": 90
+      }
     },
     {
       "kind": "ui",

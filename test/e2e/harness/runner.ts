@@ -36,9 +36,9 @@ import { PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { requiredActionSha, RUN_REFS, runStep, settleFollowUpRuns } from './steps.ts';
 import { openSetupConflict, prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES, type FixtureTools } from './fixtures.ts';
-import { projectFolders } from './step-helpers.ts';
+import { documentId, projectFolders, targetPath } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
-import { renderUiChecklist } from './ui-checklist.ts';
+import { renderUiChecklist, TARGET_UI_STEPS } from './ui-checklist.ts';
 import { cleanupKilledTokens } from './token-cleanup.ts';
 import { heldRunOf, saveHeldRun, UI_CHECKLIST_FILE } from './held-run.ts';
 
@@ -432,6 +432,17 @@ export async function recordStart(ctx: RunContext, live: LiveWorld): Promise<voi
   ctx.observations.set('start.trackedTip', (await live.sandbox.runRefs()).find((ref) => ref.ref === `refs/heads/${ctx.names.trackedBranch}`)?.oid);
   ctx.observations.set('start.pullRequests', (await live.rest.pullRequests(ctx.names.syncBranch)).map((pr) => pr.number));
   ctx.observations.set(BEFORE_VIEW, await takeStartView(ctx));
+}
+
+/**
+ * The title in Linear of the scenario's target document, for a checklist whose UI steps act on it, read from Linear:
+ * a team-zone document's title carries the run's prefix, which its path does not show.
+ */
+async function checklistTarget(ctx: RunContext, scenario: Scenario): Promise<string | undefined> {
+  if (ctx.live === null || !scenario.steps.some((step) => step.kind === 'ui' && TARGET_UI_STEPS.has(step.action))) return undefined;
+  const path = (ctx.observations.get('target.path') as string | undefined) ?? targetPath(ctx);
+  const [document] = await ctx.live.editors['editor-a'].getDocuments([await documentId(ctx, path)]);
+  return document?.title;
 }
 
 /** Documents in Linear whose titles are the slice's paths, as editor-a: the start of Linear → git scenarios. */
@@ -1002,7 +1013,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     await startRefHistory(ctx);
     for (const [index, step] of scenario.steps.entries()) {
       if (step.kind === 'ui') {
-        writeFileSync(join(runDir, UI_CHECKLIST_FILE), renderUiChecklist(scenario, names, ctx));
+        writeFileSync(join(runDir, UI_CHECKLIST_FILE), renderUiChecklist(scenario, names, ctx, await checklistTarget(ctx, scenario)));
         heldAt = index;
         throw new EnvBlockedError(`ui steps wait for the UI session: checklist ${join(runDir, UI_CHECKLIST_FILE)}`);
       }

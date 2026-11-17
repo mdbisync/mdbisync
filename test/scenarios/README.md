@@ -78,7 +78,8 @@ teams are selected.
 before the following step executes. The harness joins that invocation after
 `resume` or `kill`. Ordinary invocations wait for completion. `settle` and
 `resume-until-complete` run bounded recovery cycles until quiescence, retaining
-per-invocation evidence. `parallel` bypasses workflow serialization on purpose;
+per-invocation evidence; `settle` with `typingSeconds` first runs syncs back to
+back for that many seconds while a UI session types. `parallel` bypasses workflow serialization on purpose;
 `workflow-parallel` tests the actual concurrency group. A timeout is a failure,
 not convergence. `probe`, `lint`, `fix`, `pre-commit`, `scan-canaries`, `cleanup`,
 `burst`, `soak` and `token-lifecycle` invoke their respective test adapters.

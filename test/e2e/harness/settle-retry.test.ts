@@ -36,7 +36,7 @@ function report(ending: Ending): Record<string, unknown> {
 }
 
 /** A local settle whose runs end as `endings` says, in order; the last ending repeats. */
-async function settleWith(endings: Ending[], limit?: number) {
+async function settleWith(endings: Ending[], limit?: number, options: { args?: Record<string, unknown>; now?: () => number } = {}) {
   const results: EngineResult[] = [];
   const log: string[] = [];
   const ctx = {
@@ -47,7 +47,7 @@ async function settleWith(endings: Ending[], limit?: number) {
     const failed = !['changed', 'merged', 'settled', 'in-progress', 'refused'].includes(ending);
     results.push({ command: 'sync', exitCode: failed ? 1 : 0, signal: null, timedOut: false, notImplemented: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: report(ending) });
   };
-  const outcome = await settle(ctx, {}, limit, runOnce).then(() => undefined, (error: unknown) => error);
+  const outcome = await settle(ctx, options.args ?? {}, limit, runOnce, options.now).then(() => undefined, (error: unknown) => error);
   const name = (result: EngineResult) => {
     const pullRequest = result.report!.pullRequest as { merged: unknown; status?: number; reason?: string };
     if (result.exitCode !== 0) return `failed ${String(pullRequest.status)}`;
@@ -140,5 +140,33 @@ describe('run.settle while GitHub has a merge in progress', () => {
     assert.equal(mergeStillInProgress({ pullRequest: { suspended: { ...suspended, status: 409 } } }), false);
     assert.equal(mergeStillInProgress({ pullRequest: { code: 'merge-blocked', status: 405, reason: 'Merge already in progress' } }), false);
     assert.equal(mergeStillInProgress(null), false);
+  });
+});
+
+describe('run.settle with a typing window', () => {
+  /** A clock that moves 20 seconds each time it is read, from 2026-01-01T00:00:00Z. */
+  function clock(): () => number {
+    let at = Date.parse('2026-01-01T00:00:00Z') - 20_000;
+    return () => (at += 20_000);
+  }
+
+  it('runs syncs through the window whatever they change, then settles as usual', async () => {
+    const { outcome, runs, ctx, log } = await settleWith(['changed', 'settled', 'changed', 'settled'], undefined, { args: { typingSeconds: 50 }, now: clock() });
+    assert.equal(outcome, undefined);
+    // Without the window the settle would end on the second run; the window's three runs come first.
+    assert.deepEqual(runs, ['changed', 'settled', 'changed', 'settled']);
+    assert.deepEqual(ctx.observations.get('settle.typingWindow'), { startedAt: '2026-01-01T00:00:00.000Z', endedAt: '2026-01-01T00:01:00.000Z', runs: 3 });
+    assert.deepEqual(log, [
+      'run.settle: running syncs for 50 seconds while the UI session types',
+      'run.settle: typing window 2026-01-01T00:00:00.000Z to 2026-01-01T00:01:00.000Z, 3 run(s); settling now',
+    ]);
+  });
+
+  it('runs at least once in a window that has already passed, and settles without one as before', async () => {
+    const short = await settleWith(['settled'], undefined, { args: { typingSeconds: 0 }, now: clock() });
+    assert.deepEqual(short.runs, ['settled', 'settled']);
+    const without = await settleWith(['settled'], undefined, { now: clock() });
+    assert.deepEqual(without.runs, ['settled']);
+    assert.equal(without.ctx.observations.has('settle.typingWindow'), false);
   });
 });
