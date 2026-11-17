@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { Git } from '../state/index.ts';
+import { IDENTITY } from '../state/test-helpers.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
 
 describe('repair state scope', () => {
@@ -29,6 +33,63 @@ describe('repair state scope', () => {
         if (file.code === 0) assert.equal(file.stdout.toString(), source);
       }
     }
+  });
+
+  // A stored repair's text is not the text the hooks checked: a forged one on a synchronized document reaches the
+  // branches only when the tracked branch's security hooks pass its exact bytes.
+  const CANARY = 'repair-canary-5d0e';
+  /** The tracked branch's hooks: the required format hook from a local repository, and a security hook that refuses the canary. */
+  async function hookConfig(): Promise<string> {
+    const repo = join(h.fixture.root, 'format-hook');
+    await mkdir(repo);
+    const git = new Git(repo, {GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email});
+    await git.run(['init', '--quiet', '--initial-branch=main']);
+    await writeFile(join(repo, '.pre-commit-hooks.yaml'), '- id: linear-format\n  name: Linear format\n  entry: "true"\n  language: system\n');
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'Hook']);
+    return `repos:
+  - repo: ${repo}
+    rev: ${await git.text(['rev-parse', 'HEAD'])}
+    hooks:
+      - id: linear-format
+  - repo: local
+    hooks:
+      - id: canary-check
+        alias: security
+        name: Canary check
+        entry: node canary-check.mjs
+        language: system
+`;
+  }
+  const CHECK = `import {readFileSync} from 'node:fs'; for (const file of process.argv.slice(2)) if (readFileSync(file, 'utf8').includes('${CANARY}')) { console.log(file + ':1: found'); process.exitCode = 1; }`;
+  for (const suspended of [false, true]) for (const flagged of [true, false]) it(`applies a stored repair only when the hooks pass its text (suspended ${suspended}, flagged ${flagged})`, async () => {
+    if (suspended) await h.suspendOne();
+    await h.gitEdit('canary-check.mjs', CHECK);
+    await h.gitEdit('.pre-commit-config.yaml', await hookConfig());
+    const path = 'combined/guide.md';
+    const source = (await h.fixture.remote.run(['show', `refs/mdbisync/linear:${path}`])).stdout;
+    const replacement = `# Guide\n\nReplaced text${flagged ? ` ${CANARY}` : ''}.\n`;
+    const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
+    const hash = createHash('sha256').update(source).digest('hex');
+    ids[path] = {...ids[path], pullRewrite: {hash, observedHash: hash, replacement, images: []},
+      ...(suspended ? {suspended: {noticeId: randomUUID(), paths: [path], checks: []}} : {})};
+    await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify(ids));
+    await h.editInLinear('combined/page-0.md', '# Page 0\n\nA new paragraph.\n');
+    const run = await h.sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    const published: string[] = [];
+    for (const branch of [SYNC_BRANCH, h.SUSPENDED]) {
+      const exists = await h.fixture.remote.run(['rev-parse', '--verify', '--quiet', branch], {okCodes: [0, 1]});
+      if (exists.code !== 0) continue;
+      // Every tree newly published on the branch, including intermediate heads.
+      for (const commit of (await h.fixture.remote.text(['rev-list', branch, '--not', 'refs/heads/main'])).split('\n').filter(Boolean)) {
+        const file = await h.fixture.remote.run(['show', `${commit}:${path}`], {okCodes: [0, 128]});
+        if (file.code === 0) published.push(file.stdout.toString('utf8'));
+      }
+    }
+    assert.ok(!published.some((text) => text.includes(CANARY)), 'a repair the hooks refuse never reaches a branch');
+    // The same forged state without the flagged text is applied: the check above sees the path the repair takes.
+    if (!flagged) assert.ok(published.includes(replacement), 'a repair the hooks pass is applied: ');
   });
 
   it('does not recreate a missing sync branch from an out-of-scope Linear tree during write-back', async () => {

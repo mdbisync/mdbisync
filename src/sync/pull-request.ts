@@ -28,7 +28,8 @@
 // refusal on the same head and tracked branch is a setup error: nothing will
 // change until a person does.
 
-import { checkedPullView } from './pull-repairs.ts';
+import { checkedPullView, type RepairGate } from './pull-repairs.ts';
+import { securityGate, type SecurityGate } from './security.ts';
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import {
   type CheckExpectation,
@@ -100,6 +101,8 @@ export interface PullRequestOptions {
   requiredChecks?: readonly RequiredCheck[] | undefined;
   /** A head with no checks at all may merge; otherwise it waits for one, and past the deadline it is a setup error. */
   mergeWithoutChecks?: boolean | undefined;
+  /** Answers whether the hooks pass a stored repair's text; the tracked branch's hooks, run in this process, by default. */
+  security?: RepairGate | undefined;
 }
 
 export interface PullRequestResult {
@@ -203,6 +206,15 @@ export function pullRequestFailure(result: PullRequestResult | undefined): PullR
 }
 
 export async function syncPullRequest(context: RunContext, options: PullRequestOptions): Promise<PullRequestResult> {
+  if (options.security !== undefined) return pullRequestStep(context, { ...options, security: options.security });
+  // Started only when a repair needs an answer: most runs have none.
+  let own: Promise<SecurityGate> | undefined;
+  const security: RepairGate = { check: async (files) => (await (own ??= securityGate(context.git, context.fetched.tracked))).check(files) };
+  try { return await pullRequestStep(context, { ...options, security }); }
+  finally { if (own !== undefined) await (await own).close?.(); }
+}
+
+async function pullRequestStep(context: RunContext, options: PullRequestOptions & { security: RepairGate }): Promise<PullRequestResult> {
   const { git, fetched } = context;
   const { config, github } = options;
   let suspended: SuspendedResult | undefined;
@@ -232,7 +244,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
   const ids = await readIds(git, options.state.ids);
   const frozen = suspendedPaths(ids);
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security);
   const rewriteNotes = view.notes;
   linear = view.commit;
   // Mask before merging, so frozen paths cannot conflict or restart normal checks.
