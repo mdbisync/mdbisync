@@ -559,6 +559,12 @@ known_constructs:
     class: lint-error
   - construct: image-reference
     class: fixable
+  - construct: image-after-bang
+    class: fixable
+  - construct: image-reference-after-bang
+    class: fixable
+  - construct: image-path-after-bang
+    class: lint-error
   - construct: image-path-spaces
     class: fixable
   - construct: image-inline-text

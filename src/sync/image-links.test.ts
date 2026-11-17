@@ -58,7 +58,7 @@ for (const [source, expected] of [
   ['\\!![x](../secret.txt)', '\\![x](../secret.txt)'],
   ['!![]()[y](../secret.txt)', '\\![y](../secret.txt)'],
   ['!![d](data:image/png;base64,AAAA)[y][r]\n\n[r]: ../secret.txt', '\\![y][r]\n\n[r]: ../secret.txt'],
-  ['![a][b](javascript:alert%281%29)(../secret.txt)', '\\![a](../secret.txt)'],
+  ['![a][b](javascript:alert%281%29)(../secret.txt)', '\\!\\[a](../secret.txt)'],
   ['| A |\n| -- |\n| !![x](../secret.txt) |', '| A |\n| -- |\n| \\![x](../secret.txt) |'],
   ['\uFEFF!![x](../secret.txt)', '\uFEFF\\![x](../secret.txt)'],
 ]) it(`does not re-create an image next to a literal bang: ${JSON.stringify(source)}`, () => {
@@ -67,10 +67,25 @@ for (const [source, expected] of [
   assert.deepEqual(images(body), []);
 });
 
+// The same joins can form a link or a definition that Linear's text never held.
+for (const [source, expected] of [
+  ['[t][b](javascript:1)(../records.csv)', '\\[t](../records.csv)'],
+  ['[a](javascript:x)\n[r]: ../records.csv', '\n\\[r]: ../records.csv'],
+  ['[t][b](javascript:1)[r]\n\n[r]: ../records.csv', '\\[t][r]\n\n[r]: ../records.csv'],
+  ['Keep [this](../records.csv) and [that][r]\n\n[r]: ../records.csv', 'Keep [this](../records.csv) and [that][r]\n\n[r]: ../records.csv'],
+]) it(`does not create a link a removal joins: ${JSON.stringify(source)}`, () => assert.equal(imageLinks(source!).body, expected));
+
 it('keeps an upload image next to a bang and repairs only the others', () => {
   const source = '!![Kept](https://uploads.linear.app/a) !![x](../secret.txt)';
   const body = imageLinks(source).body;
   assert.equal(body, '!![Kept](https://uploads.linear.app/a) \\![x](../secret.txt)');
+  assert.deepEqual(images(body), ['https://uploads.linear.app/a']);
+});
+
+it('keeps an upload image whose destination a joined image repeats', () => {
+  const source = '!![]()[x](https://uploads.linear.app/a) ![Kept](https://uploads.linear.app/a)';
+  const body = imageLinks(source).body;
+  assert.equal(body, '\\![x](https://uploads.linear.app/a) ![Kept](https://uploads.linear.app/a)');
   assert.deepEqual(images(body), ['https://uploads.linear.app/a']);
 });
 
@@ -85,5 +100,5 @@ for (const name of ['bang-before-inline', 'bang-before-reference', 'bang-before-
   const linear = readFileSync(new URL(`../../test/fixtures/images/${name}.linear.md`, import.meta.url), 'utf8');
   assert.match(linear, /^Look !\n\n/);
   assert.doesNotMatch(linear, /!!\[/);
-  for (const url of images(imageLinks(linear).body)) assert.match(url, /^\.\.\/assets\/|^https:\/\/uploads\.linear\.app\//);
+  assert.deepEqual(images(imageLinks(linear).body), []);
 });
