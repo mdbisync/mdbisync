@@ -280,7 +280,7 @@ this time:
 | `edited-in-linear` | Changed in Linear since it was read; the next run takes that change in and writes again. |
 | `missing-in-linear` | Not found in Linear, or in its trash; the next run takes that in. |
 | `conflict` | Changed on both sides in a way git cannot merge; it is written when the conflict is resolved. |
-| `pull-repair-pending` | Waits for the pull request carrying its image or link repair to merge. |
+| `pull-repair-pending` | Waiting for the pull request carrying its image or link repair to merge. |
 | `suspended` | Waits for its suspended changes to reach the main branch. |
 | `renamed-to-unwritable` | Its file was renamed to one that is in conflict or left out; the document stays as it is until that is fixed. |
 
@@ -319,7 +319,7 @@ the reason is fixed. The summaries list each with its rules:
 | `stored-in-lfs` | The Markdown file itself is stored in Git LFS. | Store Markdown files in git directly. |
 | `upload-too-large` | The document links a file over Linear's 10 MB upload limit. | Make the file smaller, or link it from somewhere else. |
 | `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. For a new document left out after a confirmed missing object (404/410), also commit an edit to the document or linked file to retry it. |
-| `image-blocked` | From Linear: an image or file the document embeds is not an upload of the workspace (an external URL, a `data:` URI, a path), or its upload is gone, over 10 MB, redirected or not a supported type; or a new link names a repository file other than a Markdown document by its relative path. The file keeps the tracked branch's text. | Upload the files in Linear instead of linking them. The first sync after the initial sync (once its pull request, if any, is merged) marks the document and comments which images to fix. |
+| `image-blocked` | From Linear: an uploaded file cannot be read, is over 10 MB, redirects or has unsupported bytes; or a new ordinary link names a repository file other than a Markdown document by its relative path. The file keeps the tracked branch's text. | Upload the files in Linear instead of linking them. The first sync after the initial sync (once its pull request, if any, is merged) marks the document and comments which images to fix. |
 | `download-failed` | From Linear: a file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed next to it. The file keeps the tracked branch's text. | Nothing; the next sync reads the document again. If it repeats, check the run's log for the asset error. |
 | `security-hook` | From Linear: a hook marked `alias: security` flagged the document's text or a file it embeds. In an initial sync, that text can hold the Linear URL of a linked document that was left out. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear, or bring in the linked document. |
 | `security-unchecked` | From Linear: the security hooks did not see this text, because their step did not run or the tracked branch moved after it. | Nothing; the next run checks it. If it repeats, check that the hooks step runs. |
@@ -327,6 +327,7 @@ the reason is fixed. The summaries list each with its rules:
 | `front-matter-boundary` | From Linear: the document's text starts with something that reads as front matter, so it would not stay the file's body. | Change the start of the document in Linear. |
 | `attachment-budget` | Attachment capture exceeded 32 unique links or 32 MiB per document, or 256 downloads or 256 MiB per run. Candidate files stay in bounded temporary storage. The document keeps its previous text and the capture cursor holds. | Reduce or split attachments and rerun. Other documents can still be captured; no budget rejection marks the document as unsafe. |
 | `download-retry` | An upload download timed out, lost its connection, or returned 429 or a server error. The document stays out of this capture without a mark. | The next run retries automatically. |
+| `link-scheme` | Links must use http, https, mailto, a path or a fragment. | Replace the unsupported destination. Pull removes unsupported links together with their text; push lint refuses them. |
 | `capture-translation` | The run could not turn the document's text from Linear into the file's text. | Check the document in Linear for unusual content, or report it as a bug. |
 
 The `linear-format` hook's rules leave a file out too until it is fixed:
@@ -336,6 +337,12 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `url-in-html`, `block-first-in-list-item`, `image-not-in-repository` and
 `image-file-missing`. Each is described, with its fix, in
 [linear-format.md](linear-format.md#lint-rules).
+
+External http(s) and path images, and image uploads answering 404 or 410,
+become ordinary links in the sync pull request. Empty and `data:` images are
+removed. The PR lists each image by place and line; after merge, the write
+step puts the repaired text into Linear. These repairs do not cause an
+`image-blocked` notice. Unsupported or oversized upload bytes remain blocked.
 
 The initial sync also lists:
 
