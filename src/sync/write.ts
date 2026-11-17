@@ -1079,8 +1079,16 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     }
 
     const parents = merged ? [linearTip as Oid, tracked] : [linearTip as Oid];
-    const message = merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE;
-    const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: true });
+    // The ids ref can be rebuilt from this first-parent history. A move changes
+    // which repository paths a repaired relative link protects, even when
+    // Linear's body stays unchanged and capture has nothing new to commit.
+    const previousPlain = new Map([...ids.values()].map(entry => [entry.id, new Set(entry.plainFiles ?? [])]));
+    const plainTrailers = [...nextIds.values()].flatMap(entry => (entry.plainFiles ?? [])
+      .filter(target => !previousPlain.get(entry.id)?.has(target))
+      .map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
+    const message = (merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE)
+      + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
+    const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: plainTrailers.length === 0 });
     if (merged) {
       for (const [path, entry] of nextIds) if (entry.releaseBase !== undefined) {
         delete entry.releaseBase;

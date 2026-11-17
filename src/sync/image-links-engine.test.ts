@@ -92,6 +92,13 @@ describe('image repairs through the sync pull request', () => {
     await h.editRef('refs/heads/main', renamed, original);
     await h.settle();
     assert.equal(h.world.linear.uploads.length, before, 'renaming the document lost its plain-link provenance');
+    // Recovery must also retain the target resolved relative to the moved document.
+    await h.fixture.remote.run(['update-ref', '-d', 'refs/mdbisync/ids']);
+    await h.sync();
+    const moved = await h.show(`refs/heads/main:${renamed}`);
+    await h.gitEdit(renamed, moved + '\nA later repository edit.\n');
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before, 'rebuilding ids lost relocated plain-link provenance');
     await h.gitEdit(renamed, '# Plan\n\n![Repository image](../../../records.csv)\n');
     await h.settle();
     assert.equal(h.world.linear.uploads.length, before + 1, 'a repository-authored image should still upload');
