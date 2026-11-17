@@ -21,6 +21,7 @@ import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome }
 import { zoneConcurrent } from './concurrency.ts';
 import { RUN_ID_PATTERN } from './isolation.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
+import { comparesTypedText } from './ui-checklist.ts';
 import { conflictMarks, encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
@@ -270,9 +271,8 @@ export const I1_DIFFERENCES_FILE = 'i1-differences.txt';
  * or the first differing line on each side (shortened).
  */
 export function firstDifference(expected: string, actual: string): string {
-  const ending = (text: string) => /[\r\n]*$/.exec(text)![0];
-  if (expected.slice(0, expected.length - ending(expected).length) === actual.slice(0, actual.length - ending(actual).length)) {
-    return `only the line breaks at the end differ (file ends ${JSON.stringify(ending(expected))}, document ends ${JSON.stringify(ending(actual))})`;
+  if (withoutFinalLineBreaks(expected) === withoutFinalLineBreaks(actual)) {
+    return `only the line breaks at the end differ (file ends ${JSON.stringify(finalLineBreaks(expected))}, document ends ${JSON.stringify(finalLineBreaks(actual))})`;
   }
   const a = expected.split('\n');
   const b = actual.split('\n');
@@ -352,7 +352,12 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
     if (!other.known) throw new HarnessGapError(`assertion subject ${String(assertion.expected)}`);
     expected = other.value;
   }
-  if (compare(assertion.operator, actual.value, expected)) return { holds: true };
+  let actualValue = actual.value;
+  if (comparesTypedText(assertion) && typeof actualValue === 'string' && typeof expected === 'string') {
+    actualValue = withoutFinalLineBreaks(actualValue);
+    expected = withoutFinalLineBreaks(expected);
+  }
+  if (compare(assertion.operator, actualValue, expected)) return { holds: true };
   if (assertion.subject === 'conflicts.markCount') {
     const marks = (await resolveSubject(ctx, 'conflicts.marks')).value as Map<string, boolean>;
     const marked = [...marks].filter(([, marked]) => marked).map(([path]) => path);
@@ -362,8 +367,20 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
   }
   const paths = assertion.subject === 'summary.collisionPaths' && ['same-as', 'equal'].includes(assertion.operator)
     ? differingCollisionPaths(actual.value, expected)
-    : differingPaths(actual.value, expected) ?? differingShape(actual.value, expected) ?? differingValue(actual.value, expected, CODE_SUBJECT.test(assertion.subject));
+    : differingPaths(actualValue, expected) ?? differingShape(actualValue, expected) ?? differingValue(actualValue, expected, CODE_SUBJECT.test(assertion.subject));
   return { holds: false, reason: `${assertion.operator} did not hold${paths === undefined ? '' : `: ${paths}`}` };
+}
+
+/** The line breaks at the end of a text (`\r` and `\n`, any number), found by a scan from the end, never by backtracking. */
+export function finalLineBreaks(text: string): string {
+  let start = text.length;
+  while (start > 0 && (text[start - 1] === '\n' || text[start - 1] === '\r')) start -= 1;
+  return text.slice(start);
+}
+
+/** A text without its final line breaks; those inside it stay. */
+export function withoutFinalLineBreaks(text: string): string {
+  return text.slice(0, text.length - finalLineBreaks(text).length);
 }
 
 /**
@@ -393,9 +410,8 @@ export function differingValue(actual: unknown, expected: unknown, isCode: boole
   if (actual === null || typeof actual === 'boolean' || typeof actual === 'number') return `actual ${JSON.stringify(actual)}`;
   if (typeof actual === 'string' && isCode && /^[a-z0-9][a-z0-9-]{0,63}$/.test(actual)) return `actual ${JSON.stringify(actual)}`;
   if (typeof actual !== 'string' || typeof expected !== 'string') return undefined;
-  const ending = (text: string) => /[\r\n]*$/.exec(text)![0];
-  if (actual.slice(0, actual.length - ending(actual).length) === expected.slice(0, expected.length - ending(expected).length)) {
-    return `only the line breaks at the end differ (actual ends ${JSON.stringify(ending(actual))}, expected ${JSON.stringify(ending(expected))})`;
+  if (withoutFinalLineBreaks(actual) === withoutFinalLineBreaks(expected)) {
+    return `only the line breaks at the end differ (actual ends ${JSON.stringify(finalLineBreaks(actual))}, expected ${JSON.stringify(finalLineBreaks(expected))})`;
   }
   // Lines as a text has them: a final line break ends the last line and opens no new one.
   const lines = (text: string) => text.replace(/\n$/, '').split('\n');

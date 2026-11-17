@@ -3227,6 +3227,15 @@ describe('subjects', () => {
     assert.equal(ctx.observations.get('target.path'), 'eng/platform/plan.md');
     refreshView(ctx);
     assert.deepEqual(await evaluateAssertion(ctx, resolved), { holds: true });
+    // A person typing a page's text cannot know the file's final line breaks: they never decide a UI comparison.
+    for (const ending of ['', '\n\n', '\r\n']) {
+      ctx.observations.set('ui.resolvedText', `# Plan\n\nThe first paragraph.\n\nThe second paragraph.${ending}`);
+      assert.deepEqual(await evaluateAssertion(ctx, resolved), { holds: true });
+      assert.deepEqual(await evaluateAssertion(ctx, { subject: 'ui.resolvedText', operator: 'same-as', expected: 'tracked.body' }), { holds: true });
+    }
+    // Line breaks inside the text still count.
+    ctx.observations.set('ui.resolvedText', '# Plan\n\nThe first paragraph.\nThe second paragraph.');
+    assert.deepEqual(await evaluateAssertion(ctx, resolved), { holds: false, reason: 'same-as did not hold: the texts first differ at line 4 (actual has 5 lines, expected 4)' });
     // Another text fails by where it first differs.
     ctx.observations.set('ui.resolvedText', '# Plan\n\nAnother first paragraph.\n');
     assert.deepEqual(await evaluateAssertion(ctx, resolved), { holds: false, reason: 'same-as did not hold: the texts first differ at line 3 (actual has 5 lines, expected 3)' });

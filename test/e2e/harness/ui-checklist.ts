@@ -10,7 +10,7 @@
 
 import type { RunContext } from './context.ts';
 import type { RunNames } from './isolation.ts';
-import type { Scenario, Step } from './spec.ts';
+import type { Assertion, Scenario, Step } from './spec.ts';
 import { LINK_PAIR, type LinkPairFixture } from './fixtures.ts';
 
 /**
@@ -51,6 +51,18 @@ const RECORDS: Record<string, (args: Record<string, unknown>) => string[]> = {
   // Whether the link with a heading anchor scrolled to the heading: recorded, not required (the link opening is).
   'follow-document-links': () => ['ui.anchorScrolls'],
 };
+
+/**
+ * Whether an assertion compares a text a person typed out in the UI: a
+ * `same-as` with a `ui.*` subject on either side. Such a comparison ignores
+ * the final line breaks of both texts, since a page does not show them; the
+ * checklist says so next to the value.
+ */
+export function comparesTypedText(assertion: Pick<Assertion, 'subject' | 'operator' | 'expected'>): boolean {
+  return assertion.operator === 'same-as' && (assertion.subject.startsWith('ui.') || String(assertion.expected).startsWith('ui.'));
+}
+
+const FINAL_LINE_BREAKS = 'line breaks at the end of a text are ignored';
 
 /** UI steps that act on the scenario's target document: their checklist names it. */
 export const TARGET_UI_STEPS: ReadonlySet<string> = new Set(['type-during-write', 'type-two-editors', 'paste-image', 'inspect-suspended', 'inspect-released']);
@@ -106,9 +118,9 @@ export function renderUiChecklist(
       const compared = scenario.checks.assertions.find((candidate) => candidate.operator === 'same-as' && candidate.expected === subject);
       lines.push(
         assertion !== undefined
-          ? `- \`${subject}\` expected ${assertion.operator} \`${JSON.stringify(assertion.expected)}\``
+          ? `- \`${subject}\` expected ${assertion.operator} \`${JSON.stringify(assertion.expected)}\`${comparesTypedText(assertion) ? `; ${FINAL_LINE_BREAKS}` : ''}`
           : compared !== undefined
-            ? `- \`${subject}\` (compared with \`${compared.subject}\`)`
+            ? `- \`${subject}\` (compared with \`${compared.subject}\`; ${FINAL_LINE_BREAKS})`
             : `- \`${subject}\` (recorded for the harness's checks)`,
         '  - value:',
       );

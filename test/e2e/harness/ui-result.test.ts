@@ -216,7 +216,16 @@ describe('UI checklist answers', () => {
   it('asks the session for the texts the editors typed, and for the UI side of a same-as comparison', () => {
     assert.deepEqual(uiValueSubjects(byId('L6-08')), ['ui.typedTexts']);
     assert.deepEqual(uiValueSubjects(byId('L6-05')), ['ui.markPresent', 'ui.resolvedText']);
-    assert.match(renderUiChecklist(byId('L6-05'), runNames(RUN), { live: null, runDir: 'run' }), /^- `ui\.resolvedText` \(compared with `tracked\.body`\)\n  - value:$/m);
+    assert.match(renderUiChecklist(byId('L6-05'), runNames(RUN), { live: null, runDir: 'run' }), /^- `ui\.resolvedText` \(compared with `tracked\.body`; line breaks at the end of a text are ignored\)\n  - value:$/m);
+    // A UI text as the subject of same-as gets the same note; other operators do not.
+    const scenario = byId('L6-05');
+    const flipped = { ...scenario, checks: { ...scenario.checks, assertions: [
+      { subject: 'ui.markPresent', operator: 'equal', expected: false },
+      { subject: 'ui.resolvedText', operator: 'same-as', expected: 'tracked.body' },
+    ] } } as typeof scenario;
+    const checklist = renderUiChecklist(flipped, runNames(RUN), { live: null, runDir: 'run' });
+    assert.match(checklist, /^- `ui\.resolvedText` expected same-as `"tracked\.body"`; line breaks at the end of a text are ignored\n  - value:$/m);
+    assert.match(checklist, /^- `ui\.markPresent` expected equal `false`\n  - value:$/m);
   });
 
   it('has the blocked-mark check (L6-04) remove the secret and settle between seeing the mark and seeing it clear', () => {
