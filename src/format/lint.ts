@@ -5,6 +5,7 @@
 
 import type { Definition, Root } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
+import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, MarkdownLimitError, end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
@@ -195,7 +196,7 @@ function imageProblem(file: string, url: string, options: LintOptions): LintRule
  * matched exactly, as the folder line of `.gitattributes` matches it.
  */
 export function inAssetsFolder(file: string): boolean {
-  return file.split(/[\\/]/).slice(0, -1).includes('assets');
+  return file.split(/[\\/]/).slice(0, -1).includes(ASSETS_FOLDER);
 }
 
 /** Paths whose document titles collide: same path apart from case or Unicode normalization. */

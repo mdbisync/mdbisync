@@ -10,7 +10,7 @@ import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, par
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
 import { imageLinks } from './image-links.ts';
-import { admitsCapturedFile, uploadExtension } from './upload-type.ts';
+import { ASSETS_FOLDER, admitsCapturedFile, uploadExtension } from './upload-type.ts';
 
 export interface CapturedAssets {
   body: string;
@@ -28,8 +28,6 @@ export class AttachmentBudgetError extends Error {
 }
 export const ATTACHMENT_LIMITS = Object.freeze({documentCount: 32, documentBytes: 32 * 1024 * 1024, runCount: 256, runBytes: 256 * 1024 * 1024});
 const LIMIT = 10 * 1024 * 1024;
-/** The folder beside a document that holds the files the sync takes from Linear for it. */
-export const ASSETS_FOLDER = 'assets';
 /** Whether `url` is on Linear's upload host, the only destination the sync downloads. */
 export function isUpload(url: string): boolean {
   try { const parsed = new URL(url); return parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.username === '' && parsed.password === '' && parsed.port === ''; }
@@ -205,11 +203,17 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   // Every file of the tree with each content hash, in tree order.
   const hashPaths = new Map<string, string[]>();
   const pathHashes = new Map<string, string>();
+  // Every path of the tree that is not a folder: an `assets` entry that is a file or a symbolic link is no folder to write into.
+  const notFolders = new Set<string>();
+  // Copies this run already placed, by path: two documents moved into one folder must not take one name for different bytes.
+  const placed = new Map<string, string>();
   let indexed = false;
   const index = async () => {
     if (indexed) return;
+    const tree = await listTree(git, base);
+    for (const entry of tree) notFolders.add(entry.path);
     // Markdown files are documents the same run may rewrite or remove, never a downloaded file's home.
-    const entries = (await listTree(git, base)).filter((entry) => entry.type === 'blob' && ['100644', '100755'].includes(entry.mode) && !entry.path.toLowerCase().endsWith('.md'));
+    const entries = tree.filter((entry) => entry.type === 'blob' && ['100644', '100755'].includes(entry.mode) && !entry.path.toLowerCase().endsWith('.md'));
     for (let at = 0; at < entries.length;) {
       const batch = [];
       let bytes = 0;
@@ -231,13 +235,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   // A repository file an upload maps to is reused only when readable, and, if a capture named it, when its
   // bytes still pass the upload check: an earlier, weaker check may have admitted them.
   const reuse = new Map<string, 'unreadable' | 'admitted' | 'refused'>();
-  // The bytes of admitted files, kept only for a moved document's copies.
-  const admitted = new Map<string, Buffer>();
   const reusable = async (path: string) => {
     if (!reuse.has(path)) {
       const read = (await readFiles(git, config, base, [path])).get(path);
       reuse.set(path, read?.ok !== true ? 'unreadable' : admitsCapturedFile(path, read.content) ? 'admitted' : 'refused');
-      if (read?.ok === true && reuse.get(path) === 'admitted') admitted.set(path, read.content);
     }
     return reuse.get(path)!;
   };
@@ -275,6 +276,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     await index();
     // Files the sync takes from Linear live in an `assets/` folder beside the documents that embed them.
     const assetsFolder = posix.join(posix.dirname(path), ASSETS_FOLDER);
+    const assetsUsable = !notFolders.has(assetsFolder);
     /**
      * The repository file holding these bytes: the one the previous text linked, else one in the
      * document's own `assets/` folder, else the last in tree order. A file from git stays where it is.
@@ -287,13 +289,20 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     // by their path in the new one; the old file stays for the documents that still link it.
     const copies = new Map<string, string>();
     const oldAssetsFolder = posix.join(posix.dirname(previousPath), ASSETS_FOLDER);
-    const copyTarget = (source: string, hash: string): string => {
+    /**
+     * Where the copy of `source` goes in the new `assets/`: a file there with the same bytes, else its own name,
+     * else its hash with its extension; none when every name holds other bytes, and the old file stays linked.
+     */
+    const copyTarget = (source: string, hash: string): string | undefined => {
+      if (!assetsUsable) return undefined;
+      const same = (hashPaths.get(hash) ?? []).find((candidate) => posix.dirname(candidate) === assetsFolder);
+      if (same !== undefined) return same;
       for (const name of [posix.basename(source), `${hash}${posix.extname(source)}`]) {
         const target = posix.join(assetsFolder, name);
-        const existing = pathHashes.get(target);
+        const existing = pathHashes.get(target) ?? placed.get(target);
         if (existing === undefined || existing === hash) return target;
       }
-      throw new Error(message('assets.destination-exists'));
+      return undefined;
     };
     const preferredPaths = new Map<string, string>();
     // How the previous text wrote each link to a file of the repository, by the file's hash and the link's
@@ -305,9 +314,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
         if (await reusable(link.target) === 'unreadable') continue;
         const hash = pathHashes.get(link.target)!;
-        const copied = assetsFolder !== oldAssetsFolder && posix.dirname(link.target) === oldAssetsFolder;
-        const target = copied ? copyTarget(link.target, hash) : link.target;
-        if (copied && !pathHashes.has(target)) copies.set(target, link.target);
+        const moved = assetsFolder !== oldAssetsFolder && posix.dirname(link.target) === oldAssetsFolder;
+        // Equal bytes under two old names share one copy, so every link names a file that is written.
+        const copy = moved ? preferredPaths.get(hash) ?? copyTarget(link.target, hash) : undefined;
+        const target = copy ?? link.target;
+        if (copy !== undefined && !pathHashes.has(copy) && !copies.has(copy)) copies.set(copy, link.target);
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, target);
         const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), target).split('/').map(encodeURIComponent).join('/') + link.suffix;
         const key = hash + link.suffix;
@@ -358,7 +369,16 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         const state = await reusable(source ?? assetPath);
         if (state === 'refused') { rejected.set(node.url, 'unsupported-type'); continue; }
         if (state === 'unreadable') assetPath = undefined;
-        else if (source !== undefined) files.set(assetPath, admitted.get(source)!);
+        else if (source !== undefined) {
+          const read = (await readFiles(git, config, base, [source])).get(source);
+          if (read?.ok !== true) throw new Error(message('assets.not-allowed'));
+          // A copy named by its hash is checked as a captured upload, as every later capture checks it.
+          if (!admitsCapturedFile(assetPath, read.content)) { rejected.set(node.url, 'unsupported-type'); continue; }
+          if (!counted.has(assetPath)) { documentBytes += read.content.length; counted.add(assetPath); }
+          if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
+          placed.set(assetPath, hash!);
+          files.set(assetPath, read.content);
+        }
       }
       if (assetPath === undefined) {
         let asset = downloaded.get(url);
@@ -392,7 +412,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
           const extension = uploadExtension(contentBytes(asset.file));
           if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
           assetPath = posix.join(assetsFolder, `${hash}${extension}`);
-          if (pathHashes.has(assetPath)) throw new Error(message('assets.destination-exists'));
+          // A file or symbolic link named `assets` stays: the document waits until its author moves it.
+          if (!assetsUsable || pathHashes.has(assetPath)) throw new Error(message('assets.destination-exists'));
         }
         // Each document owns its candidate bytes until its security check passes.
         files.set(assetPath, asset.file);

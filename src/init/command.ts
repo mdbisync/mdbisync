@@ -13,6 +13,7 @@ import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/
 import { findFrontMatter } from '../mapping/front-matter.ts';
 import { message } from '../messages.ts';
 import { MINIMUM_RELEASE, OLDER_RELEASES, RELEASE_PIN } from './releases.ts';
+import { ASSETS_FOLDER, UPLOAD_EXTENSIONS } from '../sync/upload-type.ts';
 
 export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
   --folder <path> --team <name> [--project <name>]   Repeat for each folder
@@ -35,8 +36,8 @@ const LFS = 'filter=lfs diff=lfs merge=lfs -text';
  * the `assets/` folders the sync writes into, whatever a file's extension.
  */
 export const LFS_ATTRIBUTES: readonly string[] = [
-  ...['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'pdf', 'mp4', 'webm', 'svg'].map((extension) => `*.${extension} ${LFS}`),
-  `**/assets/** ${LFS}`,
+  ...[...UPLOAD_EXTENSIONS, '.jpeg'].map((extension) => `*${extension} ${LFS}`),
+  `**/${ASSETS_FOLDER}/** ${LFS}`,
 ];
 
 interface Folder { path: string; team?: string; project?: string }

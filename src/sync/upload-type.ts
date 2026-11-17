@@ -1,6 +1,8 @@
 import { parseXml, XmlElement, type XmlNode } from '@rgrove/parse-xml';
 
 /** Every extension `uploadExtension` gives: the asset files a sync writes next to a document. */
+/** The folder beside a document that holds the files the sync takes from Linear for it. */
+export const ASSETS_FOLDER = 'assets';
 export const UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.png', '.jpg', '.gif', '.webp', '.pdf', '.avif', '.mp4', '.webm', '.svg']);
 
 /**

@@ -9,7 +9,7 @@ import { describe, it } from 'node:test';
 import { contentBytes } from '../state/content.ts';
 import { resolveStateConfig } from '../state/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
-import { createAssetCapture } from './assets.ts';
+import { createAssetCapture, ImageBlockedError } from './assets.ts';
 
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 const pngHash = createHash('sha256').update(png).digest('hex');
@@ -105,5 +105,64 @@ describe('the assets folder beside the documents', () => {
     assert.equal(moved.downloads, 0);
     assert.deepEqual(moved.files.get('new/assets/chart.png'), png);
     assert.equal(moved.body, '![Chart](assets/chart.png)\n');
+  });
+
+  it('gives two documents moved into one folder in one run their own copies of equally named files', async () => {
+    const fixture = await createFixture();
+    try {
+      const tree = { 'a/plan.md': '![Chart](assets/chart.png)\n', 'a/assets/chart.png': png, 'b/spec.md': '![Chart](assets/chart.png)\n', 'b/assets/chart.png': other };
+      await fixture.seed(tree);
+      const git = await fixture.clone('assets-folder-run');
+      const base = await git.text(['rev-parse', 'origin/main']);
+      const otherHash = createHash('sha256').update(other).digest('hex');
+      const otherUrl = 'https://uploads.linear.app/workspace/other.png';
+      const uploads = new Map([[pngHash, url], [otherHash, otherUrl]]);
+      const capture = createAssetCapture(git, config, base, async () => assert.fail('no download'));
+      try {
+        const first = await capture('new/plan.md', `![Chart](${url})\n`, uploads, tree['a/plan.md'], 'a/plan.md');
+        const second = await capture('new/spec.md', `![Chart](${otherUrl})\n`, uploads, tree['b/spec.md'], 'b/spec.md');
+        assert.deepEqual([...first.files.keys()], ['new/assets/chart.png']);
+        assert.deepEqual([...second.files.keys()], [`new/assets/${otherHash}.png`]);
+        assert.equal(second.body, `![Chart](assets/${otherHash}.png)\n`);
+      } finally { capture.close(); }
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('copies equal bytes linked under two old names once, and every link names the copy', async () => {
+    const tree = { 'old/plan.md': '![A](assets/a.png)\n\n![B](assets/b.png)\n', 'old/assets/a.png': png, 'old/assets/b.png': png };
+    const moved = await captured(tree, 'new/plan.md', `![A](${url})\n\n![B](${url})\n`, new Map([[pngHash, url]]), { body: tree['old/plan.md'], path: 'old/plan.md' });
+    assert.deepEqual([...moved.files.keys()], ['new/assets/a.png']);
+    assert.equal(moved.body, '![A](assets/a.png)\n\n![B](assets/a.png)\n');
+  });
+
+  it('links equal bytes the new folder already has instead of copying them', async () => {
+    const tree = { 'old/plan.md': '![Chart](assets/chart.png)\n', 'old/assets/chart.png': png, 'new/assets/logo.png': png };
+    const moved = await captured(tree, 'new/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]), { body: tree['old/plan.md'], path: 'old/plan.md' });
+    assert.equal(moved.files.size, 0);
+    assert.equal(moved.body, '![Chart](assets/logo.png)\n');
+  });
+
+  it('keeps linking the old file when every name in the new folder holds other bytes', async () => {
+    const tree = { 'old/plan.md': '![Chart](assets/chart.png)\n', 'old/assets/chart.png': png, 'new/assets/chart.png': other, [`new/assets/${pngHash}.png`]: Buffer.concat([other, other]) };
+    const moved = await captured(tree, 'new/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]), { body: tree['old/plan.md'], path: 'old/plan.md' });
+    assert.equal(moved.files.size, 0);
+    assert.equal(moved.body, '![Chart](../old/assets/chart.png)\n');
+  });
+
+  it('checks a copy named by its hash as a captured upload', async () => {
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const svgHash = createHash('sha256').update(svg).digest('hex');
+    const svgUrl = 'https://uploads.linear.app/workspace/diagram.svg';
+    const tree = { 'old/plan.md': '![Diagram](assets/diagram.svg)\n', 'old/assets/diagram.svg': svg, 'new/assets/diagram.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' };
+    await assert.rejects(captured(tree, 'new/plan.md', `![Diagram](${svgUrl})\n`, new Map([[svgHash, svgUrl]]), { body: tree['old/plan.md'], path: 'old/plan.md' }),
+      (error: unknown) => error instanceof ImageBlockedError && error.findings.some((finding) => finding.reason === 'unsupported-type'));
+  });
+
+  it('refuses to write through an assets entry that is a file, and a move keeps linking the old file', async () => {
+    await assert.rejects(captured({ 'docs/plan.md': 'Plan.\n', 'docs/assets': 'not a folder\n' }, 'docs/plan.md', `![Pasted](${url})\n`), /asset destination already exists/);
+    const tree = { 'old/plan.md': '![Chart](assets/chart.png)\n', 'old/assets/chart.png': png, 'new/assets': 'not a folder\n' };
+    const moved = await captured(tree, 'new/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]), { body: tree['old/plan.md'], path: 'old/plan.md' });
+    assert.equal(moved.files.size, 0);
+    assert.equal(moved.body, '![Chart](../old/assets/chart.png)\n');
   });
 });

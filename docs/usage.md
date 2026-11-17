@@ -49,7 +49,9 @@ Use `--lfs` to store embedded files in Git LFS: `init` adds to
 from Linear, for files you commit anywhere, and
 `**/assets/** filter=lfs diff=lfs merge=lfs -text`, so every file the
 sync writes into an `assets/` folder goes to LFS whatever its extension.
-Lines already there are kept. Without `--lfs`, your own `.gitattributes`
+The line covers every folder named `assets`, including a website's own;
+if one must stay out of LFS, write your own lines instead. Lines already
+there are kept. Without `--lfs`, your own `.gitattributes`
 decides, as for any commit.
 
 Flags work without a terminal. With a terminal attached, `init` asks for
