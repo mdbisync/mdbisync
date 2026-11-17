@@ -179,4 +179,3 @@ describe('repair state scope', () => {
     assert.equal(await h.rev(SYNC_BRANCH), head);
   });
 });
-
