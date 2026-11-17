@@ -36,7 +36,7 @@ it('the CLI blocks unsupported upload bytes and captures every supported type af
       const url = `https://uploads.linear.app/new-${index}.${index % 2 ? 'md' : 'html'}`;
       world.linear.uploads.push({filename:file,assetUrl:url,bytes,size:bytes.length,contentType:'image/png'});
       const ext = file.slice(file.lastIndexOf('.'));
-      return {url,path:`docs/${createHash('sha256').update(bytes).digest('hex')}${ext}`,bytes};
+      return {url,path:`docs/assets/${createHash('sha256').update(bytes).digest('hex')}${ext}`,bytes};
     });
     const bad = [
       '<html><body>Page</body></html>',
