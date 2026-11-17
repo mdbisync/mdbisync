@@ -1060,8 +1060,8 @@ describe('initial sync from Linear to the tracked branch', () => {
     });
   }
 
-  /** A commit anyone who may push can add, with `subject` and the tree of `parents[0]`. */
-  const forge = (parents: string[], subject: string) => fixture.remote.text(['commit-tree', `${parents[0]}^{tree}`, ...parents.flatMap((parent) => ['-p', parent]), '-m', subject], {
+  /** A commit anyone who may push can add, with `subject` and the tree of `tree` (by default `parents[0]`). */
+  const forge = (parents: string[], subject: string, tree = parents[0]) => fixture.remote.text(['commit-tree', `${tree}^{tree}`, ...parents.flatMap((parent) => ['-p', parent]), '-m', subject], {
     env: { GIT_AUTHOR_NAME: 'Someone', GIT_AUTHOR_EMAIL: 'someone@example.com', GIT_COMMITTER_NAME: 'Someone', GIT_COMMITTER_EMAIL: 'someone@example.com' },
   });
 
@@ -1119,7 +1119,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     const record = await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear']);
     const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
     // A newer record that changes its parent, which the sync branch does not carry, joined with the older one.
-    const newer = await fixture.remote.text(['commit-tree', `${record}^{tree}`, '-p', main, '-m', REVERSE_RECORD_MESSAGE]);
+    const newer = await forge([main], REVERSE_RECORD_MESSAGE, record);
     await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', await forge([newer, record], 'Sync: Linear changes')]);
     const before = await refs();
     const writes = world.writes.length;
