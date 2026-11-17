@@ -66,6 +66,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "linear.edit-many": ["actor", "documents", "teams"],
   "linear.image-add": ["actor"],
   "linear.image-path": ["actor", "target"],
+  "linear.inspect-image-repair": ["actor"],
   "linear.metadata": ["actor", "variants"],
   "linear.move-project": ["actor", "project"],
   "linear.out-of-scope": ["actor", "variants"],

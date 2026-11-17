@@ -33,7 +33,7 @@
     },
     {
       "kind": "linear",
-      "action": "remove-image",
+      "action": "inspect-image-repair",
       "args": {
         "actor": "editor-a"
       }
@@ -81,29 +81,44 @@
         "expected": true
       },
       {
-        "subject": "blocked.icon",
-        "operator": "equal",
-        "expected": "Cross"
-      },
-      {
-        "subject": "blocked.color",
-        "operator": "equal",
-        "expected": "red"
-      },
-      {
-        "subject": "blocked.imageLines",
-        "operator": "same-as",
-        "expected": "expected.blockedImageLines"
-      },
-      {
-        "subject": "blocked.openImageNotices",
-        "operator": "equal",
-        "expected": 0
-      },
-      {
-        "subject": "blocked.marksRestored",
+        "subject": "imageRepair.observedOriginal",
         "operator": "equal",
         "expected": true
+      },
+      {
+        "subject": "imageRepair.proposedLink",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.listedInPr",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.merged",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.trackedLink",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.storedLink",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.marksUnchanged",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.imageNotices",
+        "operator": "equal",
+        "expected": 0
       },
       {
         "subject": "tracked.body",
