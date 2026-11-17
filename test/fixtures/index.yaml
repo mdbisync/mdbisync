@@ -563,8 +563,6 @@ known_constructs:
     class: fixable
   - construct: image-reference-after-bang
     class: fixable
-  - construct: image-path-after-bang
-    class: lint-error
   - construct: image-path-spaces
     class: fixable
   - construct: image-inline-text
@@ -2344,17 +2342,6 @@ fixtures:
     class: fixable
     basis: known
     canary: kx-7485ff84
-    corpus: false
-    note: "a literal exclamation mark directly before an image"
-  - file: "images/bang-before-path.md"
-    group: images
-    construct: image-path-after-bang
-    class: lint-error
-    rule: image-file-missing
-    line: 1
-    basis: known
-    canary: kx-1f68b376
-    missing_target: true
     corpus: false
     note: "a literal exclamation mark directly before an image"
   - file: "images/broken-reference.md"

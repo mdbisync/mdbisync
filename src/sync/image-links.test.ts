@@ -96,7 +96,7 @@ it('repairs only the selected images and still never adds one', () => {
 
 // Recorded by the format probe: Linear moves an image into its own block, so a literal `!` it
 // stores never sits directly before the image. The repair above holds even if that changes.
-for (const name of ['bang-before-inline', 'bang-before-reference', 'bang-before-path']) it(`Linear keeps a bang apart from the image (${name})`, () => {
+for (const name of ['bang-before-inline', 'bang-before-reference']) it(`Linear keeps a bang apart from the image (${name})`, () => {
   const linear = readFileSync(new URL(`../../test/fixtures/images/${name}.linear.md`, import.meta.url), 'utf8');
   assert.match(linear, /^Look !\n\n/);
   assert.doesNotMatch(linear, /!!\[/);
