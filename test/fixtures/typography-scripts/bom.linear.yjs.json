@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"﻿A file that starts with a byte order mark.","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-0125cc3a","marks":{"attribution":"user"}}]}
-  ]
-}

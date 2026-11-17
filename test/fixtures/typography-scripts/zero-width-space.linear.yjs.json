@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"long​word​with​break​points","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-0eaaf88f","marks":{"attribution":"user"}}]}
-  ]
-}

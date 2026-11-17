@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"הדוח מוכן לבדיקה.","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-a10f04ba","marks":{"attribution":"user"}}]}
-  ]
-}

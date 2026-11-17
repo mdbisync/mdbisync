@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"“Quoted” and ‘single’ — with an ellipsis…","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-07a51f3d","marks":{"attribution":"user"}}]}
-  ]
-}

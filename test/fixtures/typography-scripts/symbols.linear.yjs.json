@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"Prices: €10, £5, ¥300; ± 2°C; → next; ✓ done","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-8b5e21dc","marks":{"attribution":"user"}}]}
-  ]
-}
