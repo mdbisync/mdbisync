@@ -1070,6 +1070,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
     }
     for (const entry of merge.held) keepTip(entry.from);
+    // A document waiting for its repair was not written: the record keeps Linear's text, which the repair matches.
+    for (const path of pendingRepairs) keepTip(path);
     // Linear holds a left-out file as the tip has it. A partial record keeps the merge base, so recording the
     // merge result's version would make it an edit (or addition) of Linear's side, and its fix in git a conflict
     // with it in the next run. A held rename's new path is left out or in conflict, so it stays as the tip has it.

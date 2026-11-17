@@ -116,7 +116,7 @@ describe('repair state scope', () => {
     assert.equal(await h.show(`${SYNC_BRANCH}:${path}`), replacement);
   });
 
-  it('keeps Linear\'s text while a merged pull request held its refused repair', async () => {
+  it('keeps Linear\'s text, and its record of it, while a merged pull request held its refused repair', async () => {
     // A held document's view still descends from the capture that recorded its repair. Once that view is merged,
     // the write step must still wait for the repair, not write the branch's kept version over Linear's text.
     await h.gitEdit('canary-check.mjs', `import {readFileSync} from 'node:fs'; for (const file of process.argv.slice(2)) if (readFileSync(file, 'utf8').includes('${CANARY}')) { console.log(file + ':1: found'); process.exitCode = 1; }`);
@@ -136,6 +136,8 @@ describe('repair state scope', () => {
       const result = await h.sync();
       assert.equal(result.result.exitCode, 0, result.result.stderr);
       assert.equal(document.content, observed, `run ${run + 1}`);
+      // The Linear ref keeps recording what Linear holds, so the repair still matches its document.
+      assert.equal(await h.show(`refs/mdbisync/linear:${path}`), observed, `run ${run + 1}`);
       assert.ok(!(await h.show(`refs/heads/main:${path}`)).includes(CANARY));
     }
     assert.ok(await h.fixture.remote.run(['merge-base', '--is-ancestor', source, 'refs/heads/main'], {okCodes: [0]}), 'the held view was merged');
