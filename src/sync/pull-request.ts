@@ -248,9 +248,11 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A sync branch is made by the first sync pull request and stays. Once `linear` holds more than initial sync's
     // record and the tracked branch, a missing branch was deleted by a person: it comes back at `linear`.
     if (sync !== null || (await isAncestor(git, linear, tracked)) || (await isInitialRecord(git, linear))) return result;
-    const unverified = await unverifiedPaths(git, tracked, frozen.size === 0 ? linear : wanted, context.mapping.zones);
+    const needsTrackedTree = frozen.size > 0 || (await unverifiedPaths(git, tracked, linear, context.mapping.zones)).length > 0;
+    const next = needsTrackedTree ? await commitTree(git, {base: wanted, changes: new Map(), parents: [linear, tracked], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity}) : linear;
+    const unverified = await unverifiedPaths(git, tracked, next, context.mapping.zones);
     if (unverified.length > 0) return {...result, code: 'head-unverified', unverified};
-    const pushed = await pushSyncBranch(context, options, null, frozen.size === 0 ? linear : await commitTree(git, {base: wanted, changes: new Map(), parents: [linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity}));
+    const pushed = await pushSyncBranch(context, options, null, next);
     if (pushed.ok) return { ...result, branchMoved: true };
     // A refusal that is not a lease (a rule on branch names, missing rights) leaves the branch to the run that needs it.
     return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : result;
@@ -344,7 +346,14 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       head = await commitTree(git, { base: headTree as string, changes: new Map(), parents: [sync as Oid], message: CHECKS_AGAIN_MESSAGE, identity, skipIfUnchanged: false });
     }
 
-    const pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
+    let pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
+    // An older Linear snapshot may lack files added on the tracked branch.
+    // Carry that branch's files forward when the proposed merge is in scope.
+    if (head !== sync && pushUnverified.length > 0 && headTree !== null
+      && (await unverifiedPaths(git, tracked, headTree, context.mapping.zones)).length === 0) {
+      head = await commitTree(git, {base: headTree, changes: new Map(), parents: [head, tracked], message: TRACKED_MERGE_MESSAGE, identity});
+      pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
+    }
     if (head !== sync && pushUnverified.length > 0) {
       if (open !== null) result.pullRequest = {number: open.number, url: open.url, opened: false};
       return {...result, code: 'head-unverified', unverified: pushUnverified};
