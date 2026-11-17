@@ -94,7 +94,7 @@ describe('sync: pull request head check', () => {
     assert.equal(await onMain(path), false);
   });
 
-  it('a failing normal batch that joins a suspended head with such a commit keeps it waiting for a person', async () => {
+  it('a failing normal batch cannot push a join with a suspended head outside the documents', async () => {
     await suspendOne();
     const path = '.github/workflows/release.yml';
     const pushed = await editRef(SUSPENDED, path, 'echo changed\n', 'Add a build step');
@@ -103,12 +103,33 @@ describe('sync: pull request head check', () => {
     await editInLinear('combined/guide.md', '# Guide\n\nEdited in Linear.\n');
     await sync();
     checksOn(await rev(SYNC_BRANCH), [{ name: 'ci', status: 'completed', conclusion: 'failure' }]);
+    const normal = await rev(SYNC_BRANCH);
+    const suspended = await rev(SUSPENDED);
     const run = await sync();
     assert.equal(run.result.exitCode, SETUP_FAILED_EXIT_CODE, JSON.stringify(run.report.pullRequest));
-    assert.ok(run.report.pullRequest?.suspended?.batchFailure, 'the normal batch joined the suspended lane');
+    assert.equal(run.report.pullRequest?.suspended?.batchFailure, undefined, 'the unsafe join must not be published');
+    assert.equal(await rev(SYNC_BRANCH), normal);
+    assert.equal(await rev(SUSPENDED), suspended);
     assert.deepEqual(run.report.pullRequest?.suspended?.unverified, [path]);
     const held = h.world.github.pullRequests.find((pr) => pr.head === 'mdbisync/suspended' && pr.state === 'open');
     assert.match(held?.body ?? '', /The sync does not merge this pull request: .*`\.github\/workflows\/release\.yml`/);
+  });
+
+  for (const lane of ['normal', 'suspended']) it(`does not push a new ${lane} head that carries an existing workflow edit`, async () => {
+    if (lane === 'suspended') await suspendOne();
+    else {
+      await editInLinear('combined/guide.md', '# Guide\n\nA first edit.\n');
+      await sync();
+    }
+    const branch = lane === 'normal' ? SYNC_BRANCH : SUSPENDED;
+    const path = '.github/workflows/example.yml';
+    const head = await editRef(branch, path, 'name: Example\n');
+    await editInLinear(lane === 'normal' ? 'combined/guide.md' : 'eng/notes/plan.md', '# Page\n\nA later edit.\n');
+    const run = await sync();
+    const result = lane === 'normal' ? run.report.pullRequest : run.report.pullRequest?.suspended;
+    assert.equal(result?.code, 'head-unverified');
+    assert.deepEqual(result?.unverified, [path]);
+    assert.equal(await rev(branch), head, 'no new tree outside the document scope may be pushed');
   });
 
   it('a commit on a failing suspended branch is reported at once, its file named in the description, and the normal lane does not wait for it', async () => {

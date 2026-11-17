@@ -1,18 +1,24 @@
 // A checked branch view is derived from an observation without changing the observation ref.
 import { createHash } from 'node:crypto';
 import { type Git, type Oid, type IdMap, type CommitIdentity, listTree, readBlobs, buildTree } from '../state/index.ts';
-import { oneLine } from './head-check.ts';
+import { candidateFiles, mapFiles, type Zone } from '../mapping/index.ts';
+import { isSyncedChange, oneLine } from './head-check.ts';
 
-export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, identity: CommitIdentity): Promise<{commit: Oid; notes: string[]}> {
-  const pending = [...ids].filter(([, entry]) => entry.pullRewrite !== undefined);
+export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: ReadonlyMap<string, Zone>, identity: CommitIdentity, paths?: ReadonlySet<string>): Promise<{commit: Oid; notes: string[]}> {
+  // A repeated id has no canonical path. Check the complete map, before selecting a lane.
+  const counts = new Map<string, number>();
+  for (const entry of ids.values()) counts.set(entry.id, (counts.get(entry.id) ?? 0) + 1);
+  const pending = [...ids].filter(([path, entry]) => entry.pullRewrite !== undefined && counts.get(entry.id) === 1 && (paths === undefined || paths.has(path)));
   if (pending.length === 0) return {commit: linear, notes: []};
   const entries = new Map((await listTree(git, linear)).map(entry => [entry.path, entry]));
-  const files = pending.flatMap(([path]) => { const file = entries.get(path); return file?.type === 'blob' ? [file] : []; });
+  const files = candidateFiles([...entries.values()], zones);
   const blobs = await readBlobs(git, files.map(file => file.oid));
+  const documents = new Set(mapFiles([...entries.values()], zones, blobs).documents.map(document => document.path));
   const changes = new Map<string, string>();
   const notes: string[] = [];
   for (const [path, entry] of pending) {
     const file = entries.get(path);
+    if (!documents.has(path) || file === undefined || !isSyncedChange(path, file.mode, zones)) continue;
     const source = file === undefined ? undefined : blobs.get(file.oid);
     const repair = entry.pullRewrite!;
     if (source === undefined || createHash('sha256').update(source).digest('hex') !== repair.hash) continue;

@@ -6,7 +6,7 @@ import { splitFile } from '../format/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
-import { oneLine, unverifiedNote, unverifiedPaths } from './head-check.ts';
+import { checkPushScope, oneLine, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergeInProgress, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { checkpoint } from '../test-hooks.ts';
@@ -134,7 +134,9 @@ export async function commitLaneIds(context: RunContext, parent: Oid | null, ids
   return commitIds(git, parent, ids, identity ?? context.identity, { message, reserved: await readReservedIds(git, parent), superseded: await readSupersededIds(git, parent), written: await readWrittenHashes(git, parent), ...(syncPushed === undefined ? {} : { syncPushed }) });
 }
 
-async function push(context: RunContext, options: LaneOptions, ids: IdMap, head: Oid, expected: Oid | null, normal?: { expected: Oid | null; next: Oid }, updateLane = true): Promise<boolean> {
+async function push(context: RunContext, options: LaneOptions, ids: IdMap, head: Oid, expected: Oid | null, normal?: { expected: Oid | null; next: Oid }, updateLane = true, tracked = context.fetched.tracked): Promise<boolean> {
+  if (updateLane) await checkPushScope(context.git, tracked, head, context.mapping.zones);
+  if (normal !== undefined) await checkPushScope(context.git, tracked, normal.next, context.mapping.zones);
   // Keep one copy of the complete lane path set, rather than N copies in a batch of N documents.
   const paths = suspendedPaths(ids);
   // Only a push that moves the suspended branch is the sync's own head; a run that finds someone else's commit there
@@ -228,7 +230,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     if (previous === null || await isAncestor(git, previous, tracked)) return undefined;
     for (const path of await changedPaths(git, tracked, previous)) paths.add(path);
   }
-  const view = await checkedPullView(git, linear, new Map([...ids].filter(([path]) => paths.has(path))), options.identity ?? context.identity);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, paths);
   const intake = view.commit;
   let head = previous;
   let bases: { tracked: Oid; linear: Oid; view?: Oid };
@@ -276,6 +278,13 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
+  const pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
+  if (pushUnverified.length > 0) {
+    const open = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+    const note = unverifiedNote(pushUnverified);
+    if (open !== null && !(open.body ?? '').includes(note)) await updatePullRequest(options.github, open.number, {title: SUSPENDED_TITLE, body: `${open.body ?? ''}\n${note}\n`});
+    return {paths: [...paths].sort(), checks: [], code: 'head-unverified', unverified: pushUnverified, ...(open === null ? {} : {pullRequest: {number: open.number, url: open.url}})};
+  }
   const changed = await push(context, options, ids, head, previous);
   const result: SuspendedResult = { paths: [...paths].sort(), checks: [], changed };
   const open = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
@@ -366,7 +375,7 @@ async function release(context: RunContext, options: LaneOptions, ids: IdMap, pa
     nextNormal = await commit(context, options, await takePaths(git, tree, tracked, paths), [normal, tracked], 'Take released changes from the tracked branch');
   }
   await push(context, options, ids, head, context.fetched.suspended ?? null,
-    normal === null || nextNormal === normal ? undefined : { expected: normal, next: nextNormal as Oid }, false);
+    normal === null || nextNormal === normal ? undefined : { expected: normal, next: nextNormal as Oid }, false, tracked);
   context.fetched.tracked = tracked;
   const advertised = await git.text(['ls-remote', '--refs', options.config.remote, branchRef(suspendedBranch(options.config))]);
   context.fetched.suspended = advertised === '' ? null : advertised.split('\t')[0] as Oid;
@@ -385,7 +394,7 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const paths = new Set(await changedPaths(git, tracked, batchTree));
   // The batch's own paths, before the lane's earlier ones join them: its failure describes only these.
   const batchPaths = [...paths].sort();
-  const view = await checkedPullView(git, linear, new Map([...ids].filter(([path]) => paths.has(path))), options.identity ?? context.identity);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, paths);
   const intake = view.commit;
   const previous = context.fetched.suspended ?? null;
   let head: Oid;

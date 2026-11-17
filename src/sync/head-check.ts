@@ -1,8 +1,9 @@
-// What the sync merges into the tracked branch by itself.
+// What the sync publishes on its branches and merges into the tracked branch by itself.
 //
 // The sync branch keeps commits a person or a CI job adds to it, and the App
 // that merges the sync pull request may bypass the tracked branch's review
-// rule. So before either lane merges, the sync reads what the merge would
+// rule. Before a push, the sync checks the complete proposed branch tree;
+// before either lane merges, it also reads what the merge would
 // change on the tracked branch, whoever made the commits: only documents and
 // the asset types the sync writes, as regular files under an annotated
 // folder and outside any `.github` folder, and never a folder's Linear
@@ -87,4 +88,15 @@ export async function unverifiedPaths(git: Git, before: Oid | string, after: Oid
     for (const { path, from, to } of readmes) if (!keepsAnnotation(path, text(from), text(to))) paths.push(path);
   }
   return paths.sort();
+}
+
+/** A proposed branch tree must be in scope before it can start workflows on a push. */
+export class UnverifiedHead extends Error {
+  readonly paths: string[];
+  constructor(paths: string[]) { super(unverifiedNote(paths)); this.paths = paths; }
+}
+
+export async function checkPushScope(git: Git, tracked: Oid, next: Oid, zones: ReadonlyMap<string, Zone>): Promise<void> {
+  const paths = await unverifiedPaths(git, tracked, next, zones);
+  if (paths.length > 0) throw new UnverifiedHead(paths);
 }

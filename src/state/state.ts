@@ -380,8 +380,10 @@ export type UploadMap = Map<string, string>;
 export async function readIds(git: Git, commit: Oid | null): Promise<IdMap> {
   const data = await readJsonFile(git, commit, IDS_FILE);
   const map: IdMap = new Map();
+  const seen = new Set<string>();
   for (const [path, value] of Object.entries(data)) {
-    if (!isIdEntry(value)) throw new Error(message('state.invalid-path-entry', { file: IDS_FILE }));
+    if (!isIdEntry(value) || seen.has(value.id)) throw new Error(message('state.invalid-path-entry', { file: IDS_FILE }));
+    seen.add(value.id);
     map.set(path, value);
   }
   return map;
