@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import {
   advisoriesOf, blocking, check, EXCEPTIONS_FILE, evaluate, lockFilesAt, parseExceptions, releaseSource, releaseStatus, renderSummary,
 } from '../../src/release/dependency-scan.ts';
@@ -29,6 +29,7 @@ function git(directory: string, ...args: string[]): string {
 /** A repository with the given fixtures as lock files, committed. Returns its directory and commit. */
 function repository(lockFiles: Record<string, string>): { directory: string; commit: string; cleanup: () => void } {
   const directory = mkdtempSync(join(tmpdir(), 'dependency-scan-test-'));
+  after(() => rmSync(directory, { recursive: true, force: true }));
   git(directory, 'init', '-q', '-b', 'main');
   for (const [folder, name] of Object.entries(lockFiles)) {
     mkdirSync(join(directory, folder), { recursive: true });

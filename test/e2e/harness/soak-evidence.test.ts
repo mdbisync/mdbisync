@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -7,8 +7,9 @@ import { holdsToken } from './checks.ts';
 import { pathVersions, presenceOf, SOAK_EDITS_FILE, SOAK_SYNCS_FILE, SoakLedger, tokenVerdicts, type TokenVerdict } from './soak-evidence.ts';
 
 describe('soak ledger', () => {
-  it('places each edit between the sync invocations around its write and keeps credentials out', () => {
+  it('places each edit between the sync invocations around its write and keeps credentials out', (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'soak-ledger-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
     const ledger = new SoakLedger(dir);
     const at = (minute: number) => new Date(Date.UTC(2026, 0, 1, 0, minute)).toISOString();
     ledger.edit({ token: 'run-001', actor: 'editor-a', side: 'linear', path: 'a.md', startedAt: at(1), completedAt: at(1), syncsBefore: ledger.syncs });

@@ -24,7 +24,7 @@ test('CI and release install the same pinned pre-commit before tests', async () 
     });
     assert.equal(installs.length, 1, `${file} must install exactly one pinned pre-commit`);
     // The release build runs no suite, but its staged flow runs the security hooks through pre-commit.
-    const tests = steps.flatMap((step, index) => /\b(?:npm (?:test|run test:hooks)|node --test|node test\/release\/staged-flow\.ts)\b/.test(step.run ?? '') ? [index] : []);
+    const tests = steps.flatMap((step, index) => /\b(?:npm (?:test|run test:hooks)|node (?:--test|tools\/test-temp-cleanup\.ts)|node test\/release\/staged-flow\.ts)\b/.test(step.run ?? '') ? [index] : []);
     assert.ok(tests.length > 0, `${file} must run tests`);
     assert.ok(tests.every(index => installs[0]!.index < index), `${file} must install pre-commit before tests`);
     const requirementsPath = installs[0]!.requirements === '"$RUNNER_TEMP/pre-commit-requirements.txt"'

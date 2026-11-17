@@ -27,6 +27,13 @@
       }
     },
     {
+      "kind": "linear",
+      "action": "await-image",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
       "kind": "run",
       "action": "settle",
       "args": {}

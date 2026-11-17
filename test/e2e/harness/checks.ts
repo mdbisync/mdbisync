@@ -362,8 +362,22 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
   }
   const paths = assertion.subject === 'summary.collisionPaths' && ['same-as', 'equal'].includes(assertion.operator)
     ? differingCollisionPaths(actual.value, expected)
-    : differingPaths(actual.value, expected) ?? differingValue(actual.value, expected, CODE_SUBJECT.test(assertion.subject));
+    : differingPaths(actual.value, expected) ?? differingShape(actual.value, expected) ?? differingValue(actual.value, expected, CODE_SUBJECT.test(assertion.subject));
   return { holds: false, reason: `${assertion.operator} did not hold${paths === undefined ? '' : `: ${paths}`}` };
+}
+
+/**
+ * A map compared with a single value, for example a per-document subject
+ * that gives every file because the run recorded no target. Names the side
+ * that is a map and its size, and a single actual value as `differingValue`
+ * would, never content (I5). Undefined unless exactly one side is a map.
+ */
+export function differingShape(actual: unknown, expected: unknown): string | undefined {
+  if ((actual instanceof Map) === (expected instanceof Map)) return undefined;
+  const side = actual instanceof Map ? 'actual' : 'expected';
+  const map = (actual instanceof Map ? actual : expected) as Map<unknown, unknown>;
+  const single = actual instanceof Map ? undefined : differingValue(actual, expected, false);
+  return `${side} is a map of ${map.size} entries, the other side a single value${single === undefined ? '' : `; ${single}`}`;
 }
 
 /** Subjects whose value is a rule or summary code (`summary.code`, `runs.0.summary.code`, `decided.code`), never document text. */

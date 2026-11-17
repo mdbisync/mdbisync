@@ -418,7 +418,14 @@ between the answered items (such as `run.settle`); when it reaches an item
 that is not answered yet, it saves the run and keeps the hold, so the
 session answers the next items (and the values) only after that step ran, and
 runs `ui-result` again; answers to items after a harness step that has not
-run yet are refused. When a person resolves a conflict in the UI, the
+run yet are refused. A checklist whose items act on the scenario's target
+document names it. Typing items are answered as typing starts, with
+`ui-result` handed the answers at once while the session types: the
+`run.settle` after them runs syncs for `typingSeconds` before it settles,
+at least as long as the item lets the session type, so the typing falls
+among the runs. An image pasted in the editor is answered once Linear has
+saved it, and `linear.await-image` waits (bounded) until Linear's saved
+document holds it before the sync runs. When a person resolves a conflict in the UI, the
 harness reads the kept version and no longer expects the discarded edits
 (I2). Once every item
 is answered, it runs the checks, writes the result (pass, fail or

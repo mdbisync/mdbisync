@@ -6,7 +6,7 @@ import { after, describe, it } from 'node:test';
 import { countAppRequest } from './app-reads.ts';
 import type { TestConfig } from './config.ts';
 import type { EditRecord, LiveWorld, RunContext } from './context.ts';
-import { retireMissingFrom } from './steps.ts';
+import { afterUiStep, retireMissingFrom } from './steps.ts';
 import { decodeHeldRun, encodeHeldRun, heldRunOf, HELD_RUN_FILE, loadHeldRun, saveHeldRun, type HeldRun } from './held-run.ts';
 import { runNames } from './isolation.ts';
 import { liveRuns, registerRun } from './locks.ts';
@@ -255,6 +255,78 @@ describe('UI checklist answers', () => {
     assert.equal(answers.scenarioId, 'L6-12');
     assert.deepEqual(answers.items.map((item) => item.result), ['pass', 'pass']);
     assert.deepEqual([...answers.values], [['ui.plainLinkOpensTarget', true], ['ui.anchorLinkOpensTarget', true], ['ui.anchorScrolls', false]]);
+  });
+
+  it('has the typing scenarios type inside a window of sync runs, and L6-06 and L6-07 change the document from git meanwhile', () => {
+    const actions = (id: string) => byId(id).steps.map((step) => `${step.kind}.${step.action}`);
+    for (const id of ['L6-06', 'L6-07']) {
+      assert.deepEqual(actions(id), ['ui.verify-editor', 'ui.verify-editor', 'ui.type-during-write', 'git.edit', 'run.settle', 'ui.assert-dom'], id);
+      assert.deepEqual(byId(id).steps[3]?.args, { target: 'first-paragraph' }, id);
+    }
+    assert.deepEqual(actions('L6-08'), ['ui.verify-editor', 'ui.verify-editor', 'ui.type-two-editors', 'run.settle', 'ui.assert-dom']);
+    // The runs go on longer than the checklist lets the session type after the window's log line.
+    for (const id of ['L6-06', 'L6-07', 'L6-08']) {
+      const steps = byId(id).steps;
+      const typing = steps.find((step) => step.action.startsWith('type-')) as Step;
+      const settle = steps.find((step) => step.kind === 'run' && step.action === 'settle') as Step;
+      assert.equal(typeof typing.args.durationSeconds, 'number', id);
+      assert.ok((settle.args.typingSeconds as number) > (typing.args.durationSeconds as number), id);
+      const checklist = renderUiChecklist(byId(id), runNames(RUN), { live: null, runDir: 'run' }, 'briefs/equipment');
+      assert.match(checklist, /^- Target document \(the one the harness edits and checks\): "briefs\/equipment"$/m, id);
+      assert.match(checklist, new RegExp(`^3\\. \\[ \\] As editor-[ab]: [^\\n]*answer this item pass and hand the answers back with \`ui-result\` at once[^\\n]*"running syncs for … seconds while the UI session types", then stop within ${String(typing.args.durationSeconds)} seconds`, 'm'), id);
+    }
+    assert.match(renderUiChecklist(byId('L6-06'), runNames(RUN), { live: null, runDir: 'run' }), /type at the end of its last paragraph/);
+    assert.match(renderUiChecklist(byId('L6-07'), runNames(RUN), { live: null, runDir: 'run' }), /type at the end of that first paragraph/);
+    // Without the run's record (`cli.ts checklist`) the target line is left out.
+    assert.doesNotMatch(renderUiChecklist(byId('L6-06'), runNames(RUN), { live: null, runDir: 'run' }), /Target document/);
+  });
+
+  it('has L6-07 record the typing outcome it measures, and puts it into the report once the last item is answered', async () => {
+    assert.deepEqual(uiValueSubjects(byId('L6-07')), ['ui.typingOutcome', 'ui.lostCharacterCount', 'ui.lossWindowMs']);
+    assert.deepEqual(uiValueSubjects(byId('L6-06')), ['ui.lostCharacters', 'ui.syncChangeVisible']);
+    const window = { startedAt: '2026-01-01T00:00:00.000Z', endedAt: '2026-01-01T00:01:30.000Z', runs: 6 };
+    const ctx = { observations: new Map<string, unknown>([['ui.typingOutcome', 'no-loss'], ['ui.lostCharacterCount', 0], ['ui.lossWindowMs', 0], ['settle.typingWindow', window]]) } as unknown as RunContext;
+    await afterUiStep(ctx, { kind: 'ui', action: 'assert-dom', args: { actor: 'editor-a' } });
+    assert.deepEqual(ctx.observations.get('metrics'), { typingOutcome: 'no-loss', lostCharacterCount: 0, lossWindowMs: 0, typingWindow: window });
+    // Another scenario's last item adds nothing.
+    const other = { observations: new Map<string, unknown>() } as unknown as RunContext;
+    await afterUiStep(other, { kind: 'ui', action: 'assert-dom', args: { actor: 'editor-a' } });
+    assert.equal(other.observations.has('metrics'), false);
+  });
+
+  it('has the image paste (L6-09) answered once Linear saved it, and the harness wait for the saved image before it syncs', () => {
+    const paste = byId('L6-09');
+    assert.deepEqual(paste.steps.map((step) => `${step.kind}.${step.action}`), ['ui.verify-editor', 'ui.paste-image', 'linear.await-image', 'run.settle', 'ui.assert-dom']);
+    const checklist = renderUiChecklist(paste, runNames(RUN), { live: null, runDir: 'run' });
+    assert.match(checklist, /^2\. \[ \] As editor-a: Paste a small image at the end of the target document[^\n]*no "Leave site\?" prompt[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) linear\.await-image: [^\n]*\n- \(harness\) run\.settle: /m);
+  });
+
+  it('holds the suspended-document check (L6-11) with one suspended document, and releases it between the two items', () => {
+    const suspended = byId('L6-11');
+    assert.equal(suspended.mode, 'ui');
+    assert.deepEqual(suspended.steps.map((step) => `${step.kind}.${step.action}`), [
+      'linear.edit', 'run.sync', 'fault.checks', 'run.sync', 'ui.verify-editor', 'ui.inspect-suspended', 'fault.checks', 'run.settle', 'ui.inspect-released',
+    ]);
+    assert.deepEqual(suspended.steps[2]?.args, { status: 'failed', name: 'format' });
+    assert.deepEqual(suspended.steps[6]?.args, { status: 'passed', name: 'format', lane: 'tracked' });
+    // The harness reads the suspension and the release itself, as L5-24 does; the session's values add what only the page shows.
+    const harness = suspended.checks.assertions.filter((assertion) => !assertion.subject.startsWith('ui.')).map((assertion) => assertion.subject);
+    assert.deepEqual(harness, byId('L5-24').checks.assertions.map((assertion) => assertion.subject));
+    assert.deepEqual(uiValueSubjects(suspended), [
+      'ui.suspendedIcon', 'ui.suspendedMarkColor', 'ui.suspendedCommentNamesCheck', 'ui.suspendedCommentQuotesLine', 'ui.suspendedRunLinkOpensJob',
+      'ui.ownMarkBackAfterRelease', 'ui.commentResolvedAfterRelease',
+    ]);
+    for (const subject of uiValueSubjects(suspended)) assert.match(subject, /^ui\.(?:suspended\w+|\w+AfterRelease)$/);
+    const checklist = renderUiChecklist(suspended, runNames(RUN), { live: null, runDir: 'run' });
+    assert.match(checklist, /^2\. \[ \] As editor-a: Open the suspended document: the red Cross icon[^\n]*`format`[^\n]*GitHub Actions job[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) fault\.checks: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was suspended: its own icon and color are back/m);
+  });
+
+  it('holds the whole corpus (L6-13) for a look in the UI, with the rendering check of L6-02', () => {
+    const corpus = byId('L6-13');
+    assert.deepEqual([corpus.slice, corpus.mode, corpus.setup], ['full', 'ui', { state: 'converged', fixtures: ['full'], teamZoneLock: true }]);
+    assert.deepEqual(corpus.steps.map((step) => `${step.kind}.${step.action}`), ['ui.verify-editor', 'ui.inspect-rendering', 'run.settle', 'ui.assert-dom']);
+    assert.ok(Object.values(corpus.checks.invariants).every((invariant) => invariant.required));
+    assert.ok(uiValueSubjects(corpus).includes('ui.domConstructAssertionsPassed'));
   });
 
   it('reads which scenario and run the checklist is for', () => {

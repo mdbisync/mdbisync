@@ -4,10 +4,10 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import { parse } from 'yaml';
 import { runNames } from './isolation.ts';
 import { EnvBlockedError } from './results.ts';
@@ -89,6 +89,7 @@ describe('the request script', () => {
   ].join('\n');
   const take = (refs: string[], taken: string[] = [], refused: string[] = []) => {
     const dir = mkdtempSync(join(tmpdir(), 'scheduler-'));
+    after(() => rmSync(dir, { recursive: true, force: true }));
     mkdirSync(join(dir, 'bin'));
     writeFileSync(join(dir, 'bin', 'git'), fakeGit, { mode: 0o755 });
     const env = {

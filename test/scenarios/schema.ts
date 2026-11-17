@@ -58,6 +58,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "git.resolve-sync-branch": [],
   "git.scratch-hook": ["fixture", "source"],
   "kill.engine": ["checkpoint"],
+  "linear.await-image": ["actor", "target", "timeoutSeconds"],
   "linear.conflict-again": ["actor"],
   "linear.create": ["actor", "characters", "fixture", "title"],
   "linear.delete-permanently": ["actor", "fixture"],
@@ -92,7 +93,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "run.probe": ["compareGolden", "measure", "passes", "scheduled"],
   "run.resume-until-complete": ["command", "confirm", "direction"],
   "run.scan-canaries": ["scope", "sources"],
-  "run.settle": ["mergeGraceSeconds"],
+  "run.settle": ["mergeGraceSeconds", "typingSeconds"],
   "run.soak": ["actors", "drainSyncs", "durationSeconds", "invariantIntervalSeconds", "randomSeed", "scheduleSeconds", "serverErrorTicks", "serverErrorTotal"],
   "run.sync": ["mergeGraceSeconds", "wait", "checkDeadlineMinutes"],
   "run.token-lifecycle": ["outcomes"],
@@ -103,12 +104,14 @@ export const operationArguments: Record<string, readonly string[]> = {
   "ui.inspect-blocked": ["actor"],
   "ui.inspect-cleared": ["actor"],
   "ui.inspect-conflict": ["actor"],
+  "ui.inspect-released": ["actor"],
   "ui.inspect-rendering": ["actor", "coverAllConstructs", "group", "sampleCount"],
+  "ui.inspect-suspended": ["actor"],
   "ui.paste-image": ["actor"],
   "ui.rename-trash-restore": ["actor", "title"],
   "ui.resolve-markers": ["actor"],
   "ui.type-during-write": ["actor", "durationSeconds", "target"],
-  "ui.type-two-editors": ["actor", "actors"],
+  "ui.type-two-editors": ["actor", "actors", "durationSeconds"],
   "ui.verify-editor": ["actor", "requireIdleSeconds"],
 };
 export const states = ['offline', 'empty', 'converged', 'no-state', 'linear-seeded', 'conflicted'];
@@ -135,7 +138,7 @@ function list(value: unknown): asserts value is unknown[] {
 
 const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name lane operation path project ref scope service source storage target title'.split(' '));
 const booleanArguments = new Set('reset flaky document allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
-const numericArguments = new Set('minutes checkDeadlineMinutes characters cleanEdits conflictingDocuments count documents drainSyncs durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds serverErrorTicks serverErrorTotal stopAfterDocuments teams times'.split(' '));
+const numericArguments = new Set('minutes checkDeadlineMinutes characters cleanEdits conflictingDocuments count documents drainSyncs durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds serverErrorTicks serverErrorTotal stopAfterDocuments teams timeoutSeconds times typingSeconds'.split(' '));
 const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
 const requiredArguments: Record<string, string[]> = {
     'fault.check-age': ['minutes'],

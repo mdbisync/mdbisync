@@ -1415,7 +1415,7 @@ describe('oracles', () => {
   it('name the paths a failed comparison of path maps differs at in the check\'s reason', async () => {
     const ctx = { observations: new Map<string, unknown>([['fix.output', new Map([['b.md', 'kept'], ['a.md', 'private text']])], ['golden.linearForm', new Map([['b.md', 'kept'], ['a.md', 'other']])]]) } as unknown as RunContext;
     assert.deepEqual(await evaluateAssertion(ctx, { subject: 'fix.output', operator: 'same-as', expected: 'golden.linearForm' }), { holds: false, reason: 'same-as did not hold: differs at a.md' });
-    assert.deepEqual(await evaluateAssertion(ctx, { subject: 'fix.output', operator: 'equal', expected: 3 }), { holds: false, reason: 'equal did not hold' });
+    assert.deepEqual(await evaluateAssertion(ctx, { subject: 'fix.output', operator: 'equal', expected: 3 }), { holds: false, reason: 'equal did not hold: actual is a map of 2 entries, the other side a single value' });
   });
 
   it('name the paths a failed same-as differs at, a few at most and never their content', () => {
@@ -2840,6 +2840,21 @@ describe('linear executors', () => {
     await assert.rejects(runStep(ctx, { kind: 'linear', action: 'remove-secret', args: {} }), /found no access key sentence/);
   });
 
+  it('wait until Linear has saved a pasted image before the settle, and only so long (L6-09)', async () => {
+    const { ctx, linear, ids } = await fakeRun({ files: { 'eng/platform/pictured.md': '# Pictured\n\nA photo of the shelf.\n\n![Shelf](shelf.png)\n' } });
+    ctx.checkPollMs = 1;
+    const document = linear.documents.get(ids['eng/platform/pictured.md']?.id as string) as LinearDocument;
+    // The file's own image is not a new one: with nothing more saved, the wait ends at its bound.
+    document.content = '# Pictured\n\nA photo of the shelf.\n\n![Shelf](https://uploads.linear.app/a/shelf.png)\n';
+    await assert.rejects(
+      runStep(ctx, { kind: 'linear', action: 'await-image', args: { actor: 'editor-a', target: 'eng/platform/pictured.md', timeoutSeconds: 0 } }),
+      /held no image beyond the 1 of its file 0 seconds after the paste/,
+    );
+    // Linear saves the paste a moment later: the wait sees it and returns.
+    setTimeout(() => { document.content += '\n![image.png](https://uploads.linear.app/a/pasted.png)\n'; }, 20);
+    await runStep(ctx, { kind: 'linear', action: 'await-image', args: { actor: 'editor-a', target: 'eng/platform/pictured.md', timeoutSeconds: 5 } });
+  });
+
   it('read whether the blocked document cleared after the fix (L6-04)', async () => {
     const { ctx, linear, ids } = await fakeRun();
     const id = ids['eng/platform/plan.md']?.id as string;
@@ -3195,6 +3210,26 @@ describe('subjects', () => {
     // A plan under `summary` is still read there.
     ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { summary: { plan: { paths: ['a.md'] } }, plan: 'top-level' } });
     assert.deepEqual(await resolveSubject(ctx, 'runs.4.summary.plan.paths'), { known: true, value: ['a.md'] });
+  });
+
+  it('compare the resolved document alone once the UI session resolved its conflict (L6-05)', async () => {
+    const { ctx } = await fakeRun();
+    const resolved = { subject: 'tracked.body', operator: 'same-as', expected: 'ui.resolvedText' } as const;
+    ctx.observations.set('ui.resolvedText', '# Plan\n\nThe first paragraph.\n\nThe second paragraph.\n');
+    // Without a target the subject is every file, and the failure says so without content.
+    const shape = await evaluateAssertion(ctx, resolved);
+    assert.equal(shape.holds, false);
+    assert.match((shape as { reason: string }).reason, /^same-as did not hold: actual is a map of \d+ entries, the other side a single value$/);
+    // A single actual value against a map keeps its value in the reason.
+    ctx.observations.set('ui.flag', false);
+    assert.match((await evaluateAssertion(ctx, { subject: 'ui.flag', operator: 'same-as', expected: 'tracked.body' }) as { reason: string }).reason, /expected is a map of \d+ entries, the other side a single value; actual false$/);
+    await afterUiStep(ctx, { kind: 'ui', action: 'resolve-markers', args: { actor: 'editor-a', target: 'eng/platform/plan.md' } });
+    assert.equal(ctx.observations.get('target.path'), 'eng/platform/plan.md');
+    refreshView(ctx);
+    assert.deepEqual(await evaluateAssertion(ctx, resolved), { holds: true });
+    // Another text fails by where it first differs.
+    ctx.observations.set('ui.resolvedText', '# Plan\n\nAnother first paragraph.\n');
+    assert.deepEqual(await evaluateAssertion(ctx, resolved), { holds: false, reason: 'same-as did not hold: the texts first differ at line 3 (actual has 5 lines, expected 3)' });
   });
 
   it('compute both sides of the target document from the world', async () => {

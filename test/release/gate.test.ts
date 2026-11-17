@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { parse } from 'yaml';
 import { evaluate, parseExceptions } from '../../src/release/dependency-scan.ts';
 import { parseCreatorId, releaseGate } from '../../src/release/gate.ts';
@@ -22,6 +22,7 @@ const dependabot = `/repos/${repo}/dependabot/alerts?state=open&severity=medium,
 
 // Dependency scan results as the gate job's scan step writes them.
 const results = mkdtempSync(join(tmpdir(), 'gate-dependencies-'));
+after(() => rmSync(results, { recursive: true, force: true }));
 function dependencyResult(name: string, commit: string, audit: unknown): string {
   const result = evaluate({
     target: 'release v1.0.0', commit, release: 'v1.0.0', checked: '2026-11-16T00:00:00Z',

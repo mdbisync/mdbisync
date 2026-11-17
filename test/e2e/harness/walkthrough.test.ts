@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { it } from 'node:test';
+import { after, it } from 'node:test';
 import type { TestConfig } from './config.ts';
 import { EnvBlockedError } from './results.ts';
 import { readTemplate, WORKFLOW_FILES } from './workflow-files.ts';
@@ -39,6 +39,7 @@ function logZip(files: Record<string, string>): Buffer {
 
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'walkthrough-'));
+  after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, '.github/workflows'), { recursive: true });
   for (const file of Object.values(WORKFLOW_FILES)) writeFileSync(join(dir, '.github/workflows', file), readTemplate(file));
   return dir;

@@ -156,6 +156,8 @@ export async function openSetupConflict(ctx: RunContext, tools: FixtureTools): P
   // A whole set of markers outside code fences: lookalikes in a fence are not the conflict.
   const reached = existsSync(file) && scanMarkers(readFileSync(file, 'utf8')).sets.some((set) => set.kinds.length === 3);
   if (!reached) throw new ProductError(`the setup conflict did not reach the tracked branch: ${path} holds no complete set of conflict markers after the runs settled`);
+  // Setup's targets end with setup; the conflicted document stays the scenario's document (a UI resolution reads it).
+  ctx.observations.set('fixture.document', path);
 }
 
 /** A document's own icon and color, which a conflict's mark must give back. */
