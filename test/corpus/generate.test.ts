@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -129,6 +129,7 @@ function treeDigest(dir: string, base = dir): Map<string, string> {
 
 test("the same seed writes byte-identical trees, and the result passes the corpus check", () => {
   const a = mkdtempSync(join(tmpdir(), "corpus-a-"));
+  after(() => rmSync(a, { recursive: true, force: true }));
   const b = mkdtempSync(join(tmpdir(), "corpus-b-"));
   try {
     writeCorpus(buildCorpus("a".repeat(40), "determinism"), a, false);

@@ -9,8 +9,29 @@ import { createServer } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+import { after } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { Git } from './index.ts';
+
+// Keep ownership from allocation, including fixtures whose setup throws before returning.
+const temporaryDirectories = new Set<string>();
+// Release smoke scripts also import these helpers without running node:test.
+if (process.env.NODE_TEST_CONTEXT) {
+  after(async () => {
+    for (const directory of temporaryDirectories) await rm(directory, { recursive: true, force: true });
+  });
+}
+
+async function temporaryDirectory(prefix: string): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  temporaryDirectories.add(directory);
+  return directory;
+}
+
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  await rm(directory, { recursive: true, force: true });
+  temporaryDirectories.delete(directory);
+}
 
 export const IDENTITY = { name: 'State Test', email: 'state-test@example.com' };
 
@@ -22,9 +43,9 @@ export const IDENTITY = { name: 'State Test', email: 'state-test@example.com' };
 export async function pathWithoutGitLfs(): Promise<{ path: string; remove(): Promise<void> }> {
   const git = (process.env.PATH ?? '').split(delimiter).map((entry) => join(entry, 'git')).find((path) => existsSync(path));
   if (git === undefined) throw new Error('git is not on PATH');
-  const dir = await mkdtemp(join(tmpdir(), 'no-git-lfs-'));
+  const dir = await temporaryDirectory('no-git-lfs-');
   await writeFile(join(dir, 'git'), `#!/bin/sh\nexec '${git}' "$@"\n`, { mode: 0o755 });
-  return { path: dir, remove: () => rm(dir, { recursive: true, force: true }) };
+  return { path: dir, remove: () => removeTemporaryDirectory(dir) };
 }
 
 export interface Fixture {
@@ -40,7 +61,7 @@ export interface Fixture {
 }
 
 export async function createFixture(): Promise<Fixture> {
-  const root = await mkdtemp(join(tmpdir(), 'state-test-'));
+  const root = await temporaryDirectory('state-test-');
   const bare = join(root, 'remote.git');
   const url = pathToFileURL(bare).href;
   const top = new Git(root);
@@ -83,7 +104,7 @@ export async function createFixture(): Promise<Fixture> {
       await seedGit.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`], { env: { GIT_LFS_SKIP_SMUDGE: undefined } });
     },
     async cleanup() {
-      await rm(root, { recursive: true, force: true });
+      await removeTemporaryDirectory(root);
     },
   };
 }

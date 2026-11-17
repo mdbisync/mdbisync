@@ -12,7 +12,7 @@ test('CI shards the complete npm test suite on hosted runners', async () => {
   assert.equal(job.strategy['fail-fast'], false);
   const scripts = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')).scripts;
   assert.equal(job.steps.find((step: { name?: string }) => step.name === 'Test').run,
-    scripts.test.replace('node --test ', 'node --test --test-shard=${{ matrix.shard }}/4 '));
+    scripts.test.replace('node tools/test-temp-cleanup.ts ', 'node tools/test-temp-cleanup.ts --test-shard=${{ matrix.shard }}/4 '));
   const build = job.steps.findIndex((step: { run?: string }) => step.run === 'npm run build');
   const tests = job.steps.findIndex((step: { name?: string }) => step.name === 'Test');
   assert.ok(build >= 0 && build < tests, 'each shard must build the bundles before testing');

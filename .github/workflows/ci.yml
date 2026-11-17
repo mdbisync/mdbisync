@@ -104,7 +104,7 @@ jobs:
       - name: Fetch the release tags
         run: git fetch --quiet --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
       - name: Test
-        run: node --test --test-shard=${{ matrix.shard }}/4 "src/**/*.test.ts" "tools/**/*.test.ts" "test/**/*.test.ts" "test/**/*.test.mjs"
+        run: node tools/test-temp-cleanup.ts --test-shard=${{ matrix.shard }}/4 "src/**/*.test.ts" "tools/**/*.test.ts" "test/**/*.test.ts" "test/**/*.test.mjs"
 
   # Preserve the required check name while every shard and validation gates it.
   check:

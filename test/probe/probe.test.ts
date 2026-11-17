@@ -107,8 +107,12 @@ class FakeWorkspace {
   }
 }
 
+const bankDirectories: string[] = [];
+after(() => bankDirectories.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
 function makeBank(): string {
   const dir = mkdtempSync(join(tmpdir(), 'probe-bank-'));
+  bankDirectories.push(dir);
   mkdirSync(join(dir, 'lists'));
   mkdirSync(join(dir, 'images'));
   mkdirSync(join(dir, 'assets'));
