@@ -352,7 +352,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (head !== sync && hold === null && pushUnverified.length > 0 && headTree !== null
       && (await unverifiedPaths(git, tracked, headTree, context.mapping.zones)).length === 0) {
       head = await commitTree(git, {base: headTree, changes: new Map(), parents: [head, tracked], message: TRACKED_MERGE_MESSAGE, identity});
-      pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
+      pushUnverified = [];
     }
     if (head !== sync && pushUnverified.length > 0) {
       if (sync !== null) {
