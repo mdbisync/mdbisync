@@ -8,7 +8,8 @@ import { it, afterEach } from 'node:test';
 import { LinearReads } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture as makeCapture, imageFindings, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
+import { captureAssets, createAssetCapture as makeCapture, DownloadRetryError, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
+import { imageLinks } from './image-links.ts';
 import { destinations } from '../initial-sync/uploads.ts';
 import { fixText } from '../format/index.ts';
 
@@ -99,7 +100,7 @@ it('returns replacement bytes when a cached LFS pointer has no readable object',
 it('restores cached upload spellings before restricting new downloads to the upload host', async () => {
   const fixture = await createFixture();
   try {
-    // A link, not an image: the image gate blocks an image that is not an upload before any cache lookup.
+    // Historical cached ordinary links retain their repository spelling.
     const previous = '[Image](<./image.png?download=1#page=2>)\n';
     await fixture.seed({'docs/plan.md': previous, 'docs/image.png': Buffer.from('image')});
     const git = await fixture.clone('cached-links');
@@ -114,9 +115,9 @@ it('restores cached upload spellings before restricting new downloads to the upl
     const fresh = await read('docs/other.md', current, new Map([[hash, url]]));
     assert.equal(fresh.body, '[Image](<image.png?download=1#page=2>)\n');
     assert.equal(fresh.files.size, 0);
-    // The same destination as an image is blocked, cached or not.
-    await assert.rejects(read('docs/plan.md', `!${current}`, new Map([[hash, url]]), previous), (error: unknown) =>
-      error instanceof ImageBlockedError && JSON.stringify(error.findings) === JSON.stringify([{image: 1, total: 1, line: 1, reason: 'not-uploaded'}]));
+    const image = await read('docs/plan.md', `!${current}`, new Map([[hash, url]]), previous);
+    assert.equal(image.body, `[Image](${url}?download=1#page=2)\n`);
+
   } finally { await fixture.cleanup(); }
 });
 
@@ -147,7 +148,7 @@ it('keeps the previous spelling of each linked file whether or not the cache kno
       const tracked: Record<string, string> = {'docs/img.png': 'same-image', 'docs/shot (1).png': 'shot', 'docs/a<b.png': 'angle'};
       for (const [file, content] of result.files) assert.equal(contentBytes(content).toString(), tracked[file]);
       // The parser reads all five as images again (each a local file, so none is an upload).
-      assert.equal(imageFindings(result.body).length, 5);
+      assert.equal(imageLinks(result.body).images.length, 5);
     }
   } finally { await fixture.cleanup(); }
 });
@@ -230,38 +231,39 @@ it('a download kept by the stage step is taken by the apply step without a reque
 });
 
 for (const destination of ['https://example.com/a.png', 'http://example.com/a.png', 'data:image/png;base64,AAAA', 'relative.png', '/absolute.png', '', 'https://uploads.linear.app.example.com/a.png', 'http://uploads.linear.app/a.png']) {
-  it(`rejects non-upload image destination ${JSON.stringify(destination)} in every image form`, () => {
+  it(`rewrites non-upload image destination ${JSON.stringify(destination)} in every image form`, () => {
     const body = `![Inline](${destination})\n\n[![Linked](${destination})](https://example.com)\n\n![Reference][picture]\n\n[picture]: <${destination}>\n`;
     const expected = 3;
-    assert.deepEqual(imageFindings(body), Array.from({length: expected}, (_, index) => ({image: index + 1, total: expected, line: index * 2 + 1, reason: 'not-uploaded'})));
+    assert.deepEqual(imageLinks(body).images, Array.from({length: expected}, (_, index) => ({image: index + 1, total: expected, line: index * 2 + 1})));
   });
 }
 
-it('applies the gate itself, before any download, so every path from Linear to git blocks the same images', async () => {
+it('repairs external images without downloading them and still checks uploaded bytes', async () => {
   const fixture = await createFixture();
   try {
     await fixture.seed({'docs/plan.md': '# Plan\n', 'docs/diagram.png': Buffer.from('diagram')});
     const git = await fixture.clone('shared-gate');
     const base = await git.text(['rev-parse', 'origin/main']);
     let gets = 0;
-    const read = createAssetCapture(git, resolveStateConfig({}), base, async () => { gets++; return new Response(Buffer.from('never')); });
-    // An external URL and a relative path, beside an upload that would otherwise be downloaded.
+    const read = createAssetCapture(git, resolveStateConfig({}), base, async () => { gets++; return new Response(png); });
     for (const destination of ['https://images.example.test/chart.png', './diagram.png']) {
       const body = `# Plan\n\n![Upload](https://uploads.linear.app/w/a.png)\n\n![Image](${destination})\n`;
-      await assert.rejects(read('docs/plan.md', body, new Map()), (error: unknown) =>
-        error instanceof ImageBlockedError && JSON.stringify(error.findings) === JSON.stringify([{image: 2, total: 2, line: 5, reason: 'not-uploaded'}]));
+      const result = await read('docs/plan.md', body, new Map());
+      assert.ok(result.body.includes(`[Image](${destination})`));
+      assert.ok(!result.body.includes(`![Image](${destination})`));
+      assert.ok(result.observedBody?.includes(`![Image](${destination})`));
     }
-    assert.equal(gets, 0);
+    assert.equal(gets, 1);
   } finally { await fixture.cleanup(); }
 });
 
 it('counts upload images and repeated reference occurrences without treating links or code as images', () => {
   const body = '![Good](https://uploads.linear.app/a.png)\n\n![Bad][asset]\n\n![Bad again][asset]\n\n[asset]: https://example.com/a.png\n\n[Link](data:text/plain,hello)\n\n`![Code](bad.png)`\n';
-  assert.deepEqual(imageFindings(body), [
-    {image:2, total:3, line:3, reason:'not-uploaded'},
-    {image:3, total:3, line:5, reason:'not-uploaded'},
+  assert.deepEqual(imageLinks(body).images, [
+    {image:2, total:3, line:3},
+    {image:3, total:3, line:5},
   ]);
-  assert.deepEqual(imageFindings('![Good][asset]\n\n[asset]: https://uploads.linear.app/a.png\n'), []);
+  assert.deepEqual(imageLinks('![Good][asset]\n\n[asset]: https://uploads.linear.app/a.png\n').images, []);
 });
 
 it('uses detected extensions despite MIME type and URL, and reuses unrecognized tracked bytes', async () => {
@@ -342,16 +344,14 @@ it('reports all permanent download failures at original image occurrences', asyn
     await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'plan.md', body, new Map(), async (input) => String(input).endsWith('/large') ? new Response(png, {headers:{'content-length':String(10 * 1024 * 1024 + 1)}}) : new Response(null, {status:410})), (error) => {
       assert.ok(error instanceof ImageBlockedError);
       assert.deepEqual(error.findings, [
-        {image:1, total:3, line:1, reason:'unreadable'},
         {image:2, total:3, line:3, reason:'too-large'},
-        {image:3, total:3, line:5, reason:'unreadable'},
       ]);
       return true;
     });
   } finally { await fixture.cleanup(); }
 });
 
-it('keeps permanent image findings when another download needs a retry', async () => {
+it('retries when a dead image shares a document with a transient download', async () => {
   const fixture = await createFixture();
   try {
     await fixture.seed({'plan.md':'Plan.'});
@@ -360,8 +360,7 @@ it('keeps permanent image findings when another download needs a retry', async (
     for (const statuses of [[404, 503], [503, 404]]) {
       let index = 0;
       await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'plan.md', '![First](https://uploads.linear.app/first)\n![Second](https://uploads.linear.app/second)', new Map(), async () => new Response(null, {status:statuses[index++]!})), (error) => {
-        assert.ok(error instanceof ImageBlockedError);
-        assert.deepEqual(error.findings, [{image:statuses.indexOf(404) + 1, total:2, line:statuses.indexOf(404) + 1, reason:'unreadable'}]);
+        assert.ok(error instanceof DownloadRetryError);
         return true;
       });
     }
@@ -382,11 +381,13 @@ it('cancels error responses and reuses failures across repeated upload destinati
         requests++;
         return new Response(new ReadableStream({cancel() {cancelled = true;}}), {status});
       });
-      await assert.rejects(read('plan.md', body, new Map()));
+      if (status === 404) assert.ok((await read('plan.md', body, new Map())).body.startsWith('[First]'));
+      else await assert.rejects(read('plan.md', body, new Map()));
       assert.equal(requests, 1);
       assert.equal(cancelled, true);
       if (status !== 401 && status !== 403) {
-        await assert.rejects(read('other.md', body, new Map()));
+        if (status === 404) await read('other.md', body, new Map());
+        else await assert.rejects(read('other.md', body, new Map()));
         assert.equal(requests, 1, 'failures are cached for the rest of this capture');
       }
     }
@@ -532,5 +533,17 @@ it('encodes a restored link\'s fragment, so it cannot end the link and add anoth
     const query = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `[File](${url}?download=1&page=2&amp;lt;x&q=a%26b#a&b)`, new Map([[hash, url]]), async () => { throw new Error('a cached link must not be downloaded'); });
     assert.equal(query.body, '[File](existing.png?download=1&page=2%26lt;x&q=a%26b#a&b)');
     assert.deepEqual(destinations(query.body).map(({ node }) => node.url), ['existing.png?download=1&page=2%26lt;x&q=a%26b#a&b']);
+  } finally { await fixture.cleanup(); }
+});
+
+it('repairs a dead cached upload with query and fragment suffixes', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('dead-query');
+    const base = await git.text(['rev-parse','origin/main']);
+    const url = 'https://uploads.linear.app/workspace/missing';
+    const result = await captureAssets(git, resolveStateConfig({}), base, 'plan.md', `![Chart](${url}?version=2#part)`, new Map([['a'.repeat(64),url]]), async () => new Response(null,{status:404}));
+    assert.equal(result.body, `[Chart](${url}?version=2#part)`);
   } finally { await fixture.cleanup(); }
 });

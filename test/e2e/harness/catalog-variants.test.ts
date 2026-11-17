@@ -149,63 +149,106 @@ describe('the API-path image gate', () => {
     assert.doesNotMatch(report([{ ...base, id: 'L1-01', runId: '111111' }]), /Image gate/);
   });
 
-  it('L2-42: an uploaded image reaches git; a written path blocks its document with the notice line, which clears after the fix', { timeout: 240_000 }, async (t) => {
-    let blockedComments: string[] = [];
+  it('L2-42: a valid upload reaches git while a path image becomes a reviewed link written back after merge', { timeout: 240_000 }, async (t) => {
     const outcomes = await runOnFakeServices(t, scenario('L2-42'), DOCUMENTS, {
       inspect: async (ctx: RunContext) => {
-        blockedComments = ctx.observations.get('blocked.comments') as string[];
-        const blocked = ctx.observations.get('imageGate.blocked') as { path: string };
-        assert.notEqual(blocked.path, (ctx.observations.get('linear.image') as { path: string }).path, 'the upload and the path go into two documents');
-        const [label] = ctx.observations.get('expected.blockedImageLines') as string[];
-        assert.match(label ?? '', /^Image 1 of 1 \(line \d+\)$/);
-        // The first target is the document the upload went into.
+        const source = ctx.observations.get('imageRepair.source') as { path: string; line: number };
+        assert.notEqual(source.path, (ctx.observations.get('linear.image') as { path: string }).path, 'the upload and the path go into two documents');
+        assert.ok(source.line > 0);
         const notices = (await commentsWithState(ctx.live!.app, ctx.observations.get('target.id') as string)).filter((comment) => isImageNotice(comment.body));
-        assert.deepEqual(notices, [], 'the uploaded image\'s document got no image notice');
-        // The fake keeps the written path; the report names its kind, never the path.
+        assert.deepEqual(notices, [], 'the valid upload got no image notice');
         assert.deepEqual(resultOf(ctx, { result: 'pass' }, { startedAt: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true } }).imageGate, { storedDestination: 'relative-path' });
       },
     });
-    allHold(outcomes, [...INVARIANTS, 'tracked.uploadedImage', 'blocked.icon', 'blocked.color', 'blocked.imageLines', 'blocked.openImageNotices', 'blocked.marksRestored', 'tracked.body', 'pullRequests.lintFindings']);
-    assert.equal(blockedComments.filter(isImageNotice).length, 1, 'one image notice before the fix');
+    allHold(outcomes, [...INVARIANTS, ...scenario('L2-42').checks.assertions.map(assertion => assertion.subject)]);
   });
 
-  it('L2-42 where Linear turns the written path into an upload that answers 404: the report names the upload and the status', { timeout: 240_000 }, async (t) => {
+  for (const status of [404, 410]) it(`L2-42: an upload answering ${status} becomes a reviewed link and reaches Linear after merge`, { timeout: 240_000 }, async (t) => {
     const dead = 'https://uploads.linear.app/fake-workspace/plan-dead.png';
     let downloads = 0;
     const outcomes = await runOnFakeServices(t, scenario('L2-42'), DOCUMENTS, {
       intercept: (url, init) => {
-        // Linear stores an upload of its own in place of the written path, as it did in some live runs.
         if (typeof init?.body === 'string' && /\.\.\/images\/plan-/.test(init.body)) init.body = init.body.replace(/\.\.\/images\/plan-[a-z0-9-]+\.png/g, dead);
         if (url === dead) {
           downloads += 1;
-          return new Response('', { status: 404 });
+          return new Response('', { status });
         }
         return undefined;
       },
       inspect: async (ctx: RunContext) => {
-        const record = ctx.observations.get('imageGate.record');
-        assert.deepEqual(record, { storedDestination: 'upload', uploadStatus: 404 });
+        assert.deepEqual(ctx.observations.get('imageGate.record'), { storedDestination: 'upload', uploadStatus: status });
         const result = resultOf(ctx, { result: 'pass' }, { startedAt: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true } });
-        assert.deepEqual(result.imageGate, { storedDestination: 'upload', uploadStatus: 404 });
+        assert.deepEqual(result.imageGate, { storedDestination: 'upload', uploadStatus: status });
         assert.doesNotMatch(JSON.stringify(result), /fake-workspace/, 'the result keeps no upload URL');
       },
     });
-    // The sync downloaded it too and blocked the document; the fix clears it.
     assert.ok(downloads >= 2, 'the sync and the harness both requested the upload');
-    allHold(outcomes, ['blocked.icon', 'blocked.color', 'blocked.imageLines', 'blocked.openImageNotices', 'blocked.marksRestored']);
+    allHold(outcomes, [...INVARIANTS, ...scenario('L2-42').checks.assertions.map(assertion => assertion.subject)]);
   });
 
-  it('L2-42 without the fix: the notice stays open and the marks stay, so the clear subjects fail', { timeout: 240_000 }, async (t) => {
+  it('L2-42 still blocks upload bytes that are HTML and clears the notice after correction', { timeout: 240_000 }, async (t) => {
+    const invalid = 'https://uploads.linear.app/fake-workspace/invalid.png';
+    const spec = scenario('L2-42');
+    spec.steps[3] = {kind: 'linear', action: 'remove-image', args: {actor: 'editor-a'}};
+    spec.checks.assertions = [
+      {subject: 'tracked.uploadedImage', operator: 'equal', expected: true},
+      {subject: 'blocked.icon', operator: 'equal', expected: 'Cross'},
+      {subject: 'blocked.color', operator: 'equal', expected: 'red'},
+      {subject: 'blocked.imageLines', operator: 'same-as', expected: 'expected.blockedImageLines'},
+      {subject: 'blocked.openImageNotices', operator: 'equal', expected: 0},
+      {subject: 'blocked.marksRestored', operator: 'equal', expected: true},
+      {subject: 'tracked.body', operator: 'same-as', expected: 'linear.body'},
+      {subject: 'pullRequests.lintFindings', operator: 'equal', expected: []},
+    ];
+    const outcomes = await runOnFakeServices(t, spec, DOCUMENTS, {
+      intercept: (url, init) => {
+        if (typeof init?.body === 'string' && /\.\.\/images\/plan-/.test(init.body)) init.body = init.body.replace(/\.\.\/images\/plan-[a-z0-9-]+\.png/g, invalid);
+        return url === invalid ? new Response('<html>Not an image</html>', {headers: {'content-type': 'image/png'}}) : undefined;
+      },
+      inspect: async (ctx) => {
+        const comments = ctx.observations.get('blocked.comments') as string[];
+        assert.equal(comments.filter(isImageNotice).length, 1);
+        assert.match(comments.find(isImageNotice)!, /the uploaded file is not a supported image or document/);
+      },
+    });
+    allHold(outcomes, [...INVARIANTS, ...spec.checks.assertions.map(assertion => assertion.subject)]);
+  });
+
+  it('L2-42 rejects a write-back that leaves the original image in Linear', { timeout: 240_000 }, async (t) => {
     const outcomes = await runOnFakeServices(t, scenario('L2-42'), DOCUMENTS, {
-      // The editor looks at the blocked document and leaves the image in it.
-      steps: { 'linear.remove-image': async (ctx) => { for (const [name, value] of [['blocked.icon', null], ['blocked.color', null], ['blocked.comments', []]] as const) ctx.observations.set(name, value); } },
+      intercept: (_url, init) => {
+        if (!_url.endsWith('/graphql') || typeof init?.body !== 'string') return undefined;
+        const body = JSON.parse(init.body) as { operationName?: string; variables?: { input?: { content?: string } } };
+        const input = body.variables?.input;
+        if (body.operationName === 'UpdateDocument' && typeof input?.content === 'string') {
+          input.content = input.content.replace(/(?<!!)\[plan ([a-z0-9-]+)\]/g, '![plan $1]');
+          init.body = JSON.stringify(body);
+        }
+        return undefined;
+      },
+    });
+    const outcome = (name: string) => outcomes.find(candidate => candidate.name === name);
+    assert.equal(outcome('imageRepair.storedLink')?.ok, false, 'an ignored link write-back must fail');
+    assert.equal(outcome('imageRepair.proposedLink')?.ok, true, 'the reviewed proposal still held the link');
+    assert.equal(outcome('imageRepair.listedInPr')?.ok, true);
+  });
+
+  it('L2-42 rejects a proposal that retains the image or omits its position', { timeout: 240_000 }, async (t) => {
+    const outcomes = await runOnFakeServices(t, scenario('L2-42'), DOCUMENTS, {
+      steps: { 'linear.inspect-image-repair': async (ctx, args) => {
+        await STEP_ACTIONS['linear.inspect-image-repair']!(ctx, args);
+        const source = ctx.observations.get('imageRepair.source') as { body: string };
+        const proposal = ctx.observations.get('imageRepair.proposal') as { proposed: string; description: string };
+        ctx.observations.set('imageRepair.proposal', {...proposal, proposed: source.body, description: ''});
+      } },
     });
     const outcome = (name: string) => outcomes.find((candidate) => candidate.name === name);
-    assert.equal(outcome('blocked.openImageNotices')?.ok, false);
-    assert.equal(outcome('blocked.marksRestored')?.ok, false);
-    assert.equal(outcome('blocked.imageLines')?.ok, false, 'no notice read means no matching line');
-    assert.equal(outcome('tracked.uploadedImage')?.ok, true, 'the upload into the other document still reached git');
+    assert.equal(outcome('imageRepair.proposedLink')?.ok, false);
+    assert.equal(outcome('imageRepair.listedInPr')?.ok, false);
+    assert.equal(outcome('imageRepair.storedLink')?.ok, true, 'the genuine link write-back still completed');
+    assert.equal(outcome('tracked.uploadedImage')?.ok, true, 'the valid upload in the other document still reached git');
   });
+
 });
 
 describe('git.init-files', () => {

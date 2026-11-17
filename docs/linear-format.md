@@ -65,8 +65,8 @@ What both commands leave alone:
   spaces. Every image must be such a path to a file of the repository (see
   [`image-not-in-repository`](#image-not-in-repository)); links to web
   pages and other URLs are fine. In Linear, a link typed as a relative
-  path to a file other than a Markdown document is blocked like an image
-  that is not an upload (`image-blocked`): the sync would upload the file
+  path to a file other than a Markdown document is blocked (`image-blocked`):
+  the sync would upload the file
   it names, so only the repository chooses which files reach Linear. A
   link the file already had stays allowed.
 - **The sync's conflict markers.** A conflict the sync writes is ordinary
@@ -313,6 +313,16 @@ Table column alignment is dropped.
 
 Instead, use plain separators (`| -- | -- |`).
 
+### `link-scheme`
+
+Links must use http, https, mailto, a path or a fragment.
+
+```markdown
+[Unsupported](javascript:alert%281%29)
+```
+
+On pull, unsupported links are removed together with their text.
+
 ### `link-title`
 
 A link title is dropped. This holds for an inline link and for a reference
@@ -437,6 +447,26 @@ where that one is found.
 ```
 
 Instead, fix the path, or add the missing file in the same change.
+
+### `upload-file-refused`
+
+A file named as the sync names a captured upload fails the upload check:
+documents that link it are blocked when they change in Linear. When the
+sync captures a file uploaded in Linear, it names it by its content's
+SHA-256 and the extension of its type (`<sha256>.png`). A later sync checks
+such a file again before a document links it, and a file an earlier, weaker
+check admitted, such as an SVG with HTML inside it, no longer passes. `lint`
+reports every such file under the paths it checks, so `mdbisync lint` with
+no path checks the whole repository; the `linear-format` hooks pass only
+Markdown files and do not. Files with other names came through git and are
+not checked. The sync never removes or rewrites the file itself.
+
+```text
+docs/0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8.svg:1: upload-file-refused: …
+```
+
+Instead, remove the file, or replace it with a file the check admits, and
+change the documents that link it.
 
 ## Install the hook
 

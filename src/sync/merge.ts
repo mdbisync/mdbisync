@@ -3,6 +3,7 @@
 // The result says, per synchronized path, what Linear must change so that
 // it holds the merge result: a write, a rename or move, a create or a trash.
 
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -147,7 +148,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
   const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase);
   const { tree, unresolved: conflicts } = resolved;
 
-  const linearSide = await synchronizedFiles(git, linear, facts);
+  const linearSide = await synchronizedFiles(git, linear, facts, ids);
   const resultSide = await synchronizedFiles(git, tree, facts);
   const conflicted = new Set(conflicts);
 
@@ -344,7 +345,7 @@ export interface Side {
  * reported by the linter, nor with a title Linear refuses, nor colliding.
  * The same rules as the initial sync's plan.
  */
-async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Promise<Side> {
+async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts, observedRepairs?: IdMap): Promise<Side> {
   const mapping = await loadMapping(git, treeish);
   const blobs = await readBlobs(git, mapping.documents.map((document) => document.oid));
   const files = new Map<string, SideFile>();
@@ -353,7 +354,10 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   for (const document of mapping.documents) {
     const rules: FileLeftOutRule[] = lintInTree(document.path, (blobs.get(document.oid) as Buffer).toString('utf8'), mapping.files).map((finding) => finding.rule);
     if (lengthRefusal({ title: document.title }, facts) !== undefined) rules.push('title-too-long');
-    if (rules.length > 0) leave(document.path, rules);
+    // A checked repair's source is an observation used only for comparison, never a writable result.
+    const repair = observedRepairs?.get(document.path)?.pullRewrite;
+    const observed = repair !== undefined && createHash('sha256').update(blobs.get(document.oid)!).digest('hex') === repair.hash;
+    if (rules.length > 0 && !observed) leave(document.path, rules);
     else files.set(document.path, toSideFile(document));
   }
   for (const file of mapping.leftOut) leave(file.path, [file.rule]);

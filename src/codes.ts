@@ -80,7 +80,7 @@ export const STRUCTURAL_CODES = ['edit-wins-delete', 'rename-and-edit', 'git-pat
 export type StructuralCode = (typeof STRUCTURAL_CODES)[number];
 
 /** Why the sync did not write a document. */
-export const SKIP_REASONS = ['edited-in-linear', 'missing-in-linear', 'conflict', 'renamed-to-unwritable', 'suspended'] as const;
+export const SKIP_REASONS = ['edited-in-linear', 'missing-in-linear', 'conflict', 'renamed-to-unwritable', 'suspended', 'pull-repair-pending'] as const;
 export type SkipReason = (typeof SKIP_REASONS)[number];
 
 /** Why the sync's capture did not finish. */

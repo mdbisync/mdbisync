@@ -3,6 +3,26 @@ import { parseXml, XmlElement, type XmlNode } from '@rgrove/parse-xml';
 /** Every extension `uploadExtension` gives: the asset files a sync writes next to a document. */
 export const UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.png', '.jpg', '.gif', '.webp', '.pdf', '.avif', '.mp4', '.webm', '.svg']);
 
+/**
+ * Whether `path` is named as a capture names a downloaded upload: its content's
+ * SHA-256 in lowercase hex and an extension `uploadExtension` gives.
+ */
+export function isCaptureName(path: string): boolean {
+  const match = /^[0-9a-f]{64}(\.[a-z0-9]+)$/.exec(path.slice(path.lastIndexOf('/') + 1));
+  return match !== null && UPLOAD_EXTENSIONS.has(match[1]!);
+}
+
+/**
+ * Whether a file named as a capture names it still passes the upload check:
+ * its bytes are an admitted type and that type's extension is the file's.
+ * Files with other names are not uploads the sync admitted, and pass.
+ */
+export function admitsCapturedFile(path: string, bytes: Buffer): boolean {
+  if (!isCaptureName(path)) return true;
+  const extension = uploadExtension(bytes);
+  return extension !== null && path.endsWith(extension);
+}
+
 /** A signature identifies a type, not whether a media decoder can render it. */
 export function uploadExtension(bytes: Buffer): string | null {
   const starts = (signature: number[]) => bytes.subarray(0, signature.length).equals(Buffer.from(signature));
@@ -58,31 +78,78 @@ function webmHeader(bytes: Buffer): boolean {
   return found;
 }
 
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
+
+/**
+ * Static SVG elements. Not listed, so refused: script, foreignObject, animation,
+ * and image and feImage, which load another file.
+ */
+const STATIC_SVG_ELEMENTS: ReadonlySet<string> = new Set([
+  'svg', 'g', 'defs', 'symbol', 'use', 'switch', 'a', 'view', 'title', 'desc', 'metadata', 'style',
+  'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'textPath',
+  'linearGradient', 'radialGradient', 'stop', 'pattern', 'clipPath', 'mask', 'marker', 'filter',
+  'feBlend', 'feColorMatrix', 'feComponentTransfer', 'feComposite', 'feConvolveMatrix', 'feDiffuseLighting',
+  'feDisplacementMap', 'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB', 'feFuncG', 'feFuncR',
+  'feGaussianBlur', 'feMerge', 'feMergeNode', 'feMorphology', 'feOffset', 'fePointLight', 'feSpecularLighting',
+  'feSpotLight', 'feTile', 'feTurbulence',
+]);
+
+/**
+ * CSS, in a style element or any attribute, may refer only to fragments of this file.
+ * CSS escapes are refused because they could spell a function name the check misses.
+ */
+function loadsCss(css: string): boolean {
+  // CSS whitespace only: a URL keeps other spaces, such as U+00A0, as part of its path.
+  return /\\|@import|image-set[ \t\n\r\f]*\(|\bsrc[ \t\n\r\f]*\(|url[ \t\n\r\f]*\([ \t\n\r\f]*(?=[^ \t\n\r\f])(?!['"]?[ \t\n\r\f]*#)/i.test(css);
+}
+
+/** The prefixes `xml` and `xmlns` are fixed by XML Namespaces; a file may not bind them. */
+function declaredPrefix(key: string): string | null | undefined {
+  if (key === 'xmlns') return '';
+  if (!key.startsWith('xmlns:')) return undefined;
+  const prefix = key.slice(6);
+  return prefix === '' || prefix.includes(':') || prefix === 'xml' || prefix === 'xmlns' ? null : prefix;
+}
+
+/** An admitted SVG has only static SVG elements, resolved through every xmlns in scope. */
 function safeSvg(bytes: Buffer): boolean {
   try {
     const xml = new TextDecoder('utf-8', {fatal:true}).decode(bytes);
     const document = parseXml(xml, {preserveDocumentType:true});
     const root = document.root;
-    if (root === null) return false;
-    const names = root.name.split(':');
-    if (names.length > 2 || names.at(-1) !== 'svg') return false;
-    const namespace = root.attributes[names.length === 2 ? `xmlns:${names[0]}` : 'xmlns'];
-    if (namespace !== undefined && namespace !== 'http://www.w3.org/2000/svg') return false;
-    if (names.length === 2 && namespace === undefined) return false;
-    const nodes: XmlNode[] = [...document.children];
+    if (root === null || root.name.split(':').at(-1) !== 'svg') return false;
+    // An SVG without a default xmlns stays admitted, as its elements are read as SVG.
+    const nodes: Array<{node:XmlNode; scope:ReadonlyMap<string, string>}> =
+      document.children.map((node) => ({node, scope:new Map([['', SVG_NAMESPACE]])}));
     while (nodes.length > 0) {
-      const node = nodes.pop()!;
+      const {node, scope: parent} = nodes.pop()!;
       // Do not interpret DTDs, custom entities or external stylesheets.
       if (node.type === 'doctype' || node.type === 'pi') return false;
       if (!(node instanceof XmlElement)) continue;
-      const element = node.name.split(':').at(-1)!.toLowerCase();
-      // Animation can replace a checked href with a script URL after parsing.
-      if (['script', 'foreignobject', 'set'].includes(element) || element.startsWith('animate')) return false;
+      let scope = parent;
       for (const [key, value] of Object.entries(node.attributes)) {
-        const name = key.split(':').at(-1)!.toLowerCase();
-        if (name.startsWith('on') || key === 'xml:base' || (name === 'href' && !value.startsWith('#'))) return false;
+        const prefix = declaredPrefix(key);
+        if (prefix === null) return false;
+        if (prefix === undefined) continue;
+        if (scope === parent) scope = new Map(parent);
+        (scope as Map<string, string>).set(prefix, value);
       }
-      nodes.push(...node.children);
+      const name = node.name.split(':');
+      if (name.length > 2 || scope.get(name.length === 2 ? name[0]! : '') !== SVG_NAMESPACE) return false;
+      if (!STATIC_SVG_ELEMENTS.has(name.at(-1)!)) return false;
+      // A browser reads a style sheet from direct text only; an element inside could split a checked word.
+      if (name.at(-1) === 'style' && (node.children.some((child) => child instanceof XmlElement) || loadsCss(node.text))) return false;
+      for (const [key, value] of Object.entries(node.attributes)) {
+        if (declaredPrefix(key) !== undefined) continue;
+        const parts = key.split(':');
+        if (parts.length > 2) return false;
+        const [prefix, local] = parts.length === 2 ? parts as [string, string] : ['', key];
+        // Unprefixed attributes have no namespace; only xlink and xml:lang/xml:space are admitted with one.
+        if (prefix === 'xml' ? !['lang', 'space'].includes(local) : prefix !== '' && scope.get(prefix) !== XLINK_NAMESPACE) return false;
+        if (local.toLowerCase().startsWith('on') || (local === 'href' && !value.startsWith('#')) || loadsCss(value)) return false;
+      }
+      nodes.push(...node.children.map((child) => ({node:child, scope})));
     }
     return true;
   } catch { return false; }

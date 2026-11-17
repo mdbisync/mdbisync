@@ -114,7 +114,7 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nPrivate body canary.\n');
   });
 
-  it('reports a blocked upload and a retry separately through the sync CLI', async () => {
+  it('reports a repaired dead upload and a retry separately through the sync CLI', async () => {
     await fixture.seed({'.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n'});
     world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/dead.png)';
     world.linear.documents.push({id:'retry', title:'retry', projectId:'project-api', content:'![Image](https://uploads.linear.app/workspace/retry.png)', createdAt:'2026-01-04T00:00:00Z'});
@@ -129,11 +129,11 @@ describe('capture from Linear', () => {
     }});
     assert.equal(result.exitCode, 0, result.stderr);
     const report = JSON.parse(await readFile(reportFile, 'utf8'));
-    assert.equal(report.capture.blocked.length, 1);
+    assert.equal(report.capture.blocked.length, 0);
     assert.deepEqual(report.capture.leftOut, [{id:'retry', rule:'download-retry'}]);
     assert.match(result.stdout, /download-retry/);
-    assert.equal(world.linear.comments.size, 1);
-    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    assert.equal(world.linear.comments.size, 0);
+    assert.notEqual(world.linear.documents[0]!.icon, 'Cross');
     assert.notEqual(world.linear.documents[1]!.icon, 'Cross');
   });
 
@@ -710,47 +710,46 @@ describe('capture from Linear', () => {
     '![Image][picture]\n\n[picture]: https://example.com/a.png\n',
     '[![Image](https://example.com/a.png)](https://example.com)\n',
   ]) {
-    it(`blocks non-upload images and clears the episode after correction: ${body.trim()}`, async () => {
+    it(`records the original image while preparing a checked pull repair: ${body.trim()}`, async () => {
       Object.assign(world.linear.documents[0]!, {content:body, icon:'Fire', color:'#123456'});
-      world.linear.documents.push({id:'safe', title:'safe', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'[Site](https://example.com/a.png)\n'});
-      let gets = 0;
-      const captureNow = () => capture(context, {config, state:context.fetched.state, fetch:async () => {gets++; throw new Error('Unexpected download');}});
-      const lintTree = async (commit: string) => {
-        const tree = await listTree(context.git, commit);
-        const files = new Set(tree.map(({path}) => path));
-        const markdown = tree.filter(({path}) => path.endsWith('.md'));
-        const blobs = await readBlobs(context.git, markdown.map(({oid}) => oid));
-        for (const {path, oid} of markdown) assert.deepEqual(lintInTree(path, blobs.get(oid)!.toString(), files), []);
-      };
-      const first = await captureNow();
-      assert.equal(first.ok, true);
-      assert.equal(first.blocked.length, 1);
-      assert.equal(gets, 0);
-      assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
-      assert.equal(await text('docs/safe.md'), '[Site](https://example.com/a.png)\n');
-      await lintTree(first.state.linear!);
-      const comment = [...world.linear.comments.values()][0]!;
-      assert.equal(comment.body, 'Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n- Image 1 of 1 (line 1): not uploaded to this workspace. Upload the file instead of linking to it.');
-      assert.equal(world.linear.documents[0]!.icon, 'Cross');
-      assert.equal(world.linear.documents[0]!.color, '#EB5757');
-      await refresh();
-      await captureNow();
-      assert.equal(world.linear.comments.size, 1);
-      Object.assign(world.linear.documents[0]!, {content:'\n' + body, updatedAt:'2026-03-01T00:00:00Z'});
-      await refresh();
-      await captureNow();
-      assert.equal(world.linear.comments.size, 1);
-      assert.match(comment.body, /line 2/);
-      Object.assign(world.linear.documents[0]!, {content:'Corrected.\n', updatedAt:'2026-04-01T00:00:00Z'});
-      await refresh();
-      const fixed = await captureNow();
-      assert.equal(fixed.blocked.length, 0);
-      await lintTree(fixed.state.linear!);
-      assert.equal(comment.resolved, true);
+      const result = await capture(context, {config, state:context.fetched.state, fetch:async () => {throw new Error('Unexpected download');}});
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.blocked, []);
+      assert.deepEqual(result.leftOut, []);
+      assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n' + body);
+      const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
+      assert.equal(entry.pullRewrite?.images.length, 1);
+      assert.equal(entry.pullRewrite?.images[0]?.line, 1);
+      assert.equal(world.linear.comments.size, 0);
       assert.equal(world.linear.documents[0]!.icon, 'Fire');
-      assert.equal(world.linear.documents[0]!.color, '#123456');
     });
   }
+
+  it('scans a removed image even when the repaired text equals the accepted file', async () => {
+    world.linear.documents[0]!.content = 'Original.\n\n![Discarded](data:text/plain,rejected-canary)\n';
+    let checks = 0;
+    const result = await capture(context, {config, state:context.fetched.state, security: {configured:true, check:async files => {
+      checks++;
+      return [...files.values()].some(content => String(content).includes('rejected-canary')) ? [{hook:'secret-check',line:3}] : [];
+    }}});
+    assert.ok(checks > 0);
+    assert.equal(result.blocked.length, 1);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+  });
+
+  it('preserves front matter containing image syntax and accepted link spelling', async () => {
+    const head = '---\nowner: "![meta](https://example.com/meta.png)"\n---\n\n';
+    const previous = context.fetched.state.linear!;
+    const baseline = await commitTree(context.git, {parents:[previous], base:previous, changes:new Map([['docs/plan.md', head + '[Chart](<https://example.com/chart.png>)\n']]), message:'Accepted spelling', identity:IDENTITY});
+    await pushAtomic(context.git, config, [{ref:stateRef(config,'linear'), expected:previous, next:baseline}]);
+    await refresh();
+    world.linear.documents[0]!.content = '![Chart](https://example.com/chart.png)\n';
+    const result = await run();
+    assert.deepEqual(result.leftOut, []);
+    const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
+    assert.equal(entry.pullRewrite?.replacement, head + '[Chart](<https://example.com/chart.png>)\n');
+    assert.equal(await text('docs/plan.md'), head + '![Chart](https://example.com/chart.png)\n');
+  });
 
   it('keeps links to an image-blocked reserved document as Linear URLs', async () => {
     // The new document was created from this file, and the answer was lost: the id stays reserved for its path.
@@ -764,7 +763,7 @@ describe('capture from Linear', () => {
     await refresh();
     const url = 'https://linear.app/example-team/document/future-document';
     world.linear.documents[0]!.content = `[Future](${url})\n`;
-    world.linear.documents.push({id:'future-document', title:'future', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'![Image](https://example.com/a.png)\n'});
+    world.linear.documents.push({id:'future-document', title:'future', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'[File](private.csv)\n'});
     const result = await run();
     assert.equal(result.blocked.length, 1);
     assert.equal(await text('docs/plan.md'), `---\ncategory: work\n---\n\n[Future](${url})\n`);
@@ -784,10 +783,10 @@ describe('capture from Linear', () => {
     assert.equal(world.linear.documents.at(-1)!.title, '--config=x');
   });
 
-  it('combines image and security findings without downloading any asset or disclosing image text', async () => {
-    world.linear.documents[0]!.content = '![Allowed](https://uploads.linear.app/a.png)\n\n![private alt](https://example.com/private-destination)\n';
+  it('combines rejected upload and security findings without disclosing image text', async () => {
+    world.linear.documents[0]!.content = '![Allowed](https://uploads.linear.app/a.png)\n\n![private alt](https://uploads.linear.app/private-destination)\n';
     const result = await capture(context, {config, state:context.fetched.state,
-      fetch:async () => {throw new Error('Unexpected download');},
+      fetch:async (input) => new Response(String(input).endsWith('a.png') ? png : Buffer.from('<html/>')),
       security:{configured:true, check:async () => [{hook:'secret-check', line:3}]},
     });
     assert.equal(result.blocked[0]!.findings.length, 2);
@@ -826,7 +825,7 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<guides/target.md#intro>)\n');
   });
 
-  for (const status of [301, 302, 307, 308, 400, 404, 410, 422]) {
+  for (const status of [301, 302, 307, 308, 400, 422]) {
     it(`blocks unreadable upload HTTP ${status} and clears after correction`, async () => {
       const doc = world.linear.documents[0]!;
       Object.assign(doc, {content:'![Image](https://uploads.linear.app/workspace/file.png)\n', icon:'Fire', color:'#123456'});

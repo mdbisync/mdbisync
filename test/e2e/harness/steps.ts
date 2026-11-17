@@ -21,12 +21,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
 import { LinearError, LinearStoppedError, LinearTokenError, isTransientLinearError } from '../../../src/linear/index.ts';
-import { resolveStateConfig, suspendedBranch, Git } from '../../../src/state/index.ts';
+import { resolveStateConfig, stateRef, suspendedBranch, Git } from '../../../src/state/index.ts';
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, contentCanaries, editsFound, expectsDocument, holdsToken, lostEdits, readSides, recordRefs, snapshotRefs, bodyOf, type Sides } from './checks.ts';
+import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, contentCanaries, fetchRef, editsFound, expectsDocument, holdsToken, lostEdits, readSides, recordRefs, snapshotRefs, bodyOf, type Sides } from './checks.ts';
 import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
 import { type CheckState, mergeInProgress } from '../../../src/pull-request/merge.ts';
@@ -36,7 +36,7 @@ import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { TYPING_METRICS } from './ui-checklist.ts';
-import { commentsWithState, destinationKind, imageGateRecord, imagePlace, placeLabel, withoutImage, writtenImagePath } from './image-gate.ts';
+import { commentsWithState, destinationKind, imageGateRecord, imagePlace, placeLabel, withoutImage, writtenImagePath, type ImageRepairSource } from './image-gate.ts';
 import { initFiles } from './init-files.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -2073,6 +2073,38 @@ const LINEAR: Record<string, Executor> = {
     // The report's record until linear.remove-image reads the text the sync blocked; a run that stops before then keeps this one.
     ctx.observations.set('imageGate.record', { storedDestination: destinationKind(place.url, writtenImagePath(written)) });
     ctx.observations.set('expected.blockedImageLines', [placeLabel(place)]);
+    const at = stored.indexOf(`![plan ${written}]`);
+    if (at === -1) throw new Error('the stored image has no inline spelling for the expected link');
+    const document = await linearContent(ctx, path);
+    ctx.observations.set('imageRepair.source', {
+      path, token: written, body: stored, expected: stored.slice(0, at) + stored.slice(at + 1),
+      image: place.image, total: place.total, line: place.line, icon: document.icon, color: document.color,
+    } satisfies ImageRepairSource);
+
+  },
+  // Inspect the original observation and checked proposal without editing either side.
+  'linear.inspect-image-repair': async (ctx) => {
+    const source = ctx.observations.get('imageRepair.source') as ImageRepairSource;
+    if (source === undefined) throw new Error('image inspection needs linear.image-path first');
+    const world = live(ctx);
+    const document = await linearContent(ctx, source.path);
+    const record = await imageGateRecord(world.app, document.content, source.token);
+    if (record !== null) ctx.observations.set('imageGate.record', record);
+    const git = await ctx.person();
+    const config = resolveStateConfig({trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix});
+    const observed = await fetchRef(git, stateRef(config, 'linear'));
+    const proposed = await fetchRef(git, `refs/heads/${ctx.names.syncBranch}`);
+    if (observed === null || proposed === null) throw new ProductError('the image repair has no observation or proposal');
+    const pr = (await world.rest.pullRequests(ctx.names.syncBranch)).find(pr => pr.state === 'open' && pr.head.sha === proposed);
+    if (pr === undefined) throw new ProductError('the image repair has no open pull request for its proposal');
+    ctx.observations.set('imageRepair.proposal', {
+      content: document.content,
+      recorded: bodyOf(await git.text(['show', `${observed}:${source.path}`])),
+      proposed: bodyOf(await git.text(['show', `${proposed}:${source.path}`])),
+      icon: document.icon, color: document.color,
+      comments: (await commentsWithState(world.app, document.id)).map(comment => comment.body),
+      number: pr.number, description: pr.body ?? '',
+    });
   },
   // How the blocked document looks before the editor fixes it (L2-42), then the fix: the image is removed.
   'linear.remove-image': async (ctx, args) => {

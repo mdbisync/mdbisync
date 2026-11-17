@@ -91,15 +91,25 @@ and git's path beats Linear's title
   maps it to a Linear team and project; deeper folders become title paths.
 - **Images and files:** files a document links are uploaded to Linear once;
   supported images and documents pasted in Linear land next to the document, in
-  Git LFS when your `.gitattributes` says so. An image written in Linear must
-  be an upload: an external URL, `data:` URI or path blocks that document
-  with a red mark and a comment showing which images to fix. Upload the
-  files instead; the next sync clears the comment and restores the icon.
+  Git LFS when your `.gitattributes` says so. External HTTP(S) images, path
+  images and uploads returning 404 or 410 become ordinary links; an empty alt
+  uses the URL as its label, and an image inside a link keeps the outer link.
+  Empty images and `data:` images are removed. The sync pull request lists
+  every changed image by its place and Markdown line; after merge, the link
+  version is written back to Linear. External images are never downloaded;
+  repaired paths stay plain links and do not upload repository files.
+  Links with schemes other than HTTP, HTTPS or mailto are removed with their
+  text on pull and refused by lint on push. Paths and fragments are allowed.
+  Unsafe or oversized uploads block the document with a red mark and a
+  comment; fixing them clears the comment and restores the icon.
   New uploads must contain PNG, JPEG, GIF, WebP, AVIF, PDF, MP4, WebM or SVG,
   identified from their bytes. SVGs with `script` or `foreignObject` elements,
   animation elements, event attributes, `xml:base` or non-fragment `href`
   references are blocked. Files already
-  in the repository keep working. Downloaded files use the detected extension, regardless of
+  in the repository keep working, except a file an earlier sync captured
+  (named `<sha256>.<ext>`) that the check now refuses: a document that links
+  it again from Linear is blocked, and `mdbisync lint` names the file
+  (`upload-file-refused`) for you to remove or replace. Downloaded files use the detected extension, regardless of
   the upload URL or declared content type. Unreadable uploads (including redirects)
   and files larger than 10 MB block the document with a comment. Access errors
   stop capture; temporary download failures leave the document unmarked and

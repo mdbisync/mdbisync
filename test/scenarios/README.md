@@ -103,9 +103,10 @@ under test when `MDBISYNC_TEST_ACTION_SHA` names one), checks that the files
 parse, pin that release, keep README bodies and annotations and do not change
 on a second run, and commits them. `linear.image-path` writes a relative image
 path into a synced document through the API and records the image's place and
-line in the text Linear stored as `expected.blockedImageLines`;
-`linear.remove-image` records the blocked document's mark and comments, then
-removes that image.
+line in the text Linear stored. `linear.inspect-image-repair` reads the unchanged
+Linear document, raw observation, proposed link version and pull request
+description before merge. The following settle writes the link back; the
+scenario checks both sides, image positions, unchanged marks and no image notice.
 
 An argument named `variants` or `orderings` expands into independent subcases,
 each with a fresh copy of setup and the complete step sequence and assertions.

@@ -136,3 +136,26 @@ export async function commentsWithState(app: Pick<LinearClient, 'request'>, id: 
   );
   return (data.document?.comments.nodes ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(({ body, resolvedAt }) => ({ body, resolvedAt }));
 }
+
+
+/** Independent input and expected link body recorded before the sync runs. */
+export interface ImageRepairSource extends ImagePlace {
+  path: string;
+  token: string;
+  body: string;
+  expected: string;
+  icon: string | null;
+  color: string | null;
+}
+
+/** What the two sides and proposal show before its merge. */
+export interface ImageRepairProposal {
+  content: string;
+  recorded: string;
+  proposed: string;
+  icon: string | null;
+  color: string | null;
+  comments: string[];
+  number: number;
+  description: string;
+}

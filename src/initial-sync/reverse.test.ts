@@ -657,7 +657,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.match(await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']), new RegExp(`^Capture-through: ${planTime}$`, 'm'));
   });
 
-  it('an image that is not an upload stays out of the record, and the first sync after the merge blocks its document', async () => {
+  it('initial import defers image repairs to the ordinary capture after merge', async () => {
     const world = fakeWorld();
     const contents: Record<string, string> = {
       // An external URL a person typed in the editor, on a document whose file exists.
@@ -689,21 +689,19 @@ describe('initial sync from Linear to the tracked branch', () => {
     const after = await run(world, {}, 'sync');
     assert.equal(after.result.exitCode, 0, after.result.stderr);
     assert.ok(!world.requests.some((request) => request.includes('images.example.test')), 'the external image was fetched');
-    // The capture blocks both documents with the mark and the comment, as for any later edit.
-    const notice = (line: number) => `Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n- Image 1 of 1 (line ${line}): not uploaded to this workspace. Upload the file instead of linking to it.`;
-    for (const [id, line] of [['doc-plan', 3], ['doc-faq', 5]] as const) {
-      assert.equal(world.linear.documents.find((d) => d.id === id)?.icon, 'Cross', id);
-      const comments = [...world.linear.comments.values()].filter((comment) => comment.body === notice(line));
-      assert.equal(comments.length, 1, `${id}: ${JSON.stringify([...world.linear.comments.values()].map((comment) => comment.body))}`);
-    }
-    // Neither text reaches git: the tracked branch keeps the plan's tracked text and gets no FAQ file.
+    // Capture preserves the observed images and prepares the repaired ordinary sync branch.
+    assert.deepEqual(after.report.capture?.blocked, []);
+    for (const id of ['doc-plan', 'doc-faq']) assert.notEqual(world.linear.documents.find(d => d.id === id)?.icon, 'Cross');
     assert.deepEqual(await files('refs/heads/main'), tracked);
-    assert.equal(await show('refs/heads/main:eng/notes/plan.md'), (TREE['eng/notes/plan.md'] as string).replace(/\n$/, ''));
-    for (const ref of ['refs/mdbisync/linear', 'refs/heads/mdbisync/linear']) {
-      const tree = await files(ref).catch(() => [] as string[]);
-      assert.ok(!tree.includes('eng/notes/faq.md'), ref);
-      if (tree.includes('eng/notes/plan.md')) assert.ok(!(await show(`${ref}:eng/notes/plan.md`)).includes('images.example.test'), ref);
-    }
+    assert.match(await show('refs/mdbisync/linear:eng/notes/plan.md'), /!\[Chart\]/);
+    assert.doesNotMatch(await show('refs/heads/mdbisync/linear:eng/notes/plan.md'), /!\[Chart\]/);
+    assert.doesNotMatch(await show('refs/heads/mdbisync/linear:eng/notes/faq.md'), /!\[Diagram\]/);
+    const beforeUploads = world.linear.uploads.length;
+    await merge(world);
+    await run(world, {}, 'sync');
+    assert.equal(world.linear.uploads.length, beforeUploads, 'the repaired path uploaded a repository file');
+    assert.match(world.linear.documents.find(d => d.id === 'doc-faq')!.content!, /\[Diagram\]/);
+
   });
 
   it('keeps shadowed image definitions out of initial import and the next capture', async () => {

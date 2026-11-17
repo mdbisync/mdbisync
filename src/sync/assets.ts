@@ -9,10 +9,16 @@ import { type LinearReads, uploadReadKey, LinearError, LinearHttpError } from '.
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
-import { uploadExtension } from './upload-type.ts';
+import { imageLinks } from './image-links.ts';
+import { admitsCapturedFile, uploadExtension } from './upload-type.ts';
 
 export interface CapturedAssets {
   body: string;
+  /** Localized text as Linear holds it, before pull repairs. */
+  observedBody?: string;
+  deadUploads?: string[];
+  /** Repository targets mentioned by repaired path images, never upload authorizations. */
+  plainFiles?: string[];
   files: Map<string, FileContent>;
   uploads: UploadMap;
 }
@@ -64,7 +70,7 @@ export class ImageBlockedError extends Error {
 
 /**
  * Links typed in Linear that name a file of the repository by its relative
- * path (a link or definition, not an image: images have their own gate).
+ * path (a link or definition). Repaired image paths keep separate plain-link provenance.
  * The sync uploads the file a document's relative link names when it writes
  * the document, so such a link reaching git would let anyone who can edit
  * the document in Linear publish any repository file there. A link to a
@@ -136,19 +142,14 @@ function imagesOf(body: string): Array<{ url: string; line: number }> {
   return images;
 }
 
-export function imageFindings(body: string): ImageFinding[] {
-  const images = imagesOf(body);
-  return images.flatMap((image, index) => isUpload(image.url) ? [] : [{image: index + 1, total: images.length, line: image.line, reason: 'not-uploaded' as const}]);
-}
-
 /** A download that can succeed on a later run; never expose the URL or response body. */
 export class DownloadRetryError extends Error {
   constructor(cause?: unknown) { super(message('assets.download-failed'), {cause}); }
 }
 
 class DownloadBlockedError extends Error {
-  readonly reason: 'unreadable' | 'too-large';
-  constructor(reason: 'unreadable' | 'too-large') {
+  readonly reason: 'unreadable' | 'too-large' | 'dead';
+  constructor(reason: 'unreadable' | 'too-large' | 'dead') {
     super(message('assets.download-failed'));
     this.reason = reason;
   }
@@ -168,6 +169,7 @@ async function download(url: string, fetcher: typeof fetch, reads: LinearReads |
     if (response.status !== 200) await response.body?.cancel().catch(() => {});
     if (response.status === 401 || response.status === 403) throw new LinearHttpError('DownloadUpload', response.status);
     if (response.status === 429 || response.status >= 500) throw new DownloadRetryError();
+    if (response.status === 404 || response.status === 410) throw new DownloadBlockedError('dead');
     if (response.status !== 200 || response.body === null) throw new DownloadBlockedError('unreadable');
     if (Number(response.headers.get('content-length') ?? 0) > LIMIT) {
       await response.body.cancel().catch(() => {});
@@ -223,10 +225,15 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     }
     indexed = true;
   };
-  const readable = new Map<string, boolean>();
-  const canRead = async (path: string) => {
-    if (!readable.has(path)) readable.set(path, (await readFiles(git, config, base, [path])).get(path)?.ok === true);
-    return readable.get(path)!;
+  // A repository file an upload maps to is reused only when readable, and, if a capture named it, when its
+  // bytes still pass the upload check: an earlier, weaker check may have admitted them.
+  const reuse = new Map<string, 'unreadable' | 'admitted' | 'refused'>();
+  const reusable = async (path: string) => {
+    if (!reuse.has(path)) {
+      const read = (await readFiles(git, config, base, [path])).get(path);
+      reuse.set(path, read?.ok !== true ? 'unreadable' : admitsCapturedFile(path, read.content) ? 'admitted' : 'refused');
+    }
+    return reuse.get(path)!;
   };
   const downloaded = new Map<string, {file: SpooledFile; type: string}>();
   let runCount = 0;
@@ -234,10 +241,22 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   const failed = new Map<string, DownloadBlockedError | DownloadRetryError>();
 
   const capture = async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
-    // The image gate, before any download: every path that takes a document's text from Linear into git
-    // (the capture and the initial sync from Linear) reads its embedded files here, so they cannot disagree.
-    const notUploaded = [...imageFindings(body), ...typedFileLinkFindings(path, body, previousBody, previousPath)];
+    // Repository-file links typed in Linear retain their separate gate. Images are repaired after upload checks.
+    const notUploaded = typedFileLinkFindings(path, body, previousBody, previousPath);
     if (notUploaded.length > 0) throw new ImageBlockedError(notUploaded);
+    const sourceImages = imagesOf(body);
+    const sourceDestinations = destinations(body);
+    const ordinaryUrls = new Set(sourceDestinations.filter(({node}) => node.type === 'link').map(({node}) => node.url));
+    const definitions = new Map<string, string>();
+    for (const {node} of sourceDestinations) if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
+    visit(parse(body), node => { if (node.type === 'linkReference') { const url = definitions.get(node.identifier); if (url !== undefined) ordinaryUrls.add(url); } });
+    const deadUploads = new Set<string>();
+    const finish = (observedBody: string, files: Map<string, FileContent>, uploads: UploadMap): CapturedAssets => {
+      const changed = new Set(imageLinks(body, deadUploads).images.map(image => image.image));
+      const rewritten = imageLinks(observedBody, deadUploads, changed).body;
+      const plainFiles = sourceImages.flatMap(image => { const target = !isUpload(image.url) ? resolveTarget(path, image.url) : null; return target === null ? [] : [target]; });
+      return {body: rewritten, plainFiles, ...(rewritten === observedBody ? {} : {observedBody, deadUploads: [...deadUploads]}), files, uploads};
+    };
     const files = new Map<string, FileContent>();
     const additions: UploadMap = new Map();
     const originalBody = body;
@@ -246,7 +265,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     // Restore known URLs before restricting new downloads to the upload host.
     const cachedUrls = [...uploads.values()];
     const knownUpload = (url: string) => cachedUrls.some((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`));
-    if (!destinations(body).some(({node}) => isUpload(node.url) || knownUpload(node.url))) return {body, files, uploads: additions};
+    if (!sourceDestinations.some(({node}) => isUpload(node.url) || knownUpload(node.url))) return finish(body, files, additions);
     await index();
     const preferredPaths = new Map<string, string>();
     // How the previous text wrote each link to a file of the repository, by the file's hash and the link's
@@ -256,7 +275,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const spellings = new Map<string, string[]>();
     if (previousBody !== undefined) {
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
-        if (!await canRead(link.target)) continue;
+        if (await reusable(link.target) === 'unreadable') continue;
         const hash = pathHashes.get(link.target)!;
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, link.target);
         const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), link.target).split('/').map(encodeURIComponent).join('/') + link.suffix;
@@ -284,7 +303,12 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       if (opener === '<' || (written.startsWith('<') && /[()]/.test(inner))) return `<${inner}>`;
       return inner.replace(/\s/g, encodeURIComponent);
     };
-    const references = destinations(body).filter(({node}) => isUpload(node.url) || knownUpload(node.url));
+    // A repaired dead upload is now an ordinary URL link in the accepted
+    // record. Later edits must not turn it back into an attachment download.
+    const previousLinks = new Set<string>();
+    if (previousBody !== undefined) visit(parse(previousBody), node => { if (node.type === 'link' && isUpload(node.url)) previousLinks.add(node.url); });
+    const externalImages = new Set(sourceImages.filter(image => !isUpload(image.url)).map(image => image.url));
+    const references = sourceDestinations.filter(({node}) => (isUpload(node.url) || knownUpload(node.url)) && !(node.type !== 'link' && externalImages.has(node.url)) && !(node.type === 'link' && previousLinks.has(node.url) && !knownUpload(node.url)));
     const canonical = (url: string) => cachedUrls.filter((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`)).sort((a,b) => b.length - a.length)[0] ?? url.split('#')[0]!;
     const unique = new Set(references.map(({node}) => canonical(node.url)));
     if (unique.size > limits.documentCount) throw new AttachmentBudgetError();
@@ -299,7 +323,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       let hash = [...uploads].find(([, known]) => known === url)?.[0];
       let assetPath = hash === undefined ? undefined : preferredPaths.get(hash) ?? hashPaths.get(hash);
       if (assetPath !== undefined) {
-        if (!await canRead(assetPath)) assetPath = undefined;
+        const state = await reusable(assetPath);
+        if (state === 'refused') { rejected.set(node.url, 'unsupported-type'); continue; }
+        if (state === 'unreadable') assetPath = undefined;
       }
       if (assetPath === undefined) {
         let asset = downloaded.get(url);
@@ -317,7 +343,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
             if (error instanceof DownloadBlockedError || error instanceof DownloadRetryError) failed.set(url, error);
             if (error instanceof DownloadRetryError) { retry = error; continue; }
             if (!(error instanceof DownloadBlockedError)) throw error;
-            rejected.set(node.url, error.reason);
+            if (error.reason === 'dead' && sourceImages.some(image => image.url === node.url) && !ordinaryUrls.has(node.url)) { deadUploads.add(url); deadUploads.add(node.url); continue; }
+            rejected.set(node.url, error.reason === 'dead' ? 'unreadable' : error.reason);
             continue;
           }
           downloaded.set(url, asset);
@@ -326,6 +353,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
         hash = asset.file.hash;
         assetPath = preferredPaths.get(hash) ?? hashPaths.get(hash);
+        // The downloaded bytes are the file's bytes (same hash), so they are checked in its place.
+        if (assetPath !== undefined && !admitsCapturedFile(assetPath, contentBytes(asset.file))) { rejected.set(node.url, 'unsupported-type'); continue; }
         if (assetPath === undefined) {
           const extension = uploadExtension(contentBytes(asset.file));
           if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
@@ -358,7 +387,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       const files: Array<{url:string; line:number}> = [];
       visit(tree, (node) => {
         const url = node.type === 'link' ? node.url : node.type === 'linkReference' ? definitions.get(node.identifier) : undefined;
-        if (url !== undefined && isUpload(url)) files.push({url, line:line(node)});
+        if (url !== undefined && (isUpload(url) || knownUpload(url))) files.push({url, line:line(node)});
       });
       files.forEach((file, index) => {
         const reason = rejected.get(file.url);
@@ -370,7 +399,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     if (retry !== undefined) throw retry;
     let result = body;
     for (const replacement of replacements.sort((a,b) => b.from - a.from)) result = result.slice(0,replacement.from) + replacement.text + result.slice(replacement.to);
-    return {body: result, files, uploads: additions};
+    return finish(result, files, additions);
   };
   return Object.assign(capture, {close: () => spool.close()});
 }
