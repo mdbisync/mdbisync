@@ -338,6 +338,13 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `image-file-missing`. Each is described, with its fix, in
 [linear-format.md](linear-format.md#lint-rules).
 
+`mdbisync lint` run on a folder also reports `upload-file-refused` for a
+file an earlier sync captured from Linear (named `<sha256>.<ext>`) that the
+upload check now refuses. It leaves no file out; a document that links
+the file again from Linear is blocked with a red mark and a comment. Remove
+or replace the file
+([linear-format.md](linear-format.md#upload-file-refused)).
+
 External http(s) and path images, and image uploads answering 404 or 410,
 become ordinary links in the sync pull request. Empty and `data:` images are
 removed. The PR lists each image by place and line; after merge, the write
