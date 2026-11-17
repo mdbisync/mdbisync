@@ -195,10 +195,13 @@ describe('the checks a head must pass', () => {
   it('meets a configured check only from its configured publisher', async () => {
     const path = '.github/workflows/ci.yml';
     const BASE = '9'.repeat(40);
-    const state = async (registered: FakeCheck[], required: RequiredCheck[], baseRevision = 'c'.repeat(40)) => {
+    /** `baseRevision` null: the tracked branch has no such workflow file. */
+    const state = async (registered: FakeCheck[], required: RequiredCheck[], baseRevision: string | null = 'c'.repeat(40)) => {
       const local = fakeWorld();
-      local.github.checks = new Map([[HEAD, registered], [BASE, [{ name: 'other', status: 'completed', conclusion: 'success', workflow: { path, revision: baseRevision } }]]]);
-      const repo = { ...github, fetch: fakeFetch(local) };
+      local.github.checks = new Map([[HEAD, registered], [BASE, [{ name: 'other', status: 'completed', conclusion: 'success', workflow: { path, revision: baseRevision ?? '' } }]]]);
+      const fake = fakeFetch(local);
+      const repo = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) =>
+        baseRevision === null && String(input).includes(`/contents/`) && String(input).endsWith(`?ref=${BASE}`) ? Response.json({ message: 'Not Found' }, { status: 404 }) : fake(input, init) };
       // A head the sync pushes in this run, and one it pushed in an earlier run, with no earlier heads below either.
       const earlier: EarlierHeads[] = [{ pushedFrom: [], base: BASE }, { body: undefined, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: BASE, pushed: HEAD }];
       const [now, later] = await Promise.all(earlier.map(async (heads) => (await readChecks(repo, HEAD, checkExpectation({}, (await expectedChecks(repo, HEAD, required, heads)).checks))).state));
@@ -212,6 +215,9 @@ describe('the checks a head must pass', () => {
     // A workflow file changed on the branch alone, a tracked branch without the file, another file, a synthetic check
     // run of the Actions App, a commit status: none is the configured job.
     assert.equal(await state([job('d'.repeat(40))], actions), 'pending', 'a workflow changed on the branch met its own check');
+    // The fake answers any other ref with blob `b…b`: only the missing file keeps this job from meeting the check.
+    assert.equal(await state([job('b'.repeat(40))], actions, 'b'.repeat(40)), 'passed');
+    assert.equal(await state([job('b'.repeat(40))], actions, null), 'pending', 'a workflow file the tracked branch lacks met its check');
     assert.equal(await state([job('c'.repeat(40))], [{ name: 'tests', workflow: '.github/workflows/other.yml' }]), 'pending');
     assert.equal(await state([{ ...passed, workflow: false }], actions), 'pending');
     assert.equal(await state([{ ...passed, commitStatus: true }], actions), 'pending');

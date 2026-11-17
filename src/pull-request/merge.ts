@@ -53,7 +53,10 @@ export interface CheckPublisher {
 /** A check a commit must pass: its name and, when known, the publisher it must come from. */
 export interface ExpectedCheck {
   name: string;
-  /** Absent with a `workflow` (an Actions job); absent with neither, a check of that name from any publisher counts. */
+  /**
+   * Absent with a `workflow` (an Actions job). Absent with neither, a check of that name from any publisher counts,
+   * except an Actions check run, which meets only an expectation of its workflow.
+   */
   publisher?: CheckPublisher;
   /** Actions checks also identify the workflow that ran; null means unverifiable. */
   workflow?: WorkflowIdentity | null;

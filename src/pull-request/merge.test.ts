@@ -14,20 +14,27 @@ function target(checks: FakeCheck[]) {
 
 describe('readChecks', () => {
   it('keeps a commit pending while an expected check is not registered, or while it has no checks and must have some', async () => {
-    const passed: FakeCheck[] = [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }];
+    // Another App's check runs: an Actions check run meets only an expectation of its workflow.
+    const passed: FakeCheck[] = [{ name: 'pre-commit', status: 'completed', conclusion: 'success', app: 77 }];
     assert.deepEqual(await readChecks(target(passed).repo, SHA, { checks: [{ name: 'tests' }, { name: 'pre-commit' }, { name: 'tests' }] }), { state: 'pending', failed: [], pending: [], hasChecks: true, succeeded: ['pre-commit'], missing: ['tests'] });
     // A registered expected check counts by its own state; a failure still wins.
-    const failing: FakeCheck[] = [...passed, { name: 'tests', status: 'completed', conclusion: 'failure' }];
+    const failing: FakeCheck[] = [...passed, { name: 'tests', status: 'completed', conclusion: 'failure', app: 77 }];
     const failed = await readChecks(target(failing).repo, SHA, { checks: [{ name: 'tests' }, { name: 'lint' }] });
     assert.equal(failed.state, 'failed');
     assert.deepEqual(failed.missing, ['lint']);
-    assert.equal((await readChecks(target([...passed, { name: 'tests', status: 'completed', conclusion: 'success' }]).repo, SHA, { checks: [{ name: 'tests' }] })).state, 'passed');
+    assert.equal((await readChecks(target([...passed, { name: 'tests', status: 'completed', conclusion: 'success', app: 77 }]).repo, SHA, { checks: [{ name: 'tests' }] })).state, 'passed');
+    // A genuine Actions job, or one a workflow token created, never meets an expectation that names no workflow.
+    for (const workflow of [undefined, false] as const) {
+      const run: FakeCheck = { name: 'tests', status: 'completed', conclusion: 'success', ...(workflow === undefined ? {} : { workflow }) };
+      assert.deepEqual((await readChecks(target([run]).repo, SHA, { checks: [{ name: 'tests' }] })).missing, ['tests']);
+      assert.deepEqual((await readChecks(target([run]).repo, SHA, { checks: [{ name: 'tests', publisher: { kind: 'run', id: FAKE_ACTIONS_APP_ID } }] })).missing, ['tests']);
+    }
     assert.deepEqual(await readChecks(target([]).repo, SHA, { allowNone: false }), { state: 'pending', failed: [], pending: [], hasChecks: false });
     assert.equal((await readChecks(target([]).repo, SHA, { allowNone: true })).state, 'passed');
   });
 
   it('counts an expected check only from its own publisher', async () => {
-    const actions = { kind: 'run', id: FAKE_ACTIONS_APP_ID } as const;
+    const actions = { kind: 'run', id: 77 } as const;
     const expect = { checks: [{ name: 'tests', publisher: actions }] };
     // A same-name commit status or another app's check run, passed or not, is not the expected check run.
     const status: FakeCheck = { name: 'tests', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 };
@@ -35,9 +42,9 @@ describe('readChecks', () => {
     for (const stand of [status, otherApp]) {
       assert.deepEqual(await readChecks(target([stand]).repo, SHA, expect), { state: 'pending', failed: [], pending: [], hasChecks: true, succeeded: ['tests'], missing: ['tests'] });
     }
-    assert.equal((await readChecks(target([status, { name: 'tests', status: 'completed', conclusion: 'success' }]).repo, SHA, expect)).state, 'passed');
+    assert.equal((await readChecks(target([status, { name: 'tests', status: 'completed', conclusion: 'success', app: 77 }]).repo, SHA, expect)).state, 'passed');
     // Its own publisher's failure, or a stand-in's, still fails the commit.
-    assert.equal((await readChecks(target([{ ...status, conclusion: 'failure' }, { name: 'tests', status: 'completed', conclusion: 'success' }]).repo, SHA, expect)).state, 'failed');
+    assert.equal((await readChecks(target([{ ...status, conclusion: 'failure' }, { name: 'tests', status: 'completed', conclusion: 'success', app: 77 }]).repo, SHA, expect)).state, 'failed');
     // A commit status binds to the account that created it.
     const account = { checks: [{ name: 'ci/build', publisher: { kind: 'status', id: FAKE_CI_ACCOUNT_ID } as const }] };
     const build: FakeCheck = { name: 'ci/build', status: 'completed', conclusion: 'success', commitStatus: true };

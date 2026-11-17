@@ -126,8 +126,12 @@ async function inferredPullRequestWorkflowRevision(target: GitHubRepository, sha
 }
 
 /** A repository workflow's blob on an authenticated head; path components are always URL encoded. */
+/** A repository workflow file's path: directly in `.github/workflows/`, a `.yml` or `.yaml` file. */
+// eslint-disable-next-line no-control-regex
+export const WORKFLOW_FILE = /^\.github\/workflows\/[^/\\\x00-\x1f]+\.ya?ml$/;
+
 export async function workflowRevision(target: GitHubRepository, sha: string, path: string): Promise<string | undefined> {
-  if (!/^\.github\/workflows\/[^/\\\x00-\x1f]+\.ya?ml$/.test(path)) return undefined;
+  if (!WORKFLOW_FILE.test(path)) return undefined;
   const encoded = path.split('/').map(encodeURIComponent).join('/');
   const file = await request(target, 'GET', `/contents/${encoded}?ref=${sha}`);
   const blob = file.json as { type?: unknown; sha?: unknown } | null;

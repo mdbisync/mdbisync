@@ -136,9 +136,6 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   return inputs;
 }
 
-/** The longest check name GitHub takes for a check run or a status context. */
-const CHECK_NAME_LENGTH = 255;
-
 /**
  * Checks, one per line (a matrix job's name holds commas), each with the publisher it must come from; each once, in
  * the order given. A name alone is refused: anyone who may write commit statuses can post one under any name.
@@ -147,8 +144,7 @@ function checkList(list: string): RequiredCheck[] {
   const lines = [...new Set(list.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))];
   return lines.map((line) => {
     const check = requiredCheck(line);
-    // eslint-disable-next-line no-control-regex
-    if (check === undefined || check.name.length > CHECK_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(check.name)) throw new InputError(message('inputs.required-checks', { line }));
+    if (check === undefined) throw new InputError(message('inputs.required-checks', { line }));
     return check;
   });
 }

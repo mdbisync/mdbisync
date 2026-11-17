@@ -11,7 +11,7 @@
 // there under the same name is not the batch's fault, and the lane is held.
 
 import { CommitNotFoundError } from '../pull-request/merge.ts';
-import { type MovedJobSource, type WorkflowIdentity, workflowRevision } from '../pull-request/actions.ts';
+import { type MovedJobSource, WORKFLOW_FILE, type WorkflowIdentity, workflowRevision } from '../pull-request/actions.ts';
 import { type CheckExpectation, type CheckFailure, type CheckPublisher, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, checkState, readCommitChecks } from '../pull-request/index.ts';
 import { type Git, type Oid } from '../state/index.ts';
 
@@ -49,16 +49,32 @@ function notedCheck(check: ExpectedCheck): string {
  */
 export type RequiredCheck = { name: string; publisher: CheckPublisher } | { name: string; workflow: string };
 
-const REQUIRED_CHECK = /^(.+?)\s*@\s*(?:(app|status):([1-9][0-9]{0,14})|actions:(\.github\/workflows\/[^/\\\x00-\x1f]+\.ya?ml))$/;
+const REQUIRED_CHECK = /^(.+?)\s*@\s*(?:(app|status):([1-9][0-9]{0,14})|actions:(.+))$/;
 
-/** One line of `required-checks` (`<name> @ actions:<workflow file>`, `@ app:<App id>` or `@ status:<account id>`); undefined for anything else. */
+/** The longest check name GitHub takes for a check run or a status context. */
+const CHECK_NAME_LENGTH = 255;
+
+/**
+ * Publishers any workflow can act as on GitHub.com, so none vouches for a check: the GitHub Actions App, whose check
+ * runs a workflow token creates with `checks: write`, and the `github-actions[bot]` account, which posts the commit
+ * statuses of every workflow token. A job is configured by its workflow file instead.
+ */
+const SHARED_PUBLISHERS: ReadonlySet<string> = new Set(['run:15368', 'status:41898282']);
+
+/**
+ * One line of `required-checks` (`<name> @ actions:<workflow file>`, `@ app:<App id>` or `@ status:<account id>`);
+ * undefined for anything else, a name GitHub would not take included.
+ */
 export function requiredCheck(line: string): RequiredCheck | undefined {
   const match = REQUIRED_CHECK.exec(line.trim());
   if (match === null) return undefined;
   const name = (match[1] as string).trim();
-  if (match[4] !== undefined) return { name, workflow: match[4] };
+  // eslint-disable-next-line no-control-regex
+  if (name.length > CHECK_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(name)) return undefined;
+  if (match[4] !== undefined) return WORKFLOW_FILE.test(match[4]) ? { name, workflow: match[4] } : undefined;
   const id = Number(match[3]);
-  return Number.isSafeInteger(id) ? { name, publisher: { kind: match[2] === 'app' ? 'run' : 'status', id } } : undefined;
+  const publisher: CheckPublisher = { kind: match[2] === 'app' ? 'run' : 'status', id };
+  return Number.isSafeInteger(id) && !SHARED_PUBLISHERS.has(`${publisher.kind}:${id}`) ? { name, publisher } : undefined;
 }
 
 /** The checks a pull request's head must pass beyond those registered on it. */
@@ -140,8 +156,7 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
   // update from the tracked branch. Child heads never rebind this evidence.
   // Such a head expects its own revision whatever the earlier one was, so a
   // job whose pull request moved on from its head binds by its file alone.
-  const own = 'pushedFrom' in earlier || (complete && earlier.pushed === head);
-  if (own) {
+  if ('pushedFrom' in earlier || (complete && earlier.pushed === head)) {
     const revisions = new Map<string, string | undefined>();
     // Only verified identities of the head: a stand-in is no evidence of what ran.
     const current = (await registeredChecks(github, head)).filter((entry) => entry.moved === undefined);
@@ -163,6 +178,8 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
   // A configured Actions check binds to its workflow file as the tracked branch holds it: a file changed on the sync
   // branch alone (by anyone who may push there) never vouches for its own jobs. A pull request job runs the file as
   // the merge with the tracked branch holds it, which is the tracked branch's own blob unless the branch changed it.
+  // A job that ran an older copy, before the tracked branch changed the file, does not count either: the head waits
+  // for a run of the current file, which the sync's next push of the branch starts.
   const configured: ExpectedCheck[] = [];
   const blobs = new Map<string, string | undefined>();
   for (const check of required) {
@@ -172,6 +189,7 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
     }
     if (!blobs.has(check.workflow)) blobs.set(check.workflow, await workflowRevision(github, earlier.base, check.workflow));
     const revision = blobs.get(check.workflow);
+    // Any repository trigger: `publishedBy` tells only a GitHub-managed workflow (`dynamic`) from a repository file's.
     configured.push({ name: check.name, workflow: revision === undefined ? null : { path: check.workflow, event: 'push', revision } });
   }
   return { checks: distinct([...listed, ...configured]), observed: listed, complete };

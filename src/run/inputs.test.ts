@@ -91,7 +91,7 @@ it('reads required checks one per line with their publishers, commas kept in a n
   assert.equal(read({}).requiredChecks, undefined);
   // A name alone is refused: any account that may write commit statuses could meet it.
   for (const bad of ['tests', 'tests @', 'tests @ app:0', 'tests @ app:01', 'tests @ status:x', 'tests @ user:1', '@ app:1', 'tests @ actions:ci.yml',
-    'tests @ actions:.github/workflows/sub/ci.yml', 'tests @ actions:.github/workflows/ci.json', 'tests\u0007 @ app:1', `${'x'.repeat(256)} @ app:1`]) {
+    'tests @ actions:.github/workflows/sub/ci.yml', 'tests @ actions:.github/workflows/ci.json', 'tests @ app:15368', 'tests @ status:41898282', 'tests\u0007 @ app:1', `${'x'.repeat(256)} @ app:1`]) {
     assert.throws(() => read({ 'required-checks': bad }), (error) => error instanceof InputError && error.message.includes('must name each check with the publisher') && error.message.endsWith(bad.trim()), bad);
   }
   assert.equal(read({ 'merge-without-checks': 'true' }).mergeWithoutChecks, true);

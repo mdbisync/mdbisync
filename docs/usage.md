@@ -438,17 +438,22 @@ required-checks: |
   pull request, without the workflow's name.
 - `<name> @ app:<App id>`: a check run of the GitHub App with that id
   (`gh api apps/<app slug> --jq .id`). Use `actions:` for GitHub
-  Actions: its App id is not accepted for a job.
+  Actions: any workflow can create check runs of the GitHub Actions App,
+  so its id is refused here.
 - `<name> @ status:<account id>`: a commit status of that context
   created by the account with that id (`gh api users/<login> --jq .id`),
-  usually your CI service's bot or token owner.
+  usually your CI service's bot or token owner. The `github-actions[bot]`
+  account posts the statuses of every workflow's `GITHUB_TOKEN`, so its
+  id is refused here too.
 
 A check from anyone else under the same name does not count, also on a
 new sync branch that has no earlier heads, and also when it is the
 latest status of that context. A line without a publisher stops the run
-with an input error. A check that never comes from its publisher keeps
+with an input error, for the initial sync too. A check that never comes from its publisher keeps
 the head waiting; past the check deadline the run reports
-`checks-missing`.
+`checks-missing`. An `actions:` check also waits when the tracked branch
+changed the workflow file after the job ran: only a run of the current
+file counts, which the sync's next push of the branch starts.
 
 ## Release builds and pins
 
