@@ -481,6 +481,18 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "images/bang-before-inline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/bang-before-path.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/bang-before-reference.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "images/bmp.md": {
       "yjs": "recorded",
       "fixedPoint": true

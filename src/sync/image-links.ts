@@ -15,6 +15,8 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
   const definitions = new Map<string, string>();
   visit(tree, node => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url); });
   const images: ImageRewrite[] = [];
+  // Destinations of the images the repair leaves in place; the result may hold no others.
+  const kept: string[] = [];
   const edits: Array<{from: number; to: number; text: string}> = [];
   let count = 0;
   visit(tree, node => { if (node.type === 'image' || node.type === 'imageReference') count++; });
@@ -28,13 +30,13 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
     }
     if (node.type !== 'image' && node.type !== 'imageReference') return;
     index++;
-    if (onlyImages !== undefined && !onlyImages.has(index)) return;
     const url = node.type === 'image' ? node.url : definitions.get(node.identifier);
     // Undefined reference images are plain Markdown, rather than resolved images.
     if (url === undefined) return;
+    if (onlyImages !== undefined && !onlyImages.has(index)) { kept.push(url); return; }
     let upload = false;
     try { const parsed = new URL(url); upload = parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.port === '' && parsed.username === '' && parsed.password === ''; } catch {}
-    if (upload && !deadUploads.has(url.split('#')[0]!) && !deadUploads.has(url) && !ancestors.some(parent => parent.type === 'link' || parent.type === 'linkReference')) return;
+    if (upload && !deadUploads.has(url.split('#')[0]!) && !deadUploads.has(url) && !ancestors.some(parent => parent.type === 'link' || parent.type === 'linkReference')) { kept.push(url); return; }
     images.push({image: index, total: count, line: line(node)});
     if (enclosingRemoved) return;
     let replacement = '';
@@ -51,5 +53,39 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
   visit(tree, node => { if (node.type === 'definition' && !allowedLink(node.url)) edits.push({from: start(node) + offset, to: end(node) + offset, text: ''}); });
   let result = body;
   for (const edit of edits.sort((a,b) => b.from - a.from)) result = result.slice(0, edit.from) + edit.text + result.slice(edit.to);
-  return {body: result, images};
+  return {body: withoutNewImages(result, kept), images};
+}
+
+/** Image nodes of `body` in source order, with their resolved destinations. */
+function imagesOf(body: string) {
+  const tree = parse(body);
+  const definitions = new Map<string, string>();
+  visit(tree, node => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url); });
+  const found: Array<{from: number; url: string}> = [];
+  visit(tree, node => {
+    const url = node.type === 'image' ? node.url : node.type === 'imageReference' ? definitions.get(node.identifier) : undefined;
+    if (url !== undefined) found.push({from: start(node), url});
+  });
+  return found;
+}
+
+/**
+ * The edits splice text without re-parsing it, so a literal `!` before a repaired image (`!![x](path)`), or
+ * text a removal joins, can read as a new image. Such an image would pass as one written in the repository,
+ * which may upload the file it names. Escaping its `!` turns it back into the link the repair meant.
+ */
+function withoutNewImages(body: string, kept: readonly string[]): string {
+  const offset = body.startsWith('\uFEFF') ? 1 : 0;
+  // Each pass escapes the `!` of at least one image, and an escape never frees another `!`, so this ends.
+  for (;;) {
+    const remaining = [...kept];
+    const added = imagesOf(body).filter(image => {
+      const at = remaining.indexOf(image.url);
+      if (at === -1) return true;
+      remaining.splice(at, 1);
+      return false;
+    });
+    if (added.length === 0) return body;
+    for (const image of added.reverse()) body = body.slice(0, image.from + offset) + '\\' + body.slice(image.from + offset);
+  }
 }

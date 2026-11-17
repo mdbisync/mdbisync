@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { imageLinks } from './image-links.ts';
+import { parse, visit } from '../format/markdown.ts';
+
+function images(body: string): string[] {
+  const definitions = new Map<string, string>();
+  visit(parse(body), node => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url); });
+  const urls: string[] = [];
+  visit(parse(body), node => {
+    if (node.type === 'image') urls.push(node.url);
+    if (node.type === 'imageReference' && definitions.has(node.identifier)) urls.push(definitions.get(node.identifier)!);
+  });
+  return urls;
+}
 
 for (const [source, expected] of [
   ['![Chart](https://example.com/chart.png)', '[Chart](https://example.com/chart.png)'],
@@ -34,4 +47,43 @@ it('keeps table cells intact when alt text contains a pipe', () => {
 });
 it('keeps a leading byte order mark while rewriting an image', () => {
   assert.equal(imageLinks('\uFEFF![Chart](https://example.com/chart.png)').body, '\uFEFF[Chart](https://example.com/chart.png)');
+});
+
+// A literal `!` before a repaired image, or text that a removal joins, must never re-create an image.
+for (const [source, expected] of [
+  ['!![x](../secret.txt)', '\\![x](../secret.txt)'],
+  ['Look !![x](https://example.com/a.png) here', 'Look \\![x](https://example.com/a.png) here'],
+  ['!![x][r]\n\n[r]: ../secret.txt', '\\![x](../secret.txt)\n\n[r]: ../secret.txt'],
+  ['\\\\!![x](../secret.txt)', '\\\\\\![x](../secret.txt)'],
+  ['\\!![x](../secret.txt)', '\\![x](../secret.txt)'],
+  ['!![]()[y](../secret.txt)', '\\![y](../secret.txt)'],
+  ['!![d](data:image/png;base64,AAAA)[y][r]\n\n[r]: ../secret.txt', '\\![y][r]\n\n[r]: ../secret.txt'],
+  ['![a][b](javascript:alert%281%29)(../secret.txt)', '\\![a](../secret.txt)'],
+  ['| A |\n| -- |\n| !![x](../secret.txt) |', '| A |\n| -- |\n| \\![x](../secret.txt) |'],
+  ['\uFEFF!![x](../secret.txt)', '\uFEFF\\![x](../secret.txt)'],
+]) it(`does not re-create an image next to a literal bang: ${JSON.stringify(source)}`, () => {
+  const body = imageLinks(source!).body;
+  assert.equal(body, expected);
+  assert.deepEqual(images(body), []);
+});
+
+it('keeps an upload image next to a bang and repairs only the others', () => {
+  const source = '!![Kept](https://uploads.linear.app/a) !![x](../secret.txt)';
+  const body = imageLinks(source).body;
+  assert.equal(body, '!![Kept](https://uploads.linear.app/a) \\![x](../secret.txt)');
+  assert.deepEqual(images(body), ['https://uploads.linear.app/a']);
+});
+
+it('repairs only the selected images and still never adds one', () => {
+  const source = '![A](https://example.com/a.png) !![B](../secret.txt)';
+  assert.equal(imageLinks(source, new Set(), new Set([2])).body, '![A](https://example.com/a.png) \\![B](../secret.txt)');
+});
+
+// Recorded by the format probe: Linear moves an image into its own block, so a literal `!` it
+// stores never sits directly before the image. The repair above holds even if that changes.
+for (const name of ['bang-before-inline', 'bang-before-reference', 'bang-before-path']) it(`Linear keeps a bang apart from the image (${name})`, () => {
+  const linear = readFileSync(new URL(`../../test/fixtures/images/${name}.linear.md`, import.meta.url), 'utf8');
+  assert.match(linear, /^Look !\n\n/);
+  assert.doesNotMatch(linear, /!!\[/);
+  for (const url of images(imageLinks(linear).body)) assert.match(url, /^\.\.\/assets\/|^https:\/\/uploads\.linear\.app\//);
 });

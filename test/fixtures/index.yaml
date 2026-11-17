@@ -2324,6 +2324,33 @@ fixtures:
     class: unchanged
     basis: known
     canary: kx-168dfc60
+  - file: "images/bang-before-inline.md"
+    group: images
+    construct: image-after-bang
+    class: fixable
+    basis: known
+    canary: kx-a763e717
+    corpus: false
+    note: "a literal exclamation mark directly before an image"
+  - file: "images/bang-before-reference.md"
+    group: images
+    construct: image-reference-after-bang
+    class: fixable
+    basis: known
+    canary: kx-7485ff84
+    corpus: false
+    note: "a literal exclamation mark directly before an image"
+  - file: "images/bang-before-path.md"
+    group: images
+    construct: image-path-after-bang
+    class: lint-error
+    rule: image-file-missing
+    line: 1
+    basis: known
+    canary: kx-1f68b376
+    missing_target: true
+    corpus: false
+    note: "a literal exclamation mark directly before an image"
   - file: "images/broken-reference.md"
     group: images
     construct: image-broken-reference

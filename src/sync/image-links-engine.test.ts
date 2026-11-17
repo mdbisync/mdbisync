@@ -104,6 +104,27 @@ describe('image repairs through the sync pull request', () => {
     assert.equal(h.world.linear.uploads.length, before + 1, 'a repository-authored image should still upload');
   });
 
+  // The fake keeps Linear text as written; the recorded format probe shows Linear itself splits the bang
+  // into its own paragraph, so this covers a body that reaches the sync in any other way.
+  for (const reference of [false, true]) it(`never lets a repair next to a literal bang upload a repository file (reference ${reference})`, async () => {
+    const path = 'eng/notes/plan.md';
+    await h.editRef('refs/heads/main', 'records.csv', 'name,value\nExample,42\n');
+    const image = reference ? 'Look !![Report][file] here.\n\n[file]: ../../records.csv' : 'Look !![Report](../../records.csv) here.';
+    const before = h.world.linear.uploads.length;
+    await h.editInLinear(path, `# Plan\n\n${image}\n`);
+    const opened = await h.sync();
+    assert.deepEqual(opened.report.capture?.blocked, []);
+    const branch = await h.show(`${SYNC_BRANCH}:${path}`);
+    assert.match(branch, /Look \\!\[Report\]\(\.\.\/\.\.\/records\.csv\) here\./);
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before, 'a repaired image next to a bang uploaded a repository file');
+    const document = await h.documentOf(path);
+    assert.doesNotMatch(document.content!, /uploads\.linear\.app/);
+    await h.editInLinear(path, document.content + '\nAnother paragraph.\n');
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before);
+  });
+
   it('repairs intake into a suspended batch and writes the link after release', async () => {
     const path = 'eng/notes/plan.md';
     await h.suspendOne(path);
