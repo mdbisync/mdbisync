@@ -112,6 +112,17 @@ describe('places the tracked branch named', () => {
     assert.equal(await check(edited, 'docs/page.md', inProject('ENG', 'Second')), true, 'the newest version is readable');
   });
 
+  it('refuses, without failing, when a version it reaches lists a tree over the limit', async (t) => {
+    const first = await commit([], { 'docs/README.md': project('First', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const large = await commit([first], { 'docs/page.md': 'Page, edited.\n' });
+    const tip = await commit([large], { 'docs/README.md': project('Second', 'ENG') });
+    // That commit's tree listing goes over its output limit, through git's own limit check.
+    const run = git.run.bind(git);
+    t.mock.method(git, 'run', (args: string[], options?: Parameters<Git['run']>[1]) =>
+      run(args, args[0] === 'ls-tree' && args[1] === '-r' && args.includes(large) ? { ...options, maxOutputBytes: 1 } : options));
+    assert.equal(await check(tip, 'docs/page.md', inProject('ENG', 'First')), false);
+  });
+
   it('refuses a file the tracked branch never synchronized', async () => {
     const tip = await commit([], { 'docs/README.md': project('Notes', 'ENG'), 'docs/page.md': 'Page.\n' });
     assert.equal(await check(tip, 'docs/other.md', inProject('ENG', 'Notes')), false);

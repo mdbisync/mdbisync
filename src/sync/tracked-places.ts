@@ -12,7 +12,7 @@ import { folderOf } from '../mapping/annotations.ts';
 import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, MappingBlobBudgetError, readableBlob } from '../mapping/blobs.ts';
 import { placeKey } from '../initial-sync/plan.ts';
 import { type LinearFacts } from '../linear/index.ts';
-import { type Git, type Oid, isAncestor } from '../state/index.ts';
+import { type Git, GitOutputLimitError, type Oid, isAncestor } from '../state/index.ts';
 import { type TreeEntry, parseTreeListing } from '../state/objects.ts';
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import { type Side, type SideFile, baselineCommits, synchronizedAt } from './merge.ts';
@@ -74,7 +74,7 @@ class TrackedHistory {
         file = await synchronizedAt(this.git, commits[index] as Oid, path, this.facts, this.sides);
       } catch (error) {
         // An annotation or a tree over the mapping's limits proves nothing: older versions are not known.
-        if (error instanceof UnreadableAnnotationError || error instanceof MappingBlobBudgetError) return undefined;
+        if (error instanceof UnreadableAnnotationError || error instanceof MappingBlobBudgetError || error instanceof GitOutputLimitError) return undefined;
         throw error;
       }
       states.push(file !== undefined);
