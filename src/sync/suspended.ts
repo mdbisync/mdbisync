@@ -13,8 +13,8 @@ import { checkpoint } from '../test-hooks.ts';
 import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
-import type { CheckFailure } from '../pull-request/index.ts';
-import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict, type RequiredCheck } from './deadline.ts';
+import type { CheckFailure, ExpectedCheck } from '../pull-request/index.ts';
+import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgain, checksAgainTrailer, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict, type RequiredCheck } from './deadline.ts';
 
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
 export const SET_ASIDE_MESSAGE = 'Set aside suspended changes';
@@ -275,11 +275,22 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       }
     }
   }
-  // A head whose earlier checks the branch's history does not show (no head the sync signed a record of pushing is below
-  // it: the branch was rewritten, or the record was written before records were signed) gets a commit of the sync's
-  // own on top, with the same files, as on the normal lane: its push runs the checks again and is recorded.
-  if (head === previous && !(await expectedChecks(options.github, head, [], { body: undefined, git, base: tracked, pushed: lastPushed(context, options, ids) })).complete) {
-    head = await commit(context, options, await git.text(['rev-parse', `${head}^{tree}`]), [head], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view));
+  // A head whose earlier checks the branch's history does not show, or one someone else pushed whose expected checks
+  // never started, gets a commit of the sync's own on top, with the same files, as on the normal lane (see
+  // `checksAgain`): its push runs the checks again and is recorded.
+  /** The checks the head below still waited for, which the sync's commit on it must pass too. */
+  let carried: ExpectedCheck[] = [];
+  if (head === previous) {
+    const unchanged = head;
+    // The branch exists while its head is unchanged. The lane reads the pull request again after its push.
+    const waiting = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+    const again = await checksAgain(options.github, unchanged, options.requiredChecks ?? [], { body: waiting?.body, git, base: tracked, pushed: lastPushed(context, options, ids) },
+      { ...options, againMessage: SUSPENDED_CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, unchanged, context.mapping.zones)).length === 0 });
+    if (again !== null) {
+      carried = again.carried;
+      const trailer = again.from === undefined ? '' : checksAgainTrailer(again.from);
+      head = await commit(context, options, await git.text(['rev-parse', `${unchanged}^{tree}`]), [unchanged], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view) + trailer);
+    }
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
@@ -299,7 +310,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
   // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`). The episodes record
   // the last head the sync pushed on this branch, also a single-parent commit (a Linear intake): the history stops there.
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous], carried } : { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
   // As in the normal lane: whoever added commits to this branch, the sync merges only synchronized documents and their
   // assets. Read before the checks, so a head the sync will not merge neither holds the normal lane nor marks documents.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];

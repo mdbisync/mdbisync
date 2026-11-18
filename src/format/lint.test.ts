@@ -37,6 +37,9 @@ const cases: Array<[LintRule, string, number]> = [
   ['image-in-link', '[![a][i]](https://example.com)\n\n[i]: x.png', 1],
   ['url-in-html', '<img src="logo.png">', 1],
   ['url-in-html', '<a href="https://example.com">x</a>', 1],
+  ['url-in-html', '<div>See HTTPS://example.com</div>', 1],
+  ['url-in-html', '<div>1git+ssh://host/repo</div>', 1],
+  ['url-in-html', '<img SRC = "logo.png">', 1],
   ['block-first-in-list-item', '* ## Heading\n* Plain', 1],
   ['image-not-in-repository', 'Intro.\n\n![Chart](https://example.com/chart.png)', 3],
   ['image-not-in-repository', '![Chart](https://uploads.linear.app/a/b/chart.png)', 1],
@@ -101,8 +104,27 @@ describe('lint rules', () => {
     assert.deepEqual(lintText('doc.md', 'a'.repeat(CONTENT_LIMIT + 1)).map((f) => f.rule), ['content-too-long']);
   });
 
+  it('stops at content-too-long: text over the limit is not linted further', () => {
+    const text = `H~2~O\n\n<div>${'a'.repeat(CONTENT_LIMIT)} https://example.com</div>`;
+    assert.deepEqual(lintText('doc.md', text).map((f) => [f.rule, f.line]), [['content-too-long', 1]]);
+    assert.deepEqual(lintText('assets/doc.md', text).map((f) => f.rule), ['content-too-long', 'document-in-assets-folder']);
+  });
+
+  it('checks a long HTML block for URLs in linear time', () => {
+    // A scheme search that restarts at every letter took seconds here.
+    const letters = 'a'.repeat(60_000);
+    const started = performance.now();
+    assert.deepEqual(lintText('doc.md', `<div>${letters}</div>`), []);
+    assert.deepEqual(lintText('doc.md', `<div>${'a1+.-'.repeat(12_000)}</div>`), []);
+    assert.deepEqual(lintText('doc.md', `<div>${':/'.repeat(30_000)}:// ${letters}</div>`), []);
+    assert.deepEqual(lintText('doc.md', `<div>${letters}://</div>`).map((f) => f.rule), ['url-in-html']);
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 5_000, `took ${Math.round(elapsed)} ms`);
+  });
+
   it('passes what Linear keeps', () => {
     for (const text of [
+      '<div>Not a URL: 1://, -://, :// and ftp:/x</div>',
       '~~struck~~',
       '```\n<<<<<<< ours\n```',
       '`<<<<<<< ours`',

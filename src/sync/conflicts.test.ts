@@ -12,7 +12,7 @@ import { join, posix } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
-import { detectConflicts, MARKERS, RETITLED_COMMENT } from '../merge/index.ts';
+import { detectConflicts, markerCallout, MARKERS, RETITLED_COMMENT } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
@@ -260,7 +260,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.deepEqual(first.report.writes.linear, { CommentOnDocument: 1, UpdateDocument: 3 });
 
     await settle();
-    const expected = `# Plan\n\nAlpha paragraph.\n\n${MARKERS.git}\n\nBeta paragraph, git.\n\n${MARKERS.linear}\n\nBeta paragraph, Linear.\n\n${MARKERS.end}\n\nGamma paragraph. ${CANARY}\n`;
+    const expected = `# Plan\n\nAlpha paragraph.\n\n${markerCallout(MARKERS.git)}\n\nBeta paragraph, git.\n\n${markerCallout(MARKERS.linear)}\n\nBeta paragraph, Linear.\n\n${markerCallout(MARKERS.end)}\n\nGamma paragraph. ${CANARY}\n`;
     await assertBothSides(DOC, expected);
     assert.match(await show('refs/heads/main:eng/notes/other.md'), /Edited in Linear/);
     const document = await documentOf(DOC);
@@ -387,10 +387,10 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.match(result, /Beta, Linear again\./);
   });
 
-  it('L3-13: one marker line removed keeps the mark until all three are gone', async () => {
+  it('L3-13: one marker callout removed keeps the mark until all three are gone', async () => {
     await conflictOnPlan();
     const current = await show(`refs/heads/main:${DOC}`);
-    await editInLinear(DOC, current.replace(`${MARKERS.linear}\n\n`, ''));
+    await editInLinear(DOC, current.replace(`${markerCallout(MARKERS.linear)}\n\n`, ''));
     await settle();
     assert.equal((await documentOf(DOC)).icon, MARKS.conflict.icon);
     assert.ok(detectConflicts(await show(`refs/heads/main:${DOC}`)).length > 0);

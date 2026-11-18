@@ -120,8 +120,8 @@ async function scenario(t: TestContext) {
     };
   }
 
-  /** Starts a sync run in a fresh clone, paused at `pause` when given. */
-  async function startRun(pause?: Checkpoint): Promise<Running> {
+  /** Starts a sync run in a fresh clone, paused at `pause` when given, with `extra` added to its environment. */
+  async function startRun(pause?: Checkpoint, extra: Record<string, string> = {}): Promise<Running> {
     runs += 1;
     const name = `run-${runs}`;
     const clone = await fixture.clone(name);
@@ -129,7 +129,7 @@ async function scenario(t: TestContext) {
     if (pause !== undefined) hooks.pause(pause);
     const child = spawn(process.execPath, [CLI, 'sync'], {
       cwd: clone.dir,
-      env: { ...env(name, server.url), [HOOKS_ENV]: '1', [HOOKS_DIR_ENV]: hooks.dir },
+      env: { ...env(name, server.url), ...extra, [HOOKS_ENV]: '1', [HOOKS_DIR_ENV]: hooks.dir },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     let stderr = '';
@@ -516,6 +516,57 @@ describe('sync: races inside a run', { timeout: 240_000, concurrency: CONCURRENC
 
     await assertSettled(['First paragraph, typed in Linear meanwhile.', 'Second paragraph, edited in git.', 'Findings, revised in git.']);
     assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/linear']), MERGE_RECORD_MESSAGE);
+  });
+
+  it('L4-19: a document edited in Linear again while the run waits for its sync pull request is skipped; the next run writes its git change, and its sync pull request diff still lists what the tracked branch holds', async (t) => {
+    const { fixture, world, startRun, reached, rev, remoteRef, documentOf, editInLinear, editInGit, assertSettled } = await scenario(t);
+    // A Linear edit to the document goes to the sync pull request; git changes it and another document meanwhile.
+    await editInLinear(NOTES, 'First paragraph.', 'First paragraph, edited in Linear.');
+    await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
+    await editInGit(REVIEW, 'Findings of the review.', 'Findings, revised in git.');
+    // A grace period, so the run waits for its new sync pull request's checks and merges it, as a workflow run does.
+    const running = await startRun('after-capture-push-before-pr', { MDBISYNC_MERGE_GRACE_SECONDS: '60' });
+    await reached(running, 'after-capture-push-before-pr');
+    // The second Linear edit lands while the run waits for its sync pull request.
+    await editInLinear(NOTES, 'First paragraph, edited in Linear.', 'First paragraph, edited in Linear again.');
+    running.hooks.resume('after-capture-push-before-pr');
+    // The pull request's check passes once the run has opened it.
+    while (world.github.pullRequests.length === 0) await new Promise((resolve) => setTimeout(resolve, 50));
+    const pending = await remoteRef('refs/heads/mdbisync/linear');
+    assert.ok(pending !== null, 'the run pushed its sync branch');
+    world.github.checks?.set(pending, [{ name: 'ci', status: 'completed', conclusion: 'success' }]);
+    const run = await running.ended;
+
+    assert.equal(run.code, 0, run.stderr);
+    assert.notEqual(run.report?.pullRequest?.merged ?? null, null, 'the run merges its sync pull request');
+    assert.deepEqual(run.report?.sync?.skipped, [{ path: NOTES, reason: 'edited-in-linear' }]);
+    assert.deepEqual(run.report?.sync?.updated, [REVIEW]);
+    assert.equal(run.report?.record?.kind, 'ordinary');
+    assert.equal(run.report?.record?.hasTrackedParent, false);
+    // Linear still lacks the git change; the edit typed during the wait stays.
+    const after = (await documentOf(NOTES)).content ?? '';
+    assert.match(after, /edited in Linear again/);
+    assert.doesNotMatch(after, /edited in git/);
+
+    // The next run captures that edit; its sync pull request, compared with the tracked branch as GitHub
+    // shows it (from their merge base), also lists the other document, which the tracked branch already holds.
+    const tracked = await rev('refs/heads/main');
+    const next = await startRun('after-capture-push-before-pr');
+    await reached(next, 'after-capture-push-before-pr');
+    const head = await rev('refs/mdbisync/linear');
+    const base = await fixture.remote.text(['merge-base', tracked, head]);
+    const listed = (await fixture.remote.text(['diff', '--name-only', base, head])).split('\n').filter(Boolean).sort();
+    assert.deepEqual(listed, [REVIEW, NOTES].sort());
+    assert.equal(await fixture.remote.text(['diff', tracked, head, '--', REVIEW]), '', 'the tracked branch already holds the other document');
+    next.hooks.resume('after-capture-push-before-pr');
+    const second = await next.ended;
+    assert.equal(second.code, 0, second.stderr);
+    assert.deepEqual(second.report?.sync?.updated, [NOTES]);
+    assert.match((await documentOf(NOTES)).content ?? '', /edited in git/);
+
+    // Its sync pull request carries the edit typed during the wait; it merges once its check passes.
+    world.github.checks?.set(await rev('refs/heads/mdbisync/linear'), [{ name: 'ci', status: 'completed', conclusion: 'success' }]);
+    await assertSettled(['First paragraph, edited in Linear again.', 'Second paragraph, edited in git.', 'Findings, revised in git.']);
   });
 
   it('L4-03: an edit inside the window between re-read and write is overwritten; the run reports the window', async (t: TestContext) => {

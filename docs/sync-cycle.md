@@ -127,6 +127,16 @@ ongoing sync runs. You do not need to wait for a run to finish:
 - If an already tracked document changes in Linear between capture and its
   final re-read, the run skips that document. The next run captures the newer text and
   tries again; other documents keep syncing.
+- That window includes the run's wait for its sync pull request's checks,
+  up to `merge-grace-seconds`. A document that has a git change from
+  before the run started and is edited in Linear during that wait is
+  skipped, so the git change reaches Linear one run later. When the run
+  merged its sync pull request, that merge starts the next run.
+- A run that skipped or left out a document records Linear's answer
+  without the tracked branch as a parent. Until a later run records that
+  merge, the sync pull request's diff on GitHub, counted from an older
+  merge base, can also list git changes to other documents that this run
+  wrote to Linear. The tracked branch already holds them.
 - A run that stops after creating a document but before recording its id
   leaves the document in Linear. If you edit that document, nothing
   overwrites your edit: a later run takes the document over only if it
@@ -310,7 +320,18 @@ registered on the pull request's earlier heads and every check in
 counts only from the publisher that registered it there (the same GitHub
 App for a check run, the same account for a commit status), so a
 same-name check from anyone else does not satisfy it. A head that lacks
-an expected check, or has none, waits; past the deadline the run reports the setup error
+an expected check, or has none, waits. When someone else pushed that head
+(a formatter's fix pushed with a workflow's own token starts no other
+workflow), and five minutes after the sync first saw it nothing on it is
+pending or failed but an expected check never registered, the sync pushes
+a commit of its own on top, with the same files: its push starts the
+repository's whole CI. That commit must pass every check the head below it
+waited for, and the pull request merges once they pass, without waiting
+for a Linear change. The sync never does this on a head it pushed itself,
+nor again on a head pushed on such a commit of its own, and the new commit
+starts a new deadline. Past the deadline a head that still lacks an
+expected check makes the run
+report the setup error
 `checks-missing`, and nothing is suspended or marked in Linear. A check
 only GitHub's branch rules require lets the sync try the merge: if GitHub
 refuses it, the run reports `merge-refused`; a later run that meets the
@@ -405,7 +426,10 @@ same check also fails on the tracked tip.
 
 - **Git to Linear:** a push to the tracked branch starts a run at once, so
   the change is in Linear when that run finishes, usually within a minute
-  or two. If another run is going, the new one waits for it.
+  or two. If another run is going, the new one waits for it. A document
+  edited in Linear while the run waits for its sync pull request's checks
+  gets the change one run later
+  ([editing while sync runs](#editing-while-sync-runs)).
 - **Linear to git:** the next run captures the edit. Between pushes that
   is a run from your own timer, GitHub's schedule or a run by hand. With
   a timer that is within its interval plus the run

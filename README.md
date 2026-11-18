@@ -64,19 +64,26 @@ versions into the document, the same text in Linear and in git, and keeps
 syncing everything else:
 
 ```markdown
-**Sync conflict: git version**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: git version**
 
 The release ships on Tuesday.
 
-**Sync conflict: Linear version**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: Linear version**
 
 The release ships on Wednesday.
 
-**Sync conflict: end**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: end**
 ```
 
-The document gets an alert icon and a comment in Linear. Keep the text you
-want and remove the marker paragraphs, in Linear or in git; the next run
+Each marker shows in Linear as a warning callout, and the document gets an
+alert icon and a comment. Keep the text you want and remove the three
+marker callouts, in Linear or in git; the next run
 takes the result to the other side. A delete against an edit, or two
 different renames, is decided by rules instead: a change beats a delete,
 and git's path beats Linear's title

@@ -1,6 +1,6 @@
 // `lint`: finds the Markdown that Linear would lose or alter, with file, line
-// and rule. Conflict marker paragraphs written by the sync are ordinary bold
-// text and pass. Every image must be a file of the repository: Linear
+// and rule. Conflict markers written by the sync are one-line warning
+// callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
 import type { Definition, Root } from 'mdast';
@@ -11,7 +11,9 @@ import { allowedLink, MarkdownLimitError, end, line, lineCount, parse, resolveTa
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const URL_OR_LINK_ATTRIBUTE = /[a-z][a-z0-9+.-]*:\/\/|\b(?:src|href)\s*=/i;
+const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
+const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
+const LETTER = /[a-z]/i;
 
 /** What `lint` may know about the file beyond its text. */
 export interface LintOptions {
@@ -51,24 +53,41 @@ export function lintText(file: string, text: string, options: LintOptions = {}):
   const { head, body } = splitFile(text);
   const offset = lineCount(head);
   const findings: Finding[] = [];
+  const reported = new Set<string>();
   const report = (rule: LintRule, bodyLine: number): void => {
     // One finding per rule and line, however many constructs share it.
-    if (findings.some((f) => f.rule === rule && f.line === bodyLine + offset)) return;
+    const key = `${rule}:${bodyLine}`;
+    if (reported.has(key)) return;
+    reported.add(key);
     findings.push({ file, line: bodyLine + offset, rule, message: LINT_RULES[rule] });
   };
+  const sorted = (): Finding[] => findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
   if (inAssetsFolder(file)) report('document-in-assets-folder', 1);
   const content = body.replace(/\r\n?/g, '\n');
-  if ([...content].length > CONTENT_LIMIT) report('content-too-long', 1);
+  if (overContentLimit(content)) {
+    // Linear refuses the whole document, so it is not parsed or linted:
+    // content-too-long is reported alone.
+    report('content-too-long', 1);
+    return sorted();
+  }
   let tree: Root;
   try {
     tree = parse(content);
   } catch (error) {
     if (!(error instanceof MarkdownLimitError)) throw error;
     report('markdown-complexity', 1);
-    return findings;
+    return sorted();
   }
   lintTree(file, tree, content, report, options);
-  return findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
+  return sorted();
+}
+
+/** Whether the text has more Unicode code points than `CONTENT_LIMIT`, counted without copying it. */
+function overContentLimit(text: string): boolean {
+  if (text.length <= CONTENT_LIMIT) return false;
+  let count = 0;
+  for (const _ of text) if (++count > CONTENT_LIMIT) return true;
+  return false;
 }
 
 function lintTree(file: string, tree: Root, body: string, report: (rule: LintRule, line: number) => void, options: LintOptions): void {
@@ -153,7 +172,7 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         break;
       }
       case 'html':
-        if (URL_OR_LINK_ATTRIBUTE.test(node.value)) report('url-in-html', line(node));
+        if (hasUrlOrLinkAttribute(node.value)) report('url-in-html', line(node));
         break;
       default:
         break;
@@ -209,4 +228,20 @@ export function duplicateTitles(files: readonly string[]): Finding[] {
   return [...groups.values()]
     .filter((group) => group.length > 1)
     .flatMap((group) => group.map((file) => ({ file, line: 1, rule: 'duplicate-title' as const, message: `${LINT_RULES['duplicate-title']} (${group.filter((other) => other !== file).join(', ')})` })));
+}
+
+/**
+ * Whether raw HTML holds a link attribute (`src=`, `href=`) or a URL: `://`
+ * right after a scheme, a letter followed by letters, digits, `+`, `.` or `-`.
+ * The scheme is checked backwards from each `://`, over its own run of scheme
+ * characters only, so the time stays linear in the length of the HTML.
+ */
+function hasUrlOrLinkAttribute(html: string): boolean {
+  if (LINK_ATTRIBUTE.test(html)) return true;
+  for (let at = html.indexOf('://'); at !== -1; at = html.indexOf('://', at + 1)) {
+    for (let i = at - 1; i >= 0 && SCHEME_CHARACTER.test(html[i]!); i--) {
+      if (LETTER.test(html[i]!)) return true;
+    }
+  }
+  return false;
 }

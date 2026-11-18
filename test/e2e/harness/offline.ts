@@ -10,7 +10,7 @@ import { buildCorpus } from '../../corpus/generate.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, linkedAssets, loadBank, readFixture } from '../../probe/bank.ts';
 import { bodyOf } from './checks.ts';
-import { MARKERS } from './conflicts.ts';
+import { calloutDecoration, markerBlock, markerKindAt, MARKERS } from './conflicts.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 
 export interface OfflineInput {
@@ -91,11 +91,15 @@ export function fixableSample(): { file: string; text: string } {
 /** Documents with conflict markers in a paragraph, a list, a table and a code block (L0-04). */
 function markerInput(): OfflineInput {
   const set = `${MARKERS.git}\n\nOne version.\n\n${MARKERS.linear}\n\nThe other version.\n\n${MARKERS.end}`;
+  const calloutSet = `${markerBlock('git')}\n\nOne version.\n\n${markerBlock('linear')}\n\nThe other version.\n\n${markerBlock('end')}`;
   const files = new Map([
     ['markers/paragraph.md', `# Notes\n\nBefore.\n\n${set}\n\nAfter.\n`],
     ['markers/list.md', `# Notes\n\n- First\n\n${set}\n\n- Last\n`],
     ['markers/table.md', `# Notes\n\n${MARKERS.git}\n\n| a | b |\n| -- | -- |\n| 1 | 2 |\n\n${MARKERS.linear}\n\n| a | b |\n| -- | -- |\n| 3 | 4 |\n\n${MARKERS.end}\n`],
     ['markers/code.md', `# Notes\n\n${MARKERS.git}\n\n\`\`\`text\none\n\`\`\`\n\n${MARKERS.linear}\n\n\`\`\`text\ntwo\n\`\`\`\n\n${MARKERS.end}\n`],
+    // The callout form the sync writes today.
+    ['markers/callout.md', `# Notes\n\nBefore.\n\n${calloutSet}\n\nAfter.\n`],
+    ['markers/callout-table.md', `# Notes\n\n${markerBlock('git')}\n\n| a | b |\n| -- | -- |\n| 1 | 2 |\n\n${markerBlock('linear')}\n\n| a | b |\n| -- | -- |\n| 3 | 4 |\n\n${markerBlock('end')}\n`],
   ]);
   return { files, assets: new Map(), golden: new Map(), lintErrors: [] };
 }
@@ -137,9 +141,9 @@ export function runFormatCommand(command: 'lint' | 'fix', dir: string): { status
 
 export const hashes = (files: ReadonlyMap<string, string>) => new Map([...files].map(([path, text]) => [path, createHash('sha256').update(text).digest('hex')]));
 
-/** The marker lines of each file, in order. */
+/** The marker lines of each file with their callout lines, in order. */
 export const markerLines = (files: ReadonlyMap<string, string>) =>
-  new Map([...files].map(([path, text]) => [path, text.split('\n').filter((line) => (Object.values(MARKERS) as string[]).includes(line))]));
+  new Map([...files].map(([path, text]) => [path, text.split('\n').filter((line, index, all) => markerKindAt(all, index) !== null || calloutDecoration(line))]));
 
 /** Findings of `lint` output (`file:line: rule: message`). */
 export function parseFindings(stdout: string): Array<{ file: string; line: number; rule: string; message: string }> {
