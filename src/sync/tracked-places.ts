@@ -7,7 +7,7 @@
 // the folder in some commit (`trackedPlaces`).
 
 import { type Place, type Zone, collectAnnotations, nearestZone, placeOf, resolveZones } from '../mapping/index.ts';
-import { MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
+import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
 import { placeKey } from '../initial-sync/plan.ts';
 import { type Git, type Oid, isAncestor } from '../state/index.ts';
 import { type TreeEntry, parseTreeListing } from '../state/objects.ts';
@@ -111,7 +111,7 @@ async function moveRecorded(git: Git, tracked: Oid, change: string, readmes: rea
 /**
  * The texts of `readmes` after each commit of the tracked branch's first-parent line that changed one of them, newest
  * first: the commits `zonesAlong` visits for any of them. The states come from the tip's files and each commit's raw
- * diff against its first parent, in two git calls; blobs are read in batches as the walk reaches them, within the
+ * diff against its first parent; blobs are read in batches bounded by bytes as the walk reaches them, within the
  * mapping's limits. `unreadable` names the files over the mapping's size limit, which `zonesAt` does not read either.
  */
 async function* readmeHistory(git: Git, tracked: Oid, readmes: readonly string[]): AsyncGenerator<{ commit: string; texts: ReadonlyMap<string, string>; unreadable: ReadonlySet<string> }> {
@@ -120,17 +120,32 @@ async function* readmeHistory(git: Git, tracked: Oid, readmes: readonly string[]
   const state = new Map(tip.map((entry) => [entry.path, entry.oid]));
   const { stdout } = await git.run(['--literal-pathspecs', 'log', '--first-parent', '--diff-merges=first-parent', '--no-renames', '--raw', '-z', '--no-abbrev', '--format=%x01%H', tracked, '--', ...readmes]);
   const commits = parseRawLog(stdout.toString('utf8'));
+  const earlier = [...new Set(commits.flatMap((entry) => entry.changes.flatMap((change) => change.before === undefined ? [] : [change.before])))];
+  for (const [oid, size] of await blobSizes(git, earlier.filter((oid) => !sizes.has(oid)))) sizes.set(oid, size);
   const texts = new Map<Oid, string>();
-  for (let start = 0; start < commits.length; start += HISTORY_BATCH) {
-    const batch = commits.slice(start, start + HISTORY_BATCH);
-    // The files of this batch's states: the current ones and those before each of its commits.
-    const needed = new Map([...state].map(([path, oid]) => [oid, path]));
-    for (const { changes } of batch) for (const change of changes) if (change.before !== undefined) needed.set(change.before, change.path);
-    const unsized = [...needed.keys()].filter((oid) => !sizes.has(oid));
-    for (const [oid, size] of await blobSizes(git, unsized)) sizes.set(oid, size);
-    const entries: TreeEntry[] = [...needed].filter(([oid]) => !texts.has(oid)).map(([oid, path]) => ({ path, mode: '100644', type: 'blob', oid, size: sizes.get(oid) ?? null }));
+  for (let start = 0; start < commits.length;) {
+    // A batch: the current files, then commits while the files they bring that are not read yet fit in
+    // `HISTORY_BATCH_BYTES` (at least one commit), so many large revisions never meet in one read.
+    const needed = new Map<Oid, string>();
+    let bytes = 0;
+    const take = (oid: Oid, path: string) => {
+      if (texts.has(oid) || needed.has(oid)) return;
+      needed.set(oid, path);
+      const entry = { path, mode: '100644', type: 'blob' as const, oid, size: sizes.get(oid) ?? null };
+      if (readableBlob(entry)) bytes += entry.size;
+    };
+    for (const [path, oid] of state) take(oid, path);
+    let end = start;
+    while (end < commits.length) {
+      const fresh = commits[end]!.changes.flatMap((change) => change.before === undefined || texts.has(change.before) || needed.has(change.before) ? [] : [change.before]);
+      const extra = [...new Set(fresh)].reduce((sum, oid) => sum + Math.min(sizes.get(oid) ?? 0, MAPPING_FILE_BYTES + 1), 0);
+      if (end > start && bytes + extra > HISTORY_BATCH_BYTES) break;
+      for (const change of commits[end]!.changes) if (change.before !== undefined) take(change.before, change.path);
+      end++;
+    }
+    const entries: TreeEntry[] = [...needed].map(([oid, path]) => ({ path, mode: '100644', type: 'blob', oid, size: sizes.get(oid) ?? null }));
     for (const [oid, blob] of await new MappingBlobBudget().read(git, entries)) texts.set(oid, blob.toString('utf8'));
-    for (const { commit, changes } of batch) {
+    for (const { commit, changes } of commits.slice(start, end)) {
       const unreadable = new Set([...state].flatMap(([path, oid]) => texts.has(oid) ? [] : [path]));
       yield { commit, texts: new Map([...state].flatMap(([path, oid]) => texts.has(oid) ? [[path, texts.get(oid)!] as const] : [])), unreadable };
       for (const change of changes) {
@@ -138,6 +153,7 @@ async function* readmeHistory(git: Git, tracked: Oid, readmes: readonly string[]
         else state.set(change.path, change.before);
       }
     }
+    start = end;
     // Only the current files are read again.
     const current = new Set(state.values());
     for (const oid of texts.keys()) if (!current.has(oid)) texts.delete(oid);
@@ -156,7 +172,8 @@ async function blobSizes(git: Git, oids: readonly Oid[]): Promise<Map<Oid, numbe
   return sizes;
 }
 
-const HISTORY_BATCH = 200;
+/** The bytes of not yet read README versions one history read takes, a quarter of the mapping's blob budget. */
+const HISTORY_BATCH_BYTES = MAPPING_BUDGET_BYTES / 4;
 
 /**
  * Commits of `git log --raw -z --format=%x01%H`, each with its changed files as they were before it. Fields are

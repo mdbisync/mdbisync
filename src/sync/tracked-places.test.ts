@@ -185,6 +185,13 @@ describe('places the tracked branch named', () => {
       assert.equal(await unmerged(moved, await record([moved], {})), false);
     });
 
+    it('reads many large README versions in more than one batch', async () => {
+      let tip = await commit([], { 'docs/README.md': project('Payroll', 'ENG') });
+      // 70 versions of almost 1 MB each: more than the mapping's 64 MiB blob budget in all.
+      for (let version = 0; version < 70; version++) tip = await commit([tip], { 'docs/README.md': `${project('Notes', 'ENG')}${version} ${'x'.repeat(MAPPING_FILE_BYTES - 200)}` });
+      assert.equal(await unmerged(tip, await record([tip], {})), true);
+    });
+
     it('finds the same moves as a pending move, past merges and removed files', async () => {
       const base = await commit([], { 'a/README.md': team('ONE'), 'a/x/README.md': project('P'), 'b/README.md': project('B', 'ONE') });
       const side = await commit([base], { 'a/x/README.md': project('Q'), 'b/README.md': null });
