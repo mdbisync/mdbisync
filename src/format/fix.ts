@@ -154,20 +154,20 @@ class Writer {
     return parts.map((part) => this.inline(part).trim()).filter((part) => part !== '');
   }
 
-  private list(node: List): string {
+  private list(node: List, interruptsParagraph = false): string {
     return node.children
       .map((item, index) => {
         const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${(node.start ?? 1) + index}.` : '*';
-        return this.listItem(item, marker);
+        return this.listItem(item, marker, interruptsParagraph && index === 0);
       })
       .join('\n');
   }
 
-  private listItem(item: ListItem, marker: string): string {
+  private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
     // Content lines line up after the bullet or number, not after a checkbox.
     const indent = ' '.repeat(marker.split(' ')[0]!.length + 1);
     const [first] = item.children;
-    const attachment = first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
+    const attachment = itemAttachment(item);
     // A link to a file that does not exist is not uploaded: Linear keeps it as a link.
     if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
       const path = attachment.url.split(/[?#]/)[0]!;
@@ -182,18 +182,28 @@ class Writer {
         const label = this.inline(attachment.children);
         const destination = imageDestination(attachment.url);
         if (bullet && VIDEO.test(path)) return `${marker} [${label}](${destination})`;
-        return `${marker} \n${indent}[${label}](${destination})`;
+        // An empty marker cannot interrupt the parent paragraph. A task
+        // marker already has content, so its file block can stay below it.
+        if (!interruptsParagraph || marker.startsWith('- ')) {
+          return `${marker} \n${indent}[${label}](${destination})`;
+        }
       }
     }
     if (first === undefined) return marker;
     this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
     // Blocks of an item are a blank line apart, but a nested list follows
-    // its paragraph on the next line. Lint refuses an item that starts with
-    // another block, so the first block is a paragraph.
+    // its paragraph on the next line when it can interrupt that paragraph.
+    // Ordered lists starting above or below 1 and existing file blocks
+    // need their blank line to stay separate from the preceding paragraph.
     let content = '';
     item.children.forEach((child, index) => {
-      if (index > 0) content += child.type === 'list' && item.children[index - 1]?.type === 'paragraph' ? '\n' : '\n\n';
-      content += this.block(child).join('\n\n');
+      const previous = item.children[index - 1];
+      const interrupts = child.type === 'list'
+        && previous?.type === 'paragraph'
+        && (!child.ordered || (child.start ?? 1) === 1)
+        && !(child.position!.start.line > previous.position!.end.line + 1 && startsWithFileBlock(child));
+      if (index > 0) content += interrupts ? '\n' : '\n\n';
+      content += child.type === 'list' ? this.list(child, interrupts) : this.block(child).join('\n\n');
     });
     this.containers.pop();
     return `${marker} ${prefixLines(content, indent, '').slice(indent.length)}`;
@@ -488,6 +498,18 @@ const VIDEO = /\.(?:mp4|mov|webm)$/i;
 
 /** Audio Linear keeps as a link in a bullet item (recorded for MP3; other types are unconfirmed). */
 const AUDIO = /\.mp3$/i;
+
+function startsWithFileBlock(list: List): boolean {
+  const [item] = list.children;
+  if (item === undefined) return false;
+  const link = itemAttachment(item);
+  return link !== undefined && link.position!.start.line > item.position!.start.line;
+}
+
+function itemAttachment(item: ListItem): Link | undefined {
+  const [first] = item.children;
+  return first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
+}
 
 /** A paragraph that holds only a link to a relative file other than Markdown: an attachment. */
 function attachmentLink(paragraph: Paragraph): Link | undefined {

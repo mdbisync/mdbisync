@@ -367,6 +367,23 @@ describe('lint and fix commands', () => {
     }
   });
 
+  it('fix preserves a nested list item linking an existing file immediately after its parent’s text', () => {
+    const folder = join(dir, 'nested-link');
+    mkdirSync(folder);
+    try {
+      const path = join(folder, 'notes.md');
+      const fixed = '* Parent\n  * [Report](<report.csv>)';
+      writeFileSync(path, '- Parent\n  - [Report](report.csv)\n');
+      writeFileSync(join(folder, 'report.csv'), 'name,total\nExample,3\n');
+      assert.deepEqual(runFix(['nested-link'], dir), { exitCode: 1, stdout: 'nested-link/notes.md: fixed\n', stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), fixed);
+      assert.deepEqual(runFix(['nested-link'], dir), { exitCode: 0, stdout: '', stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), fixed);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it('accepts only images that are files of the repository, and fix leaves the others', () => {
     const folder = join(dir, 'pictures');
     mkdirSync(join(folder, 'img', 'set'), { recursive: true });
