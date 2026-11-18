@@ -98,6 +98,16 @@ no commit.
 3. The run records what Linear returned and opens no pull request: the
    tracked branch already holds the change.
 
+A change to a folder annotation that moves the folder to another
+project or team is the one exception. The next run opens a sync pull
+request that changes no file, and the sync merges it with a merge commit
+once its checks pass, as for Linear's changes, so the tracked branch
+holds the sync's record of the move. Until that pull request is merged,
+the sync still accepts a state ref that names the folder's previous
+place; after it, the sync reads only the new place. If a person
+squash-merges that pull request, the record is still missing from the
+tracked branch, so the next run opens the pull request again.
+
 A file Linear cannot hold as it is, such as Markdown that Linear would
 change or lose ([linear-format.md](linear-format.md)), or an image over
 Linear's upload limit, is left out: it stays in git, and the run summary
