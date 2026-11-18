@@ -157,10 +157,13 @@ export async function checkMappingBudget(git: Git, commit: Oid, knownPaths: Read
   budget.check(entries.filter((entry) => entry.type === 'blob' && knownPaths.has(entry.path)));
 }
 
+/** A folder annotation over the mapping's size limit, which `requireReadableAnnotations` refuses. */
+export class UnreadableAnnotationError extends Error {}
+
 /** A merge must not mistake an unreadable folder annotation for a removed one. */
 export function requireReadableAnnotations(entries: readonly TreeEntry[]): void {
   const entry = annotationFiles(entries).find((entry) => !readableBlob(entry));
-  if (entry !== undefined) throw new Error(oversizedAnnotation(entry.path).message);
+  if (entry !== undefined) throw new UnreadableAnnotationError(oversizedAnnotation(entry.path).message);
 }
 
 function oversizedAnnotation(readme: string): AnnotationProblem {

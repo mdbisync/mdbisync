@@ -2,35 +2,135 @@
 // are not the tracked branch: anyone who can push to the repository can move
 // them, without the review its branch rules ask for. A folder annotation the
 // recorded state names is read only to finish the tracked branch's latest move
-// of that folder (`pendingMove`). Other recorded places, such as an excluded
-// file's last place, are read only when the tracked branch gave that place to
-// the folder in some commit (`trackedPlaces`).
+// of that folder (`pendingMove`). A file's other recorded place, such as an
+// excluded file's last place, is read only when the tracked branch itself held
+// that file synchronized there (`syncedPlaces`).
 
 import { type Place, type Zone, collectAnnotations, nearestZone, placeOf, resolveZones } from '../mapping/index.ts';
-import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
+import { UnreadableAnnotationError } from '../mapping/mapping.ts';
+import { folderOf } from '../mapping/annotations.ts';
+import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, MappingBlobBudgetError, readableBlob } from '../mapping/blobs.ts';
 import { placeKey } from '../initial-sync/plan.ts';
+import { type LinearFacts } from '../linear/index.ts';
 import { type Git, type Oid, isAncestor } from '../state/index.ts';
 import { type TreeEntry, parseTreeListing } from '../state/objects.ts';
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
+import { type Side, type SideFile, baselineCommits, synchronizedAt } from './merge.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
-/** Whether files of `folder` may be read from `place`. */
-export type PlaceCheck = (folder: string, place: Place) => Promise<boolean>;
+/** Whether the document of the file at `path` may be read from `place`. */
+export type PlaceCheck = (path: string, place: Place) => Promise<boolean>;
 
 /**
- * A place of the current mapping is allowed anywhere. Any other place is allowed for a folder when a commit of the
- * tracked branch gave the folder that place, through its own annotation or an inherited one.
+ * A place of the current mapping is allowed for any file, and a pending move's old place for the files of its folder:
+ * the run reads both anyway (`listed`, the zones by folder after pending moves). Any other place is allowed for a file
+ * only when the tracked branch's first-parent line held the file synchronized there, among the commits
+ * `lastSynchronized` examines for it (`baselineCommits`): while the branch's newest synchronized version lasted, and,
+ * when that version lasts to the tip, while the synchronized version before the newest left-out one lasted. The second
+ * covers a file the branch fixed after leaving it out, which the sync has not written yet: its document is still where
+ * that version took it. A version lasts until the next of those commits; its places are the folder's place at the
+ * version and at the folder's moves in that time. A place the folder held only before those versions, or after them,
+ * is not where the sync last gave Linear the file, so a recorded state that names it was made by someone else.
  */
-export function trackedPlaces(git: Git, tracked: Oid, current: ReadonlyMap<string, Zone>): PlaceCheck {
-  const allowed = new Set([...current.values()].map((zone) => placeKey(placeOf(zone))));
-  const answers = new Map<string, Promise<boolean>>();
-  return (folder, place) => {
-    if (allowed.has(placeKey(place))) return Promise.resolve(true);
-    const key = `${folder}\0${placeKey(place)}`;
-    let answer = answers.get(key);
-    if (answer === undefined) answers.set(key, answer = named(git, tracked, folder, place));
-    return answer;
+export function syncedPlaces(git: Git, tracked: Oid, current: ReadonlyMap<string, Zone>, listed: ReadonlyMap<string, Zone>, facts: LinearFacts): PlaceCheck {
+  const anywhere = new Set([...current.values()].map((zone) => placeKey(placeOf(zone))));
+  const answers = new Map<string, Promise<ReadonlySet<string>>>();
+  const history = new TrackedHistory(git, tracked, facts);
+  return async (path, place) => {
+    const key = placeKey(place);
+    const zone = nearestZone(listed, folderOf(path));
+    if (anywhere.has(key) || (zone !== undefined && placeKey(placeOf(zone)) === key)) return true;
+    let places = answers.get(path);
+    if (places === undefined) answers.set(path, places = history.placesWhileSynchronized(path));
+    return (await places).has(key);
   };
+}
+
+/** The tracked branch's history that `syncedPlaces` reads, each part once: commits' synchronized files, folders' moves, line positions. */
+class TrackedHistory {
+  private readonly sides = new Map<Oid, Promise<Side>>();
+  private readonly moves = new Map<string, Promise<Array<{ commit: string; zone: Zone | undefined }>>>();
+  private line: Promise<Map<string, number>> | undefined;
+  private readonly git: Git;
+  private readonly tracked: Oid;
+  private readonly facts: LinearFacts;
+  constructor(git: Git, tracked: Oid, facts: LinearFacts) {
+    this.git = git;
+    this.tracked = tracked;
+    this.facts = facts;
+  }
+
+  async placesWhileSynchronized(path: string): Promise<ReadonlySet<string>> {
+    const places = new Set<string>();
+    const commits = await baselineCommits(this.git, this.tracked, path);
+    // Whether the file is synchronized at each commit, newest first; the walk stops at a commit it cannot read.
+    const states: boolean[] = [];
+    const files = new Map<number, SideFile>();
+    const synchronized = async (index: number): Promise<boolean | undefined> => {
+      if (index < states.length) return states[index];
+      if (index !== states.length || index >= commits.length) return undefined;
+      let file: SideFile | undefined;
+      try {
+        file = await synchronizedAt(this.git, commits[index] as Oid, path, this.facts, this.sides);
+      } catch (error) {
+        // An annotation or a tree over the mapping's limits proves nothing: older versions are not known.
+        if (error instanceof UnreadableAnnotationError || error instanceof MappingBlobBudgetError) return undefined;
+        throw error;
+      }
+      states.push(file !== undefined);
+      if (file !== undefined) files.set(index, file);
+      return file !== undefined;
+    };
+    const next = async (from: number, wanted: boolean): Promise<number | undefined> => {
+      for (let index = from; ; index++) {
+        const state = await synchronized(index);
+        if (state === undefined) return undefined;
+        if (state === wanted) return index;
+      }
+    };
+    const newest = await next(0, true);
+    if (newest === undefined) return places;
+    await this.addPlaces(path, commits, newest, files.get(newest)!, places);
+    if (newest === 0) {
+      const leftOut = await next(1, false);
+      const before = leftOut === undefined ? undefined : await next(leftOut + 1, true);
+      if (before !== undefined) await this.addPlaces(path, commits, before, files.get(before)!, places);
+    }
+    return places;
+  }
+
+  /** The place of the version at `commits[index]`, and the folder's places from its moves before `commits[index - 1]`. */
+  private async addPlaces(path: string, commits: readonly Oid[], index: number, file: SideFile, places: Set<string>): Promise<void> {
+    places.add(placeKey(file.place));
+    const line = await this.linePositions();
+    // Positions count from the tip: a version's moves lie between its own commit and the next newer one.
+    const start = line.get(commits[index] as string);
+    const end = index === 0 ? -1 : line.get(commits[index - 1] as string);
+    if (start === undefined || end === undefined) return;
+    const folder = folderOf(path);
+    for (const { commit, zone } of await this.folderMoves(folder)) {
+      const position = line.get(commit);
+      if (zone !== undefined && position !== undefined && position < start && position > end) places.add(placeKey(placeOf(zone)));
+    }
+  }
+
+  private folderMoves(folder: string): Promise<Array<{ commit: string; zone: Zone | undefined }>> {
+    let moves = this.moves.get(folder);
+    if (moves === undefined) {
+      this.moves.set(folder, moves = (async () => {
+        const all: Array<{ commit: string; zone: Zone | undefined }> = [];
+        for await (const entry of zonesAlong(this.git, this.tracked, annotationChain(folder), folder)) all.push(entry);
+        return all;
+      })());
+    }
+    return moves;
+  }
+
+  /** Each commit of the tracked branch's first-parent line by its distance from the tip. */
+  private linePositions(): Promise<Map<string, number>> {
+    this.line ??= this.git.text(['rev-list', '--first-parent', this.tracked]).then((text) => new Map(text.split('\n').filter(Boolean).map((commit, position) => [commit, position])));
+    return this.line;
+  }
 }
 
 /**
@@ -196,13 +296,6 @@ function parseRawLog(text: string): Array<{ commit: string; changes: Array<{ pat
 }
 
 const BLOB_MODES = new Set(['100644', '100755', '120000']);
-
-async function named(git: Git, tracked: Oid, folder: string, place: Place): Promise<boolean> {
-  for await (const { zone } of zonesAlong(git, tracked, annotationChain(folder), folder)) {
-    if (zone !== undefined && placeKey(placeOf(zone)) === placeKey(place)) return true;
-  }
-  return false;
-}
 
 /**
  * The folder's zone at each commit of the tracked branch's first-parent line that changed its README chain, newest

@@ -406,6 +406,18 @@ export async function lastSynchronized(
   sides: Map<Oid, Promise<Side>> = new Map(),
   oldest?: Oid,
 ): Promise<{ commit: Oid; file: SideFile; text: string } | null> {
+  for (const commit of await baselineCommits(git, linear, path, oldest)) {
+    const file = await synchronizedAt(git, commit, path, facts, sides);
+    if (file !== undefined) return { commit, file, text: ((await readBlobs(git, [file.oid])).get(file.oid) as Buffer).toString('utf8') };
+  }
+  return null;
+}
+
+/**
+ * The commits `lastSynchronized` examines for `path`, newest first: the last `BASELINE_DEPTH` commits of the chain's
+ * first-parent line that change the file or a file it links, down to `oldest` when given.
+ */
+export async function baselineCommits(git: Git, linear: Oid, path: string, oldest?: Oid): Promise<Oid[]> {
   const range = oldest === undefined ? [linear] : [linear, '--not', `${oldest}^@`];
   const log = async (paths: readonly string[]) => {
     const commits = (await git.text(['--literal-pathspecs', 'log', '--first-parent', '--format=%H', '-n', String(BASELINE_DEPTH), ...range, '--', ...paths])).split('\n').filter(Boolean);
@@ -415,13 +427,13 @@ export async function lastSynchronized(
   // Whether a version is synchronized, and which upload its images get, changes too in a commit that changes only a
   // file it links: an image removed, restored or replaced.
   const linked = await linkedFiles(git, versions, path);
-  const candidates = linked.length === 0 ? versions : await log([path, ...linked]);
-  for (const commit of candidates) {
-    if (!sides.has(commit)) sides.set(commit, synchronizedFiles(git, commit, facts));
-    const file = (await (sides.get(commit) as Promise<Side>)).files.get(path);
-    if (file !== undefined) return { commit, file, text: ((await readBlobs(git, [file.oid])).get(file.oid) as Buffer).toString('utf8') };
-  }
-  return null;
+  return linked.length === 0 ? versions : await log([path, ...linked]);
+}
+
+/** The file at `path` as `commit` synchronizes it, or undefined when the sync leaves it out there. Calls that share `sides` read each commit once. */
+export async function synchronizedAt(git: Git, commit: Oid, path: string, facts: LinearFacts, sides: Map<Oid, Promise<Side>>): Promise<SideFile | undefined> {
+  if (!sides.has(commit)) sides.set(commit, synchronizedFiles(git, commit, facts));
+  return (await (sides.get(commit) as Promise<Side>)).files.get(path);
 }
 
 /** The files other than Markdown documents that the versions of `path` at `commits` link, each once. */

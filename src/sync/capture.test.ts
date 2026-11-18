@@ -398,6 +398,49 @@ describe('capture from Linear', () => {
     assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Payroll body'])).stdout.toString('utf8'), '');
   });
 
+  // docs/ held Payroll, then Archive, where salaries.md was last synchronized before an edit left it out, and now
+  // Field notes. Altered state refs give that file a last synchronized version in one of those places.
+  for (const [where, name, lostIds, reads] of [
+    ['a place the folder held before its previous move', 'Payroll', false, false],
+    ['a place the folder held before its previous move, with the ids map lost', 'Payroll', true, false],
+    ['the place the tracked branch last synchronized the file in', 'Archive', false, true],
+    ['the place the tracked branch last synchronized the file in, with the ids map lost', 'Archive', true, true],
+  ] as const) it(`reads an excluded file's recorded place only where the tracked branch synchronized it: ${where}`, async () => {
+    world.linear.projects.push({ id: 'project-payroll', name: 'Payroll', teamIds: ['team-eng'] }, { id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
+    world.linear.documents.push({ id: 'salaries', title: 'salaries', content: `${name} body.\n`, projectId: `project-${name.toLowerCase()}`, createdAt: '2026-01-01T00:00:00Z' });
+    const folder = (project: string) => `---\nlinear-team: ENG\nlinear-project: ${project}\n---\n\n# Notes\n`;
+    await fixture.seed({ 'docs/README.md': folder('Payroll'), 'docs/salaries.md': 'Salaries.\n\n![Image](pixel.png)\n', 'docs/pixel.png': png });
+    await fixture.seed({ 'docs/README.md': folder('Archive') });
+    await fixture.seed({ 'docs/salaries.md': 'Salaries, edited.\n\n![Image](pixel.png)\n' });
+    await fixture.seed({ 'docs/salaries.md': 'Salaries, edited.\n\n![Image](pixel.png)\n\n![Chart](chart.png)\n' });
+    await fixture.seed({ 'docs/README.md': TREE['docs/README.md'] });
+    await context.git.run(['fetch', '--quiet', 'origin']);
+    const {linear: base, ids: idsBase} = context.fetched.state;
+    const synced = await commitTree(context.git, { parents: [base!], base: base!, changes: new Map<string, string | Buffer>([
+      ['docs/README.md', folder(name)],
+      ['docs/salaries.md', 'Salaries.\n\n![Image](pixel.png)\n'],
+      ['docs/pixel.png', png],
+    ]), message: RECORD_MESSAGE, identity: IDENTITY });
+    const altered = await commitTree(context.git, { parents: [synced], base: synced, changes: new Map([['docs/README.md', TREE['docs/README.md']], ['docs/pixel.png', null]]), message: 'Altered state', identity: IDENTITY });
+    const ids = await commitIds(context.git, idsBase, new Map([['docs/plan.md', { id: 'plan' }], ['docs/salaries.md', { id: 'salaries' }]]), IDENTITY);
+    assert.equal((await pushAtomic(context.git, config, [
+      { ref: stateRef(config, 'linear'), expected: base, next: altered },
+      { ref: stateRef(config, 'ids'), expected: idsBase, next: ids },
+    ])).ok, true);
+    if (lostIds) await fixture.remote.run(['update-ref', '-d', stateRef(config, 'ids')]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const listedPlaces: unknown[] = [];
+    const list = context.linear.listDocumentsInPlaces.bind(context.linear);
+    context.linear.listDocumentsInPlaces = (places, options) => { listedPlaces.push(...places); return list(places, options); };
+    const result = await run();
+    assert.equal(result.ok, true);
+    // A known id is looked up wherever its document is; only a rebuilt map lists the file's recorded place.
+    assert.equal(JSON.stringify(listedPlaces).includes(`project-${name.toLowerCase()}`), lostIds && reads, JSON.stringify(listedPlaces));
+    assert.equal(result.documents.has('salaries'), reads);
+    if (!reads) assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', `${name} body`])).stdout.toString('utf8'), '');
+  });
+
   it('keeps capturing the old place of a folder whose annotation the tracked branch changed', async () => {
     world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
     await fixture.seed({ 'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Archive\n---\n\n# Notes\n' });

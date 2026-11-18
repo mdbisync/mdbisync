@@ -31,7 +31,7 @@ import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBloc
 import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
 import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
-import { pendingMove, trackedPlaces } from './tracked-places.ts';
+import { pendingMove, syncedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
 
@@ -152,8 +152,6 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const recorded = await mapTree(git, entries, blobBudget);
     const zones = new Map(mapping.zones);
     let changedPlace = false;
-    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch allows it.
-    const allowedPlace = trackedPlaces(git, fetched.tracked, mapping.zones);
     for (const [folder, old] of recorded.zones) {
       const current = zones.get(folder);
       if (current !== undefined && (old.team !== current.team || old.project !== current.project)) {
@@ -169,6 +167,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (resolved.targets === undefined) throw new Error(message('sync.places-unresolved'));
       targets = resolved.targets;
     }
+    // The recorded state comes from refs any writer can move: a file's place only it names is read when the tracked
+    // branch held the file synchronized there.
+    const allowedPlace = syncedPlaces(git, fetched.tracked, context.mapping.zones, zones, linear.facts);
     if (state.ids === null) {
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const paths = new Set(recorded.documents.map((document) => document.path));
@@ -264,7 +265,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       baselines.set(old.path, baseline);
       const doc = listed.get(id);
       if (baseline === null || doc === undefined || doc.title.normalize('NFC') !== baseline.file.title.normalize('NFC')) continue;
-      if (!await allowedPlace(folderOf(old.path), baseline.file.place)) continue;
+      if (!await allowedPlace(old.path, baseline.file.place)) continue;
       let resolved;
       try { resolved = placeId(targets, baseline.file.place); }
       catch {

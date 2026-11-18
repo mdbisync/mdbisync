@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
 import { type Git, type Oid, commitTree } from '../state/index.ts';
 import { type Place, loadMapping } from '../mapping/index.ts';
-import { pendingMove, recordsUnmergedMove, trackedPlaces } from './tracked-places.ts';
+import { pendingMove, recordsUnmergedMove, syncedPlaces } from './tracked-places.ts';
+import { LINEAR_FACTS } from '../linear/index.ts';
 import { MAPPING_FILE_BYTES } from '../mapping/blobs.ts';
 import { MERGE_RECORD_MESSAGE } from './write.ts';
 
@@ -24,60 +25,131 @@ describe('places the tracked branch named', () => {
 
   const commit = (parents: Oid[], changes: Record<string, string | null>) =>
     commitTree(git, { parents, base: parents[0] ?? null, changes: new Map(Object.entries(changes)), message: 'Change', identity: IDENTITY, skipIfUnchanged: false });
-  const check = (tracked: Oid, folder: string, place: Place) => trackedPlaces(git, tracked, new Map())(folder, place);
+  const check = (tracked: Oid, path: string, place: Place) => syncedPlaces(git, tracked, new Map(), new Map(), LINEAR_FACTS)(path, place);
   const record = (parents: Oid[], changes: Record<string, string | null>) =>
     commitTree(git, { parents, base: parents[0] ?? null, changes: new Map(Object.entries(changes)), message: MERGE_RECORD_MESSAGE, identity: IDENTITY, skipIfUnchanged: false });
 
-  it('follows a folder moved under another team', async () => {
-    const first = await commit([], { 'ops/README.md': team('OPS'), 'eng/README.md': team('ENG'), 'ops/pay/README.md': project('Pay') });
-    const moved = await commit([first], { 'ops/pay/README.md': null, 'eng/pay/README.md': project('Pay') });
-    assert.equal(await check(moved, 'eng/pay', inProject('ENG', 'Pay')), true);
-    assert.equal(await check(moved, 'eng/pay', inProject('OPS', 'Pay')), false, 'that folder never had the old team');
+  it('allows the place of the newest synchronized version and the moves while it lasted', async () => {
+    const first = await commit([], { 'docs/README.md': project('First', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const second = await commit([first], { 'docs/README.md': project('Second', 'ENG') });
+    const third = await commit([second], { 'docs/README.md': project('Third', 'ENG') });
+    for (const name of ['First', 'Second', 'Third']) assert.equal(await check(third, 'docs/page.md', inProject('ENG', name)), true, name);
+    assert.equal(await check(third, 'docs/page.md', inTeam('ENG')), false, 'never the place of docs/');
   });
 
-  it('reads a place that only a merge of two branches gave', async () => {
-    const base = await commit([], { 'a/README.md': team('ONE'), 'a/x/README.md': project('P') });
+  it('refuses a place the folder held only before the newest synchronized version', async () => {
+    const first = await commit([], { 'docs/README.md': project('First', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const second = await commit([first], { 'docs/README.md': project('Second', 'ENG') });
+    const edited = await commit([second], { 'docs/page.md': 'Page, edited.\n' });
+    const third = await commit([edited], { 'docs/README.md': project('Third', 'ENG') });
+    assert.equal(await check(third, 'docs/page.md', inProject('ENG', 'First')), false, 'a place before the previous move');
+    assert.equal(await check(third, 'docs/page.md', inProject('ENG', 'Second')), true);
+    assert.equal(await check(third, 'docs/page.md', inProject('ENG', 'Third')), true);
+  });
+
+  it('keeps the places of a file left out since before a move, and refuses the places after it', async () => {
+    const first = await commit([], { 'docs/README.md': project('First', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const second = await commit([first], { 'docs/README.md': project('Second', 'ENG') });
+    const leftOut = await commit([second], { 'docs/page.md': 'Page.\n\n![Image](missing.png)\n' });
+    const third = await commit([leftOut], { 'docs/README.md': project('Third', 'ENG') });
+    const fourth = await commit([third], { 'docs/README.md': project('Fourth', 'ENG') });
+    // The version synchronized in First lasted through the move to Second: either is where the sync last gave it.
+    assert.equal(await check(fourth, 'docs/page.md', inProject('ENG', 'First')), true);
+    assert.equal(await check(fourth, 'docs/page.md', inProject('ENG', 'Second')), true);
+    assert.equal(await check(fourth, 'docs/page.md', inProject('ENG', 'Third')), false, 'the file was left out when the folder moved there');
+    assert.equal(await check(fourth, 'docs/page.md', inProject('ENG', 'Fourth')), false);
+  });
+
+  it('keeps the place of a version left out with a move after the branch fixed the file, and no older place', async () => {
+    const first = await commit([], { 'docs/README.md': project('First', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const second = await commit([first], { 'docs/README.md': project('Second', 'ENG'), 'docs/page.md': 'Page, edited.\n' });
+    const leftOut = await commit([second], { 'docs/README.md': project('Third', 'ENG'), 'docs/page.md': 'Page.\n\n![Image](missing.png)\n' });
+    const fixed = await commit([leftOut], { 'docs/page.md': 'Page, fixed.\n' });
+    assert.equal(await check(fixed, 'docs/page.md', inProject('ENG', 'Second')), true, 'the sync has not written the fix yet');
+    assert.equal(await check(fixed, 'docs/page.md', inProject('ENG', 'Third')), true);
+    assert.equal(await check(fixed, 'docs/page.md', inProject('ENG', 'First')), false, 'a place before the version the fix replaces');
+    const again = await commit([fixed], { 'docs/page.md': 'Page, fixed again.\n' });
+    assert.equal(await check(again, 'docs/page.md', inProject('ENG', 'Second')), true, 'two fixes before the next sync');
+    assert.equal(await check(again, 'docs/page.md', inProject('ENG', 'First')), false);
+  });
+
+  it('refuses the places of an older cycle of leaving a file out and fixing it', async () => {
+    const first = await commit([], { 'docs/README.md': project('First', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const leftOut = await commit([first], { 'docs/page.md': 'Page.\n\n![Image](missing.png)\n' });
+    const fixed = await commit([leftOut], { 'docs/README.md': project('Second', 'ENG'), 'docs/page.md': 'Page, fixed.\n' });
+    const again = await commit([fixed], { 'docs/page.md': 'Page, fixed.\n\n![Image](missing.png)\n' });
+    const third = await commit([again], { 'docs/README.md': project('Third', 'ENG') });
+    assert.equal(await check(third, 'docs/page.md', inProject('ENG', 'Second')), true);
+    assert.equal(await check(third, 'docs/page.md', inProject('ENG', 'First')), false, 'a cycle before the newest synchronized version');
+    assert.equal(await check(third, 'docs/page.md', inProject('ENG', 'Third')), false);
+  });
+
+  it('reads a place that a merge or a team-only step gave the folder while a version lasted', async () => {
+    const base = await commit([], { 'a/README.md': team('ONE'), 'a/x/README.md': project('P'), 'a/x/page.md': 'Page.\n' });
     const teamChanged = await commit([base], { 'a/README.md': team('TWO') });
     const projectChanged = await commit([base], { 'a/x/README.md': project('Q') });
     const merged = await commit([teamChanged, projectChanged], { 'a/x/README.md': project('Q') });
-    assert.equal(await check(merged, 'a/x', inProject('TWO', 'Q')), true);
+    const teamOnly = await commit([merged], { 'a/x/README.md': null });
+    const last = await commit([teamOnly], { 'a/x/README.md': project('R') });
+    for (const place of [inProject('ONE', 'P'), inProject('TWO', 'P'), inProject('TWO', 'Q'), inTeam('TWO'), inProject('TWO', 'R')]) assert.equal(await check(last, 'a/x/page.md', place), true, JSON.stringify(place));
+    assert.equal(await check(last, 'a/x/page.md', inProject('ONE', 'Q')), false, 'only the merge result counts');
+  });
+
+  it('does not lend one file the places another file of the folder or another folder had', async () => {
+    const first = await commit([], { 'docs/README.md': project('Notes', 'ENG'), 'docs/page.md': 'Page.\n', 'private/README.md': project('Payroll', 'ENG'), 'private/page.md': 'Page.\n' });
+    const moved = await commit([first], { 'docs/README.md': project('Archive', 'ENG'), 'docs/new.md': 'New.\n' });
+    assert.equal(await check(moved, 'docs/page.md', inProject('ENG', 'Payroll')), false);
+    assert.equal(await check(moved, 'private/page.md', inProject('ENG', 'Payroll')), true);
+    assert.equal(await check(moved, 'docs/new.md', inProject('ENG', 'Notes')), false, 'that file came after the move');
+  });
+
+  it('refuses, without failing, when a version it reaches has an unreadable annotation', async () => {
+    const first = await commit([], { 'docs/README.md': project('First', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const large = await commit([first], { 'other/README.md': `---\nlinear-team: ENG\n---\n\n${'x'.repeat(MAPPING_FILE_BYTES)}\n`, 'docs/page.md': 'Page, edited.\n' });
+    const tip = await commit([large], { 'other/README.md': null, 'docs/README.md': project('Second', 'ENG') });
+    assert.equal(await check(tip, 'docs/page.md', inProject('ENG', 'First')), false);
+    const edited = await commit([tip], { 'docs/page.md': 'Page, edited again.\n' });
+    assert.equal(await check(edited, 'docs/page.md', inProject('ENG', 'Second')), true, 'the newest version is readable');
+  });
+
+  it('refuses a file the tracked branch never synchronized', async () => {
+    const tip = await commit([], { 'docs/README.md': project('Notes', 'ENG'), 'docs/page.md': 'Page.\n' });
+    assert.equal(await check(tip, 'docs/other.md', inProject('ENG', 'Notes')), false);
+    assert.equal(await check(tip, 'private/page.md', inProject('ENG', 'Notes')), false);
   });
 
   it('ignores places that only commits a merge brought in had', async () => {
     const base = await commit([], { 'docs/README.md': project('Notes', 'ENG') });
-    const named = await commit([base], { 'docs/README.md': project('Payroll', 'ENG') });
-    const restored = await commit([named], { 'docs/README.md': project('Notes', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const named = await commit([base], { 'docs/README.md': project('Payroll', 'ENG'), 'docs/page.md': 'Page.\n' });
+    const restored = await commit([named], { 'docs/README.md': project('Notes', 'ENG') });
     const merged = await commit([base, restored], { 'docs/page.md': 'Page.\n' });
-    assert.equal(await check(merged, 'docs', inProject('ENG', 'Payroll')), false);
-    assert.equal(await check(named, 'docs', inProject('ENG', 'Payroll')), true);
+    assert.equal(await check(merged, 'docs/page.md', inProject('ENG', 'Payroll')), false);
+    assert.equal(await check(merged, 'docs/page.md', inProject('ENG', 'Notes')), true);
+    assert.equal(await check(named, 'docs/page.md', inProject('ENG', 'Payroll')), true);
+  });
+
+  it('follows a folder moved under another team', async () => {
+    const first = await commit([], { 'ops/README.md': team('OPS'), 'eng/README.md': team('ENG'), 'ops/pay/README.md': project('Pay'), 'ops/pay/page.md': 'Page.\n' });
+    const moved = await commit([first], { 'ops/pay/README.md': null, 'ops/pay/page.md': null, 'eng/pay/README.md': project('Pay'), 'eng/pay/page.md': 'Page.\n' });
+    assert.equal(await check(moved, 'eng/pay/page.md', inProject('ENG', 'Pay')), true);
+    assert.equal(await check(moved, 'eng/pay/page.md', inProject('OPS', 'Pay')), false, 'that file never had the old team');
   });
 
   it('matches a name written in quotes', async () => {
-    const tip = await commit([], { 'docs/README.md': '---\nlinear-team: ENG\nlinear-project: "Q1: \\"Plans\\""\n---\n' });
-    assert.equal(await check(tip, 'docs', inProject('ENG', 'Q1: "Plans"')), true);
+    const tip = await commit([], { 'docs/README.md': '---\nlinear-team: ENG\nlinear-project: "Q1: \\"Plans\\""\n---\n', 'docs/page.md': 'Page.\n' });
+    assert.equal(await check(tip, 'docs/page.md', inProject('ENG', 'Q1: "Plans"')), true);
   });
 
-  it('finds a team-only step between two projects of one team', async () => {
-    const first = await commit([], { 'docs/README.md': project('First', 'ENG') });
-    const teamOnly = await commit([first], { 'docs/README.md': team('ENG') });
-    const second = await commit([teamOnly], { 'docs/README.md': project('Second', 'ENG') });
-    assert.equal(await check(second, 'docs', inTeam('ENG')), true);
-    assert.equal(await check(second, 'docs', inProject('ENG', 'First')), true);
-  });
-
-  it('does not lend one folder the place another folder had', async () => {
-    const first = await commit([], { 'docs/README.md': project('Notes', 'ENG'), 'private/README.md': project('Payroll', 'ENG') });
-    const removed = await commit([first], { 'private/README.md': null });
-    assert.equal(await check(removed, 'docs', inProject('ENG', 'Payroll')), false);
-    assert.equal(await check(removed, 'private', inProject('ENG', 'Payroll')), true);
-    assert.equal(await check(removed, 'docs', inTeam('ENG')), false, 'the team alone was never the place of docs/');
-  });
-
-  it('allows the places of the current mapping without reading history', async () => {
+  it("allows the places the run lists without reading history, a pending move's only for its folder", async () => {
     const tip = await commit([], { 'docs/README.md': project('Notes', 'ENG') });
-    const allowed = trackedPlaces(git, tip, new Map([['docs', { team: 'ENG', teamFolder: 'docs', project: 'Notes', projectFolder: 'docs' }]]));
-    assert.equal(await allowed('other', inProject('ENG', 'Notes')), true);
-    assert.equal(await allowed('other', inTeam('ENG')), false);
+    const notes = { team: 'ENG', teamFolder: 'docs', project: 'Notes', projectFolder: 'docs' };
+    const archive = { team: 'ENG', teamFolder: 'docs', project: 'Archive', projectFolder: 'docs' };
+    // docs/ is on a pending move from Archive: the run lists Archive for its files only.
+    const allowed = syncedPlaces(git, tip, new Map([['docs', notes]]), new Map([['docs', archive]]), LINEAR_FACTS);
+    assert.equal(await allowed('other/page.md', inProject('ENG', 'Notes')), true);
+    assert.equal(await allowed('other/page.md', inTeam('ENG')), false);
+    assert.equal(await allowed('docs/sub/page.md', inProject('ENG', 'Archive')), true);
+    assert.equal(await allowed('other/page.md', inProject('ENG', 'Archive')), false, 'a pending move lends its place to no other folder');
   });
   describe('a pending move', () => {
     it('allows only the place just before the latest change', async () => {
