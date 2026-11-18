@@ -3,6 +3,7 @@
 import { checkedPullView, type RepairGate } from './pull-repairs.ts';
 import { randomUUID } from 'node:crypto';
 import { splitFile } from '../format/index.ts';
+import { MarkdownLimitError } from '../format/markdown.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
 import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, MappingBlobBudgetError, readableBlob } from '../mapping/blobs.ts';
@@ -11,6 +12,7 @@ import { checkPushScope, oneLine, unverifiedNote, unverifiedPaths, withUnverifie
 import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergeInProgress, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { checkpoint } from '../test-hooks.ts';
+import { GitOutputLimitError } from '../state/git.ts';
 import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
@@ -132,9 +134,10 @@ async function includeCapturedAssets(git: Git, linear: Oid, ids: IdMap, paths: S
     }
     for (const asset of assets) paths.add(asset);
   } catch (error) {
-    return hold(error instanceof MappingBlobBudgetError
-      ? `The suspended documents exceed the ${MAPPING_BUDGET_BYTES}-byte Markdown budget.`
-      : 'The recorded tree or its document links could not be read safely.');
+    if (error instanceof MappingBlobBudgetError) return hold(`The suspended documents exceed the ${MAPPING_BUDGET_BYTES}-byte Markdown budget.`);
+    if (error instanceof GitOutputLimitError) return hold(`A Git read during asset discovery exceeded its ${error.bytes}-byte output limit.`);
+    if (error instanceof MarkdownLimitError) return hold(`A suspended document exceeds the Markdown ${error.limit} limit.`);
+    return hold('The recorded tree or its document links could not be read safely.');
   }
 }
 

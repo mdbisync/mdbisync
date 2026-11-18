@@ -44,6 +44,16 @@ export class GitError extends Error {
   }
 }
 
+export class GitOutputLimitError extends Error {
+  readonly bytes: number;
+
+  constructor(bytes: number) {
+    super(message('git.output-limit', { bytes }));
+    this.name = 'GitOutputLimitError';
+    this.bytes = bytes;
+  }
+}
+
 /** Environment every git call gets: no prompts, no LFS download on checkout, stable messages. */
 const BASE_ENV: Record<string, string> = {
   GIT_TERMINAL_PROMPT: '0',
@@ -97,7 +107,7 @@ export class Git {
       child.stdin.on('error', () => {});
       child.on('close', (code) => {
         if (exceededLimit !== undefined) {
-          reject(new Error(message('git.output-limit', { bytes: exceededLimit })));
+          reject(new GitOutputLimitError(exceededLimit));
           return;
         }
         const result: RunResult = {

@@ -397,8 +397,12 @@ When restoring a suspended branch or taking later Linear edits into it,
 the sync checks recorded Markdown sizes and reads within a byte budget.
 If it cannot safely collect all linked assets, it reports
 `suspended-asset-discovery` with the reason and stops before publishing
-either batch or writing to Linear. If the hold names a size limit, reduce
-the recorded Markdown size before trying again.
+either batch or writing to Linear. For an oversized blob already in the
+`linear` state ref, shortening the document in Linear cannot replace the
+unreadable record. Restore the affected paths from a trusted state with a
+forward commit on that ref, keeping the other paths and the suspension
+records intact. If the stored state cannot be trusted, see
+[Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync).
 
 Each suspended document shows a red exclamation mark (`Alert`) and one
 comment, for example:

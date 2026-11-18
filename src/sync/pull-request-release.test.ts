@@ -127,7 +127,7 @@ describe('sync: pull request release', () => {
     assert.match((await documentOf(path)).content ?? '', /Photo/);
   });
 
-  for (const limit of ['file', 'batch'] as const) {
+  for (const limit of ['file', 'batch', 'output'] as const) {
     it(`keeps a green suspended batch in place when recorded documents exceed the ${limit} limit`, async (t) => {
       const path = 'eng/notes/plan.md';
       await suspendOne(path);
@@ -143,14 +143,14 @@ describe('sync: pull request release', () => {
       const changes = new Map<string, string>();
       if (limit === 'file') {
         changes.set(path, 'a'.repeat(MAPPING_FILE_BYTES + 1));
-      } else {
+      } else if (limit === 'batch') {
         const body = 'a'.repeat(MAPPING_FILE_BYTES);
         for (let i = 0; i <= Math.floor(MAPPING_BUDGET_BYTES / MAPPING_FILE_BYTES); i++) {
           const extra = `eng/notes/recorded-${i}.md`;
           changes.set(extra, body);
           recordedIds.set(extra, { id: `doc-${i}`, suspended: { noticeId: randomUUID(), paths: [extra], checks: [] } });
         }
-      }
+      } else changes.set(path, '# Plan\n\nAn updated record.\n');
       const linear = await commitTree(remote, { parents: [previous], base: previous, changes, identity: IDENTITY, message: 'Record documents' });
       const heldIds = await commitIds(remote, previousIds, recordedIds, IDENTITY);
       await remote.run(['update-ref', linearRef, linear, previous]);
@@ -160,7 +160,10 @@ describe('sync: pull request release', () => {
       const fetched = await fetchState(git, config);
       const mapping = await loadMapping(git, fetched.tracked);
       const fetch = fakeFetch(h.world);
-      const runGit = t.mock.method(git, 'run');
+      const run = git.run.bind(git);
+      const runGit = t.mock.method(git, 'run', (args: Parameters<typeof run>[0], options?: Parameters<typeof run>[1]) =>
+        run(args, limit === 'output' && args[0] === 'ls-tree' && args.at(-1) === linear
+          ? { ...options, maxOutputBytes: 1 } : options));
       const result = await syncPullRequest({
         git, fetched, mapping, targets: { teams: new Map(), projects: new Map() },
         linear: new LinearClient({ token: 'test', fetch }), identity: IDENTITY, pushedKey: new PushedKey('test', 'owner/repo'),
@@ -171,7 +174,8 @@ describe('sync: pull request release', () => {
 
       assert.equal(result.suspended?.code, 'suspended-asset-discovery');
       assert.equal(result.suspended?.released, undefined);
-      assert.match(result.suspended?.reason ?? '', limit === 'file' ? /file limit/ : /Markdown budget/);
+      const reasons = { file: /file limit/, batch: /Markdown budget/, output: /output limit/ };
+      assert.match(result.suspended?.reason ?? '', reasons[limit]);
       assert.equal(pullRequestFailure(result)?.code, 'suspended-asset-discovery');
       assert.match(renderPullRequest(result).join('\n'), /The batch stays suspended/);
       assert.equal(await rev(SUSPENDED), head);
@@ -181,6 +185,16 @@ describe('sync: pull request release', () => {
       assert.ok(runGit.mock.calls.some(({ arguments: [args, options] }) =>
         args[0] === 'ls-tree' && args.at(-1) === linear && options?.maxOutputBytes === MAPPING_TREE_BYTES));
       assert.ok(runGit.mock.calls.every(({ arguments: [args] }) => args[0] !== 'cat-file' || args[1] !== '--batch'));
+
+      if (limit === 'file') {
+        const restored = await commitTree(remote, {
+          parents: [linear], base: linear, changes: new Map([[path, await show(`${previous}:${path}`)]]),
+          identity: IDENTITY, message: 'Restore the recorded plan',
+        });
+        await remote.run(['update-ref', linearRef, restored, linear]);
+        await releaseHeld();
+        assert.match(await show(`refs/heads/main:${path}`), /Held Linear edit/);
+      }
     });
   }
 
