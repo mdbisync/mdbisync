@@ -93,9 +93,12 @@ describe('workflows written by init', () => {
   // environment is made without pip (no network, no ensurepip needed), so
   // `-m pip` there finds the checkout's `pip/` only when the checkout is on
   // the module path, and otherwise fails as an install failure.
-  const realPython = spawnSync('/bin/bash', ['-c', 'command -v python3'], { encoding: 'utf8' }).stdout.trim();
+  // The interpreter itself, not a version manager's shim, which would need a PATH the step does not have.
+  const found = spawnSync('python3', ['-I', '-c', 'import sys; print(sys.executable); print(int((3, 11) <= sys.version_info[:2] <= (3, 14)))'], { encoding: 'utf8' });
+  const [realPython = '', supported] = found.status === 0 ? found.stdout.trim().split('\n') : [];
+  const skip = realPython === '' ? 'no python3' : supported !== '1' && 'python3 is outside the 3.11 to 3.14 the step accepts';
   for (const [file, workflow] of generated) {
-    it(`${file}: checkout packages named venv and pip never run`, { skip: realPython === '' && 'no python3' }, () => {
+    it(`${file}: checkout packages named venv and pip never run`, { skip }, () => {
       const root = mkdtempSync(join(tmpdir(), 'installer-canary-'));
       try {
         const checkout = join(root, 'checkout');

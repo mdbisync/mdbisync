@@ -49,9 +49,15 @@ jobs:
     steps:
       # Only main, the tracked branch: its files are the ones reviewed and
       # merged. A dispatch on another branch would run that branch's files in
-      # a job that holds the App token and the Linear secrets.
+      # a job that holds the App token and the Linear secrets. If the sync
+      # tracks another branch (`tracked-branch`), name that branch here. This
+      # step is in the copy of the workflow on the branch a run uses, so it
+      # does not stop someone who removes it on their own branch; to keep the
+      # secrets from such runs, make them secrets of an environment that only
+      # main may deploy to.
       - name: Refuse a branch other than main
         if: github.ref != 'refs/heads/main'
+        shell: bash
         run: |
           echo "::error::Run this workflow on main, not on $GITHUB_REF."
           exit 1
