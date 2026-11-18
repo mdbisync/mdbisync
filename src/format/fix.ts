@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, isCallout, isCalloutComment, joinFile, parse, quoteLines, splitFile, start, visit } from './markdown.ts';
+import { end, isCallout, isCalloutComment, joinFile, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -414,13 +414,18 @@ function imageDestination(url: string): string {
  * the `linear-format` hook) leaves unchanged. Linear's own text is not always
  * that form: it can store a table cell with a trailing space (`| a  |`).
  * Pass the whole file, front matter included, as the hook sees it.
+ *
+ * Only a re-spelling is taken: when `fix` would change the document itself
+ * (it writes a setext heading's two lines as one), the file would no longer
+ * hold what Linear holds, and the text stays as it is.
  */
 export function fixLinearText(text: string, content: string): string {
   // A relative link or image still in Linear's content was not uploaded, so
   // its file is not there: Linear keeps such a link as a link, not as a file
   // block, and so does a repair that turns such an image into a link.
   const notUploaded = relativeUrls(content, new Set(['link', 'image']));
-  return fixText(text, { linkedFileExists: (url) => !notUploaded.has(url) });
+  const fixed = fixText(text, { linkedFileExists: (url) => !notUploaded.has(url) });
+  return fixed === text || sameMarkdown(splitFile(fixed).body, splitFile(text).body) ? fixed : text;
 }
 
 /** The destinations of relative links in the text (no scheme, not an anchor), as written. */

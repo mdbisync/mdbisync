@@ -103,6 +103,15 @@ describe('links to files that are not there', () => {
     const text = '* [Report](report.pdf)\n* [Chart](chart.png)\n* \n  [Spec](assets/spec.pdf)';
     assert.equal(fixLinearText(text, content), '* [Report](<report.pdf>)\n* [Chart](<chart.png>)\n* \n  [Spec](assets/spec.pdf)');
   });
+
+  it('text from Linear is only re-spelled: a rewrite that would change the document leaves the text as it is', () => {
+    const padded = '| Step | State |\n| -- | -- |\n| Draft  | tbd |';
+    assert.equal(fixLinearText(padded, padded), '| Step | State |\n| -- | -- |\n| Draft | tbd |');
+    // `fix` writes a setext heading on one line, joining its lines with a space: another text.
+    const setext = 'Two\nlines\n---\n\nText.';
+    assert.notEqual(fixText(setext), setext);
+    assert.equal(fixLinearText(setext, setext), setext);
+  });
 });
 
 describe('a body that opens with a rule pair', () => {

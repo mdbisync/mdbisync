@@ -231,6 +231,8 @@ describe('capture from Linear', () => {
     for (const path of ['docs/notes.md', 'docs/sub/README.md']) {
       const file = await text(path);
       assert.equal(splitFile(file).head, '', path);
+      // Read as a body, the text between the rules is a setext heading, which `fix` would write on one line: that
+      // changes the document, not only its spelling, so the file keeps Linear's text.
       assert.ok(sameMarkdown(splitFile(file).body, blockFirst), path);
     }
     const mapping = await loadMapping(context.git, result.state.linear!);
@@ -772,7 +774,8 @@ describe('capture from Linear', () => {
     ['![Image](relative.png)\n', '![Image](relative.png)'],
     ['![Image](/absolute.png)\n', '![Image](/absolute.png)'],
     ['![Image]()\n', '![Image]()'],
-    ['![Image][picture]\n\n[picture]: https://example.com/a.png\n', '![Image](https://example.com/a.png)'],
+    // `fix` would make the reference inline: another document to the sync, so Linear's text stays.
+    ['![Image][picture]\n\n[picture]: https://example.com/a.png\n', '![Image][picture]\n\n[picture]: https://example.com/a.png\n'],
     ['[![Image](https://example.com/a.png)](https://example.com)\n', '[![Image](https://example.com/a.png)](https://example.com)\n'],
   ] as const) {
     it(`records the original image while preparing a checked pull repair: ${body.trim()}`, async () => {

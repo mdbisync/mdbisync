@@ -293,15 +293,18 @@ for (const file of process.argv.slice(2)) {
       '[![Image](https://example.com/a.png)](https://example.com)',
     ];
     const original = images.join('\n\n') + '\n\n[asset]: relative.png';
-    // The repair is proposed in the hook's form: empty paragraphs go, the reference becomes inline.
+    // `fix` would drop the empty paragraphs and make the reference inline: another document to the sync, so the
+    // repair keeps this form (without a final newline, as Linear stores the text it repairs).
     const repaired = [
       '[Image](<https://example.com/a.png>)',
       '[Image](<http://example.com/a.png>)',
+      '',
       '[Image](<relative.png>)',
       '[Image](</absolute.png>)',
+      '',
       '[Image](<relative.png>)',
-      '[Image](<https://example.com>)',
-    ].join('\n\n');
+      '[Image](https://example.com)',
+    ].join('\n\n') + '\n\n[asset]: relative.png';
     edit(original);
     const before = written();
     await stagedRun('images');

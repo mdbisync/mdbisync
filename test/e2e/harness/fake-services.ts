@@ -43,8 +43,8 @@ export interface FakeServiceOptions {
   intercept?: (url: string, init: RequestInit | undefined) => Response | undefined;
 }
 
-/** Two documents of two paragraphs each, for specs that need no content of their own. */
-export const DOCUMENTS: Readonly<Record<string, string>> = Object.fromEntries(Array.from({ length: 2 }, (_, i) => [`eng/notes/item-${i}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.\n`]));
+/** Two documents of two paragraphs each, for specs that need no content of their own; in the `linear-format` hook's form, as the tree's configuration requires. */
+export const DOCUMENTS: Readonly<Record<string, string>> = Object.fromEntries(Array.from({ length: 2 }, (_, i) => [`eng/notes/item-${i}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.`]));
 
 /**
  * Seeds `documents` into the project folder `eng/notes` (Linear project
@@ -61,6 +61,8 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
     const tree = { 'eng/notes/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n', ...documents, '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/hooks\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n' };
     await fixture.seed(tree, { branch: names.trackedBranch });
     const world = fakeWorld();
+    // As measured: Linear stores a document's content without a final newline.
+    world.linear.store = (content) => content.replace(/\n+$/, '');
     // No check workflow in the tree: the head has no checks, as in the live specs.
     world.github.checks = new Map();
     options.prepare?.(world);
