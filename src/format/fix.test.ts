@@ -2,10 +2,12 @@
 // test (test/format/bank.test.ts) checks the same rules against Linear's
 // recorded forms.
 
+import type { List } from 'mdast';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { linkedFileCheck } from './lint.ts';
+import { parse } from './markdown.ts';
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],
@@ -45,6 +47,7 @@ const cases: Array<[string, string, string]> = [
   ['a nested numbered item after its parent’s text keeps the file link on the marker line', '* Parent\n  1. [Report](report.csv)', '* Parent\n  1. [Report](<report.csv>)'],
   ['a nested numbered list starting above one keeps its blank line and file block', '* Parent\n\n  3. [Report](report.csv)', '* Parent\n\n  3. \n     [Report](report.csv)'],
   ['a nested attachment after a sibling still becomes a file block', '* Parent\n  * First\n  * [Report](report.csv)', '* Parent\n  * First\n  * \n    [Report](report.csv)'],
+  ['a nested list starting with an empty item keeps its blank line after the parent', '* Parent\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next', '* Parent\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next'],
   ['a nested file block keeps its existing blank line after the parent', '* Parent\n\n  * \n    [Report](report.csv)', '* Parent\n\n  * \n    [Report](report.csv)'],
   ['a task or numbered item with only a video link keeps the file block (the video form is recorded for bullets)', '- [ ] [Demo](demo.mp4)\n\n1. [Demo](demo.mp4)', '- [ ] \n  [Demo](demo.mp4)\n\n1. \n   [Demo](demo.mp4)'],
   ['a bullet item with only an MP3 link keeps the link on its line, in angle brackets', '* \n  [Voice note](media/note.mp3)\n* [Call](<call one.MP3>)\n* [Memo](memo.mp3?v=2)', '* [Voice note](<media/note.mp3>)\n* [Call](<call%20one.MP3>)\n* [Memo](<memo.mp3?v=2>)'],
@@ -71,6 +74,23 @@ describe('fix rules', () => {
     it(name, () => {
       assert.equal(fixText(input), expected);
       assert.equal(fixText(expected), expected, 'the result is a fixed point');
+    });
+  }
+});
+
+describe('an empty first nested item after its parent’s text', () => {
+  for (const input of ['- Parent\n\n  -\n  - Next\n', '1. Parent\n\n   1.\n   2. Next\n']) {
+    it(`stays a list item with its following sibling, and a second run changes nothing: ${JSON.stringify(input)}`, () => {
+      const once = fixText(input);
+      assert.equal(fixText(once), once, 'the result is a fixed point');
+      const [list] = parse(once).children;
+      assert.equal(list?.type, 'list');
+      const [parent] = (list as List).children;
+      assert.deepEqual(parent!.children.map((child) => child.type), ['paragraph', 'list']);
+      const nested = (parent!.children[1] as List).children;
+      assert.equal(nested.length, 2);
+      assert.deepEqual(nested[0]!.children, []);
+      assert.equal(nested[1]!.children[0]?.type, 'paragraph');
     });
   }
 });
