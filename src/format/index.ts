@@ -1,6 +1,6 @@
 // The format module: `lint` and `fix` for Markdown in Linear's form.
 
-export { fixText, relativeLinkUrls, type FixOptions } from './fix.ts';
+export { fixText, linkDestination, relativeLinkUrls, type FixOptions } from './fix.ts';
 export { linkedFileResolver } from './command.ts';
 export { duplicateTitles, linkedFileCheck, lintInTree, lintText, type LintOptions } from './lint.ts';
 export { joinFile, sameMarkdown, splitFile } from './markdown.ts';

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { it } from 'node:test';
+import { it, test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { imageLinks } from './image-links.ts';
 import { parse, visit } from '../format/markdown.ts';
+import { fixText } from '../format/index.ts';
 
 function images(body: string): string[] {
   const definitions = new Map<string, string>();
@@ -16,10 +17,10 @@ function images(body: string): string[] {
 }
 
 for (const [source, expected] of [
-  ['![Chart](https://example.com/chart.png)', '[Chart](https://example.com/chart.png)'],
-  ['![](http://example.com/a.png)', '[http://example.com/a.png](http://example.com/a.png)'],
-  ['![Chart](../chart.png)', '[Chart](../chart.png)'],
-  ['![Chart](/chart.png)', '[Chart](/chart.png)'],
+  ['![Chart](https://example.com/chart.png)', '[Chart](<https://example.com/chart.png>)'],
+  ['![](http://example.com/a.png)', '[http://example.com/a.png](<http://example.com/a.png>)'],
+  ['![Chart](../chart.png)', '[Chart](<../chart.png>)'],
+  ['![Chart](/chart.png)', '[Chart](</chart.png>)'],
   ['[![Chart](https://example.com/a.png)](https://example.com)', '[Chart](https://example.com)'],
   ['![]()', ''],
   ['![Chart](data:image/png;base64,AAAA)', ''],
@@ -27,7 +28,7 @@ for (const [source, expected] of [
   ['[Remove](java&#x09;script:alert%281%29)', ''],
   ['[Remove](&#32;javascript:alert%281%29)', ''],
   ['[Remove][bad]\n\n[bad]: data:text/plain,hello', '\n\n'],
-  ['![Chart][image]\n\n[image]: https://example.com/a.png', '[Chart](https://example.com/a.png)\n\n[image]: https://example.com/a.png'],
+  ['![Chart][image]\n\n[image]: https://example.com/a.png', '[Chart](<https://example.com/a.png>)\n\n[image]: https://example.com/a.png'],
   ['`![Chart](../chart.png)`', '`![Chart](../chart.png)`'],
   ['![Chart](https://uploads.linear.app/chart.png)', '![Chart](https://uploads.linear.app/chart.png)'],
 ]) it(`repairs pull Markdown: ${source}`, () => assert.equal(imageLinks(source!).body, expected));
@@ -36,7 +37,7 @@ it('reports original image places and lines, including removed images', () => {
   const source = '![Kept](https://uploads.linear.app/a)\n\n![Dead](https://uploads.linear.app/dead)\n\n![]()\n';
   const result = imageLinks(source, new Set(['https://uploads.linear.app/dead']));
   assert.deepEqual(result.images, [{image:2,total:3,line:3},{image:3,total:3,line:5}]);
-  assert.match(result.body, /\[Dead\]\(https:\/\/uploads.linear.app\/dead\)/);
+  assert.match(result.body, /\[Dead\]\(<https:\/\/uploads.linear.app\/dead>\)/);
 });
 
 it('keeps table cells intact when alt text contains a pipe', () => {
@@ -46,21 +47,21 @@ it('keeps table cells intact when alt text contains a pipe', () => {
   assert.match(result, /\| Keep \|/);
 });
 it('keeps a leading byte order mark while rewriting an image', () => {
-  assert.equal(imageLinks('\uFEFF![Chart](https://example.com/chart.png)').body, '\uFEFF[Chart](https://example.com/chart.png)');
+  assert.equal(imageLinks('\uFEFF![Chart](https://example.com/chart.png)').body, '\uFEFF[Chart](<https://example.com/chart.png>)');
 });
 
 // A literal `!` before a repaired image, or text that a removal joins, must never re-create an image.
 for (const [source, expected] of [
-  ['!![x](../secret.txt)', '\\![x](../secret.txt)'],
-  ['Look !![x](https://example.com/a.png) here', 'Look \\![x](https://example.com/a.png) here'],
-  ['!![x][r]\n\n[r]: ../secret.txt', '\\![x](../secret.txt)\n\n[r]: ../secret.txt'],
-  ['\\\\!![x](../secret.txt)', '\\\\\\![x](../secret.txt)'],
-  ['\\!![x](../secret.txt)', '\\![x](../secret.txt)'],
+  ['!![x](../secret.txt)', '\\![x](<../secret.txt>)'],
+  ['Look !![x](https://example.com/a.png) here', 'Look \\![x](<https://example.com/a.png>) here'],
+  ['!![x][r]\n\n[r]: ../secret.txt', '\\![x](<../secret.txt>)\n\n[r]: ../secret.txt'],
+  ['\\\\!![x](../secret.txt)', '\\\\\\![x](<../secret.txt>)'],
+  ['\\!![x](../secret.txt)', '\\![x](<../secret.txt>)'],
   ['!![]()[y](../secret.txt)', '\\![y](../secret.txt)'],
   ['!![d](data:image/png;base64,AAAA)[y][r]\n\n[r]: ../secret.txt', '\\![y][r]\n\n[r]: ../secret.txt'],
   ['![a][b](javascript:alert%281%29)(../secret.txt)', '\\!\\[a](../secret.txt)'],
-  ['| A |\n| -- |\n| !![x](../secret.txt) |', '| A |\n| -- |\n| \\![x](../secret.txt) |'],
-  ['\uFEFF!![x](../secret.txt)', '\uFEFF\\![x](../secret.txt)'],
+  ['| A |\n| -- |\n| !![x](../secret.txt) |', '| A |\n| -- |\n| \\![x](<../secret.txt>) |'],
+  ['\uFEFF!![x](../secret.txt)', '\uFEFF\\![x](<../secret.txt>)'],
 ]) it(`does not re-create an image next to a literal bang: ${JSON.stringify(source)}`, () => {
   const body = imageLinks(source!).body;
   assert.equal(body, expected);
@@ -78,7 +79,7 @@ for (const [source, expected] of [
 it('keeps an upload image next to a bang and repairs only the others', () => {
   const source = '!![Kept](https://uploads.linear.app/a) !![x](../secret.txt)';
   const body = imageLinks(source).body;
-  assert.equal(body, '!![Kept](https://uploads.linear.app/a) \\![x](../secret.txt)');
+  assert.equal(body, '!![Kept](https://uploads.linear.app/a) \\![x](<../secret.txt>)');
   assert.deepEqual(images(body), ['https://uploads.linear.app/a']);
 });
 
@@ -91,7 +92,7 @@ it('keeps an upload image whose destination a joined image repeats', () => {
 
 it('repairs only the selected images and still never adds one', () => {
   const source = '![A](https://example.com/a.png) !![B](../secret.txt)';
-  assert.equal(imageLinks(source, new Set(), new Set([2])).body, '![A](https://example.com/a.png) \\![B](../secret.txt)');
+  assert.equal(imageLinks(source, new Set(), new Set([2])).body, '![A](https://example.com/a.png) \\![B](<../secret.txt>)');
 });
 
 // Recorded by the format probe: Linear moves an image into its own block, so a literal `!` it
@@ -101,4 +102,25 @@ for (const name of ['bang-before-inline', 'bang-before-reference']) it(`Linear k
   assert.match(linear, /^Look !\n\n/);
   assert.doesNotMatch(linear, /!!\[/);
   assert.deepEqual(images(imageLinks(linear).body), []);
+});
+
+// Linear stores every inline link destination in angle brackets (live L2-42), as `fix` writes it: a repair
+// spelled any other way leaves git and Linear one byte apart after the write-back.
+for (const [source, repaired] of [
+  ['![plan 1](https://uploads.linear.app/w/dead.png)', '[plan 1](<https://uploads.linear.app/w/dead.png>)'],
+  ['![x](<https://example.com/a b.png>)', '[x](<https://example.com/a%20b.png>)'],
+  ['![x](https://example.com/a(1).png)', '[x](<https://example.com/a(1).png>)'],
+  ['![x](<https://example.com/a\\>b.png>)', '[x](<https://example.com/a%3Eb.png>)'],
+  ['![a *b* [c]](../chart.png)', '[a b \\[c\\]](<../chart.png>)'],
+  ['![x](https://example.com/a\\\\)', '[x](<https://example.com/a\\\\>)'],
+  ['![x](https://example.com/a\\\\\\\\)', '[x](<https://example.com/a\\\\\\\\>)'],
+  ['![x](<https://example.com/a&#10;b.png>)', '[x](<https://example.com/a%0Ab.png>)'],
+] as const) test(`a repaired link is spelled as Linear and fix spell it: ${JSON.stringify(source)}`, () => {
+  const body = imageLinks(source, new Set(['https://uploads.linear.app/w/dead.png'])).body;
+  assert.equal(body, repaired);
+  assert.equal(fixText(body), body);
+  assert.equal(parse(body).children.length, 1);
+  let links = 0;
+  visit(parse(body), node => { if (node.type === 'link') links++; });
+  assert.equal(links, 1, 'the repair is a link, not text');
 });

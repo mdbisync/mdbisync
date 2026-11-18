@@ -306,7 +306,7 @@ class Writer {
 
   /** Linear writes every link destination in angle brackets, without a title. */
   private link(children: readonly PhrasingContent[], url: string): string {
-    return `[${this.inline(children)}](<${destination(url).replace(/</g, '%3C').replace(/>/g, '%3E')}>)`;
+    return `[${this.inline(children)}](${linkDestination(url)})`;
   }
 
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
@@ -392,6 +392,16 @@ function destination(url: string): string {
     .replace(/ /g, '%20')
     .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
     .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
+}
+
+/**
+ * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded, and a
+ * backslash at its end doubled, so it cannot escape the closing bracket.
+ */
+export function linkDestination(url: string): string {
+  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
+  const trailing = /\\*$/.exec(inner)![0].length;
+  return `<${inner}${trailing % 2 === 1 ? '\\' : ''}>`;
 }
 
 /** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */

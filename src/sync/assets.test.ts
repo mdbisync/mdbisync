@@ -116,7 +116,7 @@ it('restores cached upload spellings before restricting new downloads to the upl
     // Another document never linked that file: the cached URL does not give it the file, and is not downloaded.
     await assert.rejects(read('docs/other.md', current, new Map([[hash, url]])), (error: unknown) => error instanceof ImageBlockedError && error.findings.some((finding) => finding.reason === 'unreadable'));
     const image = await read('docs/plan.md', `!${current}`, new Map([[hash, url]]), previous);
-    assert.equal(image.body, `[Image](${url}?download=1#page=2)\n`);
+    assert.equal(image.body, `[Image](<${url}?download=1#page=2>)\n`);
 
   } finally { await fixture.cleanup(); }
 });
@@ -249,7 +249,7 @@ it('repairs external images without downloading them and still checks uploaded b
     for (const destination of ['https://images.example.test/chart.png', './diagram.png']) {
       const body = `# Plan\n\n![Upload](https://uploads.linear.app/w/a.png)\n\n![Image](${destination})\n`;
       const result = await read('docs/plan.md', body, new Map());
-      assert.ok(result.body.includes(`[Image](${destination})`));
+      assert.ok(result.body.includes(`[Image](<${destination}>)`));
       assert.ok(!result.body.includes(`![Image](${destination})`));
       assert.ok(result.observedBody?.includes(`![Image](${destination})`));
     }
@@ -543,6 +543,6 @@ it('repairs a dead cached upload with query and fragment suffixes', async () => 
     const base = await git.text(['rev-parse','origin/main']);
     const url = 'https://uploads.linear.app/workspace/missing';
     const result = await captureAssets(git, resolveStateConfig({}), base, 'plan.md', `![Chart](${url}?version=2#part)`, new Map([['a'.repeat(64),url]]), async () => new Response(null,{status:404}));
-    assert.equal(result.body, `[Chart](${url}?version=2#part)`);
+    assert.equal(result.body, `[Chart](<${url}?version=2#part>)`);
   } finally { await fixture.cleanup(); }
 });

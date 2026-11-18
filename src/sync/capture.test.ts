@@ -749,7 +749,7 @@ describe('capture from Linear', () => {
     }}});
     assert.equal(result.ok, true);
     const replacement = (await readIds(context.git, result.state.ids)).get('docs/plan.md')?.pullRewrite?.replacement;
-    assert.ok(replacement?.includes('[Chart](https://example.com/chart.png)'));
+    assert.ok(replacement?.includes('[Chart](<https://example.com/chart.png>)'));
     assert.ok(sets.some(set => set.size > 1 && set.get('docs/plan.md') === replacement), 'the text with its downloaded file');
     assert.ok(sets.some(set => set.size === 1 && set.get('docs/plan.md') === replacement), 'the text alone');
   });
