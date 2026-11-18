@@ -324,7 +324,7 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
   const isAction = (item: unknown) => isActionUses((item as YAMLMap).get('uses'));
   // The run's tracked branch is its main.
   const guard = steps.items.find(item => (item as YAMLMap).get('name') === BRANCH_GUARD_STEP) as YAMLMap | undefined;
-  guard?.set('if', `github.ref != 'refs/heads/${options.trackedBranch}'`);
+  guard?.setIn(['env', 'BRANCH'], options.trackedBranch);
   if (options.securityCanary && steps.items.some(isAction)) {
     const hooks = steps.items.find(item => (item as YAMLMap).get('name') === CANARY_HOOK_STEP) as YAMLMap | undefined;
     if (hooks === undefined) throw new Error('Security canary needs a separate hooks step');

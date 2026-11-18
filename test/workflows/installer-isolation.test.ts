@@ -17,7 +17,7 @@ import { describe, it } from 'node:test';
 import { parse } from 'yaml';
 import templates from '../../src/init/workflows.json' with { type: 'json' };
 
-interface Step { name?: string; if?: string; run?: string; uses?: string; with?: Record<string, unknown>; env?: Record<string, unknown> }
+interface Step { name?: string; if?: string; shell?: string; run?: string; uses?: string; with?: Record<string, unknown>; env?: Record<string, unknown> }
 interface Workflow { jobs: Record<string, { steps: Step[] }> }
 
 const generated = Object.entries(templates as Record<string, string>).map(([file, text]) => [file, parse(text) as Workflow] as const);
@@ -72,15 +72,24 @@ describe('workflows written by init', () => {
       for (const job of Object.values(workflow.jobs)) {
         const [guard, ...rest] = job.steps;
         assert.equal(guard?.name, GUARD_STEP);
-        assert.equal(guard?.if, "github.ref != 'refs/heads/main'");
+        // Every run reaches the step; the shell compares the ref case-sensitively.
+        assert.equal(guard?.if, undefined);
+        assert.equal(guard?.shell, 'bash');
+        assert.deepEqual(guard?.env, { BRANCH: 'main' });
         assert.equal(guard?.uses, undefined);
         assert.doesNotMatch(JSON.stringify(guard), /secrets\.|token/);
         assert.ok(rest.some((step) => /secrets\./.test(JSON.stringify(step))));
         const root = mkdtempSync(join(tmpdir(), 'ref-guard-'));
         try {
-          const result = bash(guard!.run!, root, { PATH: '/usr/bin:/bin', GITHUB_REF: 'refs/heads/feature' });
-          assert.equal(result.status, 1);
-          assert.equal(result.stdout, '::error::Run this workflow on main, not on refs/heads/feature.\n');
+          const run = (ref: string) => bash(guard!.run!, root, { PATH: '/usr/bin:/bin', GITHUB_REF: ref, BRANCH: 'main' });
+          for (const ref of ['refs/heads/feature', 'refs/heads/Main', 'refs/heads/main-x', 'refs/tags/main', 'refs/pull/1/merge']) {
+            const refused = run(ref);
+            assert.equal(refused.status, 1, ref);
+            assert.equal(refused.stdout, `::error::Run this workflow on main, not on ${ref}.\n`);
+          }
+          const allowed = run('refs/heads/main');
+          assert.equal(allowed.status, 0, allowed.stdout);
+          assert.equal(allowed.stdout, '');
         } finally {
           rmSync(root, { recursive: true, force: true });
         }

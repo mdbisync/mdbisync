@@ -150,7 +150,7 @@ the other steps, and a hook that rewrites files there can reach a later
 step that holds the secrets. Use only hooks you trust. Each workflow first refuses a run on any branch
 but main, the tracked branch, so a dispatch on another branch never runs
 that branch's files with the secrets (if the sync tracks another branch,
-name it in that step). The step is part of the workflow file on the branch
+name it in that step's `BRANCH`). The step is part of the workflow file on the branch
 a run uses, so someone who can push a branch can remove it there: to keep
 the secrets from such runs, make them secrets of an environment that only
 main may deploy to. Each workflow then mints the GitHub App's installation token with

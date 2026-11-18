@@ -52,11 +52,15 @@ jobs:
       # secrets from such runs, make them secrets of an environment that only
       # main may deploy to.
       - name: Refuse a branch other than main
-        if: github.ref != 'refs/heads/main'
         shell: bash
+        env:
+          BRANCH: main
+        # Compared in the shell: Git refs are case-sensitive, workflow expressions are not.
         run: |
-          echo "::error::Run this workflow on main, not on $GITHUB_REF."
-          exit 1
+          if [ "$GITHUB_REF" != "refs/heads/$BRANCH" ]; then
+            echo "::error::Run this workflow on $BRANCH, not on $GITHUB_REF."
+            exit 1
+          fi
       - name: Get the GitHub App token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0

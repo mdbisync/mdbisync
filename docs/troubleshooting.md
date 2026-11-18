@@ -60,7 +60,7 @@ step with the bare message, without `error:`.
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
-| `Run this workflow on main, not on <ref>.` | The sync or initial sync workflow ran on another branch, for example a dispatch on a feature branch, and stopped before any step got a token or a secret. Run it on main. If the sync tracks another branch, name that branch in the workflow's first step. |
+| `Run this workflow on <branch>, not on <ref>.` | The sync or initial sync workflow ran on a branch other than the tracked branch (main), for example a dispatch on a feature branch, and stopped before any step got a token or a secret. Run it on the tracked branch. If the sync tracks a branch other than main, name it in the workflow's first step (`BRANCH`). |
 | `error: <message>` (the action: `<message>` alone) | An error stopped the run. Look the message up on this page. |
 
 ## Setup check

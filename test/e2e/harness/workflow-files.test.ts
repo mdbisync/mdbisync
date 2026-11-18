@@ -84,10 +84,10 @@ describe('workflow templates rendered for a run', () => {
 
   it('guards the sync jobs to the run\'s tracked branch, its main', () => {
     for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['initial-sync']]) {
-      assert.equal(jobsOf(readTemplate(file))[0]?.steps[0]?.if, "github.ref != 'refs/heads/main'", file);
+      assert.deepEqual(jobsOf(readTemplate(file))[0]?.steps[0]?.env, { BRANCH: 'main' }, file);
       const [job] = jobsOf(renderForRun(readTemplate(file), RUN));
       assert.equal(job?.steps[0]?.name, BRANCH_GUARD_STEP, file);
-      assert.equal(job?.steps[0]?.if, `github.ref != 'refs/heads/${RUN.trackedBranch}'`, file);
+      assert.deepEqual(job?.steps[0]?.env, { BRANCH: RUN.trackedBranch }, file);
     }
   });
   it('limits push and pull request triggers to the run\'s branch', () => {

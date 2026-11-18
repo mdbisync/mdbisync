@@ -16,6 +16,9 @@ enough.
 
 mdbisync is in early development. Fixes go into the next release; pin your
 workflows and hooks to the newest release commit to receive them.
+Some fixes change the workflow templates in `examples/` rather than the
+action: compare the workflows you copied with the newest templates and apply
+their changes, keeping your own settings.
 
 ## Scope
 
