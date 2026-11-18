@@ -6,7 +6,7 @@
 import type { Definition, ImageReference, LinkReference, Root, Table } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, bracketedLabel, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
@@ -151,9 +151,11 @@ export function referencesOverLimit(tree: Root, body: string): number | undefine
     const definition = definitions.get(reference.identifier);
     if (definition === undefined) continue;
     const source = end(reference) - start(reference);
-    // `fix` writes a link's text from its children and an image's label as written: at most the reference's source.
-    const text = reference.type === 'linkReference' ? childrenLength(reference) : source;
-    added += text + destinationLength(reference, definition.url) + 4 - source;
+    // `fix` writes `[text](destination)` from a link's children, `![label](destination)` from an image's label as written.
+    const written = reference.type === 'linkReference'
+      ? childrenLength(reference) + 4
+      : bracketedLabel(body, start(reference) + 1).length + 5;
+    added += written + destinationLength(reference, definition.url) - source;
     if (body.length + added <= CONTENT_LIMIT) continue;
     kept ??= codePoints(body) - dropped.reduce((sum, node) => sum + codePoints(body.slice(start(node), end(node))), 0);
     if (kept + added > CONTENT_LIMIT) return line(reference);

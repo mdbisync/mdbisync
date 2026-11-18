@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { MarkdownLimitError, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, bracketedLabel, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -331,14 +331,7 @@ class Writer {
 
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
   private label(open: number): string {
-    let depth = 0;
-    for (let at = open; at < this.source.length; at++) {
-      const char = this.source[at];
-      if (char === '\\') at++;
-      else if (char === '[') depth++;
-      else if (char === ']' && --depth === 0) return this.source.slice(open + 1, at);
-    }
-    return '';
+    return bracketedLabel(this.source, open);
   }
 }
 

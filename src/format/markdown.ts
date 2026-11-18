@@ -257,3 +257,15 @@ export function linkDestination(url: string): string {
 export function imageDestination(url: string): string {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
+
+/** The bracketed label that opens at `open` (a `[`) in `source`, as written, without its brackets. */
+export function bracketedLabel(source: string, open: number): string {
+  let depth = 0;
+  for (let at = open; at < source.length; at++) {
+    const char = source[at];
+    if (char === '\\') at++;
+    else if (char === '[') depth++;
+    else if (char === ']' && --depth === 0) return source.slice(open + 1, at);
+  }
+  return '';
+}

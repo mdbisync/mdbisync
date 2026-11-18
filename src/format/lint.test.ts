@@ -185,6 +185,14 @@ describe('lint rules', () => {
     assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
   });
 
+  it('counts only the label of an image reference: many short image references that fit stay fixable', () => {
+    // 135 KB written as 195 KB: each `![a][r]` becomes `![a](u.png)`.
+    const text = `${'![a][r]\n\n'.repeat(15_000)}[r]: u.png\n`;
+    assert.deepEqual(lintText('doc.md', text, { linkedFileExists: () => true }), []);
+    const fixed = fixText(text, { linkedFileExists: () => true });
+    assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
+  });
+
   it('keeps writing reference links inline within the limit', () => {
     const text = references(100, 100);
     assert.deepEqual(lintText('doc.md', text), []);
