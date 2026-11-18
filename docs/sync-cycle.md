@@ -310,7 +310,18 @@ registered on the pull request's earlier heads and every check in
 counts only from the publisher that registered it there (the same GitHub
 App for a check run, the same account for a commit status), so a
 same-name check from anyone else does not satisfy it. A head that lacks
-an expected check, or has none, waits; past the deadline the run reports the setup error
+an expected check, or has none, waits. When someone else pushed that head
+(a formatter's fix pushed with a workflow's own token starts no other
+workflow), and five minutes after the sync first saw it nothing on it is
+pending or failed but an expected check never registered, the sync pushes
+a commit of its own on top, with the same files: its push starts the
+repository's whole CI. That commit must pass every check the head below it
+waited for, and the pull request merges once they pass, without waiting
+for a Linear change. The sync never does this on a head it pushed itself,
+nor again on a head pushed on such a commit of its own, and the new commit
+starts a new deadline. Past the deadline a head that still lacks an
+expected check makes the run
+report the setup error
 `checks-missing`, and nothing is suspended or marked in Linear. A check
 only GitHub's branch rules require lets the sync try the merge: if GitHub
 refuses it, the run reports `merge-refused`; a later run that meets the

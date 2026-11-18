@@ -14,6 +14,13 @@
       "lockFile": "test/e2e/harness/hook-npm/package-lock.json",
       "reason": "Only in the npm that the end-to-end test harness installs to run Node-based hooks; mdbisync does not ship it. Remove once npm bundles minimatch 11.0.1 or newer.",
       "review": "2027-02-16"
+    },
+    {
+      "advisory": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "lockFile": "test/e2e/harness/hook-npm/package-lock.json",
+      "reason": "Only in E2E harness npm for Node hooks, absent from releases. Bundled node-gyp uses fixed globs. Hook fixtures and outside inputs supply no patterns. Remove once npm bundles patched picomatch.",
+      "review": "2027-02-16"
     }
   ]
 }
