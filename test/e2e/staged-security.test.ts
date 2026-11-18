@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { lintInTree } from '../../src/format/index.ts';
 import { loadMapping } from '../../src/mapping/index.ts';
 import { type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../../src/setup/test-helpers.ts';
-import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef, listTree, readBlobs } from '../../src/state/index.ts';
+import { Git, PushedKey, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef, listTree, readBlobs } from '../../src/state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-helpers.ts';
 import { STAGE_FOLDER } from '../../src/sync/staged.ts';
 import { canaryNameLeaks } from './harness/security-canary.ts';
@@ -118,7 +118,7 @@ for (const file of process.argv.slice(2)) {
     const initial = {
       linear: await commitTree(setup, { parents: [fetched.tracked], base: fetched.tracked, changes: new Map(), message: 'Initial state', identity: IDENTITY }),
       ids: await commitIds(setup, null, new Map([['docs/plan.md', { id: 'plan' }]]), IDENTITY),
-      uploads: await commitUploads(setup, null, new Map(), IDENTITY),
+      uploads: await commitUploads(setup, null, new Map(), IDENTITY, new PushedKey('client-secret', 'owner/repo')),
     };
     const pushed = await pushAtomic(setup, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })));
     assert.equal(pushed.ok, true);
@@ -186,8 +186,8 @@ for (const file of process.argv.slice(2)) {
   };
 
   /** One `uses:` step of the action, its inputs as the runner gives them. */
-  const action = async (name: string, inputs: Record<string, string>): Promise<Step> => {
-    const env: Record<string, string> = await runnerEnv(name);
+  const action = async (name: string, inputs: Record<string, string>, runner: Record<string, string> = {}): Promise<Step> => {
+    const env: Record<string, string> = { ...(await runnerEnv(name)), ...runner };
     const given = {
       'linear-client-id': 'client',
       'linear-client-secret': clientSecret,
@@ -418,13 +418,16 @@ for (const file of process.argv.slice(2)) {
     assert.equal(await remoteHolds('Never checked'), false);
   });
 
-  it('the initial sync from Linear stages, checks and records the same way; a dry run stages nothing', async () => {
+  it('the stage step of an initial sync from git stages nothing and needs no token', async () => {
+    const stage = await action('to-linear', { operation: 'initial-sync', direction: 'git-to-linear', confirm: 'true', 'security-step': 'stage', 'report-file': '' });
+    assert.equal(stage.status, 0, stage.stdout);
+    assert.equal(world.minted, 0, 'from git there is nothing to stage');
+    assert.match((await hooksStep(stage)).stdout, /staged sets checked 0,/);
+  });
+
+  it('the initial sync from Linear stages, checks and records the same way', async () => {
     edit('Taken from Linear.\n');
     const initial = { operation: 'initial-sync', direction: 'linear-to-git', confirm: 'true' };
-    const dry = await action('dry', { ...initial, confirm: '', 'security-step': 'stage', 'report-file': '' });
-    assert.equal(dry.status, 0, dry.stdout);
-    assert.equal(world.minted, 0, 'a dry run has nothing to stage and needs no token');
-
     const stage = await action('stage', { ...initial, 'security-step': 'stage', 'report-file': '' });
     assert.equal(stage.status, 0, stage.stdout);
     assert.deepEqual(world.writes, []);
@@ -437,6 +440,81 @@ for (const file of process.argv.slice(2)) {
     const apply = await action('apply', { ...initial, 'security-step': 'apply' });
     assert.equal(apply.status, 0, apply.stdout);
     assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nTaken from Linear.');
+  });
+
+  /** Every text a step leaves for people and tooling: its log, its report and the job summary beside it. */
+  const reportTexts = async (step: Step, name: string) => [
+    step.stdout,
+    await readFile(join(fixture.root, `${name}-report`, 'report.json'), 'utf8'),
+    await readFile(join(fixture.root, `${name}-report`, 'summary.md'), 'utf8'),
+  ];
+  /** The dry run's plan in its report: the files it would create, and those it leaves out. */
+  const planOf = async (name: string) => {
+    const { summary } = JSON.parse(await readFile(join(fixture.root, `${name}-report`, 'report.json'), 'utf8')) as { summary: { plan: { create: string[] }; leftOut: string[] } };
+    return { create: summary.plan.create, leftOut: summary.leftOut };
+  };
+  /** Two new documents for a dry run from Linear: one whose title the canary hook refuses, one with a clean title. */
+  const newDocuments = () => {
+    world.linear.documents.push(
+      { id: 'held', title: 'notes private-canary 7', content: 'Clean text.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' },
+      { id: 'doc-clean', title: 'clean', content: 'Clean text.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z' },
+    );
+  };
+  const dryRun = { operation: 'initial-sync', direction: 'linear-to-git', confirm: '' };
+
+  it('a dry run from Linear lists a new file whose title the hooks refuse under its id, in one step', async () => {
+    newDocuments();
+    const dry = await action('dry', dryRun);
+    assert.equal(dry.status, 0, dry.stdout);
+    for (const text of await reportTexts(dry, 'dry')) assert.ok(!text.includes('private-canary'), text);
+    assert.deepEqual(await planOf('dry'), { create: ['docs/clean.md'], leftOut: ['docs/held.md'] });
+    assert.deepEqual(world.writes, []);
+  });
+
+  it('a dry run from Linear with no new file needs no pre-commit, even with security hooks', async () => {
+    // Every program the run needs from PATH, and not pre-commit.
+    const bin = join(fixture.root, 'bin-without-pre-commit');
+    await mkdir(bin);
+    for (const program of ['git', 'git-lfs']) {
+      const found = (process.env['PATH'] ?? '').split(':').map((dir) => join(dir, program)).find((path) => existsSync(path));
+      if (found !== undefined) await symlink(found, join(bin, program));
+    }
+    const dry = await action('dry-no-pre-commit', dryRun, { PATH: bin });
+    assert.equal(dry.status, 0, dry.stdout);
+    assert.deepEqual(await planOf('dry-no-pre-commit'), { create: [], leftOut: [] });
+    // A new title needs the hooks, and so pre-commit: the run stops rather than list it unscreened.
+    newDocuments();
+    const refused = await action('dry-needs-pre-commit', dryRun, { PATH: bin });
+    assert.notEqual(refused.status, 0, refused.stdout);
+    assert.match(refused.stdout, /require pre-commit on PATH/);
+    assert.ok(!refused.stdout.includes('private-canary'), refused.stdout);
+  });
+
+  it('a dry run from Linear stages its new titles, and lists one the hooks refuse, or did not answer, under its id', async () => {
+    newDocuments();
+    const refs = await remoteRefs();
+    const stage = await action('dry-stage', { ...dryRun, 'security-step': 'stage', 'report-file': '' });
+    assert.equal(stage.status, 0, stage.stdout);
+    assert.ok(!stage.stdout.includes('private-canary'), stage.stdout);
+    const hooks = await hooksStep(stage);
+    assert.equal(hooks.status, 0, hooks.stdout);
+    assert.match(hooks.stdout, /staged sets checked 2, with findings 1,/);
+    assert.ok(!hooks.stdout.includes('private-canary'));
+    const apply = await action('dry-apply', { ...dryRun, 'security-step': 'apply' });
+    assert.equal(apply.status, 0, apply.stdout);
+    for (const text of await reportTexts(apply, 'dry-apply')) assert.ok(!text.includes('private-canary'), text);
+    assert.deepEqual(await planOf('dry-apply'), { create: ['docs/clean.md'], leftOut: ['docs/held.md'] });
+    // A dry run writes nothing, staged or not.
+    assert.equal(await remoteRefs(), refs);
+    assert.deepEqual(world.writes, []);
+
+    // Without the hooks step, no new title has an answer: none is listed.
+    const unchecked = await action('dry-unchecked', { ...dryRun, 'security-step': 'stage', 'report-file': '' });
+    assert.equal(unchecked.status, 0, unchecked.stdout);
+    const unanswered = await action('dry-unanswered', { ...dryRun, 'security-step': 'apply' });
+    assert.equal(unanswered.status, 0, unanswered.stdout);
+    for (const text of await reportTexts(unanswered, 'dry-unanswered')) assert.ok(!text.includes('private-canary') && !text.includes('docs/clean.md'), text);
+    assert.deepEqual(await planOf('dry-unanswered'), { create: [], leftOut: ['docs/doc-clean.md', 'docs/held.md'] });
   });
 
   it('a document that links to a blocked rename goes through in the same run, linking the accepted file', async () => {

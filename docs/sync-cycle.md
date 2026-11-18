@@ -295,6 +295,12 @@ When a repository security hook (a hook marked `alias: security`, see
 
   When the findings change, the same comment is edited to the new list.
 
+The hooks also check a document's title, as text, before the title names
+a new file. A finding there reads `Hook \`gitleaks\`, in the title.`, and
+until the title passes, the document keeps its last synchronized file, or,
+when it has none yet, the run's state and summary name it by its id
+(`<folder>/<document id>.md`), never by its title.
+
 Fix it by editing the document in Linear. The next run checks the new text;
 when the hooks pass, it synchronizes the document and puts its own icon and
 color back. The comment is not resolved: it stays open as the record of what
@@ -486,13 +492,14 @@ moved out of the synchronized projects, and the old paths of documents
 renamed or moved in Linear (a rename counts once as captured and once as
 removed); *blocked* documents got the
 [blocked mark](#the-blocked-mark); *left out* documents were not taken this
-run (`markdown-complexity`, `attachment-budget`, `capture-translation`, `download-retry` or `security-unchecked`,
+run (`markdown-complexity`, `attachment-budget`, `image-repair-budget`, `capture-translation`, `download-retry` or `security-unchecked`,
 [files left out](troubleshooting.md#files-left-out)). Lines that follow
 only when they apply:
 
 | Line | Where it is explained |
 | --- | --- |
 | `attachment-budget: "<document id>"` | Attachment count or bytes exceeded the document or run limit. The document stays unchanged and the cursor holds; reduce or split attachments and rerun. See [files left out](troubleshooting.md#files-left-out). |
+| `image-repair-budget: "<document id>"` | Image or link repair exceeded the document limit. The document stays unchanged and the cursor holds. Simplify or split the document and rerun. See [files left out](troubleshooting.md#files-left-out). |
 | `download-retry: "<document id>"` | [Files left out](troubleshooting.md#files-left-out); an upload download failed temporarily and the next run retries it without marking the document. |
 | Removal held for N files | [`removal-held`](troubleshooting.md#partial-sync-runs) |
 | The document id map was lost | [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync) |

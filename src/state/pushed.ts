@@ -49,6 +49,16 @@ export class PushedKey {
     return timingSafeEqual(expected, Buffer.from(record.mac, 'hex')) ? record.head : undefined;
   }
 
+  /** Bind the uploaded bytes and their URL to this repository. */
+  uploadMac(hash: string, url: string): string {
+    return createHmac('sha256', this.#key).update(JSON.stringify(['upload-v1', this.#repository, hash, url])).digest('hex');
+  }
+
+  verifiesUpload(hash: string, url: string, mac: unknown): boolean {
+    if (typeof mac !== 'string' || !PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.uploadMac(hash, url), 'hex'), Buffer.from(mac, 'hex'));
+  }
+
   #mac(ref: string, head: Oid): string {
     return createHmac('sha256', this.#key).update(`${this.#repository}\n${ref}\n${head}`).digest('hex');
   }

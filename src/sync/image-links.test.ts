@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { it, test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { imageLinks } from './image-links.ts';
+import { spawnSync } from 'node:child_process';
+import { imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { parse, visit } from '../format/markdown.ts';
 import { fixText } from '../format/index.ts';
 
@@ -93,6 +94,48 @@ it('keeps an upload image whose destination a joined image repeats', () => {
 it('repairs only the selected images and still never adds one', () => {
   const source = '![A](https://example.com/a.png) !![B](../secret.txt)';
   assert.equal(imageLinks(source, new Set(), new Set([2])).body, '![A](https://example.com/a.png) \\![B](<../secret.txt>)');
+});
+
+it('repairs a paragraph of simple images with the same text and positions as the Markdown path', () => {
+  const source = '![Chart 1](../chart.png)  ![](folder/chart-2.svg) ![  ](plain)   ';
+  for (const selected of [undefined, new Set([2, 3])]) {
+    const simple = imageLinks(source, undefined, selected);
+    const parsed = imageLinks(source + '\n', undefined, selected);
+    assert.deepEqual(simple.images, parsed.images);
+    assert.equal(simple.body + '\n', parsed.body);
+  }
+});
+
+function assertBoundedRepair(source: string, expected: string, count: number, milliseconds: number) {
+  // Run in a child so stalled synchronous repair can be interrupted.
+  const run = spawnSync(process.execPath, ['--input-type=module', '--eval', `
+    import assert from 'node:assert/strict';
+    import { imageLinks } from ${JSON.stringify(new URL('./image-links.ts', import.meta.url).href)};
+    const count = ${count};
+    const body = ${JSON.stringify(source)}.repeat(count);
+    const started = process.cpuUsage();
+    const repair = imageLinks(body);
+    assert.equal(repair.body, ${JSON.stringify(expected)}.repeat(count));
+    assert.equal(repair.images.length, count);
+    const elapsed = process.cpuUsage(started);
+    const cpuMilliseconds = (elapsed.user + elapsed.system) / 1_000;
+    assert.ok(cpuMilliseconds < ${milliseconds}, 'repair used ' + cpuMilliseconds + ' ms of CPU time');
+  `], {timeout: 20_000, killSignal: 'SIGKILL', encoding: 'utf8'});
+  assert.ifError(run.error);
+  assert.equal(run.status, 0, run.stderr);
+}
+
+it('repairs 245,000 characters of simple images using under one second of CPU time', () => {
+  assertBoundedRepair('![](x) ', '[x](<x>) ', 35_000, 1_000);
+});
+
+it('repairs thousands of images and escapes literal bangs across paragraphs', () => {
+  assertBoundedRepair('See !![Chart](chart.png)\n\n', 'See \\![Chart](<chart.png>)\n\n', 6_000, 6_000);
+});
+
+it('bounds the total replacement text when images share a long reference destination', () => {
+  const source = '![Chart][image] '.repeat(300) + '\n\n[image]: ' + 'x'.repeat(4_000);
+  assert.throws(() => imageLinks(source).body, ImageRepairBudgetError);
 });
 
 // Recorded by the format probe: Linear moves an image into its own block, so a literal `!` it

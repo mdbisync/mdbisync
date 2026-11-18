@@ -47,6 +47,24 @@ jobs:
     # the workflow again with the same inputs and it goes on where it stopped.
     timeout-minutes: 55
     steps:
+      # Only main, the tracked branch: its files are the ones reviewed and
+      # merged. A dispatch on another branch would run that branch's files in
+      # a job that holds the App token and the Linear secrets. If the sync
+      # tracks another branch (`tracked-branch`), name that branch here. This
+      # step is in the copy of the workflow on the branch a run uses, so it
+      # does not stop someone who removes it on their own branch; to keep the
+      # secrets from such runs, make them secrets of an environment that only
+      # main may deploy to.
+      - name: Refuse a branch other than main
+        shell: bash
+        env:
+          BRANCH: main
+        # Compared in the shell: Git refs are case-sensitive, workflow expressions are not.
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/$BRANCH" ]; then
+            echo "::error::Run this workflow on $BRANCH, not on $GITHUB_REF."
+            exit 1
+          fi
       - name: Get the GitHub App token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -63,25 +81,28 @@ jobs:
       - name: Install pre-commit
         shell: bash
         run: |
+          # Python runs in isolated mode (-I) from the runner's temporary
+          # directory, so no module of the checkout can stand in for venv or pip.
+          cd "$RUNNER_TEMP"
           if ! command -v pre-commit >/dev/null 2>&1; then
             if ! command -v python3 >/dev/null 2>&1; then
               echo '::error::Install Python 3 with venv support, or provide pre-commit on PATH.'
               exit 1
             fi
             # The patched filelock in this list needs Python 3.11; the hashed wheels stop at 3.14.
-            if ! python3 -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
-              echo "Found $(python3 -V 2>&1)."
+            if ! python3 -I -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
+              echo "Found $(python3 -I -V 2>&1)."
               echo '::error::Python 3.11 to 3.14 is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
-            if ! python3 -m venv "$environment"; then
+            if ! python3 -I -m venv "$environment"; then
               echo '::error::Python 3 venv support is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             # Only these files are installed: pip refuses a file whose hash is not
             # listed and builds nothing from source.
-            if ! "$environment/bin/python" -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
+            if ! "$environment/bin/python" -I -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
           cfgv==3.5.0 --hash=sha256:a8dc6b26ad22ff227d2634a65cb388215ce6cc96bbcc5cfde7641ae87e8dacc0
           distlib==0.4.4 --hash=sha256:ca4175b4ac7f71223cc30ed7248c45d2b38c2439d8ee6e498ab67ed63cf3508d --hash=sha256:cf09d55b1e85a89576b036aeb71550bfd68320f3f21761ca329eadadad918638
           filelock==4.2.10 --hash=sha256:9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857
@@ -131,9 +152,9 @@ jobs:
             ln -s "$environment/bin/pre-commit" "$environment/commands/pre-commit"
             echo "$environment/commands" >> "$GITHUB_PATH"
           fi
-      # A confirmed run from Linear reads Linear's documents into the
-      # runner's temporary directory for the hooks; any other run has nothing
-      # to stage. It writes nothing. The action revokes its Linear token when
+      # A run from Linear reads Linear's documents (a dry run, the titles of
+      # new documents) into the runner's temporary directory for the hooks; a
+      # run from git has nothing to stage. It writes nothing. The action revokes its Linear token when
       # it ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's documents
         id: stage

@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
 import type { Handle } from 'mdast-util-from-markdown';
+import { imageDestination, linkDestination } from '../format/fix.ts';
 import { parse, resolveTarget, splitFile, visit } from '../format/markdown.ts';
 import { LinearError, LinearStoppedError } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
@@ -48,6 +49,8 @@ export const DEFAULT_UPLOAD_LIMIT = 10 * 1024 * 1024;
 export const UPLOAD_TOO_LARGE = 'upload-too-large' satisfies LeftOutAtWriteRule;
 /** Rule of a document left out because a file it links cannot be read (an LFS object that is missing). */
 export const UPLOAD_UNREADABLE = 'upload-unreadable' satisfies LeftOutAtWriteRule;
+/** Rule of a document Linear holds, left out because it plainly links a repository file and the state that says who wrote the link is lost. */
+export const LINK_PROVENANCE_UNKNOWN = 'link-provenance-unknown' satisfies LeftOutAtWriteRule;
 
 /** Bytes of blobs read per git process while hashing linked files. */
 const HASH_BATCH_BYTES = 64 * 1024 * 1024;
@@ -74,6 +77,7 @@ export interface FileLink {
   target: string;
   /** The destination's query and fragment (`#page=3`), kept after the upload URL. */
   suffix: string;
+  inTable: boolean;
 }
 
 /** What a document's link to a file was before the upload: restored in place of `url + suffix`. */
@@ -126,11 +130,25 @@ export async function predictUploadLeaveOuts(
   plan: InitialSyncPlan,
   texts: ReadonlyMap<string, string>,
   uploads: UploadMap,
+  options: { remote: string; limit?: number; plainFiles?: ReadonlyMap<string, ReadonlySet<string>>; unknownProvenance?: ReadonlySet<string> },
+): Promise<UploadLeaveOut[]> {
+  const { files } = await treeFiles(git, tracked);
+  const { planned, unproven } = plannedLinks(plan, files, texts, options.plainFiles, options.unknownProvenance);
+  const judged = await predictPlanned(git, files, planned, uploads, options);
+  // The write judges provenance before any file, so its rule comes first.
+  const result = [...unproven].map(([path, unprovenFiles]): UploadLeaveOut => ({ path, rule: LINK_PROVENANCE_UNKNOWN, files: unprovenFiles }));
+  return [...result, ...judged].sort((a, b) => compare(a.path, b.path));
+}
+
+/** `predictUploadLeaveOuts` for the documents whose links the run would upload. */
+async function predictPlanned(
+  git: Git,
+  files: ReadonlyMap<string, TreeEntry>,
+  planned: ReadonlyMap<string, string[]>,
+  uploads: UploadMap,
   options: { remote: string; limit?: number },
 ): Promise<UploadLeaveOut[]> {
   const limit = options.limit ?? DEFAULT_UPLOAD_LIMIT;
-  const { files } = await treeFiles(git, tracked);
-  const planned = plannedLinks(plan, files, texts);
   // Each file once: several documents may link it.
   const targets = [...new Set([...planned.values()].flat())];
   const linked = new Map<string, LinkedFile>();
@@ -275,17 +293,34 @@ async function treeFiles(git: Git, tracked: Oid): Promise<{ files: Map<string, T
   return { files, markdown };
 }
 
-/** The files each document the plan creates or overwrites links (each once, in link order), from its text; documents without text or links are absent. */
-function plannedLinks(plan: InitialSyncPlan, files: ReadonlyMap<string, TreeEntry>, texts: ReadonlyMap<string, string>, plainFiles?: ReadonlyMap<string, ReadonlySet<string>>): Map<string, string[]> {
+/**
+ * The files each document the plan creates or overwrites links (each once, in
+ * link order), from its text; documents without text or links are absent. A
+ * document the write leaves out for unknown provenance is in `unproven`
+ * instead, with the files that cause it, so no batch uploads its files.
+ */
+function plannedLinks(
+  plan: InitialSyncPlan,
+  files: ReadonlyMap<string, TreeEntry>,
+  texts: ReadonlyMap<string, string>,
+  plainFiles?: ReadonlyMap<string, ReadonlySet<string>>,
+  unknownProvenance?: ReadonlySet<string>,
+): { planned: Map<string, string[]>; unproven: Map<string, string[]> } {
   const isFile = (path: string) => files.has(path);
   const planned = new Map<string, string[]>();
+  const unproven = new Map<string, string[]>();
   for (const { path } of [...plan.create, ...plan.overwrite]) {
     const text = texts.get(path);
     if (text === undefined) continue;
-    const targets = [...new Set(uploadableLinks(path, splitFile(text).body, isFile, plainFiles?.get(path)).map((link) => link.target))];
+    const links = uploadableLinks(path, splitFile(text).body, isFile, plainFiles?.get(path), unknownProvenance?.has(path) === true);
+    if (links.unproven.length > 0) {
+      unproven.set(path, links.unproven);
+      continue;
+    }
+    const targets = [...new Set(links.links.map((link) => link.target))];
     if (targets.length > 0) planned.set(path, targets);
   }
-  return planned;
+  return { planned, unproven };
 }
 
 /**
@@ -451,13 +486,17 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
         if (parseLfsPointer(blob) === null) texts.set(path, blob.toString('utf8'));
       }
       // The files each document to be written links, in the run's write order (by path), for the look-ahead batches.
-      for (const [path, targets] of plannedLinks(ctx.plan, files, texts, ctx.plainFiles)) planned.set(path, targets);
+      for (const [path, targets] of plannedLinks(ctx.plan, files, texts, ctx.plainFiles, ctx.unknownProvenance).planned) planned.set(path, targets);
       order.push(...[...planned.keys()].sort(compare));
     },
 
     async apply({ path, body }) {
       if (context === undefined) throw new Error(message('initial-sync.uploads-not-prepared'));
-      const fileLinks = uploadableLinks(path, body, isFile, context.plainFiles?.get(path));
+      const uploadable = uploadableLinks(path, body, isFile, context.plainFiles?.get(path), context.unknownProvenance?.has(path) === true);
+      if (uploadable.unproven.length > 0) {
+        throw new LeaveOutError(LINK_PROVENANCE_UNKNOWN, message('initial-sync.link-provenance-unknown', { files: uploadable.unproven.join(', ') }), uploadable.unproven);
+      }
+      const fileLinks = uploadable.links;
       if (fileLinks.length === 0) return body;
       const targets = [...new Set(fileLinks.map((link) => link.target))];
       await hashFiles(context.git, targets);
@@ -469,7 +508,16 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       const { uploads } = context;
       const urls = fileLinks.map((link) => uploads.get((linked.get(link.target) as LinkedFile).hash) as string);
       links.set(path, fileLinks.map((link) => ({ written: link.written, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
-      return replaceRanges(body, fileLinks.map((link, index) => ({ from: link.from, to: link.to, text: (urls[index] as string) + link.suffix })));
+      return replaceRanges(body, fileLinks.map((link, index) => {
+        const url = withUploadSuffix(urls[index] as string, link.suffix);
+        const bracketed = link.written.startsWith('<');
+        const text = bracketed || /[()\\]/.test(url) ? linkDestination(url) : imageDestination(url);
+        return {
+          from: link.from - Number(bracketed),
+          to: link.to + Number(bracketed),
+          text: link.inTable ? text.replaceAll('|', '&#124;') : text,
+        };
+      }));
     },
 
     restore({ path, body }) {
@@ -478,6 +526,24 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       return restoreFileLinks(body, fileLinks, context.uploads);
     },
   };
+}
+
+/** Encode URL characters that a Markdown parser might strip or treat as delimiters. */
+export function uploadDestinationUrl(url: string): string {
+  return url.replace(/[\s<>\x00-\x1f\x7f]/gu, (character) => encodeURIComponent(character));
+}
+
+/** Preserve the query on a captured upload when the repository link carries the same query. */
+export function withUploadSuffix(url: string, suffix: string): string {
+  const destination = uploadDestinationUrl(url);
+  if (suffix === '') return destination;
+  const base = destination.split('#')[0]!;
+  const trailing = uploadDestinationUrl(suffix);
+  const searchAt = base.indexOf('?');
+  if (!trailing.startsWith('?') || searchAt === -1) return base + trailing;
+  const search = trailing.split('#')[0]!;
+  if (base.slice(searchAt) === search) return base + trailing.slice(search.length);
+  return base + '&' + trailing.slice(1);
 }
 
 /**
@@ -494,7 +560,7 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
   for (const link of written) {
     const url = uploads.get(link.hash);
     if (url === undefined) continue;
-    const key = url + link.suffix;
+    const key = withUploadSuffix(url, link.suffix);
     raws.set(key, [...(raws.get(key) ?? []), link.written]);
   }
   if (raws.size === 0) return body;
@@ -510,10 +576,15 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
   return replaceRanges(body, replacements);
 }
 
-/** A repaired path is a plain link. Only a repository-authored image can authorize its upload. */
-function uploadableLinks(path: string, body: string, isFile: (path: string) => boolean, plain?: ReadonlySet<string>): FileLink[] {
+/**
+ * The repository-file links of a document the run may upload. A repaired
+ * path is a plain link: only a repository-authored image can authorize its
+ * upload. When the document's provenance is unknown, every other non-image
+ * link is `unproven` (each target once): it may be a Linear member's.
+ */
+function uploadableLinks(path: string, body: string, isFile: (path: string) => boolean, plain?: ReadonlySet<string>, unknown = false): { links: FileLink[]; unproven: string[] } {
   const links = findFileLinks(path, body, isFile);
-  if (plain === undefined || plain.size === 0) return links;
+  if (links.length === 0 || ((plain === undefined || plain.size === 0) && !unknown)) return { links, unproven: [] };
   const imageUrls = new Set<string>();
   const labels = new Set<string>();
   const definitions = new Map<string, string>();
@@ -524,17 +595,18 @@ function uploadableLinks(path: string, body: string, isFile: (path: string) => b
   });
   for (const label of labels) { const url = definitions.get(label); if (url !== undefined) imageUrls.add(url); }
   const images = new Set([...imageUrls].flatMap(url => { const target = resolveTarget(path, url); return target === null ? [] : [target]; }));
-  return links.filter(link => !plain.has(link.target) || images.has(link.target));
+  const kept = links.filter(link => plain?.has(link.target) !== true || images.has(link.target));
+  return { links: kept, unproven: unknown ? [...new Set(kept.filter(link => !images.has(link.target)).map(link => link.target))] : [] };
 }
 
 /** Links, images and link definitions in `body` whose destination is a file of the repository. */
 export function findFileLinks(documentPath: string, body: string, isFile: (path: string) => boolean): FileLink[] {
   const result: FileLink[] = [];
-  for (const { node, range, outer } of destinations(body)) {
+  for (const { node, range, outer, inTable } of destinations(body)) {
     const target = resolveTarget(documentPath, node.url);
     if (target === null || !isFile(target)) continue;
     const cut = node.url.search(/[?#]/);
-    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
+    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut), inTable });
   }
   return result;
 }
@@ -548,8 +620,8 @@ type Range = { from: number; to: number };
  * with (`outer`) their angle brackets, in document order. Reference uses,
  * autolinks and empty destinations without brackets have no range of their own.
  */
-export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range }> {
-  const result: Array<{ node: DestinationNode; range: Range; outer: Range }> = [];
+export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range; inTable: boolean }> {
+  const result: Array<{ node: DestinationNode; range: Range; outer: Range; inTable: boolean }> = [];
   const ranges = new Map<DestinationNode, { range: Range; outer: Range }>();
   // The parser skips one leading BOM before counting source offsets.
   const offset = body.startsWith('\uFEFF') ? 1 : 0;
@@ -564,10 +636,10 @@ export function destinations(body: string): Array<{ node: DestinationNode; range
     ranges.set(node, { range: { from: from + Number(angle), to: to - Number(angle) }, outer: { from, to } });
   };
   const tree = parse(body, [{ enter: { resourceDestination: destination, definitionDestination: destination } }]);
-  visit(tree, (node) => {
+  visit(tree, (node, ancestors) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
     const found = ranges.get(node);
-    if (found !== undefined) result.push({ node, ...found });
+    if (found !== undefined) result.push({ node, ...found, inTable: ancestors.some(parent => parent.type === 'tableCell') });
   });
   return result.sort((a, b) => a.range.from - b.range.from);
 }

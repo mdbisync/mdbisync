@@ -32,14 +32,17 @@ for (const file of ['pre-commit.yml', 'mdbisync.yml', 'mdbisync-initial-sync.yml
         // The step's version check runs in a real Python that reports this version.
         const version = { 'old-python': [3, 10, 12], 'new-python': [3, 15, 0], 'install-3.11': [3, 11, 0] }[mode] ?? [3, 14, 4];
         if (mode !== 'missing-python') executable('python3', `
-          if [ "$1" = -c ]; then exec ${realPython} -I -c 'import sys; sys.version_info = (${version.join(', ')}, "final", 0); exec(sys.argv[1])' "$2"; fi
-          if [ "$1" = -V ]; then echo 'Python ${version.join('.')}'; exit 0; fi
+          # Every call is isolated (-I) and starts in the runner's temporary directory, never the checkout.
+          [ "$PWD" = "$RUNNER_TEMP" ] || exit 4
+          if [ "$1 $2" = '-I -c' ]; then exec ${realPython} -I -c 'import sys; sys.version_info = (${version.join(', ')}, "final", 0); exec(sys.argv[1])' "$3"; fi
+          if [ "$1 $2" = '-I -V' ]; then echo 'Python ${version.join('.')}'; exit 0; fi
           ${mode === 'missing-venv' ? 'exit 1' : ''}
-          [ "$1 $2" = '-m venv' ] || exit 2
-          /bin/mkdir -p "$3/bin"
-          /bin/cat > "$3/bin/python" <<'PYTHON'
+          [ "$1 $2 $3" = '-I -m venv' ] || exit 2
+          /bin/mkdir -p "$4/bin"
+          /bin/cat > "$4/bin/python" <<'PYTHON'
 #!/bin/bash
-[ "$*" = '-m pip install --require-hashes --only-binary :all: -r /dev/stdin' ] || exit 2
+[ "$PWD" = "$RUNNER_TEMP" ] || exit 4
+[ "$*" = '-I -m pip install --require-hashes --only-binary :all: -r /dev/stdin' ] || exit 2
 # The requirements arrive on standard input, pinned with hashes.
 /bin/grep -q '^pre-commit==${preCommit.replaceAll('.', '\\.')}\\( --hash=sha256:[0-9a-f]\\{64\\}\\)\\{1,\\}$' || exit 3
 ${mode === 'pip-failure' ? 'exit 7' : `
@@ -49,7 +52,7 @@ echo 'pre-commit ${preCommit}'
 PRECOMMIT
 /bin/chmod +x "$(/usr/bin/dirname "$0")/pre-commit"`}
 PYTHON
-          /bin/chmod +x "$3/bin/python"
+          /bin/chmod +x "$4/bin/python"
         `);
         const output = join(root, 'github-path');
         writeFileSync(output, '');

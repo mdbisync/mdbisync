@@ -9,6 +9,9 @@
 //    progress commits. A document whose text holds a conflict gets the
 //    conflict mark and its comment, as the sync's write step gives it.
 // 3. Move the documents without a file to Linear's trash.
+//    Before an overwrite or a trash, the document is read again (a batch of
+//    the next ones per request): one that moved, was trashed or was edited
+//    since the plan read it is left out (`changed-during-run`).
 // 4. Record: one atomic push of the final `ids`, `uploads` (created when
 //    missing) and `linear`, a commit whose parent is the tracked branch and
 //    whose tree is the tracked tree with each synchronized file's body
@@ -35,6 +38,7 @@ import { type RunContext } from '../run/preflight.ts';
 import {
   type CommitIdentity,
   type Git,
+  type IdEntry,
   type IdMap,
   type Oid,
   type RefUpdate,
@@ -55,8 +59,11 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, planInitialSync } from './plan.ts';
-import { readPlanSources } from './run.ts';
+import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, placeKey, planInitialSync } from './plan.ts';
+import { type Place } from '../mapping/index.ts';
+import { readPlanSources, unchangedSince } from './run.ts';
+import { provenanceUnknownTrailer, readPlainLinkProvenance } from './provenance.ts';
+import { LINK_PROVENANCE_UNKNOWN } from './uploads.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { detectConflicts } from '../merge/index.ts';
@@ -157,7 +164,11 @@ export interface ConfirmedResult {
   skippedCompleted: string[];
   /** Paths where a document without a file would be; the documents are in Linear's trash. */
   trashed: string[];
-  /** Files a transform left out while writing, with its rule. */
+  /**
+   * Files a transform left out while writing, with its rule; and documents
+   * that changed since the plan read them (`changed-during-run`), at the
+   * path of their file or where it would be, neither written nor trashed.
+   */
   leftOutAtWrite: LeftOutAtWrite[];
   failed: FailedWrite[];
   /** Paths not written because the run stopped first, the interrupted one included. */
@@ -210,11 +221,17 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const expected: StateSnapshot = { ...fetched.state };
   const resumed = (await readInitialSyncProgress(git, expected.ids)) !== null;
   const previous = await readIds(git, expected.ids);
+  // Which links came from Linear, rebuilt by document identity before anything is uploaded, and kept in the ids recorded.
+  const provenance = await readPlainLinkProvenance(git, expected, fetched.tracked, plan);
+  const withPlainFiles = (path: string, entry: IdEntry): IdEntry => {
+    const plain = provenance.plainFiles.get(path);
+    return plain === undefined ? entry : { ...entry, plainFiles: [...plain].sort(compare) };
+  };
   /** What the stopped run sent, by path, when this run resumes it; and what this run has sent. */
   const writtenBefore = resumed ? await readWrittenHashes(git, expected.ids) : new Map<string, string>();
   const sentHashes = new Map(writtenBefore);
   const ids: IdMap = resumed ? new Map(previous) : new Map();
-  const uploads = await readUploads(git, expected.uploads);
+  const uploads = await readUploads(git, expected.uploads, context.pushedKey);
   const uploadsAtStart = uploads.size;
   /** What Linear stores for each synchronized path, and the text this run sent or would send for it. */
   const stored = new Map<string, string>();
@@ -247,7 +264,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const rememberedDocuments = new Map<string, LinearDocument>();
   const remember = (path: string, document: LinearDocument) => {
     const before = previous.get(path);
-    ids.set(path, before !== undefined && before.id === document.id && before.saved !== undefined ? { id: document.id, saved: before.saved } : { id: document.id });
+    ids.set(path, withPlainFiles(path, before !== undefined && before.id === document.id && before.saved !== undefined ? { id: document.id, saved: before.saved } : { id: document.id }));
     stored.set(path, document.content ?? '');
     rememberedDocuments.set(path, document);
   };
@@ -264,7 +281,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     });
     updates.push({ ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit });
     if (uploads.size !== uploadsAtStart || expected.uploads !== null) {
-      const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
+      const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey);
       updates.push({ ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit });
     }
     const pushed = await pushAtomic(git, options.config, updates);
@@ -306,6 +323,26 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     });
   };
 
+  /**
+   * A document as Linear holds it now (null: gone), read again just before
+   * its write or trash, together with the next ones (`PROGRESS_BATCH` per
+   * request) instead of one request each.
+   */
+  const readAgainCache = new Map<string, LinearDocument | null>();
+  /** Titles, by place, of an overwrite left out as changed: no document of them is trashed. */
+  const skippedTitles = new Set<string>();
+  const titleKey = (place: Place, title: string) => `${placeKey(place)}\0${title.normalize('NFC')}`;
+  const readAgain = async (id: string, upcoming: readonly string[]): Promise<LinearDocument | null> => {
+    if (!readAgainCache.has(id)) {
+      const ids = [...new Set([id, ...upcoming])].slice(0, PROGRESS_BATCH);
+      const found = new Map((await linear.getDocuments(ids)).map((document) => [document.id, document]));
+      for (const each of ids) readAgainCache.set(each, found.get(each) ?? null);
+    }
+    const current = readAgainCache.get(id) as LinearDocument | null;
+    readAgainCache.delete(id);
+    return current;
+  };
+
   const work: Work[] = [
     ...plan.overwrite.map((entry): Work => ({ kind: 'overwrite', entry })),
     ...plan.create.map((entry): Work => ({ kind: 'create', entry })),
@@ -332,11 +369,13 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   for (const entry of plan.create) {
     const chosen = saved.get(entry.path);
     documentIds.set(entry.path, chosen !== undefined && !taken.has(chosen) ? chosen : newId());
-    ids.set(entry.path, { id: documentIds.get(entry.path) as string });
+    ids.set(entry.path, withPlainFiles(entry.path, { id: documentIds.get(entry.path) as string }));
   }
 
   try {
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads, documentIds });
+    for (const transform of transforms) {
+      await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads, documentIds, plainFiles: provenance.plainFiles, unknownProvenance: provenance.unknown });
+    }
 
     let written = 0;
     let beforeWriteReached = false;
@@ -405,6 +444,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           unpushed += 1;
           await reconcileMark(path, created, hash);
         } else {
+          // The document may have moved, been trashed or edited since the plan read it: write only the one planned.
+          const upcoming = work.slice(index + 1).flatMap((rest) => (rest.kind === 'overwrite' ? [rest.entry.documentId] : []));
+          const current = await readAgain(item.entry.documentId, upcoming);
+          if (current === null || !unchangedSince(current, document as LinearDocument)) {
+            result.leftOutAtWrite.push({ path, rule: 'changed-during-run' });
+            // Its title's other documents stay too: one of them may be the only match left.
+            skippedTitles.add(titleKey(item.entry.place, item.entry.title));
+            continue;
+          }
           const updated = await linear.updateDocument(item.entry.documentId, { content: body });
           remember(path, updated);
           sentHashes.set(path, hash);
@@ -435,7 +483,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         }
         if (error instanceof LinearReadBackError) {
           // Written, but what Linear stored is unknown: keep the id, and let the next run read the content.
-          ids.set(path, { id: error.document.id });
+          ids.set(path, withPlainFiles(path, { id: error.document.id }));
           unpushed += 1;
         }
         if (error instanceof LinearError) {
@@ -457,6 +505,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           break;
         }
         try {
+          if (skippedTitles.has(titleKey(entry.place, entry.title))) continue;
+          // Trash only the document the plan read in its place, unchanged since. One that shares its would-be
+          // path with a planned file is not reported: that file is written as planned.
+          const listed = sources.documents.get(entry.documentId);
+          const current = await readAgain(entry.documentId, plan.trash.slice(index + 1).map((rest) => rest.documentId));
+          if (listed === undefined || current === null || !unchangedSince(current, listed)) {
+            if (!work.some((planned) => planned.entry.path === entry.path)) result.leftOutAtWrite.push({ path: entry.path, rule: 'changed-during-run' });
+            continue;
+          }
           await linear.trashDocument(entry.documentId);
           result.trashed.push(entry.path);
         } catch (error) {
@@ -520,7 +577,18 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       }
     }
     const tracked = fetched.tracked;
-    let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: RECORD_MESSAGE, identity, skipIfUnchanged: false });
+    // The record carries the plain links' provenance too, so a sync that rebuilds lost ids keeps it.
+    // A document left out for unknown provenance stays unknown: a later recovery leaves it out again.
+    const unproven = result.leftOutAtWrite.flatMap(({ path, rule }) => {
+      const id = documentIds.get(path);
+      return rule === LINK_PROVENANCE_UNKNOWN && id !== undefined ? [provenanceUnknownTrailer(id)] : [];
+    });
+    const plainTrailers = [
+      ...[...finalIds.values()].flatMap((entry) => (entry.plainFiles ?? []).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`)),
+      ...unproven,
+    ].sort(compare);
+    const recordMessage = RECORD_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
+    let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false });
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;
 
     // New documents left out while writing keep their chosen ids, which other documents may link to.
@@ -547,7 +615,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       message: withRecorded(FINAL_IDS_MESSAGE, recorded),
       always: (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
-    const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
+    const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey);
     const updates: RefUpdate[] = [
       { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit },
       { ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit },
@@ -561,9 +629,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     return { linear: linearCommit, moved: linearCommit !== expected.linear, reformatted, parents, hasTrackedParent };
   }
 
-  /** Whether two record commits have the same tree and parents, so the newer one adds nothing. */
+  /** Whether two record commits have the same tree, parents and message, so the newer one adds nothing. */
   async function sameRecord(a: Oid, b: Oid): Promise<boolean> {
-    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P', oid]);
+    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%B', oid]);
     return (await describe(a)) === (await describe(b));
   }
 }

@@ -169,6 +169,12 @@ export class GraphQLTransport {
     return answer.data as T;
   }
 
+  /** A read that must reflect the token as it is now: never answered from the read store, never kept in it. */
+  async queryLive<T>(operation: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
+    if (this.#stopped) throw this.#refuse(operation, 'query', this.#stopped);
+    return (await this.#network(operation, 'query', JSON.stringify({ query, variables, operationName: operation }))).data as T;
+  }
+
   /** Every write obtains its answer directly from the network, never the read store. */
   async mutate<T>(operation: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
     const requestBody = JSON.stringify({ query, variables, operationName: operation });

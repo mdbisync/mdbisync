@@ -10,6 +10,7 @@
 
 export const MESSAGES = {
   'assets.budget': 'attachment budget exceeded; reduce attachments and retry',
+  'assets.image-repair-budget': 'Markdown exceeds the image repair budget.',
   'assets.spool-changed': 'temporary attachment content changed; retry the run',
   'assets.spool-budget': 'temporary attachment storage budget exceeded; reduce attachments and retry',
   // The command line and the action.
@@ -106,6 +107,7 @@ export const MESSAGES = {
   'setup.sync-branch-rules-open': '{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch',
   'setup.sync-branch-rule-restricted': '{rule} restricted',
   'setup.sync-branch-rule-open': '{rule} not restricted on {branches}',
+  'setup.security-hooks-inline-allow': 'security hook {hooks} runs Gitleaks without {flag}, so an inline gitleaks:allow comment in a document from Linear exempts its line; add {flag} (init updates the hook it generated) and keep exceptions in .gitleaks.toml or .gitleaksignore',
   'setup.security-hooks-missing': 'no pre-commit hook marked "alias: {alias}": content is pushed unchecked',
   'setup.hooks-invalid-yaml': '{file} is not valid YAML',
   'setup.hooks-no-repos': '{file} has no "repos" list',
@@ -196,6 +198,7 @@ export const MESSAGES = {
   // Initial sync.
   'initial-sync.state-moved': 'a state ref moved while the run was writing',
   'initial-sync.document-not-listed': 'the planned document for {path} was not listed',
+  'initial-sync.document-not-read': 'the planned document for {path} was not read with its text',
   'initial-sync.links-not-prepared': 'document-links: apply before prepare',
   'initial-sync.project-not-resolved': 'project "{project}" of team "{team}" was not resolved',
   'initial-sync.team-not-resolved': 'team "{team}" was not resolved',
@@ -203,13 +206,14 @@ export const MESSAGES = {
   'initial-sync.misplaced': 'the recorded tree maps {count} files to other documents',
   'initial-sync.over-upload-limit': '{files}: over the upload limit of {limit} bytes',
   'initial-sync.lfs-extensions': '{files}: stored with LFS extensions, which are not supported',
+  'initial-sync.link-provenance-unknown': '{files}: linked as a plain link from a document Linear holds, and the state that names the links Linear members wrote is lost',
   'initial-sync.upload-unreadable': '{file} cannot be read: {reason}',
   'initial-sync.uploads-not-prepared': 'the uploads transform was not prepared',
 
   // The sync.
   'sync.needs-initial-sync': 'run initial sync first',
   'sync.places-unresolved': 'the previously recorded document places could not be resolved',
-  'sync.recorded-place-unknown': 'the recorded state names a Linear place for {folder} that the tracked branch never named; the state refs were changed outside the sync',
+  'sync.recorded-place-unknown': 'the recorded state names a Linear place for {folder} that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync',
   'sync.lost-lease': 'state moved while recording document marks',
   'sync.no-lfs-pointer': 'LFS did not return a pointer',
   'sync.lfs-pointer-mismatch': 'LFS returned a pointer to other content than it was given',
@@ -221,6 +225,8 @@ export const MESSAGES = {
   'sync.invalid-update-time': 'a document has an invalid update time',
   'sync.invalid-security-config': 'invalid security hook configuration',
   'sync.needs-pre-commit': 'security hooks require pre-commit on PATH; install pre-commit before capture',
+  'sync.security-link-outside': 'a tracked symbolic link leads outside the tree the security hooks check',
+  'sync.security-tree-differs': 'the tree the security hooks check differs from the tracked tree',
   'sync.no-runner-temp': 'RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job',
   'sync.staged-version': 'the staged candidates come from another version of the action',
   'sync.staged-hash': 'the staged manifest names a file that is not a content hash',

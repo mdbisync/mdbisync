@@ -5,13 +5,13 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it, afterEach } from 'node:test';
-import { LinearReads } from '../linear/index.ts';
+import { LinearClient, LinearHttpError, LinearNetworkError, LinearReads, LinearStoppedError } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture as makeCapture, DownloadRetryError, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
+import { captureAssets, createAssetCapture as makeCapture, uploadAccessProbe, DownloadRetryError, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
 import { imageLinks } from './image-links.ts';
-import { destinations } from '../initial-sync/uploads.ts';
-import { fixText } from '../format/index.ts';
+import { destinations, withUploadSuffix } from '../initial-sync/uploads.ts';
+import { CONTENT_LIMIT, fixText } from '../format/index.ts';
 
 const captures: ReturnType<typeof makeCapture>[] = [];
 const createAssetCapture: typeof makeCapture = (...args) => { const capture = makeCapture(...args); captures.push(capture); return capture; };
@@ -43,6 +43,21 @@ it('downloads new uploads into the assets folder beside the document, reuses con
     const newHash = createHash('sha256').update(other).digest('hex');
     assert.deepEqual(fresh.files.get(`docs/assets/${newHash}.png`), other);
     assert.equal(fresh.uploads.get(newHash), otherUrl);
+  } finally { await fixture.cleanup(); }
+});
+
+it('localizes an upload in a document at the content limit', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md': 'Plan.'});
+    const git = await fixture.clone('assets');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const upload = '\n\n![](https://uploads.linear.app/a)';
+    const prefix = '\u{1F600}'.repeat(CONTENT_LIMIT - upload.length);
+    const capture = await captureAssets(git, resolveStateConfig({}), base, 'plan.md', prefix + upload, new Map(), async () => new Response(png));
+    const hash = createHash('sha256').update(png).digest('hex');
+    assert.equal(capture.body, `${prefix}\n\n![](assets/${hash}.png)`);
+    assert.ok(capture.body.length > 2 * CONTENT_LIMIT);
   } finally { await fixture.cleanup(); }
 });
 
@@ -118,6 +133,27 @@ it('restores cached upload spellings before restricting new downloads to the upl
     const image = await read('docs/plan.md', `!${current}`, new Map([[hash, url]]), previous);
     assert.equal(image.body, `[Image](<${url}?download=1#page=2>)\n`);
 
+  } finally { await fixture.cleanup(); }
+});
+
+it('keeps the previous attachment spelling and query when rebuilding a cache entry', async () => {
+  const fixture = await createFixture();
+  try {
+    const previous = '![Chart](<image.png?caption=a b#page=2>)\n';
+    const url = 'https://uploads.linear.app/workspace/image.png?caption=a%20b';
+    const hosted = `![Chart](<${url}#page=2>)\n`;
+    await fixture.seed({ 'docs/plan.md': previous, 'docs/image.png': png });
+    const git = await fixture.clone('rebuild-upload');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async (input) => {
+      assert.equal(String(input), url);
+      return new Response(png);
+    });
+    const result = await capture('docs/plan.md', hosted, new Map(), previous);
+    assert.equal(result.body, previous);
+    assert.deepEqual([...result.uploads.values()], [url]);
+    assert.equal(withUploadSuffix(url, '?caption=a b#page=2'), url + '#page=2');
+    assert.equal(withUploadSuffix(url, '?download=1#page=2'), url + '&download=1#page=2');
   } finally { await fixture.cleanup(); }
 });
 
@@ -391,6 +427,61 @@ it('cancels error responses and reuses failures across repeated upload destinati
       }
     }
   } finally { await fixture.cleanup(); }
+});
+
+it('blocks only the documents linking a refused upload while the access probe succeeds, and stops when it fails', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('refused-upload');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const body = 'Text.\n\n![Picture](https://uploads.linear.app/other/picture.png)\n';
+    for (const status of [401, 403]) {
+      let requests = 0;
+      let probes = 0;
+      const read = createAssetCapture(git, resolveStateConfig({}), base, async () => { requests++; return new Response(null, {status}); }, undefined, undefined, undefined, async () => { probes++; });
+      for (const path of ['plan.md', 'other.md']) {
+        await assert.rejects(read(path, body, new Map()), (error: unknown) => error instanceof ImageBlockedError && JSON.stringify(error.findings) === JSON.stringify([{image:1, total:1, line:3, reason:'unreadable'}]));
+      }
+      assert.equal(probes, 1, 'one probe answers for the whole capture');
+      assert.equal(requests, 1, 'the refusal is cached for the rest of this capture');
+      const failing = createAssetCapture(git, resolveStateConfig({}), base, async () => new Response(null, {status}), undefined, undefined, undefined, async () => { throw new Error('probe refused'); });
+      await assert.rejects(failing('plan.md', body, new Map()), (error: unknown) => error instanceof LinearHttpError && error.operation === 'DownloadUpload' && error.httpStatus === status);
+    }
+  } finally { await fixture.cleanup(); }
+});
+
+it('reports a probe that Linear stopped or that may succeed later as that, and a refused probe as the upload refusal', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('probe-errors');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const body = '![Picture](https://uploads.linear.app/other/picture.png)';
+    const read = (probe: () => Promise<unknown>) => createAssetCapture(git, resolveStateConfig({}), base, async () => new Response(null, {status:401}), undefined, undefined, undefined, probe)('plan.md', body, new Map());
+    const stopped = new LinearStoppedError('UploadAccess', {kind:'rate-limited', operation:'UploadAccess'});
+    await assert.rejects(read(async () => { throw stopped; }), (error: unknown) => error === stopped);
+    const network = new LinearNetworkError('UploadAccess', new TypeError('fetch failed'));
+    await assert.rejects(read(async () => { throw network; }), (error: unknown) => error === network);
+    await assert.rejects(read(async () => { throw new LinearHttpError('UploadAccess', 401); }), (error: unknown) => error instanceof LinearHttpError && error.operation === 'DownloadUpload' && error.httpStatus === 401);
+  } finally { await fixture.cleanup(); }
+});
+
+it('the access probe asks Linear every time, even when a staged step kept its answer', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'probe-replay-'));
+  try {
+    let probes = 0;
+    const fetcher: typeof fetch = async () => { probes++; return Response.json({data:{viewer:{id:'integration-one'}}}); };
+    const recording = LinearReads.recording();
+    recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+    await uploadAccessProbe(new LinearClient({token:'stage', fetch:fetcher, reads:recording}))();
+    await recording.save(dir);
+    const replaying = await LinearReads.replaying(dir);
+    assert.ok(replaying !== null);
+    await uploadAccessProbe(new LinearClient({token:'apply', fetch:fetcher, reads:replaying}))();
+    assert.equal(probes, 2);
+    recording.close(); replaying.close();
+  } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
 it('classifies oversized attachments and empty upload responses as permanent findings', async () => {

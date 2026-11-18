@@ -71,6 +71,13 @@ export interface PlanInput {
   texts: ReadonlyMap<string, string>;
   places: readonly PlaceDocuments[];
   facts?: LinearFacts;
+  /**
+   * Listed live documents that changed between the listing and the read of
+   * their content (`readPlanSources`), by id, with what that read returned
+   * (null: gone). Left out, with every file their listed or current title
+   * names, and neither written, trashed nor imported.
+   */
+  changed?: ReadonlyMap<string, LinearDocument | null>;
 }
 
 /** Every place an annotation makes: each project, and each team zone (a team folder without a project). */
@@ -106,7 +113,10 @@ export function placeKey(place: Place): string {
  * accepts, or when git does not store it as text; a left-out file's
  * document, if any, is neither overwritten nor trashed. A document matches
  * a file by title (see `titleIn`); when several live documents share that
- * title, the oldest is the match and the others go to trash.
+ * title, the oldest is the match and the others go to trash. A document
+ * that changed during the run (`changed`) is left out with
+ * `changed-during-run`, together with the files its listed and current
+ * titles name and the other documents of those titles.
  */
 export function planInitialSync(input: PlanInput): InitialSyncPlan {
   const facts = input.facts ?? LINEAR_FACTS;
@@ -147,9 +157,13 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
     leaveOut(file.path, [file.reason]);
     leftOutTitles.set(titleIn(file.place, file.title), file.path);
   }
+  const changed = input.changed ?? new Map<string, LinearDocument | null>();
+  const touched = touchedTitles(input);
+  const live = (document: LinearDocument) => !document.trashed && document.archivedAt === null;
   const synced: MappedDocument[] = [];
   for (const document of mapping.documents) {
     lint(document.path, document.title);
+    if (touched(document.place, document.title)) leaveOut(document.path, ['changed-during-run']);
     if (leftOut.has(document.path)) leftOutTitles.set(titleIn(document.place, document.title), document.path);
     else synced.push(document);
   }
@@ -159,10 +173,28 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   const matched = new Set<string>();
   const folders = new Map(annotatedPlaces(mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
   for (const { place, documents } of input.places) {
+    const folder = folders.get(placeKey(place)) ?? '';
+    const wouldBeAt = (title: string) => `${folder === '' ? '' : `${folder}/`}${title}.md`;
     const oldestFirst = [...documents].sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
     for (const document of oldestFirst) {
-      if (document.trashed || document.archivedAt !== null) continue;
+      if (!live(document)) continue;
       const key = titleIn(place, document.title);
+      // A title a changed document holds is taken by nothing this run: no document of it is written, trashed or
+      // imported. A changed document without a file is reported where its file would be.
+      if (touched(place, document.title)) {
+        const leftOutPath = leftOutTitles.get(key);
+        const entry = leftOutPath === undefined ? undefined : leftOut.get(leftOutPath);
+        if (entry !== undefined) {
+          entry.documentId ??= document.id;
+          // A file left out by another rule too, such as one stored in LFS.
+          if (changed.has(document.id)) leaveOut(entry.path, ['changed-during-run']);
+        } else if (changed.has(document.id)) {
+          const path = wouldBeAt(document.title);
+          leaveOut(path, ['changed-during-run']);
+          (leftOut.get(path) as LeftOutEntry).documentId ??= document.id;
+        }
+        continue;
+      }
       const file = filesByTitle.get(key);
       if (file !== undefined && !matched.has(key)) {
         matched.add(key);
@@ -177,8 +209,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
           continue;
         }
       }
-      const folder = folders.get(placeKey(place)) ?? '';
-      plan.trash.push({ path: `${folder === '' ? '' : `${folder}/`}${document.title}.md`, title: document.title, place, documentId: document.id });
+      plan.trash.push({ path: wouldBeAt(document.title), title: document.title, place, documentId: document.id });
     }
   }
   for (const document of synced) {
@@ -191,6 +222,23 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   plan.trash = byPath(plan.trash);
   plan.leftOut = byPath([...leftOut.values()]);
   return plan;
+}
+
+/**
+ * Whether a title in a place is one a changed document held or holds now
+ * (`PlanInput.changed`): its listed title in its listed place and, when it
+ * was renamed or moved, its current title in any place (the plan knows
+ * places by name, the read by id). No file or document of such a title is
+ * written, trashed or imported.
+ */
+export function touchedTitles(input: Pick<PlanInput, 'places' | 'changed'>): (place: Place, title: string) => boolean {
+  const changed = input.changed ?? new Map<string, LinearDocument | null>();
+  const listed = new Set(input.places.flatMap(({ place, documents }) => documents.filter((document) => changed.has(document.id)).map((document) => titleIn(place, document.title))));
+  const anywhere = new Set(input.places.flatMap(({ documents }) => documents.flatMap((document) => {
+    const current = changed.get(document.id);
+    return current && (current.title !== document.title || current.projectId !== document.projectId || current.teamId !== document.teamId) ? [current.title.normalize('NFC')] : [];
+  })));
+  return (place, title) => listed.has(titleIn(place, title)) || anywhere.has(title.normalize('NFC'));
 }
 
 /**

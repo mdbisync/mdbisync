@@ -18,20 +18,23 @@ import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
-import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
+import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
+import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
 import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
-import { imageLinks } from './image-links.ts';
+import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
-import { trackedPlaces } from './tracked-places.ts';
+import { pendingMove, trackedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
+
+/** The subject of a capture commit on the `linear` ref: Linear members' text entering git. */
+export const CAPTURE_MESSAGE = 'Capture Linear changes';
 
 export interface CaptureOptions {
   config: StateConfig;
@@ -131,7 +134,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   if (base === null) throw new Error(message('sync.needs-initial-sync'));
   const identity = options.identity ?? context.identity;
   const ids = await readIds(git, state.ids);
-  const uploads = await readUploads(git, state.uploads);
+  const uploads = await readUploads(git, state.uploads, context.pushedKey);
   const reserved = await readReservedIds(git, state.ids);
   // The write step relinks the documents that still name a superseded id; until then a link by it reads back as the
   // link to its path.
@@ -145,12 +148,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const recorded = await loadMapping(git, base);
     const zones = new Map(mapping.zones);
     let changedPlace = false;
-    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch named it.
+    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch allows it.
     const allowedPlace = trackedPlaces(git, fetched.tracked, mapping.zones);
     for (const [folder, old] of recorded.zones) {
       const current = zones.get(folder);
       if (current !== undefined && (old.team !== current.team || old.project !== current.project)) {
-        if (!await allowedPlace(folder, placeOf(old))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
+        // An old place is read only to finish the tracked branch's latest move of the folder, never a place it held before.
+        if (!await pendingMove(git, fetched.tracked, folder, placeOf(old), placeOf(current))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
         zones.set(folder, old);
         changedPlace = true;
       }
@@ -354,15 +358,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (!live(doc)) continue;
       try {
         // Check every body, including those after the first linked document.
+        checkImageRepairSize(doc.content ?? '');
         if (linksLinearDocuments(doc.content ?? '')) needsLinkBase = true;
       } catch (error) {
-        if (!(error instanceof MarkdownLimitError)) throw error;
+        if (!(error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError)) throw error;
         limited.add(doc.id);
-        result.leftOut.push({id: doc.id, rule: 'markdown-complexity'});
+        result.leftOut.push({id: doc.id, rule: error instanceof ImageRepairBudgetError ? 'image-repair-budget' : 'markdown-complexity'});
       }
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
-    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool);
+    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool, undefined, uploadAccessProbe(linear));
     type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; text: string } };
     const candidates = new Map<string, Candidate>();
     // A rejected target links to its accepted file, if it has one.
@@ -374,11 +379,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
     };
     const resetTarget = (id: string, targets: Map<string, string> = documentIds) => resetTargets(new Set([id]), targets);
-    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[]) => {
+    // Keyed by the document's recorded path by default.
+    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[], key = byId.get(doc.id)?.path ?? path) => {
       const old = byId.get(doc.id);
       const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-      ids.set(old?.path ?? path, {...old?.entry, id: doc.id, saved});
-      result.blocked.push({id: doc.id, path: old?.path ?? path, findings});
+      ids.set(key, {...old?.entry, id: doc.id, saved});
+      result.blocked.push({id: doc.id, path: key, findings});
       resetTarget(doc.id);
     };
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
@@ -399,6 +405,29 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const path = paths.get(doc.id)!;
       if (limited.has(doc.id)) continue;
+      // The title names the file, its `ids` key and the report's line: a name the record does not hold yet is
+      // shown to the hooks first. Until they pass it, the document keeps its accepted path or, when it has none,
+      // a name made from its id, also in place of a path an earlier run recorded for it without a file.
+      if (gate.configured && !previous.has(path)) {
+        const findings = await checkTitle(gate, path, doc.title);
+        if (findings === null) {
+          result.leftOut.push({id: doc.id, rule: 'security-unchecked'});
+          resetTarget(doc.id);
+          continue;
+        }
+        if (findings.length > 0) {
+          let held = old !== undefined && previous.has(old.path) ? old.path : undefined;
+          if (held === undefined) {
+            const available = new Set(reservations);
+            if (old !== undefined) available.delete(old.path);
+            held = documentPath(folderFor(doc)!, doc.id, doc.id, available, undefined, (candidate) => invalidZone(doc, candidate));
+            reservations.add(held);
+            if (old !== undefined && old.path !== held) ids.delete(old.path);
+          }
+          recordBlocked(doc, held, findings, held);
+          continue;
+        }
+      }
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
@@ -425,6 +454,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         }
         if (error instanceof MarkdownLimitError) result.leftOut.push({id: doc.id, rule: 'markdown-complexity'});
         else if (error instanceof AttachmentBudgetError) result.leftOut.push({id: doc.id, rule: 'attachment-budget'});
+        else if (error instanceof ImageRepairBudgetError) result.leftOut.push({id: doc.id, rule: 'image-repair-budget'});
         else if (error instanceof DownloadRetryError) result.leftOut.push({id: doc.id, rule: 'download-retry'});
         else result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
@@ -568,7 +598,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         // Linear's spelling of that version reads back as its text.
         return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
       } catch (error) {
-        if (error instanceof MarkdownLimitError) return false;
+        if (error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError) return false;
         // An image that version did not have: the document changed.
         if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
         throw error;
@@ -621,10 +651,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
     const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
-    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
+    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
-    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes' + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
+    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
     for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
       ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});
     }
@@ -855,6 +885,7 @@ function placeKeyOf(place: {projectId?: string | null; teamId?: string | null}):
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
   for (const item of result.leftOut) if (item.rule === 'attachment-budget') summary += `\nattachment-budget: ${JSON.stringify(item.id)}. Attachment count or bytes exceeded the document or run limit; reduce attachments and retry. The cursor is held.`;
+  for (const item of result.leftOut) if (item.rule === 'image-repair-budget') summary += `\nimage-repair-budget: ${JSON.stringify(item.id)}. Image or link repair exceeded the document limit; simplify or split the document and retry. The cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;

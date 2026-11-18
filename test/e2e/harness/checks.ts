@@ -12,7 +12,7 @@ import { fixText } from '../../../src/format/fix.ts';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
 import { readKeptAnnotations } from '../../../src/initial-sync/confirm.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
-import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
+import { PushedKey, readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
@@ -696,7 +696,7 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   // No ids ref: the engine recorded nothing (a refusal, a check, a dry run). The mapping is empty, not an error.
   void options;
   const ids: IdMap = idsCommit === null ? new Map() : await readIds(git, idsCommit);
-  const uploadsByHash = await readUploads(git, uploadsCommit);
+  const uploadsByHash = await readUploads(git, uploadsCommit, new PushedKey(world.engineApp.clientSecret, world.repository));
 
   const tracked = (await git.text(['ls-files', '-z'])).split('\0').filter(Boolean);
   const readmes = new Map<string, string>();

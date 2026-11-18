@@ -60,6 +60,7 @@ step with the bare message, without `error:`.
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
+| `Run this workflow on <branch>, not on <ref>.` | The sync or initial sync workflow ran on a branch other than the tracked branch (main), for example a dispatch on a feature branch, and stopped before any step got a token or a secret. Run it on the tracked branch. If the sync tracks a branch other than main, name it in the workflow's first step (`BRANCH`). |
 | `error: <message>` (the action: `<message>` alone) | An error stopped the run. Look the message up on this page. |
 
 ## Setup check
@@ -139,6 +140,11 @@ The warnings say:
   nothing checks what comes from Linear before it is pushed. Add hooks marked
   `alias: security` if you want that (`mdbisync init --security-hooks` adds
   two examples).
+- `security hook {hooks} runs Gitleaks without {flag}, so an inline gitleaks:allow comment in a document from Linear exempts its line; add {flag} (init updates the hook it generated) and keep exceptions in .gitleaks.toml or .gitleaksignore`:
+  a document from Linear can carry that comment, so a credential on its line
+  would pass the hook. Add `--ignore-gitleaks-allow` to the hook's command
+  (for the example `init` generated, before the final ` .` of its `entry`)
+  and record exceptions in `.gitleaks.toml` or `.gitleaksignore`.
 
 ## Sync state
 
@@ -313,19 +319,22 @@ the reason is fixed. The summaries list each with its rules:
 | `title-too-long` | The title made from the file's path is longer than Linear accepts. | Use a shorter file name or folder path. |
 | `content-too-long` | The text is longer than the 250,000 characters Linear accepts. Its other rules are not checked until it is shorter. | Split the file, then lint the parts. |
 | `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes. | Reduce nesting or split the file. |
+| `changed-during-run` | An initial sync found the document changed in Linear while it ran: moved to another team or project, renamed, trashed, archived, edited or gone. The document and the file its title names are neither written, trashed nor imported. | Run the initial sync again. |
 | `outside-annotations` | The file is above every annotated folder. | Move it into an annotated folder, or annotate a folder above it. |
 | `not-a-regular-file` | The path is a symbolic link or another kind of file. | Replace it with a regular file. |
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |
 | `stored-in-lfs` | The Markdown file itself is stored in Git LFS. | Store Markdown files in git directly. |
 | `upload-too-large` | The document links a file over Linear's 10 MB upload limit. | Make the file smaller, or link it from somewhere else. |
 | `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. For a new document left out after a confirmed missing object (404/410), also commit an edit to the document or linked file to retry it. |
+| `link-provenance-unknown` | An initial sync from git found a plain link to a repository file in a document Linear already holds, while the `linear` and `ids` state refs that record which links Linear members wrote are lost. The run cannot tell your link from one a Linear member wrote, so it uploads nothing for that document and leaves it out. | Write the link as an image if the file is meant to be shared, or remove it, then run the initial sync again. Until then each initial sync leaves the document out again. A repository with its state refs keeps uploading the links written in git. |
 | `image-blocked` | From Linear: an uploaded file cannot be read, is over 10 MB, redirects or has unsupported bytes; or a new ordinary link names a repository file other than a Markdown document by its relative path. The file keeps the tracked branch's text. | Upload the files in Linear instead of linking them. The first sync after the initial sync (once its pull request, if any, is merged) marks the document and comments which images to fix. After the fix the mark clears; the comment stays open as a record, and you can resolve it. |
 | `download-failed` | From Linear: a file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed in its `assets/` folder. The file keeps the tracked branch's text. | Nothing; the next sync reads the document again. If it repeats, check the run's log for the asset error. |
-| `security-hook` | From Linear: a hook marked `alias: security` flagged the document's text or a file it embeds. In an initial sync, that text can hold the Linear URL of a linked document that was left out. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear, or bring in the linked document. |
+| `security-hook` | From Linear: a hook marked `alias: security` flagged the document's title, its text or a file it embeds. In an initial sync, that text can hold the Linear URL of a linked document that was left out. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear, or bring in the linked document. |
 | `security-unchecked` | From Linear: the security hooks did not see this text, because their step did not run or the tracked branch moved after it. | Nothing; the next run checks it. If it repeats, check that the hooks step runs. |
 | `title-not-a-path` | From Linear: the file the document's title names would map to a different document, for example because it lands in a folder another annotation owns. | Rename the document in Linear. |
 | `front-matter-boundary` | From Linear: the document's text starts with something that reads as front matter, so it would not stay the file's body. | Change the start of the document in Linear. |
 | `attachment-budget` | Attachment capture exceeded 32 unique links or 32 MiB per document, or 256 downloads or 256 MiB per run. Candidate files stay in bounded temporary storage. The document keeps its previous text and the capture cursor holds. | Reduce or split attachments and rerun. Other documents can still be captured; no budget rejection marks the document as unsafe. |
+| `image-repair-budget` | Markdown exceeds the image repair budget. Repair limits the source, resolved destinations, replacement text, and output to 1,000,000 UTF-16 code units each. It allows up to eight rounds of escaping. The document keeps its previous text and the capture cursor holds. | Simplify or split the document and rerun. |
 | `download-retry` | An upload download timed out, lost its connection, or returned 429 or a server error. The document stays out of this capture without a mark. | The next run retries automatically. |
 | `link-scheme` | Links must use http, https, mailto, a path or a fragment. | Replace the unsupported destination. Pull removes unsupported links together with their text; push lint refuses them. |
 | `capture-translation` | The run could not turn the document's text from Linear into the file's text. | Check the document in Linear for unusual content, or report it as a bug. |
@@ -358,7 +367,10 @@ The initial sync also lists:
 
 - `<files>: over the upload limit of <n> bytes` for `upload-too-large`;
 - `<files>: stored with LFS extensions, which are not supported` and
-  `<file> cannot be read: <reason>` for `upload-unreadable`.
+  `<file> cannot be read: <reason>` for `upload-unreadable`;
+- `<files>: linked as a plain link from a document Linear holds, and the
+  state that names the links Linear members wrote is lost` for
+  `link-provenance-unknown`.
 
 ## Other summary lines
 
@@ -437,6 +449,8 @@ the message. Most come from the workflow's configuration:
 | `the staged candidates come from another version of the action`, `the staged manifest names a file that is not a content hash` | Pin the `stage` and `apply` steps to the same release, and let nothing else write to the runner's temporary folder between them. |
 | `invalid security hook configuration` | Fix the hooks marked `alias: security` in `.pre-commit-config.yaml`. |
 | `security hooks require pre-commit on PATH; install pre-commit before capture` | Install `pre-commit` before the mdbisync step (the example workflows do). |
+| `a tracked symbolic link leads outside the tree the security hooks check` | The security hooks hold back every document from Linear (a `security` finding on line 1) while a tracked symbolic link resolves outside the repository, into its `.git` folder, or to no file. Point the link at a tracked file, or remove it. |
+| `the tree the security hooks check differs from the tracked tree` | The security hooks hold back every document from Linear (a `security` finding on line 1) because the copy of the tracked branch they run in could not be made equal to it. Check that the tracked branch's files are all regular files, symbolic links or submodules. |
 | `files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync` | Install `git-lfs` on the runner, or repair it so `git lfs version` runs. GitHub's hosted runners have it. |
 | `the tracked branch "<branch>" does not exist on remote "<remote>"` | Set `tracked-branch` to a branch that exists. |
 
@@ -490,7 +504,7 @@ document named.
 | `GitHub answered HTTP <status> while <what>`, `GitHub did not answer while <what>` | A GitHub request failed. `<what>` is one of: listing open pull requests, reading a pull request, opening a pull request, updating a pull request, closing a pull request, sending a request to the pull request API, reading the check runs of the sync pull request, reading the commit statuses of the sync pull request, reading the annotations of a failed check run, merging the sync pull request. A failed read of a check run's annotations does not stop the run: the suspended documents' comments name that check without them, and the run summary says so. |
 | `git <arguments> failed with exit code <n>: <output>` | A git command failed; its own output follows. Often a network problem or missing rights to push. |
 | `refusing to move <ref> to a commit that does not descend from its current value` | A state ref or the sync branch was changed by hand. Undo that change, or recover with an initial sync. |
-| `the recorded state names a Linear place for <folder> that the tracked branch never named; the state refs were changed outside the sync` | The state ref `linear` names a team or project for that folder (`<folder>` is the folder, or the repository root) that no commit of the tracked branch ever gave it. Capture reads such a place only when the tracked branch named it, so it stopped before reading any document. Find out who pushed to the state refs, then recover with an initial sync. |
+| `the recorded state names a Linear place for <folder> that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync` | The state ref `linear` names a team or project for that folder (`<folder>` is the folder, or the repository root) other than its current one. Capture reads an old place only to finish a move: it must be the folder's place just before the tracked branch last changed its annotation, and no sync merged into the tracked branch since may have recorded the new place. Otherwise capture stops before reading any document. A folder the tracked branch moved twice before a sync recorded the first move stops here too: set its annotation back to the place the sync recorded, let a sync run, then move the folder to its new place in one change. Otherwise find out who pushed to the state refs, then recover with an initial sync. |
 
 ## Errors that point to a bug
 
@@ -502,6 +516,7 @@ content).
 - `a state ref moved while the run was writing`
 - `state moved while recording document marks`
 - `the planned document for <path> was not listed`
+- `the planned document for <path> was not read with its text`
 - `document-links: apply before prepare`
 - `the uploads transform was not prepared`
 - `project "<project>" of team "<team>" was not resolved`, `team "<team>" was not resolved`

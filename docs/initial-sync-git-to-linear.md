@@ -140,13 +140,25 @@ reasons:
   remote's LFS server does not have. The dry run judges a file in Git LFS by
   its pointer and asks the LFS server only whether it holds the object; it
   downloads nothing.
+- a plain link to a repository file in a document Linear already holds, when
+  the `linear` and `ids` state refs are lost (`link-provenance-unknown`):
+  the run cannot tell it from a link a Linear member wrote.
+
+A plain link that came from Linear (a Linear member's image of a repository
+path, which the sync turned into a link) never uploads the file. A recovery
+reads which links those are from the state refs and the tracked branch's
+history, and keeps them in the state it records.
 
 The confirmed run can leave out a few more: a file whose text grows past
 Linear's length limit when its links are rewritten (`content-too-long`), or
 whose Markdown exceeds the traversal limits (`markdown-complexity`), or
 whose LFS object still cannot be read (`upload-unreadable`), for example
 because the LFS server could not be reached during the dry run or answered
-with an error other than not having the object. Each rule and
+with an error other than not having the object. A document that changes in
+Linear while the run reads it, or before the run overwrites or trashes it
+(moved to another team or project, renamed, trashed, archived or edited), is
+left out with the file its title names (`changed-during-run`): it is neither
+written nor trashed, and the next run plans it again. Each rule and
 what to do about it is in
 [troubleshooting.md](troubleshooting.md#files-left-out).
 

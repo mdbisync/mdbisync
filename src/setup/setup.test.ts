@@ -6,6 +6,7 @@ import {
   CHECK_NAMES,
   checkGitHub,
   checkLinearFormatHook,
+  checkSecurityHooks,
   checkSyncState,
   readHookConfig,
   renderSetupSummary,
@@ -49,6 +50,30 @@ describe('pre-commit hooks', () => {
     assert.deepEqual(securityHooks(readHookConfig(PRE_COMMIT)), ['no-test-secrets']);
     assert.deepEqual(securityHooks(readHookConfig(null)), []);
     assert.equal(readHookConfig('repos: [').invalid, '.pre-commit-config.yaml is not valid YAML');
+  });
+
+  it('warns about a Gitleaks security hook that honours inline gitleaks:allow comments', () => {
+    const config = (hook: string) => readHookConfig(`repos:\n  - repo: local\n    hooks:\n      - ${hook}\n`);
+    const image = 'ghcr.io/gitleaks/gitleaks:v8.30.1';
+    const allowing = [
+      `{ id: gitleaks, alias: security, language: docker_image, entry: '${image} dir --redact --no-banner .' }`,
+      `{ id: secrets, alias: security, language: system, entry: gitleaks, args: [git, --staged] }`,
+      `{ id: secrets, alias: security, language: system, entry: gitleaks, args: [git, --staged, --ignore-gitleaks-allow=false] }`,
+    ];
+    for (const hook of allowing) {
+      const result = checkSecurityHooks(config(hook));
+      assert.equal(result.state, 'warning', hook);
+      assert.match(result.detail, /without --ignore-gitleaks-allow/);
+    }
+    const ignoring = [
+      `{ id: gitleaks, alias: security, language: docker_image, entry: '${image} dir --redact --no-banner --ignore-gitleaks-allow .' }`,
+      `{ id: secrets, alias: security, language: system, entry: gitleaks, args: [git, --staged, --ignore-gitleaks-allow] }`,
+      // Not a security hook: the gate does not run it.
+      `{ id: gitleaks, language: system, entry: gitleaks dir . }`,
+    ];
+    assert.equal(checkSecurityHooks(config(`${ignoring[0]!}\n      - { id: keys, alias: security, language: pygrep, entry: KEY }`)).state, 'passed');
+    assert.equal(checkSecurityHooks(config(ignoring[1]!)).state, 'passed');
+    assert.match(checkSecurityHooks(config(ignoring[2]!)).detail, /pushed unchecked/);
   });
 
   it('requires the linear-format hook from a hook repository', () => {
