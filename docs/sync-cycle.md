@@ -393,6 +393,13 @@ later changes to other documents then use the normal lane.
 Security hooks still run before any push and keep their separate blocked
 mark. Suspension is a successful run, not a setup error.
 
+When restoring a suspended branch or taking later Linear edits into it,
+the sync checks recorded Markdown sizes and reads within a byte budget.
+If it cannot safely collect all linked assets, it reports
+`suspended-asset-discovery` with the reason and stops before publishing
+either batch or writing to Linear. If the hold names a size limit, reduce
+the recorded Markdown size before trying again.
+
 Each suspended document shows a red exclamation mark (`Alert`) and one
 comment, for example:
 
