@@ -3,10 +3,10 @@
 // callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
-import type { Definition, Root, Table } from 'mdast';
+import type { Definition, ImageReference, LinkReference, Root, Table } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, MARKDOWN_MAX_NODES, MarkdownLimitError, end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, bracketedLabel, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
@@ -110,6 +110,72 @@ export function paddingOverLimit(tree: Root): number | undefined {
   return undefined;
 }
 
+/**
+ * The line of the reference whose expansion takes the written text over
+ * `CONTENT_LIMIT`, or undefined when every reference fits. `fix` writes each
+ * link or image reference with a fresh copy of its definition's destination
+ * and drops the definitions, so a few kilobytes of `[a][r]` over one long
+ * definition would be written as gigabytes. The written length is counted as
+ * the source without its definitions, plus what each reference grows by:
+ * its form in `fix` (`[text](destination)`, `![label](destination)`) with the
+ * destination as `fix` writes it, less the reference's own source. Each
+ * definition's destination is written once, however many references use it.
+ */
+export function referencesOverLimit(tree: Root, body: string): number | undefined {
+  const definitions = new Map<string, Definition>();
+  const dropped: Definition[] = [];
+  const references: Array<LinkReference | ImageReference> = [];
+  visit(tree, (node) => {
+    if (node.type === 'definition') {
+      dropped.push(node);
+      if (!definitions.has(node.identifier)) definitions.set(node.identifier, node);
+    }
+    if (node.type === 'linkReference' || node.type === 'imageReference') references.push(node);
+  });
+  if (references.length === 0) return undefined;
+  // Everything is counted in code points, as `CONTENT_LIMIT` is; each
+  // definition's destination is written and counted once.
+  const destinations = new Map<string, number>();
+  const destinationLength = (reference: LinkReference | ImageReference, url: string): number => {
+    const key = `${reference.type}:${reference.identifier}`;
+    let length = destinations.get(key);
+    if (length === undefined) {
+      length = codePoints(reference.type === 'linkReference' ? linkDestination(url) : imageDestination(url));
+      destinations.set(key, length);
+    }
+    return length;
+  };
+  const length = (from: number, to: number): number => codePoints(body.slice(from, to));
+  let written = codePoints(body) - dropped.reduce((sum, node) => sum + length(start(node), end(node)), 0);
+  // A later reference can shrink the text again: the whole sum decides, and
+  // the reference that last took it over the limit is named.
+  let crossing: number | undefined;
+  for (const reference of references) {
+    const definition = definitions.get(reference.identifier);
+    if (definition === undefined) continue;
+    // `fix` writes `[text](destination)` from a link's children, `![label](destination)` from an image's label as written.
+    const label = reference.type === 'linkReference' ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body, start(reference) + 1)) + 5;
+    const before = written;
+    written += label + destinationLength(reference, definition.url) - length(start(reference), end(reference));
+    // A text already over the limit (a later pass of `fix`) is named at its first reference.
+    if ((before <= CONTENT_LIMIT || crossing === undefined) && written > CONTENT_LIMIT) crossing = line(reference);
+  }
+  return written > CONTENT_LIMIT ? crossing : undefined;
+}
+
+/** The length of a link reference's text as written, between its brackets. */
+function childrenLength(reference: LinkReference, length: (from: number, to: number) => number): number {
+  const first = reference.children[0];
+  const last = reference.children.at(-1);
+  return first === undefined || last === undefined ? 0 : length(start(first), end(last));
+}
+
+function codePoints(text: string): number {
+  let count = 0;
+  for (const _ of text) count++;
+  return count;
+}
+
 function paddingCells(table: Table): number {
   const width = table.children[0]?.children.length ?? 0;
   let cells = 0;
@@ -138,6 +204,13 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
   const codeLines = new Set<number>();
   const padded = paddingOverLimit(tree);
   if (padded !== undefined) report('markdown-complexity', padded);
+  const expanded = referencesOverLimit(tree, body);
+  if (expanded !== undefined) {
+    // The checks below read a definition's destination once for each of its
+    // references; within the limit, those reads add up to at most the limit.
+    report('markdown-complexity', expanded);
+    return;
+  }
   visit(tree, (node, ancestors) => {
     switch (node.type) {
       case 'code':

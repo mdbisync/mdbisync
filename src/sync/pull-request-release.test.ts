@@ -11,7 +11,7 @@ import { MARKS } from './marks.ts';
 import { HOLD_FAILED, MESSAGE_WITHHELD } from './hold.ts';
 import { GITHUB_API, fakeFetch, touch } from '../setup/test-helpers.ts';
 import { commitIds, commitTree, fetchState, PushedKey, readIds, resolveStateConfig } from '../state/index.ts';
-import { IDENTITY } from '../state/test-helpers.ts';
+import { IDENTITY, signTip } from '../state/test-helpers.ts';
 import { describe, it } from 'node:test';
 import { pullRequestFailure, renderPullRequest, syncPullRequest } from './pull-request.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
@@ -192,6 +192,8 @@ describe('sync: pull request release', () => {
           identity: IDENTITY, message: 'Restore the recorded plan',
         });
         await remote.run(['update-ref', linearRef, restored, linear]);
+        // As the sync's own record would be: a run builds only on a linear commit it signed.
+        await signTip(remote);
         await releaseHeld();
         assert.match(await show(`refs/heads/main:${path}`), /Held Linear edit/);
       }

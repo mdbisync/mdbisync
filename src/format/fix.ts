@@ -8,9 +8,11 @@
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
-import { lintText, paddingOverLimit } from './lint.ts';
+import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { MarkdownLimitError, end, isCallout, isCalloutComment, joinFile, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, bracketedLabel, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+
+export { imageDestination, linkDestination } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -27,7 +29,8 @@ export interface FixOptions {
  * Returns the text in Linear's form, or the text itself when lint finds a
  * construct Linear would lose or alter. Throws `MarkdownLimitError` when a
  * rewrite takes the text over the Markdown limits, which lint cannot see in
- * the source: an inline image that leaves its paragraph can expose a table.
+ * the source: an inline image that leaves its paragraph can expose a table
+ * or reference links.
  */
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
@@ -42,8 +45,8 @@ function fixBody(body: string, options: FixOptions): string {
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
     const tree = parse(current);
-    // Lint checked the source; a rewrite may expose a table it did not see.
-    if (paddingOverLimit(tree) !== undefined) throw new MarkdownLimitError('nodes');
+    // Lint checked the source; a rewrite may expose a table or references it did not see.
+    if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, current) !== undefined)) throw new MarkdownLimitError('nodes');
     const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
@@ -330,14 +333,7 @@ class Writer {
 
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
   private label(open: number): string {
-    let depth = 0;
-    for (let at = open; at < this.source.length; at++) {
-      const char = this.source[at];
-      if (char === '\\') at++;
-      else if (char === '[') depth++;
-      else if (char === ']' && --depth === 0) return this.source.slice(open + 1, at);
-    }
-    return '';
+    return bracketedLabel(this.source, open);
   }
 }
 
@@ -399,33 +395,6 @@ function insideLine(source: string, at: number): boolean {
   const before = source.slice(lineStart, at).replace(/^(?:[ \t]*(?:>|[*+-](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*/, '');
   const after = source.slice(at + 2, lineEnd);
   return before !== '' && !/^[ \t#]*$/.test(after);
-}
-
-/**
- * A destination as Markdown source for a decoded URL: spaces encoded, and
- * what Markdown would read back differently escaped (a backslash before
- * punctuation, an `&` that starts a character reference).
- */
-function destination(url: string): string {
-  return url
-    .replace(/ /g, '%20')
-    .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
-    .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
-}
-
-/**
- * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded, and a
- * backslash at its end doubled, so it cannot escape the closing bracket.
- */
-export function linkDestination(url: string): string {
-  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
-  const trailing = /\\*$/.exec(inner)![0].length;
-  return `<${inner}${trailing % 2 === 1 ? '\\' : ''}>`;
-}
-
-/** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */
-export function imageDestination(url: string): string {
-  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 /**

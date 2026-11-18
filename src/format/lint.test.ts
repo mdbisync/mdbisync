@@ -140,6 +140,86 @@ describe('lint rules', () => {
     assert.ok(fixed.split('\n').every((row) => row.split(' | ').length === 200), 'every row has the header width');
   });
 
+  // Many short references to one long definition: `fix` writes each with its own copy of the destination.
+  const references = (count: number, length: number): string => `${'[a][r] '.repeat(count)}\n\n[r]: https://example.com/${'x'.repeat(length)}\n`;
+
+  // The previous code took minutes and gigabytes on far less, then threw a RangeError; the timeout bounds lint and fix together.
+  it('refuses references whose destinations, each written in full, would be over the content limit, and fix leaves them unchanged', { timeout: 60_000 }, () => {
+    const text = `Intro.\n\n${references(2_000, 1_000)}`;
+    assert.ok(text.length < CONTENT_LIMIT, 'the source is within the content limit');
+    assert.deepEqual(lintText('doc.md', text).map((f) => [f.rule, f.line]), [['markdown-complexity', 3]]);
+    assert.equal(fixText(text), text);
+    // Image references grow the same way.
+    const images = `${'![a][r] '.repeat(3)}\n\n[r]: i${'x'.repeat(100_000)}.png\n`;
+    assert.deepEqual(lintText('doc.md', images).map((f) => f.rule), ['markdown-complexity']);
+  });
+
+  it('refuses references that only a rewrite exposes: fix throws instead of expanding them', { timeout: 60_000 }, () => {
+    // The definition shares a paragraph with an image, so the source has none and the references are text;
+    // once fix moves the image out of the paragraph, the definition applies to all of them.
+    const text = `${'[a][r] '.repeat(100)}\n\n![i](i.png) [r]: https://example.com/${'x'.repeat(5_000)}\n`;
+    assert.deepEqual(lintText('doc.md', text), []);
+    assert.throws(() => fixText(text), MarkdownLimitError);
+  });
+
+  it('counts the parentheses fix adds around a shortcut reference', () => {
+    // `[r]` is written `[r](<u>)`: 120 KB of source written as about 270 KB, in paragraphs the parser reads.
+    const text = `${`${'[r] '.repeat(100)}\n\n`.repeat(300)}[r]: u\n`;
+    const findings = lintText('doc.md', text);
+    assert.deepEqual(findings.map((f) => f.rule), ['markdown-complexity']);
+    assert.ok(findings[0]!.line > 1, 'named at the reference that crosses the limit');
+  });
+
+  it('does not count the definitions fix drops: a large document with many references stays within the limit', () => {
+    const definitions = Array.from({ length: 600 }, (_, i) => `[r${i}]: https://example.com/${i}/${'x'.repeat(80)}`).join('\n');
+    const links = Array.from({ length: 600 }, (_, i) => `[a][r${i}]`).join(' ');
+    const text = `${'Some words here. '.repeat(8_000)}\n\n${links}\n\n${definitions}\n`;
+    assert.ok(text.length > 200_000, 'the source is close to the content limit');
+    assert.deepEqual(lintText('doc.md', text), []);
+    assert.ok(fixText(text).length < CONTENT_LIMIT, 'fix keeps it within the limit');
+  });
+
+  it('counts what a reference grows by: many short references that fit stay fixable', () => {
+    // 175 KB written as 225 KB: each `[a][r]` becomes `[a](<u>)`. Paragraphs of 100 keep the parser within its budget.
+    const text = `${`${'[a][r] '.repeat(100)}\n\n`.repeat(250)}[r]: u\n`;
+    assert.deepEqual(lintText('doc.md', text), []);
+    const fixed = fixText(text);
+    assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
+  });
+
+  it('counts only the label of an image reference: many short image references that fit stay fixable', () => {
+    // 135 KB written as 195 KB: each `![a][r]` becomes `![a](u.png)`.
+    const text = `${'![a][r]\n\n'.repeat(15_000)}[r]: u.png\n`;
+    assert.deepEqual(lintText('doc.md', text, { linkedFileExists: () => true }), []);
+    const fixed = fixText(text, { linkedFileExists: () => true });
+    assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
+  });
+
+  it('sums every reference: references that shrink the text later keep a document that fits', () => {
+    // 190 KB written as 180 KB: the first group grows by 100 KB, the second shrinks by 110 KB.
+    const grow = `${'[a][r] '.repeat(100)}\n\n`.repeat(50);
+    const shrink = `${`[b][${'s'.repeat(25)}] `.repeat(100)}\n\n`.repeat(50);
+    const text = `${grow}${shrink}[r]: https://example.com\n[${'s'.repeat(25)}]: u\n`;
+    assert.deepEqual(lintText('doc.md', text), []);
+    const fixed = fixText(text);
+    assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
+  });
+
+  it('counts destinations in code points, as the content limit is counted', () => {
+    // 236,000 code points written, though over 400,000 UTF-16 code units.
+    const text = `${'[a][r] '.repeat(2_000)}\n\n[r]: https://example.com/${'\u{1F600}'.repeat(90)}\n`;
+    assert.deepEqual(lintText('doc.md', text), []);
+    assert.notEqual(fixText(text), text);
+  });
+
+  it('keeps writing reference links inline within the limit', () => {
+    const text = references(100, 100);
+    assert.deepEqual(lintText('doc.md', text), []);
+    const fixed = fixText(text);
+    assert.equal(fixed.match(/\[a\]\(<https:\/\/example\.com\/x{100}>\)/g)?.length, 100);
+    assert.ok(!fixed.includes('[r]'), 'the definition is written inline');
+  });
+
   it('stops at content-too-long: text over the limit is not linted further', () => {
     const text = `H~2~O\n\n<div>${'a'.repeat(CONTENT_LIMIT)} https://example.com</div>`;
     assert.deepEqual(lintText('doc.md', text).map((f) => [f.rule, f.line]), [['content-too-long', 1]]);
@@ -229,6 +309,29 @@ describe('lint and fix commands', () => {
       writeFileSync(path, source);
       assert.deepEqual(runLint(['ragged.md'], dir), { exitCode: 1, stdout: message, stderr: '' });
       assert.deepEqual(runFix(['ragged.md'], dir), { exitCode: 1, stdout: message, stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), source);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  // The source is 240 KB; written inline, its references would be 2 GB. The timeout bounds lint and fix together.
+  // Through the command line in a child process: the parent's timeout stops a stalled lint or fix, which a
+  // test timeout cannot interrupt.
+  it('lint and fix report references too large to write inline and leave the file unchanged', { timeout: 300_000 }, () => {
+    const path = join(dir, 'references.md');
+    // 20,000 references in paragraphs of 100, which the parser reads within its budget.
+    const source = `${`${'[a][r] '.repeat(100)}\n\n`.repeat(200)}[r]: https://example.com/${'x'.repeat(100_000)}\n`;
+    const message = `references.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
+    const cli = fileURLToPath(new URL('../cli.ts', import.meta.url));
+    const run = (command: string) => {
+      const child = spawnSync(process.execPath, [cli, command, 'references.md'], { cwd: dir, encoding: 'utf8', timeout: 120_000 });
+      return { exitCode: child.status, stdout: child.stdout, stderr: child.stderr };
+    };
+    try {
+      writeFileSync(path, source);
+      assert.deepEqual(run('lint'), { exitCode: 1, stdout: message, stderr: '' });
+      assert.deepEqual(run('fix'), { exitCode: 1, stdout: message, stderr: '' });
       assert.equal(readFileSync(path, 'utf8'), source);
     } finally {
       rmSync(path, { force: true });

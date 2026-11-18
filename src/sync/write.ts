@@ -59,6 +59,7 @@ import {
   uploadsRebuilding,
   stateRef,
   branchRef,
+  signObservation,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { nameFixingHooks } from './fix-hooks.ts';
@@ -1103,7 +1104,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       .map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
     const message = (merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE)
       + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
-    const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: plainTrailers.length === 0 });
+    const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: plainTrailers.length === 0, sign: signObservation(context.pushedKey) });
     if (merged) {
       for (const [path, entry] of nextIds) if (entry.releaseBase !== undefined) {
         delete entry.releaseBase;

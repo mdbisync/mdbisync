@@ -575,5 +575,9 @@ describe('the sync without state', () => {
       message: 'refs/mdbisync/linear does not exist: run initial sync first. The sync wrote nothing.',
     });
     assert.equal(checkSyncState({ linear: 'a'.repeat(40), ids: null, uploads: null }, DEFAULT_STATE_CONFIG), null);
+    // A pending record is read from a history the sync may not have written: an untrusted tip refuses first.
+    const both = checkSyncState({ linear: 'a'.repeat(40), ids: null, uploads: null }, DEFAULT_STATE_CONFIG, { linearUntrusted: true, initialPullRequestPending: true });
+    assert.equal(both?.code, 'initial-sync-required');
+    assert.match(both?.message ?? '', /did not sign/);
   });
 });
