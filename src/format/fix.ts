@@ -195,14 +195,16 @@ class Writer {
     this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
     // Blocks of an item are a blank line apart, but a nested list follows
     // its paragraph on the next line when it can interrupt that paragraph.
-    // Ordered lists starting above or below 1 and existing file blocks
-    // need their blank line to stay separate from the preceding paragraph.
+    // Ordered lists starting above or below 1, lists starting with an empty
+    // item and existing file blocks need their blank line to stay separate
+    // from the preceding paragraph.
     let content = '';
     item.children.forEach((child, index) => {
       const previous = item.children[index - 1];
       const interrupts = child.type === 'list'
         && previous?.type === 'paragraph'
         && (!child.ordered || (child.start ?? 1) === 1)
+        && child.children[0]!.children.length > 0
         && !(child.position!.start.line > previous.position!.end.line + 1 && startsWithFileBlock(child));
       if (index > 0) content += interrupts ? '\n' : '\n\n';
       content += child.type === 'list' ? this.list(child, interrupts) : this.block(child).join('\n\n');
