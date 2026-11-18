@@ -292,13 +292,13 @@ for (const file of process.argv.slice(2)) {
     ];
     const original = images.join('\n\n') + '\n\n[asset]: relative.png\n';
     const repaired = [
-      '[Image](https://example.com/a.png)',
-      '[Image](http://example.com/a.png)',
+      '[Image](<https://example.com/a.png>)',
+      '[Image](<http://example.com/a.png>)',
       '',
-      '[Image](relative.png)',
-      '[Image](/absolute.png)',
+      '[Image](<relative.png>)',
+      '[Image](</absolute.png>)',
       '',
-      '[Image](relative.png)',
+      '[Image](<relative.png>)',
       '[Image](https://example.com)',
     ].join('\n\n') + '\n\n[asset]: relative.png\n';
     edit(original);
