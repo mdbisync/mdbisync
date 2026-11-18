@@ -1488,6 +1488,46 @@ describe('capture from Linear', () => {
         assert.equal(apply.stats.writes.size, 0);
       } finally { await rm(dir, {recursive: true, force: true}); }
     });
+
+    it('keeps the file and the saved decoration of a document taken out of the trash between stage and apply, and gives it back later', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'untrashed-after-staging-'));
+      try {
+        const plan = world.linear.documents[0]!;
+        Object.assign(plan, {icon: 'Fire', color: '#123456', content: `${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`});
+        await run();
+        await refresh();
+        const before = (await readIds(context.git, context.fetched.state.ids)).get('docs/plan.md')!;
+        const file = await text('docs/plan.md');
+        assert.equal(before.saved?.icon, 'Fire');
+        Object.assign(plan, {trashed: true, archivedAt: '2026-01-05T00:00:00Z', updatedAt: '2026-01-05T00:00:00Z'});
+        const gate = {configured: true, check: async () => []};
+        const recording = LinearReads.recording();
+        recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+        const stage = new LinearClient({token: 'stage', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: recording});
+        assert.equal((await capture({...context, linear: stage}, {config, state: context.fetched.state, security: gate, stageOnly: true})).ok, true);
+        await recording.save(dir);
+        recording.close();
+        // A member takes it out of the trash, with its text resolved, before the apply step.
+        Object.assign(plan, {trashed: false, archivedAt: undefined, content: 'Resolved.\n', updatedAt: '2026-01-06T00:00:00Z'});
+        const replaying = await LinearReads.replaying(dir);
+        assert.ok(replaying !== null);
+        const apply = new LinearClient({token: 'apply', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: replaying});
+        const applied = await capture({...context, linear: apply}, {config, state: context.fetched.state, security: gate});
+        replaying.close();
+        assert.equal(applied.ok, true);
+        assert.deepEqual(applied.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+        assert.deepEqual(applied.removed, []);
+        assert.equal(apply.stats.writes.size, 0);
+        assert.deepEqual((await readIds(context.git, applied.state.ids)).get('docs/plan.md'), before);
+        assert.equal(await text('docs/plan.md'), file);
+        // The next run finds it in place with its conflict resolved: the mark clears and its own decoration comes back.
+        await refresh();
+        const next = await capture(context, {config, state: context.fetched.state, security: gate});
+        assert.equal(next.ok, true);
+        assert.deepEqual(markOf(plan), {icon: 'Fire', color: '#123456'});
+        assert.equal((await readIds(context.git, next.state.ids)).get('docs/plan.md')?.saved, undefined);
+      } finally { await rm(dir, {recursive: true, force: true}); }
+    });
   });
 
   it('retries a security comment after its post-push delivery fails', async () => {

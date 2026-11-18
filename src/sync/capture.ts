@@ -408,7 +408,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       result.blocked.push({id: doc.id, path: key, findings});
       resetTarget(doc.id);
     };
-    const restores: Array<{doc: LinearDocument; saved: {icon: string | null; color: string | null}}> = [];
+    const restores: Array<{doc: LinearDocument; saved: {icon: string | null; color: string | null}; path: string; entry: IdEntry}> = [];
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
       if (!live(doc)) {
@@ -417,7 +417,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           // document in the trash or archive of a configured place. One outside them is not the sync's to decorate.
           // It is given back with the marks, after the run reads the document again.
           const saved = old.entry.saved;
-          if (saved !== undefined && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) restores.push({doc, saved});
+          if (saved !== undefined && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) restores.push({doc, saved, path: old.path, entry: old.entry});
           const changedFile = removeBody(old.path);
           const retained = keptForLane(old.entry);
           if (!retained) ids.delete(old.path);
@@ -632,11 +632,18 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (now !== undefined && placed(now)) documents.set(id, {...now, content: then?.content ?? null});
       else documents.delete(id);
     };
-    for (const {doc, saved} of restores) {
+    for (const {doc, saved, path, entry} of restores) {
       const now = current.get(doc.id);
       if (samePlace(now, doc) && (now.trashed || now.archivedAt !== null)) {
         if (now.icon !== saved.icon || now.color !== saved.color) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
-      } else result.leftOut.push({id: doc.id, rule: 'changed-during-run'});
+        continue;
+      }
+      // Not the run's to give back now: its file and entry, with the saved decoration, stay as the run found them, so a
+      // later run that finds it in place again still has the decoration to give back.
+      result.leftOut.push({id: doc.id, rule: 'changed-during-run'});
+      changes.delete(path);
+      result.removed = result.removed.filter((removed) => removed !== path);
+      ids.set(path, entry);
     }
     for (const blocked of [...result.blocked]) {
       if (!rereading.has(blocked.id)) continue;
