@@ -405,16 +405,6 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         const body = await transformBody(transforms, path, source);
         const hash = sha256(body);
         sent.set(path, body);
-        // A resumed run skips what the stopped run wrote, as long as the text
-        // to send is the same; a file changed since is written again.
-        if (document !== undefined && resumed && previous.get(path)?.id === document.id && writtenBefore.get(path) === hash) {
-          result.skippedCompleted.push(path);
-          sentHashes.set(path, hash);
-          remember(path, document);
-          // The stopped run may have stopped between the write and the mark.
-          await reconcileMark(path, document, hash);
-          continue;
-        }
         // A document already holding the body, as sent or in the form Linear
         // stores it, is not written again: files are often not in Linear's
         // form, and writing them again would change nothing but the
@@ -425,11 +415,32 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // links can put back their original spelling in otherwise formatted text.
         // That inverse comparison alone also accepts seeded relative links:
         // require stored destinations to match what was sent before using it.
-        if (document !== undefined && (holdsBody(document.content ?? '', body) || (
+        // Computed once, and only when asked: a resumed run skips most documents on the digest alone.
+        let held: boolean | undefined;
+        const holds = () => (held ??= document !== undefined && (holdsBody(document.content ?? '', body) || (
           sameLinkDestinations(document.content ?? '', body)
           && holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body, sources.input.mapping.files)), source)
-        ))) {
+        )));
+        // A resumed run skips what the stopped run wrote, as long as the text
+        // to send is the same and the document still holds what was written:
+        // as Linear returned it to the stopped run, or the body itself. A
+        // document edited since the stop is written again, so its text is
+        // never recorded unchecked; a file changed since is written again too.
+        const before = previous.get(path);
+        if (document !== undefined && resumed && before?.id === document.id && writtenBefore.get(path) === hash
+          && ((before.observedDigest !== undefined && observedDigest(document) === before.observedDigest) || holds())) {
+          result.skippedCompleted.push(path);
+          sentHashes.set(path, hash);
+          remember(path, document);
+          // The stopped run may have stopped between the write and the mark.
+          await reconcileMark(path, document, hash);
+          continue;
+        }
+        if (document !== undefined && holds()) {
           result.unchanged.push(path);
+          // A write receipt of the stopped run is for another text: kept next to this document's digest, a
+          // resume after the file goes back to that text would skip the document while it holds this one.
+          sentHashes.delete(path);
           remember(path, document);
           await reconcileMark(path, document, hash);
           continue;
