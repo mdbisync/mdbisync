@@ -125,7 +125,9 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
     if (text === undefined) throw new Error(message('initial-sync.text-not-read', { path }));
     return text;
   };
-  // Every reason a file stays in git only, so that fixing one does not reveal the next.
+  // Every reason a file stays in git only, so that fixing one does not reveal the
+  // next. A file over the content limit is not linted further: content-too-long
+  // comes alone.
   const lint = (path: string, title: string) => {
     const findings = lintInTree(path, textOf(path), mapping.files);
     if (findings.length > 0) leaveOut(path, findings.map((f) => f.rule), findings.map((f) => f.line));

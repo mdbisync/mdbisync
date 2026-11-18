@@ -269,7 +269,8 @@ to the page instead.
 
 Documents over 250,000 characters are rejected. Linear's API refuses the
 whole document. The limit counts Unicode code points of the text after the
-front matter.
+front matter. Such a document is not checked further, so
+`content-too-long` is its only finding: shorten it, then lint it again.
 
 ```text
 A 260 KB log pasted into one Markdown file.
