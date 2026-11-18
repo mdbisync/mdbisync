@@ -13,7 +13,7 @@ import { runNames } from './isolation.ts';
 import { EnvBlockedError } from './results.ts';
 import { SCHEDULE_TICK_ENV, scheduleTick } from './steps.ts';
 import {
-  ACTION_REPOSITORY, pinnedActionSha, readTemplate, renderScheduler, requestScript, runGroup, SANDBOX_RUNNER, scheduledJobName, SCHEDULER_FILE, SCHEDULER_GROUP, WORKFLOW_FILES,
+  ACTION_REPOSITORY, BRANCH_GUARD_STEP, pinnedActionSha, readTemplate, renderScheduler, requestScript, runGroup, SANDBOX_RUNNER, scheduledJobName, SCHEDULER_FILE, SCHEDULER_GROUP, WORKFLOW_FILES,
 } from './workflow-files.ts';
 import { jobSpans, maxOverlap, REPORT_ARTIFACT, stopScheduledRun, waitForRequestTaken, waitForScheduledRun } from './workflows.ts';
 
@@ -50,6 +50,8 @@ describe('the scheduled sync on the sandbox\'s default branch', () => {
     assert.deepEqual(sync['runs-on'], SANDBOX_RUNNER);
     // The checkout is the run's tracked branch, not the default branch a schedule checks out.
     assert.equal(sync.steps.find((step) => step.uses?.startsWith('actions/checkout@'))?.with?.['ref'], OUT('tracked-branch'));
+    // A tick runs on the default branch, so the template's guard against any branch but main is left out.
+    assert.equal(sync.steps.some((step) => step.name === BRANCH_GUARD_STEP), false);
     const actions = sync.steps.filter((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`));
     assert.deepEqual(actions.map((step) => step.with?.['security-step']), ['stage', 'apply']);
     for (const step of actions) {

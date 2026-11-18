@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { parse } from 'yaml';
-import { ACTION_REPOSITORY, DISPATCH_GUARD, pinnedActionSha, prerequisiteErrors, readTemplate, renderForRun, runWorkflows, SANDBOX_RUNNER, syncDispatchOnly, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { ACTION_REPOSITORY, BRANCH_GUARD_STEP, DISPATCH_GUARD, pinnedActionSha, prerequisiteErrors, readTemplate, renderForRun, runWorkflows, SANDBOX_RUNNER, syncDispatchOnly, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 import { REPORT_ARTIFACT } from './workflows.ts';
 
 const RUN = {
@@ -82,6 +82,14 @@ describe('workflow templates rendered for a run', () => {
     assert.ok(renderForRun(template, RUN).includes(`${ACTION_REPOSITORY}@${pin}`));
   });
 
+  it('guards the sync jobs to the run\'s tracked branch, its main', () => {
+    for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['initial-sync']]) {
+      assert.equal(jobsOf(readTemplate(file))[0]?.steps[0]?.if, "github.ref != 'refs/heads/main'", file);
+      const [job] = jobsOf(renderForRun(readTemplate(file), RUN));
+      assert.equal(job?.steps[0]?.name, BRANCH_GUARD_STEP, file);
+      assert.equal(job?.steps[0]?.if, `github.ref != 'refs/heads/${RUN.trackedBranch}'`, file);
+    }
+  });
   it('limits push and pull request triggers to the run\'s branch', () => {
     const template = 'on:\n  push:\n    branches: [main]\n  pull_request:\n  schedule:\n    - cron: "*/5 * * * *"\nconcurrency:\n  group: mdbisync\njobs:\n  sync:\n    runs-on: ubuntu-latest\n    steps: []\n';
     const parsed = parse(renderForRun(template, RUN)) as { on: Record<string, { branches?: string[] }> };

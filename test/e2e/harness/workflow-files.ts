@@ -96,6 +96,9 @@ export function syncDispatchOnly(options: Pick<RunWorkflowOptions, 'securityCana
   return options.securityCanary === true || options.scheduledOnly === true;
 }
 
+/** The templates' first step in the sync jobs: it fails a run on any branch but main, the deployer's tracked branch. */
+export const BRANCH_GUARD_STEP = 'Refuse a branch other than main';
+
 /** A template rendered for one run. */
 export function renderForRun(template: string, options: RunWorkflowOptions): string {
   let text = template;
@@ -287,6 +290,8 @@ export function renderScheduler(template: string, actionSha?: string): string {
     }).map(([key, value]) => doc.createPair(key, value)));
     const steps = job.get('steps');
     if (!isSeq(steps)) continue;
+    // A tick runs on the default branch and checks out the run's tracked branch below, as a run on main does.
+    steps.items = steps.items.filter((item) => (item as YAMLMap).get('name') !== BRANCH_GUARD_STEP);
     for (const item of steps.items) {
       const step = item as YAMLMap;
       const uses = step.get('uses');
@@ -317,6 +322,9 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
   const steps = job.get('steps');
   if (!isSeq(steps)) return;
   const isAction = (item: unknown) => isActionUses((item as YAMLMap).get('uses'));
+  // The run's tracked branch is its main.
+  const guard = steps.items.find(item => (item as YAMLMap).get('name') === BRANCH_GUARD_STEP) as YAMLMap | undefined;
+  guard?.set('if', `github.ref != 'refs/heads/${options.trackedBranch}'`);
   if (options.securityCanary && steps.items.some(isAction)) {
     const hooks = steps.items.find(item => (item as YAMLMap).get('name') === CANARY_HOOK_STEP) as YAMLMap | undefined;
     if (hooks === undefined) throw new Error('Security canary needs a separate hooks step');
