@@ -474,7 +474,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
 
   let written = 0;
   /** When the current batch's re-read answered. */
-  let rereadAt = 0;
+  let batchReadAt = 0;
   /**
    * Sends a write to a document that was read again, and records how long
    * Linear was unwatched for it: from the re-read to the write's answer, so
@@ -482,7 +482,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * that time, so this is the window's upper bound. A write that fails
    * records nothing.
    */
-  const timed = async <T>(write: () => Promise<T>): Promise<T> => {
+  const timed = async <T>(write: () => Promise<T>, rereadAt = batchReadAt): Promise<T> => {
     const done = await write();
     const window = Math.round((performance.now() - rereadAt) * 10) / 10;
     result.rereadWindowMs = Math.max(result.rereadWindowMs ?? 0, window);
@@ -510,7 +510,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       let current: Map<string, LinearDocument>;
       try {
         current = await reread(batch);
-        rereadAt = performance.now();
+        batchReadAt = performance.now();
       } catch (error) {
         if (error instanceof LinearStoppedError) stopAt(start, error.reason);
         if (!(error instanceof LinearError)) throw error;
@@ -519,7 +519,6 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         notDone.push(...batch);
         continue;
       }
-      await checkpoint('after-reread-before-write');
       for (let index = 0; index < batch.length; index += 1) {
         const change = batch[index] as DocumentChange;
         const stop = linear.stopped ?? (stopAfter !== undefined && written >= stopAfter ? { kind: 'test-threshold' as const, documents: stopAfter } : undefined);
@@ -806,29 +805,28 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
 
   /** Makes one change in Linear. False when it was skipped. */
   async function apply(change: DocumentChange, current: ReadonlyMap<string, LinearDocument>): Promise<boolean> {
-    if (change.kind === 'trash') return trash(change, current);
+    if (change.kind === 'trash') return trash(change);
     if (change.kind === 'keep') return keep(change, current);
     return create(change, current);
   }
 
-  async function trash(change: TrashChange, current: ReadonlyMap<string, LinearDocument>): Promise<boolean> {
-    const document = current.get(change.id);
-    if (document === undefined || document.trashed || document.archivedAt !== null) {
-      // Already gone from Linear: nothing to trash, and the id goes with the file.
-      forgetEntry(change.path);
-      result.trashed.push(change.path);
-      return true;
+  async function trash(change: TrashChange): Promise<boolean> {
+    const document = await linear.getDocument(change.id, { withContent: true });
+    const rereadAt = performance.now();
+    if (document !== null && !document.trashed && document.archivedAt === null) {
+      if (!(await unchangedSinceCapture(document, change.path))) return skip(change.path, 'edited-in-linear');
+      await checkpoint('after-reread-before-write');
+      await timed(() => linear.trashDocument(change.id), rereadAt);
     }
-    if (!(await unchangedSinceCapture(document, change.path))) return skip(change.path, 'edited-in-linear');
-    await timed(() => linear.trashDocument(change.id));
+    // Forget the id whether the run trashed the document or found it already gone.
     forgetEntry(change.path);
     result.trashed.push(change.path);
     return true;
   }
 
   async function keep(change: KeepChange, current: ReadonlyMap<string, LinearDocument>): Promise<boolean> {
-    const document = current.get(change.id);
-    if (document === undefined || document.trashed || document.archivedAt !== null) return skip(change.to, 'missing-in-linear');
+    const listed = current.get(change.id);
+    if (listed === undefined || listed.trashed || listed.archivedAt !== null) return skip(change.to, 'missing-in-linear');
     const file = merge.result.get(change.to) as SideFile;
     const patch: DocumentPatch = {};
     /** The document as Linear stores it after the content change, for its status mark. */
@@ -836,6 +834,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (change.content) patch.content = await transformBody(transforms, change.to, splitFile(textOf(file)).body);
     if (change.title) patch.title = file.title.normalize('NFC');
     if (change.place) Object.assign(patch, placePatch(file.place));
+    const document = await linear.getDocument(change.id, { withContent: true });
+    const rereadAt = performance.now();
+    if (document === null || document.trashed || document.archivedAt !== null) return skip(change.to, 'missing-in-linear');
     const holds =
       (patch.content === undefined || (document.content != null && sameMarkdown(document.content, patch.content))) &&
       (patch.title === undefined || document.title.normalize('NFC') === patch.title) &&
@@ -848,7 +849,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
     } else {
       if (!(await unchangedSinceCapture(document, change.from))) return skip(change.to, 'edited-in-linear');
-      const updated = await timed(() => linear.updateDocument(change.id, patch));
+      await checkpoint('after-reread-before-write');
+      const updated = await timed(() => linear.updateDocument(change.id, patch), rereadAt);
       // Without a content write the merge result's file stands: Linear holds its body already.
       if (patch.content !== undefined) {
         stored.set(change.to, { content: updated.content ?? '', sent: patch.content, document: updated });

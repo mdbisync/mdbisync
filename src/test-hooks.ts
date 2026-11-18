@@ -28,7 +28,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
  * - after-local-merge-before-record: the tracked branch is merged locally, from the commit fetched at the start.
  * - before-write: in a sync run, before the first re-read, so an edit made here is seen and its document skipped.
  *   An initial sync reads nothing again: there it marks the moment just before its first write.
- * - after-reread-before-write: between a batch's re-read and its writes, the window Linear has no lock for.
+ * - after-reread-before-write: between a document's final re-read and its update or trash, the window Linear has no lock for.
  * - document-created-before-ids-push: a new document exists in Linear; its id is not recorded yet.
  * - after-write-before-record: the writes are done; the record commit and its push are next.
  */

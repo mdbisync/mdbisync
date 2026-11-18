@@ -233,7 +233,7 @@ export class LinearClient {
    * Reads one document by id with `document(id:)`, which answers for trashed
    * and archived documents too; null when Linear no longer has the id.
    */
-  async getDocument(id: string): Promise<LinearDocument | null> {
+  async getDocument(id: string, { withContent = false }: { withContent?: boolean } = {}): Promise<LinearDocument | null> {
     try {
       const data = await this.request<{ document: RawDocument | null }>(
         'GetDocument',
@@ -241,7 +241,7 @@ export class LinearClient {
         `query GetDocument($id: String!, $withContent: Boolean!) {
           document(id: $id) { ${DOCUMENT_FIELDS} }
         }`,
-        { id, withContent: false },
+        { id, withContent },
       );
       return data.document === null ? null : toDocument(data.document);
     } catch (error) {

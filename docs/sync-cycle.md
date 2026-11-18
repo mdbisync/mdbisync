@@ -149,22 +149,27 @@ ongoing sync runs. You do not need to wait for a run to finish:
   from a person or CI. Closing its pull request causes a later run to open
   a replacement from the same branch.
 
-There is a remaining race: Linear's document writes accept no version
-condition. An edit made after the final re-read but before the write lands
-can be lost. The run's `rereadWindowMs` measurement in the JSON report
-([`report-file`](configuration.md#action-inputs)) is the largest interval from
-receipt of a batch re-read's answer to receipt of a successful write's answer. It
-includes earlier writes in that batch and retries. It excludes the time
-between Linear reading the document and the client receiving that response,
-so it does not bound the entire race or establish a fixed safe interval.
+Sync reads each document again by ID before applying a regular update or
+sending it to the trash. Linear's document writes accept no version condition,
+so an edit made after that final read and before the write lands can still
+be lost.
 
-In a live race test, the run was deliberately paused after the re-read
-while 100 edit markers were written. The test harness measured a held interval
-of **82,077 ms** (82.077 seconds), and all 100 markers were lost. An earlier live test held
-the interval for 88,471 ms and also lost 100 markers. These artificial
-pauses demonstrate the risk; they are not normal write latency. Tests with
-a local fake service and no pause measured 4.4–12.9 ms across six runs;
-those timings do not measure live Linear latency.
+The run's `rereadWindowMs` measurement in the JSON report
+([`report-file`](configuration.md#action-inputs)) is the longest interval
+from receiving a read response to receiving a successful write response.
+For regular updates and trash operations it starts with the individual read.
+Recovery writes that restore a document or rewrite links when adopting it
+still use the batch read, so their interval includes earlier reads and writes
+in the batch. The measurement includes retries and starts when the client
+receives the read response. The race begins earlier, when Linear reads the
+document.
+
+In earlier tests using batch reads, the live test harness deliberately paused
+sync after the read while 100 edit markers were written. The held intervals
+were **82,077 ms** and **88,471 ms**, with all 100 markers lost in each test.
+Tests with a local fake service and no pause measured 4.4–12.9 ms across six
+runs. The held intervals show the effect of the pause, and the unpaused
+timings measure the local fake service.
 
 Separate live checks kept three edits to different paragraphs from two
 Linear editors and git. A burst targeting 15 minutes generated 750 Linear
