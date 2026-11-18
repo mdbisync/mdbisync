@@ -132,9 +132,14 @@ Ask the release team in the team chat.
 - Its icon becomes the orange `Alert` icon. If the document had its own icon
   and color, the sync keeps them and puts them back exactly once the
   conflict is resolved. If the repository's security checks also reject the
-  document, their red `Cross` icon and comment show instead until the
-  finding is fixed; then the `Alert` icon and the conflict comment return.
-- The sync adds one comment, once per conflict:
+  document, their red `Cross` icon and comment show instead, and the
+  conflict comment is resolved. Once the finding is fixed, the `Alert` icon
+  returns with a new conflict comment while the markers remain; the blocked
+  comment stays open as a record (see
+  [the blocked mark](sync-cycle.md#the-blocked-mark)).
+- The sync adds one comment, once per conflict, and resolves it when the
+  conflict clears (a conflict that returns after a blocked finding gets a
+  new one):
 
   > This document contains conflicting versions. Edit the document here or
   > in Git, keep the text you want, and remove every conflict marker
@@ -169,11 +174,12 @@ The release ships on Tuesday.
 ```
 
 **In Linear:** edit the document. The next run takes the edit to the tracked
-branch through the sync pull request, removes the `Alert` icon and puts the
-document's own icon and color back.
+branch through the sync pull request, resolves the conflict comment, removes
+the `Alert` icon and puts the document's own icon and color back.
 
 **In git:** edit the file on the tracked branch, commit and push. The next run
-writes the text to Linear and removes the `Alert` icon in the same way.
+writes the text to Linear, resolves the conflict comment and removes the
+`Alert` icon in the same way.
 
 While you resolve:
 

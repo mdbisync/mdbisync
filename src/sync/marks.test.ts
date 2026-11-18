@@ -142,6 +142,57 @@ test('blocked status takes precedence and shares the original decoration with th
   assert.equal(world.entry.saved, undefined);
 });
 
+test('a cleared conflict resolves its notice before the original decoration returns', async () => {
+  const world = new World();
+  await world.reconcile();
+  const notice = world.entry.saved?.notice?.id as string;
+  world.document.content = 'Kept text.\n';
+  world.events = [];
+  assert.equal((await world.reconcile()).state, 'clear');
+  assert.deepEqual(world.resolved, [notice]);
+  assert.deepEqual(world.events, ['find', 'resolve', 'update', 'save']);
+  assert.equal(world.document.icon, ':fire:');
+  assert.equal(world.entry.saved, undefined);
+});
+
+test('a fixed blocked finding keeps its notice open as a record and restores the original decoration', async () => {
+  const world = new World();
+  world.document.content = 'Rejected.\n';
+  await world.reconcile([{ hook: 'check-key', line: 1 }]);
+  world.document.content = 'Corrected.\n';
+  world.events = [];
+  assert.equal((await world.reconcile()).state, 'clear');
+  // No lookup and no resolution: the comment is not this run's to change.
+  assert.deepEqual(world.events, ['update', 'save']);
+  assert.deepEqual(world.resolved, []);
+  assert.equal(world.comments.size, 1);
+  assert.equal(world.document.icon, ':fire:');
+  assert.equal(world.entry.saved, undefined);
+});
+
+test('a conflict under a blocked finding: conflict notice resolved, blocked notice kept, a new conflict notice after the fix', async () => {
+  const world = new World();
+  await world.reconcile();
+  const first = world.entry.saved?.notice?.id as string;
+  // Blocked over an open conflict: the conflict notice is not left dangling.
+  await world.reconcile([{ hook: 'check-key', line: 3 }]);
+  const blocked = world.entry.saved?.notice?.id as string;
+  assert.equal(world.entry.saved?.notice?.kind, 'blocked');
+  assert.deepEqual(world.resolved, [first]);
+  // The finding is fixed while the markers remain: the conflict mark and a new conflict notice return.
+  assert.equal((await world.reconcile()).state, 'conflict');
+  const second = world.entry.saved?.notice?.id as string;
+  assert.notEqual(second, first);
+  assert.equal(world.document.icon, MARKS.conflict.icon);
+  assert.deepEqual(world.resolved, [first]);
+  assert.ok(world.comments.has(blocked));
+  // Cleared: only the conflict notice is resolved.
+  world.document.content = 'Kept text.\n';
+  await world.reconcile();
+  assert.deepEqual(world.resolved, [first, second]);
+  assert.equal(world.document.icon, ':fire:');
+});
+
 test('failure to save the original decoration prevents any remote changes', async () => {
   const world = new World();
   world.failSave = true;
@@ -412,8 +463,7 @@ test('a released comment never confirmed posted is looked up and resolved when i
 for (const missing of [false, true]) {
   test(`clearing a notice whose resolution fails ${missing ? 'tolerates a deleted comment' : 'retries while the comment exists'}`, async () => {
     const world = new World();
-    world.document.content = 'Rejected.\n';
-    await world.reconcile([{hook:'check-key', line:1}]);
+    await world.reconcile();
     if (missing) world.comments.clear();
     world.document.content = 'Corrected.\n';
     world.resolveComment = async () => {throw new LinearError('ResolveComment', 'Unavailable');};
@@ -423,8 +473,8 @@ for (const missing of [false, true]) {
       assert.equal(world.entry.saved, undefined);
     } else {
       await assert.rejects(world.reconcile(), /Unavailable/);
-      assert.equal(world.document.icon, 'Cross');
-      assert.ok(world.entry.saved?.notice);
+      assert.equal(world.document.icon, 'Alert');
+      assert.equal(world.entry.saved?.notice?.kind, 'conflict');
     }
   });
 }
@@ -444,7 +494,7 @@ test('a mark reports the conflict notice it set or resolved, and never a blocked
   // A blocked finding replaces it: the conflict notice is resolved, the blocked notice is not a conflict notice.
   await reconcile([{ hook: 'secret-scan', line: 3 }]);
   assert.deepEqual(notices, { set: ['notes.md'], resolved: ['notes.md'] });
-  // Cleared from blocked: a blocked notice's resolution is not counted either.
+  // Cleared from blocked: the blocked notice stays open and is not counted.
   world.document.content = 'Resolved text.\n';
   assert.equal((await reconcile()).state, 'clear');
   assert.deepEqual(notices, { set: ['notes.md'], resolved: ['notes.md'] });

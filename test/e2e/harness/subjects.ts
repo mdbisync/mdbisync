@@ -1870,7 +1870,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const document = await securityBlockedDocument(env);
     return document.icon !== MARKS.blocked.icon || document.color !== MARKS.blocked.color;
   },
-  // Security notices on the blocked document that are not resolved; the sync resolves its notice once the secret is gone.
+  // Security notices on the blocked document that are not resolved; the sync leaves its notice open once the secret is gone, as the record of the finding.
   'blocked.openSecurityNotices': async (env) => {
     const document = await securityBlockedDocument(env);
     return (await commentsWithState(live(env.ctx).app, document.id)).filter((comment) => comment.body.includes(BLOCKED_COMMENT) && comment.resolvedAt === null).length;
@@ -1929,7 +1929,7 @@ export const SUBJECTS: Record<string, Compute> = {
 
   // The labels (`Image N of M (line L)`) the sync's image notices gave before the fix.
   'blocked.imageLines': async (env) => noticeImageLabels(observed(env.ctx, 'blocked.comments') as string[]),
-  // Image notices on the blocked document that are not resolved; the sync resolves its notice once the images are fixed.
+  // Image notices on the blocked document that are not resolved; the sync leaves its notice open once the images are fixed, as the record of the finding.
   'blocked.openImageNotices': async (env) => {
     const id = (await env.view()).ids.get(blockedImagePath(env.ctx))?.id;
     if (id === undefined) throw new ProductError('the blocked document has no recorded id');

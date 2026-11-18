@@ -80,7 +80,8 @@ it('the CLI blocks unsupported upload bytes and captures every supported type af
     touch(document);
     const fixed = await run();
     assert.equal(fixed.capture.blocked.length,0);
-    assert.equal(notice.resolved,true);
+    assert.notEqual(notice.resolved,true);
+    assert.equal(world.linear.comments.size,1);
     assert.equal(document.icon,'Fire');
     assert.equal(document.color,'#123456');
     for (const {path,bytes} of expected) {

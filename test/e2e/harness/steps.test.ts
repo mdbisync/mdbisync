@@ -2865,12 +2865,15 @@ describe('linear executors', () => {
     linear.comments.set(id, [notice]);
     const cleared = ['blocked.securityMarkCleared', 'blocked.openSecurityNotices'];
     // Still blocked: the mark is there and its notice open.
-    assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map(cleared.map((subject) => [subject, false])));
-    // The sync restored the document's own icon and resolved its notice.
+    assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map([['blocked.securityMarkCleared', false], ['blocked.openSecurityNotices', true]]));
+    // The sync restored the document's own icon and left its notice open as the record of the finding.
     Object.assign(blocked, { icon: null, color: null });
-    linear.resolved.add(notice);
     refreshView(ctx);
     assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map(cleared.map((subject) => [subject, true])));
+    // A resolved notice fails the check: the sync must not resolve it.
+    linear.resolved.add(notice);
+    refreshView(ctx);
+    assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map([['blocked.securityMarkCleared', true], ['blocked.openSecurityNotices', false]]));
   });
 
   /** Whether each assertion of scenario `id` on `subjects` holds in `ctx`, compared as the runner compares them. */
