@@ -20,6 +20,8 @@ export interface RunOptions {
   onlyEnv?: Record<string, string>;
   /** Exit codes that are not an error (default: only 0). */
   okCodes?: readonly number[];
+  /** Maximum stdout bytes to collect. Bounded calls cap stderr separately. */
+  maxOutputBytes?: number | undefined;
 }
 
 export interface RunResult {
@@ -73,13 +75,31 @@ export class Git {
       const child = spawn('git', args, { cwd: this.dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
-      child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
-      child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
+      let exceededLimit: number | undefined;
+      const collector = (chunks: Buffer[], limit?: number) => {
+        let bytes = 0;
+        return (chunk: Buffer) => {
+          if (exceededLimit !== undefined) return;
+          bytes += chunk.length;
+          if (limit !== undefined && bytes > limit) {
+            exceededLimit = limit;
+            child.kill('SIGKILL');
+            return;
+          }
+          chunks.push(chunk);
+        };
+      };
+      child.stdout.on('data', collector(out, options.maxOutputBytes));
+      child.stderr.on('data', collector(err, options.maxOutputBytes === undefined ? undefined : 64 * 1024));
       child.on('error', reject);
       // A command that exits before reading all its input closes the pipe;
       // the exit code tells what happened.
       child.stdin.on('error', () => {});
       child.on('close', (code) => {
+        if (exceededLimit !== undefined) {
+          reject(new Error(message('git.output-limit', { bytes: exceededLimit })));
+          return;
+        }
         const result: RunResult = {
           code: code ?? -1,
           stdout: Buffer.concat(out),

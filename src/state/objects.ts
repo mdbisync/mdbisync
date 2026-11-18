@@ -33,8 +33,13 @@ export interface CommitIdentity {
 export const NEUTRAL_IDENTITY: CommitIdentity = Object.freeze({ name: 'mdbisync', email: 'mdbisync@sync.invalid' });
 
 /** Lists every file of a commit or tree, recursively. */
-export async function listTree(git: Git, treeish: string): Promise<TreeEntry[]> {
-  const { stdout } = await git.run(['ls-tree', '-r', '-z', '-l', '--full-tree', treeish]);
+export async function listTree(git: Git, treeish: string, maxOutputBytes?: number): Promise<TreeEntry[]> {
+  const { stdout } = await git.run(['ls-tree', '-r', '-z', '-l', '--full-tree', treeish], { maxOutputBytes });
+  return parseTreeListing(stdout);
+}
+
+/** Parses the NUL-delimited records from `ls-tree -z -l`. */
+export function parseTreeListing(stdout: Buffer): TreeEntry[] {
   const entries: TreeEntry[] = [];
   for (const record of stdout.toString('utf8').split('\0')) {
     if (record === '') continue;
@@ -53,11 +58,11 @@ export async function listTree(git: Git, treeish: string): Promise<TreeEntry[]> 
 }
 
 /** Reads blobs by id in one git process. A missing id is an error. */
-export async function readBlobs(git: Git, oids: readonly Oid[]): Promise<Map<Oid, Buffer>> {
+export async function readBlobs(git: Git, oids: readonly Oid[], maxOutputBytes?: number): Promise<Map<Oid, Buffer>> {
   const unique = [...new Set(oids)];
   const result = new Map<Oid, Buffer>();
   if (unique.length === 0) return result;
-  const { stdout } = await git.run(['cat-file', '--batch'], { input: unique.join('\n') + '\n' });
+  const { stdout } = await git.run(['cat-file', '--batch'], { input: unique.join('\n') + '\n', maxOutputBytes });
   let offset = 0;
   for (const oid of unique) {
     const end = stdout.indexOf(0x0a, offset);

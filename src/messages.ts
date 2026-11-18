@@ -125,12 +125,14 @@ export const MESSAGES = {
   'setup.initial-pull-request-pending': 'The pull request of the initial sync from Linear is not merged into {tracked} yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch {sync} and run initial sync again to replace the snapshot. The sync wrote nothing.',
 
   // Annotations and the mapping.
+  'annotations.blob-too-large': '{readme}: cannot check the folder annotation because the blob exceeds {bytes} bytes',
   'annotations.invalid-yaml': '{readme}: the front matter with {teamKey} or {projectKey} is not valid YAML',
   'annotations.empty-name': '{readme}: {key} must be a non-empty name',
   'annotations.nested-team': '{readme}: names a team inside the folder of team "{team}" ({folder})',
   'annotations.nested-project': '{readme}: names a project inside the folder of project "{project}" ({folder})',
   'annotations.project-without-team': '{readme}: names a project, but neither it nor a folder above names a team',
   'mapping.content-not-read': 'the content of {path} was not read',
+  'mapping.blob-budget': 'mapping-blob-budget: Markdown blob reads exceed the {bytes}-byte budget',
 
   // State refs and their files.
   'config.invalid-remote': 'remote "{remote}" is not a valid remote name',
@@ -142,6 +144,7 @@ export const MESSAGES = {
   'config.prefix-outside-refs': 'refPrefix "{prefix}" must start with "refs/" and name a folder under it',
   'config.prefix-reserved': 'refPrefix "{prefix}" must not be under refs/heads, refs/tags or refs/remotes',
   'git.failed': 'git {args} failed with exit code {code}: {stderr}',
+  'git.output-limit': 'git-output-limit: command output exceeded {bytes} bytes',
   'lfs.needs-git-lfs': 'files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync',
   'objects.missing': 'git object {oid} is missing',
   'objects.not-blob': 'git object {oid} is a {type}, not a blob',

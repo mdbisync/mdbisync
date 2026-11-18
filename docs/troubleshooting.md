@@ -323,6 +323,7 @@ the reason is fixed. The summaries list each with its rules:
 | `not-a-regular-file` | The path is a symbolic link or another kind of file. | Replace it with a regular file. |
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |
 | `stored-in-lfs` | The Markdown file itself is stored in Git LFS. | Store Markdown files in git directly. |
+| `blob-too-large` | The Markdown blob exceeds 1,000,000 bytes and is skipped before reading. If the file is a `README.md`, setup also reports that its folder annotation could not be checked. | Make the file smaller or split it. |
 | `upload-too-large` | The document links a file over Linear's 10 MB upload limit. | Make the file smaller, or link it from somewhere else. |
 | `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. For a new document left out after a confirmed missing object (404/410), also commit an edit to the document or linked file to retry it. |
 | `link-provenance-unknown` | An initial sync from git found a plain link to a repository file in a document Linear already holds, while the `linear` and `ids` state refs that record which links Linear members wrote are lost. The run cannot tell your link from one a Linear member wrote, so it uploads nothing for that document and leaves it out. | Write the link as an image if the file is meant to be shared, or remove it, then run the initial sync again. Until then each initial sync leaves the document out again. A repository with its state refs keeps uploading the links written in git. |
@@ -439,6 +440,8 @@ the message. Most come from the workflow's configuration:
 
 | Message | What to do |
 | --- | --- |
+| `mapping-blob-budget` | The Markdown mapping exceeds its 64 MiB read budget. Reduce the amount of Markdown in the tree being mapped before retrying. |
+| `git-output-limit` | A bounded Git command exceeded its output limit. Mapping can read up to 16 MiB of Git tree metadata. Check the size and integrity of the tree being read. |
 | `the direction and confirm inputs belong to an initial sync, and only to it` | Remove `direction` and `confirm` from the sync and check steps. |
 | `unknown operation: <name> (expected one of: <operations>)` | Set the action's `operation` to `sync` or `initial-sync`. |
 | `unknown security-step: <name> (expected one of: <steps>, or empty)` | Set `security-step` to `stage` or `apply`, or leave it empty. |

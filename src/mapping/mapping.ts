@@ -5,7 +5,8 @@
 
 import { type Git, type Oid } from '../state/git.ts';
 import { parseLfsPointer } from '../state/lfs.ts';
-import { type TreeEntry, listTree, readBlobs } from '../state/objects.ts';
+import { type TreeEntry, listTree } from '../state/objects.ts';
+import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from './blobs.ts';
 import {
   ANNOTATION_FILE,
   type Annotation,
@@ -97,7 +98,7 @@ export function candidateFiles(entries: readonly TreeEntry[], zones: ReadonlyMap
 
 /**
  * Maps every file. `contents` holds the blobs of the candidate files (see
- * `candidateFiles`); a candidate whose blob is missing is an error.
+ * `candidateFiles`). A candidate within the byte limit whose blob is missing is an error.
  */
 export function mapFiles(
   entries: readonly TreeEntry[],
@@ -117,6 +118,10 @@ export function mapFiles(
       unsynced.push({ path: entry.path, reason: 'not-a-regular-file', title: titleOf(entry.path, zone), place: placeOf(zone) });
       continue;
     }
+    if (!readableBlob(entry)) {
+      unsynced.push({ path: entry.path, reason: 'blob-too-large', title: titleOf(entry.path, zone), place: placeOf(zone) });
+      continue;
+    }
     const content = contents.get(entry.oid);
     if (content === undefined) throw new Error(message('mapping.content-not-read', { path: entry.path }));
     const problem = contentProblem(content);
@@ -133,14 +138,50 @@ export function mapFiles(
 
 /** Maps the files of a commit, reading only `README.md` files and the `.md` files under annotations. */
 export async function loadMapping(git: Git, commit: Oid): Promise<RepositoryMapping> {
-  const entries = await listTree(git, commit);
+  return mapTree(git, await listTree(git, commit, MAPPING_TREE_BYTES), new MappingBlobBudget());
+}
+
+export async function mapTree(git: Git, entries: readonly TreeEntry[], budget: MappingBlobBudget): Promise<RepositoryMapping> {
+  const annotations = await readTreeAnnotations(git, entries, budget);
+  const contents = await budget.read(git, candidateFiles(entries, annotations.zones));
+  return { ...annotations, ...mapFiles(entries, annotations.zones, contents) };
+}
+
+/** Check a proposed state tree's budget without loading candidate document bodies. */
+export async function checkMappingBudget(git: Git, commit: Oid, knownPaths: ReadonlyMap<string, unknown>): Promise<void> {
+  const entries = await listTree(git, commit, MAPPING_TREE_BYTES);
+  requireReadableAnnotations(entries);
+  const budget = new MappingBlobBudget();
+  const { zones } = await readTreeAnnotations(git, entries, budget);
+  budget.check(candidateFiles(entries, zones));
+  budget.check(entries.filter((entry) => entry.type === 'blob' && knownPaths.has(entry.path)));
+}
+
+/** A merge must not mistake an unreadable folder annotation for a removed one. */
+export function requireReadableAnnotations(entries: readonly TreeEntry[]): void {
+  const entry = annotationFiles(entries).find((entry) => !readableBlob(entry));
+  if (entry !== undefined) throw new Error(oversizedAnnotation(entry.path).message);
+}
+
+function oversizedAnnotation(readme: string): AnnotationProblem {
+  return { readme, kind: 'invalid-annotation', message: message('annotations.blob-too-large', { readme, bytes: MAPPING_FILE_BYTES }) };
+}
+
+async function readTreeAnnotations(git: Git, entries: readonly TreeEntry[], budget: MappingBlobBudget): Promise<Pick<RepositoryMapping, 'annotations' | 'zones' | 'problems'>> {
   const readmeEntries = annotationFiles(entries);
-  const readmeBlobs = await readBlobs(git, readmeEntries.map((entry) => entry.oid));
-  const readmes = new Map(readmeEntries.map((entry) => [entry.path, (readmeBlobs.get(entry.oid) as Buffer).toString('utf8')]));
+  const readmeBlobs = await budget.read(git, readmeEntries);
+  const unreadableAnnotations: AnnotationProblem[] = [];
+  const readmes = new Map<string, string>();
+  for (const entry of readmeEntries) {
+    if (readableBlob(entry)) {
+      readmes.set(entry.path, readmeBlobs.get(entry.oid)!.toString('utf8'));
+    } else {
+      unreadableAnnotations.push(oversizedAnnotation(entry.path));
+    }
+  }
   const { annotations, problems: readProblems } = collectAnnotations(readmes);
   const { zones, problems: zoneProblems } = resolveZones(annotations);
-  const contents = await readBlobs(git, candidateFiles(entries, zones).map((entry) => entry.oid));
-  return { annotations, zones, problems: [...readProblems, ...zoneProblems], ...mapFiles(entries, zones, contents) };
+  return { annotations, zones, problems: [...unreadableAnnotations, ...readProblems, ...zoneProblems] };
 }
 
 /** The key under which two titles in one place are the same document title. */

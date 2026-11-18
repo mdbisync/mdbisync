@@ -492,7 +492,7 @@ moved out of the synchronized projects, and the old paths of documents
 renamed or moved in Linear (a rename counts once as captured and once as
 removed); *blocked* documents got the
 [blocked mark](#the-blocked-mark); *left out* documents were not taken this
-run (`markdown-complexity`, `attachment-budget`, `image-repair-budget`, `capture-translation`, `download-retry` or `security-unchecked`,
+run (`markdown-complexity`, `attachment-budget`, `image-repair-budget`, `blob-too-large`, `capture-translation`, `download-retry` or `security-unchecked`,
 [files left out](troubleshooting.md#files-left-out)). Lines that follow
 only when they apply:
 
@@ -500,6 +500,7 @@ only when they apply:
 | --- | --- |
 | `attachment-budget: "<document id>"` | Attachment count or bytes exceeded the document or run limit. The document stays unchanged and the cursor holds; reduce or split attachments and rerun. See [files left out](troubleshooting.md#files-left-out). |
 | `image-repair-budget: "<document id>"` | Image or link repair exceeded the document limit. The document stays unchanged and the cursor holds. Simplify or split the document and rerun. See [files left out](troubleshooting.md#files-left-out). |
+| `blob-too-large: "<document id>"` | The recorded file exceeds the byte limit. The file and its mapping stay in place and the cursor holds. See [files left out](troubleshooting.md#files-left-out). |
 | `download-retry: "<document id>"` | [Files left out](troubleshooting.md#files-left-out); an upload download failed temporarily and the next run retries it without marking the document. |
 | Removal held for N files | [`removal-held`](troubleshooting.md#partial-sync-runs) |
 | The document id map was lost | [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync) |

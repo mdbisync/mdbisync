@@ -135,6 +135,7 @@ reasons:
   long for Linear (`title-too-long`);
 - a `.md` file git does not store as text (`binary`, `stored-in-lfs`,
   `not-a-regular-file`);
+- a Markdown blob larger than 1,000,000 bytes (`blob-too-large`);
 - a linked file over Linear's 10 MB upload limit (`upload-too-large`) or one
   the run cannot read (`upload-unreadable`), such as an LFS object the
   remote's LFS server does not have. The dry run judges a file in Git LFS by

@@ -4,6 +4,7 @@ import { beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY, mergeOnGitHub, remoteRef } from '../state/test-helpers.ts';
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs, PushedKey } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
+import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES } from '../mapping/blobs.ts';
 import { LinearClient, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
@@ -70,6 +71,68 @@ describe('capture from Linear', () => {
   const commentsOf = (id: string) => [...world.linear.comments.values()].filter((comment) => comment.documentContentId === `content-${id}`).map((comment) => comment.body);
   const refresh = async () => { context.fetched = await fetchState(context.git, config); };
   const text = async (path: string) => (await fixture.remote.run(['show', `${stateRef(config, 'linear')}:${path}`])).stdout.toString('utf8');
+
+  it('leaves an oversized recorded document unread even when it has a known id', async (t) => {
+    const git = context.git;
+    const initial = context.fetched.state.linear!;
+    const path = 'docs/plan.md';
+    const changes = new Map([[path, 'a'.repeat(MAPPING_FILE_BYTES + 1)]]);
+    const commit = await commitTree(git, { parents: [initial], base: initial, changes, message: 'Recorded document', identity: IDENTITY });
+    const oid = await git.text(['rev-parse', `${commit}:${path}`]);
+    const runGit = t.mock.method(git, 'run');
+    Object.assign(world.linear.documents[0]!, { content: 'Updated body.\n', updatedAt: '2026-01-03T00:00:00Z' });
+
+    const result = await capture(context, { config, state: { ...context.fetched.state, linear: commit }, stageOnly: true });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.leftOut, [{ id: 'plan', rule: 'blob-too-large' }]);
+    assert.deepEqual(result.changed, []);
+    assert.deepEqual(result.removed, []);
+    for (const { arguments: [args, options] } of runGit.mock.calls) {
+      assert.ok(!(args[0] === 'cat-file' && args[1] === 'blob' && args[2] === `${commit}:${path}`));
+      if (args[0] === 'cat-file' && args[1] === '--batch') assert.ok(!String(options?.input).includes(oid));
+    }
+  });
+
+  it('fails before reading document bodies when the recorded mapping exceeds its byte budget', async (t) => {
+    const initial = context.fetched.state.linear!;
+    const body = 'a'.repeat(MAPPING_FILE_BYTES);
+    const changes = new Map(Array.from({ length: Math.floor(MAPPING_BUDGET_BYTES / MAPPING_FILE_BYTES) + 1 }, (_, i) => [
+      `docs/note-${i}.md`, body,
+    ]));
+    const git = context.git;
+    const commit = await commitTree(git, { parents: [initial], base: initial, changes, message: 'Recorded documents', identity: IDENTITY });
+    const entries = await listTree(git, commit);
+    const annotationOids = entries.filter(({ path }) => path.endsWith('/README.md')).map(({ oid }) => oid);
+    const runGit = t.mock.method(git, 'run');
+    const listDocuments = t.mock.method(context.linear, 'listDocumentsInPlaces');
+    await assert.rejects(capture(context, { config, state: { ...context.fetched.state, linear: commit } }), { code: 'mapping-blob-budget' });
+
+    const batches = runGit.mock.calls.filter(({ arguments: [args] }) => args.join(' ') === 'cat-file --batch');
+    assert.equal(batches.length, 1);
+    assert.deepEqual(String(batches[0]!.arguments[1]?.input).trim().split('\n'), annotationOids);
+    assert.equal(listDocuments.mock.callCount(), 0);
+    assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), initial);
+  });
+
+  it('keeps the state ref when a captured edit would exceed the mapping budget', async () => {
+    const git = context.git;
+    const state = context.fetched.state;
+    const initial = state.linear!;
+    const existingBytes = Object.values(TREE).reduce((total, body) => total + Buffer.byteLength(body), 0);
+    const availableBytes = MAPPING_BUDGET_BYTES - existingBytes;
+    const body = 'a'.repeat(MAPPING_FILE_BYTES);
+    const changes = new Map(Array.from({ length: Math.floor(availableBytes / MAPPING_FILE_BYTES) }, (_, i) => [
+      `docs/note-${i}.md`, body,
+    ]));
+    changes.set('docs/remaining.md', body.slice(0, availableBytes % MAPPING_FILE_BYTES));
+    const commit = await commitTree(git, { parents: [initial], base: initial, changes, message: 'Recorded documents', identity: IDENTITY });
+    const ref = stateRef(config, 'linear');
+    assert.equal((await pushAtomic(git, config, [{ ref, expected: initial, next: commit }])).ok, true);
+    Object.assign(world.linear.documents[0]!, { content: 'A slightly longer accepted document.\n', updatedAt: '2026-01-03T00:00:00Z' });
+
+    await assert.rejects(capture(context, { config, state: { ...state, linear: commit } }), { code: 'mapping-blob-budget' });
+    assert.equal(await remoteRef(fixture, ref), commit);
+  });
 
   it('leaves deeply nested documents out while capturing an unrelated document on repeated runs', async () => {
     const nested = '> '.repeat(130) + 'nesting-canary';

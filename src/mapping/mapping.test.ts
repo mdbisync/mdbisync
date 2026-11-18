@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
-import { type TreeEntry } from '../state/objects.ts';
+import { listTree, type TreeEntry } from '../state/objects.ts';
 import { createFixture } from '../state/test-helpers.ts';
+import { MAPPING_FILE_BYTES } from './blobs.ts';
 import {
   type RepositoryMapping,
   candidateFiles,
@@ -218,6 +219,46 @@ describe('folder mapping', () => {
 });
 
 describe('folder mapping of a commit', () => {
+  it('leaves oversized Markdown and annotation blobs unread and bounds each batch', async (t) => {
+    const fixture = await createFixture();
+    try {
+      await fixture.seed({
+        'docs/README.md': team('ENG'),
+        'docs/large.md': 'a'.repeat(MAPPING_FILE_BYTES + 1),
+        'docs/child/README.md': 'b'.repeat(MAPPING_FILE_BYTES + 1),
+        ...Object.fromEntries(Array.from({ length: 5 }, (_, i) => [
+          `docs/note-${i}.md`, String(i).repeat(MAPPING_FILE_BYTES),
+        ])),
+      });
+      const git = await fixture.clone('reader');
+      const commit = await git.text(['rev-parse', 'origin/main']);
+      const entries = await listTree(git, commit);
+      const oversized = entries.filter((entry) => entry.size === MAPPING_FILE_BYTES + 1);
+      const run = t.mock.method(git, 'run');
+
+      const mapping = await loadMapping(git, commit);
+      assert.deepEqual(mapping.problems.map(({ readme, kind }) => [readme, kind]), [
+        ['docs/child/README.md', 'invalid-annotation'],
+      ]);
+      assert.deepEqual(mapping.unsynced.map(({ path, reason }) => [path, reason]), [
+        ['docs/child/README.md', 'blob-too-large'],
+        ['docs/large.md', 'blob-too-large'],
+      ]);
+      assert.deepEqual(mapping.documents.map(({ path }) => path), [
+        'docs/README.md', 'docs/note-0.md', 'docs/note-1.md', 'docs/note-2.md', 'docs/note-3.md', 'docs/note-4.md',
+      ]);
+      const batches = run.mock.calls.filter(({ arguments: [args] }) => args[0] === 'cat-file');
+      assert.equal(batches.length, 3);
+      for (const { arguments: [, options] } of batches) {
+        assert.ok(options?.maxOutputBytes !== undefined && options.maxOutputBytes <= 4 * 1024 * 1024);
+        for (const { oid } of oversized) assert.ok(!String(options.input).includes(oid));
+      }
+      await assert.rejects(git.run(['show', `${commit}:docs/README.md`], { maxOutputBytes: 8 }), /git-output-limit/);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it('reads annotations and the fixture bank collision pairs from git', async () => {
     const fixture = await createFixture();
     try {
