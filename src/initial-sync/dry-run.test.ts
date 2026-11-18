@@ -142,9 +142,9 @@ describe('initial sync dry run', () => {
     assert.deepEqual(report.summary?.plan, {
       create: ['combined/README.md', 'eng/README.md', 'eng/notes/README.md', 'eng/notes/plan.md'],
       overwrite: ['eng/backend/notes.md'],
-      trash: ['eng/backend/retired.md'],
+      trash: ['eng/doc-retired.md'],
       remove: [],
-      paths: ['combined/README.md', 'eng/README.md', 'eng/backend/notes.md', 'eng/backend/retired.md', 'eng/notes/README.md', 'eng/notes/plan.md'],
+      paths: ['combined/README.md', 'eng/README.md', 'eng/backend/notes.md', 'eng/doc-retired.md', 'eng/notes/README.md', 'eng/notes/plan.md'],
     });
     assert.deepEqual(report.summary?.leftOut, ['combined/Guide.md', 'combined/guide.md', 'eng/notes/formula.md']);
     assert.deepEqual(report.summary?.collisionPaths, ['combined/Guide.md', 'combined/guide.md']);
@@ -160,7 +160,7 @@ describe('initial sync dry run', () => {
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');
     assert.match(summary, /## Setup check/);
     assert.match(summary, /## Initial sync from git to Linear: dry run\n\nNothing was written\./);
-    assert.match(summary, /^\| eng\/backend\/retired\.md \| team "ENG" \| doc-retired \|$/m);
+    assert.match(summary, /^\| eng\/doc-retired\.md \| team "ENG" \| doc-retired \|$/m);
     assert.match(summary, /^\| combined\/Guide\.md \| duplicate-title \|  \| combined\/guide\.md \|$/m);
 
     // Mint, one setup read, one list of the three places together, revoke; nothing else.
@@ -170,15 +170,20 @@ describe('initial sync dry run', () => {
     assert.equal(world.revoked, 1);
   });
 
-  it('shows Linear titles that hold Markdown or HTML as their own text in the job summary', async () => {
+  it('names documents without a file by their id: titles from Linear, Markdown or HTML among them, stay out of the job summary and the report', async () => {
     const world = fakeWorld();
-    world.linear.documents = MARKUP_TEXTS.map((title, index) => ({ id: `doc-markup-${index}`, title, teamId: 'team-eng', createdAt: `2026-01-01T00:00:${String(index + 10)}Z` }));
+    // Each title carries a plain token, which escaping in the summary or the report would not hide.
+    const token = (index: number) => `tk${index}x7e3f9a`;
+    world.linear.documents = MARKUP_TEXTS.map((title, index) => ({ id: `doc-markup-${index}`, title: `${title} ${token(index)}`, teamId: 'team-eng', createdAt: `2026-01-01T00:00:${String(index + 10)}Z` }));
     const result = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
     assert.equal(result.exitCode, 0, result.stderr);
-    const paths = MARKUP_TEXTS.map((title) => `eng/${title}.md`).sort();
+    const paths = MARKUP_TEXTS.map((_, index) => `eng/doc-markup-${index}.md`).sort();
     assert.deepEqual((await readReport()).summary?.plan.trash, paths);
-    const rows = tableRows(await readFile(summaryFile(), 'utf8')).filter((row) => row[1] === 'team "ENG"' && row[2]?.startsWith('doc-markup-'));
+    const summary = await readFile(summaryFile(), 'utf8');
+    const rows = tableRows(summary).filter((row) => row[1] === 'team "ENG"' && row[2]?.startsWith('doc-markup-'));
     assert.deepEqual(rows.map((row) => row[0]).sort(), paths);
+    const report = await readFile(reportFile(), 'utf8');
+    MARKUP_TEXTS.forEach((title, index) => assert.ok(!summary.includes(token(index)) && !report.includes(token(index)), title));
   });
 
   it('L1-13 (dry run): every lint error and both colliding files are left out, with their rules', async () => {

@@ -173,8 +173,8 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal((await readIds())['eng/notes/plan.md']?.id, 'doc-plan');
     assert.deepEqual(report.initialSync?.overwritten, ['eng/notes/plan.md']);
     assert.equal(world.linear.documents.find((d) => d.id === 'doc-retired')?.trashed, true);
-    assert.deepEqual(report.initialSync?.trashed, ['eng/backend/retired.md']);
-    assert.match(summary, /^\| eng\/backend\/retired\.md \|$/m);
+    assert.deepEqual(report.initialSync?.trashed, ['eng/doc-retired.md']);
+    assert.match(summary, /^\| eng\/doc-retired\.md \|$/m);
     const archived = world.linear.documents.find((d) => d.id === 'doc-archived');
     assert.equal(archived?.trashed, undefined);
     assert.equal(archived?.content, undefined);
@@ -262,7 +262,7 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(retired?.trashed, undefined);
     assert.deepEqual(report.initialSync?.trashed, []);
     const leftOut = report.initialSync?.leftOutAtWrite.filter((entry) => entry.rule === 'changed-during-run').map((entry) => entry.path).sort();
-    assert.deepEqual(leftOut, ['eng/backend/retired.md', 'eng/notes/plan.md']);
+    assert.deepEqual(leftOut, ['eng/doc-retired.md', 'eng/notes/plan.md']);
     assert.ok(report.initialSync?.created.includes('eng/backend/notes.md'));
   });
 

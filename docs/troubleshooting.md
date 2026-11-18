@@ -322,7 +322,7 @@ the reason is fixed. The summaries list each with its rules:
 | `title-too-long` | The title made from the file's path is longer than Linear accepts. | Use a shorter file name or folder path. |
 | `content-too-long` | The text is longer than the 250,000 characters Linear accepts. Its other rules are not checked until it is shorter. | Split the file, then lint the parts. |
 | `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes, or padding a table's short rows to its header width would add over 250,000 characters or take it past that node limit. | Reduce nesting, fill in or split the table, or split the file. |
-| `changed-during-run` | An initial sync found the document changed in Linear while it ran: moved to another team or project, renamed, trashed, archived, edited or gone. The document and the file its title names are neither written, trashed nor imported. | Run the initial sync again. |
+| `changed-during-run` | An initial sync found the document changed in Linear while it ran: moved to another team or project, renamed, trashed, archived, edited or gone. The document and the file its title names are neither written, trashed nor imported. A document without a file is listed as `<folder>/<document id>.md`: find it by that id. | Run the initial sync again. |
 | `outside-annotations` | The file is above every annotated folder. | Move it into an annotated folder, or annotate a folder above it. |
 | `not-a-regular-file` | The path is a symbolic link or another kind of file. | Replace it with a regular file. |
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |
@@ -446,6 +446,7 @@ the message. Most come from the workflow's configuration:
 | Message | What to do |
 | --- | --- |
 | `mapping-blob-budget: Markdown blob reads exceed the <bytes>-byte budget` | Reduce the amount of Markdown in the tree being mapped to fit the 64 MiB read budget. |
+| `security-scratch-budget: the tracked files the security hooks need exceed the <bytes>-byte scratch budget` | Before the security hooks check a document, the tracked branch's files are copied into a temporary repository, up to 4 GiB of regular files and link targets. Move large assets to Git LFS (only their small pointers count) or out of the repository. |
 | `git-output-limit: command output exceeded <bytes> bytes` | Mapping can read up to 16 MiB of Git tree metadata. Check the size and integrity of the tree being read. |
 | `the direction and confirm inputs belong to an initial sync, and only to it` | Remove `direction` and `confirm` from the sync and check steps. |
 | `unknown operation: <name> (expected one of: <operations>)` | Set the action's `operation` to `sync` or `initial-sync`. |

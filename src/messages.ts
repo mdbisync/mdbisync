@@ -232,6 +232,7 @@ export const MESSAGES = {
   'sync.needs-pre-commit': 'security hooks require pre-commit on PATH; install pre-commit before capture',
   'sync.security-link-outside': 'a tracked symbolic link leads outside the tree the security hooks check',
   'sync.security-tree-differs': 'the tree the security hooks check differs from the tracked tree',
+  'sync.security-scratch-budget': 'security-scratch-budget: the tracked files the security hooks need exceed the {bytes}-byte scratch budget',
   'sync.no-runner-temp': 'RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job',
   'sync.staged-version': 'the staged candidates come from another version of the action',
   'sync.staged-hash': 'the staged manifest names a file that is not a content hash',

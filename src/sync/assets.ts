@@ -275,7 +275,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   let runBytes = 0;
   const failed = new Map<string, DownloadBlockedError | DownloadRetryError>();
 
-  const capture = async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
+  /**
+   * `plain` names the files a Linear member linked in this document's earlier text (its ids entry's plain files):
+   * such a link names a file the repository never offered, so an upload with equal bytes is never bound to it.
+   */
+  const capture = async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path, plain: ReadonlySet<string> = new Set()): Promise<CapturedAssets> => {
     checkImageRepairSize(body);
     // Repository-file links typed in Linear retain their separate gate. Images are repaired after upload checks.
     const notUploaded = typedFileLinkFindings(path, body, previousBody, previousPath);
@@ -356,6 +360,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const spellings = new Map<string, string[]>();
     if (previousBody !== undefined) {
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
+        // A file a Linear member linked is never reused, whatever else links it: until its repair is merged, the
+        // previous text still holds the member's image, so the text cannot tell the member's link from the repository's.
+        if (plain.has(link.target)) continue;
         if (await reusable(link.target) === 'unreadable') {
           const hash = pathHashes.get(link.target)!;
           if (!unreadableLinks.has(hash)) unreadableLinks.set(hash, link.target);

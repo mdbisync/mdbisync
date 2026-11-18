@@ -517,6 +517,40 @@ for (const file of process.argv.slice(2)) {
     assert.deepEqual(await planOf('dry-unanswered'), { create: [], leftOut: ['docs/doc-clean.md', 'docs/held.md'] });
   });
 
+  /** Two Linear documents without a file for an initial sync from git: one whose title the canary hook refuses, one with a clean title. */
+  const linearOnlyDocuments = () => {
+    world.linear.documents.push(
+      { id: 'held', title: 'notes private-canary 7', content: 'Clean text.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' },
+      { id: 'doc-retired', title: 'retired', content: 'Clean text.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z' },
+    );
+  };
+  const trashOf = async (name: string) => {
+    const report = JSON.parse(await readFile(join(fixture.root, `${name}-report`, 'report.json'), 'utf8')) as { summary: { plan: { trash: string[] } }; initialSync?: { trashed: string[] } };
+    return { planned: report.summary.plan.trash, trashed: report.initialSync?.trashed };
+  };
+  const fromGit = { operation: 'initial-sync', direction: 'git-to-linear' };
+
+  it('an initial sync from git names each document without a file by its id, never by its title from Linear', async () => {
+    linearOnlyDocuments();
+    const dry = await action('git-dry', { ...fromGit, confirm: '' });
+    assert.equal(dry.status, 0, dry.stdout);
+    for (const text of await reportTexts(dry, 'git-dry')) assert.ok(!text.includes('private-canary'), text);
+    assert.deepEqual(await trashOf('git-dry'), { planned: ['docs/doc-retired.md', 'docs/held.md'], trashed: undefined });
+    assert.match(await readFile(join(fixture.root, 'git-dry-report', 'summary.md'), 'utf8'), /^\| docs\/held\.md \| project "Field notes" of team "ENG" \| held \|$/m);
+    assert.deepEqual(world.writes, []);
+
+    // The staged steps: the stage step has nothing to stage from git, so the apply step has no answer for any title.
+    const stage = await action('git-stage', { ...fromGit, confirm: 'true', 'security-step': 'stage', 'report-file': '' });
+    assert.equal(stage.status, 0, stage.stdout);
+    assert.equal((await hooksStep(stage)).status, 0);
+    const apply = await action('git-apply', { ...fromGit, confirm: 'true', 'security-step': 'apply' });
+    assert.equal(apply.status, 0, apply.stdout);
+    for (const text of await reportTexts(apply, 'git-apply')) assert.ok(!text.includes('private-canary'), text);
+    assert.deepEqual(await trashOf('git-apply'), { planned: ['docs/doc-retired.md', 'docs/held.md'], trashed: ['docs/doc-retired.md', 'docs/held.md'] });
+    assert.match(await readFile(join(fixture.root, 'git-apply-report', 'summary.md'), 'utf8'), /### Moved to trash[\s\S]*^\| docs\/held\.md \|$/m);
+    for (const id of ['held', 'doc-retired']) assert.equal(world.linear.documents.find((document) => document.id === id)?.trashed, true, id);
+  });
+
   it('a document that links to a blocked rename goes through in the same run, linking the accepted file', async () => {
     const run = async (name: string) => {
       const stage = await action(`${name}-stage`, { operation: 'sync', 'security-step': 'stage', 'report-file': '' });

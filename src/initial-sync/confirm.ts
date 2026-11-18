@@ -163,12 +163,13 @@ export interface ConfirmedResult {
   unchanged: string[];
   /** Recorded by the unfinished run this one continued; not read or written again. */
   skippedCompleted: string[];
-  /** Paths where a document without a file would be; the documents are in Linear's trash. */
+  /** The plan's paths of the documents without a file (`TrashEntry.path`); the documents are in Linear's trash. */
   trashed: string[];
   /**
    * Files a transform left out while writing, with its rule; and documents
    * that changed since the plan read them (`changed-during-run`), at the
-   * path of their file or where it would be, neither written nor trashed.
+   * path of their file or, without one, at the path named by their id
+   * (`TrashEntry.path`), neither written nor trashed.
    */
   leftOutAtWrite: LeftOutAtWrite[];
   failed: FailedWrite[];
