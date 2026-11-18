@@ -129,7 +129,7 @@ test('blocked status takes precedence and shares the original decoration with th
   const world = new World();
   await world.reconcile();
   await world.reconcile([{ hook: 'check-secret', line: 12 }]);
-  assert.equal(world.document.icon, 'Cross');
+  assert.equal(world.document.icon, 'Alert');
   assert.equal(world.document.color, MARKS.blocked.color);
   assert.deepEqual({ icon: world.entry.saved?.icon, color: world.entry.saved?.color }, { icon: ':fire:', color: '#123456' });
   assert.ok([...world.comments.values()].some((body) => body.includes('check-secret') && body.includes('12')));
@@ -191,6 +191,30 @@ test('a conflict under a blocked finding: conflict notice resolved, blocked noti
   await world.reconcile();
   assert.deepEqual(world.resolved, [first, second]);
   assert.equal(world.document.icon, ':fire:');
+});
+
+test('a blocked document still showing the red Cross of earlier versions gets the red exclamation mark without a new comment', async () => {
+  const world = new World();
+  world.document.content = 'Rejected.\n';
+  await world.reconcile([{ hook: 'check-key', line: 1 }]);
+  Object.assign(world.document, { icon: 'Cross', color: '#EB5757' });
+  world.events = [];
+  const result = await world.reconcile([{ hook: 'check-key', line: 1 }]);
+  assert.equal(result.updated, true);
+  assert.equal(result.commented, false);
+  assert.deepEqual({ icon: world.document.icon, color: world.document.color }, MARKS.blocked);
+  assert.equal(world.comments.size, 1);
+  assert.ok(!world.events.includes('comment'));
+  world.document.content = 'Corrected.\n';
+  await world.reconcile();
+  assert.deepEqual({ icon: world.document.icon, color: world.document.color }, { icon: ':fire:', color: '#123456' });
+});
+
+test('the blocked and suspended marks are a red exclamation mark that differs from the conflict mark by color', () => {
+  assert.deepEqual(MARKS.blocked, { icon: 'Alert', color: '#EB5757' });
+  assert.deepEqual(MARKS.suspended, { icon: 'Alert', color: '#EB5757' });
+  assert.equal(MARKS.conflict.icon, MARKS.blocked.icon);
+  assert.notEqual(MARKS.conflict.color, MARKS.blocked.color);
 });
 
 test('failure to save the original decoration prevents any remote changes', async () => {
@@ -390,7 +414,7 @@ test('resolving one of several regions keeps the document marked without another
 test('a released suspension comment is left to the hold step, like a suspended one, while the text is clear', async () => {
   const world = new World();
   world.document.content = 'Plain text.\n';
-  world.document.icon = 'Cross';
+  world.document.icon = 'Alert';
   world.document.color = '#EB5757';
   const hold = { id: '22222222-2222-4222-8222-222222222222', bodyHash: 'a'.repeat(64), posted: true };
   world.entry = { id: 'document-one', suspended: { noticeId: hold.id, paths: ['notes.md'], checks: ['lint'] }, saved: { icon: ':fire:', color: '#123456', hold } };
@@ -400,7 +424,7 @@ test('a released suspension comment is left to the hold step, like a suspended o
   world.entry = { id: 'document-one', saved: { icon: ':fire:', color: '#123456', hold } };
   await world.reconcile();
   assert.deepEqual(world.events, []);
-  assert.equal(world.document.icon, 'Cross');
+  assert.equal(world.document.icon, 'Alert');
   assert.deepEqual(world.entry.saved, { icon: ':fire:', color: '#123456', hold });
 });
 

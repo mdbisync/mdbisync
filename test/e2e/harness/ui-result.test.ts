@@ -236,7 +236,7 @@ describe('UI checklist answers', () => {
     const harnessChecks = blocked.checks.assertions.filter((assertion) => !assertion.subject.startsWith('ui.')).map((assertion) => [assertion.subject, assertion.expected]);
     assert.deepEqual(harnessChecks.slice(-3), [['blocked.secretOccurrencesOnGithub', 0], ['blocked.securityMarkCleared', true], ['blocked.openSecurityNotices', 1]]);
     const checklist = renderUiChecklist(blocked, runNames(RUN), { live: null, runDir: 'run' });
-    assert.match(checklist, /^2\. \[ \] As editor-a: Open the blocked document[^\n]*`ui\.blocked`[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) linear\.remove-secret: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was blocked: the red Cross icon is gone[^\n]*`AfterFix`/m);
+    assert.match(checklist, /^2\. \[ \] As editor-a: Open the blocked document[^\n]*`ui\.blocked`[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) linear\.remove-secret: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was blocked: the red exclamation mark icon is gone[^\n]*`AfterFix`/m);
     // Each value's name says which of the two items it belongs to.
     for (const subject of uiValueSubjects(blocked)) assert.match(subject, /^ui\.(?:blocked\w+|\w+AfterFix)$/);
   });
@@ -327,7 +327,7 @@ describe('UI checklist answers', () => {
     ]);
     for (const subject of uiValueSubjects(suspended)) assert.match(subject, /^ui\.(?:suspended\w+|\w+AfterRelease)$/);
     const checklist = renderUiChecklist(suspended, runNames(RUN), { live: null, runDir: 'run' });
-    assert.match(checklist, /^2\. \[ \] As editor-a: Open the suspended document: the red Cross icon[^\n]*`format`[^\n]*GitHub Actions job[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) fault\.checks: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was suspended: its own icon and color are back/m);
+    assert.match(checklist, /^2\. \[ \] As editor-a: Open the suspended document: the red exclamation mark \(`Alert`\) icon[^\n]*`format`[^\n]*GitHub Actions job[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) fault\.checks: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was suspended: its own icon and color are back/m);
   });
 
   it('holds the whole corpus (L6-13) for a look in the UI, with the rendering check of L6-02', () => {
