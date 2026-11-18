@@ -54,8 +54,8 @@ export interface MarkOptions {
   linear: MarkClient;
   /** Current image and security-hook findings. Blocked takes precedence over conflict. */
   blocked?: readonly BlockedFinding[];
-  /** Include content in the response when restoring the saved decoration. */
-  includeClearedBody?: boolean;
+  /** Include content in responses when changing the decoration. */
+  includeUpdatedBody?: boolean;
   /** Must durably record the entry in ids before resolving. Never just queue it. */
   persistEntry: (entry: IdEntry, cleared?: LinearDocument) => Promise<void>;
   /**
@@ -78,6 +78,7 @@ export interface MarkResult {
   state: MarkState;
   entry: IdEntry;
   updated: boolean;
+  updatedDocument?: LinearDocument;
   commented: boolean;
 }
 
@@ -171,8 +172,9 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
     if (entry.saved === undefined) return result;
     let cleared: LinearDocument | undefined;
     if (document.icon !== entry.saved.icon || document.color !== entry.saved.color) {
-      cleared = await linear.updateDocument(document.id, { icon: entry.saved.icon, color: entry.saved.color }, options.includeClearedBody);
+      cleared = await linear.updateDocument(document.id, { icon: entry.saved.icon, color: entry.saved.color }, options.includeUpdatedBody);
       result.updated = true;
+      result.updatedDocument = cleared;
     }
     // A blocked notice is forgotten here, not resolved.
     const { saved: _saved, ...restored } = entry;
@@ -195,7 +197,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   }
   const mark = MARKS[state];
   if (document.icon !== mark.icon || document.color !== mark.color) {
-    await linear.updateDocument(document.id, mark);
+    result.updatedDocument = await linear.updateDocument(document.id, mark, options.includeUpdatedBody);
     result.updated = true;
   }
   if (notice.posted) return result;

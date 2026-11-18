@@ -64,7 +64,7 @@ import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, t
 import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { type ConflictNotices, MARKS, noConflictNotices, reconcileDocumentMark } from '../sync/marks.ts';
-import { observedDigest, withRecorded } from '../sync/recorded.ts';
+import { matchesObservedBody, observedDigest, withRecorded } from '../sync/recorded.ts';
 import { stableId } from '../sync/stable-id.ts';
 import { message } from '../messages.ts';
 import { type LeftOutAtWriteRule, type WriteCode } from '../codes.ts';
@@ -303,10 +303,11 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     // document's own icon, and it stays, even when this run writes a conflict into it.
     const shown = entry.saved === undefined && listed.icon === MARKS.conflict.icon && listed.color === MARKS.conflict.color
       && detectConflicts(listed.content ?? '').length > 0;
-    await reconcileDocumentMark({
+    const outcome = await reconcileDocumentMark({
       document,
       entry: shown ? { ...entry, saved: { icon: null, color: null } } : entry,
       linear,
+      includeUpdatedBody: true,
       noticeId: (state) => stableId('initial-sync', state, document.id, hash),
       onConflictNotice: (change) => result.conflictNotices[change].push(path),
       persistEntry: async (next) => {
@@ -314,6 +315,11 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         await pushProgress();
       },
     });
+    const updated = outcome.updatedDocument;
+    if (updated !== undefined && matchesObservedBody(updated, document)) {
+      ids.set(path, {...outcome.entry, observedDigest: observedDigest(updated)});
+      rememberedDocuments.set(path, updated);
+    }
   };
 
   const work: Work[] = [

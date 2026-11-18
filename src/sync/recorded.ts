@@ -22,6 +22,13 @@ export function observedDigest(document: LinearDocument): string | undefined {
   return createHash('sha256').update(JSON.stringify([document.content, document.updatedAt])).digest('hex');
 }
 
+/** A decoration response may refresh the timestamp of an already accepted body. */
+export function matchesObservedBody(document: LinearDocument, observed: LinearDocument): boolean {
+  return document.id === observed.id && document.content !== undefined && document.content === observed.content
+    && document.title === observed.title && document.projectId === observed.projectId && document.teamId === observed.teamId
+    && !document.trashed && document.archivedAt === null;
+}
+
 /** A document's update time in the form the capture cursor uses, so times compare as text. */
 export function recordedTime(updatedAt: string): string {
   const time = new Date(updatedAt);

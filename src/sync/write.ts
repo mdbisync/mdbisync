@@ -66,7 +66,7 @@ import { type CreateChange, type Decided, type DocumentChange, type KeepChange, 
 import { type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold } from './marks.ts';
 import { stableId } from './stable-id.ts';
 import { suspendedPaths } from './suspended.ts';
-import { observedDigest, recordedTrailers } from './recorded.ts';
+import { matchesObservedBody, observedDigest, recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
 import { type FileLeftOutRule, type SkipReason, type WriteCode } from '../codes.ts';
 
@@ -995,16 +995,20 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   async function reconcileMark(path: string, document: LinearDocument): Promise<void> {
     const entry = nextIds.get(path);
     if (entry === undefined || entry.id !== document.id || document.content === undefined) return;
-    await reconcileDocumentMark({
+    const outcome = await reconcileDocumentMark({
       document,
       entry,
       linear,
+      includeUpdatedBody: true,
       onConflictNotice: (change) => result.conflictNotices[change].push(path),
       persistEntry: async (next) => {
         nextIds.set(path, next);
         await pushIds();
       },
     });
+    const updated = outcome.updatedDocument;
+    const written = stored.get(path);
+    if (written !== undefined && updated !== undefined && matchesObservedBody(updated, document)) written.document = updated;
   }
 
   /**

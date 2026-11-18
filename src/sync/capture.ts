@@ -20,7 +20,7 @@ import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
-import { observedDigest, readRecorded, recordedTime } from './recorded.ts';
+import { matchesObservedBody, observedDigest, readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
@@ -693,14 +693,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         for (const {doc, path, blocked} of marked) {
           const before = ids.get(path)!;
           const outcome = await reconcileDocumentMark({document: doc, entry: before, linear, blocked,
-            includeClearedBody: before.observedDigest !== undefined,
+            includeUpdatedBody: before.saved !== undefined && blocked.length === 0 && before.observedDigest !== undefined,
             onConflictNotice: (change) => result.conflictNotices[change].push(path),
             persistEntry: async (entry, cleared) => {
               // Clearing a mark can advance updatedAt. Refresh the digest only from a response holding the
               // same accepted body, because a Linear edit may have arrived while the mark was cleared.
-              if (cleared !== undefined && cleared.id === doc.id && cleared.content === doc.content
-                && cleared.title === doc.title && cleared.projectId === doc.projectId && cleared.teamId === doc.teamId
-                && !cleared.trashed && cleared.archivedAt === null) {
+              if (cleared !== undefined && matchesObservedBody(cleared, doc)) {
                 entry = {...entry, observedDigest: observedDigest(cleared)};
               }
               ids.set(path, entry);
