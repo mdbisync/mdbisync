@@ -5,7 +5,6 @@
 
 import { setTimeout as sleep } from 'node:timers/promises';
 import { type CheckClock, type GitHubRepository, PullRequestError, readPullRequest, request } from './github.ts';
-import { actionsJobs, type MovedJobSource, type WorkflowIdentity } from './actions.ts';
 import { message } from '../messages.ts';
 
 /** Check run conclusions that let a merge go ahead. */
@@ -40,6 +39,13 @@ export interface CheckState {
  * that created a commit status. Anyone who may write commit statuses can name
  * one as they like, so a name alone does not tell who ran the check.
  */
+/**
+ * The publisher every GitHub Actions job's check run names: the GitHub Actions App, by its id on GitHub.com. A check
+ * run of the App with the slug `github-actions` is read with this id on any GitHub server, whose own id may differ.
+ */
+export const ACTIONS_APP: CheckPublisher = { kind: 'run', id: 15368 };
+const ACTIONS_APP_SLUG = 'github-actions';
+
 export interface CheckPublisher {
   kind: 'run' | 'status';
   /**
@@ -53,18 +59,8 @@ export interface CheckPublisher {
 /** A check a commit must pass: its name and, when known, the publisher it must come from. */
 export interface ExpectedCheck {
   name: string;
-  /**
-   * Absent with a `workflow` (an Actions job). Absent with neither, a check of that name from any publisher counts,
-   * except an Actions check run, which meets only an expectation of its workflow.
-   */
+  /** Absent: a check of that name from any publisher counts. */
   publisher?: CheckPublisher;
-  /** Actions checks also identify the workflow that ran; null means unverifiable. */
-  workflow?: WorkflowIdentity | null;
-  /**
-   * Read from GitHub only, never from a note: the verified file of a job whose pull request moved on from its head.
-   * `workflow` is then its stand-in or null, and only a head the sync pushed itself binds it, to its own revision.
-   */
-  moved?: Omit<MovedJobSource, 'standIn'>;
 }
 
 /** What a commit must show beyond the checks registered on it before it counts as passed. */
@@ -82,9 +78,6 @@ export interface CheckExpectation {
 export interface CommitCheck {
   name: string;
   publisher: CheckPublisher;
-  workflow?: WorkflowIdentity | null;
-  /** With a null `workflow`: the genuine job's verified source when its pull request moved on from this head. */
-  moved?: MovedJobSource;
   outcome: 'pending' | 'failed' | 'passed';
   /** For a failed check: an https link to its run, when GitHub gave one. */
   url?: string;
@@ -142,7 +135,6 @@ export async function readCommitChecks(target: GitHubRepository, sha: string, op
   const unlisted: string[] = [];
   let seen = 0;
   let hasRuns = false;
-  const suites = new Map<number, Awaited<ReturnType<typeof actionsJobs>>>();
   for (let page = 1; ; page += 1) {
     const answer = await request(target, 'GET', `/commits/${sha}/check-runs?per_page=${PAGE_SIZE}&page=${page}`);
     const body = answer.json as { total_count?: unknown; check_runs?: unknown } | null;
@@ -151,24 +143,11 @@ export async function readCommitChecks(target: GitHubRepository, sha: string, op
       throw new ErrorType(message('github.reading-check-runs'), answer.status);
     }
     hasRuns ||= body.total_count > 0;
-    for (const run of body.check_runs as Array<{ id?: unknown; name?: unknown; status?: unknown; conclusion?: unknown; html_url?: unknown; app?: { id?: unknown; slug?: unknown } | null; check_suite?: { id?: unknown } | null }>) {
+    for (const run of body.check_runs as Array<{ id?: unknown; name?: unknown; status?: unknown; conclusion?: unknown; html_url?: unknown; app?: { id?: unknown; slug?: unknown } | null }>) {
       const name = typeof run.name === 'string' ? run.name : 'unnamed check';
       const outcome = run.status !== 'completed' ? 'pending' : typeof run.conclusion === 'string' && PASSING_CONCLUSIONS.has(run.conclusion) ? 'passed' : 'failed';
-      const check = commitCheck(name, outcome, publisher('run', run.app?.id), run.html_url, run.id);
-      if (run.app?.slug === 'github-actions') {
-        const suite = run.check_suite?.id;
-        let job;
-        if (Number.isSafeInteger(suite) && (suite as number) > 0) {
-          if (!suites.has(suite as number)) suites.set(suite as number, await actionsJobs(target, sha, suite as number));
-          job = suites.get(suite as number)?.get(run.id as number);
-        }
-        if (job?.name !== name) job = undefined;
-        check.workflow = job?.workflow ?? null;
-        if (job?.moved !== undefined) check.moved = job.moved;
-        // A successful check payload cannot override the actual job result, and a job of an unknown revision never passes.
-        if (check.outcome === 'passed') check.outcome = job?.workflow ? job.outcome : 'pending';
-      }
-      checks.push(check);
+      const from = run.app?.slug === ACTIONS_APP_SLUG ? ACTIONS_APP : publisher('run', run.app?.id);
+      checks.push(commitCheck(name, outcome, from, run.html_url, run.id));
     }
     seen += body.check_runs.length;
     if (seen >= body.total_count) break;
@@ -228,19 +207,8 @@ function commitCheck(name: string, outcome: CommitCheck['outcome'], from: CheckP
   return check;
 }
 
-/**
- * Whether a check comes from the publisher an expected check names; any does when it names neither a publisher nor a
- * workflow, none when it is unknown. An Actions check run meets only an expectation of its workflow: any workflow's
- * token may create check runs of the Actions App under any name.
- */
+/** Whether a check comes from the publisher an expected check names; any does when it names none, none when it is unknown. */
 function publishedBy(check: CommitCheck, expected: ExpectedCheck): boolean {
-  if (expected.workflow === undefined && check.workflow !== undefined) return false;
-  if (expected.workflow !== undefined) {
-    const actual = check.workflow;
-    const wanted = expected.workflow;
-    if (!actual || !wanted || actual.path !== wanted.path || actual.revision !== wanted.revision ||
-        ((actual.event === 'dynamic') !== (wanted.event === 'dynamic'))) return false;
-  }
   if (expected.publisher === undefined) return true;
   return expected.publisher.id > 0 && check.publisher.kind === expected.publisher.kind && check.publisher.id === expected.publisher.id;
 }

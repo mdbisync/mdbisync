@@ -15,7 +15,7 @@ describe('sync: pull request deadlines', () => {
   } = h;
 
   it('L5-26: a flaky check suspends its batch at once with no rerun request, and a rerun by a person that passes releases it', async () => {
-    assert.equal(APP_PERMISSIONS.actions, 'read', 'the App may verify jobs but cannot rerun workflows');
+    assert.equal('actions' in APP_PERMISSIONS, false, 'the App asks for no actions permission');
     const path = 'eng/notes/plan.md';
     await editInLinear(path, '# Plan\n\nA flaky first attempt.\n');
     await sync();

@@ -96,7 +96,7 @@ names the rights this needs). The
 sync's own commits name the App's bot account (`<app>[bot]`) as their
 author, so GitHub shows them with the App's name and avatar.
 
-[Create the App under your account](https://github.com/settings/apps/new?description=Two-way+sync+between+Linear+documents+and+Markdown+in+this+repository.&url=https%3A%2F%2Fgithub.com%2Fmdbisync%2Fmdbisync&public=false&webhook_active=false&contents=write&pull_requests=write&workflows=write&checks=read&statuses=read&actions=read):
+[Create the App under your account](https://github.com/settings/apps/new?description=Two-way+sync+between+Linear+documents+and+Markdown+in+this+repository.&url=https%3A%2F%2Fgithub.com%2Fmdbisync%2Fmdbisync&public=false&webhook_active=false&contents=write&pull_requests=write&workflows=write&checks=read&statuses=read):
 the link opens GitHub's new-App form with these settings filled in. It
 creates the App under your personal account, which can be installed only
 there. When an organization owns your docs repository, the App must
@@ -118,7 +118,6 @@ file is for tools that automate App creation.
 | Pull requests | Read and write |
 | Workflows | Read and write |
 | Checks | Read-only |
-| Actions | Read-only |
 | Commit statuses | Read-only |
 | Where can this App be installed | Only on this account |
 
@@ -526,9 +525,10 @@ checks GitHub reports as pending can stay that way after a head is pushed.
 A required check that never registers is invisible to this deadline:
 GitHub may refuse the merge instead; check workflow filters and required
 check names. The sync never reruns a check: configure flaky-check retries
-in your own CI. The App needs Actions read access to verify that checks
-belong to genuine workflow jobs on the exact head. Existing installations must approve that
-permission before upgrading.
+in your own CI. The App's permissions above stay as they are; it needs no
+Actions permission. Versions up to `v0.1.0-rc.17` also need **Actions:
+Read-only**: keep it while your workflow pins such a version. Once the pin
+is later, an installation that granted it may remove it.
 
 When the same check fails on the tracked branch's tip (`main` by default),
 the normal pull request is held instead: no document marks or Linear

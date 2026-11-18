@@ -73,13 +73,13 @@ describe('GitHub access', () => {
     const result = await checkGitHub(target(world));
     assert.equal(result.access.state, 'passed');
     assert.equal(result.mergeCommits.state, 'passed');
-    // The repository, six permission probes and the rules on the two sync branches.
-    assert.equal(world.requests.length, 9);
+    // The repository, five permission probes and the rules on the two sync branches.
+    assert.equal(world.requests.length, 8);
     assert.deepEqual(world.writes, []);
   });
 
   it('names each missing permission', async () => {
-    for (const permission of ['contents:write', 'pull_requests:write', 'workflows:write', 'checks:read', 'statuses:read', 'actions:read']) {
+    for (const permission of ['contents:write', 'pull_requests:write', 'workflows:write', 'checks:read', 'statuses:read']) {
       const world = fakeWorld();
       world.github.missing.add(permission);
       const result = await checkGitHub(target(world));
@@ -129,7 +129,7 @@ describe('GitHub server errors in the setup check', () => {
 
   it('reads a permission probe again after a 502 and passes', async () => {
     const world = fakeWorld();
-    const { fetchImpl, seen } = faulty(world, 'GET', '/actions/runs?per_page=1', 1, badGateway);
+    const { fetchImpl, seen } = faulty(world, 'GET', '/statuses?per_page=1', 1, badGateway);
     const result = await checkGitHub({ ...target(world), fetch: fetchImpl });
     assert.equal(result.access.state, 'passed');
     assert.equal(seen.length, 2);
@@ -154,8 +154,8 @@ describe('GitHub server errors in the setup check', () => {
 
   it('stops the run with the same message when the 5xx persists', async () => {
     const world = fakeWorld();
-    const { fetchImpl, seen } = faulty(world, 'GET', '/actions/runs?per_page=1', Infinity, badGateway);
-    await assert.rejects(checkGitHub({ ...target(world), fetch: fetchImpl }), { message: 'GitHub answered HTTP 502 while checking actions:read' });
+    const { fetchImpl, seen } = faulty(world, 'GET', '/statuses?per_page=1', Infinity, badGateway);
+    await assert.rejects(checkGitHub({ ...target(world), fetch: fetchImpl }), { message: 'GitHub answered HTTP 502 while checking statuses:read' });
     // The first read and its two repeats.
     assert.equal(seen.length, 3);
     const repository = faulty(fakeWorld(), 'GET', '/repos/owner/repo', Infinity, badGateway);
@@ -303,7 +303,7 @@ describe('the App account', () => {
     assert.equal(result.app.detail, 'commits name the App sync-app[bot]');
     assert.deepEqual(result.identity, FAKE_APP_IDENTITY);
     assert.ok(world.requests.includes(`GET ${GITHUB_API}/users/sync-app%5Bbot%5D`));
-    assert.equal(world.requests.length, 10);
+    assert.equal(world.requests.length, 9);
     assert.deepEqual(world.writes, []);
   });
 

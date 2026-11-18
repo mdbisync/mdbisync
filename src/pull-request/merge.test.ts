@@ -14,7 +14,6 @@ function target(checks: FakeCheck[]) {
 
 describe('readChecks', () => {
   it('keeps a commit pending while an expected check is not registered, or while it has no checks and must have some', async () => {
-    // Another App's check runs: an Actions check run meets only an expectation of its workflow.
     const passed: FakeCheck[] = [{ name: 'pre-commit', status: 'completed', conclusion: 'success', app: 77 }];
     assert.deepEqual(await readChecks(target(passed).repo, SHA, { checks: [{ name: 'tests' }, { name: 'pre-commit' }, { name: 'tests' }] }), { state: 'pending', failed: [], pending: [], hasChecks: true, succeeded: ['pre-commit'], missing: ['tests'] });
     // A registered expected check counts by its own state; a failure still wins.
@@ -23,12 +22,17 @@ describe('readChecks', () => {
     assert.equal(failed.state, 'failed');
     assert.deepEqual(failed.missing, ['lint']);
     assert.equal((await readChecks(target([...passed, { name: 'tests', status: 'completed', conclusion: 'success', app: 77 }]).repo, SHA, { checks: [{ name: 'tests' }] })).state, 'passed');
-    // A genuine Actions job, or one a workflow token created, never meets an expectation that names no workflow.
-    for (const workflow of [undefined, false] as const) {
-      const run: FakeCheck = { name: 'tests', status: 'completed', conclusion: 'success', ...(workflow === undefined ? {} : { workflow }) };
-      assert.deepEqual((await readChecks(target([run]).repo, SHA, { checks: [{ name: 'tests' }] })).missing, ['tests']);
-      assert.deepEqual((await readChecks(target([run]).repo, SHA, { checks: [{ name: 'tests', publisher: { kind: 'run', id: FAKE_ACTIONS_APP_ID } }] })).missing, ['tests']);
-    }
+    // An Actions check run counts by its name and the Actions App, like any other App's check run.
+    const run: FakeCheck = { name: 'tests', status: 'completed', conclusion: 'success' };
+    assert.equal((await readChecks(target([run]).repo, SHA, { checks: [{ name: 'tests' }] })).state, 'passed');
+    assert.equal((await readChecks(target([run]).repo, SHA, { checks: [{ name: 'tests', publisher: { kind: 'run', id: FAKE_ACTIONS_APP_ID } }] })).state, 'passed');
+    // On another GitHub server the Actions App has its own id: it is told by its slug.
+    const server: typeof fetch = async (input) => String(input).includes('/check-runs')
+      ? Response.json({ total_count: 1, check_runs: [{ id: 1, name: 'tests', status: 'completed', conclusion: 'success', app: { id: 999, slug: 'github-actions' } }] })
+      : Response.json({ state: 'pending', total_count: 0, statuses: [] });
+    const onServer = { ...target([]).repo, fetch: server };
+    assert.equal((await readChecks(onServer, SHA, { checks: [{ name: 'tests', publisher: { kind: 'run', id: FAKE_ACTIONS_APP_ID } }] })).state, 'passed');
+    assert.deepEqual((await readChecks(onServer, SHA, { checks: [{ name: 'tests', publisher: { kind: 'run', id: 999 } }] })).missing, ['tests']);
     assert.deepEqual(await readChecks(target([]).repo, SHA, { allowNone: false }), { state: 'pending', failed: [], pending: [], hasChecks: false });
     assert.equal((await readChecks(target([]).repo, SHA, { allowNone: true })).state, 'passed');
   });
@@ -340,7 +344,7 @@ describe('waitForChecks', () => {
       const { result, elapsed, world } = await scenario(() => [{ name: 'ci', status: 'queued' }], seconds);
       assert.equal(result.state, 'pending');
       assert.equal(elapsed, seconds * 1000);
-      assert.equal(world.requests.length, Math.ceil(seconds / 5) * 5);
+      assert.equal(world.requests.length, Math.ceil(seconds / 5) * 2);
     }
   });
   it('reports a failure immediately even if another check runs', async () => {

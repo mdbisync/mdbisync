@@ -43,3 +43,29 @@ not allow.
 branch, and keep your other protected branches under their own rules, so a
 retargeted pull request still meets the rules of the branch it now targets.
 Limit write access to people you trust.
+
+## A workflow in the repository can post a passing check on a sync pull request
+
+**The risk.** Every GitHub Actions workflow in a repository publishes its
+check runs as the same GitHub Actions App. A workflow or action that runs in
+your repository with permission to create check runs, from any branch, can
+post a passing check under any name on a sync pull request's head, also one
+that takes the place of a failed check of the same name. The sync counts a
+check by its name and publisher, so such a check can let a sync pull request
+merge before your real CI has passed on that head, or after it failed.
+
+**Why it is accepted.** A workflow that can do this can post a passing check
+on any pull request in the repository, not only the sync's, so the
+repository's own workflows already decide what its checks mean. When security
+hooks are configured, they still check the content from Linear inside the
+sync's own job before anything is pushed. Telling one workflow's checks from
+another's would need the sync's GitHub App to read the repository's Actions
+runs, a further permission for every installation.
+
+**What you can do.** Set the repository's default workflow permissions to
+read-only, give each workflow only the `permissions:` it needs
+(`checks: write` only where a job must create check runs), run only workflows
+and actions you trust, pin third-party actions to full commit hashes, and
+review changes to `.github/workflows/` on every branch like any other code.
+Limit who may push branches, since a workflow on any branch runs with the
+repository's token.

@@ -565,7 +565,7 @@ to the pull request branch and runs the checks again, so the branch reaches
 - The jobs use the exact head of the pull request; if the branch moves
   before the push, the push fails without overwriting the newer commits.
 - It dispatches this workflow again on the fixing commit, so all three
-  checks come from genuine jobs on that head. It creates no synthetic checks.
+  checks come from real jobs on that head. It creates no check runs itself.
   Dispatch runs only verify the fixed head: if hooks change it again, the
   run fails with a patch instead of pushing or dispatching again. A pull
   request without fixes shows `pre-commit fixes` as skipped.
@@ -586,8 +586,7 @@ to the pull request branch and runs the checks again, so the branch reaches
 
 Dispatch runs must enforce the same checks as pull-request runs; do not make
 their tests optional through dispatch inputs or event conditions. The sync
-verifies the workflow path and exact head as well as each job's check-run
-identity. Its additional file-blob guard does not prove which PR workflow
-revision executed ([check verification](usage.md#the-sync-pull-request)).
+counts a check by its name and the GitHub Actions App, whichever event ran
+it ([the sync pull request](usage.md#the-sync-pull-request)).
 Updating the formatter example requires enabling its `workflow_dispatch`
 trigger on the default branch too.

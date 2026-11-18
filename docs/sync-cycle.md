@@ -297,7 +297,7 @@ This deadline starts at the head's push, recorded in a hidden HTML note
 in the pull request description; it is separate from the short merge
 grace period. A new head starts a new deadline. The sync never reruns a
 check. Configure flaky-check retries in the repository's CI; a rerun by a
-person or CI counts by its latest result. Actions read access is required to verify workflow jobs.
+person or CI counts by its latest result. No Actions permission is needed.
 The deadline covers only checks GitHub has registered on the head. The
 sync does not read the branch's list of required checks: branch
 protection's list needs an App permission the sync does not ask for

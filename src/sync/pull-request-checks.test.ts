@@ -277,7 +277,7 @@ describe('sync: pull request checks', () => {
     assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
     assert.equal(await rev('refs/heads/main'), h.start);
     // The description carries the expectation, so a later run that reads only the fixed head still asks for `tests`.
-    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID}~[^, ]+,tests@run:${FAKE_ACTIONS_APP_ID}~[^, ]+ -->`));
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
     const again = await sync();
     assert.equal(again.report.pullRequest?.merged, null);
     assert.deepEqual(again.report.pullRequest?.checks?.missing, ['tests']);
@@ -318,26 +318,59 @@ describe('sync: pull request checks', () => {
     assert.ok(merged.report.pullRequest?.merged);
   });
 
-  it('requires genuine workflow jobs on a formatter child before merging', async () => {
+  it('requires the earlier head\'s Actions check from the Actions App on a formatter child before merging', async () => {
     const path = 'eng/notes/plan.md';
     await editInLinear(path, '# Plan\n\nFirst edit.\n');
     await sync();
     checksOn(await rev(SYNC_BRANCH), [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
     const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
     const main = await rev('refs/heads/main');
-    for (const workflow of [false, { path: '.github/workflows/other.yml' },
-      { path: '.github/workflows/ci.yml', revision: 'c'.repeat(40) }, { event: 'workflow_run' },
-      { head: main }, { repository: 'other/repo' }] satisfies NonNullable<FakeCheck['workflow']>[]) {
-      checksOn(fixed, [{ name: 'tests', status: 'completed', conclusion: 'success', workflow }]);
+    // None, a commit status, or another App's check run of the same name: not the earlier job.
+    for (const substitute of [[], [{ commitStatus: true }], [{ app: 77 }]] satisfies Partial<FakeCheck>[][]) {
+      checksOn(fixed, substitute.map((from) => ({ name: 'tests', status: 'completed', conclusion: 'success', ...from })));
       h.editHeadNote('mdbisync/linear', () => '');
       const waiting = await sync();
       assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
-      assert.equal(waiting.report.pullRequest?.merged, null, `merged with ${JSON.stringify(workflow)}`);
+      assert.equal(waiting.report.pullRequest?.merged, null, `merged with ${JSON.stringify(substitute)}`);
       assert.equal(await rev('refs/heads/main'), main);
     }
-    checksOn(fixed, [{ name: 'tests', status: 'completed', conclusion: 'success', workflow: { event: 'workflow_dispatch' } }]);
+    checksOn(fixed, [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
     const merged = await sync();
-    assert.ok(merged.report.pullRequest?.merged, 'genuine CI on the document-only formatter fix did not merge');
+    assert.ok(merged.report.pullRequest?.merged, 'CI on the document-only formatter fix did not merge');
+  });
+
+  // A fixer's push with a workflow token starts no pull_request checks: its CI comes from a dispatch run, under the
+  // same job names, while GitHub holds a pull_request run of that push for approval, with no check runs. The sync
+  // reads check runs and statuses only, so the held run neither blocks nor delays the merge.
+  it('merges a formatter child whose checks come only from a dispatch run beside a held run without check runs', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    const jobs = (conclusion: string, fixes = conclusion): FakeCheck[] => [
+      { name: 'pre-commit hooks', status: 'completed', conclusion },
+      { name: 'pre-commit fixes', status: 'completed', conclusion: fixes },
+      { name: 'pre-commit', status: 'completed', conclusion },
+    ];
+    checksOn(await rev(SYNC_BRANCH), jobs('success'));
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    const transport = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => String(input).includes('/actions/runs')
+      ? Response.json({ total_count: 1, workflow_runs: [{ id: 9, head_sha: fixed, event: 'pull_request', status: 'completed', conclusion: 'action_required' }] })
+      : transport(input, init);
+    const main = await rev('refs/heads/main');
+    const asked = githubRequests.length;
+    // The dispatch run still runs: nothing merges.
+    checksOn(fixed, [{ name: 'pre-commit hooks', status: 'in_progress' }]);
+    const waiting = await sync();
+    assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+    assert.equal(waiting.report.pullRequest?.merged, null);
+    assert.equal(await rev('refs/heads/main'), main);
+    // The dispatch run passed; its publish job is skipped on a dispatch.
+    checksOn(fixed, jobs('success', 'skipped'));
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.ok(merged.report.pullRequest?.merged, 'the dispatch run\'s passing checks did not merge the fixer\'s head');
+    assert.ok(!githubRequests.slice(asked).some((request) => request.includes('/actions/')), 'the sync read GitHub Actions');
   });
 
   // Both hold together: with the note gone, the checks read from the branch's history keep their publishers too.
@@ -355,7 +388,7 @@ describe('sync: pull request checks', () => {
     assert.equal(run.report.pullRequest?.merged, null, 'a commit status stood in for `tests` once the note was gone');
     assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
     assert.equal(await rev('refs/heads/main'), h.start);
-    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID}~[^, ]+,tests@run:${FAKE_ACTIONS_APP_ID}~[^, ]+ -->`));
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
   });
 
   // A merge's parents are whatever its author chose: anyone who may push to the sync branch can make one look like the
@@ -478,7 +511,7 @@ describe('sync: pull request checks', () => {
     assert.deepEqual(app.report.pullRequest?.checks?.missing, ['tests']);
     assert.equal(await rev('refs/heads/main'), h.start);
     // The description keeps who must publish each check, so the binding holds in runs that read only the fixed head.
-    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID}~[^, ]+,tests@run:${FAKE_ACTIONS_APP_ID}~[^, ]+ -->`));
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
     checksOn(fixed, [formatter, { name: 'tests', status: 'completed', conclusion: 'success' }]);
     const merged = await sync();
     assert.ok(merged.report.pullRequest?.merged);
@@ -549,7 +582,7 @@ describe('sync: pull request checks', () => {
   });
 
   it('waits for a configured required check that is not registered, and merges once it passes', async () => {
-    const required = { MDBISYNC_REQUIRED_CHECKS: 'tests @ actions:.github/workflows/ci.yml\nlint @ actions:.github/workflows/ci.yml' };
+    const required = { MDBISYNC_REQUIRED_CHECKS: 'tests @ actions\nlint @ actions' };
     await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
     await sync(required);
     const head = await rev(SYNC_BRANCH);
@@ -636,9 +669,9 @@ describe('sync: pull request checks', () => {
 
   it('stops expecting a configured check once it is removed from the configuration', async () => {
     await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
-    await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset @ actions:.github/workflows/ci.yml' });
+    await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset @ actions' });
     checksOn(await rev(SYNC_BRANCH), [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
-    const waiting = await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset @ actions:.github/workflows/ci.yml' });
+    const waiting = await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset @ actions' });
     assert.deepEqual(waiting.report.pullRequest?.checks?.missing, ['tset']);
     const merged = await sync();
     assert.ok(merged.report.pullRequest?.merged, 'a name removed from required-checks still held the head');
