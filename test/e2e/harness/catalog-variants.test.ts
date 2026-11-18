@@ -225,7 +225,7 @@ describe('the API-path image gate', () => {
     allHold(outcomes, [...INVARIANTS, ...scenario('L2-42').checks.assertions.map(assertion => assertion.subject)]);
   });
 
-  it('L2-42 still blocks upload bytes that are HTML and clears the notice after correction', { timeout: 240_000 }, async (t) => {
+  it('L2-42 still blocks upload bytes that are HTML and clears the mark after correction, keeping its notice open', { timeout: 240_000 }, async (t) => {
     const invalid = 'https://uploads.linear.app/fake-workspace/invalid.png';
     const spec = scenario('L2-42');
     spec.steps[3] = {kind: 'linear', action: 'remove-image', args: {actor: 'editor-a'}};
@@ -234,7 +234,7 @@ describe('the API-path image gate', () => {
       {subject: 'blocked.icon', operator: 'equal', expected: 'Cross'},
       {subject: 'blocked.color', operator: 'equal', expected: 'red'},
       {subject: 'blocked.imageLines', operator: 'same-as', expected: 'expected.blockedImageLines'},
-      {subject: 'blocked.openImageNotices', operator: 'equal', expected: 0},
+      {subject: 'blocked.openImageNotices', operator: 'equal', expected: 1},
       {subject: 'blocked.marksRestored', operator: 'equal', expected: true},
       {subject: 'tracked.body', operator: 'same-as', expected: 'linear.body'},
       {subject: 'pullRequests.lintFindings', operator: 'equal', expected: []},

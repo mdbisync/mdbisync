@@ -855,7 +855,7 @@ describe('capture from Linear', () => {
   });
 
   for (const status of [301, 302, 307, 308, 400, 422]) {
-    it(`blocks unreadable upload HTTP ${status} and clears after correction`, async () => {
+    it(`blocks unreadable upload HTTP ${status} and clears the mark after correction, keeping its notice open`, async () => {
       const doc = world.linear.documents[0]!;
       Object.assign(doc, {content:'![Image](https://uploads.linear.app/workspace/file.png)\n', icon:'Fire', color:'#123456'});
       const captureNow = (fetch: typeof globalThis.fetch) => capture(context, {config, state:context.fetched.state, fetch});
@@ -872,7 +872,8 @@ describe('capture from Linear', () => {
       assert.equal(fixed.blocked.length, 0);
       assert.equal(doc.icon, 'Fire');
       assert.equal(doc.color, '#123456');
-      assert.equal([...world.linear.comments.values()][0]!.resolved, true);
+      // The blocked notice stays open as the record of the finding.
+      assert.notEqual([...world.linear.comments.values()][0]!.resolved, true);
       const tree = await listTree(context.git, fixed.state.linear!);
       const files = new Set(tree.map(({path}) => path));
       assert.deepEqual(lintInTree('docs/plan.md', await text('docs/plan.md'), files), []);
@@ -891,7 +892,7 @@ describe('capture from Linear', () => {
     const fixed = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response('%PDF-1.7\n')});
     assert.deepEqual(fixed.blocked, []);
     assert.equal(doc.icon, 'Fire');
-    assert.equal([...world.linear.comments.values()][0]!.resolved, true);
+    assert.notEqual([...world.linear.comments.values()][0]!.resolved, true);
   });
 
   for (const status of [401, 403]) {
