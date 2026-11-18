@@ -25,6 +25,27 @@ for (const xml of [
 const SVG = 'xmlns="http://www.w3.org/2000/svg"';
 const XHTML = 'http://www.w3.org/1999/xhtml';
 
+it('refuses a static SVG above the element limit', () => {
+  const group = '<g>' + '<rect/>'.repeat(1000) + '</g>';
+  assert.equal(uploadExtension(Buffer.from(`<svg>${group.repeat(50)}</svg>`)), null);
+});
+
+it('counts namespace declarations against the SVG complexity limit', () => {
+  const group = '<g xmlns:d="urn:drawing">' + '<rect/>'.repeat(8) + '</g>';
+  const atLimit = group.repeat(4999) + '<rect/>'.repeat(9);
+  assert.equal(uploadExtension(Buffer.from(`<svg>${atLimit}</svg>`)), '.svg');
+  assert.equal(uploadExtension(Buffer.from(`<svg>${atLimit}<rect/></svg>`)), null);
+});
+
+it('restores shadowed SVG bindings and removes local bindings before visiting siblings', () => {
+  const xlink = 'http://www.w3.org/1999/xlink';
+  // Use an unprefixed element where the element prefix is shadowed.
+  const group = `<g xmlns:s="${xlink}" xmlns:local="${xlink}"><use s:href="#shape" local:href="#shape"/></g>`;
+  const open = '<svg xmlns:s="http://www.w3.org/2000/svg">';
+  assert.equal(uploadExtension(Buffer.from(`${open}${group}<s:rect id="shape"/></svg>`)), '.svg');
+  assert.equal(uploadExtension(Buffer.from(`${open}${group}<use local:href="#shape"/></svg>`)), null);
+});
+
 for (const xml of [
   `<svg ${SVG}><defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs><rect fill="url(#g)" style="fill: url( '#g' )"/></svg>`,
   `<svg ${SVG}><style><![CDATA[rect { fill: url("#g"); stroke: red }]]></style><title>Shapes</title><text xml:space="preserve">a \\ b</text></svg>`,

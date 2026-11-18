@@ -92,7 +92,7 @@ it('the CLI blocks unsupported upload bytes and captures every supported type af
   } finally {await fixture.cleanup();}
 });
 
-it('blocks a document that reuses a captured file the stricter check now refuses, and still links a static one', async () => {
+it('blocks documents with refused SVG uploads while capturing a document with a supported SVG', async () => {
   const fixture = await createFixture();
   const config = resolveStateConfig({});
   try {
@@ -102,7 +102,7 @@ it('blocks a document that reuses a captured file the stricter check now refuses
     const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
     await fixture.seed({
       'docs/README.md':'---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
-      'docs/mapped.md':'Mapped.\n','docs/copied.md':'Copied.\n','docs/static.md':'Static.\n',
+      'docs/mapped.md':'Mapped.\n','docs/copied.md':'Copied.\n','docs/static.md':'Static.\n','docs/drawing.md':'Drawing.\n',
       [`docs/assets/${hash(old)}.svg`]:old,[`docs/assets/${hash(shapes)}.svg`]:shapes,
       '.pre-commit-config.yaml':'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n',
     });
@@ -111,16 +111,19 @@ it('blocks a document that reuses a captured file the stricter check now refuses
     const mappedUrl = 'https://uploads.linear.app/old.svg';
     const copiedUrl = 'https://uploads.linear.app/copy.svg';
     const staticUrl = 'https://uploads.linear.app/shapes.svg';
+    const drawingUrl = 'https://uploads.linear.app/drawing.svg';
     const initial = {
       linear:await commitTree(git, {parents:[fetched.tracked], base:fetched.tracked, changes:new Map(), message:'Initial state', identity:IDENTITY}),
-      ids:await commitIds(git, null, new Map([['docs/mapped.md',{id:'mapped'}],['docs/copied.md',{id:'copied'}],['docs/static.md',{id:'static'}]]), IDENTITY),
+      ids:await commitIds(git, null, new Map(['mapped','copied','static','drawing'].map((id) => [`docs/${id}.md`,{id}])), IDENTITY),
       uploads:await commitUploads(git, null, new Map([[hash(old),mappedUrl],[hash(shapes),staticUrl]]), IDENTITY, new PushedKey('secret', 'example/repository')),
     };
     assert.equal((await pushAtomic(git, config, Object.entries(initial).map(([store,next]) => ({ref:stateRef(config,store as 'linear'|'ids'|'uploads'), expected:null, next})))).ok, true);
     const world = fakeWorld();
     // The same bytes under a URL the upload map does not hold: found by downloading them.
     world.linear.uploads.push({filename:'copy.svg',assetUrl:copiedUrl,bytes:old,size:old.length,contentType:'image/svg+xml'});
-    const documents = [['mapped',mappedUrl],['copied',copiedUrl],['static',staticUrl]].map(([id,url]) => ({id:id!,title:id!,content:`Text.\n\n![Image](${url})\n`,projectId:'project-api',icon:'Fire',color:'#123456',createdAt:'2026-01-01T00:00:00Z'}));
+    const drawing = Buffer.from(`<svg>${('<g>' + '<rect/>'.repeat(1000) + '</g>').repeat(50)}</svg>`);
+    world.linear.uploads.push({filename:'drawing.svg',assetUrl:drawingUrl,bytes:drawing,size:drawing.length,contentType:'image/svg+xml'});
+    const documents = [['mapped',mappedUrl],['copied',copiedUrl],['static',staticUrl],['drawing',drawingUrl]].map(([id,url]) => ({id:id!,title:id!,content:`Text.\n\n![Image](${url})\n`,projectId:'project-api',icon:'Fire',color:'#123456',createdAt:'2026-01-01T00:00:00Z'}));
     world.linear.documents.push(...documents);
     const result = await runCli(['sync'],{cwd:git.dir,fetch:fakeFetch(world),env:{
       MDBISYNC_LINEAR_CLIENT_ID:'client',MDBISYNC_LINEAR_CLIENT_SECRET:'secret',MDBISYNC_LINEAR_API_URL:LINEAR_API,
@@ -129,15 +132,16 @@ it('blocks a document that reuses a captured file the stricter check now refuses
     }});
     assert.equal(result.exitCode,0,result.stderr);
     const report = JSON.parse(await readFile(join(fixture.root,'report.json'),'utf8'));
-    assert.deepEqual(report.capture.blocked.map((item: {id:string}) => item.id).sort(),['copied','mapped']);
+    assert.deepEqual(report.capture.blocked.map((item: {id:string}) => item.id).sort(),['copied','drawing','mapped']);
     const reason = '- Image 1 of 1 (line 3): the uploaded file is not a supported image or document. Remove it or upload the original file.';
     const notices = [...world.linear.comments.values()];
-    assert.equal(notices.length,2);
+    assert.equal(notices.length,3);
     for (const notice of notices) assert.equal(notice.body,`Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n${reason}`);
-    assert.deepEqual(documents.map(({icon,color}) => ({icon,color})),[MARKS.blocked,MARKS.blocked,{icon:'Fire',color:'#123456'}]);
+    assert.deepEqual(documents.map(({icon,color}) => ({icon,color})),[MARKS.blocked,MARKS.blocked,{icon:'Fire',color:'#123456'},MARKS.blocked]);
     const show = (path: string) => fixture.remote.text(['show',`${stateRef(config,'linear')}:${path}`]);
     assert.equal(await show('docs/mapped.md'),'Mapped.');
     assert.equal(await show('docs/copied.md'),'Copied.');
+    assert.equal(await show('docs/drawing.md'),'Drawing.');
     assert.equal(await show('docs/static.md'),`Text.\n\n![Image](assets/${hash(shapes)}.svg)`);
   } finally {await fixture.cleanup();}
 });
