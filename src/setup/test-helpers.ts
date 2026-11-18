@@ -4,6 +4,7 @@
 // request, and counts anything that would have written.
 
 import { PERMISSION_PROBES } from './github.ts';
+import { ACTIONS_APP } from '../pull-request/merge.ts';
 
 export const GITHUB_API = 'https://github.test/api';
 /** The default sync branches, whose rules the setup check reads. */
@@ -12,7 +13,7 @@ export const SYNC_BRANCHES = ['mdbisync/linear', 'mdbisync/suspended'] as const;
 export const FAKE_APP_SLUG = 'sync-app';
 export const FAKE_APP_ID = 1001;
 /** The publishers of the fake repository's CI: GitHub Actions for check runs, an external CI account for commit statuses. */
-export const FAKE_ACTIONS_APP_ID = 15368;
+export const FAKE_ACTIONS_APP_ID = ACTIONS_APP.id;
 export const FAKE_CI_ACCOUNT_ID = 2001;
 export const FAKE_APP_IDENTITY = { name: 'sync-app[bot]', email: '1001+sync-app[bot]@users.noreply.github.com' } as const;
 export const LINEAR_API = 'https://linear.test';
@@ -100,12 +101,6 @@ export interface FakePullRequest {
 
 /** A check run or commit status on a commit in the fake repository. */
 export interface FakeCheck {
-  /** No workflow for a synthetic check; otherwise a genuine job by default. */
-  /**
-   * `pullRequestHead` and `pullRequestBase`: the head and base tip the run's pull request association names, as GitHub
-   * names the pull request's current ones; the run's own head by default.
-   */
-  workflow?: false | { path?: string; revision?: string; event?: string; head?: string; repository?: string; baseBranch?: string; pullRequestHead?: string; pullRequestBase?: string };
   name: string;
   /** Check runs: `queued`, `in_progress` or `completed`; commit statuses use `pending` or `completed`. */
   status: 'queued' | 'in_progress' | 'pending' | 'completed';
@@ -325,8 +320,6 @@ async function github(world: FakeWorld, method: string, path: string, init: Requ
   if (merged !== undefined) return merged;
   const checks = commitChecks(world, method, rest);
   if (checks !== undefined) return checks;
-  const actions = actionsEvidence(world, method, rest, repo[0]);
-  if (actions !== undefined) return actions;
   const annotations = checkAnnotations(world, method, rest);
   if (annotations !== undefined) return annotations;
   const probe = PERMISSION_PROBES.find((candidate) => candidate.method === method && rest === candidate.path(rest.split('/')[2] ?? ''));
@@ -440,42 +433,7 @@ function commitChecks(world: FakeWorld, method: string, rest: string): Response 
   const page = Number(new URLSearchParams(match[3] ?? '').get('page') ?? '1');
   const size = Number(new URLSearchParams(match[3] ?? '').get('per_page') ?? '30');
   const slice = runs.slice((page - 1) * size, page * size);
-  return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ id: checkRunId(world, check, match[1]!), name: check.name, status: check.status, conclusion: check.conclusion ?? null, html_url: check.url ?? `https://github.test/owner/repo/runs/${checkRunId(world, check, match[1]!)}`, check_suite: { id: checkRunId(world, check, match[1]!) }, app: { id: check.app ?? FAKE_ACTIONS_APP_ID, slug: (check.app ?? FAKE_ACTIONS_APP_ID) === FAKE_ACTIONS_APP_ID ? 'github-actions' : `app-${check.app}` } })) });
-}
-
-/** Genuine workflow-run and job evidence, separate from the check-run payload. */
-function actionsEvidence(world: FakeWorld, method: string, rest: string, repo: string): Response | undefined {
-  if (method !== 'GET') return undefined;
-  if (rest.startsWith('/actions/') && world.github.missing.has('actions:read')) return json(403, {});
-  if (rest.startsWith('/actions/runs?')) {
-    const query = new URLSearchParams(rest.split('?')[1]);
-    const suite = Number(query.get('check_suite_id'));
-    const check = world.github.checkRuns?.[suite - 1];
-    const sha = query.get('head_sha');
-    const settings = check?.workflow || {};
-    const runs = check === undefined || check.workflow === false ? [] : [{ id: suite, workflow_id: 42, check_suite_id: suite,
-      head_sha: settings.head ?? sha, path: settings.path ?? '.github/workflows/ci.yml', event: settings.event ?? 'pull_request',
-      head_repository: { full_name: settings.repository ?? repo.slice(7) },
-      pull_requests: [{ head: { sha: settings.pullRequestHead ?? sha }, base: { sha: settings.pullRequestBase ?? sha, ref: settings.baseBranch ?? 'main', repo: { url: `${GITHUB_API}${repo}` } } }] }];
-    return json(200, { total_count: runs.length, workflow_runs: runs });
-  }
-  const jobs = /^\/actions\/runs\/(\d+)\/jobs\?/.exec(rest);
-  if (jobs !== null) {
-    const id = Number(jobs[1]);
-    const check = world.github.checkRuns?.[id - 1];
-    const settings = check?.workflow || {};
-    const sha = world.github.checkRunHeads?.[id - 1];
-    return json(200, { total_count: check ? 1 : 0, jobs: check ? [{ run_id: id, head_sha: settings.head ?? sha,
-      name: check.name, status: check.status, conclusion: check.conclusion,
-      check_run_url: `${GITHUB_API}${repo}/check-runs/${id}` }] : [] });
-  }
-  const contents = /^\/contents\/(\.github\/workflows\/[^?]+)\?ref=(.+)$/.exec(rest);
-  if (contents !== null) {
-    const checks = world.github.checks?.get(contents[2]!) ?? [];
-    const settings = checks.map((check) => check.workflow).find((workflow) => workflow && workflow.path === decodeURIComponent(contents[1]!));
-    return json(200, { type: 'file', sha: settings && settings.revision || 'b'.repeat(40) });
-  }
-  return undefined;
+  return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ id: checkRunId(world, check, match[1]!), name: check.name, status: check.status, conclusion: check.conclusion ?? null, html_url: check.url ?? `https://github.test/owner/repo/runs/${checkRunId(world, check, match[1]!)}`, app: { id: check.app ?? FAKE_ACTIONS_APP_ID, slug: (check.app ?? FAKE_ACTIONS_APP_ID) === FAKE_ACTIONS_APP_ID ? 'github-actions' : `app-${check.app}` } })) });
 }
 
 /** A commit status's id: the order in which the world first listed it, from 1. */

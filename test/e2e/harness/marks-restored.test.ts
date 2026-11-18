@@ -21,13 +21,13 @@ async function holds(start: Doc, end: Doc): Promise<unknown> {
 
 it('expects the document\'s own icon and color when its text holds no conflict', async () => {
   assert.equal(await holds({ content: 'Text.\n', icon: 'Book', color: '#4ea7fc' }, { content: 'Text.\n', icon: 'Book', color: '#4ea7fc' }), true);
-  assert.equal(await holds({ content: 'Text.\n', icon: null, color: null }, { content: 'Text.\n', icon: 'Cross', color: '#EB5757' }), false);
+  assert.equal(await holds({ content: 'Text.\n', icon: null, color: null }, { content: 'Text.\n', icon: 'Alert', color: '#EB5757' }), false);
 });
 
 it('expects the conflict mark when the released text holds a conflict', async () => {
   assert.equal(await holds({ content: CONFLICT, icon: null, color: null }, { content: CONFLICT, icon: 'Alert', color: '#F2994A' }), true);
   assert.equal(await holds({ content: CONFLICT, icon: null, color: null }, { content: CONFLICT, icon: null, color: null }), false);
-  assert.equal(await holds({ content: CONFLICT, icon: null, color: null }, { content: CONFLICT, icon: 'Cross', color: '#EB5757' }), false);
+  assert.equal(await holds({ content: CONFLICT, icon: null, color: null }, { content: CONFLICT, icon: 'Alert', color: '#EB5757' }), false);
 });
 
 it('treats quoted marker lines as text, not a conflict', async () => {

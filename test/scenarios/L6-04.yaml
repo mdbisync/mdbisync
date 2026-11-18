@@ -80,7 +80,7 @@
       {
         "subject": "ui.blockedIcon",
         "operator": "equal",
-        "expected": "Cross"
+        "expected": "Alert"
       },
       {
         "subject": "ui.blockedMarkColor",
@@ -95,7 +95,7 @@
       {
         "subject": "blocked.icon",
         "operator": "equal",
-        "expected": "Cross"
+        "expected": "Alert"
       },
       {
         "subject": "blocked.color",
@@ -128,7 +128,7 @@
       {
         "subject": "blocked.openSecurityNotices",
         "operator": "equal",
-        "expected": 0
+        "expected": 1
       },
       {
         "subject": "ui.markClearedAfterFix",
@@ -138,7 +138,7 @@
       {
         "subject": "ui.blockCommentOpenAfterFix",
         "operator": "equal",
-        "expected": false
+        "expected": true
       }
     ]
   }

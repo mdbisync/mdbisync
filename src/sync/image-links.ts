@@ -1,11 +1,30 @@
 // Pull repairs are separate from the record of what Linear actually holds.
 import { toMarkdown } from 'mdast-util-to-markdown';
 import { parse, visit, start, end, line, allowedLink } from '../format/markdown.ts';
+import { linkDestination } from '../format/index.ts';
 
 export interface ImageRewrite { image: number; total: number; line: number }
 
 function text(value: string): string {
   return toMarkdown({type: 'root', children: [{type: 'paragraph', children: [{type: 'text', value}]}]}).trimEnd();
+}
+
+/**
+ * A link as Linear stores it: the destination in angle brackets, as `fix` writes it, so the repaired file
+ * equals the document Linear holds after the write-back byte for byte. The serializer escapes the label.
+ */
+function linearLink(label: string, url: string): string {
+  const link = (destination: string) => toMarkdown({type: 'root', children: [{type: 'paragraph', children: [{type: 'link', url: destination, children: [{type: 'text', value: label}]}]}]}, {resourceLink: true}).trimEnd();
+  const labelled = /^(\[[\s\S]*\])\((?:<>)?\)$/.exec(link(''));
+  // A serializer that spells an empty link another way keeps its own (valid) spelling of the whole link.
+  return labelled === null ? link(url) : `${labelled[1]}(${linkDestination(url)})`;
+}
+
+/** The destination a repaired link resolves to: Linear's spelling encodes some characters of the image's URL. */
+function destinationOf(link: string): string {
+  let url = '';
+  visit(parse(link), node => { if (node.type === 'link' && url === '') url = node.url; });
+  return url;
 }
 
 /** Rewrites parsed nodes only; code examples and unrelated source spelling stay intact. */
@@ -42,10 +61,10 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
       const label = node.alt || url;
       replacement = ancestors.some(parent => parent.type === 'link' || parent.type === 'linkReference')
         ? text(label)
-        : toMarkdown({type: 'root', children: [{type: 'paragraph', children: [{type: 'link', url, children: [{type: 'text', value: label}]}]}]}, {resourceLink: true}).trimEnd();
+        : linearLink(label, url);
     }
     if (ancestors.some(parent => parent.type === 'tableCell')) replacement = replacement.replace(/\|/g, '&#124;');
-    edits.push({from: start(node) + offset, to: end(node) + offset, text: replacement, ...(replacement.startsWith('[') ? {url} : {})});
+    edits.push({from: start(node) + offset, to: end(node) + offset, text: replacement, ...(replacement.startsWith('[') ? {url: destinationOf(replacement)} : {})});
   });
   // Remove unused dangerous definitions too: they must not survive as file-upload inputs.
   visit(tree, node => { if (node.type === 'definition' && !allowedLink(node.url)) edits.push({from: start(node) + offset, to: end(node) + offset, text: ''}); });

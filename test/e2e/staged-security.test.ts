@@ -22,6 +22,7 @@ import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, reso
 import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-helpers.ts';
 import { STAGE_FOLDER } from '../../src/sync/staged.ts';
 import { canaryNameLeaks } from './harness/security-canary.ts';
+import { MARKS } from '../../src/sync/marks.ts';
 
 const MAIN = fileURLToPath(new URL('../../src/action/main.ts', import.meta.url));
 const linux = process.platform === 'linux' && existsSync('/proc/self/environ');
@@ -324,14 +325,14 @@ for (const file of process.argv.slice(2)) {
     for (const {path, oid} of markdown) assert.deepEqual(lintInTree(path, blobs.get(oid)!.toString(), files), []);
   });
 
-  it('staged file-link rejection preserves a lint-clean tree and clears its notice after correction', async () => {
+  it('staged file-link rejection preserves a lint-clean tree and keeps its notice open after correction', async () => {
     Object.assign(world.linear.documents[0]!, {icon:'Fire', color:'#123456'});
     const links = ['[File](relative.png)', '[File](other.png)'];
     edit(links.join('\n\n') + '\n');
     await stagedRun('files');
     assert.deepEqual((await report('files-apply')).capture.blocked.map(({id}) => id), ['plan']);
     assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nOriginal.\n');
-    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    assert.deepEqual({icon: world.linear.documents[0]!.icon, color: world.linear.documents[0]!.color}, MARKS.blocked);
     const notice = [...world.linear.comments.values()][0]!;
     assert.equal(world.linear.comments.size, 1);
     assert.equal(notice.body, 'Some files in this document cannot be synchronized. Fix the listed files and sync again.\n\n' + links.map((_, index) => `- File ${index + 1} of 2 (line ${index * 2 + 1}): not uploaded to this workspace. Upload the file instead of linking to it.`).join('\n'));
@@ -340,7 +341,8 @@ for (const file of process.argv.slice(2)) {
     edit('[Site](https://example.com/a.png)\n');
     await stagedRun('files-fixed');
     assert.equal((await report('files-fixed-apply')).capture.blocked.length, 0);
-    assert.equal(notice.resolved, true);
+    assert.notEqual(notice.resolved, true);
+    assert.equal(world.linear.comments.size, 1);
     assert.equal(world.linear.documents[0]!.icon, 'Fire');
     assert.equal(world.linear.documents[0]!.color, '#123456');
     assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Site](<https://example.com/a.png>)');

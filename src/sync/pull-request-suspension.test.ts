@@ -69,6 +69,26 @@ describe('sync: pull request suspension', () => {
     assertNoRerun();
   });
 
+  it('repaints a suspended document still showing the red Cross of earlier versions, then restores its own icon', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, `# Plan\n\nA new step. ${CANARY}\n`);
+    await sync();
+    const own = { icon: (await documentOf(path)).icon ?? null, color: (await documentOf(path)).color ?? null };
+    checksOn(await rev(SYNC_BRANCH), [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure' }]);
+    await sync();
+    // An earlier version marked the suspended document with a red Cross.
+    Object.assign(await documentOf(path), { icon: 'Cross', color: '#EB5757' });
+    const again = await sync();
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    const held = await documentOf(path);
+    assert.deepEqual({ icon: held.icon, color: held.color }, MARKS.suspended);
+    assert.equal(commentsOf(held).length, 1);
+    checksOn(await rev('refs/heads/mdbisync/suspended'), [{ name: CHECK_NAME, status: 'completed', conclusion: 'success' }]);
+    await sync();
+    const released = await documentOf(path);
+    assert.deepEqual({ icon: released.icon ?? null, color: released.color ?? null }, own);
+  });
+
   it('waits for GitHub to show the empty head before closing a suspended normal pull request', async () => {
     await editInLinear('eng/notes/plan.md', '# Plan\n\nHeld edit.\n');
     await sync();
@@ -378,13 +398,24 @@ describe('sync: pull request suspension', () => {
     assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
     assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released a head that never ran `ci`');
     assert.equal(await rev(SUSPENDED), fixed);
+    // Five minutes on, the sync pushes a commit of its own with the same files, so CI runs; `ci` stays expected there.
+    h.backdate('mdbisync/suspended', 6);
+    const again = await sync(deadline);
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    const own = await rev(SUSPENDED);
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P%n%s', own]), `${fixed}\nRun the checks again on suspended changes`);
+    assert.equal(await rev(`${own}^{tree}`), await rev(`${fixed}^{tree}`));
+    checksOn(own, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const waitingOwn = await sync(deadline);
+    assert.equal(waitingOwn.report.pullRequest?.suspended?.released, undefined, 'released a head that never ran `ci`');
+    assert.equal(await rev(SUSPENDED), own, 'pushed again on a head the sync pushed itself');
     h.backdate('mdbisync/suspended', 11);
     const late = await sync(deadline);
     assert.equal(late.result.exitCode, SETUP_FAILED_EXIT_CODE, late.result.stderr);
     assert.equal(late.report.pullRequest?.suspended?.code, 'checks-missing');
     assert.deepEqual(late.report.pullRequest?.suspended?.missing, ['ci']);
     assert.match(late.summary, /suspended pull request has waited past the check deadline for checks that never started on its head \(missing `ci`\)/);
-    checksOn(fixed, [...PASSED, { name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    checksOn(own, [...PASSED, { name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
     const released = await sync(deadline);
     assert.ok(released.report.pullRequest?.suspended?.released);
     assert.match(await show(`refs/heads/main:${path}`), /Formatted/);
@@ -485,25 +516,24 @@ describe('sync: pull request suspension', () => {
     assert.ok(released.report.pullRequest?.suspended?.released);
   });
 
-  it('requires genuine workflow jobs on a formatter child before releasing a suspended batch', async () => {
+  it('requires the earlier head\'s Actions check from the Actions App on a formatter child before releasing a suspended batch', async () => {
     const path = 'eng/notes/plan.md';
     await suspendOne(path);
     await sync();
     const fixed = await h.editRef(SUSPENDED, path, '# Plan\n\nHeld Linear edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
     const main = await rev('refs/heads/main');
-    for (const workflow of [false, { path: '.github/workflows/other.yml' },
-      { path: '.github/workflows/ci.yml', revision: 'c'.repeat(40) }, { event: 'workflow_run' },
-      { head: main }, { repository: 'other/repo' }] satisfies NonNullable<FakeCheck['workflow']>[]) {
-      checksOn(fixed, PASSED.map((check) => ({ ...check, workflow })));
+    // None, a commit status, or another App's check run of the same name: not the earlier job.
+    for (const substitute of [[], [{ commitStatus: true }], [{ app: 77 }]] satisfies Partial<FakeCheck>[][]) {
+      checksOn(fixed, substitute.flatMap((from) => PASSED.map((check) => ({ ...check, ...from }))));
       h.editHeadNote('mdbisync/suspended', () => '');
       const waiting = await sync();
       assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
-      assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, `released with ${JSON.stringify(workflow)}`);
+      assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, `released with ${JSON.stringify(substitute)}`);
       assert.equal(await rev('refs/heads/main'), main);
     }
-    checksOn(fixed, PASSED.map((check) => ({ ...check, workflow: { event: 'workflow_dispatch' } })));
+    checksOn(fixed, PASSED);
     const released = await sync();
-    assert.ok(released.report.pullRequest?.suspended?.released, 'genuine CI on the formatter fix did not release');
+    assert.ok(released.report.pullRequest?.suspended?.released, 'CI on the formatter fix did not release');
   });
 
   // A Linear edit of a suspended document is a push of the sync's own on the suspended branch: a check its CI no longer
@@ -539,7 +569,7 @@ describe('sync: pull request suspension', () => {
     const joined = await sync();
     assert.ok(joined.report.pullRequest?.suspended);
     const head = await rev(SUSPENDED);
-    assert.match(openPullRequests().find((pr) => pr.head === 'mdbisync/suspended')?.body ?? '', new RegExp(`<!-- head: sha=${head} since=\\S+ checks=ci@run:${FAKE_ACTIONS_APP_ID}~[^, ]+ -->`));
+    assert.match(openPullRequests().find((pr) => pr.head === 'mdbisync/suspended')?.body ?? '', new RegExp(`<!-- head: sha=${head} since=\\S+ checks=ci@run:${FAKE_ACTIONS_APP_ID} -->`));
     // Only the formatter's check registers on the joined head: `ci`, which both earlier heads ran, is missing.
     checksOn(head, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
     const waiting = await sync();

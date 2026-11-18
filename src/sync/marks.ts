@@ -5,14 +5,20 @@ import type { HoldNotice, IdEntry } from '../state/index.ts';
 import type { ImageFinding, FileFinding } from './assets.ts';
 import { message } from '../messages.ts';
 
+/**
+ * Blocked and suspended show the same red exclamation mark: the document's
+ * changes do not reach Git, and the comment says why. It differs from the
+ * orange conflict mark by color only, so every check of a mark compares both
+ * icon and color. A document still showing an earlier mark is repainted when
+ * the sync next reconciles its mark.
+ */
 export const MARKS = {
   conflict: { icon: 'Alert', color: '#F2994A' },
-  blocked: { icon: 'Cross', color: '#EB5757' },
-  /** The same red cross as blocked: both say the document's changes do not reach Git, and the comment says why. */
-  suspended: { icon: 'Cross', color: '#EB5757' },
+  blocked: { icon: 'Alert', color: '#EB5757' },
+  suspended: { icon: 'Alert', color: '#EB5757' },
 } as const;
 
-export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and remove every conflict marker paragraph throughout the document. The alert clears after the next sync.';
+export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and delete every "Sync conflict" marker throughout the document. The alert clears after the next sync.';
 
 /** The blocked mark's comment opens with this line; a list of hooks and lines follows. */
 export const BLOCKED_COMMENT = 'Security checks rejected this document. Fix the listed findings and sync again.';
@@ -111,7 +117,7 @@ function blockedComment(findings: readonly BlockedFinding[]): string {
 
 /**
  * Reconcile one document's visible status from its current text and security
- * findings. Alert and Cross share exactly one saved original decoration.
+ * findings. All marks share exactly one saved original decoration.
  * No conflict flag is stored: marker paragraphs remain the authority.
  */
 export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkResult> {
@@ -132,7 +138,11 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   const bodyHash = createHash('sha256').update(body).digest('hex');
   const previousNotice = entry.saved?.notice;
   const changesDecoration = state !== 'clear' && (document.icon !== MARKS[state].icon || document.color !== MARKS[state].color);
-  const changesNotice = previousNotice !== undefined && (previousNotice.kind !== state || !previousNotice.posted || previousNotice.bodyHash !== bodyHash || changesDecoration);
+  // A conflict notice is resolved when its mark goes. A blocked notice is
+  // never resolved: it stays open as the record of what the checks rejected.
+  const resolvesNotice = previousNotice?.kind === 'conflict' && state !== 'conflict';
+  const updatesNotice = previousNotice?.kind === state && (!previousNotice.posted || previousNotice.bodyHash !== bodyHash || changesDecoration);
+  const changesNotice = previousNotice !== undefined && (resolvesNotice || updatesNotice);
   const noticeExists = changesNotice ? await linear.commentExists(previousNotice.id, document.id) : false;
   // A released episode whose comment the hold step has not reached yet (the per-run limit, a failed write).
   if (releasedHold(entry) && entry.saved !== undefined) {
@@ -146,11 +156,12 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
     result.entry = entry;
   }
 
-  if (entry.saved?.notice !== undefined && entry.saved.notice.kind !== state) {
-    // A person can delete the notice before fixing the document. Check for
+  if (resolvesNotice) {
+    // Cleared, or replaced by a blocked notice: the conflict notice is not
+    // left open. A person can delete it before fixing the document. Check for
     // its absence; failed reads or resolutions retain the notice for retry.
-    if (noticeExists) await linear.resolveComment(entry.saved.notice.id);
-    if (entry.saved.notice.kind === 'conflict') options.onConflictNotice?.('resolved');
+    if (noticeExists) await linear.resolveComment(previousNotice.id);
+    options.onConflictNotice?.('resolved');
   }
 
   if (state === 'clear') {
@@ -159,6 +170,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
       await linear.updateDocument(document.id, { icon: entry.saved.icon, color: entry.saved.color });
       result.updated = true;
     }
+    // A blocked notice is forgotten here, not resolved.
     const { saved: _saved, ...restored } = entry;
     await persistEntry(restored);
     result.entry = restored;
@@ -168,6 +180,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   if (!document.documentContentId) throw new Error(message('sync.needs-comment-target'));
   const saved = entry.saved ?? { icon: document.icon, color: document.color };
   const previous = saved.notice;
+  // A new notice replaces the receipt of any other kind; a blocked one stays open in Linear.
   const notice = previous?.kind === state
     ? { ...previous, bodyHash, posted: previous.posted && previous.bodyHash === bodyHash }
     : { id: options.noticeId?.(state) ?? randomUUID(), kind: state, bodyHash, posted: false };

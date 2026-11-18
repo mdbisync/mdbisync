@@ -66,7 +66,7 @@ import {
   commitTree,
 } from '../state/index.ts';
 import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_MESSAGE_LENGTH, linkTarget, plainLine } from './hold.ts';
-import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
+import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgain, checksAgainTrailer, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
 import { LaneMoved, LaneConflict, commitLaneIds, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
@@ -349,13 +349,20 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
       }
     }
     if (open === null && !result.needed && headTree === trackedTree) return result;
-    // A head whose earlier checks the branch's history does not show (no head the sync recorded pushing is below it:
-    // the branch was rewritten, or the sync last pushed it before it recorded its heads) gets a commit of the sync's own
-    // on top, with the same tree. Its push starts the repository's whole CI and is recorded, so the pull request can
-    // merge without waiting for a Linear change.
-    if (head === sync && pending && options.state.ids !== null
-      && !(await expectedChecks(github, sync as Oid, [], { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) })).complete) {
-      head = await commitTree(git, { base: headTree as string, changes: new Map(), parents: [sync as Oid], message: CHECKS_AGAIN_MESSAGE, identity, skipIfUnchanged: false });
+    // A head whose earlier checks the branch's history does not show, or one someone else pushed whose expected checks
+    // never started, gets a commit of the sync's own on top, with the same files (see `checksAgain`). Its push starts
+    // the repository's whole CI and is recorded, so the pull request can merge without waiting for a Linear change.
+    /** The checks the head below still waited for, which the sync's commit on it must pass too. */
+    let carried: ExpectedCheck[] = [];
+    if (head === sync && sync !== null && pending && options.state.ids !== null) {
+      const again = await checksAgain(github, sync, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) },
+        { ...options, againMessage: CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, sync, context.mapping.zones)).length === 0 });
+      if (again !== null) {
+        carried = again.carried;
+        const message = again.from === undefined ? CHECKS_AGAIN_MESSAGE : `${CHECKS_AGAIN_MESSAGE}\n\n${checksAgainTrailer(again.from)}`;
+        // The head's own files: the tracked branch's changes join only through a merge that records them.
+        head = await commitTree(git, { base: await git.text(['rev-parse', `${sync}^{tree}`]), changes: new Map(), parents: [sync], message, identity, skipIfUnchanged: false });
+      }
     }
 
     let pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
@@ -388,7 +395,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
     const since = headSince(open?.body, head, new Date());
     // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
     // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
-    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], base: tracked } : { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) });
+    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], carried } : { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) });
     const stillHeld = hold === null ? null : { ...hold, head };
     // Whoever added commits to the sync branch, the sync merges only changes to synchronized documents and their assets.
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);

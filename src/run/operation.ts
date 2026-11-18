@@ -200,7 +200,7 @@ async function runWithSecurity(
       checkDeadlineMinutes: inputs.checkDeadlineMinutes,
       requiredChecks: inputs.requiredChecks,
       mergeWithoutChecks: inputs.mergeWithoutChecks,
-      github: { ...inputs.github, baseBranch: inputs.state.trackedBranch, writes: pullRequestWrites, ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.checkClock ? { clock: options.checkClock } : {}) },
+      github: { ...inputs.github, writes: pullRequestWrites, ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.checkClock ? { clock: options.checkClock } : {}) },
       transforms,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });

@@ -14,6 +14,7 @@ import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git } from '../state/index.ts';
 import { fixText } from '../format/index.ts';
+import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture, fakeLfsServer } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
@@ -912,7 +913,7 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(report.sync?.conflicts, ['eng/notes/review-notes.md']);
     assert.equal((await ids())['eng/notes/review-notes.md']?.id, document.id);
     for (const text of [document.content ?? '', await show('refs/mdbisync/linear:eng/notes/review-notes.md')]) {
-      assert.match(text, /\*\*Sync conflict: git version\*\*\n\nFinding number 0, fixed in git[^\n]+\n\n\*\*Sync conflict: Linear version\*\*\n\nFinding number 0, typed in Linear[^\n]+\n\n\*\*Sync conflict: end\*\*/);
+      assert.match(text, /<!-- linear:callout color=#f2c94c -->\n> \[!WARNING\]\n> \*\*Sync conflict: git version\*\*\n\nFinding number 0, fixed in git[^\n]+\n\n<!-- linear:callout color=#f2c94c -->\n> \[!WARNING\]\n> \*\*Sync conflict: Linear version\*\*\n\nFinding number 0, typed in Linear[^\n]+\n\n<!-- linear:callout color=#f2c94c -->\n> \[!WARNING\]\n> \*\*Sync conflict: end\*\*/);
     }
   });
 
@@ -1116,7 +1117,7 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(report.sync?.conflicts, ['eng/notes/review.md']);
     assert.ok(report.capture?.changed.includes('eng/notes/review.md'));
     for (const text of [document.content ?? '', await show('refs/mdbisync/linear:eng/notes/review.md')]) {
-      assert.match(text, /\*\*Sync conflict: git version\*\*\n\nFindings, fixed in git\. [^\n]+\n\n\*\*Sync conflict: Linear version\*\*\n\nTyped in Linear meanwhile\. [^\n]+\n\n\*\*Sync conflict: end\*\*/);
+      assert.match(text, /<!-- linear:callout color=#f2c94c -->\n> \[!WARNING\]\n> \*\*Sync conflict: git version\*\*\n\nFindings, fixed in git\. [^\n]+\n\n<!-- linear:callout color=#f2c94c -->\n> \[!WARNING\]\n> \*\*Sync conflict: Linear version\*\*\n\nTyped in Linear meanwhile\. [^\n]+\n\n<!-- linear:callout color=#f2c94c -->\n> \[!WARNING\]\n> \*\*Sync conflict: end\*\*/);
     }
   });
 
@@ -1337,7 +1338,7 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'CommentOnDocument', 'UpdateDocument']);
     assert.deepEqual(report.sync?.skipped, []);
     assert.deepEqual(report.sync?.conflicts, ['eng/backend/notes.md']);
-    const marked = `# Notes\n\n**Sync conflict: git version**\n\nFirst paragraph, git's way.\n\n**Sync conflict: Linear version**\n\nFirst paragraph, Linear's way.\n\n**Sync conflict: end**\n\nSecond paragraph. ${CANARY}\n`;
+    const marked = `# Notes\n\n${markerCallout(MARKERS.git)}\n\nFirst paragraph, git's way.\n\n${markerCallout(MARKERS.linear)}\n\nFirst paragraph, Linear's way.\n\n${markerCallout(MARKERS.end)}\n\nSecond paragraph. ${CANARY}\n`;
     assert.equal((await documentOf('eng/backend/notes.md')).content, marked);
     assert.equal(report.sync?.record?.kind, 'merge');
     assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), marked);

@@ -8,6 +8,7 @@ import { lintInTree } from '../../src/format/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API, GITHUB_API, touch } from '../../src/setup/test-helpers.ts';
 import { commitIds, commitTree, commitUploads, fetchState, listTree, readBlobs, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
 import { createFixture, IDENTITY } from '../../src/state/test-helpers.ts';
+import { MARKS } from '../../src/sync/marks.ts';
 
 it('the CLI blocks unsupported upload bytes and captures every supported type after correction', async () => {
   const fixture = await createFixture();
@@ -70,7 +71,7 @@ it('the CLI blocks unsupported upload bytes and captures every supported type af
     const blocked = await run();
     assert.equal(blocked.capture.blocked.length,1);
     assert.equal(await fixture.remote.text(['show',`${stateRef(config,'linear')}:docs/plan.md`]),'Original.');
-    assert.equal(document.icon,'Cross');
+    assert.deepEqual({icon:document.icon,color:document.color},MARKS.blocked);
     const notice = [...world.linear.comments.values()][0]!;
     const reason = 'the uploaded file is not a supported image or document. Remove it or upload the original file.';
     assert.equal(notice.body,'Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n' + bad.map((_,index) => `- Image ${expected.length + index + 1} of ${expected.length + bad.length} (line ${(expected.length + index) * 2 + 1}): ${reason}`).join('\n'));
@@ -80,7 +81,8 @@ it('the CLI blocks unsupported upload bytes and captures every supported type af
     touch(document);
     const fixed = await run();
     assert.equal(fixed.capture.blocked.length,0);
-    assert.equal(notice.resolved,true);
+    assert.notEqual(notice.resolved,true);
+    assert.equal(world.linear.comments.size,1);
     assert.equal(document.icon,'Fire');
     assert.equal(document.color,'#123456');
     for (const {path,bytes} of expected) {
@@ -132,7 +134,7 @@ it('blocks a document that reuses a captured file the stricter check now refuses
     const notices = [...world.linear.comments.values()];
     assert.equal(notices.length,2);
     for (const notice of notices) assert.equal(notice.body,`Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n${reason}`);
-    assert.deepEqual(documents.map(({icon}) => icon),['Cross','Cross','Fire']);
+    assert.deepEqual(documents.map(({icon,color}) => ({icon,color})),[MARKS.blocked,MARKS.blocked,{icon:'Fire',color:'#123456'}]);
     const show = (path: string) => fixture.remote.text(['show',`${stateRef(config,'linear')}:${path}`]);
     assert.equal(await show('docs/mapped.md'),'Mapped.');
     assert.equal(await show('docs/copied.md'),'Copied.');

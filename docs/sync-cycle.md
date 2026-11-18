@@ -127,6 +127,16 @@ ongoing sync runs. You do not need to wait for a run to finish:
 - If an already tracked document changes in Linear between capture and its
   final re-read, the run skips that document. The next run captures the newer text and
   tries again; other documents keep syncing.
+- That window includes the run's wait for its sync pull request's checks,
+  up to `merge-grace-seconds`. A document that has a git change from
+  before the run started and is edited in Linear during that wait is
+  skipped, so the git change reaches Linear one run later. When the run
+  merged its sync pull request, that merge starts the next run.
+- A run that skipped or left out a document records Linear's answer
+  without the tracked branch as a parent. Until a later run records that
+  merge, the sync pull request's diff on GitHub, counted from an older
+  merge base, can also list git changes to other documents that this run
+  wrote to Linear. The tracked branch already holds them.
 - A run that stops after creating a document but before recording its id
   leaves the document in Linear. If you edit that document, nothing
   overwrites your edit: a later run takes the document over only if it
@@ -255,9 +265,15 @@ confirming its writes.
 
   | Mark | Meaning | Who acts |
   | --- | --- | --- |
-  | Red `Cross` | **Blocked**: a security hook rejected the document, so it is not synchronized | its author, by fixing the finding in Linear |
-  | Red `Cross` | **Suspended**: a check failed or did not finish in time on the batch's pull request | fix the document in Linear or fix CI in git |
+  | Red `Alert` (exclamation mark) | **Blocked**: a security hook rejected the document, so it is not synchronized | its author, by fixing the finding in Linear |
+  | Red `Alert` (exclamation mark) | **Suspended**: a check failed or did not finish in time on the batch's pull request | fix the document in Linear or fix CI in git |
   | Orange `Alert` | **Conflict**: the document holds both versions between conflict markers | anyone, on either side ([conflicts.md](conflicts.md)) |
+
+  Blocked and suspended differ from the conflict mark by color only. A
+  document that still shows the red `Cross` of earlier versions gets the red
+  exclamation mark when the sync next reconciles its mark: a blocked document
+  on its next run, suspended documents within the limit of 50 mark changes
+  per run.
 
 ### The blocked mark
 
@@ -267,8 +283,8 @@ When a repository security hook (a hook marked `alias: security`, see
 - the text is not committed anywhere: not to the sync's refs, the sync
   branch, the sync pull request or the logs. The file in git keeps its last
   synchronized text;
-- the document's icon becomes the red `Cross`; its own icon and color are
-  saved by the sync;
+- the document's icon becomes the red exclamation mark (`Alert`); its own
+  icon and color are saved by the sync;
 - the sync adds one comment, which names the hook and the line, never what
   it found:
 
@@ -281,9 +297,19 @@ When a repository security hook (a hook marked `alias: security`, see
 
 Fix it by editing the document in Linear. The next run checks the new text;
 when the hooks pass, it synchronizes the document and puts its own icon and
-color back. The marks take precedence in this order: blocked, suspended, conflict.
-All share the one saved icon and color; clearing one still leaves any
-other applicable mark.
+color back. The comment is not resolved: it stays open as the record of what
+the checks rejected, and you can resolve it yourself. The marks take
+precedence in this order: blocked, suspended, conflict. All share the one
+saved icon and color; clearing one still leaves any other applicable mark.
+
+The comments follow the marks:
+
+| Change | Conflict comment | Blocked comment |
+| --- | --- | --- |
+| conflict cleared | resolved | none |
+| conflict, then blocked | resolved | added |
+| blocked fixed, no markers | none | stays open |
+| blocked fixed, markers remain | a new one is added | stays open |
 
 Without any security hook, the sync pushes Linear's content unchecked, and
 every run summary says so.
@@ -297,7 +323,7 @@ This deadline starts at the head's push, recorded in a hidden HTML note
 in the pull request description; it is separate from the short merge
 grace period. A new head starts a new deadline. The sync never reruns a
 check. Configure flaky-check retries in the repository's CI; a rerun by a
-person or CI counts by its latest result. Actions read access is required to verify workflow jobs.
+person or CI counts by its latest result. No Actions permission is needed.
 The deadline covers only checks GitHub has registered on the head. The
 sync does not read the branch's list of required checks: branch
 protection's list needs an App permission the sync does not ask for
@@ -310,7 +336,18 @@ registered on the pull request's earlier heads and every check in
 counts only from the publisher that registered it there (the same GitHub
 App for a check run, the same account for a commit status), so a
 same-name check from anyone else does not satisfy it. A head that lacks
-an expected check, or has none, waits; past the deadline the run reports the setup error
+an expected check, or has none, waits. When someone else pushed that head
+(a formatter's fix pushed with a workflow's own token starts no other
+workflow), and five minutes after the sync first saw it nothing on it is
+pending or failed but an expected check never registered, the sync pushes
+a commit of its own on top, with the same files: its push starts the
+repository's whole CI. That commit must pass every check the head below it
+waited for, and the pull request merges once they pass, without waiting
+for a Linear change. The sync never does this on a head it pushed itself,
+nor again on a head pushed on such a commit of its own, and the new commit
+starts a new deadline. Past the deadline a head that still lacks an
+expected check makes the run
+report the setup error
 `checks-missing`, and nothing is suspended or marked in Linear. A check
 only GitHub's branch rules require lets the sync try the merge: if GitHub
 refuses it, the run reports `merge-refused`; a later run that meets the
@@ -340,7 +377,8 @@ later changes to other documents then use the normal lane.
 Security hooks still run before any push and keep their separate blocked
 mark. Suspension is a successful run, not a setup error.
 
-Each suspended document shows a red `Cross` and one comment, for example:
+Each suspended document shows a red exclamation mark (`Alert`) and one
+comment, for example:
 
 > Changes to this document are on hold: a check failed on the pull request that brings them to Git. Other documents keep syncing.
 >
@@ -405,7 +443,10 @@ same check also fails on the tracked tip.
 
 - **Git to Linear:** a push to the tracked branch starts a run at once, so
   the change is in Linear when that run finishes, usually within a minute
-  or two. If another run is going, the new one waits for it.
+  or two. If another run is going, the new one waits for it. A document
+  edited in Linear while the run waits for its sync pull request's checks
+  gets the change one run later
+  ([editing while sync runs](#editing-while-sync-runs)).
 - **Linear to git:** the next run captures the edit. Between pushes that
   is a run from your own timer, GitHub's schedule or a run by hand. With
   a timer that is within its interval plus the run

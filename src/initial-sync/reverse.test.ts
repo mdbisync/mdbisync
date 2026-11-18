@@ -29,6 +29,7 @@ import { SYNC_BRANCH_MERGE_MESSAGE } from '../sync/pull-request.ts';
 import { candidateKey } from '../sync/staged.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
 import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
+import { MARKS } from '../sync/marks.ts';
 
 const CANARY = 'kx-7d20b4e1';
 const PRE_COMMIT = `repos:
@@ -710,7 +711,10 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.ok(!world.requests.some((request) => request.includes('images.example.test')), 'the external image was fetched');
     // Capture preserves the observed images and prepares the repaired ordinary sync branch.
     assert.deepEqual(after.report.capture?.blocked, []);
-    for (const id of ['doc-plan', 'doc-faq']) assert.notEqual(world.linear.documents.find(d => d.id === id)?.icon, 'Cross');
+    for (const id of ['doc-plan', 'doc-faq']) {
+      const doc = world.linear.documents.find(d => d.id === id);
+      assert.notDeepEqual({ icon: doc?.icon ?? null, color: doc?.color ?? null }, MARKS.blocked);
+    }
     assert.deepEqual(await files('refs/heads/main'), tracked);
     assert.match(await show('refs/mdbisync/linear:eng/notes/plan.md'), /!\[Chart\]/);
     assert.doesNotMatch(await show('refs/heads/mdbisync/linear:eng/notes/plan.md'), /!\[Chart\]/);

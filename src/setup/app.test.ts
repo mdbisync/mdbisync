@@ -23,7 +23,6 @@ const REQUIRED = {
   workflows: 'write',
   checks: 'read',
   statuses: 'read',
-  actions: 'read',
 };
 
 /** GitHub's anchor for a Markdown heading. */

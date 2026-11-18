@@ -31,7 +31,7 @@ import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
 import { type CheckState, mergeInProgress } from '../../../src/pull-request/merge.ts';
 import { CHECK_NAME, CHECK_WORKFLOW_PATH, readCheckState } from '../../corpus/check-workflow.ts';
-import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
+import { calloutDecoration, editParagraph, markerKindAt, noteSentence, removeMarker, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
@@ -347,8 +347,11 @@ export function mergeStillInProgress(report: Readonly<Record<string, unknown>> |
  * and settle waits at most `limit` times. A run that merged the sync pull
  * request on the last allowed attempt is not the last either: the engine
  * takes the tracked branch in as it was at the run's start, so the next run
- * records the merge on `linear`. That run also comes on top of `limit`, at
- * most `limit` times.
+ * records the merge on `linear`. That run changes too (it moves `linear`), so
+ * when it is the last allowed attempt, one more run shows whether the sync
+ * settled. Both kinds of run come on top of `limit`, at most `limit` times
+ * together. A conflict scenario needs five runs: write the marks, open the
+ * sync pull request, merge it, record the merge, change nothing.
  *
  * A run that failed only on a GitHub server error in the sync pull request
  * step (`settleServerError`) has not settled either: the engine ends it
@@ -379,11 +382,14 @@ export async function settle(
   let merges = 0;
   let serverErrors = 0;
   let inProgress = 0;
+  let previous: unknown;
   for (let attempt = 0; attempt < limit + waits + merges + serverErrors + inProgress; attempt += 1) {
     const count = ctx.engine.results.length;
     await runOnce();
     // Only a run this attempt recorded is judged: an earlier step's failed run is not this settle's.
     const result = ctx.engine.results.length > count ? ctx.engine.results.at(-1) : undefined;
+    const recordsMerge = mergedSyncPullRequest(previous);
+    previous = result?.report;
     const verdict = result === undefined ? undefined : settleServerError(result);
     if (verdict !== undefined && 'recoverable' in verdict) {
       const error = describeServerError(verdict.recoverable);
@@ -407,13 +413,22 @@ export async function settle(
     }
     if (report?.['changed'] !== false) {
       const last = attempt + 1 === limit + waits + merges + serverErrors + inProgress;
-      if (last && typeof field(report, ['pullRequest', 'merged']) === 'string' && merges < limit) merges += 1;
+      if (last && (mergedSyncPullRequest(report) || recordsMerge) && merges < limit) merges += 1;
       else if (last) ctx.log(`settle: the last of ${String(attempt + 1)} runs still changed; the scenario did not settle`);
       continue;
     }
     if (waits >= limit || !(await waitForSyncPullRequestChecks(ctx, report))) return;
     waits += 1;
   }
+}
+
+/**
+ * Whether a run merged the sync pull request, which the next run records on
+ * `linear`. A release of the suspended lane is not counted: the run that
+ * releases it takes the tracked branch in and records it itself.
+ */
+function mergedSyncPullRequest(report: unknown): boolean {
+  return typeof field(report, ['pullRequest', 'merged']) === 'string';
 }
 
 /** Runs syncs back to back until `seconds` have passed, at least one; see `settle`. */
@@ -1869,10 +1884,10 @@ export function publishedHookPin(text: string): { repo: string; rev: string } {
  */
 export function editInsideMarkers(text: string, version: 'git' | 'linear', token: string): string {
   const lines = text.split('\n');
-  const start = lines.indexOf(version === 'git' ? MARKERS.git : MARKERS.linear);
+  const start = lines.findIndex((_, index) => markerKindAt(lines, index) === version);
   if (start < 0) throw new ProductError('the document holds no conflict markers');
   const line = lines.findIndex((candidate, index) => index > start && candidate.trim() !== '');
-  if (line < 0 || Object.values(MARKERS).includes(lines[line] as never)) throw new ProductError('the conflict has an empty version');
+  if (line < 0 || markerKindAt(lines, line) !== null || calloutDecoration(lines[line] as string)) throw new ProductError('the conflict has an empty version');
   lines[line] = `${(lines[line] as string).replace(/\s+$/, '')} ${noteSentence(token)}`;
   return lines.join('\n');
 }
@@ -2188,8 +2203,9 @@ const LINEAR: Record<string, Executor> = {
   },
   'linear.remove-one-marker': async (ctx, args) => {
     await editorEdit(ctx, editorOf(args), targetPath(ctx, args.target), (text) => {
-      if (!text.split('\n').includes(MARKERS.end)) throw new ProductError('the document holds no end marker');
-      return text.split('\n').filter((line) => line !== MARKERS.end).join('\n');
+      const removed = removeMarker(text, 'end');
+      if (removed === null) throw new ProductError('the document holds no end marker');
+      return removed;
     });
   },
   'linear.edit-inside-markers': async (ctx, args) => {

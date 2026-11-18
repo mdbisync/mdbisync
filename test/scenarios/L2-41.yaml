@@ -80,7 +80,7 @@
       {
         "subject": "blocked.icon",
         "operator": "equal",
-        "expected": "Cross"
+        "expected": "Alert"
       },
       {
         "subject": "blocked.color",
@@ -109,6 +109,11 @@
         "subject": "documents.color",
         "operator": "same-as",
         "expected": "before.documents.color"
+      },
+      {
+        "subject": "blocked.openSecurityNotices",
+        "operator": "equal",
+        "expected": 1
       },
       {
         "subject": "tracked.body",

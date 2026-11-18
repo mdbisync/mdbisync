@@ -277,35 +277,15 @@ remain after release; its presence alone does not mean a batch is on hold.
   check expected from an earlier head counts only from the publisher that
   registered it there: a check run from the same GitHub App, or a commit
   status from the same account. A commit status or another App's check run
-  under the same name does not stand in for it. An Actions check must also
-  belong to a genuine workflow job in this repository on the exact head:
-  the sync reads its check suite, workflow run and job, and uses the job's
-  result. It binds an earlier check to the same workflow path. `push`,
-  `pull_request` and `workflow_dispatch` are supported validation triggers,
-  so a formatter fix can run real CI by dispatch and a later sync push can
-  use normal CI again. GitHub-managed CodeQL default setup and Code Quality
-  also count, bound to their provider-generated workflow identity and genuine
-  jobs on this head. Synthetic checks created with `checks: write` do not
-  count, even with the same name and Actions App.
-
-  As an additional consistency guard, the sync compares workflow file blobs.
-  For pull-request runs it infers a blob from GitHub's reported PR association
-  and holds missing or ambiguous evidence. That association can change after
-  execution: this guard does not verify the executed PR workflow revision.
-  GitHub names a pull request's current head there, so once a new head is
-  pushed (or the pull request closes), an earlier head's job has no
-  inferred blob, and it never counts as passed itself. The sync's own next
-  head expects that check from the same workflow path at its own blob, as
-  for any earlier check. A head someone else pushed expects it at the blob
-  the earlier head holds, but only while the pull request's base holds the
-  same blob; otherwise the head waits until the sync pushes the branch
-  again. Any other unknown blob (both sides changed the file, another
-  base) stays unverifiable.
-  A genuine job proves its identity and result; the workflow remains
-  responsible for what it tests. When the sync advances its own branch, it
-  refreshes blob expectations for workflow updates from the tracked branch.
-  Keep dispatch jobs as strict as the corresponding push or pull-request
-  jobs, including their inputs and conditions. A
+  under the same name does not stand in for it. Every workflow in the
+  repository publishes its check runs as the same GitHub Actions App,
+  whatever event started it (`pull_request`, `push`, `workflow_dispatch`),
+  so a formatter fix can run its CI by dispatch. This tells your CI apart
+  from other Apps and accounts, not one of your workflows from another: a
+  workflow that may create check runs (`checks: write`) can post one under
+  any name. Keep the workflows and actions your repository runs trusted,
+  and keep dispatch jobs as strict as the corresponding push or
+  pull-request jobs, including their inputs and conditions. A
   CI that posts statuses from a different account on each build (the
   pusher's token, say) never meets an expectation from the previous
   account, and a check whose publisher GitHub does not name (a deleted
@@ -314,8 +294,8 @@ remain after release; its presence alone does not mean a batch is on hold.
   counts only from the publisher configured for it ([required
   checks](#required-checks)), also on a new branch with no earlier
   heads. The
-  expected checks, publishers and workflow identities are kept in a hidden
-  HTML note in the pull request description. A person can edit that note, so it only
+  expected checks and their publishers are kept in a hidden HTML note in
+  the pull request description. A person can edit that note, so it only
   adds checks: whatever it says, the sync also reads the checks registered
   on the branch's first-parent commits below the head, down to the last
   head the sync itself pushed there, which its state records, from git and
@@ -348,8 +328,8 @@ remain after release; its presence alone does not mean a batch is on hold.
   (default `60`, range `10`–`1440`) after the sync pushed a head count as
   failed. The CLI uses `MDBISYNC_CHECK_DEADLINE_MINUTES`. The sync never
   reruns a check; a check rerun on the same head counts by its latest result.
-  Configure retries for flaky checks in your own CI. The App needs Actions
-  read access to verify job provenance; see the
+  Configure retries for flaky checks in your own CI. The App needs no
+  Actions permission; its permissions remain those in the
   [quickstart](quickstart.md#github-app). The push time for each head is
   kept in a hidden HTML note in the pull request description; a new head
   starts a new deadline. An expected check that never registers, or a
@@ -370,9 +350,9 @@ remain after release; its presence alone does not mean a batch is on hold.
   error. Other documents then continue in the normal lane. While the
   suspended head's checks are still pending before their deadline, the
   normal lane waits to merge so it cannot move the tracked branch under it.
-- Every suspended document gets a red `Cross` and a comment naming the
-  check, linking to its run when available, and quoting annotations on
-  that document's path. Later Linear edits go only to the suspended lane;
+- Every suspended document gets a red exclamation mark (`Alert`) and a
+  comment naming the check, linking to its run when available, and quoting
+  annotations on that document's path. Later Linear edits go only to the suspended lane;
   tracked-branch edits to those documents wait until release. A Linear
   edit or a new tracked-branch commit updates the suspended pull request.
   Once its head contains the current tracked tip and passes checks, it
@@ -401,7 +381,7 @@ remain after release; its presence alone does not mean a batch is on hold.
 - A pending edit on the sync branch that changes the same lines as a later
   Linear edit or tracked-branch edit is not dropped and does not hold the
   pull request. The next run merges the two into the sync branch with a
-  merge commit, both versions between the usual conflict marker paragraphs
+  merge commit, both versions between the usual conflict markers
   (the sync branch's edit is the git version against Linear, the Linear
   version against the tracked branch). The pull request carries the markers
   to the tracked branch and from there to Linear, like any other conflict,
@@ -424,22 +404,22 @@ line names the check together with the publisher it must come from:
 
 ```yaml
 required-checks: |
-  test (ubuntu-latest, 24) @ actions:.github/workflows/ci.yml
+  test (ubuntu-latest, 24) @ actions
   security @ app:57789
   deploy-preview @ status:1234567
 ```
 
-- `<name> @ actions:<workflow file>`: a GitHub Actions job of that name,
-  run by that workflow file in `.github/workflows/`. The sync verifies
-  the job's workflow run on the head, and the workflow file as the
-  tracked branch holds it: a job of a file changed on the sync branch
-  alone does not count, nor a check run that a workflow created with
-  `checks: write`. The name is the job's name as GitHub shows it on the
-  pull request, without the workflow's name.
+- `<name> @ actions`: a check run of that name from the GitHub Actions
+  App, as every workflow job publishes, on GitHub.com or another GitHub
+  server. The name is the job's name as GitHub shows it on the pull
+  request, without the workflow's name, so two workflows with a job of the
+  same name meet one line together: give jobs you require separately
+  distinct names. Any workflow in the repository that may create check
+  runs can post one under that name, so keep the repository's workflows
+  trusted.
 - `<name> @ app:<App id>`: a check run of the GitHub App with that id
-  (`gh api apps/<app slug> --jq .id`). Use `actions:` for GitHub
-  Actions: any workflow can create check runs of the GitHub Actions App,
-  so its id is refused here.
+  (`gh api apps/<app slug> --jq .id`). Use `actions` for GitHub Actions;
+  the GitHub Actions App's id is refused here.
 - `<name> @ status:<account id>`: a commit status of that context
   created by the account with that id (`gh api users/<login> --jq .id`),
   usually your CI service's bot or token owner. The `github-actions[bot]`
@@ -451,9 +431,7 @@ new sync branch that has no earlier heads, and also when it is the
 latest status of that context. A line without a publisher stops the run
 with an input error, for the initial sync too. A check that never comes from its publisher keeps
 the head waiting; past the check deadline the run reports
-`checks-missing`. An `actions:` check also waits when the tracked branch
-changed the workflow file after the job ran: only a run of the current
-file counts, which the sync's next push of the branch starts.
+`checks-missing`.
 
 ## Release builds and pins
 

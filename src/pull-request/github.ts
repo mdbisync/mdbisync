@@ -10,8 +10,6 @@ export interface GitHubRepository {
   /** `owner/name`. */
   repository: string;
   token: string;
-  /** Tracked destination used by the additional PR blob consistency guard; main by default. */
-  baseBranch?: string;
   apiUrl?: string | undefined;
   fetch?: typeof fetch;
   /** Bounds a sequence of requests, including reading their bodies. */

@@ -11,7 +11,7 @@ import { Git, GitError, lfsReader, parseLfsPointer } from '../../../src/state/in
 import { fakeLfsServer } from '../../../src/state/test-helpers.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, noteSentence, resolveKeeping, scanMarkers } from './conflicts.ts';
+import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, markerBlock, MARKERS, noteSentence, removeMarker, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { CANARY_FIXTURE } from './security-canary.ts';
 import type { RunTree } from './corpus.ts';
@@ -131,6 +131,26 @@ describe('conflict markers', () => {
     const resolved = resolveKeeping(withConflict, 'git');
     assert.equal(scanMarkers(resolved).markerLines, 0);
     assert.ok(resolved.includes(`\`\`\`text\n${MARKERS.git}\none\n${MARKERS.linear}\ntwo\n${MARKERS.end}\n\`\`\``));
+  });
+
+  it('read, remove and resolve markers in the callout form the sync writes, leaving code and quotes as they are', () => {
+    const callouts = (git: string, linear: string) => `# Notes\n\n${markerBlock('git')}\n\n${git}\n\n${markerBlock('linear')}\n\n${linear}\n\n${markerBlock('end')}\n\nAfter.\n`;
+    const scan = scanMarkers(callouts('One.', 'Two.'));
+    assert.deepEqual([scan.sets.length, scan.markerLines, scan.sets[0]?.git, scan.sets[0]?.linear], [1, 3, 'One.', 'Two.']);
+    assert.equal(conflictScope(callouts('```text\none\n```', '```text\ntwo\n```')), 'whole-fence');
+    assert.equal(resolveKeeping(callouts('One.', 'Two.'), 'git'), '# Notes\n\nOne.\n\nAfter.\n');
+    assert.match(editInsideMarkers(callouts('One.', 'Two.'), 'git', 'abc123-003'), /^One\. The review moved to the next morning, note abc123-003\.$/m);
+    // A person deleting the end marker deletes its whole callout, and only there a blank line.
+    const code = '```text\na\n\n\nb\n```';
+    const removed = removeMarker(callouts(code, 'Two.'), 'end');
+    assert.equal(removed, `# Notes\n\n${markerBlock('git')}\n\n${code}\n\n${markerBlock('linear')}\n\nTwo.\n\nAfter.\n`);
+    assert.equal(removeMarker('No markers.\n', 'end'), null);
+    // A callout example in a fence, or a marker in a plain quote, is text.
+    const fenced = `\`\`\`markdown\n${markerBlock('end')}\n\`\`\``;
+    assert.equal(resolveKeeping(callouts(fenced, 'Two.'), 'git'), `# Notes\n\n${fenced}\n\nAfter.\n`);
+    assert.equal(scanMarkers(callouts(fenced, 'Two.')).sets[0]?.git, fenced);
+    assert.equal(scanMarkers(`> ${MARKERS.end}\n`).markerLines, 0);
+    assert.equal(conflictScope(callouts(`\`\`\`text\n${MARKERS.end}\n\`\`\``, '```text\ntwo\n```')), 'whole-fence');
   });
 
   it('edit the n-th plain paragraph and nothing else', () => {
@@ -666,13 +686,15 @@ describe('workflows', () => {
 
   it('settle runs again after its last run merged the sync pull request, so the merge is recorded before I6 (L4-09)', async () => {
     // L4-09's live shape: three runs that change, one that waits for `format`, the run after the wait merges,
-    // and only the run after the merge moves `linear`. Settle ends on that record run; I6's own run is then quiet.
+    // and only the run after the merge moves `linear`. That record run changes too, so settle runs once more
+    // and ends on a quiet run.
     const changed = { changed: true, checks: passed };
     const quiet = { changed: false, checks: passed };
     const { ctx, dispatched } = await settleScenario(reportsOf(changed, changed, changed, { changed: false, checks: pending }, merging, changed, quiet), { pendingReads: 1 });
-    assert.equal(dispatched.length, 6, 'the record run comes on top of the four runs and the run after the wait');
-    const last = ctx.engine.results.at(-1)?.report?.['pullRequest'] as { merged?: unknown } | undefined;
-    assert.equal(last?.merged, null, 'settle does not end on the run that merged');
+    assert.equal(dispatched.length, 7, 'the record run and the quiet run after it come on top of the four runs and the run after the wait');
+    const last = ctx.engine.results.at(-1)?.report as { changed?: unknown; pullRequest?: { merged?: unknown } } | undefined;
+    assert.equal(last?.pullRequest?.merged, null, 'settle does not end on the run that merged');
+    assert.equal(last?.changed, false, 'settle ends on a quiet run, not on the run that records the merge');
     assert.equal(ctx.observations.get('settle.checkWaits'), 1);
   });
 
@@ -944,9 +966,10 @@ describe('load', () => {
       ['near-linear.md', ['Small file.', nearLimit]],
       ['near-git.md', [nearLimit, 'Small document.']],
       ['notes.md', ['# Notes\n', '# Notes\n']],
+      ['plan.md', ['# Plan\n', '# Plan\n']],
     ]);
     const documents = burstDocuments(versions, options, 'abcdef-9999');
-    assert.deepEqual(documents, ['notes.md']);
+    assert.deepEqual([...documents].sort(), ['notes.md', 'plan.md']);
     const texts = new Map([...versions].map(([path, values]) => [path, values[0] as string]));
     const tokens: string[] = [];
     const edit = async (path: string) => {
@@ -960,20 +983,28 @@ describe('load', () => {
     const result = await burst({ ...clock, linearEdit: async (_, path) => edit(path), gitEdit: async ([path]) => edit(path as string), sync: async () => void clock.sleep(60_000) }, { ...options, documents });
     assert.equal(result.linearEdits, 750);
     assert.equal(result.gitPushes, 15);
-    assert.ok(tokens.every((token) => texts.get('notes.md')?.includes(token)));
+    assert.ok(tokens.every((token) => documents.some((path) => texts.get(path)?.includes(token))));
     assert.equal(texts.get('near-git.md'), nearLimit);
     assert.equal(texts.get('near-linear.md'), 'Small file.');
   });
 
-  it('reserves exact append headroom and refuses an exhausted candidate set', () => {
+  it('reserves exact append headroom for the edits each document gets, and refuses an exhausted candidate set', () => {
+    // One Linear edit (to the first document) and one git push (to the fourth, modulo the count).
     const options = { durationMs: 60_000, linearEditsPerMinute: 1, gitPushesPerMinute: 1 };
     const token = 'abcdef-1000';
-    const growth = 2 * paragraphEdit('', undefined, token).length;
-    const markers = 2 * `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
-    const fitting = 'a'.repeat(Math.floor((250_000 - markers) / 2) - growth);
-    assert.deepEqual(burstDocuments(new Map([['fits.md', [fitting, fitting]], ['full.md', [fitting + 'a']]]), options, token), ['fits.md']);
+    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${markerBlock('git')}\n\n${markerBlock('linear')}\n\n${markerBlock('end')}\n\n`.length;
+    /** A version with room for exactly `edits` edits. */
+    const room = (edits: number) => 'a'.repeat(Math.floor((250_000 - edits * perEdit) / 2));
+    // Two documents take one edit each; one alone would take both.
+    assert.deepEqual(burstDocuments(new Map([['one.md', [room(1)]], ['other.md', [room(1)]]]), options, token), ['one.md', 'other.md']);
+    assert.throws(() => burstDocuments(new Map([['one.md', [room(1)]]]), options, token), /no document has room/);
+    // A document without room drops out, and the rest then take more edits each.
+    assert.deepEqual(burstDocuments(new Map([['fits.md', [room(2)]], ['full.md', [room(1) + 'a'.repeat(perEdit)]]]), options, token), ['fits.md']);
     assert.throws(() => burstDocuments(new Map([['full.md', ['a'.repeat(250_000)]]]), options, token), /no document has room/);
     assert.throws(() => burstDocuments(new Map(), options, token), /no document has room/);
+    // Two Linear edits and one git push: the second place gets two edits, so the roomier document takes it.
+    const uneven = { durationMs: 60_000, linearEditsPerMinute: 2, gitPushesPerMinute: 1 };
+    assert.deepEqual(burstDocuments(new Map([['big.md', [room(2)]], ['small.md', [room(1)]]]), uneven, token), ['small.md', 'big.md']);
   });
 
   it('uses the budgeted count for non-divisor rates and rejects invalid options', async () => {
@@ -1198,7 +1229,7 @@ describe('load', () => {
     const total = counts['editor-a'] + counts['editor-b'] + counts.git;
     const token = soakToken(counts);
     // Each edit appends a note to both versions, and a conflict adds a marker set.
-    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
+    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${markerBlock('git')}\n\n${markerBlock('linear')}\n\n${markerBlock('end')}\n\n`.length;
     const nearLimit = 'a'.repeat(CONTENT_LIMIT - 1);
     // Room for exactly three edits: the seeded schedule picks it more often, so it fills up and drops out.
     const tight = 'b'.repeat(Math.floor((CONTENT_LIMIT - 3 * perEdit) / 2));
@@ -1244,12 +1275,14 @@ describe('load', () => {
     const counts = soakEditCounts(SOAK);
     const total = counts['editor-a'] + counts['editor-b'] + counts.git;
     const token = soakToken(counts);
-    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
-    const short = 'a'.repeat(Math.floor((CONTENT_LIMIT - (total - 1) * perEdit) / 2));
+    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${markerBlock('git')}\n\n${markerBlock('linear')}\n\n${markerBlock('end')}\n\n`.length;
+    // Room for one edit fewer than the schedule, in two documents: one alone cannot hold so many edits.
+    const room = (edits: number) => 'a'.repeat(Math.floor((CONTENT_LIMIT - edits * perEdit) / 2));
+    const half = Math.floor((total - 1) / 2);
     let edits = 0;
     const clock = fakeClock();
     const driver: SoakDriver = { ...clock, linearEdit: async () => { edits += 1; }, gitEdit: async () => { edits += 1; }, sync: async () => {}, checkInvariants: async () => ({ lostEdits: 0 }) };
-    await assert.rejects(soak(driver, { ...SOAK, documents: new Map([['short.md', [short]]]) }), new RegExp(`room for ${total - 1} of the ${total} soak edits`));
+    await assert.rejects(soak(driver, { ...SOAK, documents: new Map([['short.md', [room(half)]], ['other.md', [room(total - 1 - half)]]]) }), new RegExp(`room for ${total - 1} of the ${total} soak edits`));
     await assert.rejects(soak(driver, { ...SOAK, documents: new Map([['full.md', ['a'.repeat(CONTENT_LIMIT / 2)]], ['none.md', []]]) }), new RegExp(`room for 0 of the ${total} soak edits`));
     await assert.rejects(soak(driver, { ...SOAK, scheduleMs: 0, documents: new Map() }), /positive intervals/);
     await assert.rejects(soak(driver, { ...SOAK, invariantIntervalMs: Number.NaN, documents: new Map() }), /finite numbers/);
@@ -2825,10 +2858,10 @@ describe('linear executors', () => {
     const secret = ctx.observations.get('secret.value') as string;
     assert.match(secret, /^TESTKEY-[0-9a-f]{24}$/);
     // Linear gives the color as a hex code; L2-35 names it by its palette name.
-    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Cross', color: '#EB5757' });
+    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Alert', color: '#EB5757' });
     linear.comments.set(id, ['Blocked by hook `test-secret`, line 3.']);
     await runStep(ctx, { kind: 'linear', action: 'remove-secret', args: {} });
-    assert.equal(ctx.observations.get('blocked.icon'), 'Cross');
+    assert.equal(ctx.observations.get('blocked.icon'), 'Alert');
     assert.ok(!(linear.documents.get(id)?.content ?? '').includes(secret));
     assert.deepEqual(await resolveSubject(ctx, 'blocked.commentFields'), { known: true, value: ['hook', 'line'] });
     const mark = ['blocked.icon', 'blocked.color', 'blocked.commentFields'];
@@ -2860,17 +2893,20 @@ describe('linear executors', () => {
     const id = ids['eng/platform/plan.md']?.id as string;
     await runStep(ctx, { kind: 'linear', action: 'edit', args: { target: 'eng/platform/plan.md', fixture: 'fake-secret' } });
     const blocked = linear.documents.get(id) as LinearDocument;
-    Object.assign(blocked, { icon: 'Cross', color: '#EB5757' });
+    Object.assign(blocked, { icon: 'Alert', color: '#EB5757' });
     const notice = 'Security checks rejected this document. Fix the listed findings and sync again.\n\n- Hook `test-secret`, line 3';
     linear.comments.set(id, [notice]);
     const cleared = ['blocked.securityMarkCleared', 'blocked.openSecurityNotices'];
     // Still blocked: the mark is there and its notice open.
-    assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map(cleared.map((subject) => [subject, false])));
-    // The sync restored the document's own icon and resolved its notice.
+    assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map([['blocked.securityMarkCleared', false], ['blocked.openSecurityNotices', true]]));
+    // The sync restored the document's own icon and left its notice open as the record of the finding.
     Object.assign(blocked, { icon: null, color: null });
-    linear.resolved.add(notice);
     refreshView(ctx);
     assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map(cleared.map((subject) => [subject, true])));
+    // A resolved notice fails the check: the sync must not resolve it.
+    linear.resolved.add(notice);
+    refreshView(ctx);
+    assert.deepEqual(await scenarioAssertions(ctx, 'L6-04', cleared), new Map([['blocked.securityMarkCleared', true], ['blocked.openSecurityNotices', false]]));
   });
 
   /** Whether each assertion of scenario `id` on `subjects` holds in `ctx`, compared as the runner compares them. */
@@ -2918,8 +2954,8 @@ describe('linear executors', () => {
     ctx.observations.set('blocked.color', null);
     assert.deepEqual(await resolveSubject(ctx, 'blocked.color'), { known: true, value: null });
     // Direct observation subjects, and subjects a step overrides on purpose, return what was recorded.
-    ctx.observations.set('blocked.icon', 'Cross');
-    assert.deepEqual(await resolveSubject(ctx, 'blocked.icon'), { known: true, value: 'Cross' });
+    ctx.observations.set('blocked.icon', 'Alert');
+    assert.deepEqual(await resolveSubject(ctx, 'blocked.icon'), { known: true, value: 'Alert' });
     ctx.observations.set('golden.linearForm', 'recorded');
     assert.deepEqual(await resolveSubject(ctx, 'golden.linearForm'), { known: true, value: 'recorded' });
   });

@@ -1,4 +1,5 @@
-// How `run.settle` runs again after a GitHub server error in the sync pull request step, and how far.
+// How far `run.settle` runs again: after a GitHub server error in the sync pull request step, a merge still in
+// progress, a merge of the sync pull request, and through a typing window.
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -7,7 +8,7 @@ import type { EngineResult } from './engine.ts';
 import { ProductError } from './results.ts';
 import { mergeStillInProgress, settle, SETTLE_MERGE_IN_PROGRESS_RETRIES, SETTLE_SERVER_ERROR_RETRIES } from './steps.ts';
 
-type Ending = 'changed' | 'merged' | 'settled' | 'server-error' | 'client-error' | 'server-error-and-failed-write' | 'in-progress' | 'refused';
+type Ending = 'changed' | 'merged' | 'released' | 'settled' | 'server-error' | 'client-error' | 'server-error-and-failed-write' | 'in-progress' | 'refused';
 
 /** The report a sync run leaves for each ending; the server error is an HTTP 502. */
 function report(ending: Ending): Record<string, unknown> {
@@ -19,6 +20,7 @@ function report(ending: Ending): Record<string, unknown> {
     sync: { complete: true, failed: [], notAttempted: [], stopped: null },
   };
   if (ending === 'merged') return { ...base, changed: true, pullRequest: { ...base.pullRequest, needed: true, pullRequest: { number: 412, opened: false }, merged: 'a'.repeat(40) } };
+  if (ending === 'released') return { ...base, changed: true, pullRequest: { ...base.pullRequest, suspended: { released: 'b'.repeat(40), changed: true } } };
   if (ending === 'changed' || ending === 'settled') return base;
   if (ending === 'in-progress' || ending === 'refused') {
     // The run that met GitHub's refusal changed nothing and ended successfully.
@@ -44,14 +46,15 @@ async function settleWith(endings: Ending[], limit?: number, options: { args?: R
   } as unknown as RunContext;
   const runOnce = async () => {
     const ending = endings[Math.min(results.length, endings.length - 1)]!;
-    const failed = !['changed', 'merged', 'settled', 'in-progress', 'refused'].includes(ending);
+    const failed = !['changed', 'merged', 'released', 'settled', 'in-progress', 'refused'].includes(ending);
     results.push({ command: 'sync', exitCode: failed ? 1 : 0, signal: null, timedOut: false, notImplemented: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: report(ending) });
   };
   const outcome = await settle(ctx, options.args ?? {}, limit, runOnce, options.now).then(() => undefined, (error: unknown) => error);
   const name = (result: EngineResult) => {
-    const pullRequest = result.report!.pullRequest as { merged: unknown; status?: number; reason?: string };
+    const pullRequest = result.report!.pullRequest as { merged: unknown; status?: number; reason?: string; suspended?: { released?: string } };
     if (result.exitCode !== 0) return `failed ${String(pullRequest.status)}`;
     if (pullRequest.reason !== undefined) return pullRequest.reason === 'Merge already in progress' ? 'in-progress' : 'refused';
+    if (pullRequest.suspended?.released !== undefined) return 'released';
     return result.report!.changed ? (pullRequest.merged ? 'merged' : 'changed') : 'settled';
   };
   return { outcome, runs: results.map(name), ctx, log };
@@ -168,5 +171,48 @@ describe('run.settle with a typing window', () => {
     const without = await settleWith(['settled'], undefined, { now: clock() });
     assert.deepEqual(without.runs, ['settled']);
     assert.equal(without.ctx.observations.has('settle.typingWindow'), false);
+  });
+});
+
+describe('run.settle after the sync pull request merged', () => {
+  // The run after a merge records it on `linear` and so changes too; only the run after that shows the sync settled.
+
+  it('settles a conflict, whose sync needs five runs, with one run past the default limit of four', async () => {
+    const { outcome, runs, log } = await settleWith(['changed', 'changed', 'merged', 'changed', 'settled']);
+    assert.equal(outcome, undefined);
+    assert.deepEqual(runs, ['changed', 'changed', 'merged', 'changed', 'settled']);
+    assert.deepEqual(log, []);
+  });
+
+  it('after a merge on the last attempt, runs both the run that records it and the run after that', async () => {
+    const { outcome, runs, log } = await settleWith(['changed', 'changed', 'changed', 'merged', 'changed', 'settled']);
+    assert.equal(outcome, undefined);
+    assert.deepEqual(runs, ['changed', 'changed', 'changed', 'merged', 'changed', 'settled']);
+    assert.deepEqual(log, []);
+  });
+
+  it('still reports a scenario that keeps changing after it recorded the merge', async () => {
+    const { outcome, runs, log } = await settleWith(['changed', 'changed', 'merged', 'changed', 'changed']);
+    assert.equal(outcome, undefined);
+    assert.deepEqual(runs, ['changed', 'changed', 'merged', 'changed', 'changed']);
+    assert.deepEqual(log, ['settle: the last of 5 runs still changed; the scenario did not settle']);
+  });
+
+  it('gives no extra run after a release of the suspended lane, which records itself on linear', async () => {
+    const { runs, log } = await settleWith(['changed', 'changed', 'released', 'changed', 'settled']);
+    assert.deepEqual(runs, ['changed', 'changed', 'released', 'changed']);
+    assert.deepEqual(log, ['settle: the last of 4 runs still changed; the scenario did not settle']);
+  });
+
+  it('gives no extra run to a run that follows a server error after the merge, not the merge itself', async () => {
+    const { runs, log } = await settleWith(['changed', 'changed', 'merged', 'server-error', 'changed', 'settled']);
+    assert.deepEqual(runs, ['changed', 'changed', 'merged', 'failed 502', 'changed']);
+    assert.equal(log.at(-1), 'settle: the last of 5 runs still changed; the scenario did not settle');
+  });
+
+  it('gives no extra run when the changing last run follows a run that did not merge', async () => {
+    const { runs, log } = await settleWith(['changed']);
+    assert.equal(runs.length, 4);
+    assert.deepEqual(log, ['settle: the last of 4 runs still changed; the scenario did not settle']);
   });
 });

@@ -13,7 +13,6 @@ export const APP_PERMISSIONS = {
   workflows: 'write',
   checks: 'read',
   statuses: 'read',
-  actions: 'read',
 } as const satisfies Record<string, 'read' | 'write'>;
 
 export const APP_DESCRIPTION = 'Two-way sync between Linear documents and Markdown in this repository.';

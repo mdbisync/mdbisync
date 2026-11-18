@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Intro.","marks":{"attribution":"user"}}]},
+    {
+      "type": "callout",
+      "attrs": {"color":"#f2c94c","icon":"Alert"},
+      "children": [
+        {"type":"paragraph","children":[{"text":"Sync conflict: git version","marks":{"attribution":"user","strong":{}}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"The release ships on Tuesday.","marks":{"attribution":"user"}}]},
+    {
+      "type": "callout",
+      "attrs": {"color":"#f2c94c","icon":"Alert"},
+      "children": [
+        {"type":"paragraph","children":[{"text":"Sync conflict: Linear version","marks":{"attribution":"user","strong":{}}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"The release ships on Wednesday.","marks":{"attribution":"user"}}]},
+    {
+      "type": "callout",
+      "attrs": {"color":"#f2c94c","icon":"Alert"},
+      "children": [
+        {"type":"paragraph","children":[{"text":"Sync conflict: end","marks":{"attribution":"user","strong":{}}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Outro.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-8370d6da","marks":{"attribution":"user"}}]}
+  ]
+}

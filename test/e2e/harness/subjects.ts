@@ -263,6 +263,11 @@ function documentBody(view: View, path: string, document: LinearDocument | undef
   return gitLinks(document.content ?? '', path, view);
 }
 
+/** A file body from git in Linear's form, as I1 compares it: its links to uploaded files and documents mapped. */
+function inLinearForm(view: View, path: string, body: string | null): string | null {
+  return body === null ? null : linearLinks(body, path, view);
+}
+
 function fileBody(view: View, path: string): string | null {
   const text = view.files.get(path);
   return text === undefined ? null : bodyOf(text);
@@ -1870,24 +1875,28 @@ export const SUBJECTS: Record<string, Compute> = {
     const document = await securityBlockedDocument(env);
     return document.icon !== MARKS.blocked.icon || document.color !== MARKS.blocked.color;
   },
-  // Security notices on the blocked document that are not resolved; the sync resolves its notice once the secret is gone.
+  // Security notices on the blocked document that are not resolved; the sync leaves its notice open once the secret is gone, as the record of the finding.
   'blocked.openSecurityNotices': async (env) => {
     const document = await securityBlockedDocument(env);
     return (await commentsWithState(live(env.ctx).app, document.id)).filter((comment) => comment.body.includes(BLOCKED_COMMENT) && comment.resolvedAt === null).length;
   },
   // --- the image gate through the API path (L2-42) ---------------------------------------------
+  // The source is Linear's text; git's side (the observation, the proposal, the tracked file) holds uploaded
+  // files at their paths, so a comparison puts git's side in Linear's form first, link by link, as I1 does.
   'imageRepair.observedOriginal': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
     const proposal = observed(env.ctx, 'imageRepair.proposal') as ImageRepairProposal;
+    const view = await env.view();
     return imageRepairComparison(env.ctx.runDir, 'observed-original', [
       { expected: source.body, actual: proposal.content },
-      { expected: source.body, actual: proposal.recorded },
+      { expected: source.body, actual: inLinearForm(view, source.path, proposal.recorded) },
     ], env.ctx.log);
   },
   'imageRepair.proposedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
+    const view = await env.view();
     return imageRepairComparison(env.ctx.runDir, 'proposed-link', [
-      { expected: source.expected, actual: (observed(env.ctx, 'imageRepair.proposal') as ImageRepairProposal).proposed },
+      { expected: source.expected, actual: inLinearForm(view, source.path, (observed(env.ctx, 'imageRepair.proposal') as ImageRepairProposal).proposed) },
     ], env.ctx.log);
   },
   'imageRepair.listedInPr': async (env) => {
@@ -1901,8 +1910,8 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'imageRepair.trackedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
-    const content = fileBody(await env.view(), source.path);
-    return imageRepairComparison(env.ctx.runDir, 'tracked-link', [{ expected: source.expected, actual: content }], env.ctx.log);
+    const view = await env.view();
+    return imageRepairComparison(env.ctx.runDir, 'tracked-link', [{ expected: source.expected, actual: inLinearForm(view, source.path, fileBody(view, source.path)) }], env.ctx.log);
   },
   'imageRepair.storedLink': async (env) => {
     const source = observed(env.ctx, 'imageRepair.source') as ImageRepairSource;
@@ -1929,7 +1938,7 @@ export const SUBJECTS: Record<string, Compute> = {
 
   // The labels (`Image N of M (line L)`) the sync's image notices gave before the fix.
   'blocked.imageLines': async (env) => noticeImageLabels(observed(env.ctx, 'blocked.comments') as string[]),
-  // Image notices on the blocked document that are not resolved; the sync resolves its notice once the images are fixed.
+  // Image notices on the blocked document that are not resolved; the sync leaves its notice open once the images are fixed, as the record of the finding.
   'blocked.openImageNotices': async (env) => {
     const id = (await env.view()).ids.get(blockedImagePath(env.ctx))?.id;
     if (id === undefined) throw new ProductError('the blocked document has no recorded id');

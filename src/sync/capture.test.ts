@@ -19,6 +19,9 @@ import { type FileContent } from '../state/content.ts';
 import { candidateKey } from './staged.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
+import { MARKS } from './marks.ts';
+
+const markOf = (doc: {icon?: string | null, color?: string | null} | undefined) => ({icon: doc?.icon ?? null, color: doc?.color ?? null});
 import { RECORD_MESSAGE } from '../initial-sync/confirm.ts';
 import { documentPath, titlePath } from './paths.ts';
 import { buildTree, checkRepoPath, isGitDirectoryName } from '../state/objects.ts';
@@ -134,8 +137,8 @@ describe('capture from Linear', () => {
     assert.deepEqual(report.capture.leftOut, [{id:'retry', rule:'download-retry'}]);
     assert.match(result.stdout, /download-retry/);
     assert.equal(world.linear.comments.size, 0);
-    assert.notEqual(world.linear.documents[0]!.icon, 'Cross');
-    assert.notEqual(world.linear.documents[1]!.icon, 'Cross');
+    assert.notDeepEqual(markOf(world.linear.documents[0]), MARKS.blocked);
+    assert.notDeepEqual(markOf(world.linear.documents[1]), MARKS.blocked);
   });
 
   it('leaves an attachment count overrun resumable through the fake-service CLI', async () => {
@@ -653,7 +656,7 @@ describe('capture from Linear', () => {
     assert.ok(accepted);
     assert.notEqual(accepted[0], 'docs/duplicate.md');
     assert.equal(await text(accepted[0]), 'Accepted body.');
-    assert.equal(world.linear.documents.find((doc) => doc.id === blocked.id)?.icon, 'Cross');
+    assert.deepEqual(markOf(world.linear.documents.find((doc) => doc.id === blocked.id)), MARKS.blocked);
     await refresh();
     Object.assign(blocked, {content:'Corrected body.\n',updatedAt:'2026-03-01T00:00:00Z'});
     const third = await capture(context, {config, state:context.fetched.state, security});
@@ -738,7 +741,7 @@ describe('capture from Linear', () => {
     assert.equal(decoration.color, '#123456');
     assert.equal(decoration.notice?.kind, 'blocked');
     assert.equal(decoration.notice?.posted, true);
-    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    assert.deepEqual(markOf(world.linear.documents[0]), MARKS.blocked);
     assert.equal(world.linear.documents[0]!.color, '#EB5757');
     const comments = commentsOf('plan') ?? [];
     assert.match(comments.join(''), /Hook `secret-check`, line 5/);
@@ -903,7 +906,7 @@ describe('capture from Linear', () => {
   });
 
   for (const status of [301, 302, 307, 308, 400, 422]) {
-    it(`blocks unreadable upload HTTP ${status} and clears after correction`, async () => {
+    it(`blocks unreadable upload HTTP ${status} and clears the mark after correction, keeping its notice open`, async () => {
       const doc = world.linear.documents[0]!;
       Object.assign(doc, {content:'![Image](https://uploads.linear.app/workspace/file.png)\n', icon:'Fire', color:'#123456'});
       const captureNow = (fetch: typeof globalThis.fetch) => capture(context, {config, state:context.fetched.state, fetch});
@@ -912,7 +915,7 @@ describe('capture from Linear', () => {
       assert.deepEqual(blocked.blocked[0]?.findings, [{image:1, total:1, line:1, reason:'unreadable'}]);
       assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
       assert.match(commentsOf('plan')[0]!, /Image 1 of 1 \(line 1\): the uploaded file cannot be read\. Remove it or upload it again\./);
-      assert.equal(doc.icon, 'Cross');
+      assert.deepEqual(markOf(doc), MARKS.blocked);
       assert.match(blocked.summary, /blocked 1; left out 0/);
       assert.ok(!JSON.stringify(blocked).includes('Untrusted response body'));
       await refresh();
@@ -920,7 +923,8 @@ describe('capture from Linear', () => {
       assert.equal(fixed.blocked.length, 0);
       assert.equal(doc.icon, 'Fire');
       assert.equal(doc.color, '#123456');
-      assert.equal([...world.linear.comments.values()][0]!.resolved, true);
+      // The blocked notice stays open as the record of the finding.
+      assert.notEqual([...world.linear.comments.values()][0]!.resolved, true);
       const tree = await listTree(context.git, fixed.state.linear!);
       const files = new Set(tree.map(({path}) => path));
       assert.deepEqual(lintInTree('docs/plan.md', await text('docs/plan.md'), files), []);
@@ -934,12 +938,12 @@ describe('capture from Linear', () => {
     assert.deepEqual(blocked.blocked[0]?.findings, [{file:1, total:1, line:1, reason:'unreadable'}]);
     assert.deepEqual(blocked.leftOut, []);
     assert.match(commentsOf('plan')[0]!, /File 1 of 1 \(line 1\): the uploaded file cannot be read/);
-    assert.equal(doc.icon, 'Cross');
+    assert.deepEqual(markOf(doc), MARKS.blocked);
     await refresh();
     const fixed = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response('%PDF-1.7\n')});
     assert.deepEqual(fixed.blocked, []);
     assert.equal(doc.icon, 'Fire');
-    assert.equal([...world.linear.comments.values()][0]!.resolved, true);
+    assert.notEqual([...world.linear.comments.values()][0]!.resolved, true);
   });
 
   for (const status of [401, 403]) {
@@ -1020,7 +1024,7 @@ describe('capture from Linear', () => {
     assert.deepEqual((await readIds(context.git, repeated.state.ids)).get('docs/plan.md')!.saved, original);
     await refresh();
     const blocked = await capture(context, {config, state:context.fetched.state, security:{configured:true, check:async()=>[{hook:'secret-check', line:5}]}});
-    assert.equal(doc.icon, 'Cross');
+    assert.deepEqual(markOf(doc), MARKS.blocked);
     const saved = (await readIds(context.git, blocked.state.ids)).get('docs/plan.md')!.saved!;
     assert.equal(saved.icon, 'Fire');
     assert.equal(saved.color, '#123456');
@@ -1105,7 +1109,7 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.content = 'Rejected.\n';
     const first = await capture(context, {config, state: context.fetched.state, security: gate});
     assert.deepEqual(first.blocked.map(({id}) => id), ['plan']);
-    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    assert.deepEqual(markOf(world.linear.documents[0]), MARKS.blocked);
     assert.deepEqual(Object.fromEntries(context.linear.stats.writes), {CommentOnDocument: 1, UpdateDocument: 1});
     await refresh();
     const moved = movedRefs(context.git);
@@ -1121,7 +1125,7 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.content = 'Rejected.\n';
     world.linear.writes.reject = (operation) => operation === 'CommentOnDocument';
     await assert.rejects(capture(context, {config, state: context.fetched.state, security: gate}));
-    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    assert.deepEqual(markOf(world.linear.documents[0]), MARKS.blocked);
     await refresh();
     delete world.linear.writes.reject;
     await capture(context, {config, state: context.fetched.state, security: gate});

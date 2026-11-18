@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, joinFile, parse, splitFile, start, visit } from './markdown.ts';
+import { end, isCallout, isCalloutComment, joinFile, parse, quoteLines, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -74,12 +74,23 @@ class Writer {
     return this.blocks(this.tree.children);
   }
 
-  /** Sibling blocks, one blank line apart. Reference definitions are written inline instead. */
+  /**
+   * Sibling blocks, one blank line apart, except that Linear writes a
+   * callout's color comment directly above the callout. Reference
+   * definitions are written inline instead.
+   */
   private blocks(nodes: readonly (RootContent | BlockContent | DefinitionContent)[]): string {
-    return nodes
+    const written = nodes
       .filter((node) => node.type !== 'definition')
-      .flatMap((node) => this.block(node))
-      .join('\n\n');
+      .map((node) => ({ node, parts: this.block(node) }))
+      .filter(({ parts }) => parts.length > 0);
+    return written
+      .map(({ node, parts }, index) => {
+        const next = written[index + 1];
+        if (next === undefined) return parts.join('\n\n');
+        return parts.join('\n\n') + (isCalloutComment(node) && isCallout(next.node, this.source) ? '\n' : '\n\n');
+      })
+      .join('');
   }
 
   private block(node: RootContent | BlockContent | DefinitionContent): string[] {
@@ -95,7 +106,7 @@ class Writer {
         this.containers.push({ kind: 'quote' });
         const content = this.blocks(node.children);
         this.containers.pop();
-        return [prefixLines(content, '> ', '>')];
+        return [quoteLines(content)];
       }
       case 'list':
         return [this.list(node)];
@@ -295,7 +306,7 @@ class Writer {
 
   /** Linear writes every link destination in angle brackets, without a title. */
   private link(children: readonly PhrasingContent[], url: string): string {
-    return `[${this.inline(children)}](<${destination(url).replace(/</g, '%3C').replace(/>/g, '%3E')}>)`;
+    return `[${this.inline(children)}](${linkDestination(url)})`;
   }
 
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
@@ -381,6 +392,16 @@ function destination(url: string): string {
     .replace(/ /g, '%20')
     .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
     .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
+}
+
+/**
+ * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded, and a
+ * backslash at its end doubled, so it cannot escape the closing bracket.
+ */
+export function linkDestination(url: string): string {
+  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
+  const trailing = /\\*$/.exec(inner)![0].length;
+  return `<${inner}${trailing % 2 === 1 ? '\\' : ''}>`;
 }
 
 /** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */

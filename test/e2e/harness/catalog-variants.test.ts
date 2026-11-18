@@ -188,16 +188,53 @@ describe('the API-path image gate', () => {
     allHold(outcomes, [...INVARIANTS, ...scenario('L2-42').checks.assertions.map(assertion => assertion.subject)]);
   });
 
-  it('L2-42 still blocks upload bytes that are HTML and clears the notice after correction', { timeout: 240_000 }, async (t) => {
+  // Live L2-42 showed two things the plain fake does not: Linear stores a link destination in angle brackets,
+  // and the repaired document also holds an image of the repository that Linear holds as an upload.
+  it('L2-42: the repaired link is written as Linear stores it, beside an uploaded image of the repository', { timeout: 240_000 }, async (t) => {
+    const dead = 'https://uploads.linear.app/fake-workspace/plan-dead.png';
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/eL9GtQAAAABJRU5ErkJggg==', 'base64');
+    const documents = { ...DOCUMENTS, 'eng/notes/images/logo.png': png, 'eng/notes/item-1.md': '# Notes 1\n\n![Logo](images/logo.png)\n\nFirst paragraph.\n\nSecond paragraph.\n' };
+    const linked = /(?<![!\\])\[([^\]]*)\]\((https:\/\/[^\s()<>]+)\)/g;
+    const writtenBack: string[] = [];
+    const outcomes = await runOnFakeServices(t, scenario('L2-42'), documents, {
+      intercept: (url, init) => {
+        if (typeof init?.body === 'string' && /\.\.\/images\/plan-/.test(init.body)) init.body = init.body.replace(/\.\.\/images\/plan-[a-z0-9-]+\.png/g, dead);
+        if (url === dead) return new Response('', { status: 404 });
+        if (!url.endsWith('/graphql') || typeof init?.body !== 'string') return undefined;
+        const body = JSON.parse(init.body) as { variables?: { input?: { content?: string } } };
+        const input = body.variables?.input;
+        if (typeof input?.content === 'string' && input.content.includes(dead)) {
+          writtenBack.push(input.content);
+          // Linear's spelling: every inline link destination in angle brackets, image destinations bare.
+          input.content = input.content.replace(linked, '[$1](<$2>)');
+          init.body = JSON.stringify(body);
+        }
+        return undefined;
+      },
+      inspect: async (ctx: RunContext) => {
+        const source = ctx.observations.get('imageRepair.source') as { path: string; body: string };
+        const proposal = ctx.observations.get('imageRepair.proposal') as { recorded: string; proposed: string };
+        assert.equal(source.path, 'eng/notes/item-1.md');
+        assert.doesNotMatch(source.body, /images\/logo\.png/, 'Linear holds the logo as an upload');
+        assert.match(proposal.recorded, /!\[Logo\]\(images\/logo\.png\)/, 'git holds the logo at its path');
+        assert.ok(proposal.proposed.includes(`](<${dead}>)`), 'the proposal spells the link as Linear stores it');
+      },
+    });
+    // The editor's own write holds the image with a bare destination; only the write-back holds the link.
+    assert.ok(writtenBack.some(content => content.includes(`](<${dead}>)`) && !content.includes(`](${dead})`)), "the write-back sends the link in Linear's spelling");
+    allHold(outcomes, [...INVARIANTS, ...scenario('L2-42').checks.assertions.map(assertion => assertion.subject)]);
+  });
+
+  it('L2-42 still blocks upload bytes that are HTML and clears the mark after correction, keeping its notice open', { timeout: 240_000 }, async (t) => {
     const invalid = 'https://uploads.linear.app/fake-workspace/invalid.png';
     const spec = scenario('L2-42');
     spec.steps[3] = {kind: 'linear', action: 'remove-image', args: {actor: 'editor-a'}};
     spec.checks.assertions = [
       {subject: 'tracked.uploadedImage', operator: 'equal', expected: true},
-      {subject: 'blocked.icon', operator: 'equal', expected: 'Cross'},
+      {subject: 'blocked.icon', operator: 'equal', expected: 'Alert'},
       {subject: 'blocked.color', operator: 'equal', expected: 'red'},
       {subject: 'blocked.imageLines', operator: 'same-as', expected: 'expected.blockedImageLines'},
-      {subject: 'blocked.openImageNotices', operator: 'equal', expected: 0},
+      {subject: 'blocked.openImageNotices', operator: 'equal', expected: 1},
       {subject: 'blocked.marksRestored', operator: 'equal', expected: true},
       {subject: 'tracked.body', operator: 'same-as', expected: 'linear.body'},
       {subject: 'pullRequests.lintFindings', operator: 'equal', expected: []},

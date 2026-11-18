@@ -267,7 +267,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
       work.push({ kind: 'set', path, entry, document, ...previous });
       continue;
     }
-    // The cross was taken off (the document came back from the trash, or a person changed its icon): put it back.
+    // The mark was taken off (the document came back from the trash, or a person changed its icon): put it back.
     const repaint = document.icon !== MARKS.suspended.icon || document.color !== MARKS.suspended.color;
     // Only the suspended head's own failure edits a posted comment.
     if (failure === undefined || hold.failure === failureKey(failure)) {

@@ -76,10 +76,12 @@ What both commands leave alone:
   the sync would upload the file
   it names, so only the repository chooses which files reach Linear. A
   link the file already had stays allowed.
-- **The sync's conflict markers.** A conflict the sync writes is ordinary
-  bold paragraphs (`**Sync conflict: git version**` and so on) and passes
-  both commands unchanged ([conflicts](conflicts.md) shows them and how to
-  resolve them). Git's own conflict markers do not: see
+- **The sync's conflict markers.** A conflict the sync writes is three
+  one-line warning callouts (`> **Sync conflict: git version**` and so on,
+  each with Linear's color comment above it) around the two versions as
+  ordinary text, and passes both commands unchanged, as do the bold marker
+  paragraphs earlier versions wrote ([conflicts](conflicts.md) shows them
+  and how to resolve them). Git's own conflict markers do not: see
   [`git-conflict-marker`](#git-conflict-marker).
 - **Constructs Linear keeps as they are**, though it may show some as plain
   text: raw HTML without URLs, HTML comments, `<details>`, `<u>`, `<sub>`,
@@ -110,7 +112,11 @@ Blocks:
   `1. a`.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
   `- [X] done`.
-- Lazy quote lines get their `>`.
+- Lazy quote lines get their `>`. A blank line between blocks in a quote
+  is a bare `>`; a blank line inside a code block in a quote keeps the
+  space (`> `), as Linear writes it.
+- Linear's color comment of a callout (`<!-- linear:callout color=... -->`)
+  stays directly above its callout, with no blank line between them.
 - Tilde fences and indented code become backtick fences. A fence whose info
   string holds a backtick stays a tilde fence, since a backtick fence cannot
   carry one.
@@ -270,7 +276,8 @@ to the page instead.
 
 Documents over 250,000 characters are rejected. Linear's API refuses the
 whole document. The limit counts Unicode code points of the text after the
-front matter.
+front matter. Such a document is not checked further, so
+`content-too-long` is its only finding: shorten it, then lint it again.
 
 ```text
 A 260 KB log pasted into one Markdown file.
@@ -572,7 +579,7 @@ to the pull request branch and runs the checks again, so the branch reaches
 - The jobs use the exact head of the pull request; if the branch moves
   before the push, the push fails without overwriting the newer commits.
 - It dispatches this workflow again on the fixing commit, so all three
-  checks come from genuine jobs on that head. It creates no synthetic checks.
+  checks come from real jobs on that head. It creates no check runs itself.
   Dispatch runs only verify the fixed head: if hooks change it again, the
   run fails with a patch instead of pushing or dispatching again. A pull
   request without fixes shows `pre-commit fixes` as skipped.
@@ -593,8 +600,7 @@ to the pull request branch and runs the checks again, so the branch reaches
 
 Dispatch runs must enforce the same checks as pull-request runs; do not make
 their tests optional through dispatch inputs or event conditions. The sync
-verifies the workflow path and exact head as well as each job's check-run
-identity. Its additional file-blob guard does not prove which PR workflow
-revision executed ([check verification](usage.md#the-sync-pull-request)).
+counts a check by its name and the GitHub Actions App, whichever event ran
+it ([the sync pull request](usage.md#the-sync-pull-request)).
 Updating the formatter example requires enabling its `workflow_dispatch`
 trigger on the default branch too.
