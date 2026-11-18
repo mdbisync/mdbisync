@@ -9,6 +9,7 @@ import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } fr
 import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
 import { type ResolvedTargets, projectKey } from '../setup/index.ts';
 import { message } from '../messages.ts';
+import { documentPath } from '../sync/paths.ts';
 import { type FileLeftOutRule, type LeftOutAtWriteRule } from '../codes.ts';
 
 /**
@@ -43,7 +44,11 @@ export interface OverwriteEntry {
   documentId: string;
 }
 
-/** A Linear document no synchronized file matches; `path` is where its file would be. */
+/**
+ * A Linear document no synchronized file matches. `path` is the path of the file of the tracked branch that holds
+ * its title (a newer duplicate), and otherwise `<folder>/<document id>.md`: a title from Linear alone is never
+ * reported.
+ */
 export interface TrashEntry {
   path: string;
   title: string;
@@ -172,15 +177,25 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   const filesByTitle = new Map(synced.map((document) => [titleIn(document.place, document.title), document]));
   const matched = new Set<string>();
   const folders = new Map(annotatedPlaces(mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
+  const occupied = new Set([...mapping.documents, ...mapping.leftOut, ...mapping.unsynced].map((file) => file.path));
   for (const { place, documents } of input.places) {
     const folder = folders.get(placeKey(place)) ?? '';
-    const wouldBeAt = (title: string) => `${folder === '' ? '' : `${folder}/`}${title}.md`;
+    // A title no file of the tracked branch holds comes from Linear alone and reaches the job summary and the report,
+    // which no security hook reads: such a document is named by its id, at a path no mapped file takes. A newer
+    // duplicate of a file's title is reported at that file's path, the repository's own text.
+    const wouldBeAt = (key: string, document: LinearDocument) => {
+      const own = filesByTitle.get(key)?.path ?? leftOutTitles.get(key);
+      if (own !== undefined) return own;
+      const path = documentPath(folder, document.id, document.id, occupied);
+      occupied.add(path);
+      return path;
+    };
     const oldestFirst = [...documents].sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
     for (const document of oldestFirst) {
       if (!live(document)) continue;
       const key = titleIn(place, document.title);
       // A title a changed document holds is taken by nothing this run: no document of it is written, trashed or
-      // imported. A changed document without a file is reported where its file would be.
+      // imported. A changed document without a file is reported by its id (see `wouldBeAt`).
       if (touched(place, document.title)) {
         const leftOutPath = leftOutTitles.get(key);
         const entry = leftOutPath === undefined ? undefined : leftOut.get(leftOutPath);
@@ -189,7 +204,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
           // A file left out by another rule too, such as one stored in LFS.
           if (changed.has(document.id)) leaveOut(entry.path, ['changed-during-run']);
         } else if (changed.has(document.id)) {
-          const path = wouldBeAt(document.title);
+          const path = wouldBeAt(key, document);
           leaveOut(path, ['changed-during-run']);
           (leftOut.get(path) as LeftOutEntry).documentId ??= document.id;
         }
@@ -209,7 +224,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
           continue;
         }
       }
-      plan.trash.push({ path: wouldBeAt(document.title), title: document.title, place, documentId: document.id });
+      plan.trash.push({ path: wouldBeAt(key, document), title: document.title, place, documentId: document.id });
     }
   }
   for (const document of synced) {
