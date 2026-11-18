@@ -50,6 +50,8 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
   const entries: IdMap[] = [await readIds(git, state.ids)];
   const before = await idsBeforeProgress(git, state.ids);
   if (before !== null && before !== state.ids) entries.push(await readIds(git, before));
+  // The ids the run started from: an unfinished initial sync's progress commits do not bring lost ids back.
+  const started = before === null ? new Map() : before === state.ids ? entries[0]! : entries[1]!;
 
   const byId = new Map<string, Set<string>>();
   const add = (id: string, targets: Iterable<string>) => {
@@ -82,7 +84,7 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
   const planned = [...plan.create, ...plan.overwrite].map((entry) => ({ entry, identities: identify(entry) }));
   // With the ids lost, a document no planned file is known to be (its title changed in Linear, or another document
   // took its title) may be any planned file, so its targets protect every one. With the ids, such a file is new.
-  const idsLost = entries.every((ids) => ids.size === 0);
+  const idsLost = started.size === 0;
   const orphaned = idsLost ? [...byId].filter(([id]) => !identified.has(id)) : [];
   for (const { entry, identities } of planned) {
     const targets = new Set<string>();

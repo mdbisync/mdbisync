@@ -128,7 +128,7 @@ describe('initial sync from git keeps plain-link provenance', () => {
     assert.doesNotMatch((await h.documentOf(PLAN)).content!, /uploads\.linear\.app/);
   });
 
-  it('with the ids ref deleted and the document replaced in Linear by another with its title', async () => {
+  for (const resumed of [false, true]) it(`with the ids ref deleted and the document replaced in Linear by another with its title (resumed ${resumed})`, async () => {
     await repairedLink();
     const original = await h.documentOf(PLAN);
     original.trashed = true;
@@ -137,8 +137,20 @@ describe('initial sync from git keeps plain-link provenance', () => {
     const replacement = { ...kept, id: 'replacement-plan', trashed: false, content: '# Plan\n\nDraft.\n', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     h.world.linear.documents.push(replacement);
     await deleteRef('ids');
+    if (resumed) {
+      // A first run stops after writing one document before the plan: its progress commit holds ids again.
+      for (const page of ['combined/page-0.md', 'combined/page-1.md']) await h.editRef('refs/heads/main', page, `# ${page}\n\nRevised.\n`);
+      const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(h.fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '1' };
+      Object.assign(process.env, hooks);
+      try {
+        assert.equal((await initialSync()).report.initialSync?.complete, false);
+      } finally {
+        for (const name of Object.keys(hooks)) delete process.env[name];
+      }
+    }
     const run = await initialSync();
     assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.resumed, resumed);
     assert.ok(run.report.initialSync?.overwritten.includes(PLAN), JSON.stringify(run.report.initialSync));
     assert.ok(!h.world.linear.uploads.some((upload) => upload.filename === SECRET), 'recovery uploaded the file into the replacement');
     assert.doesNotMatch(replacement.content ?? '', /uploads\.linear\.app/);
