@@ -177,7 +177,7 @@ describe('capture from Linear', () => {
     assert.match(result.summary, /image-repair-budget: "plan"/);
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
     await assert.rejects(text('docs/charts.md'));
-    assert.equal(await text('docs/safe.md'), 'Safe addition.\n');
+    assert.equal(await text('docs/safe.md'), 'Safe addition.');
   });
 
   it('captures edits with previous front matter; repeated capture makes no content commit', async () => {
@@ -1181,7 +1181,7 @@ describe('capture from Linear', () => {
         const ids = await readIds(context.git, result.state.ids);
         assert.equal(ids.get('docs/titled.md')?.id, 'titled');
         assert.equal(ids.get('docs/ordinary.md')?.id, 'ordinary', 'a clean title keeps its path');
-        assert.equal(await text('docs/ordinary.md'), 'Ordinary.\n');
+        assert.equal(await text('docs/ordinary.md'), 'Ordinary.');
         await assertNoToken(result);
         await refresh();
       }

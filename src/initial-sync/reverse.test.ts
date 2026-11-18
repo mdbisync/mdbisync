@@ -1702,7 +1702,8 @@ describe('the security gate of an initial sync from Linear', () => {
       const SECRET = ['blocked', 'value', '906'].join('-');
       const count = 16;
       const ids = Array.from({ length: count }, (_, i) => `doc-dense-${String(i).padStart(2, '0')}`);
-      const dense = ids.map((id, i) => doc(id, `dense-${String(i).padStart(2, '0')}`, { projectId: 'project-api' }, `${i === 0 ? `${SECRET}\n\n` : ''}${ids.filter((other) => other !== id).map((other) => `[${other}](${url(other)})`).join('\n')}\n`));
+      // In Linear's own form (links in angle brackets, no final newline), so the written text is Linear's.
+      const dense = ids.map((id, i) => doc(id, `dense-${String(i).padStart(2, '0')}`, { projectId: 'project-api' }, `${i === 0 ? `${SECRET}\n\n` : ''}${ids.filter((other) => other !== id).map((other) => `[${other}](<${url(other)}>)`).join('\n')}`));
       world.linear.documents = [...linearDocuments(), ...dense];
       const staged = { sets: 0 };
       const result = await gated(fixture, world, (text) => text.includes(SECRET), 2, staged);
