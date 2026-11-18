@@ -83,6 +83,7 @@ export const MESSAGES = {
   'pull-request.initial-pending': 'stopped short ({code}): an initial sync from Linear waits for a person to merge it',
   'pull-request.head-unverified': 'waits for a person ({code}): the sync pull request also changes files that are not synchronized documents or their assets ({files}); a person reviews and merges it',
   'pull-request.not-finished': 'not finished ({code}); run it again',
+  'pull-request.suspended-asset-discovery': 'the batch stays suspended ({code}). {reason}',
 
   // The setup check.
   'setup.left-out': '{count} files left out, not synced: {files}{more}',

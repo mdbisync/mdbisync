@@ -60,8 +60,9 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   await checkpoint('after-capture-push-before-pr');
   // Pending checks and suspended batches still allow steps 3 to 5 for other documents.
   const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks, security: options.security });
-  // Writing Linear from the tracked branch while that pull request waits would leave it to be merged over the new state.
-  if (pullRequest.code === 'initial-pull-request-pending') return { complete: false, changed, trackedTip, capture: captured, pullRequest };
+  // A pending initial pull request needs the current state intact until it merges.
+  // Incomplete asset discovery also keeps state intact until the held files are known.
+  if (pullRequest.code === 'initial-pull-request-pending' || pullRequest.code === 'suspended-asset-discovery') return { complete: false, changed, trackedTip, capture: captured, pullRequest };
   // The suspended marks follow the lane's push: set for new episodes, edited for a new failure, cleared at release.
   if (pullRequest.code !== 'state-moved') {
     const marks = await reconcileHoldMarks(context, { config: options.config, state: captured.state, documents: captured.documents, github: options.github, failure: pullRequest.suspended?.failure, batchFailure: pullRequest.suspended?.batchFailure, linear: context.linear });
