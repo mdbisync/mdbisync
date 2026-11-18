@@ -66,7 +66,7 @@ import {
   commitTree,
 } from '../state/index.ts';
 import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_MESSAGE_LENGTH, linkTarget, plainLine } from './hold.ts';
-import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
+import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgainDue, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
 import { LaneMoved, LaneConflict, commitLaneIds, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
@@ -353,8 +353,10 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
     // the branch was rewritten, or the sync last pushed it before it recorded its heads) gets a commit of the sync's own
     // on top, with the same tree. Its push starts the repository's whole CI and is recorded, so the pull request can
     // merge without waiting for a Linear change.
+    // The same for a head someone else pushed whose expected checks never started on it (see `checksAgainDue`).
     if (head === sync && pending && options.state.ids !== null
-      && !(await expectedChecks(github, sync as Oid, [], { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) })).complete) {
+      && (!(await expectedChecks(github, sync as Oid, [], { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) })).complete
+        || (open !== null && await checksAgainDue(github, sync as Oid, options.requiredChecks ?? [], { body: open.body, git, base: tracked, pushed: await ownPushed(context, options) }, options)))) {
       head = await commitTree(git, { base: headTree as string, changes: new Map(), parents: [sync as Oid], message: CHECKS_AGAIN_MESSAGE, identity, skipIfUnchanged: false });
     }
 

@@ -534,6 +534,15 @@ describe('sync: pull request checks', () => {
     const waiting = await sync(deadline);
     assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
     assert.match(waiting.summary, /waits for its checks/);
+    // The formatter's head gets the sync's own commit on top once; its checks do not start there either.
+    backdate('mdbisync/linear', 6);
+    const again = await sync(deadline);
+    assert.equal(again.report.pullRequest?.branchMoved, true);
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P', await rev(SYNC_BRANCH)]), fixed);
+    backdate('mdbisync/linear', 6);
+    const own = await sync(deadline);
+    assert.equal(own.report.pullRequest?.branchMoved, undefined, 'pushed again on a head the sync pushed itself');
+    assert.deepEqual(own.writes, []);
     backdate('mdbisync/linear', 11);
     const late = await sync(deadline);
     assert.equal(late.result.exitCode, SETUP_FAILED_EXIT_CODE, late.result.stderr);
@@ -546,6 +555,38 @@ describe('sync: pull request checks', () => {
     const document = await documentOf(path);
     assert.notEqual(document.icon, MARKS.suspended.icon);
     assert.deepEqual(commentsOf(document), []);
+  });
+
+  // A formatter's fix pushed with a workflow's own token starts no other workflow: without a push of the sync's own, its
+  // head would wait for a Linear change or the deadline. A run held for approval registers no check run, so it holds nothing.
+  it('runs the checks again on a formatter\'s head whose expected checks never start, and merges without a Linear change', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const waiting = await sync();
+    assert.equal(waiting.report.pullRequest?.branchMoved, undefined, 'pushed before the formatter\'s checks had time to start');
+    assert.deepEqual(waiting.report.pullRequest?.checks?.missing, ['tests']);
+    backdate('mdbisync/linear', 4);
+    const early = await sync();
+    assert.equal(early.report.pullRequest?.branchMoved, undefined, 'pushed before the head waited five minutes');
+    backdate('mdbisync/linear', 6);
+    const transport = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => {
+      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
+      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+      return transport(input, init);
+    };
+    const run = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.pullRequest?.branchMoved, true);
+    assert.ok(run.report.pullRequest?.merged, 'the head the sync pushed on the formatter\'s fix did not merge');
+    const merged = (await h.fixture.remote.text(['show', '-s', '--format=%P', await rev('refs/heads/main')])).split(' ')[1] as string;
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P%n%s', merged]), `${fixed}\nRun the checks again on the sync branch`);
+    assert.equal(await rev(`${merged}^{tree}`), await rev(`${fixed}^{tree}`));
+    assert.equal(h.world.github.pullRequests.length, 1);
   });
 
   it('waits for a configured required check that is not registered, and merges once it passes', async () => {

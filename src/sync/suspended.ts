@@ -14,7 +14,7 @@ import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, rea
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure } from '../pull-request/index.ts';
-import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict, type RequiredCheck } from './deadline.ts';
+import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgainDue, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict, type RequiredCheck } from './deadline.ts';
 
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
 export const SET_ASIDE_MESSAGE = 'Set aside suspended changes';
@@ -278,7 +278,10 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // A head whose earlier checks the branch's history does not show (no head the sync signed a record of pushing is below
   // it: the branch was rewritten, or the record was written before records were signed) gets a commit of the sync's
   // own on top, with the same files, as on the normal lane: its push runs the checks again and is recorded.
-  if (head === previous && !(await expectedChecks(options.github, head, [], { body: undefined, git, base: tracked, pushed: lastPushed(context, options, ids) })).complete) {
+  // The same for a head someone else pushed whose expected checks never started on it (see `checksAgainDue`).
+  const pushed = lastPushed(context, options, ids);
+  if (head === previous && (!(await expectedChecks(options.github, head, [], { body: undefined, git, base: tracked, pushed })).complete
+    || (pushed !== head && await checksAgainDue(options.github, head, options.requiredChecks ?? [], { body: (await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch))?.body, git, base: tracked, pushed }, options)))) {
     head = await commit(context, options, await git.text(['rev-parse', `${head}^{tree}`]), [head], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view));
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);

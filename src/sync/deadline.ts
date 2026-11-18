@@ -12,7 +12,7 @@
 
 import { CommitNotFoundError } from '../pull-request/merge.ts';
 import { type MovedJobSource, WORKFLOW_FILE, type WorkflowIdentity, workflowRevision } from '../pull-request/actions.ts';
-import { type CheckExpectation, type CheckFailure, type CheckPublisher, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, checkState, readCommitChecks } from '../pull-request/index.ts';
+import { type CheckExpectation, type CheckFailure, type CheckPublisher, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, checkState, readChecks, readCommitChecks } from '../pull-request/index.ts';
 import { type Git, type Oid } from '../state/index.ts';
 
 export const DEFAULT_CHECK_DEADLINE_MINUTES = 60;
@@ -266,6 +266,32 @@ export function checkExpectation(options: { mergeWithoutChecks?: boolean | undef
 /** Whether a pending head waits only for checks that never registered on it. */
 export function checksMissing(checks: CheckState, expectation: CheckExpectation): boolean {
   return checks.pending.length === 0 && ((checks.missing?.length ?? 0) > 0 || (!checks.hasChecks && expectation.allowNone !== true));
+}
+
+/**
+ * How long a head someone else pushed may wait for checks that never start on it before the sync pushes a commit of its
+ * own on top: long enough for the workflow that pushed it to start the checks it runs itself, well within the deadline.
+ */
+export const CHECKS_AGAIN_AFTER_MINUTES = 5;
+
+/**
+ * Whether the sync pushes a commit of its own on `head`, with the same files, so that the checks run on it: someone
+ * else pushed `head` (a formatter's fix pushed with a workflow's own token starts no other workflow), it has waited
+ * `CHECKS_AGAIN_AFTER_MINUTES` since the description noted it, and it waits only for expected checks that never
+ * registered on it. The sync cannot rerun a check, but its own push starts the repository's whole CI. A head the sync
+ * pushed itself never gets one: if its checks still never start, the deadline reports `checks-missing`. So it happens
+ * at most once for each head someone else pushed.
+ */
+export async function checksAgainDue(github: GitHubRepository, head: Oid, required: readonly RequiredCheck[], earlier: { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined }, options: { mergeWithoutChecks?: boolean | undefined }): Promise<boolean> {
+  if (earlier.pushed === undefined || earlier.pushed === head) return false;
+  const now = new Date();
+  if (!pastDeadline(headSince(earlier.body, head, now), CHECKS_AGAIN_AFTER_MINUTES, now)) return false;
+  const expected = await expectedChecks(github, head, required, earlier);
+  // A head whose earlier checks are unknown gets the sync's commit anyway (see `expectedChecks`).
+  if (!expected.complete) return false;
+  const expectation = checkExpectation(options, expected.checks);
+  const checks = await readChecks(github, head, expectation);
+  return checks.state === 'pending' && checksMissing(checks, expectation);
 }
 
 /** The missing checks as Markdown code, or what is missing when no check ran at all. */
