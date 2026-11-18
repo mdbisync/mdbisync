@@ -65,6 +65,7 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
+import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
 import { captureCursorTrailer, cursorTime, linkVariants, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
 import { type SecurityFinding, type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
@@ -477,6 +478,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool);
     const failed: string[] = [];
     const budget: string[] = [];
+    const repairBudget: string[] = [];
     const imageBlocked: string[] = [];
     const complexity: string[] = [];
     let needsLinkBase = false;
@@ -487,6 +489,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       if (trackedBody !== undefined) trackedBodies.set(entry.path, trackedBody);
       try {
         // Keep parsing and link discovery inside this document's boundary.
+        checkImageRepairSize(content);
         if (linksLinearDocuments(content)) needsLinkBase = true;
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
         const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, trackedBody);
@@ -502,6 +505,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         // after the merge reads the document again and repairs or marks it there.
         if (error instanceof MarkdownLimitError) complexity.push(entry.path);
         else if (error instanceof AttachmentBudgetError) budget.push(entry.path);
+        else if (error instanceof ImageRepairBudgetError) repairBudget.push(entry.path);
         else if (error instanceof ImageBlockedError) imageBlocked.push(entry.path);
         // Not downloaded this run (a network error, a rate limit, a server error, a file it could not place): the file keeps the tracked branch's version.
         else failed.push(entry.path);
@@ -525,6 +529,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       leaveOut(paths.filter((path) => created.has(path)), rule);
     };
     keepTracked(budget, 'attachment-budget');
+    keepTracked(repairBudget, 'image-repair-budget');
     keepTracked(failed, 'download-failed');
     keepTracked(imageBlocked, 'image-blocked');
     keepTracked(complexity, 'markdown-complexity');
