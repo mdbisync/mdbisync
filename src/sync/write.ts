@@ -1109,16 +1109,16 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
     }
     for (const path of nextIds.keys()) nextReserved.delete(path);
-    // A written document the record holds as Linear returned it (its text, title and place; not the tip's old
-    // file) is named with its update time: the next capture need not read it again. A partial record keeps files
-    // from the tip that written documents depend on (an image's old bytes), so it names none: the capture reads them.
+    // Keep the digest for each written document the record holds as Linear returned it. Only a full record adds
+    // update-time trailers that let capture skip reading those documents. A partial record can retain dependencies
+    // from the tip, such as an image's old bytes, so capture still reads them.
     const asWritten = new Map<string, string>();
-    for (const [path, {document}] of merged ? stored : []) {
+    for (const [path, {document}] of stored) {
       const file = merge.result.get(path);
       if (fromTip.has(path) || file === undefined || document.title.normalize('NFC') !== file.title.normalize('NFC') || !inPlace(document, file.place)) continue;
       const entry = nextIds.get(path)!;
       nextIds.set(path, {...entry, observedDigest: observedDigest(document)});
-      asWritten.set(document.id, document.updatedAt);
+      if (merged) asWritten.set(document.id, document.updatedAt);
     }
     // A kept README the merge record holds at a new path (its folder renamed) stays kept there: the set is recorded
     // anew. A partial record keeps the tip's README where it was, and the next run follows the rename again.
