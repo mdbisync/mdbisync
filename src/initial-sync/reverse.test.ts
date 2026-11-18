@@ -743,8 +743,20 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.linear.uploads.length, 0);
   });
 
-  it('stops when Linear refuses the run access to an upload, instead of leaving the document out', async () => {
+  it('keeps the tracked text of a document whose upload Linear refuses while the run access works, and records the rest', async () => {
     const world = fakeWorld();
+    const refused = `${UPLOADS_HOST}/0/refused.png`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Chart](${refused}) ${CANARY}\n` } : d));
+    world.linear.uploads.push({ filename: 'refused.png', contentType: 'image/png', size: 0, assetUrl: refused, status: 403 });
+    const report = await run(world);
+    assert.equal(report.result.exitCode, 0, report.result.stderr);
+    assert.deepEqual(report.report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/plan.md', rule: 'image-blocked' }]);
+    assert.doesNotMatch(await show('refs/mdbisync/linear:eng/notes/plan.md'), /refused\.png/);
+  });
+
+  it('stops when Linear refuses the run access to an upload and the access probe fails, instead of leaving the document out', async () => {
+    const world = fakeWorld();
+    world.linear.uploadAccessStatus = 401;
     const refused = `${UPLOADS_HOST}/0/refused.png`;
     world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Chart](${refused}) ${CANARY}\n` } : d));
     const base = fakeFetch(world);

@@ -64,7 +64,7 @@ import {
   readUploads,
   stateRef,
 } from '../state/index.ts';
-import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
+import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
 import { captureCursorTrailer, cursorTime, linkVariants, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
 import { type SecurityFinding, type SecurityGate, securityGate } from '../sync/security.ts';
@@ -475,7 +475,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
     let entries = [...plan.overwrite, ...plan.create];
     const uploads = await readUploads(git, expected.uploads);
-    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool);
+    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool, undefined, uploadAccessProbe(context.linear));
     const failed: string[] = [];
     const budget: string[] = [];
     const repairBudget: string[] = [];
@@ -498,7 +498,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         if (captured.observedBody !== undefined) { imageBlocked.push(entry.path); continue; }
         bodies.set(entry.path, captured);
       } catch (error) {
-        // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload), ends the run, as in the capture.
+        // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload with a failing probe), ends the run, as in the capture.
         if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
         // An image that cannot be recorded here (a pending repair or a blocked upload): the
         // document's text does not enter git. This sync writes nothing to Linear, so the first sync

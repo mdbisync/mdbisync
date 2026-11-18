@@ -62,6 +62,8 @@ export interface FakeUpload {
   size: number;
   assetUrl: string;
   bytes?: Buffer;
+  /** An answer other than the file, such as 403 for an upload the workspace cannot read. */
+  status?: number;
 }
 
 /** Where the fake's asset URLs point. */
@@ -188,6 +190,8 @@ export interface FakeWorld {
     teams: FakeTeam[];
     projects: FakeProject[];
     documents: FakeDocument[];
+    /** The HTTP status Linear answers the capture's access probe with, when it refuses the token (401). */
+    uploadAccessStatus?: number;
     /** Optional deterministic query-boundary edits by a test user. */
     beforeQuery?: (operation: string, variables: Record<string, unknown>) => void;
     writes: FakeWrites;
@@ -262,6 +266,7 @@ export function fakeFetch(world: FakeWorld): typeof fetch {
     try { parsed = new URL(url); } catch { throw new Error(`unexpected request to ${url}`); }
     if (method === 'GET' && parsed.origin === uploadsUrl.origin) {
       const upload = world.linear.uploads.find((entry) => entry.assetUrl === url);
+      if (upload?.status !== undefined) return new Response(null, {status:upload.status});
       return upload?.bytes === undefined ? new Response(null, {status:404}) : new Response(upload.bytes, {headers:{'content-type':upload.contentType}});
     }
     if (parsed.origin === githubUrl.origin && (parsed.pathname === githubUrl.pathname || parsed.pathname.startsWith(`${githubUrl.pathname}/`))) {
@@ -547,6 +552,10 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       .filter((project) => names.includes(project.name))
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
     return json(200, { data: { teams, projects: { nodes, pageInfo: { hasNextPage: false } }, ...visible } });
+  }
+  if (operationName === 'UploadAccess') {
+    const status = world.linear.uploadAccessStatus;
+    return status === undefined ? json(200, { data: { viewer: { id: 'integration-one' } } }) : json(status, { errors: [{ message: 'Authentication required, not authenticated', extensions: { code: 'AUTHENTICATION_ERROR' } }] });
   }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });

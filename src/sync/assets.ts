@@ -5,7 +5,7 @@ import type { Definition, Link } from 'mdast';
 import { destinations, findFileLinks, resolveTarget } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import { encodeFragment } from '../initial-sync/links.ts';
-import { type LinearReads, uploadReadKey, LinearError, LinearHttpError } from '../linear/index.ts';
+import { type LinearClient, type LinearReads, uploadReadKey, LinearError, LinearHttpError, LinearStoppedError, isTransientLinearError } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
@@ -165,7 +165,7 @@ async function download(url: string, fetcher: typeof fetch, reads: LinearReads |
   if (kept !== undefined && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
   try {
     const response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
-    // Access failures belong to the client, never to an individual document.
+    // A refusal may be the client's access or one file the workspace cannot read: the capture decides with a probe.
     if (response.status !== 200) await response.body?.cancel().catch(() => {});
     if (response.status === 401 || response.status === 403) throw new LinearHttpError('DownloadUpload', response.status);
     if (response.status === 429 || response.status >= 500) throw new DownloadRetryError();
@@ -198,8 +198,31 @@ async function download(url: string, fetcher: typeof fetch, reads: LinearReads |
   }
 }
 
-/** One lazily built hash index per capture, read in bounded batches. */
-export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fetcher: typeof fetch = fetch, reads?: LinearReads, spool = new ContentSpool(), limits: {documentCount: number; documentBytes: number; runCount: number; runBytes: number} = ATTACHMENT_LIMITS) {
+/**
+ * The capture's access probe: a read any token that can sync makes, answered by Linear's API, not its upload host.
+ * It always goes to the network: a staged step's kept answer says nothing about the token in use now.
+ */
+export function uploadAccessProbe(linear: Pick<LinearClient, 'transport'>): () => Promise<unknown> {
+  return () => linear.transport.queryLive('UploadAccess', 'query UploadAccess { viewer { id } }');
+}
+
+/**
+ * One lazily built hash index per capture, read in bounded batches.
+ * `probe` is an authenticated request that succeeds while the client's own Linear access works. After an
+ * upload answers 401 or 403, a probe that succeeds blocks only the documents that link that file; without a
+ * probe, or when it fails, the refusal stops the capture as an access error of the client.
+ */
+export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fetcher: typeof fetch = fetch, reads?: LinearReads, spool = new ContentSpool(), limits: {documentCount: number; documentBytes: number; runCount: number; runBytes: number} = ATTACHMENT_LIMITS, probe?: () => Promise<unknown>) {
+  // One probe per capture: its answer holds for every refused upload of the run. A probe that Linear stopped
+  // (rate limit, budget) or that may succeed next time ends the capture as that, not as the upload's refusal.
+  let access: Promise<{works: true} | {works: false; error: unknown}> | undefined;
+  const accessWorks = async (refusal: LinearHttpError): Promise<boolean> => {
+    access ??= probe === undefined ? Promise.resolve({works: false, error: refusal}) : probe().then(() => ({works: true}) as const, (error: unknown) => ({works: false, error}) as const);
+    const answer = await access;
+    if (answer.works) return true;
+    if (answer.error instanceof LinearStoppedError || (answer.error instanceof LinearError && isTransientLinearError(answer.error))) throw answer.error;
+    return false;
+  };
   // Every file of the tree with each content hash, in tree order.
   const hashPaths = new Map<string, string[]>();
   const pathHashes = new Map<string, string>();
@@ -416,7 +439,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
             counted.add(url);
             asset = {file: spool.put(fresh.bytes), type: fresh.type};
           }
-          catch (error) {
+          catch (thrown) {
+            // A file the client cannot read while its own access works (another workspace's upload, a revoked one)
+            // is this document's problem: it is blocked, and the run goes on.
+            const error = thrown instanceof LinearHttpError && thrown.operation === 'DownloadUpload' && await accessWorks(thrown) ? new DownloadBlockedError('unreadable') : thrown;
             if (error instanceof DownloadBlockedError || error instanceof DownloadRetryError) failed.set(url, error);
             if (error instanceof DownloadRetryError) { retry = error; continue; }
             if (!(error instanceof DownloadBlockedError)) throw error;

@@ -916,7 +916,8 @@ describe('capture from Linear', () => {
   });
 
   for (const status of [401, 403]) {
-    it(`stops capture on upload HTTP ${status} without marking any document or publishing`, async () => {
+    it(`stops capture on upload HTTP ${status} with a failing access probe, without marking any document or publishing`, async () => {
+      world.linear.uploadAccessStatus = 401;
       world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/file.png)';
       world.linear.documents.push({id:'aaa', title:'blocked', projectId:'project-api', content:'![External](https://example.com/file.png)', createdAt:'2026-01-04T00:00:00Z'});
       const before = context.fetched.state;

@@ -25,7 +25,7 @@ import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
+import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
 import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
 import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
@@ -363,7 +363,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
-    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool);
+    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool, undefined, uploadAccessProbe(linear));
     type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
     // A rejected target links to its accepted file, if it has one.
