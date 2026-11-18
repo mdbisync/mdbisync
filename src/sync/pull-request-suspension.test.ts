@@ -536,6 +536,46 @@ describe('sync: pull request suspension', () => {
     assert.ok(released.report.pullRequest?.suspended?.released, 'CI on the formatter fix did not release');
   });
 
+  // As on the normal lane: a fixer's push with a workflow token starts no pull_request checks, so its CI comes from a
+  // dispatch run under the same job names, while GitHub holds a pull_request run of that push for approval. The sync
+  // reads check runs and statuses only, and the held run has no check runs, so it leaves nothing for the sync to see.
+  // The dispatch run's checks count: the batch is released on the first run after they pass, with no Linear change.
+  it('releases a suspended batch whose fixed head has checks only from a dispatch run beside a held run without check runs', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne(path);
+    await sync();
+    const fixed = await h.editRef(SUSPENDED, path, '# Plan\n\nHeld Linear edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    const main = await rev('refs/heads/main');
+    const asked = h.githubRequests.length;
+    // The dispatch run still runs `ci`: the batch waits.
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'ci', status: 'in_progress' }]);
+    const waiting = await sync();
+    assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+    assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released while `ci` still ran');
+    assert.equal(await rev(SUSPENDED), fixed);
+    assert.equal(await rev('refs/heads/main'), main);
+    // Five minutes on, the sync runs the checks again only on a head where an expected check never registered; here
+    // `ci` did register, from the dispatch run, so the sync pushes nothing.
+    h.backdate('mdbisync/suspended', 6);
+    const later = await sync();
+    assert.equal(later.result.exitCode, 0, later.result.stderr);
+    assert.equal(later.report.pullRequest?.suspended?.released, undefined, 'released while `ci` still ran, six minutes on');
+    assert.equal(await rev(SUSPENDED), fixed, 'ran the checks again on a head whose dispatch run had started `ci`');
+    assert.equal(await rev('refs/heads/main'), main);
+    // The dispatch run passed.
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, ...PASSED]);
+    const released = await sync();
+    assert.equal(released.result.exitCode, 0, released.result.stderr);
+    assert.ok(released.report.pullRequest?.suspended?.released, 'the dispatch run\'s passing checks did not release the fixer\'s head');
+    assert.equal(openPullRequests().length, 0);
+    assert.match(await show(`refs/heads/main:${path}`), /Formatted/);
+    assert.deepEqual(released.report.pullRequest?.holdMarks?.cleared, [path]);
+    const document = await documentOf(path);
+    assert.equal(commentsOf(document).length, 1);
+    assert.equal(commentsOf(document)[0]?.resolved, true);
+    assert.ok(!h.githubRequests.slice(asked).some((request) => request.includes('/actions/')), 'the sync read GitHub Actions');
+  });
+
   // A Linear edit of a suspended document is a push of the sync's own on the suspended branch: a check its CI no longer
   // runs (a renamed job) stays expected for that one push only, as on the normal lane.
   it('stops expecting a renamed check once the sync pushed the suspended branch twice', async () => {
