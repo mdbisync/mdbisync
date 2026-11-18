@@ -5,7 +5,7 @@
 
 import { createHash } from 'node:crypto';
 import { message } from '../messages.ts';
-import { type Git, GitError, type Oid } from './git.ts';
+import { type Git, GitError, GitOutputLimitError, type Oid } from './git.ts';
 
 export interface LfsPointer {
   /** SHA-256 of the content, lowercase hex. */
@@ -160,9 +160,14 @@ async function readLfsObject(git: Git, remoteArgs: readonly string[], pointer: L
     const result = await git.run([...remoteArgs, 'lfs', 'smudge', '--', path], {
       input: pointerText,
       env: { GIT_LFS_SKIP_SMUDGE: undefined },
+      // A failed smudge may return the pointer itself.
+      maxOutputBytes: Math.max(pointer.size, MAX_POINTER_SIZE),
     });
     content = result.stdout;
   } catch (error) {
+    if (error instanceof GitOutputLimitError) {
+      return { ok: false, reason: `LFS object ${pointer.oid} could not be read (output limit exceeded)` };
+    }
     if (!(error instanceof GitError)) throw error;
     if (!(await runs())) throw new GitLfsMissingError();
     return { ok: false, reason: `LFS object ${pointer.oid} could not be read (exit code ${error.code})` };

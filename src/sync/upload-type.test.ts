@@ -25,6 +25,49 @@ for (const xml of [
 const SVG = 'xmlns="http://www.w3.org/2000/svg"';
 const XHTML = 'http://www.w3.org/1999/xhtml';
 
+it('refuses a static SVG above the element limit', () => {
+  const group = '<g>' + '<rect/>'.repeat(999) + '</g>';
+  const atLimit = group.repeat(49) + '<rect/>'.repeat(999);
+  assert.equal(uploadExtension(Buffer.from(`<svg>${atLimit}</svg>`)), '.svg');
+  const overLimit = Buffer.from(`<svg>${atLimit}<rect/></svg>`);
+  assert.equal(uploadExtension(overLimit), null);
+  assert.equal(admitsCapturedFile(`docs/assets/${'a'.repeat(64)}.svg`, overLimit), false);
+});
+
+it('counts namespace declarations against the SVG complexity limit', () => {
+  const group = '<g xmlns:d="urn:drawing">' + '<rect/>'.repeat(8) + '</g>';
+  const atLimit = group.repeat(4999) + '<rect/>'.repeat(9);
+  assert.equal(uploadExtension(Buffer.from(`<svg>${atLimit}</svg>`)), '.svg');
+  assert.equal(uploadExtension(Buffer.from(`<svg>${atLimit}<rect/></svg>`)), null);
+});
+
+it('restores shadowed SVG bindings and removes local bindings before visiting siblings', () => {
+  const xlink = 'http://www.w3.org/1999/xlink';
+  // Use an unprefixed element where the element prefix is shadowed.
+  const group = `<g xmlns:s="${xlink}" xmlns:local="${xlink}"><use s:href="#shape" local:href="#shape"/></g>`;
+  const open = '<svg xmlns:s="http://www.w3.org/2000/svg">';
+  assert.equal(uploadExtension(Buffer.from(`${open}${group}<s:rect id="shape"/></svg>`)), '.svg');
+  assert.equal(uploadExtension(Buffer.from(`${open}${group}<use local:href="#shape"/></svg>`)), null);
+});
+
+it('applies SVG namespace declarations without enumerating the inherited bindings', () => {
+  const bytes = Buffer.from('<svg xmlns:d="urn:drawing"><g xmlns:l="urn:layer"><rect/></g></svg>');
+  const iterate = Map.prototype[Symbol.iterator];
+  let enumerations = 0;
+  let extension: string | null;
+  try {
+    Map.prototype[Symbol.iterator] = function () {
+      enumerations++;
+      return iterate.call(this);
+    };
+    extension = uploadExtension(bytes);
+  } finally {
+    Map.prototype[Symbol.iterator] = iterate;
+  }
+  assert.equal(extension, '.svg');
+  assert.equal(enumerations, 0);
+});
+
 for (const xml of [
   `<svg ${SVG}><defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs><rect fill="url(#g)" style="fill: url( '#g' )"/></svg>`,
   `<svg ${SVG}><style><![CDATA[rect { fill: url("#g"); stroke: red }]]></style><title>Shapes</title><text xml:space="preserve">a \\ b</text></svg>`,

@@ -82,6 +82,8 @@ function webmHeader(bytes: Buffer): boolean {
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
+// Count elements and namespace declarations against a shared per-file limit.
+const MAX_SVG_COMPLEXITY = 50_000;
 
 /**
  * Static SVG elements. Not listed, so refused: script, foreignObject, animation,
@@ -122,27 +124,44 @@ function safeSvg(bytes: Buffer): boolean {
     const root = document.root;
     if (root === null || root.name.split(':').at(-1) !== 'svg') return false;
     // An SVG without a default xmlns stays admitted, as its elements are read as SVG.
-    const nodes: Array<{node:XmlNode; scope:ReadonlyMap<string, string>}> =
-      document.children.map((node) => ({node, scope:new Map([['', SVG_NAMESPACE]])}));
-    while (nodes.length > 0) {
-      const {node, scope: parent} = nodes.pop()!;
+    const scope = new Map([['', SVG_NAMESPACE]]);
+    const undo: Array<[prefix: string, previous: string | undefined]> = [];
+    const stack: Array<{children: readonly XmlNode[]; next: number; undoLength: number}> =
+      [{children:document.children, next:0, undoLength:0}];
+    let complexity = 0;
+    while (stack.length > 0) {
+      const frame = stack.at(-1)!;
+      if (frame.next === frame.children.length) {
+        // Leaving an element restores the bindings its siblings inherit.
+        while (undo.length > frame.undoLength) {
+          const [prefix, previous] = undo.pop()!;
+          if (previous === undefined) scope.delete(prefix);
+          else scope.set(prefix, previous);
+        }
+        stack.pop();
+        continue;
+      }
+      const node = frame.children[frame.next++]!;
       // Do not interpret DTDs, custom entities or external stylesheets.
       if (node.type === 'doctype' || node.type === 'pi') return false;
       if (!(node instanceof XmlElement)) continue;
-      let scope = parent;
-      for (const [key, value] of Object.entries(node.attributes)) {
+      if (++complexity > MAX_SVG_COMPLEXITY) return false;
+      const undoLength = undo.length;
+      const attributes = Object.entries(node.attributes);
+      for (const [key, value] of attributes) {
         const prefix = declaredPrefix(key);
         if (prefix === null) return false;
         if (prefix === undefined) continue;
-        if (scope === parent) scope = new Map(parent);
-        (scope as Map<string, string>).set(prefix, value);
+        if (++complexity > MAX_SVG_COMPLEXITY) return false;
+        undo.push([prefix, scope.get(prefix)]);
+        scope.set(prefix, value);
       }
       const name = node.name.split(':');
       if (name.length > 2 || scope.get(name.length === 2 ? name[0]! : '') !== SVG_NAMESPACE) return false;
       if (!STATIC_SVG_ELEMENTS.has(name.at(-1)!)) return false;
       // A browser reads a style sheet from direct text only; an element inside could split a checked word.
       if (name.at(-1) === 'style' && (node.children.some((child) => child instanceof XmlElement) || loadsCss(node.text))) return false;
-      for (const [key, value] of Object.entries(node.attributes)) {
+      for (const [key, value] of attributes) {
         if (declaredPrefix(key) !== undefined) continue;
         const parts = key.split(':');
         if (parts.length > 2) return false;
@@ -151,7 +170,7 @@ function safeSvg(bytes: Buffer): boolean {
         if (prefix === 'xml' ? !['lang', 'space'].includes(local) : prefix !== '' && scope.get(prefix) !== XLINK_NAMESPACE) return false;
         if (local.toLowerCase().startsWith('on') || (local === 'href' && !value.startsWith('#')) || loadsCss(value)) return false;
       }
-      nodes.push(...node.children.map((child) => ({node:child, scope})));
+      stack.push({children:node.children, next:0, undoLength});
     }
     return true;
   } catch { return false; }
