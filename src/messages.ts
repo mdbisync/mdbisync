@@ -222,6 +222,8 @@ export const MESSAGES = {
   'sync.invalid-update-time': 'a document has an invalid update time',
   'sync.invalid-security-config': 'invalid security hook configuration',
   'sync.needs-pre-commit': 'security hooks require pre-commit on PATH; install pre-commit before capture',
+  'sync.security-link-outside': 'a tracked symbolic link leads outside the tree the security hooks check',
+  'sync.security-tree-differs': 'the tree the security hooks check differs from the tracked tree',
   'sync.no-runner-temp': 'RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job',
   'sync.staged-version': 'the staged candidates come from another version of the action',
   'sync.staged-hash': 'the staged manifest names a file that is not a content hash',
