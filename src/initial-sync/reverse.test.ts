@@ -1190,9 +1190,10 @@ describe('initial sync from Linear to the tracked branch', () => {
 
       const refused = await run(world, {}, 'sync');
       assert.equal(refused.result.exitCode, NO_STATE_EXIT_CODE, refused.result.stderr);
-      assert.equal(refused.report.code, 'initial-pull-request-pending');
-      // The preflight refuses, before the run captures or writes anything.
-      assert.match(refused.summary, /Closing the pull request or deleting its branch does not cancel/);
+      // The preflight refuses, before the run captures or writes anything: the sync did not sign the appended commit,
+      // so the history it would read a pending record from is not its own.
+      assert.equal(refused.report.code, 'initial-sync-required');
+      assert.match(refused.summary, /is at a commit the sync did not sign/);
       assert.deepEqual(await refs(), before, 'a remote ref moved');
       assert.equal(world.writes.length, writes, 'the run wrote to an API');
       assert.equal(mergeCalls, 0);

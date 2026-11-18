@@ -57,6 +57,7 @@ import {
   readIds,
   readUploads,
   stateRef,
+  signObservation,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, placeKey, planInitialSync } from './plan.ts';
@@ -607,7 +608,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       ...unproven,
     ].sort(compare);
     const recordMessage = RECORD_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
-    let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false });
+    let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;
 
     // New documents left out while writing keep their chosen ids, which other documents may link to.

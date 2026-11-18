@@ -132,6 +132,8 @@ export interface CommitSpec {
    * parent, no commit is made and the parent is returned.
    */
   skipIfUnchanged?: boolean;
+  /** Gives the message to commit in place of `message`, from the tree and parents the commit gets: a signed one. */
+  sign?: (tree: Oid, parents: readonly Oid[], message: string) => string;
 }
 
 /** Builds a tree from `base` plus `changes` and commits it. Returns the commit id. */
@@ -144,12 +146,16 @@ export async function commitTree(git: Git, spec: CommitSpec): Promise<Oid> {
     if (parentTree === tree) return spec.parents[0] as Oid;
   }
 
-  // State commits are never signed, whatever the machine's commit.gpgSign says.
-  const args = ['commit-tree', '--no-gpg-sign', tree];
-  for (const parent of spec.parents) args.push('-p', parent);
+  // State commits are never GPG-signed, whatever the machine's commit.gpgSign says, and are UTF-8 without an encoding
+  // header, whatever its i18n.commitEncoding says: a signed record with that header does not verify.
+  const args = ['-c', 'i18n.commitEncoding=UTF-8', 'commit-tree', '--no-gpg-sign', tree];
+  // Git stores a parent given twice once: a signature covers the parents as stored.
+  const parents = [...new Set(spec.parents)];
+  for (const parent of parents) args.push('-p', parent);
   args.push('-F', '-');
+  const text = spec.sign === undefined ? spec.message : spec.sign(tree, parents, spec.message);
   return git.text(args, {
-    input: spec.message.endsWith('\n') ? spec.message : `${spec.message}\n`,
+    input: text.endsWith('\n') ? text : `${text}\n`,
     env: {
       GIT_AUTHOR_NAME: spec.identity.name,
       GIT_AUTHOR_EMAIL: spec.identity.email,

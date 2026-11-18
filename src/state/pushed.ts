@@ -59,6 +59,19 @@ export class PushedKey {
     return timingSafeEqual(Buffer.from(this.uploadMac(hash, url), 'hex'), Buffer.from(mac, 'hex'));
   }
 
+  /**
+   * The signature of a `linear` state commit the sync writes: its tree, its
+   * parents and its message, bound to this repository (see `observation.ts`).
+   */
+  observationMac(tree: Oid, parents: readonly Oid[], text: string): string {
+    return createHmac('sha256', this.#key).update(JSON.stringify(['linear-v1', this.#repository, tree, parents, text])).digest('hex');
+  }
+
+  verifiesObservation(tree: Oid, parents: readonly Oid[], text: string, mac: string): boolean {
+    if (!PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.observationMac(tree, parents, text), 'hex'), Buffer.from(mac, 'hex'));
+  }
+
   #mac(ref: string, head: Oid): string {
     return createHmac('sha256', this.#key).update(`${this.#repository}\n${ref}\n${head}`).digest('hex');
   }

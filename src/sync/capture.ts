@@ -19,7 +19,7 @@ import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, signObservation, UPLOADS_REBUILDING } from '../state/index.ts';
 import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, markWritesLinear, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { matchesObservedBody, observedDigest, readRecorded, recordedTime } from './recorded.ts';
@@ -739,7 +739,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
-    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
+    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity, sign: signObservation(context.pushedKey) });
     if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
     for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
       ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});

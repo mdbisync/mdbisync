@@ -293,3 +293,42 @@ export function allowedLink(url: string): boolean {
   const normalized = url.replace(/[\u0000-\u0020\u007f]/g, '');
   return !/^[a-z][a-z\d+.-]*:/i.test(normalized) || /^(?:https?|mailto):/i.test(normalized);
 }
+
+/**
+ * A destination as Markdown source for a decoded URL: spaces encoded, and
+ * what Markdown would read back differently escaped (a backslash before
+ * punctuation, an `&` that starts a character reference).
+ */
+function destination(url: string): string {
+  return url
+    .replace(/ /g, '%20')
+    .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
+    .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
+}
+
+/**
+ * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded, and a
+ * backslash at its end doubled, so it cannot escape the closing bracket.
+ */
+export function linkDestination(url: string): string {
+  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
+  const trailing = /\\*$/.exec(inner)![0].length;
+  return `<${inner}${trailing % 2 === 1 ? '\\' : ''}>`;
+}
+
+/** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */
+export function imageDestination(url: string): string {
+  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/** The bracketed label that opens at `open` (a `[`) in `source`, as written, without its brackets. */
+export function bracketedLabel(source: string, open: number): string {
+  let depth = 0;
+  for (let at = open; at < source.length; at++) {
+    const char = source[at];
+    if (char === '\\') at++;
+    else if (char === '[') depth++;
+    else if (char === ']' && --depth === 0) return source.slice(open + 1, at);
+  }
+  return '';
+}

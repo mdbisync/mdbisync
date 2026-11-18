@@ -128,6 +128,19 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(new Set(keys).size, keys.length, 'duplicate documents');
   };
 
+  it('leaves out a file whose reference links would be too large written inline, and initializes the rest', { timeout: 120_000 }, async () => {
+    // A few kilobytes of references to one long definition: `fix` would write the destination once per reference.
+    const path = 'eng/notes/references.md';
+    await fixture.seed({ [path]: `# References\n\n${'[a][r] '.repeat(2_000)}\n\n[r]: https://example.com/${'x'.repeat(1_000)}\n` });
+    const world = fakeWorld();
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.summary?.leftOut, ['combined/Guide.md', 'combined/guide.md', 'eng/notes/formula.md', path]);
+    assert.ok(report.leftOutRules?.includes('markdown-complexity'), JSON.stringify(report.leftOutRules));
+    assert.equal(live(world).length, SYNCED_PATHS.length, 'not every other file was written');
+    assert.ok(!live(world).some((d) => d.title === 'notes/references'), 'the left-out file reached Linear');
+  });
+
   it('L1-04 and L1-06: creates a document per synchronized file, without front matter, and records the state', async () => {
     const world = fakeWorld();
     const { result, report, summary, graphql } = await run(world);
