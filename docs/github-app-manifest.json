@@ -11,8 +11,7 @@
     "pull_requests": "write",
     "workflows": "write",
     "checks": "read",
-    "statuses": "read",
-    "actions": "read"
+    "statuses": "read"
   },
   "default_events": []
 }

@@ -12,7 +12,7 @@ import { checkExpectation, checksMissing, type EarlierHeads, expectedChecks, typ
 const HEAD = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
 const ACTIONS = { kind: 'run', id: FAKE_ACTIONS_APP_ID } as const;
-const RUN = { publisher: ACTIONS, workflow: { path: '.github/workflows/ci.yml', revision: 'b'.repeat(40), event: 'pull_request' as const } };
+const RUN = { publisher: ACTIONS };
 const CI_ACCOUNT = { kind: 'status', id: FAKE_CI_ACCOUNT_ID } as const;
 /** Configured checks: a commit status of the repository's CI account. */
 const TESTS = { name: 'tests', publisher: CI_ACCOUNT };
@@ -54,7 +54,7 @@ describe('the checks a head must pass', () => {
 
   it('expects a check whose publisher GitHub did not name from that unknown publisher, never from anyone', async () => {
     const unnamed = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) => String(input).includes('/statuses?') ? Response.json([]) : github.fetch(input, init) };
-    const { checks } = await expectedChecks(unnamed, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) });
+    const { checks } = await expectedChecks(unnamed, HEAD, [], { pushedFrom: [OTHER] });
     assert.deepEqual(checks.find(({ name }) => name === 'lint'), { name: 'lint', publisher: { kind: 'status', id: 0 } });
     assert.match(headNote(HEAD, since, checks), /checks=lint@status:0,/);
   });
@@ -64,7 +64,7 @@ describe('the checks a head must pass', () => {
       { name: 'tests', status: 'completed', conclusion: 'success' },
       { name: 'tests', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 },
     ]]]) } }) };
-    assert.deepEqual((await expectedChecks(both, HEAD, [TESTS], { pushedFrom: [OTHER], base: 'f'.repeat(40) })).checks, [
+    assert.deepEqual((await expectedChecks(both, HEAD, [TESTS], { pushedFrom: [OTHER] })).checks, [
       { name: 'tests', ...RUN },
       TESTS,
       { name: 'tests', publisher: { kind: 'status', id: 666 } },
@@ -126,110 +126,71 @@ describe('the checks a head must pass', () => {
 
   it('expects of a head the sync pushed what the commits it pushed on registered, not the older note', async () => {
     const registered = [{ name: 'lint', publisher: CI_ACCOUNT }, { name: 'pre-commit', ...RUN }, { name: 'tests', ...RUN }];
-    assert.deepEqual(await expectedChecks(github, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) }), { checks: registered, observed: registered, complete: true });
-    assert.deepEqual(await expectedChecks(github, HEAD, [DEPLOY], { pushedFrom: [], base: 'f'.repeat(40) }), { checks: [DEPLOY], observed: [], complete: true });
+    assert.deepEqual(await expectedChecks(github, HEAD, [], { pushedFrom: [OTHER] }), { checks: registered, observed: registered, complete: true });
+    assert.deepEqual(await expectedChecks(github, HEAD, [DEPLOY], { pushedFrom: [] }), { checks: [DEPLOY], observed: [], complete: true });
   });
 
-  it('rebinds workflow revisions only on heads authenticated as the sync own push', async () => {
+  it('expects an earlier head\'s Actions check by name and publisher, so the same job on a later head meets it', async () => {
+    // A job that ran on an earlier head, then the pull request moved on: whoever pushed the later head, the job of
+    // the same name from the Actions App on it meets the earlier expectation, and its absence keeps the head waiting.
     const local = fakeWorld();
     local.github.checks = new Map([
       [OTHER, [{ name: 'tests', status: 'completed', conclusion: 'success' }]],
-      [HEAD, [{ name: 'tests', status: 'completed', conclusion: 'success', workflow: {
-        path: '.github/workflows/ci.yml', revision: 'c'.repeat(40),
-      } }]],
+      [HEAD, [{ name: 'tests', status: 'completed', conclusion: 'success' }]],
     ]);
     const repo = { ...github, fetch: fakeFetch(local) };
-    const fresh = await expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) });
-    assert.equal(fresh.checks[0]?.workflow?.revision, 'c'.repeat(40));
-    const child = await expectedChecks(repo, HEAD, [], { body: undefined,
-      git: { text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40), pushed: OTHER });
-    assert.equal(child.checks[0]?.workflow?.revision, 'b'.repeat(40), 'a child rebound the trusted revision');
-    const own = await expectedChecks(repo, HEAD, [], { body: headNote(HEAD, since, fresh.observed),
-      git: { text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
-    assert.deepEqual(own.checks, fresh.checks, 'the next run revived a stale revision');
+    const history = { git: { text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40) };
+    for (const earlier of [{ pushedFrom: [OTHER] }, { body: undefined, ...history, pushed: OTHER }, { body: undefined, ...history, pushed: HEAD }] as EarlierHeads[]) {
+      const expected = await expectedChecks(repo, HEAD, [], earlier);
+      assert.deepEqual(expected.checks, [{ name: 'tests', ...RUN }]);
+      assert.equal((await readChecks(repo, HEAD, checkExpectation({}, expected.checks))).state, 'passed');
+    }
+    local.github.checks.set(HEAD, [{ name: 'tests', status: 'completed', conclusion: 'success', app: 77 }]);
+    const moved = await expectedChecks(repo, HEAD, [], { body: undefined, ...history, pushed: OTHER });
+    assert.deepEqual((await readChecks(repo, HEAD, checkExpectation({}, moved.checks))).missing, ['tests'], 'another App met an Actions check');
   });
 
-  it('expects a check whose pull request moved on from the earlier head by its file, and its blob only where the base agrees', async () => {
-    // GitHub names a pull request's current head and base tip in a run's association: once HEAD is pushed on OTHER,
-    // the job that ran on OTHER has no inferable revision, though its file and event are verified.
-    const path = '.github/workflows/ci.yml';
-    const BASE = '9'.repeat(40);
-    const world = (headRevision: string, baseRevision = 'b'.repeat(40)) => {
-      const local = fakeWorld();
-      local.github.checks = new Map([
-        [OTHER, [{ name: 'tests', status: 'completed', conclusion: 'success', workflow: { path, revision: 'b'.repeat(40), pullRequestHead: HEAD, pullRequestBase: BASE } }]],
-        [HEAD, [{ name: 'tests', status: 'completed', conclusion: 'success', workflow: { path, revision: headRevision } }]],
-        // The base tip's blob of the workflow file, as the contents API answers it.
-        [BASE, [{ name: 'other', status: 'completed', conclusion: 'success', workflow: { path, revision: baseRevision } }]],
-      ]);
-      return { ...github, fetch: fakeFetch(local) };
-    };
-    const at = (revision: string) => [{ name: 'tests', publisher: ACTIONS, workflow: { path, event: 'pull_request', revision } }];
-    const history = { git: { text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40) };
-    // The sync's own push binds its own revision, as for a known identity, also in a later run on the same head,
-    // whatever the base holds.
-    for (const bound of [world('c'.repeat(40)), world('c'.repeat(40), 'e'.repeat(40))]) {
-      const fresh = await expectedChecks(bound, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) });
-      assert.deepEqual(fresh.checks, at('c'.repeat(40)), 'the sync own push expected an unverifiable check');
-      assert.equal((await readChecks(bound, HEAD, checkExpectation({}, fresh.checks))).state, 'passed');
-      const own = await expectedChecks(bound, HEAD, [], { body: headNote(HEAD, since, fresh.observed), ...history, pushed: HEAD });
-      assert.deepEqual(own.checks, fresh.checks, 'a later run on the same own head lost the binding');
+  it('reads a check noted with a workflow identity by an earlier version by its name and publisher', async () => {
+    const local = fakeWorld();
+    local.github.checks = new Map([[HEAD, [{ name: 'tests', status: 'completed', conclusion: 'success' }]]]);
+    const repo = { ...github, fetch: fakeFetch(local) };
+    const identity = encodeURIComponent(JSON.stringify({ path: '.github/workflows/ci.yml', revision: 'b'.repeat(40), event: 'pull_request' }));
+    // Another GitHub server's Actions App id, noted by an earlier version, reads as the Actions App.
+    for (const id of [FAKE_ACTIONS_APP_ID, 999]) {
+      const legacy = `<!-- head: sha=${HEAD} since=${since.toISOString()} checks=tests@run:${id}~${identity} -->`;
+      const read = await expectedChecks(repo, HEAD, [], { body: legacy, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
+      assert.deepEqual(read.checks, [{ name: 'tests', ...RUN }]);
     }
-    // A head someone else pushed expects the file the earlier head held, while the base holds the same: a changed
-    // file never satisfies it.
-    const changed = world('c'.repeat(40));
-    const child = await expectedChecks(changed, HEAD, [], { body: undefined, ...history, pushed: OTHER });
-    assert.deepEqual(child.checks, at('b'.repeat(40)));
-    assert.equal((await readChecks(changed, HEAD, checkExpectation({}, child.checks))).state, 'pending', 'a changed workflow satisfied the earlier check');
-    const same = world('b'.repeat(40));
-    const kept = await expectedChecks(same, HEAD, [], { body: undefined, ...history, pushed: OTHER });
-    assert.equal((await readChecks(same, HEAD, checkExpectation({}, kept.checks))).state, 'passed', 'an unchanged workflow did not satisfy the earlier check');
-    // A base that changed the file may be what the earlier job ran: no stand-in, the head waits for the sync's push.
-    const based = world('b'.repeat(40), 'e'.repeat(40));
-    const held = await expectedChecks(based, HEAD, [], { body: undefined, ...history, pushed: OTHER });
-    assert.deepEqual(held.checks, [{ name: 'tests', publisher: ACTIONS, workflow: null }]);
-    assert.equal((await readChecks(based, HEAD, checkExpectation({}, held.checks))).state, 'pending', 'the earlier head\'s blob stood in against the base');
+    const body = `<!-- head: sha=${HEAD} since=${since.toISOString()} checks=tests@run:${FAKE_ACTIONS_APP_ID}~${identity} -->`;
+    const expected = await expectedChecks(repo, HEAD, [], { body, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
+    assert.deepEqual(expected.checks, [{ name: 'tests', ...RUN }]);
+    assert.equal(headNote(HEAD, since, expected.checks), `<!-- head: sha=${HEAD} since=${since.toISOString()} checks=tests@run:${FAKE_ACTIONS_APP_ID} -->`);
   });
 
   // A new branch has no earlier heads: a configured check is met only by its configured publisher, never by its name.
   it('meets a configured check only from its configured publisher', async () => {
-    const path = '.github/workflows/ci.yml';
-    const BASE = '9'.repeat(40);
-    /** `baseRevision` null: the tracked branch has no such workflow file. */
-    const state = async (registered: FakeCheck[], required: RequiredCheck[], baseRevision: string | null = 'c'.repeat(40)) => {
+    const state = async (registered: FakeCheck[], required: RequiredCheck[]) => {
       const local = fakeWorld();
-      local.github.checks = new Map([[HEAD, registered], [BASE, [{ name: 'other', status: 'completed', conclusion: 'success', workflow: { path, revision: baseRevision ?? '' } }]]]);
-      const fake = fakeFetch(local);
-      const repo = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) =>
-        baseRevision === null && String(input).includes(`/contents/`) && String(input).endsWith(`?ref=${BASE}`) ? Response.json({ message: 'Not Found' }, { status: 404 }) : fake(input, init) };
+      local.github.checks = new Map([[HEAD, registered]]);
+      const repo = { ...github, fetch: fakeFetch(local) };
       // A head the sync pushes in this run, and one it pushed in an earlier run, with no earlier heads below either.
-      const earlier: EarlierHeads[] = [{ pushedFrom: [], base: BASE }, { body: undefined, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: BASE, pushed: HEAD }];
+      const earlier: EarlierHeads[] = [{ pushedFrom: [] }, { body: undefined, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD }];
       const [now, later] = await Promise.all(earlier.map(async (heads) => (await readChecks(repo, HEAD, checkExpectation({}, (await expectedChecks(repo, HEAD, required, heads)).checks))).state));
       assert.equal(now, later, 'a new head and the same head in a later run disagreed');
       return now;
     };
     const passed = { name: 'tests', status: 'completed', conclusion: 'success' } as const;
-    const job = (revision: string): FakeCheck => ({ ...passed, workflow: { path, revision } });
-    const actions = [{ name: 'tests', workflow: path }];
-    assert.equal(await state([job('c'.repeat(40))], actions), 'passed');
-    // A workflow file changed on the branch alone, a tracked branch without the file, another file, a synthetic check
-    // run of the Actions App, a commit status: none is the configured job.
-    assert.equal(await state([job('d'.repeat(40))], actions), 'pending', 'a workflow changed on the branch met its own check');
-    // The fake answers any other ref with blob `b…b`: only the missing file keeps this job from meeting the check.
-    assert.equal(await state([job('b'.repeat(40))], actions, 'b'.repeat(40)), 'passed');
-    assert.equal(await state([job('b'.repeat(40))], actions, null), 'pending', 'a workflow file the tracked branch lacks met its check');
-    assert.equal(await state([job('c'.repeat(40))], [{ name: 'tests', workflow: '.github/workflows/other.yml' }]), 'pending');
-    assert.equal(await state([{ ...passed, workflow: false }], actions), 'pending');
+    // A GitHub Actions job: a check run of the Actions App, not a commit status or another App's check run.
+    const actions = [{ name: 'tests', publisher: ACTIONS }];
+    assert.equal(await state([passed], actions), 'passed');
     assert.equal(await state([{ ...passed, commitStatus: true }], actions), 'pending');
+    assert.equal(await state([{ ...passed, app: 77 }], actions), 'pending');
     // Another App's check run, or a status from another account.
     const app = [{ name: 'tests', publisher: { kind: 'run' as const, id: 77 } }];
     assert.equal(await state([{ ...passed, app: 77 }], app), 'passed');
     assert.equal(await state([{ ...passed, app: 78 }], app), 'pending');
     assert.equal(await state([{ ...passed, commitStatus: true, creator: 77 }], app), 'pending');
-    // The Actions App's id never vouches for a check run without its workflow: any workflow token may create one.
-    const actionsApp = [{ name: 'tests', publisher: ACTIONS }];
-    assert.equal(await state([job('c'.repeat(40))], actionsApp), 'pending');
-    assert.equal(await state([{ ...passed, workflow: false }], actionsApp), 'pending');
+    assert.equal(await state([passed], app), 'pending');
     const status = [{ name: 'tests', publisher: CI_ACCOUNT }];
     assert.equal(await state([{ ...passed, commitStatus: true }], status), 'passed');
     assert.equal(await state([{ ...passed, commitStatus: true, creator: 666 }], status), 'pending');
@@ -244,14 +205,12 @@ describe('the checks a head must pass', () => {
     assert.deepEqual((await expectedChecks(failing, HEAD, [], { body, ...alone })).checks, [{ name: 'pre-commit', publisher: { kind: 'run', id: 0 } }, { name: 'tests' }, { name: 'tests', publisher: { kind: 'status', id: 42 } }]);
   });
 
-  it('never drops earlier check expectations when provenance or status reads return not found', async () => {
-    for (const endpoint of ['/actions/runs?', '/statuses?']) {
-      for (const status of [404, 422]) {
-        const repo = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) =>
-          String(input).includes(endpoint) ? Response.json({}, { status }) : github.fetch(input, init) };
-        await assert.rejects(expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER], base: 'f'.repeat(40) }),
-          (error: unknown) => error instanceof PullRequestError && error.status === status);
-      }
+  it('never drops earlier check expectations when status reads return not found', async () => {
+    for (const status of [404, 422]) {
+      const repo = { ...github, fetch: async (input: string | URL | Request, init?: RequestInit) =>
+        String(input).includes('/statuses?') ? Response.json({}, { status }) : github.fetch(input, init) };
+      await assert.rejects(expectedChecks(repo, HEAD, [], { pushedFrom: [OTHER] }),
+        (error: unknown) => error instanceof PullRequestError && error.status === status);
     }
   });
 

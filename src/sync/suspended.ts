@@ -310,7 +310,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
   // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`). The episodes record
   // the last head the sync pushed on this branch, also a single-parent commit (a Linear intake): the history stops there.
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous], base: tracked, carried } : { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous], carried } : { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
   // As in the normal lane: whoever added commits to this branch, the sync merges only synchronized documents and their
   // assets. Read before the checks, so a head the sync will not merge neither holds the normal lane nor marks documents.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
@@ -436,7 +436,7 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   await push(context, options, ids, head, previous, { expected: failed, next: normal });
   const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
   // The new head joins the failed batch and the earlier suspended head: it expects what both registered.
-  const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous === null ? [failed] : [previous, failed], base: tracked });
+  const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous === null ? [failed] : [previous, failed] });
   // A batch joining a suspended head that holds someone else's non-document change keeps it waiting for a person.
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
   const held = unverified.length === 0 ? '' : `${unverifiedNote(unverified)}\n\n`;
