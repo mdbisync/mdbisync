@@ -61,7 +61,7 @@ import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, t
 import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { type ConflictNotices, MARKS, noConflictNotices, reconcileDocumentMark } from '../sync/marks.ts';
-import { withRecorded } from '../sync/recorded.ts';
+import { observedDigest, withRecorded } from '../sync/recorded.ts';
 import { stableId } from '../sync/stable-id.ts';
 import { message } from '../messages.ts';
 import { type LeftOutAtWriteRule, type WriteCode } from '../codes.ts';
@@ -247,7 +247,8 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const rememberedDocuments = new Map<string, LinearDocument>();
   const remember = (path: string, document: LinearDocument) => {
     const before = previous.get(path);
-    ids.set(path, before !== undefined && before.id === document.id && before.saved !== undefined ? { id: document.id, saved: before.saved } : { id: document.id });
+    const saved = before?.id === document.id ? before.saved : undefined;
+    ids.set(path, { id: document.id, observedDigest: observedDigest(document), ...(saved === undefined ? {} : {saved}) });
     stored.set(path, document.content ?? '');
     rememberedDocuments.set(path, document);
   };

@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { Git, commitTree } from '../state/index.ts';
+import { Git, commitTree, type IdEntry } from '../state/index.ts';
 import { fixText } from '../format/index.ts';
 import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
@@ -138,7 +138,7 @@ describe('sync: the tracked branch to Linear', () => {
   /** A file's exact bytes, final newline included. */
   const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
   const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
-  const ids = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
+  const ids = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, IdEntry>;
   const live = () => world.linear.documents.filter((d) => d.trashed !== true);
   const documentOf = async (path: string): Promise<FakeDocument> => {
     const id = (await ids())[path]?.id;
@@ -979,15 +979,29 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
   });
 
-  it('with the upload cache lost, an edited document with an image is written, not taken for a Linear edit', async () => {
-    const previousUrl = uploadUrls((await documentOf('eng/notes/figure.md')).content)[0]!;
-    const uploadsBefore = world.linear.uploads.length;
+  async function clearUploadCache() {
     const empty = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: '{}\n' });
     const tree = await fixture.remote.text(['mktree'], { input: `100644 blob ${empty}\tuploads.json\n` });
     const lost = await fixture.remote.text(['commit-tree', tree, '-p', 'refs/mdbisync/uploads', '-m', 'Cache lost'], {
       env: { GIT_AUTHOR_NAME: 'x', GIT_AUTHOR_EMAIL: 'x@example.com', GIT_COMMITTER_NAME: 'x', GIT_COMMITTER_EMAIL: 'x@example.com' },
     });
     await fixture.remote.run(['update-ref', 'refs/mdbisync/uploads', lost]);
+  }
+
+  it('with the upload cache lost, a document that Linear still holds as captured takes a git edit', async () => {
+    const path = 'eng/notes/figure.md';
+    const figure = await documentOf(path);
+    const previousUrl = uploadUrls(figure.content)[0]!;
+    const uploadsBefore = world.linear.uploads.length;
+    const legacyIds = await ids();
+    delete legacyIds[path]!.observedDigest;
+    const parent = await rev('refs/mdbisync/ids');
+    const legacy = await commitTree(fixture.remote, { parents: [parent], base: parent, identity: IDENTITY,
+      changes: new Map([['ids.json', JSON.stringify(legacyIds, null, 2) + '\n']]), message: 'Record document ids' });
+    await fixture.remote.run(['update-ref', 'refs/mdbisync/ids', legacy]);
+    assert.equal((await sync()).result.exitCode, 0);
+    assert.match((await ids())[path]?.observedDigest ?? '', /^[0-9a-f]{64}$/);
+    await clearUploadCache();
     await commit({ 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows, edited. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
@@ -996,11 +1010,31 @@ describe('sync: the tracked branch to Linear', () => {
     // cache, so it is uploaded once more, and the cache records the new upload.
     assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
     assert.equal(world.linear.uploads.length, uploadsBefore + 1);
-    const [url] = uploadUrls((await documentOf('eng/notes/figure.md')).content);
+    const [url] = uploadUrls(figure.content);
     assert.ok(url !== undefined && url !== previousUrl, 'the figure does not link the new upload');
     assert.ok((await show('refs/mdbisync/uploads:uploads.json')).includes(url));
     assert.ok((await show('refs/mdbisync/linear:eng/notes/figure.md')).includes('../media/diagram.png'));
   });
+
+  for (const change of ['delete', 'edit'] as const) {
+    it(`preserves a Linear edit after capture when git would ${change} a document whose attachment is uncached`, async () => {
+      const path = 'eng/notes/figure.md';
+      const figure = await documentOf(path);
+      touch(figure);
+      assert.equal((await sync()).result.exitCode, 0);
+      await clearUploadCache();
+      const edited = `${figure.content}\n\nAdded in Linear. ${CANARY}\n`;
+      afterCapture(() => { figure.content = edited; touch(figure); });
+      await commit({ [path]: change === 'delete' ? null : `# Figure\n\nChanged in git. ${CANARY}\n` });
+
+      const { result, report, writes } = await sync();
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.deepEqual(writes, []);
+      assert.deepEqual(report.sync?.skipped, [{ path, reason: 'edited-in-linear' }]);
+      assert.equal(figure.trashed, undefined);
+      assert.equal(figure.content, edited);
+    });
+  }
 
   it('a write Linear rejects is listed, and the run exits to be run again', async () => {
     world.linear.writes.reject = (operation) => operation === 'UpdateDocument';

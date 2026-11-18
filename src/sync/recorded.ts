@@ -9,10 +9,18 @@
 // Only the `ids` commits after the latest capture cursor count: that cursor
 // covers every time recorded before it.
 
+import { createHash } from 'node:crypto';
+import type { LinearDocument } from '../linear/index.ts';
 import { type Git, type Oid } from '../state/index.ts';
 import { message } from '../messages.ts';
 
 const RECORDED = /^Document-recorded: (\S+) (\S+)$/gm;
+
+/** An exact comparison of the body as Linear returned it, including its update time. */
+export function observedDigest(document: LinearDocument): string | undefined {
+  if (document.content === undefined) return undefined;
+  return createHash('sha256').update(JSON.stringify([document.content, document.updatedAt])).digest('hex');
+}
 
 /** A document's update time in the form the capture cursor uses, so times compare as text. */
 export function recordedTime(updatedAt: string): string {
