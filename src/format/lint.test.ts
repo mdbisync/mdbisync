@@ -177,6 +177,14 @@ describe('lint rules', () => {
     assert.ok(fixText(text).length < CONTENT_LIMIT, 'fix keeps it within the limit');
   });
 
+  it('counts what a reference grows by: many short references that fit stay fixable', () => {
+    // 175 KB written as 225 KB: each `[a][r]` becomes `[a](<u>)`.
+    const text = `${'[a][r] '.repeat(25_000)}\n\n[r]: u\n`;
+    assert.deepEqual(lintText('doc.md', text), []);
+    const fixed = fixText(text);
+    assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
+  });
+
   it('keeps writing reference links inline within the limit', () => {
     const text = references(100, 100);
     assert.deepEqual(lintText('doc.md', text), []);
