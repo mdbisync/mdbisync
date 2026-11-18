@@ -9,6 +9,7 @@ import { after, describe, it } from 'node:test';
 import { markdownFiles, runFix, runLint } from './command.ts';
 import { fixText } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
+import { MarkdownLimitError } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
 const cases: Array<[LintRule, string, number]> = [
@@ -121,6 +122,14 @@ describe('lint rules', () => {
     assert.deepEqual(lintText('doc.md', tables).map((f) => [f.rule, f.line]), [['markdown-complexity', 347]]);
   });
 
+  it('refuses a table that only a rewrite exposes: fix throws instead of padding it', () => {
+    // The image makes the header one cell wider than the delimiter row, so the source has no table; once
+    // fix moves the image out of the paragraph, the rest is a 300-column table over 300 one-cell rows.
+    const text = `![i](i.png) ${raggedTable(300, 300)}`;
+    assert.deepEqual(lintText('doc.md', text), []);
+    assert.throws(() => fixText(text), MarkdownLimitError);
+  });
+
   it('keeps padding a ragged table within the limits', () => {
     const text = raggedTable(200, 200);
     assert.deepEqual(lintText('doc.md', text), []);
@@ -221,6 +230,22 @@ describe('lint and fix commands', () => {
       assert.equal(readFileSync(path, 'utf8'), source);
     } finally {
       rmSync(path, { force: true });
+    }
+  });
+
+  it('lint and fix report a table that only a rewrite exposes, and leave the file unchanged', () => {
+    const path = join(dir, 'exposed.md');
+    const source = `![i](i.png) ${'|a'.repeat(300)}|\n${'|-'.repeat(300)}|\n${'|x|\n'.repeat(300)}`;
+    const message = `exposed.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
+    try {
+      writeFileSync(path, source);
+      writeFileSync(join(dir, 'i.png'), 'png');
+      assert.deepEqual(runLint(['exposed.md'], dir), { exitCode: 1, stdout: message, stderr: '' });
+      assert.deepEqual(runFix(['exposed.md'], dir), { exitCode: 1, stdout: message, stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), source);
+    } finally {
+      rmSync(path, { force: true });
+      rmSync(join(dir, 'i.png'), { force: true });
     }
   });
 

@@ -23,30 +23,27 @@ export interface FixOptions {
   linkedFileExists?: (url: string) => boolean;
 }
 
-/** Returns the text in Linear's form, or the text itself when lint finds a construct Linear would lose or alter. */
+/**
+ * Returns the text in Linear's form, or the text itself when lint finds a
+ * construct Linear would lose or alter. Throws `MarkdownLimitError` when a
+ * rewrite takes the text over the Markdown limits, which lint cannot see in
+ * the source: an inline image that leaves its paragraph can expose a table.
+ */
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
-  const fixed = fixBody(body.replace(/\r\n?/g, '\n'), options);
-  return fixed === undefined ? text : joinFile(head, fixed);
+  return joinFile(head, fixBody(body.replace(/\r\n?/g, '\n'), options));
 }
 
-/** The body in Linear's form, or undefined when a rewrite takes it over the Markdown limits. */
-function fixBody(body: string, options: FixOptions): string | undefined {
+function fixBody(body: string, options: FixOptions): string {
   if (body.trim() === '') return '';
   let current = body;
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    let tree: Root;
-    try {
-      tree = parse(current);
-    } catch (error) {
-      if (error instanceof MarkdownLimitError) return undefined;
-      throw error;
-    }
+    const tree = parse(current);
     // Lint checked the source; a rewrite may expose a table it did not see.
-    if (paddingOverLimit(tree) !== undefined) return undefined;
+    if (paddingOverLimit(tree) !== undefined) throw new MarkdownLimitError('nodes');
     const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;

@@ -5,6 +5,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSyn
 import { basename, join, relative, resolve, sep } from 'node:path';
 import { fixText } from './fix.ts';
 import { duplicateTitles, linkedFileCheck, lintText } from './lint.ts';
+import { MarkdownLimitError } from './markdown.ts';
 import { LINT_RULES, type Finding } from './rules.ts';
 import { parseLfsPointer } from '../state/lfs.ts';
 import { admitsCapturedFile, isCaptureName } from '../sync/upload-type.ts';
@@ -103,6 +104,21 @@ function isFileAt(root: string, path: string): boolean {
   }
 }
 
+/** The file in Linear's form, or undefined when rewriting it takes it over the Markdown limits. */
+function fixedText(file: string, text: string, cwd: string): string | undefined {
+  try {
+    return fixText(text, { linkedFileExists: linkedFileResolver(file, cwd) });
+  } catch (error) {
+    if (error instanceof MarkdownLimitError) return undefined;
+    throw error;
+  }
+}
+
+/** The finding for a file that lint passes but `fix` cannot rewrite within the Markdown limits. */
+function complexity(file: string): Finding {
+  return { file, line: 1, rule: 'markdown-complexity', message: LINT_RULES['markdown-complexity'] };
+}
+
 /** `lint`: exit 1 and one line per finding when Linear would lose or alter something, or a file is not in Linear's form. */
 export function runLint(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
   const problem = badPaths(paths, cwd);
@@ -113,7 +129,9 @@ export function runLint(paths: readonly string[], cwd: string = process.cwd()): 
   const unfixed = files.filter((file) => {
     if (failing.has(file)) return false;
     const text = readFileSync(join(cwd, file), 'utf8');
-    return fixText(text, { linkedFileExists: linkedFileResolver(file, cwd) }) !== text;
+    const fixed = fixedText(file, text, cwd);
+    if (fixed === undefined) findings.push(complexity(file));
+    return fixed !== undefined && fixed !== text;
   });
   const stdout = describe(findings) + unfixed.map((file) => `${file}: not in Linear's form; run fix\n`).join('');
   return { exitCode: stdout === '' ? 0 : 1, stdout, stderr: '' };
@@ -132,8 +150,9 @@ export function runFix(paths: readonly string[], cwd: string = process.cwd()): C
     if (failing.has(file)) continue;
     const path = join(cwd, file);
     const text = readFileSync(path, 'utf8');
-    const fixed = fixText(text, { linkedFileExists: linkedFileResolver(file, cwd) });
-    if (fixed !== text) {
+    const fixed = fixedText(file, text, cwd);
+    if (fixed === undefined) before.push(complexity(file));
+    else if (fixed !== text) {
       writeFileSync(path, fixed);
       changed.push(file);
     }
