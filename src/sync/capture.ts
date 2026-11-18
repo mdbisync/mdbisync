@@ -21,7 +21,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
-import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
+import { MARKS, type ConflictNotices, markWritesLinear, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { matchesObservedBody, observedDigest, readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
@@ -259,6 +259,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         || lengthRefusal({title: mapped.title}, linear.facts) !== undefined;
     };
     const retained = new Map<string, string>();
+    // The place each retained document was listed in: it is the sync's only there.
+    const retainedPlace = new Map<string, string>();
     for (const [id, old] of byId) {
       if (unreadIds.has(id) || !excludedPath(old.path)) continue;
       const baseline = await lastSynchronized(git, base, old.path, linear.facts, sides);
@@ -274,12 +276,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (lookup.targets === undefined) continue;
         resolved = placeId(lookup.targets, place);
       }
-      if ('projectId' in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) retained.set(id, old.path);
+      if ('projectId' in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) {
+        retained.set(id, old.path);
+        retainedPlace.set(id, placeKeyOf(doc));
+      }
     }
     const folderFor = (doc: LinearDocument) => folders.get(placeKeyOf(doc));
     // Linear's own answer for where a document is, never the ids state, decides whether the sync may change it: a
     // known id is only a path's claim, and anyone who can push the state refs can make that claim.
-    const placed = (doc: LinearDocument) => folderFor(doc) !== undefined || retained.has(doc.id);
+    const placed = (doc: LinearDocument) => folderFor(doc) !== undefined || (retained.has(doc.id) && retainedPlace.get(doc.id) === placeKeyOf(doc));
     const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && placed(doc);
     const normalizedTime = cursorTime;
     // A document still at the update time a run recorded it with is in the record as Linear holds it.
@@ -403,14 +408,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       result.blocked.push({id: doc.id, path: key, findings});
       resetTarget(doc.id);
     };
+    const restores: Array<{doc: LinearDocument; saved: {icon: string | null; color: string | null}}> = [];
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
           // A retained entry (a suspended tombstone) keeps its saved decoration: give it back only once, and only to a
           // document in the trash or archive of a configured place. One outside them is not the sync's to decorate.
+          // It is given back with the marks, after the run reads the document again.
           const saved = old.entry.saved;
-          if (saved !== undefined && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
+          if (saved !== undefined && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) restores.push({doc, saved});
           const changedFile = removeBody(old.path);
           const retained = keptForLane(old.entry);
           if (!retained) ids.delete(old.path);
@@ -587,27 +594,75 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (budget.short === true) result.summary += ` ${message('sync.link-variant-budget')}`;
       return result;
     }
-    // The apply step's documents are the stage step's snapshot, and a mark
-    // saves and restores a document's icon and color. The documents whose
-    // mark may change are read again: a blocked one is marked over its
-    // current decoration, and any other that changed since then keeps its
-    // mark until the next run captures it.
+    // A mark saves and restores a document's icon and color and comments on
+    // it, by id, wherever the document is. Its copy here was read earlier in
+    // the run (in the apply step, by the stage step), and a Linear member may
+    // have moved, trashed or archived it since. The documents whose mark may
+    // change, and those in the trash or archive whose own decoration is due
+    // back, are read again. Only one still in the place it was read in (and,
+    // to be marked, still live) is changed. Any other is reported, and the
+    // held cursor lets the next run read it again: a blocked one keeps its
+    // entry as the run found it. A blocked one is marked over its current
+    // decoration; any other that changed since keeps its mark until the next
+    // run captures it.
     const unmarked = new Set<string>();
-    if (linear.transport.reads?.mode === 'replay') {
-      const marking = [
-        ...result.blocked.map(({id}) => id),
-        ...[...candidates].filter(([id, {doc}]) => byId.get(id)?.entry.saved !== undefined || detectConflicts(doc.content ?? '').length > 0).map(([id]) => id),
-      ];
-      const current = marking.length === 0 ? new Map<string, LinearDocument>() : new Map((await linear.getDocuments(marking, {withContent: true})).map((doc) => [doc.id, doc]));
-      for (const blocked of result.blocked) {
-        const now = current.get(blocked.id);
-        const then = documents.get(blocked.id);
-        if (now === undefined || then === undefined || now.updatedAt === then.updatedAt) continue;
-        documents.set(blocked.id, {...now, content: then.content ?? null});
-        const entry = ids.get(blocked.path);
-        if (entry !== undefined && byId.get(blocked.id)?.entry.saved === undefined) ids.set(blocked.path, {...entry, saved: {icon: now.icon, color: now.color}});
+    const marking = new Set([
+      ...result.blocked.map(({id}) => id),
+      ...[...candidates].filter(([id, {doc}]) => byId.get(id)?.entry.saved !== undefined || detectConflicts(doc.content ?? '').length > 0).map(([id]) => id),
+    ]);
+    // The apply step reads every one of them, as its copies are the stage step's. A single-step run read them
+    // itself a moment ago: it reads again only those whose mark would change something in Linear.
+    const writes = (id: string) => {
+      const blocked = result.blocked.find((item) => item.id === id);
+      const doc = blocked === undefined ? candidates.get(id)?.doc : documents.get(id);
+      const entry = blocked === undefined ? byId.get(id)?.entry ?? {id} : ids.get(blocked.path);
+      return doc === undefined || entry === undefined || markWritesLinear(doc, entry, blocked?.findings);
+    };
+    const rereading = new Set([...[...marking].filter((id) => linear.transport.reads?.mode === 'replay' || writes(id)), ...restores.map(({doc}) => doc.id)]);
+    const current = rereading.size === 0 ? new Map<string, LinearDocument>() : new Map((await linear.getDocuments([...rereading])).map((doc) => [doc.id, doc]));
+    const samePlace = (now: LinearDocument | undefined, then: LinearDocument | undefined): now is LinearDocument =>
+      now !== undefined && then !== undefined && placed(now) && placeKeyOf(now) === placeKeyOf(then);
+    const stillThere = (now: LinearDocument | undefined, then: LinearDocument | undefined): now is LinearDocument =>
+      samePlace(now, then) && !now.trashed && now.archivedAt === null;
+    const leaveUnmarked = (id: string, then: LinearDocument | undefined) => {
+      const now = current.get(id);
+      unmarked.add(id);
+      result.leftOut.push({id, rule: 'changed-during-run'});
+      // Later steps (the hold marks, the write step's restore) read where the document is from this map.
+      if (now !== undefined && placed(now)) documents.set(id, {...now, content: then?.content ?? null});
+      else documents.delete(id);
+    };
+    for (const {doc, saved} of restores) {
+      const now = current.get(doc.id);
+      if (samePlace(now, doc) && (now.trashed || now.archivedAt !== null)) {
+        if (now.icon !== saved.icon || now.color !== saved.color) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
+      } else result.leftOut.push({id: doc.id, rule: 'changed-during-run'});
+    }
+    for (const blocked of [...result.blocked]) {
+      if (!rereading.has(blocked.id)) continue;
+      const now = current.get(blocked.id);
+      const then = documents.get(blocked.id);
+      if (!stillThere(now, then)) {
+        result.blocked.splice(result.blocked.indexOf(blocked), 1);
+        leaveUnmarked(blocked.id, then);
+        // The entry stays as the run found it: no saved decoration without a mark behind it.
+        for (const [path, entry] of ids) if (entry.id === blocked.id) ids.delete(path);
+        const old = byId.get(blocked.id);
+        if (old !== undefined) ids.set(old.path, old.entry);
+        continue;
       }
-      for (const [id, {doc}] of candidates) if (marking.includes(id) && current.get(id)?.updatedAt !== doc.updatedAt) unmarked.add(id);
+      if (now.updatedAt === then!.updatedAt) continue;
+      documents.set(blocked.id, {...now, content: then!.content ?? null});
+      const entry = ids.get(blocked.path);
+      if (entry !== undefined && byId.get(blocked.id)?.entry.saved === undefined) ids.set(blocked.path, {...entry, saved: {icon: now.icon, color: now.color}});
+    }
+    // A candidate's text was read and checked while it was in place, and other texts of this run link it where it
+    // was: it is captured as read. Only its mark waits.
+    for (const [id, {doc}] of candidates) {
+      if (!rereading.has(id)) continue;
+      const now = current.get(id);
+      if (!stillThere(now, doc)) leaveUnmarked(id, doc);
+      else if (now.updatedAt !== doc.updatedAt) unmarked.add(id);
     }
     // An excluded file's document that Linear still holds as last accepted has nothing to capture, the images it
     // downloaded included: they are read in the commit of that version, since git may have removed one since (the
@@ -922,6 +977,7 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
   for (const item of result.leftOut) if (item.rule === 'image-repair-budget') summary += `\nimage-repair-budget: ${JSON.stringify(item.id)}. Image or link repair exceeded the document limit; simplify or split the document and retry. The cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'blob-too-large') summary += `\nblob-too-large: ${JSON.stringify(item.id)}. The Markdown file exceeds the byte limit. Any previous file stays in place and the cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
+  for (const item of result.leftOut) if (item.rule === 'changed-during-run') summary += `\nchanged-during-run: ${JSON.stringify(item.id)}. The document left the place the run read it in, or was trashed or archived, before the run marked it or gave back its decoration: the run leaves its decoration as it is, and the next run reads it again.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;
   }
