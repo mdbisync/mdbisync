@@ -43,6 +43,7 @@ Each fixture entry has:
 | `missing_target` | `true` when a broken relative link is the point of the fixture |
 | `name_as` | the colliding name a test writes the fixture under (see below) |
 | `macos_unsafe` | `true` together with `name_as` |
+| `git_form` | `captured` on a `fixable` fixture whose recorded Linear form `fix` cannot write, because Markdown reads it as another document (a nested file block right after its parent's text reads as that text). The sync reads that form as `fix`'s, so the tests expect `fix` to reach what the sync captures for the recorded form, not the recorded form itself |
 | `corpus` | `false` keeps the fixture or asset out of the test corpus, so a probe question waiting for Linear's recorded form does not move the corpus slices; the probe still writes it |
 | `note` | free text |
 

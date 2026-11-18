@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { buildCorpus } from '../../corpus/generate.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
-import { BANK_DIR, engineForm, linkedAssets, loadBank, readFixture } from '../../probe/bank.ts';
+import { BANK_DIR, fixForm, linkedAssets, loadBank, readFixture } from '../../probe/bank.ts';
 import { bodyOf } from './checks.ts';
 import { calloutDecoration, markerBlock, markerKindAt, MARKERS } from './conflicts.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
@@ -21,7 +21,8 @@ export interface OfflineInput {
   /**
    * Path → the form Linear keeps, for the files whose form is known: an
    * unchanged file's body by the engine's rule (`bodyOf`: no byte order mark,
-   * no front matter), else a bank fixture's recorded form.
+   * no front matter), else a bank fixture's recorded form, or what the sync
+   * captures for it when fix cannot write it (`fixForm`).
    */
   golden: Map<string, string>;
   /** Files the linter must leave out. */
@@ -37,7 +38,7 @@ function bankInput(filter: (fixture: { class: string; construct: string }, text:
     if (!filter(fixture, text)) continue;
     input.files.set(fixture.file, text);
     if (fixture.class === 'lint-error') input.lintErrors.push(fixture.file);
-    const golden = engineForm(bank, fixture, text);
+    const golden = fixForm(bank, fixture, text);
     if (golden !== undefined) input.golden.set(fixture.file, golden);
   }
   for (const file of linkedAssets(bank, [...input.files.values()])) {
@@ -56,7 +57,7 @@ function corpusInput(): OfflineInput {
   // fixture's form is its body, so its copy's form is the copy's own body, rewritten or not.
   const recorded = new Map(bank.fixtures.map((fixture) => {
     const text = readFixture(bank, fixture);
-    return [fixture.file, { text, form: fixture.class === 'unchanged' ? undefined : engineForm(bank, fixture, text) }];
+    return [fixture.file, { text, form: fixture.class === 'unchanged' ? undefined : fixForm(bank, fixture, text) }];
   }));
   const input: OfflineInput = { files: new Map(), assets: new Map(), golden: new Map(), lintErrors: [] };
   const linked = new Set(corpus.files.filter((file) => file.kind === 'markdown' && file.synced).flatMap((file) => file.links));

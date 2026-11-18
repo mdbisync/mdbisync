@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { MarkdownLimitError, bracketedLabel, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, bracketedLabel, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -409,7 +409,10 @@ function insideLine(source: string, at: number): boolean {
  * (it writes a setext heading's two lines as one), the file would no longer
  * hold what Linear holds, and the text stays as it is.
  */
-export function fixLinearText(text: string, content: string, inRepository: (url: string) => boolean): string {
+export function fixLinearText(linearText: string, content: string, inRepository: (url: string) => boolean): string {
+  // Read a nested file block as Linear holds it, not as the parent's text.
+  const split = splitFile(linearText);
+  const text = joinFile(split.head, nestedFileBlocksOnItemLine(split.body));
   // A relative link or image still in Linear's content was not uploaded, so
   // its file is not there: Linear keeps such a link as a link, not as a file
   // block, and so does a repair that turns such an image into a link.

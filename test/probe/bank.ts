@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { fixLinearText } from '../../src/format/fix.ts';
 import { splitFile } from '../../src/format/markdown.ts';
 
 export const BANK_DIR = 'test/fixtures';
@@ -20,6 +21,8 @@ export interface BankFixture {
   basis: 'known' | 'assumed';
   canary: string;
   synced?: boolean;
+  /** `captured`: fix's form is what the sync captures for Linear's recorded form, which fix cannot write. */
+  git_form?: 'captured';
 }
 
 export interface BankAsset {
@@ -74,6 +77,20 @@ export { sentForm } from '../fixtures/check-index.mjs';
  */
 export function engineForm(bank: Bank, fixture: BankFixture, text: string): string | undefined {
   return fixture.class === 'unchanged' ? splitFile(text).body : readOptional(join(bank.dir, goldenMarkdownPath(fixture.file)));
+}
+
+/**
+ * The form `fix` gives a fixture, where it is known: Linear's form (`engineForm`),
+ * or, for a fixture whose `git_form` is `captured`, what the sync captures for
+ * Linear's recorded form. Linear stores such a fixture in a spelling Markdown
+ * reads as another document (a nested file block right after its parent's
+ * text), and the sync reads it as fix's form.
+ */
+export function fixForm(bank: Bank, fixture: BankFixture, text: string): string | undefined {
+  const form = engineForm(bank, fixture, text);
+  if (fixture.git_form !== 'captured' || form === undefined) return form;
+  // Linear's content holds uploads, not relative links: every linked file was uploaded.
+  return fixLinearText(form, '', () => true);
 }
 
 export function readOptional(path: string): string | undefined {

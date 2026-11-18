@@ -111,6 +111,29 @@ describe('sameMarkdown', () => {
     assert.ok(sameMarkdown('# Test\n\nThis is test change\n\n# ', '# Test\n\nThis is test change\n\n#\n'));
   });
 
+  it("takes Linear's nested file block right after the parent's text as the item on one line", () => {
+    // Markdown reads Linear's form as the parent's text; Linear holds a nested item with the file.
+    assert.ok(sameMarkdown('* Parent\n  * [Report](<report.csv>)', '* Parent\n  * \n    [Report](report.csv)'));
+    assert.ok(sameMarkdown('* Parent\n  1. [Report](<report.csv>)', '* Parent\n  1. \n     [Report](report.csv)\n'));
+    assert.ok(sameMarkdown('* Parent\n  * [Report](<report.csv>)\n  * Next', '* Parent\n  * \n    [Report](report.csv)\n  * Next'));
+    assert.ok(sameMarkdown('1. Parent\n   * [A](<a.pdf>)\n2. Other\n   * [B](<b.pdf>)', '1. Parent\n   * \n     [A](a.pdf)\n2. Other\n   * \n     [B](b.pdf)'));
+    // The link at the parent's indent, or other text after the marker, stays the parent's text.
+    assert.ok(!sameMarkdown('* Parent\n  * [Report](<report.csv>)', '* Parent\n  * \n  [Report](report.csv)'));
+    assert.ok(!sameMarkdown('* Parent\n  * Report', '* Parent\n  * \n    Report'));
+    assert.ok(!sameMarkdown('* Parent\n  * [Report](<report.csv>) here', '* Parent\n  * \n    [Report](report.csv) here'));
+    // A second file block is an item of the list the first one starts.
+    assert.ok(sameMarkdown('* Parent\n  * [A](<a.csv>)\n  * \n    [B](b.csv)', '* Parent\n  * \n    [A](a.csv)\n  * \n    [B](b.csv)'));
+    // A destination with parentheses, in a quote, and with CRLF line breaks.
+    assert.ok(sameMarkdown('* Parent\n  * [A](<a%20(final).pdf>)', '* Parent\n  * \n    [A](<a%20(final).pdf>)'));
+    assert.ok(sameMarkdown('> * Parent\n>   * [A](<a.csv>)', '> * Parent\n>   * \n>     [A](a.csv)'));
+    assert.ok(sameMarkdown('* Parent\n  * [A](<a.csv>)', '* Parent\r\n  * \r\n    [A](a.csv)\r\n'));
+    // Text inside a code span, and a line with more than the link, stay text.
+    assert.ok(!sameMarkdown('* Parent `x\n  *\n    [A](a.csv) y`', '* Parent `x\n  * [A](a.csv) y`'));
+    assert.ok(!sameMarkdown('* Parent\n  * [A](<a.csv>) and [B](<b.csv>)', '* Parent\n  * \n    [A](a.csv) and [B](b.csv)'));
+    // A file block Markdown already reads as an item stays a file block.
+    assert.ok(!sameMarkdown('* Parent\n\n  * \n    [Report](report.csv)', '* Parent\n\n  * [Report](report.csv)'));
+  });
+
   it('tells a changed document apart', () => {
     assert.ok(!sameMarkdown('| Day | Change |\n| -- | -- |\n| Monday | -6 |', '| Day | Change |\n| -- | -- |\n| Monday | -7 |'));
     assert.ok(!sameMarkdown('* -6', '-6'));

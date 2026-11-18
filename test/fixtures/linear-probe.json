@@ -713,6 +713,26 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/nested-attachment-csv-numbered.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/nested-attachment-csv-one-line.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/nested-attachment-csv-raw.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/nested-attachment-csv-then-sibling.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/nested-attachment-pdf-one-line.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/release-notes.md": {
       "yjs": "recorded",
       "fixedPoint": true

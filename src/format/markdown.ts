@@ -181,7 +181,7 @@ function comparable(body: string): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
   // A list marker (with a task checkbox, if any) alone on its line opens a file block
   // in Linear (`* \n  [a](a.pdf)`), which Markdown reads as `* [a](a.pdf)`: keep that line apart too.
-  const marked = body
+  const marked = nestedFileBlocksOnItemLine(body)
     .replace(/\\[$+]/g, (escape) => LINEAR_SYNTAX_ESCAPES[escape]!)
     .replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, '$1 ');
   const tree = parse(marked);
@@ -192,6 +192,63 @@ function comparable(body: string): unknown {
     return rest;
   };
   return strip(tree);
+}
+
+// A bullet or number marker alone on its line, after any quote prefix.
+const BARE_MARKER = /^((?: {0,3}>[ ]?)*)( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
+// Cheap test before a parse: a line, then a bare marker, then an indented line opening with `[`.
+const MAYBE_NESTED_BLOCK = /\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
+
+/**
+ * The body with each file block Markdown reads as text written on its
+ * item's line. Linear writes a nested item holding an uploaded file right
+ * after its parent's text as the marker alone, then the link at the item's
+ * content indent (`* Parent\n  * \n    [a](a.csv)`). An empty item cannot
+ * interrupt a paragraph, so Markdown reads both lines as the parent's text
+ * (`Parent\n*\n[a](a.csv)`), while Linear holds a nested item with the
+ * file: the same document as `* Parent\n  * [a](a.csv)`, the form `fix`
+ * writes. Only the first such block of a paragraph is joined: once it is an
+ * item, the blocks after it are items of its list, which Markdown reads as
+ * file blocks already. A file block Markdown reads as an item stays as it is.
+ */
+export function nestedFileBlocksOnItemLine(body: string): string {
+  if (!MAYBE_NESTED_BLOCK.test(body)) return body;
+  const lines = body.split('\n');
+  // Line indexes (0-based) of the marker lines to join with the link line after them.
+  const joins = new Map<number, number>();
+  visit(parse(body), (node) => {
+    if (node.type !== 'paragraph') return;
+    for (const [index, link] of node.children.entries()) {
+      const before = node.children[index - 1];
+      if (link.type !== 'link' || before?.type !== 'text') continue;
+      const linkLine = link.position!.start.line - 1;
+      const markerLine = linkLine - 1;
+      // The marker line is the paragraph's own text, not its first line.
+      if (markerLine < node.position!.start.line || before.position!.start.line - 1 > markerLine) continue;
+      const marker = BARE_MARKER.exec(lines[markerLine]!);
+      if (marker === null) continue;
+      const [, prefix, spaces, bullet] = marker as unknown as [string, string, string, string];
+      const column = prefix.length + spaces.length + bullet.length + 1;
+      const line = lines[linkLine]!;
+      // The link alone on its line, at the item's content indent.
+      if (link.position!.start.column - 1 !== column || line.slice(0, column) !== prefix + ' '.repeat(column - prefix.length)) continue;
+      if (link.position!.end.line - 1 !== linkLine || line.slice(link.position!.end.column - 1).trim() !== '') continue;
+      joins.set(markerLine, column);
+      break;
+    }
+  });
+  if (joins.size === 0) return body;
+  const result: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const column = joins.get(index);
+    if (column === undefined) {
+      result.push(lines[index]!);
+      continue;
+    }
+    result.push(`${lines[index]!.replace(/[ \t\r]*$/, '')} ${lines[index + 1]!.slice(column)}`);
+    index++;
+  }
+  return result.join('\n');
 }
 
 /** A color comment Linear writes directly above a callout whose color is not its alert's default. */

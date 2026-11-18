@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Read the summary before the planning call.","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "file",
+                      "attrs": {"contentAttribution":{"actorType":"user","userId":"<userId>"},"href":"../assets/summary.pdf","mimetype":"application/pdf","name":"Summary","size":591,"uploadState":"finished"}
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-d291dd1b","marks":{"attribution":"user"}}]}
+  ]
+}

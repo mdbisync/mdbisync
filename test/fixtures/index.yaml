@@ -605,6 +605,16 @@ known_constructs:
     class: unchanged
   - construct: task-list-then-bullet-list
     class: unchanged
+  - construct: nested-attachment-one-line
+    class: fixable
+  - construct: nested-attachment-raw
+    class: fixable
+  - construct: nested-attachment-numbered
+    class: fixable
+  - construct: nested-attachment-pdf
+    class: fixable
+  - construct: nested-attachment-sibling
+    class: fixable
   - construct: video-in-item-mov
     class: fixable
   - construct: video-in-item
@@ -2485,6 +2495,51 @@ fixtures:
     corpus: false
     missing_target: true
     note: "the probe confirms a link Linear cannot resolve stays a link in Markdown and Yjs"
+  - file: "list-items/nested-attachment-csv-one-line.md"
+    group: list-items
+    construct: nested-attachment-one-line
+    class: fixable
+    basis: known
+    git_form: captured
+    canary: kx-8c3e8e5b
+    corpus: false
+    note: "a nested bullet holding only an uploaded CSV right after its parent's text, in fix's one-line form; Linear writes it as a file block that Markdown reads as the parent's text"
+  - file: "list-items/nested-attachment-csv-raw.md"
+    group: list-items
+    construct: nested-attachment-raw
+    class: fixable
+    basis: known
+    git_form: captured
+    canary: kx-bec43de6
+    corpus: false
+    note: "the same item before fix, with dash markers and a bare destination"
+  - file: "list-items/nested-attachment-csv-numbered.md"
+    group: list-items
+    construct: nested-attachment-numbered
+    class: fixable
+    basis: known
+    git_form: captured
+    canary: kx-36a7373a
+    corpus: false
+    note: "a nested numbered item holding only an uploaded CSV right after its parent's text"
+  - file: "list-items/nested-attachment-pdf-one-line.md"
+    group: list-items
+    construct: nested-attachment-pdf
+    class: fixable
+    basis: known
+    git_form: captured
+    canary: kx-d291dd1b
+    corpus: false
+    note: "a nested bullet holding only an uploaded PDF right after its parent's text"
+  - file: "list-items/nested-attachment-csv-then-sibling.md"
+    group: list-items
+    construct: nested-attachment-sibling
+    class: fixable
+    basis: known
+    git_form: captured
+    canary: kx-2381846f
+    corpus: false
+    note: "the nested CSV item followed by a sibling item"
   - file: "list-items/file-not-uploaded.md"
     group: list-items
     construct: attachment-in-item-relative
