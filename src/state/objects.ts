@@ -132,6 +132,8 @@ export interface CommitSpec {
    * parent, no commit is made and the parent is returned.
    */
   skipIfUnchanged?: boolean;
+  /** Gives the message to commit in place of `message`, from the tree and parents the commit gets: a signed one. */
+  sign?: (tree: Oid, parents: readonly Oid[], message: string) => string;
 }
 
 /** Builds a tree from `base` plus `changes` and commits it. Returns the commit id. */
@@ -148,8 +150,9 @@ export async function commitTree(git: Git, spec: CommitSpec): Promise<Oid> {
   const args = ['commit-tree', '--no-gpg-sign', tree];
   for (const parent of spec.parents) args.push('-p', parent);
   args.push('-F', '-');
+  const text = spec.sign === undefined ? spec.message : spec.sign(tree, spec.parents, spec.message);
   return git.text(args, {
-    input: spec.message.endsWith('\n') ? spec.message : `${spec.message}\n`,
+    input: text.endsWith('\n') ? text : `${text}\n`,
     env: {
       GIT_AUTHOR_NAME: spec.identity.name,
       GIT_AUTHOR_EMAIL: spec.identity.email,

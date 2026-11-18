@@ -63,6 +63,7 @@ import {
   readInitialSyncProgress,
   readUploads,
   stateRef,
+  signObservation,
 } from '../state/index.ts';
 import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
@@ -778,7 +779,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
             .filter((oid): oid is string => oid !== undefined),
         ),
       ];
-      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false });
+      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     }
 
     const trees = (await git.text(['show', '-s', '--format=%T', commit, fetched.tracked])).split('\n');

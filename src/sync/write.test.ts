@@ -16,7 +16,7 @@ import { Git, commitTree, type IdEntry } from '../state/index.ts';
 import { fixText } from '../format/index.ts';
 import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, IDENTITY, createFixture, fakeLfsServer, mergeOnGitHub } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, createFixture, fakeLfsServer, mergeOnGitHub, signTip } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
 const CANARY = 'kx-5b1e0a94';
@@ -1495,6 +1495,7 @@ describe('sync: the tracked branch to Linear', () => {
     await writeFile(join(personDir, path), text);
     await person.run(['commit', '--quiet', '-am', 'Captured']);
     await person.run(['push', '--quiet', 'origin', 'HEAD:refs/mdbisync/linear']);
+    await signTip(fixture.remote);
     await person.run(['checkout', '--quiet', 'main']);
   }
 

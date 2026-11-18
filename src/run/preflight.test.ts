@@ -13,7 +13,7 @@ import { runCli } from '../cli.ts';
 import { NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { CHECK_NAMES } from '../setup/index.ts';
 import { type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
-import { PushedKey, commitIds, commitUploads } from '../state/index.ts';
+import { PushedKey, commitIds, commitTree, commitUploads, signObservation } from '../state/index.ts';
 import { IDENTITY, type Fixture, createFixture } from '../state/test-helpers.ts';
 import { type RunReport } from './finish.ts';
 import { INPUT_NAMES, environmentName } from './inputs.ts';
@@ -316,6 +316,30 @@ describe('preflight', () => {
       assert.equal(report.complete, true);
       assert.equal(report.changed, false);
       assert.match(result.stdout, /nothing to write/);
+    });
+
+    it('a commit someone else pushed to the linear state ref stops the sync before it talks to any service', async () => {
+      const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+      const key = new PushedKey('client-secret', 'owner/repo');
+      const forged = await commitTree(fixture.remote, { parents: [main], base: main, changes: new Map([['eng/x.md', '# X\n\nplanted\n']]), message: 'Capture Linear changes', identity: IDENTITY });
+      // The sync's own signature, copied from a commit it wrote, does not cover another tree.
+      const signed = await commitTree(fixture.remote, { parents: [main], base: main, changes: new Map([['eng/x.md', '# X\n']]), message: 'Capture Linear changes', identity: IDENTITY, sign: signObservation(key) });
+      const copied = await fixture.remote.text(['commit-tree', (await fixture.remote.text(['rev-parse', `${forged}^{tree}`])), '-p', main, '-m', (await fixture.remote.text(['show', '-s', '--format=%B', signed]))]);
+      try {
+        for (const tip of [forged, copied]) {
+          await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', tip]);
+          const world = fakeWorld();
+          const { result, report } = await run('sync', world);
+          assert.equal(result.exitCode, NO_STATE_EXIT_CODE);
+          assert.equal(report.code, 'initial-sync-required');
+          assert.match(result.stdout, /refs\/mdbisync\/linear is at a commit the sync did not write/);
+          assert.deepEqual(world.requests, []);
+          assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear']), tip);
+          assert.equal((await fixture.remote.run(['rev-parse', '--verify', '--quiet', 'refs/heads/mdbisync/linear'], { okCodes: [0, 1] })).code, 1);
+        }
+      } finally {
+        await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', 'refs/heads/main']);
+      }
     });
 
     /** The fake world with every Linear query's operation name recorded. */

@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { Git } from '../state/index.ts';
-import { IDENTITY } from '../state/test-helpers.ts';
+import { IDENTITY, signTip } from '../state/test-helpers.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
 
 describe('repair state scope', () => {
@@ -15,6 +15,8 @@ describe('repair state scope', () => {
     const source = 'name: Example\n';
     await h.gitEdit(path, source);
     await h.editRef('refs/mdbisync/linear', path, source);
+    // The linear ref holds the file as the sync's own record of the tracked branch would; only the ids are forged.
+    await signTip(h.fixture.remote);
     const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
     const hash = createHash('sha256').update(source).digest('hex');
     const forged = { id: duplicate ? ids['combined/guide.md'].id : 'unknown-document', pullRewrite: {hash, observedHash: hash, replacement: 'name: Replaced\n', images: []},
@@ -126,7 +128,8 @@ describe('repair state scope', () => {
     const observed = '# Guide\n\nLinear text.\n';
     const document = await h.documentOf(path);
     document.content = observed;
-    const source = await h.editRef('refs/mdbisync/linear', path, observed, 'Capture Linear changes');
+    await h.editRef('refs/mdbisync/linear', path, observed, 'Capture Linear changes');
+    const source = await signTip(h.fixture.remote);
     const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
     const hash = createHash('sha256').update(observed).digest('hex');
     ids[path] = {...ids[path], pullRewrite: {source, hash, observedHash: hash, replacement: `# Guide\n\nRepaired ${CANARY}.\n`, images: []}};
@@ -146,6 +149,8 @@ describe('repair state scope', () => {
   it('does not recreate a missing sync branch from an out-of-scope Linear tree during write-back', async () => {
     await h.fixture.remote.run(['update-ref', '-d', SYNC_BRANCH]);
     await h.editRef('refs/mdbisync/linear', '.github/workflows/example.yml', 'name: Example\n');
+    // Signed, so the write step's own scope check is what this reaches; an unsigned tip stops the run before it.
+    await signTip(h.fixture.remote);
     await h.editInLinear('combined/guide.md', '# Guide\n\nA new paragraph.\n');
     const run = await h.sync();
     assert.equal(run.report.pullRequest?.code, 'head-unverified');

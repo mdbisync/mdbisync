@@ -2,6 +2,8 @@
 // initial sync has not finished, it writes nothing and asks for initial
 // sync. It never picks a direction itself. After an initial sync from
 // Linear, it also waits until a person has merged that sync's pull request.
+// A `linear` tip the sync did not write is lost state too: initial sync
+// records it anew.
 
 import { type StateConfig, type StateSnapshot, stateRef } from '../state/index.ts';
 import { type FailureCode } from './report.ts';
@@ -19,12 +21,15 @@ export interface StateRefusal {
  * `initialPullRequestPending`: `linear`'s history holds an initial sync's
  * record from Linear that the tracked branch has not taken yet, wherever the
  * tip has moved since.
+ * `linearUntrusted`: the sync did not write `linear`'s tip, and the tracked
+ * branch does not hold it.
  */
 export function checkSyncState(
   state: StateSnapshot,
   config: StateConfig,
   initialSyncUnfinished = false,
   initialPullRequestPending = false,
+  linearUntrusted = false,
 ): StateRefusal | null {
   if (initialSyncUnfinished) {
     return {
@@ -42,6 +47,12 @@ export function checkSyncState(
     return {
       code: 'initial-pull-request-pending',
       message: message('setup.initial-pull-request-pending', { tracked: config.trackedBranch, sync: config.syncBranch }),
+    };
+  }
+  if (linearUntrusted) {
+    return {
+      code: 'initial-sync-required',
+      message: message('setup.linear-untrusted', { ref: stateRef(config, 'linear') }),
     };
   }
   return null;
