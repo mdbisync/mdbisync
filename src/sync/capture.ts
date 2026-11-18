@@ -29,7 +29,7 @@ import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBloc
 import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
 import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
-import { trackedPlaces } from './tracked-places.ts';
+import { pendingMove, trackedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
 
@@ -148,12 +148,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const recorded = await loadMapping(git, base);
     const zones = new Map(mapping.zones);
     let changedPlace = false;
-    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch named it.
+    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch allows it.
     const allowedPlace = trackedPlaces(git, fetched.tracked, mapping.zones);
     for (const [folder, old] of recorded.zones) {
       const current = zones.get(folder);
       if (current !== undefined && (old.team !== current.team || old.project !== current.project)) {
-        if (!await allowedPlace(folder, placeOf(old))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
+        // An old place is read only to finish the tracked branch's latest move of the folder, never a place it held before.
+        if (!await pendingMove(git, fetched.tracked, folder, placeOf(old), placeOf(current))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
         zones.set(folder, old);
         changedPlace = true;
       }

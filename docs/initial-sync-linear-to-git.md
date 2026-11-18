@@ -53,6 +53,16 @@ Its job summary lists, by path and never with document content:
 | Kept | A folder's annotation `README.md` without a document. It stays, since the folder's mapping depends on it. Shown only when there is one. |
 | Left out | A file or document the run cannot take, with the rule that stops it. |
 
+When the repository has security hooks (marked `alias: security`), the dry
+run shows them the title of each document without a file, as a confirmed
+run does. A document whose title they reject is listed under **Left out**
+with `security-hook` at a name made from its id (`<folder>/<document id>.md`),
+never under its title. With `security-step`, the stage step stages these
+titles and the apply step lists the plan; a title the hooks step did not
+answer is listed the same way, with `security-unchecked`. Like a confirmed
+run, a dry run with security hooks and new documents needs pre-commit on
+`PATH`; the workflow template installs it.
+
 Read the **Remove** table carefully. If a file there should stay, create its
 document in Linear, titled with the file's path below its mapped folder
 without `.md`, and run the dry run again.
@@ -120,7 +130,9 @@ form: those with a finding of the `linear-format` linter (its rules are in
 [linear-format.md](linear-format.md)), a title that collides with another
 file's or is too long, or a file git does not store as text (in LFS,
 binary). Such a file stays in git as it is, and the document whose title
-names it is not taken.
+names it is not taken. It also leaves out a document without a file whose
+title the security hooks reject (`security-hook`) or did not see
+(`security-unchecked`), as described under [Step 1](#step-1-dry-run).
 
 The confirmed run can leave out more once it has each document's text, for
 the rules below. A new file is left out of the pull request; an existing
@@ -136,7 +148,7 @@ file keeps the tracked branch's text and stays tied to its document.
 | `front-matter-boundary` | The document's text starts with something that reads as front matter, so it would not stay the file's body. |
 | `title-not-a-path` | The new file would map back to another document or another folder's team or project. |
 | `security-hook` | A security hook reported a finding in the document's title, its text or its files, including the Linear URL of a linked document that was left out. |
-| `security-unchecked` | The security hooks have not seen this text, for example because their step did not run. |
+| `security-unchecked` | The security hooks have not seen this text or title, for example because their step did not run. |
 | `changed-during-run` | The document changed in Linear between the listing and the read of its text: it moved to another team or project, was renamed, trashed, archived or edited, or is gone. It is not imported, and the file its title names stays as it is. Run again. |
 
 ### A run that stops

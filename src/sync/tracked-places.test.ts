@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
 import { type Git, type Oid, commitTree } from '../state/index.ts';
 import { type Place } from '../mapping/index.ts';
-import { trackedPlaces } from './tracked-places.ts';
+import { pendingMove, trackedPlaces } from './tracked-places.ts';
+import { MERGE_RECORD_MESSAGE } from './write.ts';
 
 const team = (name: string) => `---\nlinear-team: ${name}\n---\n\n# Folder\n`;
 const project = (name: string, teamName?: string) => `---\n${teamName === undefined ? '' : `linear-team: ${teamName}\n`}linear-project: ${name}\n---\n\n# Folder\n`;
@@ -23,6 +24,8 @@ describe('places the tracked branch named', () => {
   const commit = (parents: Oid[], changes: Record<string, string | null>) =>
     commitTree(git, { parents, base: parents[0] ?? null, changes: new Map(Object.entries(changes)), message: 'Change', identity: IDENTITY, skipIfUnchanged: false });
   const check = (tracked: Oid, folder: string, place: Place) => trackedPlaces(git, tracked, new Map())(folder, place);
+  const record = (parents: Oid[], changes: Record<string, string | null>) =>
+    commitTree(git, { parents, base: parents[0] ?? null, changes: new Map(Object.entries(changes)), message: MERGE_RECORD_MESSAGE, identity: IDENTITY, skipIfUnchanged: false });
 
   it('follows a folder moved under another team', async () => {
     const first = await commit([], { 'ops/README.md': team('OPS'), 'eng/README.md': team('ENG'), 'ops/pay/README.md': project('Pay') });
@@ -74,5 +77,68 @@ describe('places the tracked branch named', () => {
     const allowed = trackedPlaces(git, tip, new Map([['docs', { team: 'ENG', teamFolder: 'docs', project: 'Notes', projectFolder: 'docs' }]]));
     assert.equal(await allowed('other', inProject('ENG', 'Notes')), true);
     assert.equal(await allowed('other', inTeam('ENG')), false);
+  });
+  describe('a pending move', () => {
+    it('allows only the place just before the latest change', async () => {
+      const first = await commit([], { 'docs/README.md': project('First', 'ENG') });
+      const second = await commit([first], { 'docs/README.md': project('Second', 'ENG') });
+      const edited = await commit([second], { 'docs/README.md': project('Second', 'ENG') + 'More.\n' });
+      const third = await commit([edited], { 'docs/README.md': project('Third', 'ENG') });
+      assert.equal(await pendingMove(git, third, 'docs', inProject('ENG', 'Second'), inProject('ENG', 'Third')), true);
+      assert.equal(await pendingMove(git, third, 'docs', inProject('ENG', 'First'), inProject('ENG', 'Third')), false, 'a place held before the previous one');
+      assert.equal(await pendingMove(git, edited, 'docs', inProject('ENG', 'First'), inProject('ENG', 'Second')), true);
+      assert.equal(await pendingMove(git, third, 'docs', inProject('ENG', 'Second'), inProject('ENG', 'First')), false, 'not the current place');
+    });
+
+    it('allows a second move once the folder went back to the recorded place', async () => {
+      const first = await commit([], { 'docs/README.md': project('First', 'ENG') });
+      const second = await commit([first], { 'docs/README.md': project('Second', 'ENG') });
+      const back = await commit([second], { 'docs/README.md': project('First', 'ENG') });
+      const third = await commit([back], { 'docs/README.md': project('Third', 'ENG') });
+      assert.equal(await pendingMove(git, third, 'docs', inProject('ENG', 'First'), inProject('ENG', 'Third')), true);
+    });
+
+    it('takes the move from an inherited annotation', async () => {
+      const first = await commit([], { 'README.md': team('OPS'), 'docs/README.md': '# Docs\n' });
+      const moved = await commit([first], { 'README.md': team('ENG') });
+      assert.equal(await pendingMove(git, moved, 'docs', inTeam('OPS'), inTeam('ENG')), true);
+    });
+
+    it('refuses a folder that never had another place', async () => {
+      const tip = await commit([], { 'docs/README.md': project('Notes', 'ENG') });
+      assert.equal(await pendingMove(git, tip, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), false);
+      const unannotated = await commit([], { 'docs/README.md': '# Docs\n' });
+      const annotated = await commit([unannotated], { 'docs/README.md': project('Notes', 'ENG') });
+      assert.equal(await pendingMove(git, annotated, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), false);
+    });
+
+    it('ends once a merged sync record took the new place', async () => {
+      const first = await commit([], { 'docs/README.md': project('Payroll', 'ENG') });
+      const oldRecord = await record([first], {});
+      const synced = await commit([first, oldRecord], {});
+      const moved = await commit([synced], { 'docs/README.md': project('Notes', 'ENG') });
+      const later = await commit([moved], { 'docs/page.md': 'Page.\n' });
+      assert.equal(await pendingMove(git, later, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), true, 'a record from before the move');
+      const newRecord = await record([oldRecord, moved], { 'docs/README.md': project('Notes', 'ENG') });
+      const merged = await commit([later, newRecord], {});
+      assert.equal(await pendingMove(git, merged, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), false);
+    });
+
+    it('ignores a record from an earlier stay in the new place that is merged after the move', async () => {
+      const first = await commit([], { 'docs/README.md': project('Notes', 'ENG') });
+      const earlier = await record([first], {});
+      const away = await commit([first], { 'docs/README.md': project('Payroll', 'ENG') });
+      const back = await commit([away], { 'docs/README.md': project('Notes', 'ENG') });
+      const merged = await commit([back, earlier], {});
+      assert.equal(await pendingMove(git, merged, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), true);
+    });
+
+    it('ignores a merged record that does not name the new place', async () => {
+      const first = await commit([], { 'docs/README.md': project('Payroll', 'ENG'), 'other/README.md': project('Other', 'ENG') });
+      const moved = await commit([first], { 'docs/README.md': project('Notes', 'ENG') });
+      const otherRecord = await record([first], { 'other/page.md': 'Page.\n' });
+      const merged = await commit([moved, otherRecord], { 'other/page.md': 'Page.\n' });
+      assert.equal(await pendingMove(git, merged, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), true);
+    });
   });
 });
