@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { documentUrlBase, linksFromLinear, linksToLinear, type LinkSpellings } from '../../src/initial-sync/links.ts';
 import { findFileLinks, restoreFileLinks } from '../../src/initial-sync/uploads.ts';
-import { parseLfsPointer, readReservedIds, readUploads } from '../../src/state/index.ts';
+import { PushedKey, parseLfsPointer, readReservedIds, readUploads } from '../../src/state/index.ts';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -143,7 +143,7 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
         const ids = JSON.parse(await fixture.remote.text(['show', 'refs/mdbisync/ids:ids.json'])) as Record<string, { id: string }>;
         const idsTip = await fixture.remote.text(['rev-parse', 'refs/mdbisync/ids']);
         const uploadsTip = await fixture.remote.text(['rev-parse', 'refs/mdbisync/uploads']);
-        const uploads = await readUploads(fixture.remote, uploadsTip);
+        const uploads = await readUploads(fixture.remote, uploadsTip, new PushedKey('client-secret', 'owner/repo'));
         const documentIds = new Map([...Object.entries(ids).map(([path, entry]) => [path, entry.id] as const), ...await readReservedIds(fixture.remote, idsTip)]);
         const linkMap = {base: documentUrlBase(world.linear.urlKey), ids: documentIds};
         const live = world.linear.documents.filter((d) => d.trashed !== true);

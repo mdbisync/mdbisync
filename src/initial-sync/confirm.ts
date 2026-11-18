@@ -214,7 +214,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const writtenBefore = resumed ? await readWrittenHashes(git, expected.ids) : new Map<string, string>();
   const sentHashes = new Map(writtenBefore);
   const ids: IdMap = resumed ? new Map(previous) : new Map();
-  const uploads = await readUploads(git, expected.uploads);
+  const uploads = await readUploads(git, expected.uploads, context.pushedKey);
   const uploadsAtStart = uploads.size;
   /** What Linear stores for each synchronized path, and the text this run sent or would send for it. */
   const stored = new Map<string, string>();
@@ -264,7 +264,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     });
     updates.push({ ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit });
     if (uploads.size !== uploadsAtStart || expected.uploads !== null) {
-      const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
+      const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey);
       updates.push({ ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit });
     }
     const pushed = await pushAtomic(git, options.config, updates);
@@ -547,7 +547,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       message: withRecorded(FINAL_IDS_MESSAGE, recorded),
       always: (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
-    const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
+    const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey);
     const updates: RefUpdate[] = [
       { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit },
       { ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit },

@@ -473,7 +473,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     };
 
     let entries = [...plan.overwrite, ...plan.create];
-    const uploads = await readUploads(git, expected.uploads);
+    const uploads = await readUploads(git, expected.uploads, context.pushedKey);
     const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool);
     const failed: string[] = [];
     const budget: string[] = [];
@@ -701,7 +701,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     // The cache records each downloaded file, so the sync never uploads it again.
     const finalUploads: UploadMap = new Map(uploads);
     for (const entry of entries) for (const [hash, url] of (bodies.get(entry.path) as { uploads: UploadMap }).uploads) finalUploads.set(hash, url);
-    const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity);
+    const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity, context.pushedKey);
     // The objects reach the remote's LFS store before any ref points at their pointers.
     if (lfsObjects.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...lfsObjects]);
     const updates: RefUpdate[] = [

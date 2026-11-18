@@ -6,7 +6,7 @@ import { it } from 'node:test';
 import { runCli } from '../../src/cli.ts';
 import { lintInTree } from '../../src/format/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API, GITHUB_API, touch } from '../../src/setup/test-helpers.ts';
-import { commitIds, commitTree, commitUploads, fetchState, listTree, readBlobs, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
+import { PushedKey, commitIds, commitTree, commitUploads, fetchState, listTree, readBlobs, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
 import { createFixture, IDENTITY } from '../../src/state/test-helpers.ts';
 import { MARKS } from '../../src/sync/marks.ts';
 
@@ -24,7 +24,7 @@ it('the CLI blocks unsupported upload bytes and captures every supported type af
     const initial = {
       linear:await commitTree(git, {parents:[fetched.tracked], base:fetched.tracked, changes:new Map(), message:'Initial state', identity:IDENTITY}),
       ids:await commitIds(git, null, new Map([['docs/plan.md',{id:'plan'}]]), IDENTITY),
-      uploads:await commitUploads(git, null, new Map(), IDENTITY),
+      uploads:await commitUploads(git, null, new Map(), IDENTITY, new PushedKey('secret', 'example/repository')),
     };
     assert.equal((await pushAtomic(git, config, Object.entries(initial).map(([store,next]) => ({ref:stateRef(config,store as 'linear'|'ids'|'uploads'), expected:null, next})))).ok, true);
     const world = fakeWorld();
@@ -114,7 +114,7 @@ it('blocks a document that reuses a captured file the stricter check now refuses
     const initial = {
       linear:await commitTree(git, {parents:[fetched.tracked], base:fetched.tracked, changes:new Map(), message:'Initial state', identity:IDENTITY}),
       ids:await commitIds(git, null, new Map([['docs/mapped.md',{id:'mapped'}],['docs/copied.md',{id:'copied'}],['docs/static.md',{id:'static'}]]), IDENTITY),
-      uploads:await commitUploads(git, null, new Map([[hash(old),mappedUrl],[hash(shapes),staticUrl]]), IDENTITY),
+      uploads:await commitUploads(git, null, new Map([[hash(old),mappedUrl],[hash(shapes),staticUrl]]), IDENTITY, new PushedKey('secret', 'example/repository')),
     };
     assert.equal((await pushAtomic(git, config, Object.entries(initial).map(([store,next]) => ({ref:stateRef(config,store as 'linear'|'ids'|'uploads'), expected:null, next})))).ok, true);
     const world = fakeWorld();

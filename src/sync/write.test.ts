@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { Git } from '../state/index.ts';
+import { Git, commitTree } from '../state/index.ts';
 import { fixText } from '../format/index.ts';
 import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
@@ -490,6 +490,30 @@ describe('sync: the tracked branch to Linear', () => {
   /** Upload requests, single or batched, whatever the operation is called. */
   const isUpload = (write: string) => /^FileUpload/.test(write);
   const kinds = (writes: string[]) => writes.map((write) => (isUpload(write) ? 'upload' : write));
+
+  for (const url of [
+    'https://evil.example/x',
+    'https://uploads.linear.app/workspace/diagram).png',
+    'https://uploads.linear.app/workspace/diagram>.png',
+    'https://uploads.linear.app/workspace/unrelated.png',
+  ]) {
+    it(`uploads the tracked attachment instead of reusing a modified cache URL (${url})`, async () => {
+      const path = 'eng/media/diagram.png';
+      const hash = createHash('sha256').update(TREE[path]!).digest('hex');
+      const parent = await rev('refs/mdbisync/uploads');
+      const forged = await commitTree(fixture.remote, {
+        parents: [parent], base: parent, identity: IDENTITY, message: 'Update upload cache',
+        changes: new Map([['uploads.json', JSON.stringify({ [hash]: url })]]),
+      });
+      await fixture.remote.run(['update-ref', 'refs/mdbisync/uploads', forged, parent]);
+      await commit({ 'eng/notes/figure.md': TREE['eng/notes/figure.md']!.replace('What it shows.', 'Edited.') });
+      const { result, writes } = await sync();
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+      assert.deepEqual(uploadUrls((await documentOf('eng/notes/figure.md')).content), [world.linear.uploads.at(-1)?.assetUrl]);
+      assert.ok(world.linear.documents.every(({content}) => !content?.includes(url)));
+    });
+  }
 
   it('a document with an image whose text changed is written; the image is not uploaded again', async () => {
     const figure = await documentOf('eng/notes/figure.md');

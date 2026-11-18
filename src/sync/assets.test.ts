@@ -10,7 +10,7 @@ import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
 import { captureAssets, createAssetCapture as makeCapture, DownloadRetryError, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
 import { imageLinks } from './image-links.ts';
-import { destinations } from '../initial-sync/uploads.ts';
+import { destinations, withUploadSuffix } from '../initial-sync/uploads.ts';
 import { fixText } from '../format/index.ts';
 
 const captures: ReturnType<typeof makeCapture>[] = [];
@@ -118,6 +118,27 @@ it('restores cached upload spellings before restricting new downloads to the upl
     const image = await read('docs/plan.md', `!${current}`, new Map([[hash, url]]), previous);
     assert.equal(image.body, `[Image](<${url}?download=1#page=2>)\n`);
 
+  } finally { await fixture.cleanup(); }
+});
+
+it('keeps the previous attachment spelling and query when rebuilding a cache entry', async () => {
+  const fixture = await createFixture();
+  try {
+    const previous = '![Chart](<image.png?caption=a b#page=2>)\n';
+    const url = 'https://uploads.linear.app/workspace/image.png?caption=a%20b';
+    const hosted = `![Chart](<${url}#page=2>)\n`;
+    await fixture.seed({ 'docs/plan.md': previous, 'docs/image.png': png });
+    const git = await fixture.clone('rebuild-upload');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async (input) => {
+      assert.equal(String(input), url);
+      return new Response(png);
+    });
+    const result = await capture('docs/plan.md', hosted, new Map(), previous);
+    assert.equal(result.body, previous);
+    assert.deepEqual([...result.uploads.values()], [url]);
+    assert.equal(withUploadSuffix(url, '?caption=a b#page=2'), url + '#page=2');
+    assert.equal(withUploadSuffix(url, '?download=1#page=2'), url + '&download=1#page=2');
   } finally { await fixture.cleanup(); }
 });
 
