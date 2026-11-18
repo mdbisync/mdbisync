@@ -66,7 +66,7 @@ import {
 } from '../state/index.ts';
 import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { captureCursorTrailer, cursorTime, linkVariants, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
-import { type SecurityFinding, type SecurityGate, securityGate } from '../sync/security.ts';
+import { type SecurityFinding, type SecurityGate, checkTitle, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
@@ -293,6 +293,16 @@ export interface ReverseRecord {
 }
 
 export async function confirmLinearToGit(context: RunContext, options: ReverseOptions): Promise<{ plan: ReversePlan; result: ReverseResult }> {
+  const gate = options.security ?? (await securityGate(context.git, context.fetched.tracked));
+  try {
+    return await confirmWithGate(context, options, gate);
+  } finally {
+    // Also when the run ends before its record; closing again is harmless.
+    await gate.close?.();
+  }
+}
+
+async function confirmWithGate(context: RunContext, options: ReverseOptions, gate: SecurityGate): Promise<{ plan: ReversePlan; result: ReverseResult }> {
   const { git, fetched } = context;
   const transforms = options.transforms ?? [];
   const identity = options.identity ?? context.identity;
@@ -343,6 +353,22 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
   if (fetched.sync !== null && !(await isOwnRecord(fetched.sync)) && !(await isAncestor(git, fetched.sync, fetched.tracked))) {
     result.code = 'sync-branch-changed';
     return { plan, result };
+  }
+
+  // A new file's name comes from its document's title, and the name reaches the progress commits, the record and
+  // this run's report. The hooks read each such title first; one they refuse, or have no answer for, leaves its
+  // document out under a name made from its id. The first capture after the record reads it again.
+  if (gate.configured) {
+    const screened: ReverseEntry[] = [];
+    for (const entry of plan.create) {
+      const folder = entry.path.slice(0, entry.path.length - `${entry.fileTitle}.md`.length).replace(/\/$/, '');
+      const held = titleFile(folder, entry.documentId);
+      const findings = await checkTitle(gate, held, entry.title);
+      if (findings === null) result.leftOutAtRecord.push({ path: held, rule: 'security-unchecked' });
+      else if (findings.length > 0) result.leftOutAtRecord.push({ path: held, rule: 'security-hook' });
+      else screened.push(entry);
+    }
+    plan.create = screened;
   }
 
   // Take the documents in path order. Each needs no request now; the order
@@ -529,7 +555,6 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     keepTracked(imageBlocked, 'image-blocked');
     keepTracked(complexity, 'markdown-complexity');
     // The repository's security hooks see Linear's text and every downloaded file before any byte is pushed, as in the capture.
-    const gate = options.security ?? (await securityGate(git, fetched.tracked));
     // The text each document last passed the hooks with: a document is checked again only when its bytes change.
     const passed = new Map<string, string>();
     /**

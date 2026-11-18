@@ -93,7 +93,8 @@ function blockedComment(findings: readonly BlockedFinding[]): string {
     // Hook configuration is untrusted input. Never copy matched text or a
     // malformed hook name into a public comment.
     const name = /^[a-zA-Z0-9_.-]{1,128}$/.test(hook) ? hook : 'security-check';
-    const location = Number.isSafeInteger(line) && line > 0 ? `, line ${line}` : '';
+    // Line 0 is a finding on the title (`checkTitle`).
+    const location = line === 0 ? ', in the title' : Number.isSafeInteger(line) && line > 0 ? `, line ${line}` : '';
     return `- Hook \`${name}\`${location}.`;
   }))].sort();
   const sections: string[] = [];

@@ -18,7 +18,7 @@ import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
-import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
+import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
@@ -399,6 +399,26 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const path = paths.get(doc.id)!;
       if (limited.has(doc.id)) continue;
+      // The title names the file, its `ids` key and the report's line: a name the record does not hold yet is
+      // shown to the hooks first. Until they pass it, the document keeps its accepted path or, when it has none,
+      // a name made from its id.
+      if (gate.configured && !previous.has(path)) {
+        let held = old?.path;
+        if (held === undefined) {
+          held = documentPath(folderFor(doc)!, doc.id, doc.id, reservations, undefined, (candidate) => invalidZone(doc, candidate));
+          reservations.add(held);
+        }
+        const findings = await checkTitle(gate, held, doc.title);
+        if (findings === null) {
+          result.leftOut.push({id: doc.id, rule: 'security-unchecked'});
+          resetTarget(doc.id);
+          continue;
+        }
+        if (findings.length > 0) {
+          recordBlocked(doc, held, findings);
+          continue;
+        }
+      }
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {

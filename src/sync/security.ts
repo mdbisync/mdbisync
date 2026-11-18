@@ -152,3 +152,13 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
     },
   };
 }
+
+/**
+ * Asks the hooks about a document's title before it names a file, an `ids` key or a report line: the title as the
+ * text of a file at `path`, a name that does not hold the title (the document's id or its accepted file). Findings
+ * on the title carry line 0, which a notice reads as "in the title"; null when the gate has no answer.
+ */
+export async function checkTitle(gate: SecurityGate, path: string, title: string): Promise<SecurityFinding[] | null> {
+  const findings = await gate.check(new Map([[path, `${title.normalize('NFC')}\n`]]));
+  return findings === null ? null : findings.map(({ hook }) => ({ hook, line: 0 }));
+}
