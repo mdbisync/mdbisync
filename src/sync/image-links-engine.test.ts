@@ -120,7 +120,9 @@ describe('image repairs through the sync pull request', () => {
 
     delete document.projectId;
     document.teamId = 'team-eng';
-    document.content = document.content!.split('\n\n').filter(paragraph => !paragraph.includes('schedule.txt')).join('\n\n');
+    document.content = document.content!.split('\n\n')
+      .filter(paragraph => !paragraph.includes('schedule.txt')).join('\n\n')
+      .replace('../outline.txt', '../%6Futline.txt#overview');
     touch(document);
     const uploads = h.world.linear.uploads.length;
     const run = await h.sync();

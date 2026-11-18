@@ -81,7 +81,7 @@ export class ImageBlockedError extends Error {
  */
 export function checkTypedFileLinks(path: string, body: string, previousBody?: string, previousPath = path, plain: ReadonlySet<string> = new Set()): { findings: FileFinding[]; relocatedPlain: Set<string> } {
   const known = new Set<string>();
-  const movedDestinations = new Map<string, string>();
+  const movedTargets = new Map<string, Set<string>>();
   const movedFolders = posix.dirname(path) !== posix.dirname(previousPath);
   if (previousBody !== undefined) {
     visit(parse(previousBody), (node) => {
@@ -91,7 +91,10 @@ export function checkTypedFileLinks(path: string, body: string, previousBody?: s
       known.add(target);
       if (!movedFolders || !plain.has(target)) return;
       const moved = resolveTarget(path, node.url);
-      if (moved !== null && moved !== target) movedDestinations.set(node.url, moved);
+      if (moved === null || moved === target) return;
+      const targets = movedTargets.get(target) ?? new Set<string>();
+      targets.add(moved);
+      movedTargets.set(target, targets);
     });
   }
   // Only the first definition resolves an image reference and is checked by
@@ -100,14 +103,20 @@ export function checkTypedFileLinks(path: string, body: string, previousBody?: s
   const definitions = new Map<string, Definition>();
   const candidates: Array<Link | Definition> = [];
   const relocatedPlain = new Set<string>();
+  const continuedDestinations = new Set<string>();
   visit(parse(body), (node) => {
     if (node.type === 'imageReference') imageLabels.add(node.identifier);
     if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
     if (node.type === 'link' || node.type === 'definition') candidates.push(node);
-    if (node.type === 'link' || node.type === 'image' || node.type === 'definition') {
-      const moved = movedDestinations.get(node.url);
-      if (moved !== undefined) relocatedPlain.add(moved);
-    }
+    if (movedTargets.size === 0 || (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition')) return;
+    const previousTarget = resolveTarget(previousPath, node.url);
+    if (previousTarget === null) return;
+    const targets = movedTargets.get(previousTarget);
+    if (targets === undefined) return;
+    const target = resolveTarget(path, node.url);
+    if (target === null || !targets.has(target)) return;
+    relocatedPlain.add(target);
+    continuedDestinations.add(node.url);
   });
   // Validate parsed URLs even when their source ranges cannot be rewritten:
   // formatting can turn a multiline destination into an ordinary file link.
@@ -118,7 +127,7 @@ export function checkTypedFileLinks(path: string, body: string, previousBody?: s
   });
   const findings: FileFinding[] = [];
   links.forEach((node, index) => {
-    if (!movedDestinations.has(node.url) && !known.has(resolveTarget(path, node.url) as string)) {
+    if (!continuedDestinations.has(node.url) && !known.has(resolveTarget(path, node.url) as string)) {
       findings.push({ file: index + 1, total: links.length, line: line(node), reason: 'not-uploaded' });
     }
   });
