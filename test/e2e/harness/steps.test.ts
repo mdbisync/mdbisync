@@ -686,13 +686,15 @@ describe('workflows', () => {
 
   it('settle runs again after its last run merged the sync pull request, so the merge is recorded before I6 (L4-09)', async () => {
     // L4-09's live shape: three runs that change, one that waits for `format`, the run after the wait merges,
-    // and only the run after the merge moves `linear`. Settle ends on that record run; I6's own run is then quiet.
+    // and only the run after the merge moves `linear`. That record run changes too, so settle runs once more
+    // and ends on a quiet run.
     const changed = { changed: true, checks: passed };
     const quiet = { changed: false, checks: passed };
     const { ctx, dispatched } = await settleScenario(reportsOf(changed, changed, changed, { changed: false, checks: pending }, merging, changed, quiet), { pendingReads: 1 });
-    assert.equal(dispatched.length, 6, 'the record run comes on top of the four runs and the run after the wait');
-    const last = ctx.engine.results.at(-1)?.report?.['pullRequest'] as { merged?: unknown } | undefined;
-    assert.equal(last?.merged, null, 'settle does not end on the run that merged');
+    assert.equal(dispatched.length, 7, 'the record run and the quiet run after it come on top of the four runs and the run after the wait');
+    const last = ctx.engine.results.at(-1)?.report as { changed?: unknown; pullRequest?: { merged?: unknown } } | undefined;
+    assert.equal(last?.pullRequest?.merged, null, 'settle does not end on the run that merged');
+    assert.equal(last?.changed, false, 'settle ends on a quiet run, not on the run that records the merge');
     assert.equal(ctx.observations.get('settle.checkWaits'), 1);
   });
 
