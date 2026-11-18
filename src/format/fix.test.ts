@@ -41,6 +41,11 @@ const cases: Array<[string, string, string]> = [
   ['reference images are written inline', '![a][i]\n\n[i]: x.png', '![a](x.png)'],
   ['an image leaves a paragraph with text', 'Before ![a](x.png) after.', 'Before\n\n![a](x.png)\n\nafter.'],
   ['a list item with only a file link becomes a file block', '* [Report](report.pdf)', '* \n  [Report](report.pdf)'],
+  ['a nested bullet after its parent’s text keeps the file link on the marker line', '* Parent\n  * [Report](report.csv)', '* Parent\n  * [Report](<report.csv>)'],
+  ['a nested numbered item after its parent’s text keeps the file link on the marker line', '* Parent\n  1. [Report](report.csv)', '* Parent\n  1. [Report](<report.csv>)'],
+  ['a nested numbered list starting above one keeps its blank line and file block', '* Parent\n\n  3. [Report](report.csv)', '* Parent\n\n  3. \n     [Report](report.csv)'],
+  ['a nested attachment after a sibling still becomes a file block', '* Parent\n  * First\n  * [Report](report.csv)', '* Parent\n  * First\n  * \n    [Report](report.csv)'],
+  ['a nested file block keeps its existing blank line after the parent', '* Parent\n\n  * \n    [Report](report.csv)', '* Parent\n\n  * \n    [Report](report.csv)'],
   ['a task or numbered item with only a video link keeps the file block (the video form is recorded for bullets)', '- [ ] [Demo](demo.mp4)\n\n1. [Demo](demo.mp4)', '- [ ] \n  [Demo](demo.mp4)\n\n1. \n   [Demo](demo.mp4)'],
   ['a bullet item with only an MP3 link keeps the link on its line, in angle brackets', '* \n  [Voice note](media/note.mp3)\n* [Call](<call one.MP3>)\n* [Memo](memo.mp3?v=2)', '* [Voice note](<media/note.mp3>)\n* [Call](<call%20one.MP3>)\n* [Memo](<memo.mp3?v=2>)'],
   ['a task or numbered item with only an MP3 link keeps the file block (the MP3 form is recorded for bullets)', '- [ ] [Note](note.mp3)\n\n1. [Note](note.mp3)', '- [ ] \n  [Note](note.mp3)\n\n1. \n   [Note](note.mp3)'],
@@ -113,7 +118,7 @@ describe('links to files that are not there', () => {
     // A rewrite that would change the document still leaves the text as it is.
     const setext = 'Two\nlines\n---\n\n* [Report](<report.pdf>)';
     assert.equal(fixLinearText(setext, setext, inRepository), setext);
-    // A file block that would no longer be a list item (a nested item right after its parent's text) is not written.
+    // The hook also keeps the link on the marker line right after the parent's text.
     const nested = '* Parent\n  * [Report](<report.pdf>)';
     assert.equal(fixLinearText(nested, nested, inRepository), nested);
   });
