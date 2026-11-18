@@ -9,7 +9,7 @@ describe('image repairs through the sync pull request', () => {
     const path = 'eng/notes/plan.md';
     const url = status === undefined ? 'https://example.com/chart.png' : 'https://uploads.linear.app/chart.png';
     const body = `# Plan\n\n![Chart](${url})\n`;
-    const expected = `# Plan\n\n[Chart](${url})\n`;
+    const expected = `# Plan\n\n[Chart](<${url}>)`;
     const network = fakeFetch(h.world);
     let downloads = 0;
     h.fetchOverride = async (input, init) => {
@@ -22,7 +22,7 @@ describe('image repairs through the sync pull request', () => {
     assert.deepEqual(opened.report.capture?.blocked, []);
     assert.equal((await h.documentOf(path)).content, body);
     assert.ok((await h.show(`refs/mdbisync/linear:${path}`)).includes(`![Chart](${url})`));
-    assert.ok((await h.show(`${SYNC_BRANCH}:${path}`)).includes(`[Chart](${url})`));
+    assert.ok((await h.show(`${SYNC_BRANCH}:${path}`)).includes(`[Chart](<${url}>)`));
     assert.ok(!(await h.show(`${SYNC_BRANCH}:${path}`)).includes(`![Chart](${url})`));
     assert.match(h.world.github.pullRequests[0]!.body!, /image 1 of 1 \(line 3\)/);
     if (status === undefined) await h.fixture.remote.run(['update-ref', '-d', 'refs/mdbisync/ids']);
@@ -54,9 +54,9 @@ describe('image repairs through the sync pull request', () => {
     assert.deepEqual(opened.report.capture?.blocked, []);
     const branch = await h.show(`${SYNC_BRANCH}:${path}`);
     assert.match(branch, /!\[Kept\]\(assets\/[a-f0-9]+\.png\)/);
-    assert.match(branch, /\[Relative\]\(missing.png\)/);
-    assert.match(branch, /\[Absolute\]\(\/missing.png\)/);
-    assert.match(branch, /\[Nested\]\(https:\/\/example.com\/guide\)/);
+    assert.match(branch, /\[Relative\]\(<missing.png>\)/);
+    assert.match(branch, /\[Absolute\]\(<\/missing.png>\)/);
+    assert.match(branch, /\[Nested\]\(<https:\/\/example.com\/guide>\)/);
     assert.doesNotMatch(branch, /data:|javascript:|!\[\]\(\)/);
     assert.equal((h.world.github.pullRequests[0]!.body!.match(/image \d of 7 \(line/g) ?? []).length, 6);
     await h.settle();
@@ -107,8 +107,8 @@ describe('image repairs through the sync pull request', () => {
   // The fake keeps Linear text as written; the recorded format probe shows Linear itself splits the bang
   // into its own paragraph, so this covers a body that reaches the sync in any other way.
   for (const [form, image, repaired] of [
-    ['inline', 'Look !![Report](../../records.csv) here.', 'Look \\![Report](../../records.csv) here.'],
-    ['reference', 'Look !![Report][file] here.\n\n[file]: ../../records.csv', 'Look \\![Report](../../records.csv) here.'],
+    ['inline', 'Look !![Report](../../records.csv) here.', 'Look \\![Report](<../../records.csv>) here.'],
+    ['reference', 'Look !![Report][file] here.\n\n[file]: ../../records.csv', 'Look \\![Report](<../../records.csv>) here.'],
     ['joined by a removed link', 'Look [Report][x](javascript:void%280%29)(../../records.csv) here.', 'Look \\[Report](../../records.csv) here.'],
   ]) it(`never lets a repair upload a repository file Linear's text did not name (${form})`, async () => {
     const path = 'eng/notes/plan.md';
@@ -133,7 +133,7 @@ describe('image repairs through the sync pull request', () => {
     await h.suspendOne(path);
     await h.editInLinear(path, '# Plan\n\n![Chart](https://example.com/chart.png)\n');
     await h.sync();
-    assert.match(await h.show(`${h.SUSPENDED}:${path}`), /\[Chart\]\(https:\/\/example.com\/chart.png\)/);
+    assert.match(await h.show(`${h.SUSPENDED}:${path}`), /\[Chart\]\(<https:\/\/example.com\/chart.png>\)/);
     assert.doesNotMatch(await h.show(`${h.SUSPENDED}:${path}`), /!\[Chart\]/);
     assert.match(await h.show(`refs/mdbisync/linear:${path}`), /!\[Chart\]/);
     await h.editInLinear(path, '# Plan\n\n![Chart](https://example.com/chart.png)\n\nAnother paragraph.\n');

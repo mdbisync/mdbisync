@@ -41,13 +41,14 @@ const PRE_COMMIT = `repos:
 const NOTES = 'eng/backend/notes.md';
 const REVIEW = 'eng/notes/review.md';
 
+// Markdown in the form the repository's `linear-format` hook keeps (no final newline).
 const TREE: Record<string, string> = {
-  'README.md': `# Repository\n\n${CANARY}\n`,
-  'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
-  [NOTES]: `# Notes\n\nFirst paragraph.\n\nSecond paragraph. ${CANARY}\n`,
-  'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}\n`,
-  'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two. ${CANARY}\n`,
-  [REVIEW]: `# Review\n\nFindings of the review. ${CANARY}\n`,
+  'README.md': `# Repository\n\n${CANARY}`,
+  'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}`,
+  [NOTES]: `# Notes\n\nFirst paragraph.\n\nSecond paragraph. ${CANARY}`,
+  'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}`,
+  'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two. ${CANARY}`,
+  [REVIEW]: `# Review\n\nFindings of the review. ${CANARY}`,
   '.pre-commit-config.yaml': PRE_COMMIT,
 };
 
@@ -704,7 +705,7 @@ describe('sync: races inside a run', { timeout: 240_000, concurrency: CONCURRENC
     const { world, person, personDir, personCommits, startRun, reached, show, ids, body, assertSettled } = await scenario(t);
     const path = 'eng/notes/draft.md';
     await person.run(['pull', '--quiet', '--ff-only']);
-    await writeFile(join(personDir, path), `# Draft\n\nA new page from git. ${CANARY}\n`);
+    await writeFile(join(personDir, path), `# Draft\n\nA new page from git. ${CANARY}`);
     await person.run(['add', path]);
     await person.run(['commit', '--quiet', '-m', 'Add a page']);
     await person.run(['push', '--quiet', 'origin', 'HEAD:main']);

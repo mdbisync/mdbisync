@@ -220,9 +220,10 @@ for (const file of process.argv.slice(2)) {
   const remoteText = async (path: string) => (await fixture.remote.run(['show', `${stateRef(config, 'linear')}:${path}`])).stdout.toString('utf8');
   /** Whether any object of the remote holds the text, reachable or not. */
   const remoteHolds = async (text: string) => (await fixture.remote.run(['cat-file', '--batch-all-objects', '--batch'])).stdout.toString('utf8').includes(text);
+  /** An edit typed in Linear, stored as Linear stores it: without a final newline. */
   const edit = (content: string) => {
     const document = world.linear.documents[0]!;
-    document.content = content;
+    document.content = content.replace(/\n+$/, '');
     touch(document);
   };
 
@@ -254,7 +255,7 @@ for (const file of process.argv.slice(2)) {
 
     const apply = await action('apply', { operation: 'sync', 'security-step': 'apply' });
     assert.equal(apply.status, 0, apply.stdout);
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.');
     assert.deepEqual((await report('apply')).capture.leftOut, []);
     // The staged content is gone from the runner's disk.
     assert.equal(existsSync(join(runnerTemp, STAGE_FOLDER)), false);
@@ -290,17 +291,16 @@ for (const file of process.argv.slice(2)) {
       '![Image][asset]',
       '[![Image](https://example.com/a.png)](https://example.com)',
     ];
-    const original = images.join('\n\n') + '\n\n[asset]: relative.png\n';
+    const original = images.join('\n\n') + '\n\n[asset]: relative.png';
+    // The repair is proposed in the hook's form: empty paragraphs go, the reference becomes inline.
     const repaired = [
-      '[Image](https://example.com/a.png)',
-      '[Image](http://example.com/a.png)',
-      '',
-      '[Image](relative.png)',
-      '[Image](/absolute.png)',
-      '',
-      '[Image](relative.png)',
-      '[Image](https://example.com)',
-    ].join('\n\n') + '\n\n[asset]: relative.png\n';
+      '[Image](<https://example.com/a.png>)',
+      '[Image](<http://example.com/a.png>)',
+      '[Image](<relative.png>)',
+      '[Image](</absolute.png>)',
+      '[Image](<relative.png>)',
+      '[Image](<https://example.com>)',
+    ].join('\n\n');
     edit(original);
     const before = written();
     await stagedRun('images');
@@ -343,7 +343,7 @@ for (const file of process.argv.slice(2)) {
     assert.equal(notice.resolved, true);
     assert.equal(world.linear.documents[0]!.icon, 'Fire');
     assert.equal(world.linear.documents[0]!.color, '#123456');
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Site](https://example.com/a.png)\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Site](<https://example.com/a.png>)');
     const tree = await listTree(fixture.remote, stateRef(config, 'linear'));
     const files = new Set(tree.map(({path}) => path));
     const markdown = tree.filter(({path}) => path.endsWith('.md'));
@@ -354,7 +354,7 @@ for (const file of process.argv.slice(2)) {
   it('a staged run reads Linear once: the apply step answers its reads from the stage step, within I9', async () => {
     edit('Edited in Linear.\n');
     const run = await stagedRun('edit');
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.');
     // The apply step has nothing to write to Linear: every read it needs, the stage step made.
     assert.deepEqual(run.apply, []);
     const total = run.stage.length + run.apply.length;
@@ -389,9 +389,9 @@ for (const file of process.argv.slice(2)) {
     assert.equal(apply.status, 0, apply.stdout);
     assert.deepEqual((await report('apply')).capture.leftOut, []);
     assert.equal(await remoteHolds('Unseen secret-like edit'), false);
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nSeen by the hooks.\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nSeen by the hooks.');
     // Linear's newer text stays: nothing from the run's git side was written over it.
-    assert.equal(world.linear.documents[0]!.content, 'Unseen secret-like edit.\n');
+    assert.equal(world.linear.documents[0]!.content, 'Unseen secret-like edit.');
 
     // The next run's hooks see it, and it goes through.
     const again = await action('stage-2', { operation: 'sync', 'security-step': 'stage', 'report-file': '' });
@@ -400,7 +400,7 @@ for (const file of process.argv.slice(2)) {
     // The fake GitHub has no merge for the first run's pull request, so this run ends at that step; the capture is what counts here.
     assert.ok(next.status === 0 || /not finished \(github-failed\)/.test(next.stdout), next.stdout);
     assert.deepEqual((await report('apply-2')).capture.leftOut, []);
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nUnseen secret-like edit.\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nUnseen secret-like edit.');
   });
 
   it('without the hooks step, nothing from Linear is pushed', async () => {
@@ -431,7 +431,7 @@ for (const file of process.argv.slice(2)) {
     assert.deepEqual(seen.flatMap((canary) => canary.found), []);
     const apply = await action('apply', { ...initial, 'security-step': 'apply' });
     assert.equal(apply.status, 0, apply.stdout);
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nTaken from Linear.\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nTaken from Linear.');
   });
 
   it('a document that links to a blocked rename goes through in the same run, linking the accepted file', async () => {
@@ -448,7 +448,7 @@ for (const file of process.argv.slice(2)) {
     world.linear.documents.push(target);
     edit('[Target](https://linear.app/example-team/document/target)\n');
     await run('first');
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<target.md>)\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<target.md>)');
     // The target is renamed and gets a finding; the linking document changes too.
     Object.assign(target, { title: 'renamed', content: 'A private-canary value.\n' });
     touch(target);
@@ -456,7 +456,7 @@ for (const file of process.argv.slice(2)) {
     const captured = await run('second');
     assert.deepEqual(captured.blocked.map(({ id }) => id), ['target']);
     assert.deepEqual(captured.leftOut, []);
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<target.md>)\n\nMore.\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<target.md>)\n\nMore.');
     assert.equal(await remoteHolds('A private-canary value'), false);
   });
 

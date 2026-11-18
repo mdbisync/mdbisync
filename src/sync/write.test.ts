@@ -810,6 +810,18 @@ describe('sync: the tracked branch to Linear', () => {
   });
 
   it('a renamed project folder needs no write, and the id map follows the files', async () => {
+    // The folder's files in the form the repository's linear-format hook keeps: the capture after the move writes the
+    // same text, so the move opens no pull request and the next edit merges without a conflict. Linear holds the same
+    // Markdown: no write.
+    const notes = Object.keys(TREE).filter((path) => path.startsWith('eng/notes/'));
+    await commit(Object.fromEntries(notes.map((path) => [path, fixText(TREE[path]!)])));
+    assert.deepEqual((await sync()).writes, []);
+    // Linear stores no final newline either.
+    for (const path of notes) {
+      const id = (await ids())[path]?.id;
+      const document = world.linear.documents.find((d) => d.id === id);
+      if (document?.content !== undefined) document.content = document.content.replace(/\n+$/, '');
+    }
     const before = await documentOf('eng/notes/review.md');
     await commit({}, [['eng/notes', 'eng/fieldnotes']]);
     const first = await sync();
@@ -818,7 +830,7 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal((await ids())['eng/fieldnotes/review.md']?.id, before.id);
     assert.equal((await ids())['eng/notes/review.md'], undefined);
     // The next edit writes the same document; nothing is trashed or created.
-    await commit({ 'eng/fieldnotes/review.md': `# Review\n\nLater edit. ${CANARY}\n` });
+    await commit({ 'eng/fieldnotes/review.md': `# Review\n\nLater edit. ${CANARY}` });
     const second = await sync();
     assert.deepEqual(second.writes, ['UpdateDocument']);
     assert.match(before.content ?? '', /Later edit/);

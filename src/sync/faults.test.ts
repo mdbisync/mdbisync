@@ -34,7 +34,7 @@ const PRE_COMMIT = `repos:
 `;
 const DOCUMENTS = 40;
 const pathOf = (index: number) => `combined/part-${String(index).padStart(2, '0')}.md`;
-const textOf = (index: number, words: string) => `# Part ${index}\n\n${words} ${CANARY}\n`;
+const textOf = (index: number, words: string) => `# Part ${index}\n\n${words} ${CANARY}`;
 
 const TREE: Record<string, string> = {
   'README.md': `# Repository\n\n${CANARY}\n`,
@@ -276,7 +276,7 @@ describe('sync: rate limits and transport faults', () => {
 
   /** A body as Linear holds it: each relative link to a synchronized file becomes the URL of that file's document. */
   function linearForm(path: string, text: string, map: Record<string, { id: string }>): string {
-    return text.replace(/\]\(([^()<>\s#]+\.md)(#[^()\s]*)?\)/g, (link, target: string, fragment: string | undefined) => {
+    return text.replace(/\]\(<?([^()<>\s#]+\.md)(#[^()<>\s]*)?>?\)/g, (link, target: string, fragment: string | undefined) => {
       const id = map[posix.join(posix.dirname(path), target)]?.id;
       return id === undefined ? link : `](<https://linear.app/${world.linear.urlKey}/document/${id}${fragment ?? ''}>)`;
     });
@@ -449,7 +449,7 @@ describe('sync: rate limits and transport faults', () => {
 
     it(`L5-09: a ${variant} on a create records no id; the next run creates or adopts it once`, async () => {
       const path = 'combined/new.md';
-      await commit({ [path]: `# New\n\nA new page. ${CANARY}\n` });
+      await commit({ [path]: `# New\n\nA new page. ${CANARY}` });
       transport.arm(lostCreate(variant));
       const run = await sync();
       assertPartial(run);
@@ -463,7 +463,7 @@ describe('sync: rate limits and transport faults', () => {
 
     it(`a single ${variant} on a create is retried with its id in the same run, which completes`, async () => {
       const path = 'combined/new.md';
-      await commit({ [path]: `# New\n\nA new page. ${CANARY}\n` });
+      await commit({ [path]: `# New\n\nA new page. ${CANARY}` });
       transport.arm({ writeError: variant, writeErrorOn: 'CreateDocument' });
       const run = await sync();
       assert.equal(run.result.exitCode, 0, run.result.stderr);
@@ -537,7 +537,7 @@ describe('sync: rate limits and transport faults', () => {
   });
 
   it('a 429 while capture reads Linear stops the run before any write; the next run converges', async () => {
-    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}` });
     const before = await rev('refs/mdbisync/linear');
     transport.arm({ onOperation: { operation: 'ListDocuments', occurrence: 1, status: 429 } });
     const run = await sync();
@@ -566,7 +566,7 @@ describe('sync: rate limits and transport faults', () => {
     // A person edits a document the run did not touch, so the next capture commits before the write step.
     const untouched = await idOf(pathOf(20));
     const document = world.linear.documents.find((d) => d.id === untouched) as FakeDocument;
-    document.content = `${document.content ?? ''}\nAdded in Linear.\n`;
+    document.content = `${document.content ?? ''}\n\nAdded in Linear.`;
     touch(document);
     transport.clear();
     const next = await sync();
@@ -577,7 +577,7 @@ describe('sync: rate limits and transport faults', () => {
   });
 
   it('a 500 while capture reads Linear ends the run partial with nothing written; the next run converges', async () => {
-    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}` });
     const before = await rev('refs/mdbisync/linear');
     transport.arm({ onOperation: { operation: 'ListDocuments', occurrence: 1, status: 500 } });
     const run = await sync();
@@ -590,7 +590,7 @@ describe('sync: rate limits and transport faults', () => {
   });
 
   it("a 500 on the write step's listing of its targets writes nothing; the next run converges", async () => {
-    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}` });
     transport.arm({ onOperation: { operation: 'ListDocuments', occurrence: 2, status: 500 } });
     const run = await sync();
     assertPartial(run);
@@ -613,7 +613,7 @@ describe('sync: rate limits and transport faults', () => {
     it(`when ${fault}, an edit that links to the new document keeps a link that the next run's document answers`, async () => {
       await editAll(0, '', {
         [pathOf(0)]: textOf(0, 'See [the new page](new.md).'),
-        'combined/new.md': `# New\n\nA new page. ${CANARY}\n`,
+        'combined/new.md': `# New\n\nA new page. ${CANARY}`,
       });
       await arm();
       const run = await sync();
@@ -635,7 +635,7 @@ describe('sync: rate limits and transport faults', () => {
   async function createWithLostAnswer(): Promise<string> {
     await editAll(0, '', {
       [pathOf(0)]: textOf(0, 'See [the new page](new.md).'),
-      'combined/new.md': `# New\n\nA new page. ${CANARY}\n`,
+      'combined/new.md': `# New\n\nA new page. ${CANARY}`,
     });
     transport.arm(lostCreate('reset-after'));
     assertPartial(await sync());
@@ -661,11 +661,11 @@ describe('sync: rate limits and transport faults', () => {
   });
 
   it('when the reserved ids cannot be checked, only the new documents that would use one wait', async () => {
-    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}` });
     transport.arm(lostCreate('server-error'));
     assertPartial(await sync());
     const reservedId = JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json'))['combined/new.md'] as string;
-    await commit({ 'combined/other.md': `# Other\n\nAnother page. ${CANARY}\n` });
+    await commit({ 'combined/other.md': `# Other\n\nAnother page. ${CANARY}` });
     transport.arm({ onOperation: { operation: 'GetDocuments', occurrence: 1, status: 502, ids: [reservedId] } });
     const run = await sync();
     assertPartial(run);
@@ -707,10 +707,10 @@ describe('sync: rate limits and transport faults', () => {
 
   it("a person's edit in Linear to the linking document is kept when the document gets the new id", async () => {
     // A longer document, synchronized first, so the edit in Linear and the new link merge without a conflict.
-    const long = (first: string, last: string) => `# Part 0\n\n${first} ${CANARY}\n\nSecond paragraph.\n\nThird paragraph.\n\n${last}\n`;
+    const long = (first: string, last: string) => `# Part 0\n\n${first} ${CANARY}\n\nSecond paragraph.\n\nThird paragraph.\n\n${last}`;
     await commit({ [pathOf(0)]: long('No link yet.', 'Last paragraph.') });
     assert.equal((await sync()).report.complete, true);
-    await commit({ [pathOf(0)]: long('See [the new page](new.md).', 'Last paragraph.'), 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    await commit({ [pathOf(0)]: long('See [the new page](<new.md>).', 'Last paragraph.'), 'combined/new.md': `# New\n\nA new page. ${CANARY}` });
     transport.arm(lostCreate('reset-after'));
     assertPartial(await sync());
     transport.clear();
@@ -729,7 +729,7 @@ describe('sync: rate limits and transport faults', () => {
     assert.match(linking.content ?? '', /edited in Linear/, 'the edit stays in Linear');
     const file = await recorded(pathOf(0));
     assert.match(file, /edited in Linear/, 'and reaches the record');
-    assert.match(file, /\]\(new\.md\)/, 'with the link as the file has it');
+    assert.match(file, /\]\(<new\.md>\)/, 'with the link as the file has it');
     assert.deepEqual(await supersededIds(), {});
   });
 
@@ -752,7 +752,7 @@ describe('sync: rate limits and transport faults', () => {
     const linking = await documentOf(pathOf(0));
     // The edit lands after the capture (the first read of the document), just before the write step reads it again.
     transport.arm({ beforeOperation: { operation: 'GetDocuments', occurrence: 2, ids: [linking.id], change: () => {
-      linking.content = `${linking.content ?? ''}\nAdded in Linear.\n`;
+      linking.content = `${linking.content ?? ''}\n\nAdded in Linear.`;
       touch(linking);
     } } });
     const run = await sync();
@@ -765,7 +765,7 @@ describe('sync: rate limits and transport faults', () => {
   });
 
   it('a document an interrupted run created with a link by a superseded id is taken over with the link written by the new id', async () => {
-    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}` });
     transport.arm(lostCreate('reset-after'));
     assertPartial(await sync());
     transport.clear();
@@ -775,7 +775,7 @@ describe('sync: rate limits and transport faults', () => {
     lost.trashed = true;
     lost.archivedAt = new Date().toISOString();
     const linker = 'combined/linker.md';
-    const text = `# Linker\n\nSee [the new page](new.md). ${CANARY}\n`;
+    const text = `# Linker\n\nSee [the new page](new.md). ${CANARY}`;
     await commit({ [linker]: text });
     // After this run's capture, an interrupted run's document for the new file, linking the page by the taken id.
     const orphan: FakeDocument = { id: 'orphan-linker', title: 'linker', projectId: 'project-handbook', createdAt: new Date().toISOString(), content: body(linearForm(linker, text, { 'combined/new.md': { id: lost.id } })) };
@@ -799,7 +799,7 @@ describe('sync: rate limits and transport faults', () => {
   });
 
   it('an edited document an interrupted run created keeps its link by a superseded id readable until the next capture', async () => {
-    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}` });
     transport.arm(lostCreate('reset-after'));
     assertPartial(await sync());
     transport.clear();
@@ -808,10 +808,10 @@ describe('sync: rate limits and transport faults', () => {
     lost.trashed = true;
     lost.archivedAt = new Date().toISOString();
     const linker = 'combined/linker.md';
-    const text = `# Linker\n\nSee [the new page](new.md). ${CANARY}\n`;
+    const text = `# Linker\n\nSee [the new page](new.md). ${CANARY}`;
     await commit({ [linker]: text });
     // The interrupted run's document links the page by the taken id, and a person has edited it.
-    const edited = `${body(linearForm(linker, text, { 'combined/new.md': { id: lost.id } }))}\nAdded in Linear.\n`;
+    const edited = `${body(linearForm(linker, text, { 'combined/new.md': { id: lost.id } }))}\n\nAdded in Linear.`;
     const orphan: FakeDocument = { id: 'orphan-linker', title: 'linker', projectId: 'project-handbook', createdAt: new Date().toISOString(), content: edited };
     let lists = 0;
     world.linear.beforeQuery = (operation) => {

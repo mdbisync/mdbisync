@@ -125,12 +125,13 @@ describe('sync: pull request recovery', () => {
 
   it('advances Linear-base when Linear adopts a CI repair without changing the selected tree', async () => {
     const path = 'eng/notes/plan.md';
-    await suspendOne(path, '# Plan\n\nBad content.\n');
-    await editRef(SUSPENDED, path, '# Plan\n\nFixed content.\n');
-    await editInLinear(path, '# Plan\n\nFixed content.\n');
+    // Linear and the CI repair (the format hook's fix) both write no final newline.
+    await suspendOne(path, '# Plan\n\nBad content.');
+    await editRef(SUSPENDED, path, '# Plan\n\nFixed content.');
+    await editInLinear(path, '# Plan\n\nFixed content.');
     await sync();
     checksOn(await rev(SUSPENDED), FAILED);
-    await editInLinear(path, '# Plan\n\nNew content.\n');
+    await editInLinear(path, '# Plan\n\nNew content.');
     await sync();
     const text = await show(`${SUSPENDED}:${path}`);
     assert.equal(detectConflicts(text).length, 0);

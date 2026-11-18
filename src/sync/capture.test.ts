@@ -12,7 +12,8 @@ import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
-import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
+import { fixText, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
+import { hookRun } from '../format/test-helpers.ts';
 import { LINK_VARIANT_LINKS, type LinkVariantBudget, capture, linkVariants, linkVariantBudget, prepareLfs } from './capture.ts';
 import { type FileContent } from '../state/content.ts';
 import { candidateKey } from './staged.ts';
@@ -79,7 +80,7 @@ describe('capture from Linear', () => {
       assert.equal(result.ok, true);
       assert.deepEqual(result.leftOut.sort((a, b) => a.id.localeCompare(b.id)), [{id: 'deep-new', rule: 'markdown-complexity'}, {id: 'plan', rule: 'markdown-complexity'}]);
       assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
-      assert.equal(await text('docs/ordinary.md'), 'Ordinary update.\n');
+      assert.equal(await text('docs/ordinary.md'), 'Ordinary update.');
       assert.ok(!JSON.stringify(result.leftOut).includes('nesting-canary'));
       assert.equal(world.linear.comments.size, 0);
       await refresh();
@@ -95,7 +96,7 @@ describe('capture from Linear', () => {
     const result = await run();
     assert.equal(result.ok, true);
     assert.deepEqual(result.leftOut, []);
-    assert.equal(await text('docs/plan.md'), 'Corrected.\n');
+    assert.equal(await text('docs/plan.md'), 'Corrected.');
   });
 
   it('captures through the CLI and omits document bodies from its report and summary', async () => {
@@ -111,7 +112,7 @@ describe('capture from Linear', () => {
     const reportText = await readFile(reportFile, 'utf8');
     assert.ok(!reportText.includes('Private body canary'));
     assert.equal(JSON.parse(reportText).capture.ok, true);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nPrivate body canary.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nPrivate body canary.');
   });
 
   it('reports a repaired dead upload and a retry separately through the sync CLI', async () => {
@@ -163,10 +164,55 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.content = 'Updated.\n';
     const result = await run();
     assert.equal(result.ok, true);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nUpdated.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nUpdated.');
     const tip = result.state.linear;
     await refresh();
     assert.equal((await run()).state.linear, tip);
+  });
+
+  it('writes Linear\'s text in the form the linear-format hook leaves unchanged', async () => {
+    // Linear can store a table cell with a trailing space (`| a  |`) and other spacing `fix` normalizes.
+    const stored = '# Plan  \n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n|  Padded on both sides  |   x |\n\n'
+      + '* First item\n    continued with extra indentation\n\nA line\n   with an indented continuation.\n\n'
+      // A callout as Linear stores it: its comment directly above the quote.
+      + '<!-- linear:callout color=#f2c94c -->\n> [!WARNING]\n> Kept both versions.';
+    assert.notEqual(fixText(stored), stored);
+    world.linear.documents[0]!.content = stored;
+    world.linear.documents.push({id: 'new', title: 'new', content: stored, projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'});
+    const result = await run();
+    assert.equal(result.ok, true);
+    for (const path of ['docs/plan.md', 'docs/new.md']) {
+      const file = await text(path);
+      assert.ok(sameMarkdown(splitFile(file).body, stored), path);
+      assert.match(file, /^\| Draft the outline \| tbd \|$/m, path);
+      assert.deepEqual(hookRun(path, file), {exitCode: 0, stdout: '', stderr: ''}, path);
+    }
+    // Linear still holds its own spelling of the same document: the next run has nothing to capture.
+    await refresh();
+    assert.equal((await run()).state.linear, result.state.linear);
+    // An edit in git (in the hook's form) merged with Linear's text: the record after the write passes the hook too.
+    const edited = (await text('docs/new.md')).replace('| tbd |', '| done |');
+    const tracked = await commitTree(context.git, {parents: [result.state.linear!], base: result.state.linear, changes: new Map([['docs/new.md', edited]]), message: 'Edit document', identity: IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const written = await writeTrackedToLinear(context, {config, state: result.state});
+    assert.deepEqual(written.updated, ['docs/new.md']);
+    const recorded = await text('docs/new.md');
+    assert.match(recorded, /^\| Draft the outline \| done \|$/m);
+    assert.deepEqual(hookRun('docs/new.md', recorded), {exitCode: 0, stdout: '', stderr: ''});
+  });
+
+  it('writes a Linear body that opens with a rule in the hook\'s form, under the file\'s front matter', async () => {
+    // Read alone, the text between the two rules would look like front matter; the hook reads it as body.
+    const stored = '---\n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n\n---\n\nAfter.';
+    world.linear.documents[0]!.content = stored;
+    const result = await run();
+    assert.equal(result.ok, true);
+    const file = await text('docs/plan.md');
+    assert.equal(splitFile(file).head, '---\ncategory: work\n---\n\n');
+    assert.match(file, /^\| Draft the outline \| tbd \|$/m);
+    assert.deepEqual(hookRun('docs/plan.md', file), {exitCode: 0, stdout: '', stderr: ''});
   });
 
   it('keeps a Linear body that opens with a front matter block as the body, in a folder README too', async () => {
@@ -309,7 +355,7 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.updatedAt = '2026-02-01T00:00:00Z';
     const result = await run();
     assert.equal(result.ok, true);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nEdited before the move.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nEdited before the move.');
   });
 
   it('uses the supplied snapshot between steps without changing the run context', async () => {
@@ -323,7 +369,7 @@ describe('capture from Linear', () => {
     const second = await capture(context, {config, state: first.state});
     assert.equal(second.ok, true);
     assert.notEqual(second.state.linear, first.state.linear);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nNext edit.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nNext edit.');
     assert.deepEqual(context.fetched.state, initial);
   });
 
@@ -380,7 +426,7 @@ describe('capture from Linear', () => {
     assert.equal(partial.stopped?.kind, 'rate-limited');
     assert.notEqual(partial.state.ids, before.ids);
     assert.notEqual(partial.state.linear, before.linear);
-    assert.equal(await text('docs/safe.md'), 'Safe.\n');
+    assert.equal(await text('docs/safe.md'), 'Safe.');
     const pending = (await readIds(context.git, partial.state.ids)).get('docs/plan.md')!.saved!.notice!;
     assert.equal(pending.posted, false);
     delete world.linear.writes.rateLimitAt;
@@ -426,7 +472,7 @@ describe('capture from Linear', () => {
   it('captures a title that names the Git directory by its NTFS short name under an escaped path', async () => {
     world.linear.documents.push({ id: 'hook', title: 'GIT~1/hooks/post-checkout', content: 'Hook.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
     const result = await run();
-    assert.equal(await text('docs/%47IT~1/hooks/post-checkout.md'), 'Hook.\n');
+    assert.equal(await text('docs/%47IT~1/hooks/post-checkout.md'), 'Hook.');
     const ids = await readIds(context.git, result.state.ids);
     assert.equal(ids.get('docs/%47IT~1/hooks/post-checkout.md')?.id, 'hook');
     const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
@@ -449,8 +495,8 @@ describe('capture from Linear', () => {
     }
     const result = await run();
     assert.ok(result.ok);
-    assert.equal(await text(path), 'Shortened.\n');
-    assert.equal(await text('docs/ordinary.md'), 'Ordinary.\n');
+    assert.equal(await text(path), 'Shortened.');
+    assert.equal(await text('docs/ordinary.md'), 'Ordinary.');
     const ids = await readIds(context.git, result.state.ids);
     assert.equal(ids.get(path)?.id, 'shortened');
     const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
@@ -474,7 +520,7 @@ describe('capture from Linear', () => {
     await refresh();
     Object.assign(world.linear.documents[0]!, { title: 'git~2/notes', updatedAt: '2026-01-03T00:00:00Z' });
     const result = await run();
-    assert.equal(await text('docs/%67it~2/notes.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    assert.equal(await text('docs/%67it~2/notes.md'), '---\ncategory: work\n---\n\nOriginal.');
     const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
     assert.ok(!paths.includes(legacy), paths.join(', '));
     assert.equal((await readIds(git, result.state.ids)).get('docs/%67it~2/notes.md')?.id, 'plan');
@@ -497,7 +543,7 @@ describe('capture from Linear', () => {
     await refresh();
     Object.assign(world.linear.documents[0]!, { title: '.GitHub/notes', updatedAt: '2026-01-03T00:00:00Z' });
     const result = await run();
-    assert.equal(await text('docs/%2EGitHub/notes.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    assert.equal(await text('docs/%2EGitHub/notes.md'), '---\ncategory: work\n---\n\nOriginal.');
     const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
     assert.ok(!paths.includes(legacy), paths.join(', '));
     assert.equal((await readIds(git, result.state.ids)).get('docs/%2EGitHub/notes.md')?.id, 'plan');
@@ -506,11 +552,11 @@ describe('capture from Linear', () => {
   it('captures a new path, renames by id and moves across projects', async () => {
     world.linear.documents.push({ id: 'new', title: 'guides/new-page', content: 'New.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
     await run();
-    assert.equal(await text('docs/guides/new-page.md'), 'New.\n');
+    assert.equal(await text('docs/guides/new-page.md'), 'New.');
     await refresh();
     Object.assign(world.linear.documents[0]!, { title: 'guides/renamed', projectId: 'project-handbook', updatedAt: '2026-01-03T00:00:00Z' });
     const result = await run();
-    assert.equal(await text('other/guides/renamed.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    assert.equal(await text('other/guides/renamed.md'), '---\ncategory: work\n---\n\nOriginal.');
     const ids = await readIds(context.git, result.state.ids);
     assert.equal(ids.get('other/guides/renamed.md')?.id, 'plan');
     assert.equal(ids.has('docs/plan.md'), false);
@@ -522,7 +568,7 @@ describe('capture from Linear', () => {
     const ids = await readIds(context.git, first.state.ids);
     const path = [...ids].find(([, entry]) => entry.id === 'new')?.[0];
     assert.ok(path !== undefined && path.startsWith('docs/') && !path.split('/').includes('assets'), path);
-    assert.equal(await text(path), 'New.\n');
+    assert.equal(await text(path), 'New.');
     const tree = new Set((await listTree(context.git, first.state.linear!)).map((entry) => entry.path));
     assert.deepEqual(lintInTree(path, await text(path), tree), []);
     await refresh();
@@ -537,7 +583,7 @@ describe('capture from Linear', () => {
     await refresh();
     Object.assign(world.linear.documents[0]!, { trashed: false, updatedAt: '2026-01-04T00:00:00Z' });
     await run();
-    assert.equal(await text('docs/plan.md'), 'Original.\n');
+    assert.equal(await text('docs/plan.md'), 'Original.');
     await refresh();
     Object.assign(world.linear.documents[0]!, { projectId: 'outside', updatedAt: '2026-01-05T00:00:00Z' });
     await run();
@@ -606,7 +652,7 @@ describe('capture from Linear', () => {
     const accepted = [...ids].find(([,entry]) => entry.id === 'a-earlier');
     assert.ok(accepted);
     assert.notEqual(accepted[0], 'docs/duplicate.md');
-    assert.equal(await text(accepted[0]), 'Accepted body.\n');
+    assert.equal(await text(accepted[0]), 'Accepted body.');
     assert.equal(world.linear.documents.find((doc) => doc.id === blocked.id)?.icon, 'Cross');
     await refresh();
     Object.assign(blocked, {content:'Corrected body.\n',updatedAt:'2026-03-01T00:00:00Z'});
@@ -615,7 +661,7 @@ describe('capture from Linear', () => {
     assert.equal(finalIds.get('docs/duplicate.md')?.id, blocked.id);
     assert.equal(finalIds.get(accepted[0])?.id, 'a-earlier');
     assert.equal(finalIds.get('docs/duplicate.md')?.saved, undefined);
-    assert.equal(await text('docs/duplicate.md'), 'Corrected body.\n');
+    assert.equal(await text('docs/duplicate.md'), 'Corrected body.');
   });
 
   it('never writes a document over a hook script that a forged reserved path names', async () => {
@@ -644,7 +690,7 @@ describe('capture from Linear', () => {
     await refresh();
     // A fixed canary: run as a hook, it writes a marker beside the gate's scratch folder, which this test keeps in its
     // own fixture folder.
-    const payload = "import('node:fs').then((fs) => fs.writeFileSync('../hook-canary', 'ran'));\n";
+    const payload = "import('node:fs').then((fs) => fs.writeFileSync('../hook-canary', 'ran'));";
     world.linear.documents.push(
       {id: 'forged', title: 'scan', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
       {id: 'forged-new', title: 'notes', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
@@ -661,7 +707,7 @@ describe('capture from Linear', () => {
     // The documents still come in, at the paths their titles name.
     assert.equal(await text('docs/scan.md'), payload);
     assert.equal(await text('docs/notes.md'), payload);
-    assert.equal(await text('docs/report.md'), 'A report.\n');
+    assert.equal(await text('docs/report.md'), 'A report.');
     assert.ok(!paths.includes('docs/elsewhere.md'));
   });
 
@@ -685,7 +731,7 @@ describe('capture from Linear', () => {
     assert.equal(rejected.blocked.length, 1);
     assert.ok(!rejected.summary.includes('blocked-value-731'));
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
-    assert.equal(await text('docs/safe.md'), 'Safe addition.\n');
+    assert.equal(await text('docs/safe.md'), 'Safe addition.');
     const ids = await readIds(context.git, rejected.state.ids);
     const decoration = ids.get('docs/plan.md')!.saved!;
     assert.equal(decoration.icon, 'Fire');
@@ -708,29 +754,31 @@ describe('capture from Linear', () => {
     Object.assign(world.linear.documents[0]!, {content: 'Corrected.\n', updatedAt: '2026-01-05T00:00:00Z'});
     const accepted = await run();
     assert.equal(accepted.blocked.length, 0);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nCorrected.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nCorrected.');
     assert.equal(world.linear.documents[0]!.icon, 'Fire');
     assert.equal(world.linear.documents[0]!.color, '#123456');
     assert.equal((await readIds(context.git, accepted.state.ids)).get('docs/plan.md')?.saved, undefined);
   });
 
-  for (const body of [
-    '![Image](https://example.com/a.png)\n',
-    '![Image](http://example.com/a.png)\n',
-    '![Image](data:image/png;base64,AAAA)\n',
-    '![Image](relative.png)\n',
-    '![Image](/absolute.png)\n',
-    '![Image]()\n',
-    '![Image][picture]\n\n[picture]: https://example.com/a.png\n',
-    '[![Image](https://example.com/a.png)](https://example.com)\n',
-  ]) {
+  // Each body as Linear holds it, and as the file holds it: in the form `fix` writes (a reference
+  // becomes inline), or as it is when lint leaves it to its author (an image inside a link).
+  for (const [body, written] of [
+    ['![Image](https://example.com/a.png)\n', '![Image](https://example.com/a.png)'],
+    ['![Image](http://example.com/a.png)\n', '![Image](http://example.com/a.png)'],
+    ['![Image](data:image/png;base64,AAAA)\n', '![Image](data:image/png;base64,AAAA)'],
+    ['![Image](relative.png)\n', '![Image](relative.png)'],
+    ['![Image](/absolute.png)\n', '![Image](/absolute.png)'],
+    ['![Image]()\n', '![Image]()'],
+    ['![Image][picture]\n\n[picture]: https://example.com/a.png\n', '![Image](https://example.com/a.png)'],
+    ['[![Image](https://example.com/a.png)](https://example.com)\n', '[![Image](https://example.com/a.png)](https://example.com)\n'],
+  ] as const) {
     it(`records the original image while preparing a checked pull repair: ${body.trim()}`, async () => {
       Object.assign(world.linear.documents[0]!, {content:body, icon:'Fire', color:'#123456'});
       const result = await capture(context, {config, state:context.fetched.state, fetch:async () => {throw new Error('Unexpected download');}});
       assert.equal(result.ok, true);
       assert.deepEqual(result.blocked, []);
       assert.deepEqual(result.leftOut, []);
-      assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n' + body);
+      assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n' + written);
       const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
       assert.equal(entry.pullRewrite?.images.length, 1);
       assert.equal(entry.pullRewrite?.images[0]?.line, 1);
@@ -749,7 +797,7 @@ describe('capture from Linear', () => {
     }}});
     assert.equal(result.ok, true);
     const replacement = (await readIds(context.git, result.state.ids)).get('docs/plan.md')?.pullRewrite?.replacement;
-    assert.ok(replacement?.includes('[Chart](https://example.com/chart.png)'));
+    assert.ok(replacement?.includes('[Chart](<https://example.com/chart.png>)'));
     assert.ok(sets.some(set => set.size > 1 && set.get('docs/plan.md') === replacement), 'the text with its downloaded file');
     assert.ok(sets.some(set => set.size === 1 && set.get('docs/plan.md') === replacement), 'the text alone');
   });
@@ -777,7 +825,7 @@ describe('capture from Linear', () => {
     assert.deepEqual(result.leftOut, []);
     const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
     assert.equal(entry.pullRewrite?.replacement, head + '[Chart](<https://example.com/chart.png>)\n');
-    assert.equal(await text('docs/plan.md'), head + '![Chart](https://example.com/chart.png)\n');
+    assert.equal(await text('docs/plan.md'), head + '![Chart](https://example.com/chart.png)');
   });
 
   it('keeps links to an image-blocked reserved document as Linear URLs', async () => {
@@ -795,7 +843,7 @@ describe('capture from Linear', () => {
     world.linear.documents.push({id:'future-document', title:'future', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'[File](private.csv)\n'});
     const result = await run();
     assert.equal(result.blocked.length, 1);
-    assert.equal(await text('docs/plan.md'), `---\ncategory: work\n---\n\n[Future](${url})\n`);
+    assert.equal(await text('docs/plan.md'), `---\ncategory: work\n---\n\n[Future](<${url}>)`);
     assert.equal((await fixture.remote.run(['cat-file','-e',`${result.state.linear}:docs/future.md`],{okCodes:[0,128]})).code, 128);
   });
 
@@ -808,7 +856,7 @@ describe('capture from Linear', () => {
     assert.equal(result.ok, true);
     assert.ok(checked.includes('docs/--config=x.md'));
     assert.ok(!checked.some((path) => path.startsWith('-')));
-    assert.equal(await text('docs/--config=x.md'), 'Dash.\n');
+    assert.equal(await text('docs/--config=x.md'), 'Dash.');
     assert.equal(world.linear.documents.at(-1)!.title, '--config=x');
   });
 
@@ -851,7 +899,7 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target#intro)\n';
     const result = await run();
     assert.equal(result.ok, true);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<guides/target.md#intro>)\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<guides/target.md#intro>)');
   });
 
   for (const status of [301, 302, 307, 308, 400, 422]) {
@@ -923,7 +971,7 @@ describe('capture from Linear', () => {
       assert.match(first.summary, /download-retry: "plan"/);
       assert.equal(world.linear.comments.size, 0);
       assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
-      assert.equal(await text('docs/later.md'), 'Later.\n');
+      assert.equal(await text('docs/later.md'), 'Later.');
       await refresh();
       const next = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response(png)});
       assert.equal(next.leftOut.length, 0);
@@ -952,7 +1000,7 @@ describe('capture from Linear', () => {
     const accepted = await run();
     assert.equal(accepted.blocked.length, 0);
     assert.ok((await text('docs/plan.md')).includes('<renamed.md>'));
-    assert.equal(await text('docs/renamed.md'), 'Target.\n');
+    assert.equal(await text('docs/renamed.md'), 'Target.');
   });
 
   it('reconciles conflict, blocked and clear marks with durable notices and one original icon', async () => {
@@ -1095,7 +1143,7 @@ describe('capture from Linear', () => {
     assert.ok(path);
     assert.ok(path.startsWith('team/'));
     assert.ok(!path.startsWith('team/sub/'));
-    assert.equal(await text(path), 'Team document.\n');
+    assert.equal(await text(path), 'Team document.');
   });
 
   it('preserves prior document-link spellings and leaves URLs to blocked new targets usable', async () => {
@@ -1104,19 +1152,19 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target)\n';
     await run();
     await refresh();
-    const raw = '---\ncategory: work\n---\n\n[Target](./target.md)\n';
+    const raw = '---\ncategory: work\n---\n\n[Target](<./target.md>)';
     const record = await commitTree(context.git, {parents:[context.fetched.state.linear!], base:context.fetched.state.linear, changes:new Map([['docs/plan.md',raw]]), message:'Keep link spelling', identity:IDENTITY});
     assert.equal((await pushAtomic(context.git,config,[{ref:stateRef(config,'linear'),expected:context.fetched.state.linear,next:record}])).ok,true);
     await refresh();
     Object.assign(world.linear.documents[0]!, {content:'[Target](https://linear.app/example-team/document/target)\n\nEdited.\n', updatedAt:'2026-01-06T00:00:00Z'});
     await run();
-    assert.ok((await text('docs/plan.md')).includes('[Target](./target.md)'));
+    assert.ok((await text('docs/plan.md')).includes('[Target](<./target.md>)'));
     await refresh();
     world.linear.documents.push({id:'blocked-new',title:'blocked-new',projectId:'project-api',content:'Rejected.\n',createdAt:'2026-01-07T00:00:00Z'});
     Object.assign(world.linear.documents[0]!, {content:'[New](https://linear.app/example-team/document/blocked-new)\n',updatedAt:'2026-01-07T00:00:00Z'});
     const result = await capture(context,{config, state: context.fetched.state,security:{configured:true,check:async(files)=>files.has('docs/blocked-new.md')?[{hook:'secret-check',line:1}]:[]}});
     assert.equal(result.blocked.length,1);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[New](https://linear.app/example-team/document/blocked-new)\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[New](<https://linear.app/example-team/document/blocked-new>)');
     assert.equal((await fixture.remote.run(['cat-file','-e',`${stateRef(config,'linear')}:docs/blocked-new.md`],{okCodes:[0,128]})).code,128);
   });
 
@@ -1124,7 +1172,8 @@ describe('capture from Linear', () => {
     const count = 16;
     const ids = Array.from({ length: count }, (_, i) => `dense-${String(i).padStart(2, '0')}`);
     for (const [i, id] of ids.entries()) {
-      const content = ids.filter((other) => other !== id).map((other) => `[${other}](https://linear.app/example-team/document/${other})`).join('\n') + '\n';
+      // In Linear's own form: link destinations in angle brackets, no final newline.
+      const content = ids.filter((other) => other !== id).map((other) => `[${other}](<https://linear.app/example-team/document/${other}>)`).join('\n');
       world.linear.documents.push({ id, title: id, projectId: 'project-api', content, createdAt: `2026-01-02T00:00:${String(i).padStart(2, '0')}Z` });
     }
     const staged = new Set<string>();
@@ -1141,14 +1190,15 @@ describe('capture from Linear', () => {
     });
     assert.deepEqual(result.blocked.map(({ id }) => id), [refused]);
     assert.deepEqual(result.leftOut, []);
-    for (const id of ids.slice(1)) assert.ok((await text(`docs/${id}.md`)).includes(`(https://linear.app/example-team/document/${refused})`), id);
+    for (const id of ids.slice(1)) assert.ok((await text(`docs/${id}.md`)).includes(`(<https://linear.app/example-team/document/${refused}>)`), id);
   });
 
   it('records the densely linked documents on the next run when the hooks refuse one past those staged alone', async () => {
     const count = 16;
     const ids = Array.from({ length: count }, (_, i) => `dense-${String(i).padStart(2, '0')}`);
     for (const [i, id] of ids.entries()) {
-      const content = ids.filter((other) => other !== id).map((other) => `[${other}](https://linear.app/example-team/document/${other})`).join('\n') + '\n';
+      // In Linear's own form: link destinations in angle brackets, no final newline.
+      const content = ids.filter((other) => other !== id).map((other) => `[${other}](<https://linear.app/example-team/document/${other}>)`).join('\n');
       world.linear.documents.push({ id, title: id, projectId: 'project-api', content, createdAt: `2026-01-02T00:00:${String(i).padStart(2, '0')}Z` });
     }
     // The last document: past the targets the first documents stage alone.
@@ -1172,7 +1222,7 @@ describe('capture from Linear', () => {
     const second = await stagedRun();
     assert.deepEqual(second.blocked.map(({ id }) => id), [refused]);
     assert.deepEqual(second.leftOut, []);
-    for (const id of ids.slice(0, -1)) assert.ok((await text(`docs/${id}.md`)).includes(`(https://linear.app/example-team/document/${refused})`), id);
+    for (const id of ids.slice(0, -1)) assert.ok((await text(`docs/${id}.md`)).includes(`(<https://linear.app/example-team/document/${refused}>)`), id);
   });
 
   it('scans original upload URLs before their query can enter the cache ref', async () => {

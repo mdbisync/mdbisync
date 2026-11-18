@@ -388,11 +388,30 @@ function imageDestination(url: string): string {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
+/**
+ * A text made from a Linear document's `content`, in the form `fix` (and so
+ * the `linear-format` hook) leaves unchanged. Linear's own text is not always
+ * that form: it can store a table cell with a trailing space (`| a  |`).
+ * Pass the whole file, front matter included, as the hook sees it.
+ */
+export function fixLinearText(text: string, content: string): string {
+  // A relative link or image still in Linear's content was not uploaded, so
+  // its file is not there: Linear keeps such a link as a link, not as a file
+  // block, and so does a repair that turns such an image into a link.
+  const notUploaded = relativeUrls(content, new Set(['link', 'image']));
+  return fixText(text, { linkedFileExists: (url) => !notUploaded.has(url) });
+}
+
 /** The destinations of relative links in the text (no scheme, not an anchor), as written. */
 export function relativeLinkUrls(text: string): Set<string> {
+  return relativeUrls(text, new Set(['link']));
+}
+
+/** The relative destinations (no scheme, not an anchor) of the given node types in the text, as written. */
+function relativeUrls(text: string, types: ReadonlySet<string>): Set<string> {
   const urls = new Set<string>();
   visit(parse(splitFile(text).body), (node) => {
-    if (node.type === 'link' && !/^[a-z][a-z0-9+.-]*:/i.test(node.url) && !node.url.startsWith('#')) urls.add(node.url);
+    if ((node.type === 'link' || node.type === 'image') && types.has(node.type) && !/^[a-z][a-z0-9+.-]*:/i.test(node.url) && !node.url.startsWith('#')) urls.add(node.url);
   });
   return urls;
 }

@@ -30,20 +30,21 @@ const PRE_COMMIT = `repos:
 `;
 const DIAGRAM = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
+// Markdown in the form the repository's `linear-format` hook keeps (no final newline).
 const TREE: Record<string, string | Buffer> = {
-  'README.md': `# Repository\n\n${CANARY}\n`,
+  'README.md': `# Repository\n\n${CANARY}`,
   '.pre-commit-config.yaml': PRE_COMMIT,
-  'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
-  'eng/backend/notes.md': `# Notes\n\nFirst paragraph. ${CANARY}\n`,
-  'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}\n`,
-  'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two. ${CANARY}\n`,
-  'eng/notes/review.md': `# Review\n\nFindings. See the [plan](plan.md). ${CANARY}\n`,
-  'eng/notes/diagram.md': `# Diagram\n\n![Diagram](../media/diagram.png)\n\n${CANARY}\n`,
-  'eng/notes/chart.md': `# Chart\n\n![Chart](../media/diagram.png)\n\n${CANARY}\n`,
+  'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}`,
+  'eng/backend/notes.md': `# Notes\n\nFirst paragraph. ${CANARY}`,
+  'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}`,
+  'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two. ${CANARY}`,
+  'eng/notes/review.md': `# Review\n\nFindings. See the [plan](plan.md). ${CANARY}`,
+  'eng/notes/diagram.md': `# Diagram\n\n![Diagram](../media/diagram.png)\n\n${CANARY}`,
+  'eng/notes/chart.md': `# Chart\n\n![Chart](../media/diagram.png)\n\n${CANARY}`,
   'eng/media/diagram.png': DIAGRAM,
-  'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}\n`,
-  'combined/guide.md': `# Guide\n\nHow to start. ${CANARY}\n`,
-  'combined/topics/setup.md': `# Setup\n\nInstall it. ${CANARY}\n`,
+  'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}`,
+  'combined/guide.md': `# Guide\n\nHow to start. ${CANARY}`,
+  'combined/topics/setup.md': `# Setup\n\nInstall it. ${CANARY}`,
 };
 
 const SYNC_BRANCH = 'refs/heads/mdbisync/linear';
@@ -207,9 +208,9 @@ describe('sync: lost state and deleted branches', () => {
     await assertQuiet();
 
     // The rebuilt map works: a git edit reaches its document, a Linear edit reaches the tracked branch.
-    await commit({ 'combined/guide.md': `# Guide\n\nHow to start, edited. ${CANARY}\n` });
+    await commit({ 'combined/guide.md': `# Guide\n\nHow to start, edited. ${CANARY}` });
     const notes = world.linear.documents.find((document) => document.id === before['eng/backend/notes.md']?.id)!;
-    notes.content = `# Notes\n\nFirst paragraph, edited in Linear. ${CANARY}\n`;
+    notes.content = `# Notes\n\nFirst paragraph, edited in Linear. ${CANARY}`;
     touch(notes);
     await settle();
     assert.match(world.linear.documents.find((document) => document.id === before['combined/guide.md']?.id)?.content ?? '', /edited\./);
@@ -259,7 +260,7 @@ describe('sync: lost state and deleted branches', () => {
     const before = await assertLeftOutKeepDocuments(['eng/notes/chart.md', 'eng/notes/diagram.md']);
 
     // Fixed, the file updates its original document.
-    await commit({ 'eng/media/diagram.png': DIAGRAM, 'eng/notes/diagram.md': `# Diagram\n\n![Diagram](../media/diagram.png)\n\nEdited in git. ${CANARY}\n` });
+    await commit({ 'eng/media/diagram.png': DIAGRAM, 'eng/notes/diagram.md': `# Diagram\n\n![Diagram](../media/diagram.png)\n\nEdited in git. ${CANARY}` });
     const documents = world.linear.documents.length;
     await settle();
     assert.match(world.linear.documents.find((document) => document.id === before['eng/notes/diagram.md']?.id)?.content ?? '', /Edited in git\./);
@@ -275,7 +276,7 @@ describe('sync: lost state and deleted branches', () => {
     assert.deepEqual(left.report.sync?.leftOut, [{ path: 'eng/backend/notes.md', rules: ['footnote'] }]);
     const before = await assertLeftOutKeepDocuments(['eng/backend/notes.md']);
 
-    await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph, edited in git. ${CANARY}\n` });
+    await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph, edited in git. ${CANARY}` });
     const documents = world.linear.documents.length;
     await settle();
     assert.match(world.linear.documents.find((document) => document.id === before['eng/backend/notes.md']?.id)?.content ?? '', /edited in git/);
@@ -285,7 +286,7 @@ describe('sync: lost state and deleted branches', () => {
   });
 
   it('L5-13: a file left out for a duplicate title keeps its document when the ids ref is rebuilt; the new file gets none', async () => {
-    await commit({ 'combined/Guide.md': `# Guide\n\nAnother guide. ${CANARY}\n` });
+    await commit({ 'combined/Guide.md': `# Guide\n\nAnother guide. ${CANARY}` });
     const left = await sync();
     assert.equal(left.result.exitCode, 0, left.result.stderr);
     assert.deepEqual(left.report.sync?.leftOut, [
@@ -295,7 +296,7 @@ describe('sync: lost state and deleted branches', () => {
     const before = await assertLeftOutKeepDocuments(['combined/guide.md'], 1);
     assert.equal(before['combined/Guide.md'], undefined);
 
-    await commit({ 'combined/Guide.md': null, 'combined/guide.md': `# Guide\n\nHow to start, edited in git. ${CANARY}\n` });
+    await commit({ 'combined/Guide.md': null, 'combined/guide.md': `# Guide\n\nHow to start, edited in git. ${CANARY}` });
     const documents = world.linear.documents.length;
     await settle();
     assert.match(world.linear.documents.find((document) => document.id === before['combined/guide.md']?.id)?.content ?? '', /edited in git/);
@@ -331,7 +332,7 @@ describe('sync: lost state and deleted branches', () => {
     await start([{ ...TREE, 'combined/aside.md': `# Aside\n\nA remark. ${CANARY}\n` }, { 'combined/aside.md': `# Aside\n\nA remark.[^1] ${CANARY}\n\n[^1]: The note.\n` }]);
     assert.equal((await ids())['combined/aside.md'], undefined);
     // A document of that title written in Linear, never the file's: capture takes it as a file of its own.
-    world.linear.documents.push({ id: 'doc-aside', title: 'aside', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# Aside\n\nWritten in Linear. ${CANARY}\n` });
+    world.linear.documents.push({ id: 'doc-aside', title: 'aside', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# Aside\n\nWritten in Linear. ${CANARY}` });
     await settle();
     const before = await ids();
     assert.equal(before['combined/aside.md'], undefined);
@@ -346,7 +347,7 @@ describe('sync: lost state and deleted branches', () => {
     assert.deepEqual(await ids(), before, 'the left-out file stays unmapped; the document keeps its own file');
     await settle();
     assert.deepEqual(await paths(), files);
-    assert.equal(world.linear.documents.find((document) => document.id === 'doc-aside')?.content, `# Aside\n\nWritten in Linear. ${CANARY}\n`, 'the document is untouched');
+    assert.equal(world.linear.documents.find((document) => document.id === 'doc-aside')?.content, `# Aside\n\nWritten in Linear. ${CANARY}`, 'the document is untouched');
   });
 
   it('L5-13: a document renamed in Linear while the ids ref was lost comes back as a new file with its id; the old file keeps a document of its own', async () => {
@@ -433,14 +434,14 @@ describe('sync: lost state and deleted branches', () => {
     for (const title of ['diagram', 'chart']) assert.ok(live().find((d) => d.title === title)?.content?.includes(latest), `${title} links the fresh upload`);
     assert.equal(await rev('refs/heads/main'), tracked, 'the tracked branch does not change');
     // A git edit of a linking document reaches Linear afterwards: it is not taken for an edit made in Linear.
-    await commit({ 'eng/notes/chart.md': `# Chart\n\n![Chart](../media/diagram.png)\n\nEdited in git. ${CANARY}\n` });
+    await commit({ 'eng/notes/chart.md': `# Chart\n\n![Chart](../media/diagram.png)\n\nEdited in git. ${CANARY}` });
     await settle();
     assert.match(live().find((d) => d.title === 'chart')?.content ?? '', /Edited in git/);
     await assertQuiet();
   });
 
   it('L5-13: a file capture named from an encoded title gets its document back, with no second file', async () => {
-    world.linear.documents.push({ id: 'doc-why', title: 'Why now?', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# Why\n\nBecause. ${CANARY}\n` });
+    world.linear.documents.push({ id: 'doc-why', title: 'Why now?', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# Why\n\nBecause. ${CANARY}` });
     await settle();
     const before = await ids();
     const path = Object.keys(before).find((key) => before[key]?.id === 'doc-why');
@@ -498,7 +499,7 @@ describe('sync: lost state and deleted branches', () => {
     await fixture.remote.run(['update-ref', '-d', SYNC_BRANCH], { okCodes: [0, 1] });
     const hook = join(fixture.root, 'remote.git', 'hooks', 'pre-receive');
     await writeFile(hook, '#!/bin/sh\nwhile read old new ref; do [ "$ref" = "refs/heads/mdbisync/linear" ] && { echo "branch refused by rule" >&2; exit 1; }; done\nexit 0\n', { mode: 0o755 });
-    await commit({ 'combined/guide.md': `# Guide\n\nHow to start, edited. ${CANARY}\n` });
+    await commit({ 'combined/guide.md': `# Guide\n\nHow to start, edited. ${CANARY}` });
 
     const run = await sync();
     assert.equal(run.result.exitCode, 0, run.result.stderr);
@@ -549,7 +550,7 @@ describe('sync: lost state and deleted branches', () => {
   });
 
   it('L5-16: a ref moved by someone else during a run refuses the atomic push; nothing is half-updated and the next run converges', async () => {
-    await commit({ 'combined/guide.md': `# Guide\n\nHow to start, edited. ${CANARY}\n` });
+    await commit({ 'combined/guide.md': `# Guide\n\nHow to start, edited. ${CANARY}` });
     const hooks = join(fixture.root, 'hooks');
     const pause = join(hooks, 'pause', 'after-write-before-record');
     await mkdir(dirname(pause), { recursive: true });
@@ -598,7 +599,7 @@ describe('sync: lost state and deleted branches', () => {
   it('L5-18: a sync branch deleted by a person is recreated from linear by the next run', async () => {
     // A Linear edit goes to the tracked branch through a sync pull request, which makes the branch.
     const notes = world.linear.documents.find((document) => document.title === 'backend/notes')!;
-    notes.content = `# Notes\n\nFirst paragraph, edited in Linear. ${CANARY}\n`;
+    notes.content = `# Notes\n\nFirst paragraph, edited in Linear. ${CANARY}`;
     touch(notes);
     await settle();
     assert.notEqual(await remoteRef(fixture, SYNC_BRANCH), null);
@@ -617,7 +618,7 @@ describe('sync: lost state and deleted branches', () => {
   it('L5-18: a sync branch deleted while its pull request waits: the next run recreates it and opens a new pull request; nothing lost', async () => {
     world.github.checks = new Map();
     const notes = world.linear.documents.find((document) => document.title === 'backend/notes')!;
-    notes.content = `# Notes\n\nFirst paragraph, edited in Linear. ${CANARY}\n`;
+    notes.content = `# Notes\n\nFirst paragraph, edited in Linear. ${CANARY}`;
     touch(notes);
     const opened = await sync();
     assert.equal(opened.report.pullRequest?.pullRequest?.opened, true);

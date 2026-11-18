@@ -250,7 +250,7 @@ describe('confirmed initial sync from Linear over the generated corpus (offline)
         const byPath = (path: string) => world.linear.documents.find((d) => d.id === seeded[path]?.id) as FakeDocument;
         const edited = pages[0] as string;
         const trashed = pages.at(-1) as string;
-        byPath(edited).content = 'Rewritten in Linear.\n';
+        byPath(edited).content = 'Rewritten in Linear.';
         byPath(trashed).trashed = true;
         const home = byPath(edited);
         const place = home.projectId !== undefined ? { projectId: home.projectId } : { teamId: home.teamId as string };

@@ -7,7 +7,7 @@
 // A transform may make requests of its own (an upload); it must not write the
 // document itself.
 
-import { fixText, relativeLinkUrls, sameMarkdown } from '../format/index.ts';
+import { fixLinearText, fixText, sameMarkdown } from '../format/index.ts';
 import { parse, visit } from '../format/markdown.ts';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { type LinearClient } from '../linear/index.ts';
@@ -130,8 +130,5 @@ export function restoreBody(transforms: readonly BodyTransform[], path: string, 
   let current = kept ? sent : content;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
   if (kept) return current;
-  // A relative link still in Linear's content was not uploaded, so its file
-  // is not there: Linear keeps such a link as a link, not as a file block.
-  const notUploaded = relativeLinkUrls(content);
-  return fixText(current, { linkedFileExists: (url) => !notUploaded.has(url) });
+  return fixLinearText(current, content);
 }

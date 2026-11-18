@@ -25,7 +25,7 @@
 import { type FileContent, contentBytes, ContentSpool } from '../state/content.ts';
 import { checkPushScope } from '../sync/head-check.ts';
 import { posix } from 'node:path';
-import { joinFile, splitFile } from '../format/index.ts';
+import { fixLinearText, joinFile, splitFile } from '../format/index.ts';
 import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { type LinearDocument, LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
@@ -453,11 +453,24 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       if (tracked !== undefined) linksToLinear(tracked, entry.path, map, seen);
       return linksFromLinear(body, entry.path, map, seen);
     };
-    const textOf = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
+    /** The document's body under the tracked file's front matter, before `fix`. */
+    const joinedOf = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
       const body = restored(entry, ids);
       const tracked = input.texts.get(entry.path);
       if (tracked === undefined) return body;
       return joinFile(splitFile(tracked).head, body);
+    };
+    // The file is written in the form the `linear-format` hook leaves as it is; a text is fixed once.
+    const fixedTexts = new Map<string, string>();
+    const textOf = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
+      const joined = joinedOf(entry, ids);
+      const key = `${entry.path}\0${joined}`;
+      let text = fixedTexts.get(key);
+      if (text === undefined) {
+        text = fixLinearText(joined, (documents.get(entry.documentId) as LinearDocument).content ?? '');
+        fixedTexts.set(key, text);
+      }
+      return text;
     };
     const leaveOut = (paths: Iterable<string>, rule: RecordLeftOutRule) => {
       const out = new Set(paths);
@@ -548,7 +561,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         const frontMatter: string[] = [];
         for (const entry of entries) {
           try {
-            if (splitFile(textOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
+            if (splitFile(joinedOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
           } catch (error) {
             if (!(error instanceof MarkdownLimitError)) throw error;
             tooComplex.push(entry.path);

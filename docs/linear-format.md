@@ -22,6 +22,13 @@ own that reads as the same Markdown (a final newline, a backslash before a
 `-` that opens a table cell, `*` for `_`), the file keeps its text: no
 change is recorded and no sync pull request is opened for it.
 
+Text the sync takes from Linear goes through `fix` before the sync commits
+it, so the `linear-format` hook finds nothing to change in it. Linear's own
+text is not always in that form: it can store a table cell with a trailing
+space (`| a  |`), which `fix` writes as `| a |`. A file whose text Linear
+only re-spells keeps its own text, and a text with a lint finding stays as
+it is, as with `fix` itself.
+
 Both run as the `linear-format` pre-commit hook, which every synchronized
 repository needs (see [Install the hook](#install-the-hook)).
 

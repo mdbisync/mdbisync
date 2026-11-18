@@ -281,7 +281,7 @@ describe('sync: the Linear request budget (I9)', () => {
     world.linear.documents.push({ id: 'created', title: 'guides/new-page', projectId: 'project-notes', content: 'A new page.\n', createdAt: '2026-01-03T00:00:00Z' });
     touch(byTitle('guides/new-page'));
     const runReports = await syncAndSettle();
-    assert.equal(await tracked('eng/notes/guides/new-page.md'), 'A new page.\n');
+    assert.equal(await tracked('eng/notes/guides/new-page.md'), 'A new page.');
     assertBudget(runReports);
   });
 
@@ -359,7 +359,7 @@ describe('sync: the Linear request budget (I9)', () => {
     const text = (await tracked('eng/notes/plan.md')) ?? '';
     assert.match(text, /\| One \| Ana \|/);
     assert.match(text, /```mermaid/);
-    assert.match(text, /- \[x\] Read it/);
+    assert.match(text, /- \[X\] Read it/);
     assertBudget(runReports);
   });
 

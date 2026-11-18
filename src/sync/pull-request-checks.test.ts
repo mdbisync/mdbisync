@@ -84,7 +84,8 @@ describe('sync: pull request checks', () => {
       // CI finishes after the previous invocation's grace and before this one.
       if (openPullRequests().length > 0) checksOn(await rev(SYNC_BRANCH), [{ name: 'format', status: 'completed', conclusion: 'success' }]);
       tokens.push(`edit-${cycle}`);
-      await editInLinear(path, `# Plan\n\n${tokens.join('\n\n')}\n`);
+      // Linear keeps no final newline.
+      await editInLinear(path, `# Plan\n\n${tokens.join('\n\n')}`);
       const before = await rev('refs/heads/main');
       const run = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
       assert.equal(run.result.exitCode, 0, run.result.stderr);

@@ -297,17 +297,17 @@ export async function smokeStagedFlow(directory: string): Promise<void> {
   const scenarios: Array<[string, (job: Job) => Promise<void>, boolean]> = [
     ['the sync takes a change from Linear through the hooks', async (job) => {
       const plan = job.world.linear.documents[0]!;
-      plan.content = 'Edited in Linear.\n';
+      plan.content = 'Edited in Linear.';
       touch(plan);
       assert.match(await runTemplate(release, 'mdbisync.yml', {}, job), checked(1));
-      assert.equal(await trackedText(job, 'docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.\n');
+      assert.equal(await trackedText(job, 'docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.');
     }, true],
     ['the initial sync from Linear stages, checks and records', async (job) => {
       const plan = job.world.linear.documents[0]!;
-      plan.content = 'Taken from Linear.\n';
+      plan.content = 'Taken from Linear.';
       touch(plan);
       assert.match(await runTemplate(release, 'mdbisync-initial-sync.yml', { direction: 'linear-to-git', confirm: 'true' }, job), checked(1));
-      assert.equal(await trackedText(job, 'docs/plan.md'), '---\ncategory: work\n---\n\nTaken from Linear.\n');
+      assert.equal(await trackedText(job, 'docs/plan.md'), '---\ncategory: work\n---\n\nTaken from Linear.');
     }, true],
     // Nothing comes from Linear, yet the stage step still names the hooks script and the hooks step runs it.
     ['the initial sync to Linear stages nothing, in a dry run and a confirmed run', async (job) => {

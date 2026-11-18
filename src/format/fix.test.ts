@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { fixText } from './fix.ts';
+import { fixLinearText, fixText } from './fix.ts';
 import { linkedFileCheck } from './lint.ts';
 
 const cases: Array<[string, string, string]> = [
@@ -95,6 +95,13 @@ describe('links to files that are not there', () => {
 
   it('without the check every linked file is taken to exist', () => {
     assert.equal(fixText('* [Report](<missing/report.pdf>)'), '* \n  [Report](missing/report.pdf)');
+  });
+
+  it('text from Linear keeps a relative link or image Linear holds as one: its file was not uploaded', () => {
+    const content = '* [Report](report.pdf)\n* ![Chart](chart.png)\n* \n  [Spec](https://uploads.linear.app/a/b/spec.pdf)';
+    // The sync writes the upload as a file beside the document, and a repair turns the image into a link.
+    const text = '* [Report](report.pdf)\n* [Chart](chart.png)\n* \n  [Spec](assets/spec.pdf)';
+    assert.equal(fixLinearText(text, content), '* [Report](<report.pdf>)\n* [Chart](<chart.png>)\n* \n  [Spec](assets/spec.pdf)');
   });
 });
 

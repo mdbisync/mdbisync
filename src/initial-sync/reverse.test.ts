@@ -8,6 +8,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fixText } from '../format/index.ts';
+import { hookRun } from '../format/test-helpers.ts';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
@@ -464,7 +466,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.deepEqual(report.linearToGit?.leftOutAtRecord, []);
     const head = 'refs/mdbisync/linear';
     // Next to the document, named by content hash, linked relatively; a file the tracked text links is linked, not copied.
-    assert.equal(await show(`${head}:eng/ops/runbook.md`), `# Runbook\n\n![Shot](assets/${sha(shot)}.png)\n\nRead [the spec](assets/${sha(spec)}.pdf#page=2).`);
+    assert.equal(await show(`${head}:eng/ops/runbook.md`), `# Runbook\n\n![Shot](assets/${sha(shot)}.png)\n\nRead [the spec](<assets/${sha(spec)}.pdf#page=2>).`);
     assert.equal(await show(`${head}:eng/notes/plan.md`), `---\nowner: platform\n---\n\n# Plan\n\n![Diagram](diagram.png)`);
     const tree = await files(head);
     assert.deepEqual(tree.filter((path) => /\.(png|pdf)$/.test(path)), [`eng/notes/diagram.png`, `eng/ops/assets/${sha(shot)}.png`, `eng/ops/assets/${sha(spec)}.pdf`].sort());
@@ -565,7 +567,7 @@ describe('initial sync from Linear to the tracked branch', () => {
 
   it('maps links to synchronized documents back to relative links, keeping the tracked spelling', async () => {
     // The tracked plan already links the README in its own spelling; Linear holds the document URL.
-    await fixture.seed({ 'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](./README.md#top). ${CANARY}` });
+    await fixture.seed({ 'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](<./README.md#top>). ${CANARY}` });
     const world = fakeWorld();
     const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
     const contents: Record<string, string> = {
@@ -575,10 +577,10 @@ describe('initial sync from Linear to the tracked branch', () => {
     world.linear.documents = linearDocuments().map((d) => (contents[d.id] === undefined ? d : { ...d, content: contents[d.id] as string }));
     const { result } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](./README.md#top). ${CANARY}`);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](<./README.md#top>). ${CANARY}`);
     assert.equal(
       await show('refs/mdbisync/linear:eng/notes/faq.md'),
-      `# FAQ\n\nRead [the plan](<plan.md#steps>) and [the runbook](<../ops/runbook.md>). Elsewhere: [a stranger](${url('doc-unknown')}).`,
+      `# FAQ\n\nRead [the plan](<plan.md#steps>) and [the runbook](<../ops/runbook.md>). Elsewhere: [a stranger](<${url('doc-unknown')}>).`,
     );
   });
 
@@ -593,7 +595,22 @@ describe('initial sync from Linear to the tracked branch', () => {
     const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'front-matter-boundary' }]);
-    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](<${url('doc-faq')}>).`);
+  });
+
+  it('writes each document in the form the linear-format hook leaves unchanged', async () => {
+    // Linear can store a table cell with a trailing space (`| a  |`) and other spacing `fix` normalizes.
+    const stored = `# Plan  \n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n\n* First item\n    continued with extra indentation\n\n<!-- linear:callout color=#f2c94c -->\n> [!WARNING]\n> Kept both versions.\n\n${CANARY}`;
+    assert.notEqual(fixText(stored), stored);
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' || d.id === 'doc-faq' ? { ...d, content: stored } : d));
+    const { result } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    for (const path of ['eng/notes/plan.md', 'eng/notes/faq.md']) {
+      const file = await show(`refs/mdbisync/linear:${path}`);
+      assert.match(file, /^\| Draft the outline \| tbd \|$/m, path);
+      assert.deepEqual(hookRun(path, file), { exitCode: 0, stdout: '', stderr: '' }, path);
+    }
   });
 
   it('leaves an initial attachment budget overrun out without partial files or Linear writes', async () => {
@@ -634,7 +651,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.ok(report.linearToGit?.leftOutAtRecord.some((entry) => entry.path === 'eng/notes/faq.md'), JSON.stringify(report.linearToGit?.leftOutAtRecord));
     assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/notes/faq.md'));
     // A later build rewrote the runbook's link; the record holds that text, not the first build's.
-    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](<${url('doc-faq')}>).`);
   });
 
   it('a dead upload keeps the tracked file, which stays its document', async () => {
@@ -998,8 +1015,8 @@ describe('initial sync from Linear to the tracked branch', () => {
 
   it('records its own marker even when an earlier record from the other direction has the same tree', async () => {
     const world = fakeWorld();
-    // Linear stores the text in its own form, so the record differs from the tracked branch.
-    world.linear.store = (content) => content.replace('# ', '#  ');
+    // Linear stores the text in a spelling of its own that `fix` keeps, so the record differs from the tracked branch.
+    world.linear.store = (content) => content.replace('kx-', 'kx\\-');
     world.github.pullRequests = [];
     const gitToLinear = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
     assert.equal(gitToLinear.result.exitCode, 0, gitToLinear.result.stderr);
@@ -1499,7 +1516,7 @@ describe('the security gate of an initial sync from Linear', () => {
         const result = await gated(fixture, world, (text) => text.includes(SECRET), steps);
         // The runbook's text with the FAQ's URL was staged too: it has an answer, and is not left waiting for one.
         assert.deepEqual(result.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'security-hook' }]);
-        assert.equal(await fixture.remote.text(['show', 'refs/mdbisync/linear:eng/ops/runbook.md']), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+        assert.equal(await fixture.remote.text(['show', 'refs/mdbisync/linear:eng/ops/runbook.md']), `# Runbook\n\nSee [the FAQ](<${url('doc-faq')}>).`);
       } finally {
         await fixture.cleanup();
       }
