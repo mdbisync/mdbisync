@@ -477,6 +477,7 @@ describe('state: reading the tracked tree and LFS', () => {
     // Pointers to the same object as picture-0 that differ in size or name an extension.
     const zero = createHash('sha256').update(images[0] as Buffer).digest('hex');
     files['docs/img/wrong-size.png'] = `version https://git-lfs.github.com/spec/v1\noid sha256:${zero}\nsize ${(images[0] as Buffer).length + 1}\n`;
+    files['docs/img/short-size.png'] = `version https://git-lfs.github.com/spec/v1\noid sha256:${zero}\nsize ${(images[0] as Buffer).length - 1}\n`;
     files['docs/img/same-object-extension.png'] = `version https://git-lfs.github.com/spec/v1\next-0-zip sha256:${'d'.repeat(64)}\noid sha256:${zero}\nsize ${(images[0] as Buffer).length}\n`;
     // A pointer naming a transforming extension; its object is never fetched.
     files['docs/img/extension.png'] = `version https://git-lfs.github.com/spec/v1\next-0-zip sha256:${'d'.repeat(64)}\noid sha256:${'e'.repeat(64)}\nsize 10\n`;
@@ -532,7 +533,7 @@ describe('state: reading the tracked tree and LFS', () => {
   });
 
   it('checks each pointer on its own when pointers share an object, in any order', async () => {
-    const odd = ['docs/img/wrong-size.png', 'docs/img/same-object-extension.png'];
+    const odd = ['docs/img/wrong-size.png', 'docs/img/short-size.png', 'docs/img/same-object-extension.png'];
     for (const order of [['docs/img/picture-0.png', ...odd], [...odd, 'docs/img/picture-0.png']]) {
       const git = await fixture.clone(`shared-object-${order[0]?.length}`);
       const { tracked } = await fetchState(git, config);

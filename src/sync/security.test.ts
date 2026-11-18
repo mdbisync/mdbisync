@@ -3,7 +3,8 @@ import { it } from 'node:test';
 import { createFixture } from '../state/test-helpers.ts';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type SecurityGate, checkTitle, securityGate } from './security.ts';
+import { SCRATCH_BATCH_BYTES, type SecurityGate, SecurityScratchBudgetError, checkTitle, securityGate } from './security.ts';
+import { randomBytes } from 'node:crypto';
 import type { Git } from '../state/index.ts';
 import { answeringGate, checkStaged, stagingGate } from './staged.ts';
 
@@ -327,4 +328,98 @@ it('gives no answer for a title whose path no gate can take, without naming the 
   assert.deepEqual(asked, []);
   assert.deepEqual(await checkTitle(gate, 'docs/' + TITLE + '.md', TITLE), []);
   assert.deepEqual(asked, ['docs/' + TITLE + '.md']);
+});
+
+const BUDGET_HOOK = `repos:
+  - repo: local
+    hooks:
+      - id: support-check
+        alias: security
+        name: Support check
+        entry: node check.mjs
+        language: system
+        stages: [pre-commit]
+`;
+
+/** Records each `cat-file` call the gate makes on `git`: its arguments, its output cap and the files streamed. */
+function spyCatFile(git: Git): { batches: { oids: string[]; maxOutputBytes: number | undefined }[]; streamed: string[] } {
+  const batches: { oids: string[]; maxOutputBytes: number | undefined }[] = [];
+  const streamed: string[] = [];
+  const run = git.run.bind(git);
+  git.run = (args, options = {}) => {
+    if (args[0] === 'cat-file' && args[1] === '--batch') batches.push({oids: String(options.input).trim().split('\n'), maxOutputBytes: options.maxOutputBytes});
+    return run(args, options);
+  };
+  const runToFile = git.runToFile.bind(git);
+  git.runToFile = (args, path, mode) => {
+    streamed.push(String(args.at(-1)));
+    return runToFile(args, path, mode);
+  };
+  return {batches, streamed};
+}
+
+it('reads support files in byte-bounded batches and streams one larger than a batch, so the hooks still run', async () => {
+  const fixture = await createFixture();
+  let gate: SecurityGate | undefined;
+  try {
+    const large: Record<string, Buffer> = {};
+    // 32 support files of 1 MiB each: one count-bounded batch of them would exceed the byte budget.
+    for (let at = 0; at < 32; at++) large[`assets/part-${at}.bin`] = randomBytes(1024 * 1024);
+    const huge = randomBytes(SCRATCH_BATCH_BYTES + 1);
+    await fixture.seed({
+      '.pre-commit-config.yaml': BUDGET_HOOK,
+      // The hook proves the streamed file reached the scratch tree whole.
+      'check.mjs': `import {statSync} from 'node:fs'; if (statSync('assets/huge.bin').size !== ${huge.length}) { console.log('docs/plan.md:1: huge'); process.exitCode = 1; } for (const file of process.argv.slice(2)) { if (statSync(file).size === 0) process.exitCode = 1; }`,
+      'assets/huge.bin': huge,
+      ...large,
+    }, {executable: ['assets/part-0.bin']});
+    const git = await fixture.clone('large-support');
+    const tracked = await git.text(['rev-parse', 'origin/main']);
+    const spy = spyCatFile(git);
+    gate = await securityGate(git, tracked);
+    assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+    const hugeOid = await git.text(['rev-parse', `${tracked}:assets/huge.bin`]);
+    assert.deepEqual(spy.streamed, [hugeOid]);
+    assert.ok(spy.batches.length >= 2);
+    for (const batch of spy.batches) {
+      assert.ok(batch.maxOutputBytes !== undefined && batch.maxOutputBytes <= SCRATCH_BATCH_BYTES);
+      assert.ok(!batch.oids.includes(hugeOid));
+    }
+    // Every support file was read, and the scratch tree equals the tracked one (the gate checks this, or it fails).
+    const read = new Set(spy.batches.flatMap((batch) => batch.oids));
+    for (const path of Object.keys(large)) assert.ok(read.has(await git.text(['rev-parse', `${tracked}:${path}`])));
+  } finally { await gate?.close?.(); await fixture.cleanup(); }
+});
+
+it('stops a check before any read or hook, with a named code, when the tracked files exceed the scratch budget', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({
+      '.pre-commit-config.yaml': BUDGET_HOOK,
+      // The hook would leave a marker in the real repository's folder if it ever ran.
+      'check.mjs': `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fixture.root, 'hook-ran'))}, '');`,
+      'assets/a.bin': randomBytes(64 * 1024),
+      'assets/b.bin': randomBytes(64 * 1024),
+    });
+    const git = await fixture.clone('over-budget');
+    const tracked = await git.text(['rev-parse', 'origin/main']);
+    const spy = spyCatFile(git);
+    // A run with nothing to check is not stopped; the first check is, every time, with the named code.
+    const over = await securityGate(git, tracked, {scratchBytes: 100 * 1024});
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await assert.rejects(over.check(new Map([['docs/plan.md', 'Safe.\n']])), (error: unknown) =>
+          error instanceof SecurityScratchBudgetError && error.code === 'security-scratch-budget' && /security-scratch-budget/.test(error.message));
+      }
+    } finally { await over.close?.(); }
+    // Nothing was read: the budget is checked from the sizes the tree lists.
+    assert.deepEqual(spy.batches, []);
+    assert.deepEqual(spy.streamed, []);
+    await assert.rejects(access(join(fixture.root, 'hook-ran')));
+    // Under the budget the same tree is checked as usual.
+    const gate = await securityGate(git, tracked, {scratchBytes: 1024 * 1024});
+    try {
+      assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+    } finally { await gate.close?.(); }
+  } finally { await fixture.cleanup(); }
 });

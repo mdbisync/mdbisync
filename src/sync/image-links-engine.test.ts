@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { fakeFetch } from '../setup/test-helpers.ts';
 import { sameMarkdown, splitFile } from '../format/index.ts';
@@ -104,6 +105,38 @@ describe('image repairs through the sync pull request', () => {
     await h.gitEdit(renamed, '# Plan\n\n![Repository image](../../../records.csv)\n');
     await h.settle();
     assert.equal(h.world.linear.uploads.length, before + 1, 'a repository-authored image should still upload');
+  });
+
+  for (const merged of [true, false]) it(`never binds an upload with equal bytes to a repository file a Linear member linked (repair merged first: ${merged})`, async () => {
+    const path = 'eng/notes/plan.md';
+    const report = '%PDF-1.4\nQuarterly figures.\n';
+    const upload = 'https://uploads.linear.app/workspace/scan.pdf';
+    await h.editRef('refs/heads/main', 'finance/report.pdf', report);
+    const network = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => String(input) === upload ? new Response(report) : network(input, init);
+    const before = h.world.linear.uploads.length;
+    await h.editInLinear(path, '# Plan\n\n![x](../../finance/report.pdf)\n');
+    if (merged) await h.settle();
+    else await h.sync();
+    const held = (await h.documentOf(path)).content!;
+    if (merged) assert.doesNotMatch(held, /!\[x\]/);
+
+    // The member then uploads the same bytes: the upload is a new file beside the document, not the repository file.
+    await h.editInLinear(path, `${held}\n\n![Scan](${upload})\n`);
+    await h.sync();
+    const branch = await h.show(`${SYNC_BRANCH}:${path}`);
+    const hash = createHash('sha256').update(report).digest('hex');
+    assert.match(branch, new RegExp(`!\\[Scan\\]\\(assets/${hash}\\.pdf\\)`));
+    assert.doesNotMatch(branch, /!\[Scan\]\([^)]*finance/);
+    await h.settle();
+
+    // A contributor's new version of the file uploads nothing and adds no URL to the member's document.
+    const linked = (await h.documentOf(path)).content!;
+    assert.match(linked, /\[x\]\(<?\.\.\/\.\.\/finance\/report\.pdf>?\)/);
+    await h.gitEdit('finance/report.pdf', '%PDF-1.4\nRevised figures.\n');
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before);
+    assert.equal((await h.documentOf(path)).content, linked);
   });
 
   it('writes a list item linking a plain repository file in the form the linear-format hook leaves unchanged', async () => {

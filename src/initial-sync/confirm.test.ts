@@ -186,8 +186,8 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal((await readIds())['eng/notes/plan.md']?.id, 'doc-plan');
     assert.deepEqual(report.initialSync?.overwritten, ['eng/notes/plan.md']);
     assert.equal(world.linear.documents.find((d) => d.id === 'doc-retired')?.trashed, true);
-    assert.deepEqual(report.initialSync?.trashed, ['eng/backend/retired.md']);
-    assert.match(summary, /^\| eng\/backend\/retired\.md \|$/m);
+    assert.deepEqual(report.initialSync?.trashed, ['eng/doc-retired.md']);
+    assert.match(summary, /^\| eng\/doc-retired\.md \|$/m);
     const archived = world.linear.documents.find((d) => d.id === 'doc-archived');
     assert.equal(archived?.trashed, undefined);
     assert.equal(archived?.content, undefined);
@@ -275,7 +275,7 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(retired?.trashed, undefined);
     assert.deepEqual(report.initialSync?.trashed, []);
     const leftOut = report.initialSync?.leftOutAtWrite.filter((entry) => entry.rule === 'changed-during-run').map((entry) => entry.path).sort();
-    assert.deepEqual(leftOut, ['eng/backend/retired.md', 'eng/notes/plan.md']);
+    assert.deepEqual(leftOut, ['eng/doc-retired.md', 'eng/notes/plan.md']);
     assert.ok(report.initialSync?.created.includes('eng/backend/notes.md'));
   });
 
@@ -376,6 +376,71 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(world.linear.writes.count - writes, SYNCED_PATHS.length - 2);
     // The finished state keeps no progress files.
     assert.equal((await fixture.remote.run(['cat-file', '-e', 'refs/mdbisync/ids:written.json'], { okCodes: [0, 128] })).code, 128);
+  });
+
+  it('a resumed run writes again a document a member edited since the stop, so the edit is never recorded unchecked', async () => {
+    const world = fakeWorld();
+    world.linear.writes.rateLimitAt = 3;
+    assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    const [edited, untouched] = SYNCED_PATHS as [string, string];
+    const progress = await readIds();
+    const document = world.linear.documents.find((d) => d.id === progress[edited]?.id);
+    assert.ok(document !== undefined, `${edited} was not written by the first run`);
+    const added = 'unchecked-edit-5f1c08';
+    document.content = `${document.content ?? ''}\n\n${added}`;
+    touch(document);
+
+    delete world.linear.writes.rateLimitAt;
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(report.resumed, true);
+    assert.ok(report.initialSync?.overwritten.includes(edited), `${edited} was skipped with its edit`);
+    assert.deepEqual(report.initialSync?.skippedCompleted, [untouched]);
+    assert.equal(report.record?.reformattedCount, 0);
+    await assertConverged(world);
+
+    // Neither the record nor any other pushed ref holds the edit, and the next sync proposes nothing.
+    const holding = async () => {
+      const all = Object.keys(await refs());
+      const found = await fixture.remote.run(['grep', '-l', '-F', added, ...all], { okCodes: [0, 1] });
+      return found.stdout.toString().trim();
+    };
+    assert.equal(await holding(), '');
+    assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']), await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']));
+    const sync = await runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world) });
+    assert.equal(sync.exitCode, 0, sync.stderr);
+    assert.deepEqual(world.github.pullRequests, [], 'a sync pull request was opened');
+    assert.equal(await holding(), '');
+  });
+
+  it('a document found holding a newer text drops the stopped write, so a file that goes back to the written text is written again', async () => {
+    const world = fakeWorld();
+    world.linear.writes.rateLimitAt = 3;
+    assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    const [first] = SYNCED_PATHS as [string];
+    const original = TREE[first] as string;
+    const revised = `# Handbook\n\nRevised. ${CANARY}`;
+    const firstId = (await readIds())[first]?.id;
+    const document = world.linear.documents.find((d) => d.id === firstId);
+    assert.ok(document !== undefined, `${first} was not written by the first run`);
+    // Git and Linear both move to the same new text; the next run finds the document holding it and stops again.
+    await fixture.seed({ [first]: `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n${revised}` });
+    document.content = revised;
+    touch(document);
+    world.linear.writes.rateLimitAt = world.linear.writes.count + 2;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, INCOMPLETE_EXIT_CODE);
+    assert.ok(second.report.initialSync?.unchanged.includes(first), `${first} was not found holding its text`);
+
+    // The file goes back to the text the first run wrote: Linear still holds the newer one, so it is written again.
+    await fixture.seed({ [first]: original });
+    delete world.linear.writes.rateLimitAt;
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.initialSync?.overwritten.includes(first), `${first} was skipped holding the newer text`);
+    assert.equal(report.record?.reformattedCount, 0);
+    assert.equal(document.content, SYNCED[first as keyof typeof SYNCED].body);
+    await assertConverged(world);
   });
 
   it('a run that stops while only trashing still marks the initial sync unfinished, so the sync waits', async () => {

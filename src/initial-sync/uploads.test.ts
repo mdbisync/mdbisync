@@ -12,6 +12,7 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { fixText } from '../format/index.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
+import { LinearClient } from '../linear/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git, commitTree } from '../state/index.ts';
 import { type FakeUpload, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
@@ -113,6 +114,84 @@ describe('uploads of linked files in an initial sync', () => {
   };
   const document = (world: FakeWorld, title: string) => world.linear.documents.find((d) => d.title === title && d.trashed !== true);
   const uploadOf = (world: FakeWorld, content: Buffer) => world.linear.uploads.filter((upload) => upload.bytes?.equals(content));
+
+  for (const { count, size, firstBatch, stopOnBudget } of [
+    { count: 100, size: 1024 * 1024, firstBatch: 20, stopOnBudget: true },
+    { count: 7, size: DEFAULT_UPLOAD_LIMIT, firstBatch: 6, stopOnBudget: false },
+  ]) {
+    it(`batches a document's ${count} attachments and reuses completed batches after a stop`, async (t) => {
+      const attachments = Array.from({ length: count }, (_, index) => ({
+        name: `attachment-${index}.png`,
+        content: Buffer.alloc(size, index),
+      }));
+      const body = attachments.map(({ name }) => `[Attachment](${name})`).join('\n') + '\n';
+      await fixture.seed({
+        'eng/notes/00-attachments.md': body,
+        ...Object.fromEntries(attachments.map(({ name, content }) => [`eng/notes/${name}`, content])),
+      });
+      const readCalls: string[][] = [];
+      const gitRun = Git.prototype.run;
+      t.mock.method(Git.prototype, 'run', async function (this: Git, ...args: Parameters<Git['run']>) {
+        const result = await gitRun.apply(this, args);
+        if (args[0][0] === 'cat-file' && args[0][1] === '--batch') {
+          const ids = String(args[1]?.input).trim().split('\n');
+          readCalls.push(ids);
+        }
+        return result;
+      });
+      const uploadCalls: { names: string[]; bytes: number }[] = [];
+      const world = fakeWorld();
+      let stopAfterFirstBatch = true;
+      const uploadFiles = LinearClient.prototype.uploadFiles;
+      t.mock.method(LinearClient.prototype, 'uploadFiles', async function (this: LinearClient, inputs: Parameters<LinearClient['uploadFiles']>[0]) {
+        uploadCalls.push({ names: inputs.map(({ filename }) => filename), bytes: inputs.reduce((sum, { bytes }) => sum + bytes.byteLength, 0) });
+        if (stopAfterFirstBatch && !stopOnBudget && uploadCalls.length === 2) world.linear.writes.rateLimitAt = world.linear.writes.count + 1;
+        return uploadFiles.call(this, inputs);
+      });
+      const attachmentIds = new Set((await fixture.remote.text(['ls-tree', 'main:eng/notes'])).split('\n')
+        .filter((line) => /\tattachment-\d+\.png$/.test(line))
+        .map((line) => line.split(/[ \t]/)[2]!));
+      assert.equal(attachmentIds.size, count);
+
+      const fetcher = fakeFetch(world);
+      const first = await run(world, async (input, init) => {
+        const response = await fetcher(input, init);
+        if (stopOnBudget && String(input) === `${LINEAR_API}/graphql` && typeof init?.body === 'string' && JSON.parse(init.body).operationName === 'FileUploads') {
+          response.headers.set('x-ratelimit-requests-remaining', '1');
+        }
+        return response;
+      });
+      const assertBounds = () => {
+        assert.ok(uploadCalls.every(({ names, bytes }) => names.length <= 20 && bytes <= 64 * 1024 * 1024));
+        assert.ok(readCalls.every((ids) => ids.filter((id) => attachmentIds.has(id)).length * size <= 64 * 1024 * 1024));
+      };
+      assertBounds();
+      assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+      assert.equal(first.report.stoppedEarly, true);
+      assert.equal(first.report.stop?.kind, stopOnBudget ? 'budget-low' : 'rate-limited');
+      if (stopOnBudget) {
+        assert.equal(readCalls.flat().filter((id) => attachmentIds.has(id)).length, count + firstBatch, 'only the first batch is read for upload');
+      }
+      assert.equal(document(world, '00-attachments'), undefined);
+      const completed = attachments.slice(0, firstBatch);
+      const cached = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+      assert.deepEqual(Object.keys(cached).sort(), completed.map(({ content }) => sha(content)).sort());
+
+      readCalls.length = 0;
+      uploadCalls.length = 0;
+      stopAfterFirstBatch = false;
+      delete world.linear.writes.rateLimitAt;
+      const second = await run(world);
+      assert.equal(second.result.exitCode, 0, second.result.stderr);
+      assertBounds();
+      assert.deepEqual(uploadCalls.flatMap(({ names }) => names).filter((name) => /^attachment-/.test(name)),
+        attachments.slice(firstBatch).map(({ name }) => name));
+      // Every regular blob must be hashed on a fresh run. Only uncached
+      // attachments should then be read a second time for upload.
+      assert.equal(readCalls.flat().filter((id) => attachmentIds.has(id)).length, 2 * count - firstBatch);
+      assert.equal(await show('refs/mdbisync/linear:eng/notes/00-attachments.md'), body.trimEnd());
+    });
+  }
 
   for (const url of [
     'https://evil.example/x',

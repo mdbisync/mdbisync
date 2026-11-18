@@ -449,7 +449,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       try {
         // An over-limit legacy body is not evidence for links or equality.
         const previousBody = old === undefined ? undefined : markdownBaseline(prior.body);
-        const assets = await downloadAssets(path, doc.content ?? '', uploads, previousBody, old?.path);
+        const assets = await downloadAssets(path, doc.content ?? '', uploads, previousBody, old?.path, new Set(old?.entry.plainFiles));
         const candidate: Candidate = {doc, path, head, assets, files: new Map<string, FileContent>([[path, joinFile(head, assets.body)], ...assets.files])};
         if (old?.path === path && previousBody !== undefined) candidate.previousBody = previousBody;
         candidates.set(doc.id, candidate);
@@ -621,7 +621,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const {head, body} = splitFile(baseline.text);
       let assets: CapturedAssets;
       try {
-        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body);
+        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body, candidate.path, new Set(byId.get(candidate.doc.id)?.entry.plainFiles));
         // Linear's spelling of that version reads back as its text.
         return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
       } catch (error) {
