@@ -26,8 +26,12 @@ const SVG = 'xmlns="http://www.w3.org/2000/svg"';
 const XHTML = 'http://www.w3.org/1999/xhtml';
 
 it('refuses a static SVG above the element limit', () => {
-  const group = '<g>' + '<rect/>'.repeat(1000) + '</g>';
-  assert.equal(uploadExtension(Buffer.from(`<svg>${group.repeat(50)}</svg>`)), null);
+  const group = '<g>' + '<rect/>'.repeat(999) + '</g>';
+  const atLimit = group.repeat(49) + '<rect/>'.repeat(999);
+  assert.equal(uploadExtension(Buffer.from(`<svg>${atLimit}</svg>`)), '.svg');
+  const overLimit = Buffer.from(`<svg>${atLimit}<rect/></svg>`);
+  assert.equal(uploadExtension(overLimit), null);
+  assert.equal(admitsCapturedFile(`docs/assets/${'a'.repeat(64)}.svg`, overLimit), false);
 });
 
 it('counts namespace declarations against the SVG complexity limit', () => {
@@ -44,6 +48,24 @@ it('restores shadowed SVG bindings and removes local bindings before visiting si
   const open = '<svg xmlns:s="http://www.w3.org/2000/svg">';
   assert.equal(uploadExtension(Buffer.from(`${open}${group}<s:rect id="shape"/></svg>`)), '.svg');
   assert.equal(uploadExtension(Buffer.from(`${open}${group}<use local:href="#shape"/></svg>`)), null);
+});
+
+it('applies SVG namespace declarations without enumerating the inherited bindings', () => {
+  const bytes = Buffer.from('<svg xmlns:d="urn:drawing"><g xmlns:l="urn:layer"><rect/></g></svg>');
+  const iterate = Map.prototype[Symbol.iterator];
+  let enumerations = 0;
+  let extension: string | null;
+  try {
+    Map.prototype[Symbol.iterator] = function () {
+      enumerations++;
+      return iterate.call(this);
+    };
+    extension = uploadExtension(bytes);
+  } finally {
+    Map.prototype[Symbol.iterator] = iterate;
+  }
+  assert.equal(extension, '.svg');
+  assert.equal(enumerations, 0);
 });
 
 for (const xml of [

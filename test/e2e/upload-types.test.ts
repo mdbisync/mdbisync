@@ -6,7 +6,7 @@ import { it } from 'node:test';
 import { runCli } from '../../src/cli.ts';
 import { lintInTree } from '../../src/format/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API, GITHUB_API, touch } from '../../src/setup/test-helpers.ts';
-import { PushedKey, commitIds, commitTree, commitUploads, fetchState, listTree, readBlobs, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
+import { PushedKey, commitIds, commitTree, commitUploads, fetchState, listTree, readBlobs, readUploads, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
 import { createFixture, IDENTITY } from '../../src/state/test-helpers.ts';
 import { MARKS } from '../../src/sync/marks.ts';
 
@@ -143,5 +143,9 @@ it('blocks documents with refused SVG uploads while capturing a document with a 
     assert.equal(await show('docs/copied.md'),'Copied.');
     assert.equal(await show('docs/drawing.md'),'Drawing.');
     assert.equal(await show('docs/static.md'),`Text.\n\n![Image](assets/${hash(shapes)}.svg)`);
+    const files = await listTree(fixture.remote, stateRef(config,'linear'));
+    assert.equal(files.some(({path}) => path === `docs/assets/${hash(drawing)}.svg`),false);
+    const uploads = await readUploads(fixture.remote, stateRef(config,'uploads'), new PushedKey('secret', 'example/repository'));
+    assert.equal(uploads.has(hash(drawing)),false);
   } finally {await fixture.cleanup();}
 });
