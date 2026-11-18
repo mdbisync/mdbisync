@@ -14,7 +14,7 @@ import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, rea
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure, ExpectedCheck } from '../pull-request/index.ts';
-import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgain, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict, type RequiredCheck } from './deadline.ts';
+import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgain, checksAgainTrailer, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict, type RequiredCheck } from './deadline.ts';
 
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
 export const SET_ASIDE_MESSAGE = 'Set aside suspended changes';
@@ -287,8 +287,9 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     const again = await checksAgain(options.github, unchanged, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) },
       { ...options, againMessage: SUSPENDED_CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, unchanged, context.mapping.zones)).length === 0 });
     if (again !== null) {
-      carried = again;
-      head = await commit(context, options, await git.text(['rev-parse', `${unchanged}^{tree}`]), [unchanged], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view));
+      carried = again.carried;
+      const trailer = again.from === undefined ? '' : checksAgainTrailer(again.from);
+      head = await commit(context, options, await git.text(['rev-parse', `${unchanged}^{tree}`]), [unchanged], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view) + trailer);
     }
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);

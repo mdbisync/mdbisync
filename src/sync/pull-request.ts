@@ -66,7 +66,7 @@ import {
   commitTree,
 } from '../state/index.ts';
 import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_MESSAGE_LENGTH, linkTarget, plainLine } from './hold.ts';
-import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgain, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
+import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgain, checksAgainTrailer, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
 import { LaneMoved, LaneConflict, commitLaneIds, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
@@ -355,12 +355,13 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
     /** The checks the head below still waited for, which the sync's commit on it must pass too. */
     let carried: ExpectedCheck[] = [];
     if (head === sync && sync !== null && pending && options.state.ids !== null) {
-      const again = await checksAgain(github, sync,options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) },
+      const again = await checksAgain(github, sync, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: await ownPushed(context, options) },
         { ...options, againMessage: CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, sync, context.mapping.zones)).length === 0 });
       if (again !== null) {
-        carried = again;
+        carried = again.carried;
+        const message = again.from === undefined ? CHECKS_AGAIN_MESSAGE : `${CHECKS_AGAIN_MESSAGE}\n\n${checksAgainTrailer(again.from)}`;
         // The head's own files: the tracked branch's changes join only through a merge that records them.
-        head = await commitTree(git, { base: await git.text(['rev-parse', `${sync}^{tree}`]), changes: new Map(), parents: [sync], message: CHECKS_AGAIN_MESSAGE, identity, skipIfUnchanged: false });
+        head = await commitTree(git, { base: await git.text(['rev-parse', `${sync}^{tree}`]), changes: new Map(), parents: [sync], message, identity, skipIfUnchanged: false });
       }
     }
 

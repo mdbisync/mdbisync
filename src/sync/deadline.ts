@@ -211,14 +211,28 @@ async function earlierHeadChecks(git: Git, github: GitHubRepository, head: Oid, 
   if (pushed === undefined) return null;
   const commits = (await git.text(['rev-list', '--first-parent', '-n', String(EARLIER_HEAD_DEPTH + 2), head, '--not', base])).split('\n').filter(Boolean) as Oid[];
   const own = commits[0] === pushed;
+  // A commit the sync pushed only to run the checks again expects what the heads below it did, down to the sync's push
+  // before it, which its message names: its signed record covers its message too.
+  const until = own ? checksAgainFrom(await git.text(['show', '-s', '--format=%B', pushed])) : pushed;
   const checks: ExpectedCheck[] = [];
   for (const [index, commit] of commits.slice(1).entries()) {
     if (index === EARLIER_HEAD_DEPTH) return null;
     checks.push(...await registeredChecks(github, commit));
-    if (own || commit === pushed) return checks;
+    if (until === undefined || commit === until) return checks;
   }
   // The head the sync pushed is not below this one (the branch was rewritten): what ran before is not known.
-  return own ? checks : null;
+  return own && until === undefined ? checks : null;
+}
+
+const CHECKS_AGAIN_FROM = /^Checks-again-from: ([0-9a-f]{40,64})$/m;
+
+/** The trailer line of a commit the sync pushes to run the checks again on a head someone else pushed on `from`, its own push. */
+export function checksAgainTrailer(from: Oid): string {
+  return `Checks-again-from: ${from}\n`;
+}
+
+function checksAgainFrom(message: string): Oid | undefined {
+  return CHECKS_AGAIN_FROM.exec(message)?.[1] as Oid | undefined;
 }
 
 /** Each check once, sorted by name, then by publisher. */
@@ -281,7 +295,9 @@ export const CHECKS_AGAIN_AFTER_MINUTES = 5;
  * Whether the sync pushes a commit of its own on `head`, a pull request's unchanged head, with the same files, so that
  * the checks run on it: its push starts the repository's whole CI, and is recorded. Null when it does not; otherwise
  * the checks `head` waited for, which the new commit must pass too (`carried` in `EarlierHeads`), so a check that never
- * started is still expected there. It does in two cases:
+ * started is still expected there, and `from`, the sync's push below `head`, which the commit names
+ * (`checksAgainTrailer`) so that later runs read the history down to it, whatever the description says. It does in
+ * two cases:
  *
  * - The branch's history does not show `head`'s earlier checks (no head the sync recorded pushing is below it: the
  *   branch was rewritten, or the sync last pushed it before it recorded its heads). The new commit ends that history;
@@ -293,9 +309,9 @@ export const CHECKS_AGAIN_AFTER_MINUTES = 5;
  *   one at most, nor when `verified` says the sync would not push `head`'s files. If the checks still never start,
  *   the deadline reports `checks-missing`, as for a head the sync pushed.
  */
-export async function checksAgain(github: GitHubRepository, head: Oid, required: readonly RequiredCheck[], earlier: { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined }, options: { mergeWithoutChecks?: boolean | undefined; againMessage: string; verified: () => Promise<boolean> }): Promise<ExpectedCheck[] | null> {
+export async function checksAgain(github: GitHubRepository, head: Oid, required: readonly RequiredCheck[], earlier: { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined }, options: { mergeWithoutChecks?: boolean | undefined; againMessage: string; verified: () => Promise<boolean> }): Promise<{ carried: ExpectedCheck[]; from?: Oid } | null> {
   const expected = await expectedChecks(github, head, required, earlier);
-  if (!expected.complete || earlier.pushed === undefined) return [];
+  if (!expected.complete || earlier.pushed === undefined) return { carried: [] };
   if (earlier.pushed === head) return null;
   const now = new Date();
   if (!pastDeadline(headSince(earlier.body, head, now), CHECKS_AGAIN_AFTER_MINUTES, now)) return null;
@@ -303,7 +319,7 @@ export async function checksAgain(github: GitHubRepository, head: Oid, required:
   if (!(await options.verified())) return null;
   const expectation = checkExpectation(options, expected.checks);
   const checks = await readChecks(github, head, expectation);
-  return checks.state === 'pending' && checksMissing(checks, expectation) ? expected.observed : null;
+  return checks.state === 'pending' && checksMissing(checks, expectation) ? { carried: expected.observed, from: earlier.pushed } : null;
 }
 
 /** The missing checks as Markdown code, or what is missing when no check ran at all. */

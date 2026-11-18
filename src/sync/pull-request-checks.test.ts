@@ -590,6 +590,11 @@ describe('sync: pull request checks', () => {
     assert.equal(run.report.pullRequest?.merged, null, 'merged before `tests`, which the formatter\'s head never ran, ran on the new head');
     assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
     h.fetchOverride = undefined;
+    // The sync's commit names its push below, so a description without the note still expects `tests`.
+    h.editHeadNote('mdbisync/linear', () => '');
+    const edited = await sync();
+    assert.equal(edited.report.pullRequest?.merged, null, 'merged without `tests` once the head note was deleted');
+    assert.deepEqual(edited.report.pullRequest?.checks?.missing, ['tests']);
     checksOn(await rev(SYNC_BRANCH), [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
     const passed = await sync();
     assert.ok(passed.report.pullRequest?.merged, 'the head the sync pushed on the formatter\'s fix did not merge');
