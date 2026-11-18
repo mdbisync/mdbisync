@@ -401,7 +401,7 @@ remain after release; its presence alone does not mean a batch is on hold.
 - A pending edit on the sync branch that changes the same lines as a later
   Linear edit or tracked-branch edit is not dropped and does not hold the
   pull request. The next run merges the two into the sync branch with a
-  merge commit, both versions between the usual conflict marker paragraphs
+  merge commit, both versions between the usual conflict markers
   (the sync branch's edit is the git version against Linear, the Linear
   version against the tracked branch). The pull request carries the markers
   to the tracked branch and from there to Linear, like any other conflict,

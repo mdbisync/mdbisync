@@ -32,7 +32,7 @@ resolved in git or in Linear.
 A conflict is written into the document itself, as three markers around the
 two versions:
 
-| Marker paragraph | What follows it |
+| Marker | What follows it |
 | --- | --- |
 | `**Sync conflict: git version**` | the tracked branch's version |
 | `**Sync conflict: Linear version**` | Linear's version |
@@ -158,8 +158,8 @@ Ask the release team in the team chat.
 - The sync adds one comment, once per conflict:
 
   > This document contains conflicting versions. Edit the document here or
-  > in Git, keep the text you want, and remove every conflict marker
-  > paragraph throughout the document. The alert clears after the next sync.
+  > in Git, keep the text you want, and delete every "Sync conflict" marker
+  > throughout the document. The alert clears after the next sync.
 
   In Linear, each marker is a callout: deleting the callout removes it.
 

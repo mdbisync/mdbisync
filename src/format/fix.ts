@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, joinFile, parse, quoteLines, splitFile, start, visit } from './markdown.ts';
+import { end, isCallout, isCalloutComment, joinFile, parse, quoteLines, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -88,7 +88,7 @@ class Writer {
       .map(({ node, parts }, index) => {
         const next = written[index + 1];
         if (next === undefined) return parts.join('\n\n');
-        return parts.join('\n\n') + (calloutComment(node) && next.node.type === 'blockquote' ? '\n' : '\n\n');
+        return parts.join('\n\n') + (isCalloutComment(node) && isCallout(next.node, this.source) ? '\n' : '\n\n');
       })
       .join('');
   }
@@ -421,11 +421,6 @@ function attachmentLink(paragraph: Paragraph): Link | undefined {
   const url = only.url.split('#')[0]!;
   if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('#') || /\.md$/i.test(url) || url === '') return undefined;
   return only;
-}
-
-/** The comment Linear writes above a callout whose color is not its alert's default. */
-function calloutComment(node: RootContent | BlockContent | DefinitionContent): boolean {
-  return node.type === 'html' && /^<!--\s*linear:callout\b[^]*?-->$/.test(node.value);
 }
 
 /** Prefixes every line; empty lines get `empty` instead. */

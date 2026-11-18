@@ -2,9 +2,9 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Nodes } from 'mdast';
-import { parse, splitFile, visit } from '../format/markdown.ts';
+import { isCalloutComment, parse, splitFile, visit } from '../format/markdown.ts';
 import { Git } from '../state/git.ts';
-import { detectConflicts, findMarkerLines, lines, lineText, markerCallout, MARKERS, unquote } from './markers.ts';
+import { detectConflicts, findMarkerLines, lines, lineText, markerCallout, MARKERS } from './markers.ts';
 import type { Conflict } from './markers.ts';
 import { message } from '../messages.ts';
 
@@ -67,11 +67,17 @@ function blockRanges(tokens: Token[], side: Side): Range[] {
     const end = tokenAtLine[Math.min(endLine, source.length) - 1];
     if (start !== undefined && end !== undefined) ranges.push({ start, end: end + 1 });
   };
-  visit(parse(text), (node) => {
+  const tree = parse(text);
+  visit(tree, (node) => {
     if ((['code', 'table', 'blockquote', 'inlineCode', 'html', 'heading'].includes(node.type) ||
       (node.type === 'list' && (node.ordered || nestedList(node)))) && node.position) {
       add(node.position.start.line, node.position.end.line);
     }
+  });
+  // A callout's color comment belongs to its callout: a conflict takes in both.
+  tree.children.forEach((node, index) => {
+    const next = tree.children[index + 1];
+    if (isCalloutComment(node) && next?.type === 'blockquote' && node.position && next.position) add(node.position.start.line, next.position.end.line);
   });
   for (const conflict of detectConflicts(text)) add(conflict.startLine, conflict.endLine);
   return ranges;
@@ -108,34 +114,27 @@ function conflictRanges(tokens: Token[]): Range[] {
 
 /**
  * Each token's lines without the marker blocks of an old conflict and the
- * blank line after each: a marker line, or a marker callout with its color
- * comment. Any other text typed into a marker callout stays, unquoted, so
- * the old versions become ordinary text of the new conflict, never a nested
- * mark.
+ * blank line after each: a marker line, or a marker callout's alert line
+ * and marker line with its color comment. Any other text typed into a
+ * marker callout stays as written, still quoted, so an example in it stays
+ * an example. The old versions become ordinary text of the new conflict,
+ * never a nested mark.
  */
 function withoutMarkers(tokens: Token[], side: Side): string[][] {
   const projection = tokens.flatMap((token) => content(token, side)).join('');
   const source = lines(projection);
-  const blank = (line: number) => source[line - 1] !== undefined && lineText(unquote(source[line - 1]!)) === '';
+  const blank = (line: number) => source[line - 1] !== undefined && lineText(source[line - 1]!) === '';
   const drop = new Set<number>();
-  const quoted = new Set<number>();
   // Classify markers in the complete document, before cutting out an arm:
   // quote and multiline inline-code context may start outside a Git hunk.
   for (const [line, marker] of findMarkerLines(projection)) {
     drop.add(line);
-    if (marker.calloutLine !== undefined) {
-      for (let comment = marker.startLine; comment < marker.calloutLine; comment++) drop.add(comment);
-      drop.add(marker.calloutLine);
-      for (let inside = marker.calloutLine; inside <= marker.endLine; inside++) quoted.add(inside);
-    }
-    if (blank(marker.endLine + 1)) drop.add(marker.endLine + 1);
+    if (marker.calloutLine !== undefined) for (let header = marker.startLine; header <= marker.calloutLine; header++) drop.add(header);
+    // Text typed after the marker inside its callout keeps the blank line that ends its paragraph.
+    if (line === marker.endLine && blank(line + 1)) drop.add(line + 1);
   }
   let line = 0;
-  return tokens.map((token) => content(token, side).flatMap((text) => {
-    line++;
-    if (drop.has(line)) return [];
-    return [quoted.has(line) ? unquote(text) : text];
-  }));
+  return tokens.map((token) => content(token, side).filter(() => !drop.has(++line)));
 }
 
 /** EOF-terminated literal blocks must end before the following marker paragraph. */

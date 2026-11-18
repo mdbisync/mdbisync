@@ -91,3 +91,41 @@ test("the mark the sync writes is Linear's recorded form of it", async () => {
   const merged = await mergeMarkdown('Intro.\n\nThe release ships on Monday.\n\nOutro.', 'Intro.\n\nThe release ships on Tuesday.\n\nOutro.', 'Intro.\n\nThe release ships on Wednesday.\n\nOutro.');
   assert.equal(recorded.replace(/\n\nRef kx-[0-9a-f]{8}$/, ''), merged.text);
 });
+
+test('text typed into an old marker callout stays a paragraph of its own, still quoted, when a new conflict replaces the mark', async () => {
+  const typed = `${CALLOUT_COMMENT}\n> [!WARNING]\n> ${MARKERS.git}\n>\n> A note typed here.`;
+  const base = `Intro.\n\n${typed}\n\nold git\n\n${markerCallout(MARKERS.linear)}\n\nold Linear\n\n${markerCallout(MARKERS.end)}\n\nOutro.`;
+  const result = await mergeMarkdown(base, base.replace('old git', 'new git'), base.replace('old git', 'new Linear'));
+  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.conflicts[0]!.git, '>\n> A note typed here.\n\nnew git\n\nold Linear');
+});
+
+test('a marker shown as an example in a quote inside a marker callout stays an example when a new conflict replaces the mark', async () => {
+  const example = `${CALLOUT_COMMENT}\n> [!WARNING]\n> ${MARKERS.git}\n>\n> > ${MARKERS.end}`;
+  const base = `${example}\n\nold git\n\n${markerCallout(MARKERS.linear)}\n\nold Linear\n\n${markerCallout(MARKERS.end)}\n\nOutro.`;
+  assert.equal(detectConflicts(base).length, 1);
+  const result = await mergeMarkdown(base, base.replace('old git', 'new git'), base.replace('old git', 'new Linear'));
+  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.text.split(`> > ${MARKERS.end}`).length - 1, 2, 'the example is kept in both versions, still quoted');
+});
+
+test('markers pasted into one callout each bound their own version', () => {
+  const text = `> [!WARNING]\n> ${MARKERS.git}\n>\n> One.\n>\n> ${MARKERS.linear}\n>\n> Two.\n>\n> ${MARKERS.end}\n`;
+  const [conflict] = detectConflicts(text);
+  assert.equal(detectConflicts(text).length, 1);
+  assert.deepEqual({ ...conflict }, { startLine: 1, endLine: 10, git: '>\n> One.\n>', linear: '>\n> Two.\n>' });
+});
+
+test("a conflict in a person's colored callout takes in its color comment, so both versions keep their color", async () => {
+  const callout = (text: string) => `<!-- linear:callout color=#eb5757 -->\n> [!NOTE]\n> ${text}`;
+  const base = `Intro.\n\n${callout('old')}\n\nOutro.`;
+  const result = await mergeMarkdown(base, base.replace('old', 'git'), base.replace('old', 'Linear'));
+  assert.equal(result.text, `Intro.\n\n${callouts(callout('git'), callout('Linear'))}\n\nOutro.`);
+  assert.equal(fixText(result.text), result.text);
+});
+
+test('fix keeps a blank line between a color comment and a plain quote, which is no callout', () => {
+  const text = '<!-- linear:callout color=#eb5757 -->\n\n> Just a quote.';
+  assert.equal(fixText(text), text);
+  assert.equal(fixText('<!-- linear:callout color=#eb5757 -->\n\n> [!NOTE]\n> A note.'), '<!-- linear:callout color=#eb5757 -->\n> [!NOTE]\n> A note.');
+});

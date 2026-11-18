@@ -74,19 +74,19 @@ export function editCapacity(versions: readonly string[], lastToken: string): nu
 const linearTarget = (index: number, documents: number) => index % documents;
 const gitTarget = (index: number, documents: number) => (index * 7 + 3) % documents;
 
-/** The most edits `burst`'s schedule sends to any one of `documents` documents. */
-function mostEditsPerDocument(counts: { linear: number; git: number }, documents: number): number {
+/** How many edits `burst`'s schedule sends to each of `documents` documents, by index. */
+function editsPerDocument(counts: { linear: number; git: number }, documents: number): number[] {
   const edits = new Array<number>(documents).fill(0);
   for (let index = 0; index < counts.linear; index += 1) edits[linearTarget(index, documents)]! += 1;
   for (let index = 0; index < counts.git; index += 1) edits[gitTarget(index, documents)]! += 1;
-  return Math.max(...edits);
+  return edits;
 }
 
 /**
- * The documents a burst edits: those with room for every edit the schedule
- * sends to one document (its appends, duplicated conflict versions and a
- * marker set per edit). Fewer documents take more edits each, so the set
- * shrinks until every member has room.
+ * The documents a burst edits, in the order it walks them: the most
+ * documents that can each take the edits the schedule sends to their place
+ * (appends, duplicated conflict versions and a marker set per edit). The
+ * roomiest documents take the busiest places.
  */
 export function burstDocuments(
   documents: ReadonlyMap<string, readonly string[]>,
@@ -94,15 +94,19 @@ export function burstDocuments(
   lastToken: string,
 ): string[] {
   const counts = burstEditCounts(options);
-  let paths = [...documents.keys()];
-  for (;;) {
-    const need = paths.length === 0 ? Infinity : mostEditsPerDocument(counts, paths.length);
-    const fitting = paths.filter((path) => editCapacity(documents.get(path)!, lastToken) >= need);
-    if (fitting.length === paths.length) break;
-    paths = fitting;
+  const byRoom = [...documents]
+    .map(([path, versions]) => ({ path, room: editCapacity(versions, lastToken) }))
+    .sort((a, b) => b.room - a.room);
+  for (let size = byRoom.length; size > 0; size -= 1) {
+    const edits = editsPerDocument(counts, size);
+    const places = edits.map((count, place) => ({ count, place })).sort((a, b) => b.count - a.count);
+    if (places.every(({ count }, rank) => byRoom[rank]!.room >= count)) {
+      const order = new Array<string>(size);
+      places.forEach(({ place }, rank) => { order[place] = byRoom[rank]!.path; });
+      return order;
+    }
   }
-  if (paths.length === 0) throw new Error('no document has room for the burst edits');
-  return paths;
+  throw new Error('no document has room for the burst edits');
 }
 
 export interface BurstResult {

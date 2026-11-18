@@ -131,6 +131,21 @@ function comparable(body: string): unknown {
   return strip(tree);
 }
 
+/** A color comment Linear writes directly above a callout whose color is not its alert's default. */
+export function isCalloutComment(node: Nodes | undefined): boolean {
+  return node?.type === 'html' && /^<!--\s*linear:callout\b[^]*?-->$/.test(node.value);
+}
+
+/** The first line of a callout, without its quote prefix: `[!WARNING]` or another alert kind. */
+export const ALERT = /^\[!\w+\][ \t]*$/;
+
+/** Whether a top-level block quote of `source` is a callout: its first line is an alert. */
+export function isCallout(node: Nodes, source: string): boolean {
+  if (node.type !== 'blockquote' || !node.position) return false;
+  const first = source.split('\n')[node.position.start.line - 1] ?? '';
+  return ALERT.test(first.replace(/\r$/, '').replace(/^ {0,3}> ?/, ''));
+}
+
 /**
  * The text as the content of a block quote, the way Linear writes one: each
  * line after `> `, a blank line as a bare `>`, except a blank line of a
@@ -138,6 +153,8 @@ function comparable(body: string): unknown {
  */
 export function quoteLines(text: string): string {
   const codeLines = new Set<number>();
+  // Only fences can hold a blank line here: fix writes no indented code.
+  if (!/^(`{3,}|~{3,})/m.test(text)) return text.split('\n').map((line) => (line === '' ? '>' : `> ${line}`)).join('\n');
   // Only code directly in the quote: a nested quote has already written its
   // blank code lines as `> `, and Linear's form of code in a list is unrecorded.
   for (const node of parse(text).children) {

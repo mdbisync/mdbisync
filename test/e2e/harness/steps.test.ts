@@ -11,7 +11,7 @@ import { Git, GitError, lfsReader, parseLfsPointer } from '../../../src/state/in
 import { fakeLfsServer } from '../../../src/state/test-helpers.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, markerBlock, MARKERS, noteSentence, resolveKeeping, scanMarkers } from './conflicts.ts';
+import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, markerBlock, MARKERS, noteSentence, removeMarker, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { CANARY_FIXTURE } from './security-canary.ts';
 import type { RunTree } from './corpus.ts';
@@ -131,6 +131,26 @@ describe('conflict markers', () => {
     const resolved = resolveKeeping(withConflict, 'git');
     assert.equal(scanMarkers(resolved).markerLines, 0);
     assert.ok(resolved.includes(`\`\`\`text\n${MARKERS.git}\none\n${MARKERS.linear}\ntwo\n${MARKERS.end}\n\`\`\``));
+  });
+
+  it('read, remove and resolve markers in the callout form the sync writes, leaving code and quotes as they are', () => {
+    const callouts = (git: string, linear: string) => `# Notes\n\n${markerBlock('git')}\n\n${git}\n\n${markerBlock('linear')}\n\n${linear}\n\n${markerBlock('end')}\n\nAfter.\n`;
+    const scan = scanMarkers(callouts('One.', 'Two.'));
+    assert.deepEqual([scan.sets.length, scan.markerLines, scan.sets[0]?.git, scan.sets[0]?.linear], [1, 3, 'One.', 'Two.']);
+    assert.equal(conflictScope(callouts('```text\none\n```', '```text\ntwo\n```')), 'whole-fence');
+    assert.equal(resolveKeeping(callouts('One.', 'Two.'), 'git'), '# Notes\n\nOne.\n\nAfter.\n');
+    assert.match(editInsideMarkers(callouts('One.', 'Two.'), 'git', 'abc123-003'), /^One\. The review moved to the next morning, note abc123-003\.$/m);
+    // A person deleting the end marker deletes its whole callout, and only there a blank line.
+    const code = '```text\na\n\n\nb\n```';
+    const removed = removeMarker(callouts(code, 'Two.'), 'end');
+    assert.equal(removed, `# Notes\n\n${markerBlock('git')}\n\n${code}\n\n${markerBlock('linear')}\n\nTwo.\n\nAfter.\n`);
+    assert.equal(removeMarker('No markers.\n', 'end'), null);
+    // A callout example in a fence, or a marker in a plain quote, is text.
+    const fenced = `\`\`\`markdown\n${markerBlock('end')}\n\`\`\``;
+    assert.equal(resolveKeeping(callouts(fenced, 'Two.'), 'git'), `# Notes\n\n${fenced}\n\nAfter.\n`);
+    assert.equal(scanMarkers(callouts(fenced, 'Two.')).sets[0]?.git, fenced);
+    assert.equal(scanMarkers(`> ${MARKERS.end}\n`).markerLines, 0);
+    assert.equal(conflictScope(callouts(`\`\`\`text\n${MARKERS.end}\n\`\`\``, '```text\ntwo\n```')), 'whole-fence');
   });
 
   it('edit the n-th plain paragraph and nothing else', () => {
@@ -947,7 +967,7 @@ describe('load', () => {
       ['plan.md', ['# Plan\n', '# Plan\n']],
     ]);
     const documents = burstDocuments(versions, options, 'abcdef-9999');
-    assert.deepEqual(documents, ['notes.md', 'plan.md']);
+    assert.deepEqual([...documents].sort(), ['notes.md', 'plan.md']);
     const texts = new Map([...versions].map(([path, values]) => [path, values[0] as string]));
     const tokens: string[] = [];
     const edit = async (path: string) => {
@@ -980,6 +1000,9 @@ describe('load', () => {
     assert.deepEqual(burstDocuments(new Map([['fits.md', [room(2)]], ['full.md', [room(1) + 'a'.repeat(perEdit)]]]), options, token), ['fits.md']);
     assert.throws(() => burstDocuments(new Map([['full.md', ['a'.repeat(250_000)]]]), options, token), /no document has room/);
     assert.throws(() => burstDocuments(new Map(), options, token), /no document has room/);
+    // Two Linear edits and one git push: the second place gets two edits, so the roomier document takes it.
+    const uneven = { durationMs: 60_000, linearEditsPerMinute: 2, gitPushesPerMinute: 1 };
+    assert.deepEqual(burstDocuments(new Map([['big.md', [room(2)]], ['small.md', [room(1)]]]), uneven, token), ['small.md', 'big.md']);
   });
 
   it('uses the budgeted count for non-divisor rates and rejects invalid options', async () => {

@@ -107,15 +107,38 @@ export function markerKindAt(all: readonly string[], index: number): MarkerKind 
   return kindOf(line.replace(/^> ?/, ''));
 }
 
+/** Indexes of the lines of code fences, fence lines included: what they hold are lookalikes. */
+function fencedLines(all: readonly string[]): Set<number> {
+  const fenced = new Set<number>();
+  let fence: string | null = null;
+  all.forEach((line, index) => {
+    const opener = /^(```+|~~~+)/.exec(line)?.[1];
+    if (opener !== undefined) {
+      fenced.add(index);
+      if (fence === null) fence = opener;
+      else if (line.startsWith(fence) && line.trim() === line.trim().replace(/[^`~]/g, '')) fence = null;
+    } else if (fence !== null) {
+      fenced.add(index);
+    }
+  });
+  return fenced;
+}
+
+/** The marker at a line outside code fences. */
+function markerOutsideFences(all: readonly string[], fenced: ReadonlySet<number>, index: number): MarkerKind | null {
+  return fenced.has(index) ? null : markerKindAt(all, index);
+}
+
 /** The lines with each marker callout written as its bare marker line: color comment and alert line dropped. */
 function bareMarkers(all: readonly string[]): string[] {
+  const fenced = fencedLines(all);
   const out: string[] = [];
   all.forEach((line, index) => {
-    if (ALERT_LINE.test(line) && kindOf(all[index + 1] ?? '') === null && markerKindAt(all, index + 1) !== null) {
+    if (!fenced.has(index) && ALERT_LINE.test(line) && kindOf(all[index + 1] ?? '') === null && markerOutsideFences(all, fenced, index + 1) !== null) {
       if (calloutDecoration(out.at(-1) ?? '')) out.pop();
       return;
     }
-    const kind = markerKindAt(all, index);
+    const kind = markerOutsideFences(all, fenced, index);
     out.push(kind === null ? line : MARKERS[kind]);
   });
   return out;
@@ -174,11 +197,16 @@ export function inConflict(text: string): boolean {
  */
 export function removeMarker(text: string, kind: MarkerKind): string | null {
   const all = lines(text);
-  if (!all.some((_, index) => markerKindAt(all, index) === kind)) return null;
+  const fenced = fencedLines(all);
+  const removed = (index: number) => markerOutsideFences(all, fenced, index) === kind;
+  if (!all.some((_, index) => removed(index))) return null;
   const out: string[] = [];
+  let skipBlank = false;
   all.forEach((line, index) => {
-    if (markerKindAt(all, index) !== kind) {
-      out.push(line);
+    if (!removed(index)) {
+      // One of the two blank lines around a removed marker goes with it.
+      if (!(skipBlank && line === '' && out.at(-1) === '')) out.push(line);
+      skipBlank = false;
       return;
     }
     // A callout goes whole: its alert line and the color comment above it.
@@ -186,8 +214,9 @@ export function removeMarker(text: string, kind: MarkerKind): string | null {
       out.pop();
       if (calloutDecoration(out.at(-1) ?? '')) out.pop();
     }
+    skipBlank = true;
   });
-  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+  return out.join('\n');
 }
 
 /** Removes every marker set, keeping one side's version: the marker callouts go whole. */
@@ -217,7 +246,7 @@ export type BlockKind = 'paragraph' | 'heading' | 'fence' | 'table' | 'ordered-l
 /** The kind of a block of Markdown (text between blank lines). */
 export function blockKind(block: string): BlockKind {
   const [first = '', ...rest] = block.split('\n');
-  if (block.split('\n').some((_, index, all) => markerKindAt(all, index) !== null)) return 'marker';
+  if (kindOf(first) !== null || (calloutDecoration(first) && block.split('\n').some((_, index, all) => markerKindAt(all, index) !== null))) return 'marker';
   if (first === '---') return 'front-matter';
   if (/^(```|~~~)/.test(first)) return 'fence';
   if (/^#{1,6}\s/.test(first)) return 'heading';

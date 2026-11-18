@@ -1,5 +1,5 @@
 import type { Nodes } from 'mdast';
-import { parse, splitFile, lineCount, visit } from '../format/markdown.ts';
+import { isCallout, isCalloutComment, parse, splitFile, lineCount, visit } from '../format/markdown.ts';
 
 export const MARKERS = {
   git: '**Sync conflict: git version**',
@@ -49,17 +49,9 @@ export function lineText(text: string): string {
 }
 
 /** A line of a top-level quote or callout without its quote prefix. */
-export function unquote(text: string): string {
+function unquote(text: string): string {
   return text.replace(/^ {0,3}> ?/, '');
 }
-
-/** A color comment of Linear's callout syntax. */
-function calloutComment(node: Nodes | undefined): boolean {
-  return node?.type === 'html' && /^<!--\s*linear:callout\b[^]*?-->$/.test(node.value);
-}
-
-/** The first line of a callout, without its quote prefix: `[!WARNING]` or another alert kind. */
-export const ALERT = /^\[!\w+\][ \t]*$/;
 
 /**
  * Exact visible marker lines, excluding literal code and quoted examples.
@@ -74,8 +66,7 @@ export function findMarkerLines(text: string): Map<number, MarkerLine> {
   const offset = lineCount(head);
   const tree = parse(body);
   const source = lines(body);
-  const callout = (node: Nodes, ancestors: readonly Nodes[]) => node.type === 'blockquote' && ancestors.length === 1 &&
-    ALERT.test(unquote(lineText(source[(node.position?.start.line ?? 0) - 1] ?? '')));
+  const callout = (node: Nodes, ancestors: readonly Nodes[]) => ancestors.length === 1 && isCallout(node, body);
   const excluded: [number, number][] = [];
   visit(tree, (node, ancestors) => {
     if (['code', 'inlineCode', 'html', 'blockquote'].includes(node.type) && !callout(node, ancestors) && node.position) {
@@ -88,7 +79,7 @@ export function findMarkerLines(text: string): Map<number, MarkerLine> {
     if (!callout(node, [tree]) || !node.position) return;
     const previous = tree.children[index - 1];
     const first = node.position.start.line;
-    quotes.push([first, node.position.end.line, calloutComment(previous) ? previous!.position!.start.line : first]);
+    quotes.push([first, node.position.end.line, isCalloutComment(previous) ? previous!.position!.start.line : first]);
   });
   const values: readonly string[] = Object.values(MARKERS);
   const found = new Map<number, MarkerLine>();
@@ -101,6 +92,15 @@ export function findMarkerLines(text: string): Map<number, MarkerLine> {
     found.set(line + offset, quote
       ? { value, startLine: quote[2] + offset, endLine: quote[1] + offset, calloutLine: quote[0] + offset }
       : { value, startLine: line + offset, endLine: line + offset });
+  });
+  // Markers pasted into one callout bound each other: the callout's head goes
+  // with the first, its tail with the last, and each other marker is its own line.
+  const inCallout = [...found].filter(([, marker]) => marker.calloutLine !== undefined);
+  inCallout.forEach(([line, marker], index) => {
+    const previous = inCallout[index - 1]?.[1];
+    const next = inCallout[index + 1]?.[1];
+    if (previous?.calloutLine === marker.calloutLine) marker.startLine = line;
+    if (next?.calloutLine === marker.calloutLine) marker.endLine = line;
   });
   return found;
 }
