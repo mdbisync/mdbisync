@@ -25170,7 +25170,7 @@ function runFix(paths, cwd = process.cwd()) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "0.1.0-rc.16" : packageJson.version;
+var VERSION2 = true ? "0.1.0-rc.17" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -27653,15 +27653,13 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
     await index2();
     const assetsFolder = posix4.join(posix4.dirname(path2), ASSETS_FOLDER);
     const assetsUsable = !notFolders.has(assetsFolder);
-    const place = (hash) => {
-      const paths = hashPaths.get(hash) ?? [];
-      return preferredPaths.get(hash) ?? paths.find((candidate) => posix4.dirname(candidate) === assetsFolder) ?? paths.at(-1);
-    };
+    const captureOf = (hash) => (hashPaths.get(hash) ?? []).find((candidate) => posix4.dirname(candidate) === assetsFolder && isCaptureName(candidate) && posix4.basename(candidate).startsWith(hash));
+    const place = (hash) => preferredPaths.get(hash) ?? captureOf(hash) ?? unreadableLinks.get(hash);
     const copies = /* @__PURE__ */ new Map();
     const oldAssetsFolder = posix4.join(posix4.dirname(previousPath), ASSETS_FOLDER);
     const copyTarget = (source, hash) => {
       if (!assetsUsable) return void 0;
-      const same = (hashPaths.get(hash) ?? []).find((candidate) => posix4.dirname(candidate) === assetsFolder);
+      const same = captureOf(hash);
       if (same !== void 0) return same;
       const own6 = posix4.basename(source);
       const names = isCaptureName(own6) && !own6.startsWith(hash) ? [] : [own6];
@@ -27677,10 +27675,15 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
       return void 0;
     };
     const preferredPaths = /* @__PURE__ */ new Map();
+    const unreadableLinks = /* @__PURE__ */ new Map();
     const spellings = /* @__PURE__ */ new Map();
     if (previousBody !== void 0) {
       for (const link2 of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
-        if (await reusable(link2.target) === "unreadable") continue;
+        if (await reusable(link2.target) === "unreadable") {
+          const hash2 = pathHashes.get(link2.target);
+          if (!unreadableLinks.has(hash2)) unreadableLinks.set(hash2, link2.target);
+          continue;
+        }
         const hash = pathHashes.get(link2.target);
         const moved = assetsFolder !== oldAssetsFolder && posix4.dirname(link2.target) === oldAssetsFolder;
         const copy = moved ? preferredPaths.get(hash) ?? copyTarget(link2.target, hash) : void 0;
@@ -27751,6 +27754,10 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
         let asset = downloaded.get(url);
         if (asset === void 0) {
           try {
+            if (!isUpload(url)) {
+              rejected.set(node2.url, "unreadable");
+              continue;
+            }
             const failure = failed2.get(url);
             if (failure !== void 0) throw failure;
             if (runCount >= limits.runCount || runBytes >= limits.runBytes || documentBytes >= limits.documentBytes) throw new AttachmentBudgetError();
@@ -29573,17 +29580,17 @@ function isReadme(path2) {
 
 // src/sync/pull-repairs.ts
 import { createHash as createHash12 } from "node:crypto";
-async function checkedPullView(git, linear, ids, zones, identity, paths) {
+var repairSet = (path2, replacement) => /* @__PURE__ */ new Map([[path2, replacement]]);
+async function pendingRepairs(git, linear, ids, zones, paths) {
   const counts2 = /* @__PURE__ */ new Map();
   for (const entry of ids.values()) counts2.set(entry.id, (counts2.get(entry.id) ?? 0) + 1);
   const pending = [...ids].filter(([path2, entry]) => entry.pullRewrite !== void 0 && counts2.get(entry.id) === 1 && (paths === void 0 || paths.has(path2)));
-  if (pending.length === 0) return { commit: linear, notes: [] };
+  const repairs = /* @__PURE__ */ new Map();
+  if (pending.length === 0) return repairs;
   const entries = new Map((await listTree(git, linear)).map((entry) => [entry.path, entry]));
   const files = candidateFiles([...entries.values()], zones);
   const blobs = await readBlobs(git, files.map((file) => file.oid));
   const documents = new Set(mapFiles([...entries.values()], zones, blobs).documents.map((document4) => document4.path));
-  const changes = /* @__PURE__ */ new Map();
-  const notes = [];
   for (const [path2, entry] of pending) {
     const file = entries.get(path2);
     if (!documents.has(path2) || file === void 0 || !isSyncedChange(path2, file.mode, zones)) continue;
@@ -29591,11 +29598,27 @@ async function checkedPullView(git, linear, ids, zones, identity, paths) {
     const repair = entry.pullRewrite;
     if (source === void 0 || createHash12("sha256").update(source).digest("hex") !== repair.hash) continue;
     if (source.toString("utf8") === repair.replacement) continue;
+    repairs.set(path2, repair);
+  }
+  return repairs;
+}
+async function checkedPullView(git, linear, ids, zones, identity, gate, hold, paths) {
+  const changes = /* @__PURE__ */ new Map();
+  const held = /* @__PURE__ */ new Set();
+  const notes = [];
+  for (const [path2, repair] of await pendingRepairs(git, linear, ids, zones, paths)) {
+    const findings = await gate.check(repairSet(path2, repair.replacement));
+    if (findings === null || findings.length > 0) {
+      held.add(path2);
+      continue;
+    }
     changes.set(path2, repair.replacement);
     for (const image2 of repair.images) notes.push(`- ${oneLine(path2)}: image ${image2.image} of ${image2.total} (line ${image2.line}).`);
   }
-  if (changes.size === 0) return { commit: linear, notes };
-  const tree = await buildTree(git, linear, changes);
+  if (changes.size === 0 && held.size === 0) return { commit: linear, notes };
+  let tree = changes.size === 0 ? await git.text(["rev-parse", `${linear}^{tree}`]) : await buildTree(git, linear, changes);
+  if (held.size > 0) tree = await takePaths(git, tree, hold, held);
+  if (tree === await git.text(["rev-parse", `${linear}^{tree}`])) return { commit: linear, notes };
   const date = await git.text(["show", "-s", "--format=%cI", linear]);
   const commit2 = await git.text(["commit-tree", "--no-gpg-sign", tree, "-p", linear, "-m", "Apply checked image and link repairs"], { env: {
     GIT_AUTHOR_NAME: identity.name,
@@ -29606,6 +29629,11 @@ async function checkedPullView(git, linear, ids, zones, identity, paths) {
     GIT_COMMITTER_DATE: date
   } });
   return { commit: commit2, notes };
+}
+async function stagePullRepairs(git, state, zones, gate) {
+  if (state.linear === null) return;
+  const repairs = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones);
+  for (const [path2, repair] of repairs) await gate.check(repairSet(path2, repair.replacement));
 }
 async function readPlainFileProvenance(git, linear) {
   const log = await git.text(["log", "--first-parent", "--format=%B", "--grep=^Plain-link:", linear]);
@@ -30086,6 +30114,7 @@ ${assets.plainFiles.join("\n")}
             delete observedCandidate.compared;
             const observed = textOf(observedCandidate, documentIds);
             if (observed !== text6 && observed !== original) findings = await gate.check(new Map([[path2, observed], ...assets.files]));
+            if (findings?.length === 0 && candidate.files.size > 1) findings = await gate.check(repairSet(path2, text6));
           }
         }
         if (findings === null) {
@@ -30503,6 +30532,7 @@ var SUSPENDED_TITLE = "Suspended changes from Linear";
 var SET_ASIDE_MESSAGE = "Set aside suspended changes";
 var LINEAR_INTAKE_MESSAGE = "Take Linear's changes to suspended documents";
 var SUSPENDED_CHECKS_AGAIN_MESSAGE = "Run the checks again on suspended changes";
+var treeOf = (git, commit2) => git.text(["rev-parse", `${commit2}^{tree}`]);
 var LaneMoved = class extends Error {
 };
 var LaneConflict = class extends Error {
@@ -30640,7 +30670,7 @@ async function maintainSuspended(context, options) {
     if (previous3 === null || await isAncestor(git, previous3, tracked)) return void 0;
     for (const path2 of await changedPaths(git, tracked, previous3)) paths.add(path2);
   }
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, paths);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, previous3 ?? tracked, paths);
   const intake = view.commit;
   let head = previous3;
   let bases;
@@ -30662,7 +30692,7 @@ async function maintainSuspended(context, options) {
     }
     for (const path2 of await changedPaths(git, tracked, head)) paths.add(path2);
     await addEpisodes(context, options, ids, paths, []);
-    if (bases.linear !== linear) {
+    if (bases.linear !== linear || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
       await includeCapturedAssets(git, intake, ids, paths);
       const input = await treeCommit(git, await takePaths(git, head, intake, paths), linear);
       const base = await treeCommit(git, await takePaths(git, head, bases.view ?? bases.linear, paths), bases.linear);
@@ -30800,7 +30830,7 @@ async function suspendBatch(context, options, failed2, normalNumber, failures, t
   const batch = await treeCommit(git, batchTree, failed2);
   const paths = new Set(await changedPaths(git, tracked, batchTree));
   const batchPaths = [...paths].sort();
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, paths);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, failed2, paths);
   const intake = view.commit;
   const previous3 = context.fetched.suspended ?? null;
   let head;
@@ -31144,6 +31174,16 @@ function pullRequestFailure(result) {
   }
 }
 async function syncPullRequest(context, options) {
+  if (options.security !== void 0) return pullRequestStep(context, { ...options, security: options.security });
+  let own6;
+  const security = { check: async (files) => (await (own6 ??= securityGate(context.git, context.fetched.tracked))).check(files) };
+  try {
+    return await pullRequestStep(context, { ...options, security });
+  } finally {
+    if (own6 !== void 0) await (await own6).close?.();
+  }
+}
+async function pullRequestStep(context, options) {
   const { git, fetched } = context;
   const { config, github } = options;
   let suspended;
@@ -31169,7 +31209,7 @@ async function syncPullRequest(context, options) {
   if (suspended?.code === "merge-misplaced") return result;
   const ids = await readIds(git, options.state.ids);
   const frozen = suspendedPaths(ids);
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, sync ?? tracked);
   const rewriteNotes = view.notes;
   linear = view.commit;
   const laneLinear = frozen.size === 0 ? linear : await treeCommit(git, await takePaths(git, linear, sync ?? tracked, frozen), linear);
@@ -31709,16 +31749,16 @@ async function writeTrackedToLinear(context, options) {
   const keptAnnotations = await readKeptAnnotations(git, expected.ids);
   const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations });
   if (nothingNew && !releasing) merge.changes.length = 0;
-  const pendingRepairs = /* @__PURE__ */ new Set();
+  const pendingRepairs2 = /* @__PURE__ */ new Set();
   for (const [path2, entry] of ids) {
     if (entry.pullRewrite?.source === void 0 || frozen.has(path2)) continue;
-    if (!await isAncestor(git, entry.pullRewrite.source, tracked)) {
-      pendingRepairs.add(path2);
+    if (!await isAncestor(git, entry.pullRewrite.source, tracked) || !await repairMerged(git, entry.pullRewrite.source, tracked, path2, entry.pullRewrite.replacement)) {
+      pendingRepairs2.add(path2);
       result.skipped.push({ path: path2, reason: "pull-repair-pending" });
     }
   }
-  merge.changes = merge.changes.filter((change) => !pathsOf(change).some((path2) => frozen.has(path2) || pendingRepairs.has(path2)));
-  merge.unchanged = merge.unchanged.filter((change) => !frozen.has(change.from) && !frozen.has(change.to) && !pendingRepairs.has(change.from) && !pendingRepairs.has(change.to));
+  merge.changes = merge.changes.filter((change) => !pathsOf(change).some((path2) => frozen.has(path2) || pendingRepairs2.has(path2)));
+  merge.unchanged = merge.unchanged.filter((change) => !frozen.has(change.from) && !frozen.has(change.to) && !pendingRepairs2.has(change.from) && !pendingRepairs2.has(change.to));
   result.leftOut = merge.leftOut;
   await nameFixingHooks(git, tracked, result.leftOut);
   const containerListing = (await writesNothing() ? options.containers : void 0) ?? await readContainers();
@@ -31945,7 +31985,7 @@ async function writeTrackedToLinear(context, options) {
   result.conflicts = merge.marked.filter((path2) => !undone.has(path2));
   result.decided = merge.decided.filter((entry) => !undone.has(entry.path));
   await checkpoint2("after-write-before-record");
-  const allDone = notDone.length === 0 && merge.conflicts.length === 0 && merge.held.length === 0 && pendingRepairs.size === 0;
+  const allDone = notDone.length === 0 && merge.conflicts.length === 0 && merge.held.length === 0 && pendingRepairs2.size === 0;
   const recorded = await record(allDone);
   if (recorded === null) {
     result.code = "state-moved";
@@ -32293,6 +32333,7 @@ async function writeTrackedToLinear(context, options) {
       }
     }
     for (const entry of merge.held) keepTip(entry.from);
+    for (const path2 of pendingRepairs2) keepTip(path2);
     if (!merged) for (const path2 of [...merge.leftOut.map((entry) => entry.path), ...leftOutNew.map((change) => change.path)]) keepTip(path2);
     const tipBlobs = await readBlobs(git, [...fromTip].flatMap((path2) => linearFiles.has(path2) ? [linearFiles.get(path2)] : []));
     for (const path2 of fromTip) {
@@ -32381,6 +32422,15 @@ function pathsOf(change) {
 function compare9(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
+async function repairMerged(git, source, tracked, path2, replacement) {
+  const blob = await git.text(["hash-object", "--stdin"], { input: replacement });
+  const commits = (await git.text(["log", "--format=%H", `--find-object=${blob}`, `${source}..${tracked}`])).split("\n").filter((line2) => line2 !== "");
+  for (const commit2 of commits) {
+    const found = await git.run(["rev-parse", "--verify", "--quiet", `${commit2}:${path2}`], { okCodes: [0, 1, 128] });
+    if (found.code === 0 && found.stdout.toString("utf8").trim() === blob) return true;
+  }
+  return false;
+}
 
 // src/sync/cycle.ts
 async function runSyncCycle(context, options) {
@@ -32391,7 +32441,7 @@ async function runSyncCycle(context, options) {
   const changed2 = captured.changed.length > 0 || captured.removed.length > 0 || captured.blocked.length > 0;
   if (!captured.ok) return { complete: false, changed: changed2, trackedTip, capture: captured };
   await checkpoint("after-capture-push-before-pr");
-  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks });
+  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks, security: options.security });
   if (pullRequest.code === "initial-pull-request-pending") return { complete: false, changed: changed2, trackedTip, capture: captured, pullRequest };
   if (pullRequest.code !== "state-moved") {
     const marks = await reconcileHoldMarks(context, { config: options.config, state: captured.state, documents: captured.documents, github: options.github, failure: pullRequest.suspended?.failure, batchFailure: pullRequest.suspended?.batchFailure, linear: context.linear });
@@ -32625,6 +32675,7 @@ Staging stopped early (${ended}).`);
         if (!result.ok) stopped = `
 
 ${result.summary}`;
+        await stagePullRepairs(context.git, context.fetched.state, context.mapping.zones, gate);
       }
       staged = { sets: await gate.finish() };
       workSummary = renderStaged(staged.sets) + stopped;
