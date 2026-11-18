@@ -60,7 +60,7 @@ describe('capture from Linear', () => {
     const initial = {
       linear: await commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: new Map(), message: 'Initial state', identity: IDENTITY }),
       ids: await commitIds(git, null, new Map([['docs/plan.md', { id: 'plan' }]]), IDENTITY),
-      uploads: await commitUploads(git, null, new Map(), IDENTITY),
+      uploads: await commitUploads(git, null, new Map(), IDENTITY, new PushedKey('client-secret', 'owner/repo')),
     };
     assert.equal((await pushAtomic(git, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })))).ok, true);
     context = { git, fetched: await fetchState(git, config), mapping, targets, linear, identity: IDENTITY, pushedKey: new PushedKey('client-secret', 'owner/repo') };
@@ -233,7 +233,7 @@ describe('capture from Linear', () => {
     const fetched = await fetchState(git, config);
     const linearTip = await commitTree(git, {parents:[fetched.tracked], base:fetched.tracked, changes:new Map([['docs/pixel.png', null]]), message:'Remove the image', identity:IDENTITY});
     const ids = await commitIds(git, fetched.state.ids, new Map([['docs/plan.md', {id:'plan'}]]), IDENTITY);
-    const uploads = await commitUploads(git, fetched.state.uploads, new Map([[hash, url]]), IDENTITY);
+    const uploads = await commitUploads(git, fetched.state.uploads, new Map([[hash, url]]), IDENTITY, context.pushedKey);
     assert.equal((await pushAtomic(git, config, [
       {ref:stateRef(config, 'linear'), expected:fetched.state.linear, next:linearTip},
       {ref:stateRef(config, 'ids'), expected:fetched.state.ids, next:ids},

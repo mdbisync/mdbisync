@@ -405,7 +405,7 @@ export function linkDestination(url: string): string {
 }
 
 /** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */
-function imageDestination(url: string): string {
+export function imageDestination(url: string): string {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 

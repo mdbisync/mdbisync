@@ -131,7 +131,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   if (base === null) throw new Error(message('sync.needs-initial-sync'));
   const identity = options.identity ?? context.identity;
   const ids = await readIds(git, state.ids);
-  const uploads = await readUploads(git, state.uploads);
+  const uploads = await readUploads(git, state.uploads, context.pushedKey);
   const reserved = await readReservedIds(git, state.ids);
   // The write step relinks the documents that still name a superseded id; until then a link by it reads back as the
   // link to its path.
@@ -621,7 +621,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
     const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
-    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
+    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes' + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });

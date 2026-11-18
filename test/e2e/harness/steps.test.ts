@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError, LinearTokenError, type LinearDocument } from '../../../src/linear/index.ts';
-import { Git, GitError, lfsReader, parseLfsPointer } from '../../../src/state/index.ts';
+import { Git, GitError, PushedKey, commitUploads, lfsReader, parseLfsPointer } from '../../../src/state/index.ts';
 import { fakeLfsServer } from '../../../src/state/test-helpers.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
@@ -1794,10 +1794,10 @@ function engineRun(command: EngineResult['command'], report: Record<string, unkn
  */
 /** Replaces the run's uploads state ref with one commit holding these hash → URL entries. */
 async function writeUploads(ctx: RunContext, entries: Record<string, string>): Promise<void> {
+  const world = ctx.live!;
   const git = await ctx.person();
-  const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(entries) })).trim();
-  const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
-  const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
+  const key = new PushedKey(world.engineApp.clientSecret, world.repository);
+  const commit = await commitUploads(git, null, new Map(Object.entries(entries)), NEUTRAL_IDENTITY, key);
   await git.run(['push', '--quiet', 'origin', `+${commit}:${ctx.names.refPrefix}/uploads`]);
   refreshView(ctx);
 }

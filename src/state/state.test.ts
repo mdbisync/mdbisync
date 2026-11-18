@@ -9,6 +9,7 @@ import {
   GitError,
   type IdMap,
   NotFastForwardError,
+  PushedKey,
   commitIds,
   commitTree,
   commitUploads,
@@ -27,6 +28,7 @@ import {
 import { type Fixture, IDENTITY, countLocalLfsObjects, createFixture, remoteRef } from './test-helpers.ts';
 
 const config = resolveStateConfig();
+const key = new PushedKey('client-secret', 'owner/repo');
 const LINEAR = stateRef(config, 'linear');
 const IDS = stateRef(config, 'ids');
 const UPLOADS = stateRef(config, 'uploads');
@@ -42,7 +44,7 @@ async function buildState(git: Git, tracked: string, writer: string) {
     identity: IDENTITY,
   });
   const ids = await commitIds(git, null, new Map([['docs/a.md', { id: `doc-${writer}` }]]), IDENTITY);
-  const uploads = await commitUploads(git, null, new Map([['f'.repeat(64), `https://uploads.example.com/${writer}`]]), IDENTITY);
+  const uploads = await commitUploads(git, null, new Map([['f'.repeat(64), `https://uploads.linear.app/${writer}`]]), IDENTITY, key);
   return { linear, ids, uploads };
 }
 
@@ -61,7 +63,7 @@ describe('state: stores and atomic lease pushes', () => {
     assert.equal(fetched.sync, null);
     assert.deepEqual(fetched.state, { linear: null, ids: null, uploads: null });
     assert.deepEqual(await readIds(git, null), new Map());
-    assert.deepEqual(await readUploads(git, null), new Map());
+    assert.deepEqual(await readUploads(git, null, key), new Map());
   });
 
   it('refuses a tracked branch that does not exist', async () => {
@@ -79,7 +81,7 @@ describe('state: stores and atomic lease pushes', () => {
     const next = {
       linear: await commitTree(writer, { parents: [tracked], base: tracked, changes: new Map(), message: 'Record Linear', identity: IDENTITY, skipIfUnchanged: false }),
       ids: await commitIds(writer, state.ids, ids, IDENTITY),
-      uploads: await commitUploads(writer, state.uploads, new Map([['0'.repeat(64), 'https://uploads.example.com/x']]), IDENTITY),
+      uploads: await commitUploads(writer, state.uploads, new Map([['0'.repeat(64), 'https://uploads.linear.app/x']]), IDENTITY, key),
     };
     const result = await pushAtomic(writer, config, [
       { ref: LINEAR, expected: null, next: next.linear },
@@ -93,7 +95,7 @@ describe('state: stores and atomic lease pushes', () => {
     const fetched = await fetchState(reader, config);
     assert.deepEqual(fetched.state, next);
     assert.deepEqual(await readIds(reader, fetched.state.ids), ids);
-    assert.deepEqual(await readUploads(reader, fetched.state.uploads), new Map([['0'.repeat(64), 'https://uploads.example.com/x']]));
+    assert.deepEqual(await readUploads(reader, fetched.state.uploads, key), new Map([['0'.repeat(64), 'https://uploads.linear.app/x']]));
     // The id file is stable: sorted by path, one entry per path.
     const [entry] = await listTree(reader, fetched.state.ids as string);
     const text = (await readBlobs(reader, [entry?.oid as string])).get(entry?.oid as string)?.toString('utf8');
@@ -282,7 +284,7 @@ describe('state: stores and atomic lease pushes', () => {
     assert.ok((await pushAtomic(other, config, [{ ref: IDS, expected: otherSeen.state.ids, next: otherIds }])).ok);
 
     // The writer built its uploads from the ids it saw, which are now stale.
-    const uploads = await commitUploads(writer, seen.state.uploads, new Map([['c'.repeat(64), 'https://uploads.example.com/c']]), IDENTITY);
+    const uploads = await commitUploads(writer, seen.state.uploads, new Map([['c'.repeat(64), 'https://uploads.linear.app/c']]), IDENTITY, key);
     const result = await pushAtomic(writer, config, [
       { ref: IDS, expected: seen.state.ids, next: seen.state.ids as string },
       { ref: UPLOADS, expected: seen.state.uploads, next: uploads, replace: true },
@@ -312,7 +314,31 @@ describe('state: stores and atomic lease pushes', () => {
     const git = await fixture.clone('damaged');
     const damaged = await commitTree(git, { parents: [], base: null, changes: new Map([['other.json', '{}\n']]), message: 'x', identity: IDENTITY });
     await assert.rejects(readIds(git, damaged), /ids\.json is missing/);
-    await assert.rejects(readUploads(git, damaged), /uploads\.json is missing/);
+    await assert.rejects(readUploads(git, damaged, key), /uploads\.json is missing/);
+  });
+
+  it('reuses only safe upload URLs authenticated for this repository and content hash', async () => {
+    const git = await fixture.clone('uploads');
+    const url = 'https://uploads.linear.app/upload.png';
+    const withCredentials = new URL(url);
+    withCredentials.username = 'example';
+    const valid = ['0'.repeat(64), url] as const;
+    const parenthesized = ['a'.repeat(64), 'https://uploads.linear.app/upload(1).png'] as const;
+    const unsafe = [
+      'https://evil.example/x',
+      withCredentials.href,
+      'https://uploads.linear.app:443/upload.png',
+      'https://uploads.linear.app/upload>.png',
+    ].map((value, index) => [String(index + 1).repeat(64), value] as const);
+    const signed = await commitUploads(git, null, new Map([valid, parenthesized, ...unsafe]), IDENTITY, key);
+    assert.deepEqual(await readUploads(git, signed, key), new Map([valid, parenthesized]));
+    assert.deepEqual(await readUploads(git, signed, new PushedKey('client-secret', 'owner/other-repo')), new Map());
+
+    const changed = await commitTree(git, {
+      parents: [signed], base: signed, identity: IDENTITY, message: 'Update upload cache',
+      changes: new Map([['uploads.json', JSON.stringify({ [valid[0]]: url + '?other' })]]),
+    });
+    assert.deepEqual(await readUploads(git, changed, key), new Map());
   });
 
   it('builds commits with removed paths in a bare repository', async () => {

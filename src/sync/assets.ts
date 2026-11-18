@@ -2,7 +2,7 @@ import { ContentSpool, contentBytes, type FileContent, type SpooledFile } from '
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Definition, Link } from 'mdast';
-import { destinations, findFileLinks, resolveTarget } from '../initial-sync/uploads.ts';
+import { destinations, findFileLinks, resolveTarget, uploadDestinationUrl } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import { encodeFragment } from '../initial-sync/links.ts';
 import { type LinearClient, type LinearReads, uploadReadKey, LinearError, LinearHttpError, LinearStoppedError, isTransientLinearError } from '../linear/index.ts';
@@ -300,8 +300,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const rejected = new Map<string, ImageFinding['reason']>();
     let retry: DownloadRetryError | undefined;
     // Restore known URLs before restricting new downloads to the upload host.
-    const cachedUrls = [...uploads.values()];
-    const knownUpload = (url: string) => cachedUrls.some((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`));
+    const cachedUrls = [...uploads.values()].sort((a, b) => b.length - a.length);
+    const cachedUrl = (url: string) => cachedUrls.find((known) =>
+      url === known || url.startsWith(`${known}#`) || url.startsWith(`${known}${known.includes('?') ? '&' : '?'}`));
+    const knownUpload = (url: string) => cachedUrl(url) !== undefined;
     if (!sourceDestinations.some(({node}) => isUpload(node.url) || knownUpload(node.url))) return finish(body, files, additions);
     await index();
     // Files the sync takes from Linear live in an `assets/` folder beside the documents that embed them.
@@ -367,7 +369,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         if (copy !== undefined && !pathHashes.has(copy) && !copies.has(copy)) copies.set(copy, link.target);
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, target);
         const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), target).split('/').map(encodeURIComponent).join('/') + link.suffix;
-        const key = hash + link.suffix;
+        const key = hash + uploadDestinationUrl(link.suffix);
         if (!spellings.has(key)) spellings.set(key, []);
         spellings.get(key)!.push(previousPath !== path && link.written.startsWith('<') ? `<${raw}>` : raw);
       }
@@ -397,17 +399,17 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     if (previousBody !== undefined) visit(parse(previousBody), node => { if (node.type === 'link' && isUpload(node.url)) previousLinks.add(node.url); });
     const externalImages = new Set(sourceImages.filter(image => !isUpload(image.url)).map(image => image.url));
     const references = sourceDestinations.filter(({node}) => (isUpload(node.url) || knownUpload(node.url)) && !(node.type !== 'link' && externalImages.has(node.url)) && !(node.type === 'link' && previousLinks.has(node.url) && !knownUpload(node.url)));
-    const canonical = (url: string) => cachedUrls.filter((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`)).sort((a,b) => b.length - a.length)[0] ?? url.split('#')[0]!;
+    const canonical = (url: string) => cachedUrl(url) ?? url.split('#')[0]!;
     const unique = new Set(references.map(({node}) => canonical(node.url)));
     if (unique.size > limits.documentCount) throw new AttachmentBudgetError();
     let documentBytes = 0;
     const counted = new Set<string>();
     const replacements: Array<{from: number; to: number; text: string}> = [];
     for (const {node, range, outer} of references) {
-      const cached = cachedUrls.filter((known) => node.url === known || node.url.startsWith(`${known}?`) || node.url.startsWith(`${known}#`)).sort((a,b) => b.length - a.length)[0];
+      const cached = cachedUrl(node.url);
       const hashAt = node.url.indexOf('#');
       const url = cached ?? (hashAt === -1 ? node.url : node.url.slice(0, hashAt));
-      const suffix = cached === undefined ? (hashAt === -1 ? '' : node.url.slice(hashAt)) : node.url.slice(cached.length);
+      const suffix = (cached === undefined ? (hashAt === -1 ? '' : node.url.slice(hashAt)) : node.url.slice(cached.length)).replace(/^&/, '?');
       let hash = [...uploads].find(([, known]) => known === url)?.[0];
       let assetPath = hash === undefined ? undefined : place(hash);
       if (assetPath !== undefined) {
@@ -473,7 +475,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       additions.set(hash!, url);
       // The link's query and fragment as Linear wrote them, whatever part of the URL the cache holds.
       const cut = node.url.search(/[?#]/);
-      const spelled = preferredPaths.get(hash!) === assetPath ? spelling(hash! + (cut === -1 ? '' : node.url.slice(cut)), body[outer.from]) : undefined;
+      const fullSuffix = cut === -1 ? '' : node.url.slice(cut);
+      const opener = body[outer.from];
+      const spelled = preferredPaths.get(hash!) === assetPath
+        ? spelling(hash! + uploadDestinationUrl(fullSuffix), opener) ?? spelling(hash! + uploadDestinationUrl(suffix), opener)
+        : undefined;
       if (spelled !== undefined) {
         replacements.push({...outer, text: spelled});
         continue;

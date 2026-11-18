@@ -10,7 +10,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, readFiles, resolveStateConfig, stateRef } from '../../src/state/index.ts';
+import { Git, PushedKey, commitIds, commitTree, commitUploads, fetchState, pushAtomic, readFiles, resolveStateConfig, stateRef } from '../../src/state/index.ts';
 import { countLocalLfsObjects } from '../../src/state/test-helpers.ts';
 
 const url = process.env.MDBISYNC_TEST_SANDBOX_URL ?? '';
@@ -66,7 +66,7 @@ describe('state against the sandbox repository', { skip: url === '' ? 'MDBISYNC_
         return [
           await commitTree(git, { parents: [tracked], base: tracked, changes: new Map([['notes/plan.md', `# Plan\n\nWriter ${index}.\n`]]), message: 'Record', identity }),
           await commitIds(git, null, new Map([['notes/plan.md', { id: `doc-${index}` }]]), identity),
-          await commitUploads(git, null, new Map([['e'.repeat(64), `https://uploads.example.com/${index}`]]), identity),
+          await commitUploads(git, null, new Map([['e'.repeat(64), `https://uploads.linear.app/${index}`]]), identity, new PushedKey('client-secret', 'owner/repo')),
         ];
       }),
     );

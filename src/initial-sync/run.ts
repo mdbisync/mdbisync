@@ -53,6 +53,6 @@ export async function planFromRepository(context: RunContext, options: { remote:
   const plan = planInitialSync(sources.input);
   // Counted as the confirmed run counts them: before the uploads leave any document out.
   plan.capacity = assessCapacity(context, sources.containers, plan.create, options.cap);
-  const uploads = await readUploads(context.git, context.fetched.state.uploads);
+  const uploads = await readUploads(context.git, context.fetched.state.uploads, context.pushedKey);
   return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads, { remote: options.remote }));
 }

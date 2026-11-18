@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
 import type { Handle } from 'mdast-util-from-markdown';
+import { imageDestination, linkDestination } from '../format/fix.ts';
 import { parse, resolveTarget, splitFile, visit } from '../format/markdown.ts';
 import { LinearError, LinearStoppedError } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
@@ -74,6 +75,7 @@ export interface FileLink {
   target: string;
   /** The destination's query and fragment (`#page=3`), kept after the upload URL. */
   suffix: string;
+  inTable: boolean;
 }
 
 /** What a document's link to a file was before the upload: restored in place of `url + suffix`. */
@@ -469,7 +471,16 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       const { uploads } = context;
       const urls = fileLinks.map((link) => uploads.get((linked.get(link.target) as LinkedFile).hash) as string);
       links.set(path, fileLinks.map((link) => ({ written: link.written, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
-      return replaceRanges(body, fileLinks.map((link, index) => ({ from: link.from, to: link.to, text: (urls[index] as string) + link.suffix })));
+      return replaceRanges(body, fileLinks.map((link, index) => {
+        const url = withUploadSuffix(urls[index] as string, link.suffix);
+        const bracketed = link.written.startsWith('<');
+        const text = bracketed || /[()\\]/.test(url) ? linkDestination(url) : imageDestination(url);
+        return {
+          from: link.from - Number(bracketed),
+          to: link.to + Number(bracketed),
+          text: link.inTable ? text.replaceAll('|', '&#124;') : text,
+        };
+      }));
     },
 
     restore({ path, body }) {
@@ -478,6 +489,24 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       return restoreFileLinks(body, fileLinks, context.uploads);
     },
   };
+}
+
+/** Encode URL characters that a Markdown parser might strip or treat as delimiters. */
+export function uploadDestinationUrl(url: string): string {
+  return url.replace(/[\s<>\x00-\x1f\x7f]/gu, (character) => encodeURIComponent(character));
+}
+
+/** Preserve the query on a captured upload when the repository link carries the same query. */
+export function withUploadSuffix(url: string, suffix: string): string {
+  const destination = uploadDestinationUrl(url);
+  if (suffix === '') return destination;
+  const base = destination.split('#')[0]!;
+  const trailing = uploadDestinationUrl(suffix);
+  const searchAt = base.indexOf('?');
+  if (!trailing.startsWith('?') || searchAt === -1) return base + trailing;
+  const search = trailing.split('#')[0]!;
+  if (base.slice(searchAt) === search) return base + trailing.slice(search.length);
+  return base + '&' + trailing.slice(1);
 }
 
 /**
@@ -494,7 +523,7 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
   for (const link of written) {
     const url = uploads.get(link.hash);
     if (url === undefined) continue;
-    const key = url + link.suffix;
+    const key = withUploadSuffix(url, link.suffix);
     raws.set(key, [...(raws.get(key) ?? []), link.written]);
   }
   if (raws.size === 0) return body;
@@ -530,11 +559,11 @@ function uploadableLinks(path: string, body: string, isFile: (path: string) => b
 /** Links, images and link definitions in `body` whose destination is a file of the repository. */
 export function findFileLinks(documentPath: string, body: string, isFile: (path: string) => boolean): FileLink[] {
   const result: FileLink[] = [];
-  for (const { node, range, outer } of destinations(body)) {
+  for (const { node, range, outer, inTable } of destinations(body)) {
     const target = resolveTarget(documentPath, node.url);
     if (target === null || !isFile(target)) continue;
     const cut = node.url.search(/[?#]/);
-    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
+    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut), inTable });
   }
   return result;
 }
@@ -548,8 +577,8 @@ type Range = { from: number; to: number };
  * with (`outer`) their angle brackets, in document order. Reference uses,
  * autolinks and empty destinations without brackets have no range of their own.
  */
-export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range }> {
-  const result: Array<{ node: DestinationNode; range: Range; outer: Range }> = [];
+export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range; inTable: boolean }> {
+  const result: Array<{ node: DestinationNode; range: Range; outer: Range; inTable: boolean }> = [];
   const ranges = new Map<DestinationNode, { range: Range; outer: Range }>();
   // The parser skips one leading BOM before counting source offsets.
   const offset = body.startsWith('\uFEFF') ? 1 : 0;
@@ -564,10 +593,10 @@ export function destinations(body: string): Array<{ node: DestinationNode; range
     ranges.set(node, { range: { from: from + Number(angle), to: to - Number(angle) }, outer: { from, to } });
   };
   const tree = parse(body, [{ enter: { resourceDestination: destination, definitionDestination: destination } }]);
-  visit(tree, (node) => {
+  visit(tree, (node, ancestors) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
     const found = ranges.get(node);
-    if (found !== undefined) result.push({ node, ...found });
+    if (found !== undefined) result.push({ node, ...found, inTable: ancestors.some(parent => parent.type === 'tableCell') });
   });
   return result.sort((a, b) => a.range.from - b.range.from);
 }

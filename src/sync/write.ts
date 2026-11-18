@@ -291,7 +291,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   for (const entry of merge.held) result.skipped.push({ path: entry.from, reason: 'renamed-to-unwritable' });
   await checkpoint('after-local-merge-before-record');
 
-  const uploads = await readUploads(git, expected.uploads);
+  const uploads = await readUploads(git, expected.uploads, context.pushedKey);
   const resultFiles = await filesOf(git, merge.tree);
   const linearFiles = await filesOf(git, linearTip);
   const texts = merge.texts;
@@ -1127,7 +1127,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
     // documents to relink, before they are changes) leaves the rest to the next run.
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};
-    const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, rebuilt);
+    const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey, rebuilt);
 
     const updates = (ids: Oid): RefUpdate[] => [
       { ref: stateRef(options.config, 'linear'), expected: linearTip, next: commit },
