@@ -26,6 +26,7 @@ import { LINK_VARIANT_LINKS, capture } from '../sync/capture.ts';
 import { SYNC_BRANCH_MERGE_MESSAGE } from '../sync/pull-request.ts';
 import { candidateKey } from '../sync/staged.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
+import { planInitialSync } from './plan.ts';
 import { type ReversePlan, type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit, pullRequestBody } from './reverse.ts';
 import { renderReverseConfirmed } from './summary.ts';
 import { MARKS } from '../sync/marks.ts';
@@ -153,6 +154,38 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(await show('refs/heads/mdbisync/linear:eng/notes/plan.md'), TREE['eng/notes/plan.md']);
     assert.match(await show('refs/heads/mdbisync/linear:eng/notes/faq.md'), /FAQ/);
     assert.ok(!(await files('refs/heads/mdbisync/linear')).includes('eng/notes/deep.md'));
+    assert.deepEqual(linearMutations(world), []);
+  });
+
+  for (const [label, change] of [
+    ['moved to another project or deleted', (world: FakeWorld) => {
+      world.linear.documents.find((d) => d.id === 'doc-plan')!.projectId = 'project-handbook';
+      world.linear.documents = world.linear.documents.filter((d) => d.id !== 'doc-faq');
+    }],
+    ['renamed or archived', (world: FakeWorld) => {
+      world.linear.documents.find((d) => d.id === 'doc-plan')!.title = 'other';
+      world.linear.documents.find((d) => d.id === 'doc-faq')!.archivedAt = '2026-01-02T00:00:00Z';
+    }],
+  ] as const) it(`imports no document ${label} between the listing and the read of its text, and writes no empty file`, async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    world.linear.beforeQuery = (operation) => {
+      if (operation !== 'GetDocuments') return;
+      delete world.linear.beforeQuery;
+      change(world);
+    };
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.leftOutRules?.includes('changed-during-run'));
+    assert.ok(report.summary?.leftOut.includes('eng/notes/plan.md') && report.summary.leftOut.includes('eng/notes/doc-faq.md'), JSON.stringify(report.summary?.leftOut));
+    // The tracked file stays as it is, and the document gone from its place gets no file, empty or not.
+    assert.equal(await show('refs/heads/mdbisync/linear:eng/notes/plan.md'), TREE['eng/notes/plan.md']);
+    assert.ok(!(await files('refs/heads/mdbisync/linear')).includes('eng/notes/faq.md'));
+    const ids = await readIds();
+    assert.equal(ids['eng/notes/plan.md'], undefined);
+    assert.equal(ids['eng/notes/faq.md'], undefined);
+    // The other documents are imported as usual.
+    assert.match(await show('refs/heads/mdbisync/linear:eng/ops/runbook.md'), /Restart it/);
     assert.deepEqual(linearMutations(world), []);
   });
 
@@ -1334,6 +1367,69 @@ describe('planning an initial sync from Linear', () => {
       ['literal', 'notes/Q3%253A goals.md'],
     ]);
     assert.deepEqual([plan.create, plan.remove], [[], []]);
+  });
+
+  describe('a document that changed during the run', () => {
+    const changedOut = (plan: ReversePlan) => plan.leftOut.filter((entry) => entry.rules.includes('changed-during-run')).map((entry) => [entry.documentId, entry.path]).sort();
+    const gone = (...ids: string[]) => new Map(ids.map((id) => [id, null]));
+
+    it('is not imported, and the file its title names stays as it is', () => {
+      const plan = planLinearToGit({ ...input([listed('plan', 'plan', '2026-01-01T00:00:00Z'), listed('faq', 'faq', '2026-01-02T00:00:00Z')], { 'notes/plan.md': '# Plan\n' }), changed: gone('plan', 'faq') });
+      // `faq` has no file: its name is made from its id, here the same as its title.
+      assert.deepEqual(changedOut(plan), [['faq', 'notes/faq.md'], ['plan', 'notes/plan.md']]);
+      assert.deepEqual([plan.overwrite, plan.create, plan.remove], [[], [], []]);
+    });
+
+    it('keeps the file the naming rule gives it, by its plain encoded name or after another title took it', () => {
+      const alone = planLinearToGit({ ...input([listed('colon', 'Q3: goals', '2026-01-01T00:00:00Z')], { 'notes/Q3%3A goals.md': '# Goals\n' }), changed: gone('colon') });
+      assert.deepEqual(changedOut(alone), [['colon', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([alone.overwrite, alone.create, alone.remove], [[], [], []]);
+
+      const files = { 'notes/Q3%3A goals.md': '# Goals\n', 'notes/Q3%253A goals.md': '# Literal\n' };
+      const plan = planLinearToGit({ ...input([listed('literal', 'Q3%3A goals', '2026-01-01T00:00:00Z'), listed('colon', 'Q3: goals', '2026-01-02T00:00:00Z')], files), changed: gone('colon') });
+      assert.deepEqual(plan.overwrite.map((entry) => [entry.documentId, entry.path]), [['literal', 'notes/Q3%253A goals.md']]);
+      assert.deepEqual(changedOut(plan), [['colon', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([plan.create, plan.remove], [[], []]);
+    });
+
+    it('is reported without a file under a name made from its id, since no hook has seen its title', () => {
+      const plan = planLinearToGit({ ...input([listed('colon', 'Q3: goals', '2026-01-01T00:00:00Z')]), changed: gone('colon') });
+      assert.deepEqual(changedOut(plan), [['colon', 'notes/colon.md']]);
+    });
+
+    it('adds its rule to a file left out by another rule', () => {
+      const base = input([listed('plan', 'plan', '2026-01-01T00:00:00Z')]);
+      const mapping = { ...base.mapping, unsynced: [{ path: 'notes/plan.md', reason: 'stored-in-lfs', place, title: 'plan' }] } as never;
+      const plan = planInitialSync({ ...base, mapping, changed: gone('plan') });
+      assert.deepEqual(plan.leftOut.map((entry) => [entry.path, entry.rules, entry.documentId]), [['notes/plan.md', ['changed-during-run', 'stored-in-lfs'], 'plan']]);
+    });
+
+    it('keeps its title from every other document: an older changed one keeps its file, a newer one is neither imported nor trashed', () => {
+      const encoded = planLinearToGit({ ...input([listed('older', 'Q3: goals', '2026-01-01T00:00:00Z'), listed('newer', 'Q3: goals', '2026-01-02T00:00:00Z')], { 'notes/Q3%3A goals.md': '# Goals\n' }), changed: gone('older') });
+      assert.deepEqual(changedOut(encoded), [['older', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([encoded.overwrite, encoded.create, encoded.remove], [[], [], []]);
+
+      // The newer one's own file, named with its id, stays too.
+      const both = { 'notes/Q3%3A goals.md': '# Goals\n', [`notes/Q3%3A goals~${suffix('newer')}.md`]: '# Newer\n' };
+      const kept = planLinearToGit({ ...input([listed('older', 'Q3: goals', '2026-01-01T00:00:00Z'), listed('newer', 'Q3: goals', '2026-01-02T00:00:00Z')], both), changed: gone('older') });
+      assert.deepEqual(changedOut(kept), [['newer', `notes/Q3%3A goals~${suffix('newer')}.md`], ['older', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([kept.overwrite, kept.create, kept.remove], [[], [], []]);
+
+      const input2 = { ...input([listed('older', 'plan', '2026-01-01T00:00:00Z'), listed('newer', 'plan', '2026-01-02T00:00:00Z')], { 'notes/plan.md': '# Plan\n' }), changed: gone('older') };
+      const forward = planInitialSync(input2);
+      assert.deepEqual([forward.overwrite, forward.create, forward.trash], [[], [], []]);
+      assert.deepEqual(forward.leftOut.map((entry) => [entry.path, entry.rules, entry.documentId]), [['notes/plan.md', ['changed-during-run'], 'older']]);
+      const plan = planLinearToGit(input2);
+      assert.deepEqual([plan.overwrite, plan.create, plan.remove], [[], [], []]);
+    });
+
+    it('renamed or moved, also keeps the file its current title names', () => {
+      const renamed = { ...listed('plan', 'other', '2026-01-01T00:00:00Z'), updatedAt: '2026-01-03T00:00:00Z' };
+      const files = { 'notes/plan.md': '# Plan\n', 'notes/other.md': '# Other\n' };
+      const forward = planInitialSync({ ...input([listed('plan', 'plan', '2026-01-01T00:00:00Z')], files), changed: new Map([['plan', renamed]]) });
+      assert.deepEqual([forward.overwrite, forward.create, forward.trash], [[], [], []]);
+      assert.deepEqual(forward.leftOut.map((entry) => [entry.path, entry.rules]), [['notes/other.md', ['changed-during-run']], ['notes/plan.md', ['changed-during-run']]]);
+    });
   });
 
   it('removes a file without a document but keeps the folder annotation', () => {

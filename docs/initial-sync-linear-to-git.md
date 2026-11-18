@@ -140,7 +140,7 @@ file keeps the tracked branch's text and stays tied to its document.
 
 | Rule | Why |
 | --- | --- |
-| `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes. Reduce nesting or split the document; valid neighbors still import. |
+| `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes, or padding a table's short rows to its header width would add over 250,000 characters or take it past that node limit. Reduce nesting, fill in or split the table, or split the document; valid neighbors still import. |
 | `image-blocked` | An image or file the document embeds is one the sync blocks: not an upload of the workspace (an external URL, a `data:` URI, a path), or an upload that is gone, over 10 MB, redirected or not a supported type. The first sync afterwards marks the document and comments which images to fix. |
 | `image-repair-budget` | The document exceeds the image and link repair budget. Simplify or split the document and rerun. |
 | `attachment-budget` | More than 32 unique upload links or 32 MiB in one document, or 256 downloads or 256 MiB in the run. The document keeps its tracked text (or stays out if new). Reduce or split attachments and rerun. |
@@ -149,6 +149,7 @@ file keeps the tracked branch's text and stays tied to its document.
 | `title-not-a-path` | The new file would map back to another document or another folder's team or project. |
 | `security-hook` | A security hook reported a finding in the document's title, its text or its files, including the Linear URL of a linked document that was left out. |
 | `security-unchecked` | The security hooks have not seen this text or title, for example because their step did not run. |
+| `changed-during-run` | The document changed in Linear between the listing and the read of its text: it moved to another team or project, was renamed, trashed, archived or edited, or is gone. It is not imported, and the file its title names stays as it is. Run again. |
 
 ### A run that stops
 

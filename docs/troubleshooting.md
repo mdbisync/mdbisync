@@ -318,7 +318,8 @@ the reason is fixed. The summaries list each with its rules:
 | `duplicate-title` | Two files map to one document title (their names differ only in letter case or Unicode normalization). | Rename one of them. |
 | `title-too-long` | The title made from the file's path is longer than Linear accepts. | Use a shorter file name or folder path. |
 | `content-too-long` | The text is longer than the 250,000 characters Linear accepts. Its other rules are not checked until it is shorter. | Split the file, then lint the parts. |
-| `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes. | Reduce nesting or split the file. |
+| `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes, or padding a table's short rows to its header width would add over 250,000 characters or take it past that node limit. | Reduce nesting, fill in or split the table, or split the file. |
+| `changed-during-run` | An initial sync found the document changed in Linear while it ran: moved to another team or project, renamed, trashed, archived, edited or gone. The document and the file its title names are neither written, trashed nor imported. | Run the initial sync again. |
 | `outside-annotations` | The file is above every annotated folder. | Move it into an annotated folder, or annotate a folder above it. |
 | `not-a-regular-file` | The path is a symbolic link or another kind of file. | Replace it with a regular file. |
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |
@@ -519,6 +520,7 @@ content).
 - `a state ref moved while the run was writing`
 - `state moved while recording document marks`
 - `the planned document for <path> was not listed`
+- `the planned document for <path> was not read with its text`
 - `document-links: apply before prepare`
 - `the uploads transform was not prepared`
 - `project "<project>" of team "<team>" was not resolved`, `team "<team>" was not resolved`

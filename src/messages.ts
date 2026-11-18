@@ -201,6 +201,7 @@ export const MESSAGES = {
   // Initial sync.
   'initial-sync.state-moved': 'a state ref moved while the run was writing',
   'initial-sync.document-not-listed': 'the planned document for {path} was not listed',
+  'initial-sync.document-not-read': 'the planned document for {path} was not read with its text',
   'initial-sync.links-not-prepared': 'document-links: apply before prepare',
   'initial-sync.project-not-resolved': 'project "{project}" of team "{team}" was not resolved',
   'initial-sync.team-not-resolved': 'team "{team}" was not resolved',

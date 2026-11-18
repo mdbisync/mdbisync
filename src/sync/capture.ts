@@ -22,7 +22,7 @@ import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
-import { readRecorded, recordedTime } from './recorded.ts';
+import { matchesObservedBody, observedDigest, readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
@@ -291,7 +291,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const entry = byId.get(doc.id)?.entry;
       return entry?.saved !== undefined && (entry.suspended === undefined || entry.saved.notice?.kind === 'blocked');
     };
-    let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || marked(doc) || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor)));
+    // Older ids entries have no digest. Read those bodies once so a later write can still verify them if the
+    // attachment cache is unavailable.
+    let selected = [...listed.values()].filter((doc) => {
+      const old = byId.get(doc.id);
+      return old === undefined || marked(doc) || (old.entry.observedDigest === undefined && live(doc) && previous.has(old.path) && !excludedPath(old.path))
+        || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor));
+    });
     const invalidZone = (doc: LinearDocument, path: string) => {
       const zone = nearestZone(mapping.zones, folderOf(path));
       if (zone === undefined) return true;
@@ -630,7 +636,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      const entry = {...old?.entry, id};
+      const entry = {...old?.entry, id, observedDigest: observedDigest(candidate.doc)};
       delete entry.pullRewrite;
       const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
@@ -664,8 +670,6 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // so documents sharing a timestamp or edited during pagination are not lost.
     // A place that listed nothing may have left out changes too: the cursor holds while a removal is held.
     const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
-    const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
-    const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
@@ -676,12 +680,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});
     }
     // Record a held removal, and a cleared one, so the next capture reads what this one held.
-    // The cursor alone moves no ref: an edit that changes nothing in git (an icon, a color,
-    // a comment) leaves every ref where it was, and the next capture reads those documents
-    // again. The cursor moves with the next capture that records a change; until then it
-    // only holds back, which rereads more and loses nothing.
+    // The cursor alone moves no ref. It moves when capture records a change to the
+    // content or uploads. Until then it can only cause another read.
     const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
-    const always = held.size > 0 || heldBefore.size > 0 || (through !== cursor && recordsChange);
+    const recordsRemovals = held.size > 0 || heldBefore.size > 0;
+    const trailers = [
+      ...(through !== null && (recordsChange || recordsRemovals) ? [captureCursorTrailer(through)] : []),
+      ...[...held].sort().map((id) => `Removal-held: ${id}`),
+    ];
+    const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
+    const always = recordsRemovals || (through !== cursor && recordsChange);
     const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
@@ -704,8 +712,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         for (const {doc, path, blocked} of marked) {
           const before = ids.get(path)!;
           const outcome = await reconcileDocumentMark({document: doc, entry: before, linear, blocked,
+            includeUpdatedBody: before.saved !== undefined && blocked.length === 0 && before.observedDigest !== undefined,
             onConflictNotice: (change) => result.conflictNotices[change].push(path),
-            persistEntry: async (entry) => {
+            persistEntry: async (entry, cleared) => {
+              // Clearing a mark can advance updatedAt. Refresh the digest only from a response holding the
+              // same accepted body, because a Linear edit may have arrived while the mark was cleared.
+              if (cleared !== undefined && matchesObservedBody(cleared, doc)) {
+                entry = {...entry, observedDigest: observedDigest(cleared)};
+              }
               ids.set(path, entry);
               const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, superseded, message:'Capture document marks'});
               const updated = {...next, ids:tip};
