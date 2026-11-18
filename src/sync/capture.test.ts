@@ -19,6 +19,7 @@ import { candidateKey } from './staged.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
+import { IMAGE_REPAIR_INPUT_LIMIT } from './image-links.ts';
 
 const markOf = (doc: {icon?: string | null, color?: string | null} | undefined) => ({icon: doc?.icon ?? null, color: doc?.color ?? null});
 import { RECORD_MESSAGE } from '../initial-sync/confirm.ts';
@@ -160,6 +161,22 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
     assert.equal(world.linear.comments.size, 0);
     assert.match(result.stdout, /attachment-budget/);
+  });
+
+  it('withholds a document over the image repair budget and captures its neighbor', async () => {
+    world.linear.documents[0]!.content = '![](x) '.repeat(Math.floor(IMAGE_REPAIR_INPUT_LIMIT / 7) + 1);
+    const references = '![Chart][image] '.repeat(300) + '\n\n[image]: ' + 'x'.repeat(4_000);
+    world.linear.documents.push(
+      {id: 'charts', title: 'charts', projectId: 'project-api', content: references, createdAt: '2026-01-03T00:00:00Z'},
+      {id: 'safe', title: 'safe', projectId: 'project-api', content: 'Safe addition.\n', createdAt: '2026-01-04T00:00:00Z'},
+    );
+    const result = await run();
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.leftOut, [{id: 'plan', rule: 'image-repair-budget'}, {id: 'charts', rule: 'image-repair-budget'}]);
+    assert.match(result.summary, /image-repair-budget: "plan"/);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+    await assert.rejects(text('docs/charts.md'));
+    assert.equal(await text('docs/safe.md'), 'Safe addition.\n');
   });
 
   it('captures edits with previous front matter; repeated capture makes no content commit', async () => {

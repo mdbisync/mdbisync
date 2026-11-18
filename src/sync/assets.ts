@@ -9,7 +9,7 @@ import { type LinearReads, uploadReadKey, LinearError, LinearHttpError } from '.
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
-import { imageLinks } from './image-links.ts';
+import { checkImageRepairSize, imageLinks } from './image-links.ts';
 import { ASSETS_FOLDER, admitsCapturedFile, isCaptureName, uploadExtension } from './upload-type.ts';
 
 export interface CapturedAssets {
@@ -253,6 +253,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   const failed = new Map<string, DownloadBlockedError | DownloadRetryError>();
 
   const capture = async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
+    checkImageRepairSize(body);
     // Repository-file links typed in Linear retain their separate gate. Images are repaired after upload checks.
     const notUploaded = typedFileLinkFindings(path, body, previousBody, previousPath);
     if (notUploaded.length > 0) throw new ImageBlockedError(notUploaded);
@@ -264,8 +265,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     visit(parse(body), node => { if (node.type === 'linkReference') { const url = definitions.get(node.identifier); if (url !== undefined) ordinaryUrls.add(url); } });
     const deadUploads = new Set<string>();
     const finish = (observedBody: string, files: Map<string, FileContent>, uploads: UploadMap): CapturedAssets => {
-      const changed = new Set(imageLinks(body, deadUploads).images.map(image => image.image));
-      const rewritten = imageLinks(observedBody, deadUploads, changed).body;
+      const source = imageLinks(body, deadUploads);
+      const rewritten = observedBody === body ? source.body
+        : imageLinks(observedBody, deadUploads, new Set(source.images.map(image => image.image))).body;
       const plainFiles = sourceImages.flatMap(image => { const target = !isUpload(image.url) ? resolveTarget(path, image.url) : null; return target === null ? [] : [target]; });
       return {body: rewritten, plainFiles, ...(rewritten === observedBody ? {} : {observedBody, deadUploads: [...deadUploads]}), files, uploads};
     };
