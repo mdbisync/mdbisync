@@ -8,7 +8,7 @@ import { it, afterEach } from 'node:test';
 import { LinearClient, LinearHttpError, LinearNetworkError, LinearReads, LinearStoppedError } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture as makeCapture, uploadAccessProbe, DownloadRetryError, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
+import { captureAssets, createAssetCapture as makeCapture, uploadAccessProbe, DownloadRetryError, ImageBlockedError, checkTypedFileLinks } from './assets.ts';
 import { imageLinks } from './image-links.ts';
 import { destinations, withUploadSuffix } from '../initial-sync/uploads.ts';
 import { CONTENT_LIMIT, fixText } from '../format/index.ts';
@@ -575,7 +575,7 @@ it('counts cached query variants as one attachment, matching download identity',
 });
 
 it('blocks a link typed in Linear to a repository file the previous text did not link, matching by resolved path only', () => {
-  const findings = (body: string, previous?: string, previousPath?: string) => typedFileLinkFindings('docs/plan.md', body, previous, previousPath).map(({ file, total, line }) => [file, total, line]);
+  const findings = (body: string, previous?: string, previousPath?: string) => checkTypedFileLinks('docs/plan.md', body, previous, previousPath).findings.map(({ file, total, line }) => [file, total, line]);
   assert.deepEqual(findings('See [r](../private/report.csv).'), [[1, 1, 1]]);
   assert.deepEqual(findings('A\n\n[r]: ../private/%72eport.csv'), [[1, 1, 3]]);
   // A definition an image uses is left to the image gate; one a link uses is not.
