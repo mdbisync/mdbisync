@@ -59,7 +59,7 @@ const DISMISSED_REASONS: Record<string, string> = {
 
 export interface ToolSummary {
   id: ToolId;
-  // The name shown on the image, with the version the run reported (for example "Fable 5.2").
+  // The name shown on the image, with the version the run reported (for example "Fable-5.2").
   name: string;
   high: number;
   critical: number;
@@ -117,14 +117,17 @@ function severityOf(alert: Json): string {
 }
 
 /**
- * The name shown for a tool: the name its run reported, followed by the
- * version it reported unless the name already ends with it. It must be
- * short, plain text, since the image and the README show it as it is.
+ * The name shown for a tool: the name its run reported, joined with a hyphen
+ * to the version it reported ("Fable-5.2", searchable without quotes). A
+ * name that already ends with the version after a space, a hyphen or an
+ * underscore keeps it once, hyphenated. It must be short, plain text, since
+ * the image and the README show it as it is.
  */
 export function toolName(name: unknown, version: unknown): string {
   const base = typeof name === 'string' ? name.trim() : '';
   const suffix = typeof version === 'string' ? version.trim() : '';
-  const full = suffix === '' || base.endsWith(suffix) ? base : `${base} ${suffix}`;
+  const named = [' ', '-', '_'].some((separator) => base.endsWith(`${separator}${suffix}`)) ? base.slice(0, -suffix.length - 1) : base;
+  const full = suffix === '' ? base : `${named}-${suffix}`;
   if (!/^[\p{L}\p{N}][\p{L}\p{N} .+_-]{0,39}$/u.test(full)) throw new Error(`Unexpected tool name from the scan: ${JSON.stringify(full)}`);
   return full;
 }

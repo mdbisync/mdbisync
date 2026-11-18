@@ -15,7 +15,7 @@ const privateLink = 'https://github.com/example/private-scans/issues/12';
 type Routes = Record<string, unknown>;
 
 const fable = { name: 'Fable', version: '5.2' };
-const astra = { name: 'GPT-6 Astra', version: '' };
+const astra = { name: 'Astra', version: '6.2' };
 const codeql = { name: 'CodeQL', version: '2.25.1' };
 
 function alert(tool: { name: string }, category: string, severity: string, extra: Record<string, unknown> = {}, commit = source) {
@@ -83,8 +83,8 @@ test('the summary names each scan that ran with the version from its run, in dis
     assert.deepEqual(summary, {
       schema: 1, release: 'v0.1.0', sourceCommit: source, date: '2026-11-16', report: 'security-report.md',
       tools: [
-        { id: 'fable', name: 'Fable 5.2', high: 0, critical: 0 },
-        { id: 'astra', name: 'GPT-6 Astra', high: 0, critical: 0 },
+        { id: 'fable', name: 'Fable-5.2', high: 0, critical: 0 },
+        { id: 'astra', name: 'Astra-6.2', high: 0, critical: 0 },
         { id: 'codeql', name: 'CodeQL', high: 0, critical: 0 },
         { id: 'dependencies', name: 'Dependencies', high: 0, critical: 0 },
       ],
@@ -111,8 +111,8 @@ test('open findings of severity high and critical are counted per tool, lower on
     assert.deepEqual(summary.tools.map(({ id, high, critical }) => [id, high, critical]), [
       ['fable', 1, 2], ['astra', 0, 0], ['codeql', 1, 0], ['dependencies', 2, 1],
     ]);
-    assert.match(markdown, /\| Fable 5\\\.2 \| 5\\\.2 \| `aaaaaaaaaaaa` \| 2 \| 1 \| 0 \| 1 \|/);
-    assert.match(markdown, /\| GPT\\-6 Astra \| not reported \| `aaaaaaaaaaaa` \| 0 \| 0 \| 1 \| 1 \|/);
+    assert.match(markdown, /\| Fable\\-5\\\.2 \| 5\\\.2 \| `aaaaaaaaaaaa` \| 2 \| 1 \| 0 \| 1 \|/);
+    assert.match(markdown, /\| Astra\\-6\\\.2 \| 6\\\.2 \| `aaaaaaaaaaaa` \| 0 \| 0 \| 1 \| 1 \|/);
   });
 });
 
@@ -127,7 +127,7 @@ test('a scan that did not run on the source commit has no entry in the summary a
     const { summary, report: markdown } = await report(apiUrl);
     assert.deepEqual(summary.tools.map((tool) => tool.id), ['fable', 'codeql', 'dependencies']);
     assert.match(markdown, /^Did not run on this release: Astra review\.$/m);
-    assert.doesNotMatch(markdown, /^## GPT/m);
+    assert.doesNotMatch(markdown, /^## Astra/m);
   });
 });
 
@@ -204,7 +204,7 @@ test('only alerts whose newest instance is an analyzed commit count, and a later
   ];
   await withApi(replies, async (apiUrl) => {
     const { summary } = await report(apiUrl);
-    assert.deepEqual(summary.tools.find((tool) => tool.id === 'fable'), { id: 'fable', name: 'Fable 5.2', high: 0, critical: 1 });
+    assert.deepEqual(summary.tools.find((tool) => tool.id === 'fable'), { id: 'fable', name: 'Fable-5.2', high: 0, critical: 1 });
   });
   replies[`/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&per_page=100`] = [
     { category: 'fable', commit_sha: later, tool: { name: 'Fable', version: '5.3' } },
@@ -229,10 +229,26 @@ test('dismissed findings are listed from the most severe, with an unknown severi
   });
 });
 
+test('a review run that reported no version is shown by its name alone, with the version not reported', async () => {
+  const replies = routes();
+  const analyses = `/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&per_page=100`;
+  replies[analyses] = (replies[analyses] as Array<Record<string, unknown>>)
+    .map((analysis) => analysis.category === 'astra' ? { ...analysis, tool: { name: 'Astra', version: '' } } : analysis);
+  await withApi(replies, async (apiUrl) => {
+    const { summary, report: markdown } = await report(apiUrl);
+    assert.equal(summary.tools.find((tool) => tool.id === 'astra')?.name, 'Astra');
+    assert.match(markdown, /\| Astra \| not reported \| `aaaaaaaaaaaa` \|/);
+  });
+});
+
 test('a tool name joins the reported name and version once, and untrusted text becomes literal', () => {
-  assert.equal(toolName('Fable', '5.2'), 'Fable 5.2');
-  assert.equal(toolName('Fable 5.2', '5.2'), 'Fable 5.2');
-  assert.equal(toolName('GPT-6 Astra', undefined), 'GPT-6 Astra');
+  assert.equal(toolName('Fable', '5.2'), 'Fable-5.2');
+  assert.equal(toolName('Astra', ' 6.2 '), 'Astra-6.2');
+  assert.equal(toolName('Fable-5.2', '5.2'), 'Fable-5.2');
+  assert.equal(toolName('Fable 5.2', '5.2'), 'Fable-5.2');
+  assert.equal(toolName('Fable_5.2', '5.2'), 'Fable-5.2');
+  assert.equal(toolName('Scanner 15.2', '5.2'), 'Scanner 15.2-5.2');
+  assert.equal(toolName('Astra', undefined), 'Astra');
   assert.throws(() => toolName('', ''), /Unexpected tool name/);
   assert.throws(() => toolName('x'.repeat(41), ''), /Unexpected tool name/);
   assert.equal(literal('a\n<img src=x>|`b`'), 'a \\<img src\\=x\\>\\|\\`b\\`');
