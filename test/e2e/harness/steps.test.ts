@@ -686,13 +686,15 @@ describe('workflows', () => {
 
   it('settle runs again after its last run merged the sync pull request, so the merge is recorded before I6 (L4-09)', async () => {
     // L4-09's live shape: three runs that change, one that waits for `format`, the run after the wait merges,
-    // and only the run after the merge moves `linear`. Settle ends on that record run; I6's own run is then quiet.
+    // and only the run after the merge moves `linear`. That record run changes too, so settle runs once more
+    // and ends on a quiet run.
     const changed = { changed: true, checks: passed };
     const quiet = { changed: false, checks: passed };
     const { ctx, dispatched } = await settleScenario(reportsOf(changed, changed, changed, { changed: false, checks: pending }, merging, changed, quiet), { pendingReads: 1 });
-    assert.equal(dispatched.length, 6, 'the record run comes on top of the four runs and the run after the wait');
-    const last = ctx.engine.results.at(-1)?.report?.['pullRequest'] as { merged?: unknown } | undefined;
-    assert.equal(last?.merged, null, 'settle does not end on the run that merged');
+    assert.equal(dispatched.length, 7, 'the record run and the quiet run after it come on top of the four runs and the run after the wait');
+    const last = ctx.engine.results.at(-1)?.report as { changed?: unknown; pullRequest?: { merged?: unknown } } | undefined;
+    assert.equal(last?.pullRequest?.merged, null, 'settle does not end on the run that merged');
+    assert.equal(last?.changed, false, 'settle ends on a quiet run, not on the run that records the merge');
     assert.equal(ctx.observations.get('settle.checkWaits'), 1);
   });
 
@@ -2856,10 +2858,10 @@ describe('linear executors', () => {
     const secret = ctx.observations.get('secret.value') as string;
     assert.match(secret, /^TESTKEY-[0-9a-f]{24}$/);
     // Linear gives the color as a hex code; L2-35 names it by its palette name.
-    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Cross', color: '#EB5757' });
+    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Alert', color: '#EB5757' });
     linear.comments.set(id, ['Blocked by hook `test-secret`, line 3.']);
     await runStep(ctx, { kind: 'linear', action: 'remove-secret', args: {} });
-    assert.equal(ctx.observations.get('blocked.icon'), 'Cross');
+    assert.equal(ctx.observations.get('blocked.icon'), 'Alert');
     assert.ok(!(linear.documents.get(id)?.content ?? '').includes(secret));
     assert.deepEqual(await resolveSubject(ctx, 'blocked.commentFields'), { known: true, value: ['hook', 'line'] });
     const mark = ['blocked.icon', 'blocked.color', 'blocked.commentFields'];
@@ -2891,7 +2893,7 @@ describe('linear executors', () => {
     const id = ids['eng/platform/plan.md']?.id as string;
     await runStep(ctx, { kind: 'linear', action: 'edit', args: { target: 'eng/platform/plan.md', fixture: 'fake-secret' } });
     const blocked = linear.documents.get(id) as LinearDocument;
-    Object.assign(blocked, { icon: 'Cross', color: '#EB5757' });
+    Object.assign(blocked, { icon: 'Alert', color: '#EB5757' });
     const notice = 'Security checks rejected this document. Fix the listed findings and sync again.\n\n- Hook `test-secret`, line 3';
     linear.comments.set(id, [notice]);
     const cleared = ['blocked.securityMarkCleared', 'blocked.openSecurityNotices'];
@@ -2952,8 +2954,8 @@ describe('linear executors', () => {
     ctx.observations.set('blocked.color', null);
     assert.deepEqual(await resolveSubject(ctx, 'blocked.color'), { known: true, value: null });
     // Direct observation subjects, and subjects a step overrides on purpose, return what was recorded.
-    ctx.observations.set('blocked.icon', 'Cross');
-    assert.deepEqual(await resolveSubject(ctx, 'blocked.icon'), { known: true, value: 'Cross' });
+    ctx.observations.set('blocked.icon', 'Alert');
+    assert.deepEqual(await resolveSubject(ctx, 'blocked.icon'), { known: true, value: 'Alert' });
     ctx.observations.set('golden.linearForm', 'recorded');
     assert.deepEqual(await resolveSubject(ctx, 'golden.linearForm'), { known: true, value: 'recorded' });
   });

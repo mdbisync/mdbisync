@@ -69,6 +69,26 @@ describe('sync: pull request suspension', () => {
     assertNoRerun();
   });
 
+  it('repaints a suspended document still showing the red Cross of earlier versions, then restores its own icon', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, `# Plan\n\nA new step. ${CANARY}\n`);
+    await sync();
+    const own = { icon: (await documentOf(path)).icon ?? null, color: (await documentOf(path)).color ?? null };
+    checksOn(await rev(SYNC_BRANCH), [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure' }]);
+    await sync();
+    // An earlier version marked the suspended document with a red Cross.
+    Object.assign(await documentOf(path), { icon: 'Cross', color: '#EB5757' });
+    const again = await sync();
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    const held = await documentOf(path);
+    assert.deepEqual({ icon: held.icon, color: held.color }, MARKS.suspended);
+    assert.equal(commentsOf(held).length, 1);
+    checksOn(await rev('refs/heads/mdbisync/suspended'), [{ name: CHECK_NAME, status: 'completed', conclusion: 'success' }]);
+    await sync();
+    const released = await documentOf(path);
+    assert.deepEqual({ icon: released.icon ?? null, color: released.color ?? null }, own);
+  });
+
   it('waits for GitHub to show the empty head before closing a suspended normal pull request', async () => {
     await editInLinear('eng/notes/plan.md', '# Plan\n\nHeld edit.\n');
     await sync();

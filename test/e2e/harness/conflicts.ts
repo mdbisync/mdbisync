@@ -63,8 +63,6 @@ export function colorLabel(color: string | null | undefined): string | null {
   if (color === null || color === undefined) return null;
   return PALETTE[color.toLowerCase()] ?? color;
 }
-/** The mark of a document a security hook blocked. */
-export const BLOCKED_MARK = { icon: 'Cross', color: 'red' } as const;
 
 export interface MarkerSet {
   /** Marker kinds present, in order. */

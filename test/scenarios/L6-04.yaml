@@ -80,7 +80,7 @@
       {
         "subject": "ui.blockedIcon",
         "operator": "equal",
-        "expected": "Cross"
+        "expected": "Alert"
       },
       {
         "subject": "ui.blockedMarkColor",
@@ -95,7 +95,7 @@
       {
         "subject": "blocked.icon",
         "operator": "equal",
-        "expected": "Cross"
+        "expected": "Alert"
       },
       {
         "subject": "blocked.color",

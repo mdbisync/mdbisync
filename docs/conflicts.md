@@ -153,8 +153,8 @@ Ask the release team in the team chat.
 - Its icon becomes the orange `Alert` icon. If the document had its own icon
   and color, the sync keeps them and puts them back exactly once the
   conflict is resolved. If the repository's security checks also reject the
-  document, their red `Cross` icon and comment show instead, and the
-  conflict comment is resolved. Once the finding is fixed, the `Alert` icon
+  document, their red exclamation mark (`Alert`) and comment show instead,
+  and the conflict comment is resolved. Once the finding is fixed, the `Alert` icon
   returns with a new conflict comment while the markers remain; the blocked
   comment stays open as a record (see
   [the blocked mark](sync-cycle.md#the-blocked-mark)).

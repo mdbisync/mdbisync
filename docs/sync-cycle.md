@@ -265,9 +265,15 @@ confirming its writes.
 
   | Mark | Meaning | Who acts |
   | --- | --- | --- |
-  | Red `Cross` | **Blocked**: a security hook rejected the document, so it is not synchronized | its author, by fixing the finding in Linear |
-  | Red `Cross` | **Suspended**: a check failed or did not finish in time on the batch's pull request | fix the document in Linear or fix CI in git |
+  | Red `Alert` (exclamation mark) | **Blocked**: a security hook rejected the document, so it is not synchronized | its author, by fixing the finding in Linear |
+  | Red `Alert` (exclamation mark) | **Suspended**: a check failed or did not finish in time on the batch's pull request | fix the document in Linear or fix CI in git |
   | Orange `Alert` | **Conflict**: the document holds both versions between conflict markers | anyone, on either side ([conflicts.md](conflicts.md)) |
+
+  Blocked and suspended differ from the conflict mark by color only. A
+  document that still shows the red `Cross` of earlier versions gets the red
+  exclamation mark when the sync next reconciles its mark: a blocked document
+  on its next run, suspended documents within the limit of 50 mark changes
+  per run.
 
 ### The blocked mark
 
@@ -277,8 +283,8 @@ When a repository security hook (a hook marked `alias: security`, see
 - the text is not committed anywhere: not to the sync's refs, the sync
   branch, the sync pull request or the logs. The file in git keeps its last
   synchronized text;
-- the document's icon becomes the red `Cross`; its own icon and color are
-  saved by the sync;
+- the document's icon becomes the red exclamation mark (`Alert`); its own
+  icon and color are saved by the sync;
 - the sync adds one comment, which names the hook and the line, never what
   it found:
 
@@ -377,7 +383,8 @@ later changes to other documents then use the normal lane.
 Security hooks still run before any push and keep their separate blocked
 mark. Suspension is a successful run, not a setup error.
 
-Each suspended document shows a red `Cross` and one comment, for example:
+Each suspended document shows a red exclamation mark (`Alert`) and one
+comment, for example:
 
 > Changes to this document are on hold: a check failed on the pull request that brings them to Git. Other documents keep syncing.
 >

@@ -5,11 +5,17 @@ import type { HoldNotice, IdEntry } from '../state/index.ts';
 import type { ImageFinding, FileFinding } from './assets.ts';
 import { message } from '../messages.ts';
 
+/**
+ * Blocked and suspended show the same red exclamation mark: the document's
+ * changes do not reach Git, and the comment says why. It differs from the
+ * orange conflict mark by color only, so every check of a mark compares both
+ * icon and color. A document still showing an earlier mark is repainted when
+ * the sync next reconciles its mark.
+ */
 export const MARKS = {
   conflict: { icon: 'Alert', color: '#F2994A' },
-  blocked: { icon: 'Cross', color: '#EB5757' },
-  /** The same red cross as blocked: both say the document's changes do not reach Git, and the comment says why. */
-  suspended: { icon: 'Cross', color: '#EB5757' },
+  blocked: { icon: 'Alert', color: '#EB5757' },
+  suspended: { icon: 'Alert', color: '#EB5757' },
 } as const;
 
 export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and delete every "Sync conflict" marker throughout the document. The alert clears after the next sync.';
@@ -112,7 +118,7 @@ function blockedComment(findings: readonly BlockedFinding[]): string {
 
 /**
  * Reconcile one document's visible status from its current text and security
- * findings. Alert and Cross share exactly one saved original decoration.
+ * findings. All marks share exactly one saved original decoration.
  * No conflict flag is stored: marker paragraphs remain the authority.
  */
 export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkResult> {

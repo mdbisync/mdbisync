@@ -504,11 +504,11 @@ none has run yet.
 The normal pull request is **Changes from Linear** on `mdbisync/linear`.
 A failing batch moves to the one **Suspended changes from Linear** pull
 request on `mdbisync/suspended` (the default branch names), and the
-normal pull request closes so
-other documents can continue. A suspended document shows a red `Cross`
-and a comment naming the check, linking to its run when available, and
-listing annotations for that file or “did not finish in time”. Security
-hooks still run before push; their blocked mark takes precedence.
+normal pull request closes so other documents can continue. A suspended
+document shows a red exclamation mark (`Alert`) and a comment naming the
+check, linking to its run when available, and listing annotations for that
+file or “did not finish in time”. Security hooks still run before push;
+their blocked mark takes precedence.
 
 Suspended documents are frozen both ways: Linear edits go only to the
 suspended lane, and git edits wait until release. Fix the document in

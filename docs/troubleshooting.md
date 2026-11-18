@@ -189,8 +189,8 @@ other documents continue through **Changes from Linear** on
 `mdbisync/linear`. The run succeeds. While the suspended head's checks
 are pending before the deadline, the normal lane waits to merge.
 
-Suspended documents show a red `Cross` and one comment naming the failed
-check and linking to its run when available, with annotations for that
+Suspended documents show a red exclamation mark (`Alert`) and one comment
+naming the failed check and linking to its run when available, with annotations for that
 file, or “did not finish in time”. Later failures edit that comment.
 A blocked security-hook mark takes precedence over suspension, which
 takes precedence over conflict. Suspended documents are frozen both ways:
