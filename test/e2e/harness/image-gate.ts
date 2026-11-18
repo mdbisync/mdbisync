@@ -129,7 +129,7 @@ export function withoutImage(text: string, token: string): string | null {
   return lines.join('\n');
 }
 
-/** A document's comments, with whether each is resolved; the sync resolves an image notice once the images are fixed. */
+/** A document's comments, with whether each is resolved; the sync leaves an image notice open once the images are fixed, as the record of the finding. */
 export async function commentsWithState(app: Pick<LinearClient, 'request'>, id: string): Promise<Array<{ body: string; resolvedAt: string | null }>> {
   const data = await app.request<{ document: { comments: { nodes: Array<{ body: string; resolvedAt: string | null; createdAt: string }> } } | null }>(
     'DocumentComments', 'query', 'query DocumentComments($id: String!) { document(id: $id) { comments(first: 100) { nodes { body resolvedAt createdAt } } } }', { id },

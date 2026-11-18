@@ -291,9 +291,19 @@ When a repository security hook (a hook marked `alias: security`, see
 
 Fix it by editing the document in Linear. The next run checks the new text;
 when the hooks pass, it synchronizes the document and puts its own icon and
-color back. The marks take precedence in this order: blocked, suspended, conflict.
-All share the one saved icon and color; clearing one still leaves any
-other applicable mark.
+color back. The comment is not resolved: it stays open as the record of what
+the checks rejected, and you can resolve it yourself. The marks take
+precedence in this order: blocked, suspended, conflict. All share the one
+saved icon and color; clearing one still leaves any other applicable mark.
+
+The comments follow the marks:
+
+| Change | Conflict comment | Blocked comment |
+| --- | --- | --- |
+| conflict cleared | resolved | none |
+| conflict, then blocked | resolved | added |
+| blocked fixed, no markers | none | stays open |
+| blocked fixed, markers remain | a new one is added | stays open |
 
 Without any security hook, the sync pushes Linear's content unchecked, and
 every run summary says so.

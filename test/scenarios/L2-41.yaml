@@ -111,6 +111,11 @@
         "expected": "before.documents.color"
       },
       {
+        "subject": "blocked.openSecurityNotices",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
         "subject": "tracked.body",
         "operator": "same-as",
         "expected": "linear.body"

@@ -234,7 +234,7 @@ describe('UI checklist answers', () => {
     assert.deepEqual(uiValueSubjects(blocked), ['ui.blockedIcon', 'ui.blockedMarkColor', 'ui.blockedCommentVisible', 'ui.markClearedAfterFix', 'ui.blockCommentOpenAfterFix']);
     // The harness checks the cleared state on its own too, not only through the session's answers.
     const harnessChecks = blocked.checks.assertions.filter((assertion) => !assertion.subject.startsWith('ui.')).map((assertion) => [assertion.subject, assertion.expected]);
-    assert.deepEqual(harnessChecks.slice(-3), [['blocked.secretOccurrencesOnGithub', 0], ['blocked.securityMarkCleared', true], ['blocked.openSecurityNotices', 0]]);
+    assert.deepEqual(harnessChecks.slice(-3), [['blocked.secretOccurrencesOnGithub', 0], ['blocked.securityMarkCleared', true], ['blocked.openSecurityNotices', 1]]);
     const checklist = renderUiChecklist(blocked, runNames(RUN), { live: null, runDir: 'run' });
     assert.match(checklist, /^2\. \[ \] As editor-a: Open the blocked document[^\n]*`ui\.blocked`[^\n]*\n(?:   - [^\n]*\n){2}- \(harness\) linear\.remove-secret: [^\n]*\n- \(harness\) run\.settle: [^\n]*\n3\. \[ \] As editor-a: Reload the document that was blocked: the red Cross icon is gone[^\n]*`AfterFix`/m);
     // Each value's name says which of the two items it belongs to.
