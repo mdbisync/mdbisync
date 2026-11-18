@@ -374,11 +374,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
     };
     const resetTarget = (id: string, targets: Map<string, string> = documentIds) => resetTargets(new Set([id]), targets);
-    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[]) => {
+    // Keyed by the document's recorded path by default.
+    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[], key = byId.get(doc.id)?.path ?? path) => {
       const old = byId.get(doc.id);
       const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-      ids.set(old?.path ?? path, {...old?.entry, id: doc.id, saved});
-      result.blocked.push({id: doc.id, path: old?.path ?? path, findings});
+      ids.set(key, {...old?.entry, id: doc.id, saved});
+      result.blocked.push({id: doc.id, path: key, findings});
       resetTarget(doc.id);
     };
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
@@ -401,21 +402,24 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (limited.has(doc.id)) continue;
       // The title names the file, its `ids` key and the report's line: a name the record does not hold yet is
       // shown to the hooks first. Until they pass it, the document keeps its accepted path or, when it has none,
-      // a name made from its id.
+      // a name made from its id, also in place of a path an earlier run recorded for it without a file.
       if (gate.configured && !previous.has(path)) {
-        let held = old?.path;
-        if (held === undefined) {
-          held = documentPath(folderFor(doc)!, doc.id, doc.id, reservations, undefined, (candidate) => invalidZone(doc, candidate));
-          reservations.add(held);
-        }
-        const findings = await checkTitle(gate, held, doc.title);
+        const findings = await checkTitle(gate, path, doc.title);
         if (findings === null) {
           result.leftOut.push({id: doc.id, rule: 'security-unchecked'});
           resetTarget(doc.id);
           continue;
         }
         if (findings.length > 0) {
-          recordBlocked(doc, held, findings);
+          let held = old !== undefined && previous.has(old.path) ? old.path : undefined;
+          if (held === undefined) {
+            const available = new Set(reservations);
+            if (old !== undefined) available.delete(old.path);
+            held = documentPath(folderFor(doc)!, doc.id, doc.id, available, undefined, (candidate) => invalidZone(doc, candidate));
+            reservations.add(held);
+            if (old !== undefined && old.path !== held) ids.delete(old.path);
+          }
+          recordBlocked(doc, held, findings, held);
           continue;
         }
       }

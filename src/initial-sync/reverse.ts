@@ -331,6 +331,27 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     pullRequest: null,
   };
 
+  // A new file's name comes from its document's title, and the name reaches the progress commits, the record and
+  // this run's report, also one that stops at the sync branch check below. The hooks read each such title first;
+  // one they refuse, or have no answer for, leaves its document out under a name made from its id. The first
+  // capture after the record reads it again.
+  if (gate.configured) {
+    const folders = new Map(annotatedPlaces(context.mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
+    const occupied = new Set([...treePaths, ...plan.overwrite.map((entry) => entry.path), ...plan.create.map((entry) => entry.path)]);
+    const screened: ReverseEntry[] = [];
+    for (const entry of plan.create) {
+      const findings = await checkTitle(gate, entry.path, entry.title);
+      if (findings?.length === 0) {
+        screened.push(entry);
+        continue;
+      }
+      const held = documentPath(folders.get(placeKey(entry.place)) ?? '', entry.documentId, entry.documentId, occupied);
+      occupied.add(held);
+      result.leftOutAtRecord.push({ path: held, rule: findings === null ? 'security-unchecked' : 'security-hook' });
+    }
+    plan.create = screened;
+  }
+
   let unpushed = 0;
   const pushProgress = async (): Promise<boolean> => {
     // Staging writes nothing; the apply step takes the same documents again.
@@ -353,22 +374,6 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
   if (fetched.sync !== null && !(await isOwnRecord(fetched.sync)) && !(await isAncestor(git, fetched.sync, fetched.tracked))) {
     result.code = 'sync-branch-changed';
     return { plan, result };
-  }
-
-  // A new file's name comes from its document's title, and the name reaches the progress commits, the record and
-  // this run's report. The hooks read each such title first; one they refuse, or have no answer for, leaves its
-  // document out under a name made from its id. The first capture after the record reads it again.
-  if (gate.configured) {
-    const screened: ReverseEntry[] = [];
-    for (const entry of plan.create) {
-      const folder = entry.path.slice(0, entry.path.length - `${entry.fileTitle}.md`.length).replace(/\/$/, '');
-      const held = titleFile(folder, entry.documentId);
-      const findings = await checkTitle(gate, held, entry.title);
-      if (findings === null) result.leftOutAtRecord.push({ path: held, rule: 'security-unchecked' });
-      else if (findings.length > 0) result.leftOutAtRecord.push({ path: held, rule: 'security-hook' });
-      else screened.push(entry);
-    }
-    plan.create = screened;
   }
 
   // Take the documents in path order. Each needs no request now; the order
