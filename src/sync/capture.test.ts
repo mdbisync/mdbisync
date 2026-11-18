@@ -393,7 +393,7 @@ describe('capture from Linear', () => {
     const captured = await run();
     assert.equal(captured.ok, true);
     assert.deepEqual(captured.leftOut, []);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nShorter edit.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nShorter edit.');
   });
 
   it('never captures a place that only an altered state ref names', async () => {
@@ -1273,7 +1273,7 @@ describe('capture from Linear', () => {
       Object.assign(world.linear.documents.find(({id}) => id === 'titled')!, {title: 'keys', content: 'Clean.\n', updatedAt: '2026-01-05T00:00:00Z'});
       const accepted = await captureGated();
       assert.deepEqual(accepted.blocked, []);
-      assert.equal(await text('docs/keys.md'), 'Clean.\n');
+      assert.equal(await text('docs/keys.md'), 'Clean.');
       const ids = await readIds(context.git, accepted.state.ids);
       assert.equal(ids.get('docs/keys.md')?.id, 'titled');
       assert.equal(ids.has('docs/titled.md'), false);
