@@ -133,41 +133,41 @@ export function referencesOverLimit(tree: Root, body: string): number | undefine
     if (node.type === 'linkReference' || node.type === 'imageReference') references.push(node);
   });
   if (references.length === 0) return undefined;
+  // Everything is counted in code points, as `CONTENT_LIMIT` is; each
+  // definition's destination is written and counted once.
   const destinations = new Map<string, number>();
   const destinationLength = (reference: LinkReference | ImageReference, url: string): number => {
     const key = `${reference.type}:${reference.identifier}`;
     let length = destinations.get(key);
     if (length === undefined) {
-      length = (reference.type === 'linkReference' ? linkDestination(url) : imageDestination(url)).length;
+      length = codePoints(reference.type === 'linkReference' ? linkDestination(url) : imageDestination(url));
       destinations.set(key, length);
     }
     return length;
   };
-  // The source without its definitions, in code points; counted only when
-  // the cheaper bound in code units no longer fits.
-  let kept: number | undefined;
-  let added = 0;
+  const length = (from: number, to: number): number => codePoints(body.slice(from, to));
+  let written = codePoints(body) - dropped.reduce((sum, node) => sum + length(start(node), end(node)), 0);
+  // A later reference can shrink the text again: the whole sum decides, and
+  // the reference that last took it over the limit is named.
+  let crossing: number | undefined;
   for (const reference of references) {
     const definition = definitions.get(reference.identifier);
     if (definition === undefined) continue;
-    const source = end(reference) - start(reference);
     // `fix` writes `[text](destination)` from a link's children, `![label](destination)` from an image's label as written.
-    const written = reference.type === 'linkReference'
-      ? childrenLength(reference) + 4
-      : bracketedLabel(body, start(reference) + 1).length + 5;
-    added += written + destinationLength(reference, definition.url) - source;
-    if (body.length + added <= CONTENT_LIMIT) continue;
-    kept ??= codePoints(body) - dropped.reduce((sum, node) => sum + codePoints(body.slice(start(node), end(node))), 0);
-    if (kept + added > CONTENT_LIMIT) return line(reference);
+    const label = reference.type === 'linkReference' ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body, start(reference) + 1)) + 5;
+    const before = written;
+    written += label + destinationLength(reference, definition.url) - length(start(reference), end(reference));
+    // A text already over the limit (a later pass of `fix`) is named at its first reference.
+    if ((before <= CONTENT_LIMIT || crossing === undefined) && written > CONTENT_LIMIT) crossing = line(reference);
   }
-  return undefined;
+  return written > CONTENT_LIMIT ? crossing : undefined;
 }
 
-/** The source length of a link reference's text, between its brackets. */
-function childrenLength(reference: LinkReference): number {
+/** The length of a link reference's text as written, between its brackets. */
+function childrenLength(reference: LinkReference, length: (from: number, to: number) => number): number {
   const first = reference.children[0];
   const last = reference.children.at(-1);
-  return first === undefined || last === undefined ? 0 : end(last) - start(first);
+  return first === undefined || last === undefined ? 0 : length(start(first), end(last));
 }
 
 function codePoints(text: string): number {

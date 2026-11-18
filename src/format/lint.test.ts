@@ -193,6 +193,21 @@ describe('lint rules', () => {
     assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
   });
 
+  it('sums every reference: references that shrink the text later keep a document that fits', () => {
+    // 190 KB written as 180 KB: the first group grows by 100 KB, the second shrinks by 110 KB.
+    const text = `${'[a][r] '.repeat(5_000)}${`[b][${'s'.repeat(25)}] `.repeat(5_000)}\n\n[r]: https://example.com\n[${'s'.repeat(25)}]: u\n`;
+    assert.deepEqual(lintText('doc.md', text), []);
+    const fixed = fixText(text);
+    assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
+  });
+
+  it('counts destinations in code points, as the content limit is counted', () => {
+    // 236,000 code points written, though over 400,000 UTF-16 code units.
+    const text = `${'[a][r] '.repeat(2_000)}\n\n[r]: https://example.com/${'\u{1F600}'.repeat(90)}\n`;
+    assert.deepEqual(lintText('doc.md', text), []);
+    assert.notEqual(fixText(text), text);
+  });
+
   it('keeps writing reference links inline within the limit', () => {
     const text = references(100, 100);
     assert.deepEqual(lintText('doc.md', text), []);
