@@ -3,7 +3,7 @@ import { it } from 'node:test';
 import { createFixture } from '../state/test-helpers.ts';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { securityGate } from './security.ts';
+import { type SecurityGate, checkTitle, securityGate } from './security.ts';
 import type { Git } from '../state/index.ts';
 import { answeringGate, checkStaged, stagingGate } from './staged.ts';
 
@@ -308,4 +308,23 @@ it('keeps a file stored before its LFS pattern as it is stored, with the LFS cle
     await gate?.close?.();
     await fixture.cleanup();
   }
+});
+
+it('gives no answer for a title whose path no gate can take, without naming the path', async () => {
+  const TITLE = ['title', 'canary', '5521'].join('-');
+  const asked: string[] = [];
+  const gate: SecurityGate = {
+    configured: true,
+    async check(files) {
+      asked.push(...files.keys());
+      return [];
+    },
+  };
+  // A tracked folder Git accepts that a repository path may not hold: the gate is never asked, and nothing throws with the path.
+  for (const path of ['odd\\folder/' + TITLE + '.md', 'docs/../' + TITLE + '.md', 'docs/.git/' + TITLE + '.md']) {
+    assert.equal(await checkTitle(gate, path, TITLE), null, path);
+  }
+  assert.deepEqual(asked, []);
+  assert.deepEqual(await checkTitle(gate, 'docs/' + TITLE + '.md', TITLE), []);
+  assert.deepEqual(asked, ['docs/' + TITLE + '.md']);
 });
