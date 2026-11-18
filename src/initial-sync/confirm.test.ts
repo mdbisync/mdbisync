@@ -184,6 +184,88 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(formula?.trashed, undefined);
   });
 
+  /** Changes the document the next query after the read of every text, as a person can while the run plans. */
+  const afterTextRead = (world: FakeWorld, change: () => void) => {
+    let read = false;
+    world.linear.beforeQuery = (operation) => {
+      if (read) {
+        delete world.linear.beforeQuery;
+        change();
+      } else if (operation === 'GetDocuments') read = true;
+    };
+  };
+  /** The only document these runs could overwrite is `doc-plan`; the others are created. */
+  const updates = (world: FakeWorld) => world.writes.filter((write) => write === 'UpdateDocument');
+
+  for (const [label, change] of [
+    ['moved to another project', (world: FakeWorld) => { world.linear.documents.find((d) => d.id === 'doc-plan')!.projectId = 'project-handbook'; }],
+    ['trashed', (world: FakeWorld) => { const d = world.linear.documents.find((d) => d.id === 'doc-plan')!; d.trashed = true; touch(d); }],
+    ['edited', (world: FakeWorld) => { const d = world.linear.documents.find((d) => d.id === 'doc-plan')!; d.content = `Edited. ${CANARY}`; touch(d); }],
+    ['deleted', (world: FakeWorld) => { world.linear.documents = world.linear.documents.filter((d) => d.id !== 'doc-plan'); }],
+  ] as const) it(`leaves out a matched document ${label} between the listing and the read of its text, and its file`, async () => {
+    const world = fakeWorld();
+    world.linear.documents = [{ id: 'doc-plan', title: 'plan', projectId: 'project-api', createdAt: '2026-01-01T00:00:01Z', content: `Old text. ${CANARY}` }];
+    world.linear.beforeQuery = (operation) => {
+      if (operation !== 'GetDocuments') return;
+      delete world.linear.beforeQuery;
+      change(world);
+    };
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.summary?.leftOut.includes('eng/notes/plan.md'), JSON.stringify(report.summary?.leftOut));
+    assert.ok(report.leftOutRules?.includes('changed-during-run'));
+    assert.ok(!report.initialSync?.overwritten.includes('eng/notes/plan.md') && !report.initialSync?.created.includes('eng/notes/plan.md'));
+    assert.deepEqual(updates(world), []);
+    const plan = world.linear.documents.find((d) => d.id === 'doc-plan');
+    if (label === 'deleted') assert.equal(plan, undefined);
+    else assert.equal(plan?.content, label === 'edited' ? `Edited. ${CANARY}` : `Old text. ${CANARY}`);
+    assert.ok(!live(world).some((d) => d.title === 'plan' && d.id !== 'doc-plan'), 'a second plan document');
+    assert.equal((await readIds())['eng/notes/plan.md'], undefined);
+    // The other files are written as usual.
+    assert.ok(report.initialSync?.created.includes('eng/backend/notes.md'));
+  });
+
+  it('trashes no duplicate of a title whose matched document is gone before its write', async () => {
+    const world = fakeWorld();
+    world.linear.documents = [
+      { id: 'doc-plan', title: 'plan', projectId: 'project-api', createdAt: '2026-01-01T00:00:01Z', content: `Old text. ${CANARY}` },
+      { id: 'doc-plan-copy', title: 'plan', projectId: 'project-api', createdAt: '2026-01-01T00:00:02Z', content: `Copy. ${CANARY}` },
+    ];
+    afterTextRead(world, () => { world.linear.documents = world.linear.documents.filter((d) => d.id !== 'doc-plan'); });
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(updates(world), []);
+    const copy = world.linear.documents.find((d) => d.id === 'doc-plan-copy');
+    assert.equal(copy?.trashed, undefined, 'the only document left for the file was trashed');
+    assert.deepEqual(report.initialSync?.trashed, []);
+    assert.deepEqual(report.initialSync?.leftOutAtWrite.map((entry) => [entry.path, entry.rule]), [['eng/notes/plan.md', 'changed-during-run']]);
+  });
+
+  it('neither overwrites nor trashes a document that moves after the plan read it', async () => {
+    const world = fakeWorld();
+    world.linear.documents = [
+      { id: 'doc-plan', title: 'plan', projectId: 'project-api', createdAt: '2026-01-01T00:00:01Z', content: `Old text. ${CANARY}` },
+      { id: 'doc-retired', title: 'backend/retired', teamId: 'team-eng', createdAt: '2026-01-01T00:00:02Z', content: `Retired. ${CANARY}` },
+    ];
+    afterTextRead(world, () => {
+      for (const d of world.linear.documents) if (d.id === 'doc-plan' || d.id === 'doc-retired') {
+        delete d.teamId;
+        d.projectId = 'project-handbook';
+      }
+    });
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(updates(world), []);
+    const plan = world.linear.documents.find((d) => d.id === 'doc-plan');
+    assert.equal(plan?.content, `Old text. ${CANARY}`);
+    const retired = world.linear.documents.find((d) => d.id === 'doc-retired');
+    assert.equal(retired?.trashed, undefined);
+    assert.deepEqual(report.initialSync?.trashed, []);
+    const leftOut = report.initialSync?.leftOutAtWrite.filter((entry) => entry.rule === 'changed-during-run').map((entry) => entry.path).sort();
+    assert.deepEqual(leftOut, ['eng/backend/retired.md', 'eng/notes/plan.md']);
+    assert.ok(report.initialSync?.created.includes('eng/backend/notes.md'));
+  });
+
   it('L1-18: run again with nothing changed writes nothing and leaves the refs as they are', async () => {
     const world = fakeWorld();
     assert.equal((await run(world)).result.exitCode, 0);

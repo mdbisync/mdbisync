@@ -53,7 +53,7 @@ export const LEFT_OUT_RULES = ['duplicate-title', 'title-too-long'] as const;
 export type LeftOutRule = (typeof LEFT_OUT_RULES)[number];
 
 /** Why an initial sync to Linear leaves a document out while writing it. */
-export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'markdown-complexity', 'upload-too-large', 'upload-unreadable', 'link-provenance-unknown'] as const;
+export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'markdown-complexity', 'upload-too-large', 'upload-unreadable', 'link-provenance-unknown', 'changed-during-run'] as const;
 export type LeftOutAtWriteRule = (typeof LEFT_OUT_AT_WRITE_RULES)[number];
 
 /** Why a dry run from Linear leaves out a document that would make a new file: the hooks refused its title, or had no answer for it. */
