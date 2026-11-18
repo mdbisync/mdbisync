@@ -94,6 +94,7 @@ export interface ListOptions {
 export interface UploadInput {
   filename: string;
   contentType: string;
+  /** Send this view as-is. Its backing buffer may contain bytes outside the file. */
   bytes: Uint8Array<ArrayBuffer>;
 }
 
