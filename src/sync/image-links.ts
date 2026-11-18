@@ -2,6 +2,7 @@
 import { toMarkdown } from 'mdast-util-to-markdown';
 import { parse, visit, start, end, line, allowedLink } from '../format/markdown.ts';
 import { CONTENT_LIMIT, linkDestination } from '../format/index.ts';
+import { message } from '../messages.ts';
 
 export interface ImageRewrite { image: number; total: number; line: number }
 
@@ -12,7 +13,7 @@ const ESCAPE_PASS_LIMIT = 8;
 
 export class ImageRepairBudgetError extends Error {
   constructor() {
-    super('Markdown exceeds the image repair budget.');
+    super(message('assets.image-repair-budget'));
     this.name = 'ImageRepairBudgetError';
   }
 }
