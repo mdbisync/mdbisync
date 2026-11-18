@@ -146,8 +146,9 @@ export async function commitTree(git: Git, spec: CommitSpec): Promise<Oid> {
     if (parentTree === tree) return spec.parents[0] as Oid;
   }
 
-  // State commits are never signed, whatever the machine's commit.gpgSign says.
-  const args = ['commit-tree', '--no-gpg-sign', tree];
+  // State commits are never GPG-signed, whatever the machine's commit.gpgSign says, and are UTF-8 without an encoding
+  // header, whatever its i18n.commitEncoding says: a signed record with that header does not verify.
+  const args = ['-c', 'i18n.commitEncoding=UTF-8', 'commit-tree', '--no-gpg-sign', tree];
   // Git stores a parent given twice once: a signature covers the parents as stored.
   const parents = [...new Set(spec.parents)];
   for (const parent of parents) args.push('-p', parent);

@@ -63,6 +63,17 @@ describe('state: signed linear commits', () => {
     assert.equal(await signedObservation(fixture.remote, encoded, key), false);
   });
 
+  it('writes its own record as UTF-8 without an encoding header, whatever the repository\'s commit encoding says', async () => {
+    await fixture.remote.run(['config', 'i18n.commitEncoding', 'ISO-8859-1']);
+    try {
+      const signed = await commit({ 'docs/a.md': '# A\n' }, { sign: key });
+      assert.doesNotMatch((await fixture.remote.run(['cat-file', 'commit', signed])).stdout.toString('utf8'), /^encoding /m);
+      assert.ok(await signedObservation(fixture.remote, signed, key));
+    } finally {
+      await fixture.remote.run(['config', '--unset', 'i18n.commitEncoding']);
+    }
+  });
+
   it('signs the parents git stores when one is given twice', async () => {
     const signed = await commit({ 'docs/a.md': '# A\n' }, { parents: [main, main], sign: key });
     assert.equal(await fixture.remote.text(['show', '-s', '--format=%P', signed]), main);
