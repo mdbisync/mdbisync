@@ -492,7 +492,7 @@ document named.
 | Message | Meaning |
 | --- | --- |
 | `<operation>: Linear client stopped (<why>)` | Linear's rate limit or a low budget stopped the run; see `stopped` in [Partial sync runs](#partial-sync-runs). |
-| `<operation>: Linear error <code> (HTTP <status>, request <id>): <message>` | Linear rejected the request. `INPUT_ERROR` usually names a document Linear no longer has or does not accept; `AUTHENTICATION_ERROR` means the app lost access. |
+| `<operation>: Linear error <code> (HTTP <status>, request <id>): <message>` | Linear rejected the request. `INPUT_ERROR` usually names a document Linear no longer has or does not accept; `cursor not found` on `ListDocuments` means Linear forgot a page cursor mid-listing; the run starts the listing again on its own, up to three listings, unless Linear's budget already stopped it, so run again; `AUTHENTICATION_ERROR` means the app lost access. |
 | `<operation>: Linear answered HTTP <status> (request <id>)` | Linear failed the request. |
 | `<operation>: request to Linear failed (<cause>)` | The connection broke or timed out. |
 | `<operation>: <field> is <n> characters, Linear accepts at most <limit>` | A title or text is too long for Linear; see `title-too-long` and `content-too-long`. |

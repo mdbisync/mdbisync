@@ -125,6 +125,20 @@ export class LinearReads {
     this.#add(key, {...answer, body: this.#spool.put(answer.body)});
   }
 
+  /** A mark of what is kept so far, for `dropSince`. */
+  mark(): number {
+    return this.#order.length;
+  }
+
+  /**
+   * Drops the answers kept since `mark`: reads whose result the caller threw
+   * away (a listing it started again), so the next step never takes them.
+   */
+  dropSince(mark: number): void {
+    if (this.mode !== 'record') return;
+    for (const key of this.#order.splice(mark).reverse()) this.#answers.get(key)?.pop();
+  }
+
   /** The capture ended: nothing more is kept or answered. */
   end(): void {
     this.#ended = true;
