@@ -140,7 +140,8 @@ jobs:
             if [[ "${python_command[0]##*/}" != python* ]]; then
               python_command=(python3)
             fi
-            "${python_command[@]}" - <<'PY' || printf 'Apply pre-commit fixes\n' > "$RUNNER_TEMP/pre-commit-message"
+            # Isolated (-I): the checkout is not on its module path.
+            "${python_command[@]}" -I - <<'PY' || printf 'Apply pre-commit fixes\n' > "$RUNNER_TEMP/pre-commit-message"
           import os
           import re
           from pathlib import Path

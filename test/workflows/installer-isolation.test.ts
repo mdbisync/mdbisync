@@ -55,6 +55,15 @@ describe('workflows written by init', () => {
       assert.ok(calls.length >= 4, `${file}: the version check, version report, venv and pip calls`);
       for (const call of calls) assert.equal(call[1]?.trim(), '-I', `${file}: ${call[0]}`);
     });
+
+    it(`${file}: every Python call in any step is isolated`, () => {
+      const scripts = Object.values(workflow.jobs).flatMap((job) => job.steps).flatMap((step) => (step.run === undefined ? [] : [step.run]));
+      const lines = scripts.flatMap((script) => script.split('\n')).map((line) => line.trim()).filter((line) => !line.startsWith('#'));
+      // Python by name, the installed environment's, or the interpreter pre-commit runs on; never the command lookup.
+      const calls = lines.flatMap((line) => [...line.matchAll(/(?<!command -v )(?:\bpython3|"\$environment\/bin\/python"|"\$\{python_command\[@\]\}")(?=\s)(\s+\S+)?/g)]);
+      assert.ok(calls.length >= 4, file);
+      for (const call of calls) assert.equal(call[1]?.trim(), '-I', `${file}: ${call[0]}`);
+    });
   }
 
   for (const file of PRIVILEGED) {
