@@ -43,6 +43,16 @@ Gitleaks in a Docker image pinned by version and SHA-256 digest, and a
 private-key pattern hook. Docker must be available wherever those hooks
 run. Review these examples for your repository's privacy requirements;
 without security hooks, runs warn that content is pushed unchecked.
+The Gitleaks example runs with `--ignore-gitleaks-allow`: document text
+comes from Linear, so an inline `gitleaks:allow` comment in it does not
+exempt a line. The hook scans the whole tree, so such comments in the
+repository's own files stop exempting their lines too. Record exceptions
+in the repository's own `.gitleaks.toml` or `.gitleaksignore`, which a
+change from Linear cannot edit. `check` and every run warn about a
+Gitleaks security hook without that flag. To update a hook an earlier
+release generated, add `--ignore-gitleaks-allow` before the final ` .`
+of its `entry`; `init` does this itself when the repository's other
+files match the release it is run with.
 
 Use `--lfs` to store embedded files in Git LFS: `init` adds to
 `.gitattributes` a line for each image and document type the sync takes

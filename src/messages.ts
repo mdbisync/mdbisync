@@ -107,6 +107,7 @@ export const MESSAGES = {
   'setup.sync-branch-rules-open': '{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch',
   'setup.sync-branch-rule-restricted': '{rule} restricted',
   'setup.sync-branch-rule-open': '{rule} not restricted on {branches}',
+  'setup.security-hooks-inline-allow': 'security hook {hooks} runs Gitleaks without {flag}, so an inline gitleaks:allow comment in a document from Linear exempts its line; add {flag} (init updates the hook it generated) and keep exceptions in .gitleaks.toml or .gitleaksignore',
   'setup.security-hooks-missing': 'no pre-commit hook marked "alias: {alias}": content is pushed unchecked',
   'setup.hooks-invalid-yaml': '{file} is not valid YAML',
   'setup.hooks-no-repos': '{file} has no "repos" list',

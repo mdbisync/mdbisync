@@ -140,6 +140,11 @@ The warnings say:
   nothing checks what comes from Linear before it is pushed. Add hooks marked
   `alias: security` if you want that (`mdbisync init --security-hooks` adds
   two examples).
+- `security hook {hooks} runs Gitleaks without {flag}, so an inline gitleaks:allow comment in a document from Linear exempts its line; add {flag} (init updates the hook it generated) and keep exceptions in .gitleaks.toml or .gitleaksignore`:
+  a document from Linear can carry that comment, so a credential on its line
+  would pass the hook. Add `--ignore-gitleaks-allow` to the hook's command
+  (for the example `init` generated, before the final ` .` of its `entry`)
+  and record exceptions in `.gitleaks.toml` or `.gitleaksignore`.
 
 ## Sync state
 
