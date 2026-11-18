@@ -1,6 +1,6 @@
 // `lint`: finds the Markdown that Linear would lose or alter, with file, line
-// and rule. Conflict marker paragraphs written by the sync are ordinary bold
-// text and pass. Every image must be a file of the repository: Linear
+// and rule. Conflict markers written by the sync are one-line warning
+// callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
 import type { Definition, Root } from 'mdast';
