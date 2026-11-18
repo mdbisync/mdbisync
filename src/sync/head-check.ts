@@ -5,9 +5,9 @@
 // rule. Before a push, the sync checks the complete proposed branch tree;
 // before either lane merges, it also reads what the merge would
 // change on the tracked branch, whoever made the commits: only documents and
-// the asset types the sync writes, as regular files under an annotated
-// folder and outside any `.github` folder, and never a folder's Linear
-// annotation. Any other change leaves the pull request to a person.
+// the asset types the sync writes, as regular files that keep their mode,
+// under an annotated folder and outside any `.github` folder, and never a
+// folder's Linear annotation. Any other change leaves the pull request to a person.
 
 import { ANNOTATION_FILE, folderOf, nearestZone, readAnnotation, type Zone } from '../mapping/annotations.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
@@ -16,9 +16,24 @@ import { UPLOAD_EXTENSIONS } from './upload-type.ts';
 
 /** Modes the sync merges a file in: a regular file, or none (removed). */
 const MERGED_MODES = new Set(['100644', '100755', '000000']);
-const NO_BLOB = '0'.repeat(40);
+const NO_FILE = '000000';
 
-/** Whether a change of `path` to `mode` is one the sync merges by itself, by its path and mode alone. */
+/**
+ * Whether a change from `before` to `after` keeps a regular file a regular
+ * file with the same mode: an add, an edit or a removal. Removing or replacing
+ * a symbolic link or a submodule, a type change and an executable-bit flip are
+ * a person's to review.
+ */
+export function keepsRegularMode(before: string, after: string): boolean {
+  if (!MERGED_MODES.has(before) || !MERGED_MODES.has(after)) return false;
+  return before === after || before === NO_FILE || after === NO_FILE;
+}
+
+/**
+ * Whether a file at `path` in `mode` is one the sync merges by itself, by its
+ * path and that mode alone. A change between two trees also needs
+ * `keepsRegularMode` for its old mode (see `unverifiedPaths`).
+ */
 export function isSyncedChange(path: string, mode: string, zones: ReadonlyMap<string, Zone>): boolean {
   if (!MERGED_MODES.has(mode)) return false;
   if (path.split('/').some((segment) => segment.toLowerCase() === '.github')) return false;
@@ -74,17 +89,20 @@ export async function unverifiedPaths(git: Git, before: Oid | string, after: Oid
   const raw = (await git.run(['diff-tree', '-r', '-z', '--no-renames', '--raw', before, after])).stdout.toString('utf8');
   const fields = raw.split('\0');
   const paths: string[] = [];
-  const readmes: Array<{ path: string; from: string; to: string }> = [];
+  // A README's two versions, `null` where it is absent: told by its mode, which reads the same in any object format.
+  const readmes: Array<{ path: string; from: string | null; to: string | null }> = [];
   // Each change is `:<old mode> <new mode> <old oid> <new oid> <status>` and its path.
   for (let index = 0; index + 1 < fields.length; index += 2) {
-    const [, mode = '', from = NO_BLOB, to = NO_BLOB] = (fields[index] as string).split(' ');
+    const [oldMode = '', newMode = '', from = '', to = ''] = (fields[index] as string).slice(1).split(' ');
     const path = fields[index + 1] as string;
-    if (!isSyncedChange(path, mode, zones)) paths.push(path);
-    else if (path.split('/').at(-1) === ANNOTATION_FILE) readmes.push({ path, from, to });
+    if (!keepsRegularMode(oldMode, newMode) || !isSyncedChange(path, newMode, zones)) paths.push(path);
+    else if (path.split('/').at(-1) === ANNOTATION_FILE) {
+      readmes.push({ path, from: oldMode === NO_FILE ? null : from, to: newMode === NO_FILE ? null : to });
+    }
   }
   if (readmes.length > 0) {
-    const blobs = await readBlobs(git, readmes.flatMap(({ from, to }) => [from, to].filter((oid) => oid !== NO_BLOB)));
-    const text = (oid: string) => oid === NO_BLOB ? null : (blobs.get(oid) as Buffer).toString('utf8');
+    const blobs = await readBlobs(git, readmes.flatMap(({ from, to }) => [from, to].filter((oid) => oid !== null)));
+    const text = (oid: string | null) => oid === null ? null : (blobs.get(oid) as Buffer).toString('utf8');
     for (const { path, from, to } of readmes) if (!keepsAnnotation(path, text(from), text(to))) paths.push(path);
   }
   return paths.sort();

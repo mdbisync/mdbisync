@@ -62,6 +62,33 @@ describe('sync: pull request head check', () => {
     assert.ok(run.report.pullRequest?.merged);
   });
 
+  for (const replacement of ['a regular file', 'nothing'] as const) {
+    it(`a commit on the sync branch that replaces a symbolic link named like a document with ${replacement} is not merged`, async () => {
+      const path = 'eng/notes/link.md';
+      const main = await rev('refs/heads/main');
+      const target = await h.fixture.remote.text(['hash-object', '-w', '--stdin'], { input: 'plan.md' });
+      const linked = await commitFile(main, path, target, undefined, 'Link the plan', '120000');
+      await h.fixture.remote.run(['update-ref', 'refs/heads/main', linked, main]);
+      h.start = linked;
+      await editInLinear('combined/guide.md', '# Guide\n\nEdited in Linear.\n');
+      await sync();
+      const head = await rev(SYNC_BRANCH);
+      const blob = replacement === 'nothing' ? null : await h.fixture.remote.text(['hash-object', '-w', '--stdin'], { input: '# Link\n\nReplaced.\n' });
+      const pushed = await commitFile(head, path, blob, undefined, 'Replace the link');
+      await h.fixture.remote.run(['update-ref', SYNC_BRANCH, pushed, head]);
+      h.syncValues.push(pushed);
+      passing(pushed);
+
+      const run = await sync();
+      assert.equal(run.result.exitCode, SETUP_FAILED_EXIT_CODE, run.result.stderr);
+      assert.equal(run.report.pullRequest?.code, 'head-unverified');
+      assert.deepEqual(run.report.pullRequest?.unverified, [path]);
+      assert.equal(run.report.pullRequest?.merged, null);
+      assert.ok(!run.writes.some((write) => write.endsWith('/merge')), run.writes.join('\n'));
+      assert.equal((await h.fixture.remote.text(['ls-tree', 'refs/heads/main', '--', path])).split(' ')[0], '120000', 'the link stays on the tracked branch');
+    });
+  }
+
   it('a commit on the sync branch that reverts a tracked-branch change outside the documents is not merged', async () => {
     await editRef('refs/heads/main', '.github/workflows/ci.yml', 'safe: true\n', 'Add CI');
     await editInLinear('combined/guide.md', '# Guide\n\nEdited in Linear.\n');
