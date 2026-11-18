@@ -370,9 +370,9 @@ remain after release; its presence alone does not mean a batch is on hold.
   error. Other documents then continue in the normal lane. While the
   suspended head's checks are still pending before their deadline, the
   normal lane waits to merge so it cannot move the tracked branch under it.
-- Every suspended document gets a red `Cross` and a comment naming the
-  check, linking to its run when available, and quoting annotations on
-  that document's path. Later Linear edits go only to the suspended lane;
+- Every suspended document gets a red exclamation mark (`Alert`) and a
+  comment naming the check, linking to its run when available, and quoting
+  annotations on that document's path. Later Linear edits go only to the suspended lane;
   tracked-branch edits to those documents wait until release. A Linear
   edit or a new tracked-branch commit updates the suspended pull request.
   Once its head contains the current tracked tip and passes checks, it

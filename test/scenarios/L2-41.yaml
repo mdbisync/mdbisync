@@ -80,7 +80,7 @@
       {
         "subject": "blocked.icon",
         "operator": "equal",
-        "expected": "Cross"
+        "expected": "Alert"
       },
       {
         "subject": "blocked.color",

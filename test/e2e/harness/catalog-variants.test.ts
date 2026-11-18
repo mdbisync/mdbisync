@@ -194,7 +194,7 @@ describe('the API-path image gate', () => {
     spec.steps[3] = {kind: 'linear', action: 'remove-image', args: {actor: 'editor-a'}};
     spec.checks.assertions = [
       {subject: 'tracked.uploadedImage', operator: 'equal', expected: true},
-      {subject: 'blocked.icon', operator: 'equal', expected: 'Cross'},
+      {subject: 'blocked.icon', operator: 'equal', expected: 'Alert'},
       {subject: 'blocked.color', operator: 'equal', expected: 'red'},
       {subject: 'blocked.imageLines', operator: 'same-as', expected: 'expected.blockedImageLines'},
       {subject: 'blocked.openImageNotices', operator: 'equal', expected: 1},

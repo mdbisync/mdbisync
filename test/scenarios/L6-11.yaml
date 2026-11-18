@@ -129,7 +129,7 @@
       {
         "subject": "ui.suspendedIcon",
         "operator": "equal",
-        "expected": "Cross"
+        "expected": "Alert"
       },
       {
         "subject": "ui.suspendedMarkColor",
