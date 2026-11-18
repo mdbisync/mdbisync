@@ -16,7 +16,7 @@ import { Git, commitTree, type IdEntry } from '../state/index.ts';
 import { fixText } from '../format/index.ts';
 import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, IDENTITY, createFixture, fakeLfsServer } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, createFixture, fakeLfsServer, mergeOnGitHub } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
 const CANARY = 'kx-5b1e0a94';
@@ -188,6 +188,32 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal(new Set(keys).size, keys.length, 'duplicate documents');
   }
 
+  /**
+   * After a folder's move, which changes no file, the next run opens a sync pull request for the move's record and
+   * the run after it merges that with a merge commit, so the record is on the tracked branch.
+   */
+  async function settleMoveRecord() {
+    world.github.merge = (pr, sha) => mergeOnGitHub(fixture, pr, sha);
+    const record = await rev('refs/mdbisync/linear');
+    const tracked = await rev('refs/heads/main');
+    const opened = await sync();
+    assert.equal(opened.result.exitCode, 0, opened.result.stderr);
+    assert.deepEqual(opened.writes, ['POST /pulls']);
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    const prs = world.github.pullRequests;
+    assert.equal(prs.length, 1);
+    assert.ok(prs[0]!.merged && prs[0]!.body.includes('Files changed: 0.'), 'the record of the move was not merged');
+    assert.equal(await rev(`${prs[0]!.mergeCommit}^1`), tracked);
+    assert.equal(await rev(`${prs[0]!.mergeCommit}^{tree}`), await rev(`${tracked}^{tree}`));
+    assert.equal((await fixture.remote.run(['merge-base', '--is-ancestor', record, 'refs/heads/main'], { okCodes: [0, 1] })).code, 0);
+    // The run after the merge records the tracked branch's merge commit and writes nothing; no pull request follows.
+    const recorded = await sync();
+    assert.equal(recorded.result.exitCode, 0, recorded.result.stderr);
+    assert.deepEqual(recorded.writes, []);
+    assert.equal(world.github.pullRequests.length, 1);
+  }
+
   /** One more run changes nothing (I6). */
   async function assertIdempotent() {
     const before = await rev('refs/mdbisync/linear');
@@ -331,7 +357,66 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(report.sync?.updated, []);
     for (const document of before) assert.equal(document.projectId, 'project-archive');
     await assertConverged();
+    await settleMoveRecord();
     await assertIdempotent();
+  });
+
+  it('a synced move reaches the tracked branch, so a state ref moved back cannot read the old project again', async () => {
+    const before = await rev('refs/mdbisync/linear');
+    await commit({ 'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n` });
+    const moved = await sync();
+    assert.equal(moved.result.exitCode, 0, moved.result.stderr);
+    // The move changes no file: the sync still opens a pull request for its record and merges it with a merge commit.
+    await settleMoveRecord();
+    await assertIdempotent();
+
+    // Someone adds a document to the old project, and a writer of the repository moves the state ref back.
+    world.linear.documents.push({ ...world.linear.documents.find((d) => d.projectId === 'project-archive')!, projectId: 'project-api', id: 'doc-old-place', title: 'Old place', content: `# Old place\n\nNot for git. ${CANARY}\n`, createdAt: '2026-03-01T00:00:00Z', updatedAt: '2026-03-01T00:00:00Z' });
+    await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', before]);
+    const reads: string[] = [];
+    world.linear.beforeQuery = (operation, variables) => { if (operation === 'ListDocuments' || operation === 'GetDocuments') reads.push(JSON.stringify(variables)); };
+    await assert.rejects(sync(), /for eng\/notes\/ that is not a move the tracked branch made and the sync has not recorded yet/);
+    assert.deepEqual(reads.filter((read) => read.includes('project-api') || read.includes('doc-old-place')), []);
+    assert.equal(await rev('refs/mdbisync/linear'), before);
+    assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Not for git'])).stdout.toString('utf8'), '');
+  });
+
+  it('a move after an earlier record left the sync branch unmerged brings its own record to the pull request', async () => {
+    // A git edit is recorded, and the next run starts the sync branch at that record without a pull request.
+    await commit({ 'eng/notes/review.md': `# Review\n\nEdited in git. ${CANARY}\n` });
+    assert.equal((await sync()).result.exitCode, 0);
+    const started = await sync();
+    assert.equal(started.result.exitCode, 0, started.result.stderr);
+    assert.deepEqual(started.writes, []);
+    assert.equal(world.github.pullRequests.length, 0);
+    await commit({ 'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n` });
+    assert.equal((await sync()).result.exitCode, 0);
+    await settleMoveRecord();
+    await assertIdempotent();
+  });
+
+  it('a person who squash-merges the record of a move gets it again in a pull request the sync merges', async () => {
+    await commit({ 'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n` });
+    assert.equal((await sync()).result.exitCode, 0);
+    const record = await rev('refs/mdbisync/linear');
+    const opened = await sync();
+    assert.deepEqual(opened.writes, ['POST /pulls']);
+    // A person squash-merges it: the tracked branch gets the same tree, without the record.
+    const tracked = await rev('refs/heads/main');
+    const squash = await fixture.remote.text(['commit-tree', `${tracked}^{tree}`, '-p', tracked, '-m', 'Changes from Linear (#1)'], { env: { GIT_AUTHOR_NAME: 'Person', GIT_AUTHOR_EMAIL: 'person@example.test', GIT_COMMITTER_NAME: 'Person', GIT_COMMITTER_EMAIL: 'person@example.test' } });
+    await fixture.remote.run(['update-ref', 'refs/heads/main', squash.trim(), tracked]);
+    Object.assign(world.github.pullRequests[0]!, { state: 'closed', merged: true, mergeCommit: squash.trim() });
+    world.github.merge = (pr, sha) => mergeOnGitHub(fixture, pr, sha);
+    const again = await sync();
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.equal(world.github.pullRequests.length, 2);
+    assert.equal(world.github.pullRequests[1]!.merged, true);
+    assert.equal((await fixture.remote.run(['merge-base', '--is-ancestor', record, 'refs/heads/main'], { okCodes: [0, 1] })).code, 0);
+    assert.deepEqual((await sync()).writes, []);
+    await assertIdempotent();
+    assert.equal(world.github.pullRequests.length, 2);
   });
 
   it('L2-11: a change of front matter only writes nothing to Linear and is recorded', async () => {
@@ -857,7 +942,9 @@ describe('sync: the tracked branch to Linear', () => {
     // The next edit writes the same document; nothing is trashed or created.
     await commit({ 'eng/fieldnotes/review.md': `# Review\n\nLater edit. ${CANARY}` });
     const second = await sync();
-    assert.deepEqual(second.writes, ['UpdateDocument']);
+    // Before its README came, eng/fieldnotes/ had the team place of eng/: that counts as a move, so its record also
+    // goes to the tracked branch, in a pull request that changes no file.
+    assert.deepEqual(second.writes, ['POST /pulls', 'UpdateDocument']);
     assert.match(before.content ?? '', /Later edit/);
     await assertConverged();
   });

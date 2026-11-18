@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
 import { type Git, type Oid, commitTree } from '../state/index.ts';
-import { type Place } from '../mapping/index.ts';
-import { pendingMove, trackedPlaces } from './tracked-places.ts';
+import { type Place, loadMapping } from '../mapping/index.ts';
+import { pendingMove, recordsUnmergedMove, trackedPlaces } from './tracked-places.ts';
+import { MAPPING_FILE_BYTES } from '../mapping/blobs.ts';
 import { MERGE_RECORD_MESSAGE } from './write.ts';
 
 const team = (name: string) => `---\nlinear-team: ${name}\n---\n\n# Folder\n`;
@@ -139,6 +140,64 @@ describe('places the tracked branch named', () => {
       const otherRecord = await record([first], { 'other/page.md': 'Page.\n' });
       const merged = await commit([moved, otherRecord], { 'other/page.md': 'Page.\n' });
       assert.equal(await pendingMove(git, merged, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), true);
+    });
+  });
+
+  describe('a move whose record the tracked branch lacks', () => {
+    const unmerged = async (tracked: Oid, linear: Oid) => recordsUnmergedMove(git, tracked, linear, (await loadMapping(git, tracked)).zones);
+
+    it('is found once the state ref took in the move, and ends when its record is merged', async () => {
+      const first = await commit([], { 'docs/README.md': project('Payroll', 'ENG'), 'other/README.md': project('Other', 'ENG') });
+      const moved = await commit([first], { 'docs/README.md': project('Notes', 'ENG') });
+      const later = await commit([moved], { 'other/README.md': project('Other', 'ENG') + 'More.\n', 'docs/page.md': 'Page.\n' });
+      const before = await record([first], {});
+      assert.equal(await unmerged(later, before), false, 'the state ref has not taken in the move');
+      const synced = await commitTree(git, { parents: [before, later], base: later, changes: new Map(), message: MERGE_RECORD_MESSAGE, identity: IDENTITY });
+      assert.equal(await unmerged(later, synced), true);
+      const merged = await commit([later, synced], {});
+      assert.equal(await unmerged(merged, synced), false);
+      assert.equal(await pendingMove(git, merged, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), false);
+    });
+
+    it('takes the move from an inherited annotation', async () => {
+      const first = await commit([], { 'README.md': team('OPS'), 'docs/README.md': project('Notes'), 'docs/deep/README.md': '# Deep\n' });
+      const moved = await commit([first], { 'README.md': team('ENG') });
+      assert.equal(await unmerged(moved, await record([moved], {})), true);
+    });
+
+    it('finds none for folders that never had another place', async () => {
+      const unannotated = await commit([], { 'docs/README.md': '# Docs\n', 'other/README.md': project('Other', 'ENG') });
+      const annotated = await commit([unannotated], { 'docs/README.md': project('Notes', 'ENG') });
+      const edited = await commit([annotated], { 'docs/README.md': project('Notes', 'ENG') + 'More.\n' });
+      assert.equal(await unmerged(edited, await record([edited], {})), false);
+    });
+
+    it('reads a folder whose name holds the byte that marks a commit in the log', async () => {
+      const first = await commit([], { 'a\x01b/README.md': project('Payroll', 'ENG') });
+      const moved = await commit([first], { 'a\x01b/README.md': project('Notes', 'ENG') });
+      assert.equal(await unmerged(moved, await record([moved], {})), true);
+    });
+
+    it('reads no README over the mapping limit, as a pending move does not', async () => {
+      const first = await commit([], { 'docs/README.md': project('Payroll', 'ENG') + 'x'.repeat(MAPPING_FILE_BYTES) });
+      const moved = await commit([first], { 'docs/README.md': project('Notes', 'ENG') });
+      assert.equal(await pendingMove(git, moved, 'docs', inProject('ENG', 'Payroll'), inProject('ENG', 'Notes')), false);
+      assert.equal(await unmerged(moved, await record([moved], {})), false);
+    });
+
+    it('reads many large README versions in more than one batch', async () => {
+      let tip = await commit([], { 'docs/README.md': project('Payroll', 'ENG') });
+      // 70 versions of almost 1 MB each: more than the mapping's 64 MiB blob budget in all.
+      for (let version = 0; version < 70; version++) tip = await commit([tip], { 'docs/README.md': `${project('Notes', 'ENG')}${version} ${'x'.repeat(MAPPING_FILE_BYTES - 200)}` });
+      assert.equal(await unmerged(tip, await record([tip], {})), true);
+    });
+
+    it('finds the same moves as a pending move, past merges and removed files', async () => {
+      const base = await commit([], { 'a/README.md': team('ONE'), 'a/x/README.md': project('P'), 'b/README.md': project('B', 'ONE') });
+      const side = await commit([base], { 'a/x/README.md': project('Q'), 'b/README.md': null });
+      const merged = await commit([base, side], { 'a/x/README.md': project('Q'), 'b/README.md': null });
+      assert.equal(await pendingMove(git, merged, 'a/x', inProject('ONE', 'P'), inProject('ONE', 'Q')), true);
+      assert.equal(await unmerged(merged, await record([merged], {})), true);
     });
   });
 });

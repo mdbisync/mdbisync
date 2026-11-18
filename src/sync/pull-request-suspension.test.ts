@@ -69,6 +69,30 @@ describe('sync: pull request suspension', () => {
     assertNoRerun();
   });
 
+  it('a move whose record failed a check waits in the suspended lane, and no record-only pull request reopens meanwhile', async () => {
+    h.world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
+    await gitEdit('eng/notes/README.md', `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n`);
+    const moved = await sync();
+    assert.equal(moved.result.exitCode, 0, moved.result.stderr);
+    const record = await rev('refs/mdbisync/linear');
+    const opened = await sync();
+    assert.equal(opened.result.exitCode, 0, opened.result.stderr);
+    assert.equal(openPullRequests().length, 1);
+    checksOn(await rev(SYNC_BRANCH), [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure' }]);
+    const failed = await sync();
+    assert.equal(failed.result.exitCode, 0, failed.result.stderr);
+    assert.ok(failed.report.pullRequest?.suspended);
+    assert.equal((await h.fixture.remote.run(['merge-base', '--is-ancestor', record, 'refs/heads/mdbisync/suspended'], { okCodes: [0, 1] })).code, 0);
+    // While the suspended batch waits, the record waits with it: the normal pull request stays closed.
+    for (let run = 0; run < 3; run++) {
+      checksOn(await rev('refs/heads/mdbisync/suspended'), [{ name: CHECK_NAME, status: 'queued' }]);
+      const waiting = await sync();
+      assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+      assert.deepEqual(openPullRequests().map((pr) => pr.head), ['mdbisync/suspended']);
+      assert.equal(h.world.github.pullRequests.length, 2);
+    }
+  });
+
   it('repaints a suspended document still showing the red Cross of earlier versions, then restores its own icon', async () => {
     const path = 'eng/notes/plan.md';
     await editInLinear(path, `# Plan\n\nA new step. ${CANARY}\n`);

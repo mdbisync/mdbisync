@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { graphqlReadKey, LinearClient, LinearHttpError, LinearReads, withDeferredRunToken, withRunToken } from '../../src/linear/index.ts';
-import { FakeLinear } from './fake-linear.ts';
+import { FakeLinear, fakeDocument } from './fake-linear.ts';
 
 const credentials = { clientId: 'client-id', clientSecret: 'client-secret-value' };
 const QUERY = 'query Teams { teams { nodes { id } } }';
@@ -113,6 +113,33 @@ describe('Linear reads kept for the next step', () => {
       } finally { recording.close(); reads?.close(); }
     });
   }
+
+  it('keeps only the pages of a listing started again after Linear forgot its cursor', async () => {
+    let firstPages = 0;
+    let forgot = false;
+    fake.operations.set('ListDocuments', (request) => {
+      if (request.variables?.after === null) {
+        firstPages += 1;
+        // The first page changes between the two listings, with the same cursor.
+        const nodes = [fakeDocument('d1', { title: `Edit ${firstPages}` })];
+        return { body: { data: { documents: { nodes, pageInfo: { hasNextPage: true, endCursor: 'cursor-1' } } } } };
+      }
+      if (!forgot) {
+        forgot = true;
+        return { body: { errors: [{ message: 'cursor not found', extensions: { code: 'INPUT_ERROR' } }], data: null } };
+      }
+      return { body: { data: { documents: { nodes: [fakeDocument('d2')], pageInfo: { hasNextPage: false, endCursor: null } } } } };
+    });
+    let staged: string[] = [];
+    await record(async (client) => {
+      staged = (await client.listDocuments({ projectId: 'project-1' }, { pageSize: 1 })).map((d) => d.title);
+    });
+    assert.deepEqual(staged, ['Edit 2', 'Title d2']);
+    fake.received.length = 0;
+    const applied = await replay(async (client) => (await client.listDocuments({ projectId: 'project-1' }, { pageSize: 1 })).map((d) => d.title));
+    assert.deepEqual(applied, staged, 'the next step sees the listing the stage step used');
+    assert.deepEqual(paths(), [], 'every page answered from the record');
+  });
 
   it('answers each read once; a repeated read, a write and a read after the end reach Linear with one minted token', async () => {
     await record(async (client) => {

@@ -34,6 +34,12 @@ export const DEFAULT_PAGE_SIZE = MAX_PAGE_SIZE;
 export const CREATE_ATTEMPTS = 3;
 /** Longest wait for an upload's PUT to storage; files are at most a few MB. */
 export const UPLOAD_TIMEOUT_MS = 120_000;
+/**
+ * Listings of a document list: the first and two more. Linear sometimes
+ * forgets a page cursor between requests and answers a later page with
+ * `cursor not found`; the listing then starts again from the first page.
+ */
+export const LISTING_ATTEMPTS = 3;
 
 export interface LinearDocument {
   id: string;
@@ -613,7 +619,26 @@ export class LinearClient {
     return stored;
   }
 
+  /**
+   * Every document the filter matches, page by page. When Linear forgets the
+   * cursor of a later page, the listing restarts from the first page, at most
+   * `LISTING_ATTEMPTS` listings in all; the last refusal is then thrown as is,
+   * also when the client stopped meanwhile, so the run names Linear's detail.
+   */
   async #pagedDocuments(operation: string, filter: unknown, options: ListOptions): Promise<LinearDocument[]> {
+    for (let attempt = 1; ; attempt += 1) {
+      const kept = this.transport.reads?.mark();
+      try {
+        return await this.#listPages(operation, filter, options);
+      } catch (error) {
+        if (!isCursorNotFound(error) || attempt >= LISTING_ATTEMPTS || this.stopped) throw error;
+        // The pages of the abandoned listing are not what this run used: a later step must not replay them.
+        if (kept !== undefined) this.transport.reads?.dropSince(kept);
+      }
+    }
+  }
+
+  async #listPages(operation: string, filter: unknown, options: ListOptions): Promise<LinearDocument[]> {
     const result: LinearDocument[] = [];
     let after: string | null = null;
     do {
@@ -702,6 +727,11 @@ function succeeded<P extends { success: boolean }>(operation: string, payload: P
 function toDocument(raw: RawDocument): LinearDocument {
   const { project, team, trashed, ...rest } = raw;
   return { ...rest, projectId: project?.id ?? null, teamId: team?.id ?? null, trashed: trashed === true };
+}
+
+/** Linear no longer knows the page cursor the request sent. */
+function isCursorNotFound(error: unknown): boolean {
+  return error instanceof LinearGraphQLError && error.code === 'INPUT_ERROR' && /cursor not found/i.test(error.detail ?? '');
 }
 
 function clampPageSize(pageSize: number | undefined): number {

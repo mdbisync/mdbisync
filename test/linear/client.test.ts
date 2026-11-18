@@ -11,6 +11,7 @@ import {
   LinearReadBackError,
   LinearStoppedError,
   LinearTokenError,
+  LISTING_ATTEMPTS,
   RequestStats,
   mintAppToken,
   revokeToken,
@@ -361,6 +362,77 @@ describe('Linear client against a fake Linear', () => {
     assert.deepEqual(fake.received[0]?.variables?.filter, { team: { id: { eq: 'team-9' } } });
     assert.equal(fake.received[0]?.variables?.includeArchived, true);
     assert.equal(fake.received[0]?.variables?.first, 2);
+  });
+
+  /** Two-page listing whose later page Linear answers with `cursor not found` the first `forgets` times. */
+  function forgetfulListing(forgets: number): void {
+    let forgotten = 0;
+    fake.operations.set('ListDocuments', (request) => {
+      const after = request.variables?.after as string | null;
+      if (after !== null && forgotten < forgets) {
+        forgotten += 1;
+        return { headers: { 'x-request-id': `req-${forgotten}` }, body: { errors: [{ message: 'cursor not found', extensions: { code: 'INPUT_ERROR' } }], data: null } };
+      }
+      const page = after === null ? 1 : 2;
+      return {
+        body: {
+          data: {
+            documents: {
+              nodes: [fakeDocument(`p${page}`, { project: null })],
+              pageInfo: { hasNextPage: page === 1, endCursor: page === 1 ? 'cursor-1' : null },
+            },
+          },
+        },
+      };
+    });
+  }
+
+  it('restarts a listing from the first page when Linear forgets its cursor', async () => {
+    forgetfulListing(1);
+    const docs = await client().listDocuments({ teamId: 'team-9' }, { pageSize: 1 });
+    assert.deepEqual(docs.map((d) => d.id), ['p1', 'p2'], 'no document twice, none lost');
+    assert.deepEqual(fake.received.map((r) => r.variables?.after), [null, 'cursor-1', null, 'cursor-1']);
+  });
+
+  it('stops with Linear\'s detail when the cursor is forgotten on every listing', async () => {
+    forgetfulListing(LISTING_ATTEMPTS);
+    const error = await client().listDocuments({ teamId: 'team-9' }, { pageSize: 1 }).then(
+      () => assert.fail('expected the listing to stop'),
+      (e: unknown) => e,
+    );
+    assert.ok(error instanceof LinearGraphQLError && error.code === 'INPUT_ERROR');
+    assert.match(error.message, /ListDocuments: .*INPUT_ERROR \(HTTP 200, request req-3\): cursor not found/);
+    assert.equal(fake.graphqlCount(), 2 * LISTING_ATTEMPTS);
+  });
+
+  for (const [label, refusal] of [
+    ['another INPUT_ERROR', { message: 'Argument Validation Error', extensions: { code: 'INPUT_ERROR' } }],
+    ['cursor not found under another code', { message: 'cursor not found', extensions: { code: 'INTERNAL_SERVER_ERROR' } }],
+  ] as const) {
+    it(`does not restart a listing on ${label}`, async () => {
+      fake.operations.set('ListDocuments', (request) =>
+        request.variables?.after === null
+          ? { body: { data: { documents: { nodes: [fakeDocument('p1')], pageInfo: { hasNextPage: true, endCursor: 'cursor-1' } } } } }
+          : { body: { errors: [refusal], data: null } },
+      );
+      await assert.rejects(client().listDocuments({ projectId: 'project-1' }), LinearGraphQLError);
+      assert.equal(fake.graphqlCount(), 2);
+    });
+  }
+
+  it('does not restart a listing once the client has stopped', async () => {
+    fake.operations.set('ListDocuments', (request) =>
+      request.variables?.after === null
+        ? { body: { data: { documents: { nodes: [fakeDocument('p1')], pageInfo: { hasNextPage: true, endCursor: 'cursor-1' } } } } }
+        : {
+            headers: { 'x-ratelimit-requests-remaining': '0' },
+            body: { errors: [{ message: 'cursor not found', extensions: { code: 'INPUT_ERROR' } }], data: null },
+          },
+    );
+    const linear = client();
+    await assert.rejects(linear.listDocuments({ projectId: 'project-1' }), (e) => e instanceof LinearGraphQLError && /cursor not found/.test(e.message));
+    assert.ok(linear.stopped);
+    assert.equal(fake.graphqlCount(), 2);
   });
 
   it('lists full pages of 250 by default', async () => {
