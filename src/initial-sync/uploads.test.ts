@@ -13,9 +13,9 @@ import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { fixText } from '../format/index.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { Git } from '../state/index.ts';
+import { Git, commitTree } from '../state/index.ts';
 import { type FakeUpload, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
-import { type Fixture, countLocalLfsObjects, createFixture } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, countLocalLfsObjects, createFixture } from '../state/test-helpers.ts';
 import { DEFAULT_UPLOAD_LIMIT, findFileLinks, resolveTarget, restoreFileLinks } from './uploads.ts';
 
 const CANARY = 'kx-5d2a9e40';
@@ -113,6 +113,44 @@ describe('uploads of linked files in an initial sync', () => {
   };
   const document = (world: FakeWorld, title: string) => world.linear.documents.find((d) => d.title === title && d.trashed !== true);
   const uploadOf = (world: FakeWorld, content: Buffer) => world.linear.uploads.filter((upload) => upload.bytes?.equals(content));
+
+  for (const url of [
+    'https://evil.example/x',
+    'https://uploads.linear.app/workspace/diagram).png',
+    'https://uploads.linear.app/workspace/diagram>.png',
+    'https://uploads.linear.app/workspace/unrelated.png',
+  ]) {
+    it(`uploads the tracked attachment instead of reusing an unverified cache URL (${url})`, async () => {
+      const forged = await commitTree(fixture.remote, {
+        parents: [], base: null, identity: IDENTITY, message: 'Update upload cache',
+        changes: new Map([['uploads.json', JSON.stringify({ [sha(DIAGRAM)]: url })]]),
+      });
+      await fixture.remote.run(['update-ref', 'refs/mdbisync/uploads', forged]);
+      const world = fakeWorld();
+      const { result } = await run(world);
+      assert.equal(result.exitCode, 0, result.stderr);
+      const [diagram] = uploadOf(world, DIAGRAM);
+      assert.ok(diagram, 'the tracked file was uploaded');
+      assert.ok(document(world, 'a')?.content?.includes(`![Diagram](${diagram.assetUrl})`));
+      assert.ok(world.linear.documents.every(({content}) => !content?.includes(url)));
+      assert.equal((await run(world)).result.exitCode, 0);
+      assert.equal(uploadOf(world, DIAGRAM).length, 1, 'the verified upload is reused');
+    });
+  }
+
+  it('serializes and reuses an upload with parentheses in its URL', async () => {
+    const body = '![Chart](chart(1).png)\n';
+    await fixture.seed({ 'eng/notes/chart.md': body, 'eng/notes/chart(1).png': 'chart bytes' });
+    const world = fakeWorld();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const [upload] = uploadOf(world, Buffer.from('chart bytes'));
+    assert.ok(upload);
+    assert.ok(upload.assetUrl.endsWith('/chart(1).png'));
+    assert.equal(document(world, 'chart')?.content, `![Chart](<${upload.assetUrl}>)\n`);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/chart.md'), body.trimEnd());
+    assert.equal((await run(world)).result.exitCode, 0);
+    assert.equal(uploadOf(world, Buffer.from('chart bytes')).length, 1);
+  });
 
   it('resolves links in matching seeded documents before treating their restored Markdown as unchanged', async () => {
     // Seeded images can be byte-identical to the source; a seeded PDF list

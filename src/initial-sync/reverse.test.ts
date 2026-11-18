@@ -609,6 +609,19 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.linear.uploads.length, 0);
   });
 
+  it('leaves an initial image repair budget overrun out and imports another document', async () => {
+    const world = fakeWorld();
+    const references = '![Chart][image] '.repeat(300) + '\n\n[image]: ' + 'x'.repeat(4_000);
+    world.linear.documents = linearDocuments().map((doc) => doc.id === 'doc-runbook' ? {...doc, content: references} : doc);
+    const {result, report} = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{path:'eng/ops/runbook.md', rule:'image-repair-budget'}]);
+    const tree = await files('refs/mdbisync/linear');
+    assert.ok(!tree.includes('eng/ops/runbook.md'));
+    assert.ok(tree.includes('eng/notes/faq.md'));
+    assert.equal(world.linear.comments.size, 0);
+  });
+
   it('refuses unsupported attachment bytes equal to a removed Markdown page instead of linking that page', async () => {
     const world = fakeWorld();
     const bytes = Buffer.from(TREE['eng/backend/notes.md'] as string);

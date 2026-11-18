@@ -10,8 +10,8 @@ import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
 import { captureAssets, createAssetCapture as makeCapture, DownloadRetryError, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
 import { imageLinks } from './image-links.ts';
-import { destinations } from '../initial-sync/uploads.ts';
-import { fixText } from '../format/index.ts';
+import { destinations, withUploadSuffix } from '../initial-sync/uploads.ts';
+import { CONTENT_LIMIT, fixText } from '../format/index.ts';
 
 const captures: ReturnType<typeof makeCapture>[] = [];
 const createAssetCapture: typeof makeCapture = (...args) => { const capture = makeCapture(...args); captures.push(capture); return capture; };
@@ -43,6 +43,21 @@ it('downloads new uploads into the assets folder beside the document, reuses con
     const newHash = createHash('sha256').update(other).digest('hex');
     assert.deepEqual(fresh.files.get(`docs/assets/${newHash}.png`), other);
     assert.equal(fresh.uploads.get(newHash), otherUrl);
+  } finally { await fixture.cleanup(); }
+});
+
+it('localizes an upload in a document at the content limit', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md': 'Plan.'});
+    const git = await fixture.clone('assets');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const upload = '\n\n![](https://uploads.linear.app/a)';
+    const prefix = '\u{1F600}'.repeat(CONTENT_LIMIT - upload.length);
+    const capture = await captureAssets(git, resolveStateConfig({}), base, 'plan.md', prefix + upload, new Map(), async () => new Response(png));
+    const hash = createHash('sha256').update(png).digest('hex');
+    assert.equal(capture.body, `${prefix}\n\n![](assets/${hash}.png)`);
+    assert.ok(capture.body.length > 2 * CONTENT_LIMIT);
   } finally { await fixture.cleanup(); }
 });
 
@@ -118,6 +133,27 @@ it('restores cached upload spellings before restricting new downloads to the upl
     const image = await read('docs/plan.md', `!${current}`, new Map([[hash, url]]), previous);
     assert.equal(image.body, `[Image](<${url}?download=1#page=2>)\n`);
 
+  } finally { await fixture.cleanup(); }
+});
+
+it('keeps the previous attachment spelling and query when rebuilding a cache entry', async () => {
+  const fixture = await createFixture();
+  try {
+    const previous = '![Chart](<image.png?caption=a b#page=2>)\n';
+    const url = 'https://uploads.linear.app/workspace/image.png?caption=a%20b';
+    const hosted = `![Chart](<${url}#page=2>)\n`;
+    await fixture.seed({ 'docs/plan.md': previous, 'docs/image.png': png });
+    const git = await fixture.clone('rebuild-upload');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async (input) => {
+      assert.equal(String(input), url);
+      return new Response(png);
+    });
+    const result = await capture('docs/plan.md', hosted, new Map(), previous);
+    assert.equal(result.body, previous);
+    assert.deepEqual([...result.uploads.values()], [url]);
+    assert.equal(withUploadSuffix(url, '?caption=a b#page=2'), url + '#page=2');
+    assert.equal(withUploadSuffix(url, '?download=1#page=2'), url + '&download=1#page=2');
   } finally { await fixture.cleanup(); }
 });
 

@@ -10,6 +10,7 @@
 
 export const MESSAGES = {
   'assets.budget': 'attachment budget exceeded; reduce attachments and retry',
+  'assets.image-repair-budget': 'Markdown exceeds the image repair budget.',
   'assets.spool-changed': 'temporary attachment content changed; retry the run',
   'assets.spool-budget': 'temporary attachment storage budget exceeded; reduce attachments and retry',
   // The command line and the action.

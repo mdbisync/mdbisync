@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { lintInTree } from '../../src/format/index.ts';
 import { loadMapping } from '../../src/mapping/index.ts';
 import { type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../../src/setup/test-helpers.ts';
-import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef, listTree, readBlobs } from '../../src/state/index.ts';
+import { Git, PushedKey, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef, listTree, readBlobs } from '../../src/state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-helpers.ts';
 import { STAGE_FOLDER } from '../../src/sync/staged.ts';
 import { canaryNameLeaks } from './harness/security-canary.ts';
@@ -118,7 +118,7 @@ for (const file of process.argv.slice(2)) {
     const initial = {
       linear: await commitTree(setup, { parents: [fetched.tracked], base: fetched.tracked, changes: new Map(), message: 'Initial state', identity: IDENTITY }),
       ids: await commitIds(setup, null, new Map([['docs/plan.md', { id: 'plan' }]]), IDENTITY),
-      uploads: await commitUploads(setup, null, new Map(), IDENTITY),
+      uploads: await commitUploads(setup, null, new Map(), IDENTITY, new PushedKey('client-secret', 'owner/repo')),
     };
     const pushed = await pushAtomic(setup, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })));
     assert.equal(pushed.ok, true);

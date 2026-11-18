@@ -60,6 +60,7 @@ step with the bare message, without `error:`.
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
+| `Run this workflow on <branch>, not on <ref>.` | The sync or initial sync workflow ran on a branch other than the tracked branch (main), for example a dispatch on a feature branch, and stopped before any step got a token or a secret. Run it on the tracked branch. If the sync tracks a branch other than main, name it in the workflow's first step (`BRANCH`). |
 | `error: <message>` (the action: `<message>` alone) | An error stopped the run. Look the message up on this page. |
 
 ## Setup check
@@ -327,6 +328,7 @@ the reason is fixed. The summaries list each with its rules:
 | `title-not-a-path` | From Linear: the file the document's title names would map to a different document, for example because it lands in a folder another annotation owns. | Rename the document in Linear. |
 | `front-matter-boundary` | From Linear: the document's text starts with something that reads as front matter, so it would not stay the file's body. | Change the start of the document in Linear. |
 | `attachment-budget` | Attachment capture exceeded 32 unique links or 32 MiB per document, or 256 downloads or 256 MiB per run. Candidate files stay in bounded temporary storage. The document keeps its previous text and the capture cursor holds. | Reduce or split attachments and rerun. Other documents can still be captured; no budget rejection marks the document as unsafe. |
+| `image-repair-budget` | Markdown exceeds the image repair budget. Repair limits the source, resolved destinations, replacement text, and output to 1,000,000 UTF-16 code units each. It allows up to eight rounds of escaping. The document keeps its previous text and the capture cursor holds. | Simplify or split the document and rerun. |
 | `download-retry` | An upload download timed out, lost its connection, or returned 429 or a server error. The document stays out of this capture without a mark. | The next run retries automatically. |
 | `link-scheme` | Links must use http, https, mailto, a path or a fragment. | Replace the unsupported destination. Pull removes unsupported links together with their text; push lint refuses them. |
 | `capture-translation` | The run could not turn the document's text from Linear into the file's text. | Check the document in Linear for unusual content, or report it as a bug. |
