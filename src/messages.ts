@@ -205,13 +205,14 @@ export const MESSAGES = {
   'initial-sync.misplaced': 'the recorded tree maps {count} files to other documents',
   'initial-sync.over-upload-limit': '{files}: over the upload limit of {limit} bytes',
   'initial-sync.lfs-extensions': '{files}: stored with LFS extensions, which are not supported',
+  'initial-sync.link-provenance-unknown': '{files}: linked as a plain link from a document Linear holds, and the state that names the links Linear members wrote is lost',
   'initial-sync.upload-unreadable': '{file} cannot be read: {reason}',
   'initial-sync.uploads-not-prepared': 'the uploads transform was not prepared',
 
   // The sync.
   'sync.needs-initial-sync': 'run initial sync first',
   'sync.places-unresolved': 'the previously recorded document places could not be resolved',
-  'sync.recorded-place-unknown': 'the recorded state names a Linear place for {folder} that the tracked branch never named; the state refs were changed outside the sync',
+  'sync.recorded-place-unknown': 'the recorded state names a Linear place for {folder} that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync',
   'sync.lost-lease': 'state moved while recording document marks',
   'sync.no-lfs-pointer': 'LFS did not return a pointer',
   'sync.lfs-pointer-mismatch': 'LFS returned a pointer to other content than it was given',

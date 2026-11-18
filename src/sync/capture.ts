@@ -29,9 +29,12 @@ import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBloc
 import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
 import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
-import { trackedPlaces } from './tracked-places.ts';
+import { pendingMove, trackedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
+
+/** The subject of a capture commit on the `linear` ref: Linear members' text entering git. */
+export const CAPTURE_MESSAGE = 'Capture Linear changes';
 
 export interface CaptureOptions {
   config: StateConfig;
@@ -145,12 +148,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const recorded = await loadMapping(git, base);
     const zones = new Map(mapping.zones);
     let changedPlace = false;
-    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch named it.
+    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch allows it.
     const allowedPlace = trackedPlaces(git, fetched.tracked, mapping.zones);
     for (const [folder, old] of recorded.zones) {
       const current = zones.get(folder);
       if (current !== undefined && (old.team !== current.team || old.project !== current.project)) {
-        if (!await allowedPlace(folder, placeOf(old))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
+        // An old place is read only to finish the tracked branch's latest move of the folder, never a place it held before.
+        if (!await pendingMove(git, fetched.tracked, folder, placeOf(old), placeOf(current))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
         zones.set(folder, old);
         changedPlace = true;
       }
@@ -652,7 +656,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
-    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes' + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
+    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
     for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
       ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});
     }

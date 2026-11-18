@@ -87,6 +87,8 @@ export interface TransformContext {
   documentIds: ReadonlyMap<string, string>;
   /** File targets originating in repaired Linear path images, by document path. */
   plainFiles?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Documents whose plain-link provenance is lost: a non-image repository-file link leaves them out (`link-provenance-unknown`). */
+  unknownProvenance?: ReadonlySet<string>;
 }
 
 /** Runs the transforms in order. */

@@ -1,12 +1,16 @@
 // Which Linear places capture may read for the recorded state. The state refs
 // are not the tracked branch: anyone who can push to the repository can move
-// them, without the review its branch rules ask for. So a place that capture
-// finds only in the recorded state is read only when the tracked branch gave
-// it to that folder in some commit.
+// them, without the review its branch rules ask for. A folder annotation the
+// recorded state names is read only to finish the tracked branch's latest move
+// of that folder (`pendingMove`). Other recorded places, such as an excluded
+// file's last place, are read only when the tracked branch gave that place to
+// the folder in some commit (`trackedPlaces`).
 
 import { type Place, type Zone, collectAnnotations, nearestZone, placeOf, resolveZones } from '../mapping/index.ts';
 import { placeKey } from '../initial-sync/plan.ts';
 import { type Git, type Oid, readBlobs } from '../state/index.ts';
+import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
+import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
 /** Whether files of `folder` may be read from `place`. */
 export type PlaceCheck = (folder: string, place: Place) => Promise<boolean>;
@@ -27,17 +31,56 @@ export function trackedPlaces(git: Git, tracked: Oid, current: ReadonlyMap<strin
   };
 }
 
-async function named(git: Git, tracked: Oid, folder: string, place: Place): Promise<boolean> {
+/**
+ * Whether the recorded place `from` of `folder` is a move the tracked branch made and the sync has not recorded yet:
+ * `from` is the folder's place just before the tracked branch's first-parent line last changed it to `to`, and no
+ * commit the tracked branch holds that descends from that change is a sync record that gives the folder `to`. A record the
+ * sync merged in after the move took the new place, so a recorded state that still names the old one was moved back
+ * by someone else. A commit with a record's subject that someone else made can only make this answer no.
+ */
+export async function pendingMove(git: Git, tracked: Oid, folder: string, from: Place, to: Place): Promise<boolean> {
   const readmes = annotationChain(folder);
-  // Only the branch's own line counts: a merge is its result against the previous tip. The commits a merge brought in
-  // are not the branch's states, and the sync pull request brings in the state chain itself.
-  const log = await git.text(['--literal-pathspecs', 'log', '--first-parent', '--format=%H', tracked, '--', ...readmes]);
-  for (const commit of log.split('\n')) {
-    if (commit === '') continue;
-    const zone = nearestZone(await zonesAt(git, commit, readmes), folder);
+  const target = placeKey(to);
+  let change: string | undefined;
+  let before: Zone | undefined;
+  for await (const { commit, zone } of zonesAlong(git, tracked, readmes, folder)) {
+    if (zone === undefined || placeKey(placeOf(zone)) !== target) {
+      before = zone;
+      break;
+    }
+    change = commit;
+  }
+  if (change === undefined || before === undefined || placeKey(placeOf(before)) !== placeKey(from)) return false;
+  const subjects = new Set([MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, ...INITIAL_RECORD_SUBJECTS]);
+  // Only a record that took in the change counts: one from an earlier stay in the new place may be merged later.
+  const records = await git.text(['log', '--ancestry-path', '--format=%H %s', '--fixed-strings', ...[...subjects].map((subject) => `--grep=${subject}`), tracked, '--not', change]);
+  for (const line of records.split('\n')) {
+    const space = line.indexOf(' ');
+    if (space < 0 || !subjects.has(line.slice(space + 1))) continue;
+    const zone = nearestZone(await zonesAt(git, line.slice(0, space), readmes), folder);
+    if (zone !== undefined && placeKey(placeOf(zone)) === target) return false;
+  }
+  return true;
+}
+
+async function named(git: Git, tracked: Oid, folder: string, place: Place): Promise<boolean> {
+  for await (const { zone } of zonesAlong(git, tracked, annotationChain(folder), folder)) {
     if (zone !== undefined && placeKey(placeOf(zone)) === placeKey(place)) return true;
   }
   return false;
+}
+
+/**
+ * The folder's zone at each commit of the tracked branch's first-parent line that changed its README chain, newest
+ * first. Only the branch's own line counts: a merge is its result against the previous tip. The commits a merge
+ * brought in are not the branch's states, and the sync pull request brings in the state chain itself.
+ */
+async function* zonesAlong(git: Git, tracked: Oid, readmes: readonly string[], folder: string): AsyncGenerator<{ commit: string; zone: Zone | undefined }> {
+  const log = await git.text(['--literal-pathspecs', 'log', '--first-parent', '--format=%H', tracked, '--', ...readmes]);
+  for (const commit of log.split('\n')) {
+    if (commit === '') continue;
+    yield { commit, zone: nearestZone(await zonesAt(git, commit, readmes), folder) };
+  }
 }
 
 /** The README files whose annotations decide a folder's place: its own and its ancestors'. */

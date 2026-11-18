@@ -325,6 +325,7 @@ the reason is fixed. The summaries list each with its rules:
 | `stored-in-lfs` | The Markdown file itself is stored in Git LFS. | Store Markdown files in git directly. |
 | `upload-too-large` | The document links a file over Linear's 10 MB upload limit. | Make the file smaller, or link it from somewhere else. |
 | `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. For a new document left out after a confirmed missing object (404/410), also commit an edit to the document or linked file to retry it. |
+| `link-provenance-unknown` | An initial sync from git found a plain link to a repository file in a document Linear already holds, while the `linear` and `ids` state refs that record which links Linear members wrote are lost. The run cannot tell your link from one a Linear member wrote, so it uploads nothing for that document and leaves it out. | Write the link as an image if the file is meant to be shared, or remove it, then run the initial sync again. Until then each initial sync leaves the document out again. A repository with its state refs keeps uploading the links written in git. |
 | `image-blocked` | From Linear: an uploaded file cannot be read, is over 10 MB, redirects or has unsupported bytes; or a new ordinary link names a repository file other than a Markdown document by its relative path. The file keeps the tracked branch's text. | Upload the files in Linear instead of linking them. The first sync after the initial sync (once its pull request, if any, is merged) marks the document and comments which images to fix. After the fix the mark clears; the comment stays open as a record, and you can resolve it. |
 | `download-failed` | From Linear: a file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed in its `assets/` folder. The file keeps the tracked branch's text. | Nothing; the next sync reads the document again. If it repeats, check the run's log for the asset error. |
 | `security-hook` | From Linear: a hook marked `alias: security` flagged the document's title, its text or a file it embeds. In an initial sync, that text can hold the Linear URL of a linked document that was left out. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear, or bring in the linked document. |
@@ -365,7 +366,10 @@ The initial sync also lists:
 
 - `<files>: over the upload limit of <n> bytes` for `upload-too-large`;
 - `<files>: stored with LFS extensions, which are not supported` and
-  `<file> cannot be read: <reason>` for `upload-unreadable`.
+  `<file> cannot be read: <reason>` for `upload-unreadable`;
+- `<files>: linked as a plain link from a document Linear holds, and the
+  state that names the links Linear members wrote is lost` for
+  `link-provenance-unknown`.
 
 ## Other summary lines
 
@@ -499,7 +503,7 @@ document named.
 | `GitHub answered HTTP <status> while <what>`, `GitHub did not answer while <what>` | A GitHub request failed. `<what>` is one of: listing open pull requests, reading a pull request, opening a pull request, updating a pull request, closing a pull request, sending a request to the pull request API, reading the check runs of the sync pull request, reading the commit statuses of the sync pull request, reading the annotations of a failed check run, merging the sync pull request. A failed read of a check run's annotations does not stop the run: the suspended documents' comments name that check without them, and the run summary says so. |
 | `git <arguments> failed with exit code <n>: <output>` | A git command failed; its own output follows. Often a network problem or missing rights to push. |
 | `refusing to move <ref> to a commit that does not descend from its current value` | A state ref or the sync branch was changed by hand. Undo that change, or recover with an initial sync. |
-| `the recorded state names a Linear place for <folder> that the tracked branch never named; the state refs were changed outside the sync` | The state ref `linear` names a team or project for that folder (`<folder>` is the folder, or the repository root) that no commit of the tracked branch ever gave it. Capture reads such a place only when the tracked branch named it, so it stopped before reading any document. Find out who pushed to the state refs, then recover with an initial sync. |
+| `the recorded state names a Linear place for <folder> that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync` | The state ref `linear` names a team or project for that folder (`<folder>` is the folder, or the repository root) other than its current one. Capture reads an old place only to finish a move: it must be the folder's place just before the tracked branch last changed its annotation, and no sync merged into the tracked branch since may have recorded the new place. Otherwise capture stops before reading any document. A folder the tracked branch moved twice before a sync recorded the first move stops here too: set its annotation back to the place the sync recorded, let a sync run, then move the folder to its new place in one change. Otherwise find out who pushed to the state refs, then recover with an initial sync. |
 
 ## Errors that point to a bug
 
