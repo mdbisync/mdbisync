@@ -10,7 +10,7 @@ import { isMarkdownPath, placeOf, readAnnotation, findFrontMatter, TEAM_KEY, PRO
 import { checkMappingBudget, mapTree } from '../mapping/mapping.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
+import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
 import { joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
@@ -377,7 +377,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
     const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool, undefined, uploadAccessProbe(linear));
-    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; same: boolean } };
+    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; observed?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
     // A rejected target links to its accepted file, if it has one.
     const resetTargets = (rejected: ReadonlySet<string>, targets: Map<string, string>) => {
@@ -504,8 +504,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const {doc, path, head, assets} = candidate;
         const old = byId.get(id);
         let text: string;
+        let observed: string | undefined;
         try {
           text = textOf(candidate, documentIds);
+          if (assets.observedBody !== undefined) {
+            const observedCandidate = {...candidate, assets: {...assets, body: assets.observedBody}};
+            delete observedCandidate.compared;
+            observed = textOf(observedCandidate, documentIds);
+          }
         } catch (error) {
           if (!(error instanceof MarkdownLimitError)) throw error;
           result.leftOut.push({id, rule: 'markdown-complexity'});
@@ -514,8 +520,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           again = true;
           break;
         }
+        if (Buffer.byteLength(text) > MAPPING_FILE_BYTES || (observed !== undefined && Buffer.byteLength(observed) > MAPPING_FILE_BYTES)) {
+          result.leftOut.push({id, rule: 'blob-too-large'});
+          candidates.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
         candidate.files.set(path, text);
-        if (candidate.checked === text) continue;
+        if (candidate.checked === text && candidate.observed === observed) continue;
         let findings: SecurityFinding[] | null = [];
         if (!recordedAsIs(candidate, text)) {
           // Upload URLs also enter the cache ref. Scan the original text so
@@ -523,10 +536,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           const original = withNewUploadUrls(head + (doc.content ?? ''), assets.uploads, uploads) + ((assets.plainFiles?.length ?? 0) === 0 ? '' : `\n${assets.plainFiles!.join('\n')}\n`);
           if (original !== text) findings = await gate.check(new Map<string, FileContent>([[path, original], ...assets.files]));
           if (findings?.length === 0) findings = await gate.check(candidate.files);
-          if (findings?.length === 0 && assets.observedBody !== undefined) {
-            const observedCandidate = {...candidate, assets: {...assets, body: assets.observedBody}};
-            delete observedCandidate.compared;
-            const observed = textOf(observedCandidate, documentIds);
+          if (findings?.length === 0 && observed !== undefined) {
             if (observed !== text && observed !== original) findings = await gate.check(new Map([[path, observed], ...assets.files]));
             // The pull request step asks about the repaired text alone (`repairSet`): with the downloaded files
             // beside it, this run's check is another set, which the staged steps would not answer.
@@ -550,6 +560,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           break;
         }
         candidate.checked = text;
+        if (observed !== undefined) candidate.observed = observed;
       }
     }
     // The stage step stops here: the reads it kept end, and the rest of the run reads Linear itself.
@@ -624,10 +635,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
       const repaired = candidate.files.get(candidate.path)!;
-      if (candidate.assets.observedBody !== undefined) {
-        const observedCandidate = {...candidate, assets: {...candidate.assets, body: candidate.assets.observedBody}};
-        delete observedCandidate.compared;
-        const observed = textOf(observedCandidate, documentIds);
+      if (candidate.observed !== undefined) {
+        const observed = candidate.observed;
         candidate.files.set(candidate.path, observed);
         const deadUploads = candidate.assets.deadUploads ?? [];
         entry.pullRewrite = {hash: createHash('sha256').update(observed).digest('hex'), observedHash: createHash('sha256').update(candidate.doc.content ?? '').digest('hex'), replacement: String(repaired),
@@ -894,7 +903,7 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
   for (const item of result.leftOut) if (item.rule === 'attachment-budget') summary += `\nattachment-budget: ${JSON.stringify(item.id)}. Attachment count or bytes exceeded the document or run limit; reduce attachments and retry. The cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'image-repair-budget') summary += `\nimage-repair-budget: ${JSON.stringify(item.id)}. Image or link repair exceeded the document limit; simplify or split the document and retry. The cursor is held.`;
-  for (const item of result.leftOut) if (item.rule === 'blob-too-large') summary += `\nblob-too-large: ${JSON.stringify(item.id)}. The recorded file exceeds the byte limit and is left in place. The cursor is held.`;
+  for (const item of result.leftOut) if (item.rule === 'blob-too-large') summary += `\nblob-too-large: ${JSON.stringify(item.id)}. The Markdown file exceeds the byte limit. Any previous file stays in place and the cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;

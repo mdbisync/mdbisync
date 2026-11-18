@@ -314,7 +314,7 @@ describe('capture from Linear', () => {
   for (const [name, content, warns] of [
     ['at the content limit', 'a'.repeat(250_000), false],
     ['emoji below the code-point limit', '\u{1F600}'.repeat(125_001), false],
-    ['emoji above the code-point limit', '\u{1F600}'.repeat(250_001), true],
+    ['emoji text above the code-point limit but within the byte limit', '\u{1F600}'.repeat(150_000) + 'a'.repeat(100_001), true],
   ] as const) {
     it(`captures ${name} and reports write-back limits in code points`, async () => {
       world.linear.documents[0]!.content = content;
@@ -328,6 +328,25 @@ describe('capture from Linear', () => {
       assert.deepEqual(world.writes, []);
     });
   }
+
+  it('leaves a rendered file over the byte limit out and captures a later shorter edit', async () => {
+    const doc = world.linear.documents[0]!;
+    Object.assign(doc, { content: '\u{1F600}'.repeat(250_000), updatedAt: '2026-01-03T00:00:00Z' });
+    const prior = context.fetched.state;
+
+    const excluded = await run();
+    assert.equal(excluded.ok, true);
+    assert.deepEqual(excluded.leftOut, [{ id: 'plan', rule: 'blob-too-large' }]);
+    assert.deepEqual(excluded.state, prior);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+
+    await refresh();
+    Object.assign(doc, { content: 'Shorter edit.\n', updatedAt: '2026-01-04T00:00:00Z' });
+    const captured = await run();
+    assert.equal(captured.ok, true);
+    assert.deepEqual(captured.leftOut, []);
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nShorter edit.\n');
+  });
 
   it('never captures a place that only an altered state ref names', async () => {
     world.linear.projects.push({ id: 'project-payroll', name: 'Payroll', teamIds: ['team-eng'] });

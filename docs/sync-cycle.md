@@ -500,7 +500,7 @@ only when they apply:
 | --- | --- |
 | `attachment-budget: "<document id>"` | Attachment count or bytes exceeded the document or run limit. The document stays unchanged and the cursor holds; reduce or split attachments and rerun. See [files left out](troubleshooting.md#files-left-out). |
 | `image-repair-budget: "<document id>"` | Image or link repair exceeded the document limit. The document stays unchanged and the cursor holds. Simplify or split the document and rerun. See [files left out](troubleshooting.md#files-left-out). |
-| `blob-too-large: "<document id>"` | The recorded file exceeds the byte limit. The file and its mapping stay in place and the cursor holds. See [files left out](troubleshooting.md#files-left-out). |
+| `blob-too-large: "<document id>"` | The recorded or newly rendered Markdown file exceeds the byte limit. Any previous file and its mapping stay in place and the cursor holds. See [files left out](troubleshooting.md#files-left-out). |
 | `download-retry: "<document id>"` | [Files left out](troubleshooting.md#files-left-out); an upload download failed temporarily and the next run retries it without marking the document. |
 | Removal held for N files | [`removal-held`](troubleshooting.md#partial-sync-runs) |
 | The document id map was lost | [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync) |
