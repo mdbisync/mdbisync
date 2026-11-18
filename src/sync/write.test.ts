@@ -1020,8 +1020,6 @@ describe('sync: the tracked branch to Linear', () => {
     it(`preserves a Linear edit after capture when git would ${change} a document whose attachment is uncached`, async () => {
       const path = 'eng/notes/figure.md';
       const figure = await documentOf(path);
-      touch(figure);
-      assert.equal((await sync()).result.exitCode, 0);
       await clearUploadCache();
       const edited = `${figure.content}\n\nAdded in Linear. ${CANARY}\n`;
       afterCapture(() => { figure.content = edited; touch(figure); });
@@ -1033,6 +1031,35 @@ describe('sync: the tracked branch to Linear', () => {
       assert.deepEqual(report.sync?.skipped, [{ path, reason: 'edited-in-linear' }]);
       assert.equal(figure.trashed, undefined);
       assert.equal(figure.content, edited);
+    });
+  }
+
+  for (const concurrentEdit of [false, true]) {
+    it(`checks the document body returned when restoring its decoration (${concurrentEdit ? 'Linear edited' : 'body unchanged'})`, async () => {
+      const path = 'eng/notes/figure.md';
+      const figure = await documentOf(path);
+      const entries = await ids();
+      entries[path]!.saved = {icon: null, color: null};
+      figure.icon = 'Fire';
+      touch(figure);
+      const parent = await rev('refs/mdbisync/ids');
+      const marked = await commitTree(fixture.remote, { parents: [parent], base: parent, identity: IDENTITY,
+        changes: new Map([['ids.json', JSON.stringify(entries, null, 2) + '\n']]), message: 'Record saved decoration' });
+      await fixture.remote.run(['update-ref', 'refs/mdbisync/ids', marked]);
+      await fixture.remote.run(['update-ref', '-d', 'refs/mdbisync/uploads']);
+      await commit({[path]: null});
+      const edited = `${figure.content}\n\nAdded in Linear. ${CANARY}\n`;
+      if (concurrentEdit) world.linear.writes.reject = (operation) => {
+        if (operation === 'UpdateDocument') { figure.content = edited; touch(figure); }
+        return false;
+      };
+
+      const {result, report} = await sync();
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(figure.icon, null);
+      assert.deepEqual(report.sync?.skipped, concurrentEdit ? [{path, reason: 'edited-in-linear'}] : []);
+      assert.equal(figure.trashed, concurrentEdit ? undefined : true);
+      if (concurrentEdit) assert.equal(figure.content, edited);
     });
   }
 

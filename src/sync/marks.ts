@@ -54,8 +54,10 @@ export interface MarkOptions {
   linear: MarkClient;
   /** Current image and security-hook findings. Blocked takes precedence over conflict. */
   blocked?: readonly BlockedFinding[];
+  /** Include content in the response when restoring the saved decoration. */
+  includeClearedBody?: boolean;
   /** Must durably record the entry in ids before resolving. Never just queue it. */
-  persistEntry: (entry: IdEntry) => Promise<void>;
+  persistEntry: (entry: IdEntry, cleared?: LinearDocument) => Promise<void>;
   /**
    * The id of a new notice's comment; random by default. A caller that may run
    * again without the entry it saved (a rebuilt state) passes an id derived from
@@ -167,13 +169,14 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
 
   if (state === 'clear') {
     if (entry.saved === undefined) return result;
+    let cleared: LinearDocument | undefined;
     if (document.icon !== entry.saved.icon || document.color !== entry.saved.color) {
-      await linear.updateDocument(document.id, { icon: entry.saved.icon, color: entry.saved.color });
+      cleared = await linear.updateDocument(document.id, { icon: entry.saved.icon, color: entry.saved.color }, options.includeClearedBody);
       result.updated = true;
     }
     // A blocked notice is forgotten here, not resolved.
     const { saved: _saved, ...restored } = entry;
-    await persistEntry(restored);
+    await persistEntry(restored, cleared);
     result.entry = restored;
     return result;
   }

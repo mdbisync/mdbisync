@@ -689,8 +689,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         for (const {doc, path, blocked} of marked) {
           const before = ids.get(path)!;
           const outcome = await reconcileDocumentMark({document: doc, entry: before, linear, blocked,
+            includeClearedBody: before.observedDigest !== undefined,
             onConflictNotice: (change) => result.conflictNotices[change].push(path),
-            persistEntry: async (entry) => {
+            persistEntry: async (entry, cleared) => {
+              // Clearing a mark can advance updatedAt. Refresh the digest only from a response holding the
+              // same accepted body, because a Linear edit may have arrived while the mark was cleared.
+              if (cleared !== undefined && cleared.id === doc.id && cleared.content === doc.content
+                && cleared.title === doc.title && cleared.projectId === doc.projectId && cleared.teamId === doc.teamId
+                && !cleared.trashed && cleared.archivedAt === null) {
+                entry = {...entry, observedDigest: observedDigest(cleared)};
+              }
               ids.set(path, entry);
               const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, superseded, message:'Capture document marks'});
               const updated = {...next, ids:tip};
