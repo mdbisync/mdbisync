@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { beforeEach, afterEach, describe, it } from 'node:test';
-import { type Fixture, createFixture, IDENTITY, remoteRef } from '../state/test-helpers.ts';
+import { type Fixture, createFixture, IDENTITY, mergeOnGitHub, remoteRef } from '../state/test-helpers.ts';
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs, PushedKey } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { LinearClient, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
@@ -16,7 +16,7 @@ import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { LINK_VARIANT_LINKS, type LinkVariantBudget, capture, linkVariants, linkVariantBudget, prepareLfs } from './capture.ts';
 import { type FileContent, contentBytes } from '../state/content.ts';
 import { candidateKey } from './staged.ts';
-import { writeTrackedToLinear } from './write.ts';
+import { MERGE_RECORD_MESSAGE, writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
 import { IMAGE_REPAIR_INPUT_LIMIT } from './image-links.ts';
@@ -277,7 +277,7 @@ describe('capture from Linear', () => {
     const listedPlaces: unknown[] = [];
     const list = context.linear.listDocumentsInPlaces.bind(context.linear);
     context.linear.listDocumentsInPlaces = (places, options) => { listedPlaces.push(...places); return list(places, options); };
-    await assert.rejects(run(), /for docs\/ that the tracked branch never named/);
+    await assert.rejects(run(), /for docs\/ that is not a move the tracked branch made/);
     assert.ok(!JSON.stringify(listedPlaces).includes('project-payroll'), JSON.stringify(listedPlaces));
     assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), altered);
     assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Payroll body'])).stdout.toString('utf8'), '');
@@ -330,6 +330,38 @@ describe('capture from Linear', () => {
     const result = await run();
     assert.equal(result.ok, true);
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nEdited before the move.\n');
+  });
+
+  it('never reads a place the tracked branch moved a folder away from once a merged sync recorded the move', async () => {
+    // The tracked branch moves docs/ from "Field notes" to Archive, and a sync recording Archive is merged.
+    world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
+    world.linear.documents[0]!.content = 'Removed project body.\n';
+    world.linear.documents[0]!.updatedAt = '2026-02-01T00:00:00Z';
+    await fixture.seed({ 'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Archive\n---\n\n# Notes\n' });
+    await context.git.run(['fetch', '--quiet', 'origin']);
+    await refresh();
+    const before = context.fetched.state.linear!;
+    const moved = context.fetched.tracked;
+    const synced = await commitTree(context.git, { parents: [before, moved], base: moved, changes: new Map(), message: MERGE_RECORD_MESSAGE, identity: IDENTITY });
+    await context.git.run(['push', '--quiet', 'origin', `${synced}:refs/heads/sync`]);
+    assert.ok('sha' in await mergeOnGitHub(fixture, { head: 'sync', base: 'main', number: 1 }, synced));
+    // A writer of the repository moves the state ref back to the record that still names "Field notes".
+    await fixture.remote.run(['update-ref', stateRef(config, 'linear'), before]);
+    await context.git.run(['fetch', '--quiet', 'origin']);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const { targets } = await resolveTargets(context.linear, context.mapping.zones.values());
+    assert.ok(targets);
+    context.targets = targets;
+    const reads: unknown[] = [];
+    const list = context.linear.listDocumentsInPlaces.bind(context.linear);
+    context.linear.listDocumentsInPlaces = (places, options) => { reads.push(...places); return list(places, options); };
+    const get = context.linear.getDocuments.bind(context.linear);
+    context.linear.getDocuments = (ids) => { reads.push(...ids); return get(ids); };
+    await assert.rejects(run(), /for docs\/ that is not a move the tracked branch made and the sync has not recorded yet/);
+    assert.deepEqual(reads, []);
+    assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), before);
+    assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Removed project body'])).stdout.toString('utf8'), '');
   });
 
   it('uses the supplied snapshot between steps without changing the run context', async () => {
