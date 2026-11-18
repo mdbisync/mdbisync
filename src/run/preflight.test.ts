@@ -324,7 +324,7 @@ describe('preflight', () => {
       const forged = await commitTree(fixture.remote, { parents: [main], base: main, changes: new Map([['eng/x.md', '# X\n\nplanted\n']]), message: 'Capture Linear changes', identity: IDENTITY });
       // The sync's own signature, copied from a commit it wrote, does not cover another tree.
       const signed = await commitTree(fixture.remote, { parents: [main], base: main, changes: new Map([['eng/x.md', '# X\n']]), message: 'Capture Linear changes', identity: IDENTITY, sign: signObservation(key) });
-      const copied = await fixture.remote.text(['commit-tree', (await fixture.remote.text(['rev-parse', `${forged}^{tree}`])), '-p', main, '-m', (await fixture.remote.text(['show', '-s', '--format=%B', signed]))]);
+      const copied = await fixture.remote.text(['commit-tree', (await fixture.remote.text(['rev-parse', `${forged}^{tree}`])), '-p', main, '-m', (await fixture.remote.text(['show', '-s', '--format=%B', signed]))], { env: { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email } });
       try {
         for (const tip of [forged, copied]) {
           await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', tip]);

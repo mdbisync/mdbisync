@@ -25,7 +25,7 @@ describe('state: signed linear commits', () => {
     const [tree, ...parents] = (await fixture.remote.text(['show', '-s', '--format=%T %P', signed])).split(' ');
     const text = (await fixture.remote.run(['cat-file', 'commit', signed])).stdout.toString('utf8');
     const message = text.slice(text.indexOf('\n\n') + 2);
-    return fixture.remote.text(['commit-tree', change.tree ?? tree!, ...(change.parents ?? parents).flatMap((parent) => ['-p', parent]), '-F', '-'], { input: change.message?.(message) ?? message });
+    return fixture.remote.text(['commit-tree', change.tree ?? tree!, ...(change.parents ?? parents).flatMap((parent) => ['-p', parent]), '-F', '-'], { input: change.message?.(message) ?? message, env: { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email } });
   };
 
   it('takes a commit it signed, with its message and trailers as written', async () => {

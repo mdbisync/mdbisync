@@ -213,6 +213,9 @@ export async function mergeOnGitHub(fixture: Fixture, pr: { head: string; base: 
   return { sha: commit };
 }
 
+/** Commits by `IDENTITY`, whatever the machine's own git identity is. */
+const IDENTITY_ENV = { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email };
+
 /** The key the run tests' sync holds: their Linear client secret and repository. */
 export const TEST_PUSHED_KEY = new PushedKey('client-secret', 'owner/repo');
 
@@ -226,7 +229,7 @@ export async function signTip(git: Git, ref = 'refs/mdbisync/linear', key: Pushe
   const [tree, ...parents] = (await git.text(['show', '-s', '--format=%T %P', old])).split(' ').filter(Boolean) as [Oid, ...Oid[]];
   const raw = (await git.run(['cat-file', 'commit', old])).stdout.toString('utf8');
   const text = signObservation(key)(tree, parents, raw.slice(raw.indexOf('\n\n') + 2));
-  const signed = await git.text(['commit-tree', '--no-gpg-sign', tree, ...parents.flatMap((parent) => ['-p', parent]), '-F', '-'], { input: text });
+  const signed = await git.text(['commit-tree', '--no-gpg-sign', tree, ...parents.flatMap((parent) => ['-p', parent]), '-F', '-'], { input: text, env: IDENTITY_ENV });
   await git.run(['update-ref', ref, signed, old]);
   return signed;
 }
