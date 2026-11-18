@@ -1162,6 +1162,20 @@ describe('sync: the tracked branch to Linear', () => {
     });
   }
 
+  it('a file removed in git trashes its document when Linear only re-spells it and its files are downloaded again', async () => {
+    const path = 'eng/notes/figure.md';
+    const figure = await documentOf(path);
+    // Linear's spelling of the same document (a heading with trailing spaces, which `fix` trims), and no upload cache.
+    figure.content = (figure.content ?? '').replace('# Figure', '# Figure  ');
+    touch(figure);
+    await fixture.remote.run(['update-ref', '-d', 'refs/mdbisync/uploads']);
+    await commit({[path]: null});
+    const {result, report} = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.decided, []);
+    assert.equal(figure.trashed, true);
+  });
+
   it('a write Linear rejects is listed, and the run exits to be run again', async () => {
     world.linear.writes.reject = (operation) => operation === 'UpdateDocument';
     await commit({ 'eng/notes/review.md': `# Review\n\nEdited. ${CANARY}\n` });

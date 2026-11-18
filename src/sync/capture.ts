@@ -494,16 +494,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, candidate.path, map, seen);
         body = linksFromLinear(body, candidate.path, map, seen);
       }
-      // Linear's own spelling of the same document is no change: keep the file's text. A changed document is
-      // written in the form the `linear-format` hook leaves as it is; an unchanged one is not re-spelled (with new
-      // files to link it is rewritten as Linear has it), since a change of spelling alone would read as an edit in Linear.
+      // Linear's own spelling of the same document is no change: keep the file's text, also when its files are
+      // downloaded again (the same Markdown links the same paths). A change of spelling alone would read as an edit
+      // in Linear. A changed document is written in the form the `linear-format` hook leaves as it is.
       // Compared again only when other link targets change the body.
       if (candidate.compared?.body !== body) {
-        const {assets} = candidate;
-        const newAssets = assets.files.size > 0 || [...assets.uploads].some(([hash, url]) => uploads.get(hash) !== url);
         const unchanged = candidate.previousBody !== undefined && sameMarkdown(candidate.previousBody, body);
-        const text = unchanged && !newAssets ? joinFile(candidate.head, candidate.previousBody!)
-          : unchanged ? joinFile(candidate.head, body) : fixLinearText(joinFile(candidate.head, body), candidate.doc.content ?? '');
+        const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), candidate.doc.content ?? '');
         candidate.compared = {body, text};
       }
       return candidate.compared.text;
