@@ -461,9 +461,10 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
    * another document's file never fails this one.
    */
   const uploadMissing = async (path: string, targets: readonly string[]) => {
-    const { git, uploads } = context as TransformContext;
+    const { git, linear, uploads } = context as TransformContext;
     const batches = uploadBatches(filesToRead(targets, linked, uploads), linked);
     for (const [index, batch] of batches.entries()) {
+      if (linear.stopped !== undefined) throw new LinearStoppedError('FileUploads', linear.stopped);
       const own = await readFiles(batch.pending);
       if (!Array.isArray(own)) {
         // A failed read alone can be transient. Only the batch API's 404/410 confirms that the remote lacks it.

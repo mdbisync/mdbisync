@@ -115,9 +115,9 @@ describe('uploads of linked files in an initial sync', () => {
   const document = (world: FakeWorld, title: string) => world.linear.documents.find((d) => d.title === title && d.trashed !== true);
   const uploadOf = (world: FakeWorld, content: Buffer) => world.linear.uploads.filter((upload) => upload.bytes?.equals(content));
 
-  for (const { count, size, firstBatch } of [
-    { count: 100, size: 1024 * 1024, firstBatch: 20 },
-    { count: 7, size: DEFAULT_UPLOAD_LIMIT, firstBatch: 6 },
+  for (const { count, size, firstBatch, stopOnBudget } of [
+    { count: 100, size: 1024 * 1024, firstBatch: 20, stopOnBudget: true },
+    { count: 7, size: DEFAULT_UPLOAD_LIMIT, firstBatch: 6, stopOnBudget: false },
   ]) {
     it(`batches a document's ${count} attachments and reuses completed batches after a stop`, async (t) => {
       const attachments = Array.from({ length: count }, (_, index) => ({
@@ -145,7 +145,7 @@ describe('uploads of linked files in an initial sync', () => {
       const uploadFiles = LinearClient.prototype.uploadFiles;
       t.mock.method(LinearClient.prototype, 'uploadFiles', async function (this: LinearClient, inputs: Parameters<LinearClient['uploadFiles']>[0]) {
         uploadCalls.push({ names: inputs.map(({ filename }) => filename), bytes: inputs.reduce((sum, { bytes }) => sum + bytes.byteLength, 0) });
-        if (stopAfterFirstBatch && uploadCalls.length === 2) world.linear.writes.rateLimitAt = world.linear.writes.count + 1;
+        if (stopAfterFirstBatch && !stopOnBudget && uploadCalls.length === 2) world.linear.writes.rateLimitAt = world.linear.writes.count + 1;
         return uploadFiles.call(this, inputs);
       });
       const attachmentIds = new Set((await fixture.remote.text(['ls-tree', 'main:eng/notes'])).split('\n')
@@ -153,7 +153,14 @@ describe('uploads of linked files in an initial sync', () => {
         .map((line) => line.split(/[ \t]/)[2]!));
       assert.equal(attachmentIds.size, count);
 
-      const first = await run(world);
+      const fetcher = fakeFetch(world);
+      const first = await run(world, async (input, init) => {
+        const response = await fetcher(input, init);
+        if (stopOnBudget && String(input) === `${LINEAR_API}/graphql` && typeof init?.body === 'string' && JSON.parse(init.body).operationName === 'FileUploads') {
+          response.headers.set('x-ratelimit-requests-remaining', '1');
+        }
+        return response;
+      });
       const assertBounds = () => {
         assert.ok(uploadCalls.every(({ names, bytes }) => names.length <= 20 && bytes <= 64 * 1024 * 1024));
         assert.ok(readCalls.every((ids) => ids.filter((id) => attachmentIds.has(id)).length * size <= 64 * 1024 * 1024));
@@ -161,6 +168,10 @@ describe('uploads of linked files in an initial sync', () => {
       assertBounds();
       assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
       assert.equal(first.report.stoppedEarly, true);
+      assert.equal(first.report.stop?.kind, stopOnBudget ? 'budget-low' : 'rate-limited');
+      if (stopOnBudget) {
+        assert.equal(readCalls.flat().filter((id) => attachmentIds.has(id)).length, count + firstBatch, 'only the first batch is read for upload');
+      }
       assert.equal(document(world, '00-attachments'), undefined);
       const completed = attachments.slice(0, firstBatch);
       const cached = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
