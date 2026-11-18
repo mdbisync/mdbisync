@@ -322,7 +322,8 @@ remain after release; its presence alone does not mean a batch is on hold.
   bound to the repository and the branch; a record without a valid
   signature counts as none. Each commit the sync records in the
   `linear` state ref is signed the same way, and the sync builds only on
-  one it signed or one the tracked branch holds: otherwise it refuses
+  one it signed or one that holds exactly the files of a commit on the
+  tracked branch's own history: otherwise it refuses
   with `initial-sync-required` ([troubleshooting](troubleshooting.md#sync-state)).
   Keep that secret where only the sync's
   workflow reads it. When that head is more than 50 commits below, no

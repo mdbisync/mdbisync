@@ -3,11 +3,10 @@
 // sync proposes its tree to the tracked branch, so every `linear` commit the
 // sync writes carries a signature keyed by the sync's own secret: over its
 // tree, its parents and its message. The sync builds on a tip only when it
-// signed that tip, or when the tracked branch already holds it; a commit it
-// did not write never becomes the base of a signed one.
+// signed that tip, or when the tip holds a tree the tracked branch itself
+// held; a commit it did not write never becomes the base of a signed one.
 
 import { type Git, type Oid } from './git.ts';
-import { isAncestor } from './state.ts';
 import { type PushedKey } from './pushed.ts';
 
 const SIGNATURE = 'Sync-signature';
@@ -23,23 +22,29 @@ export function signObservation(key: PushedKey): (tree: Oid, parents: readonly O
 
 /** Whether the sync signed `commit` as a `linear` commit of this repository. */
 export async function signedObservation(git: Git, commit: Oid, key: PushedKey): Promise<boolean> {
+  // The tree and parents as git reads them, whatever other headers the object carries.
+  const [tree = '', parents = ''] = (await git.text(['show', '-s', '--format=%T%n%P', commit])).split('\n');
   const raw = (await git.run(['cat-file', 'commit', commit])).stdout.toString('utf8');
   const split = raw.indexOf('\n\n');
   if (split < 0) return false;
-  const headers = raw.slice(0, split).split('\n');
+  // The sync writes UTF-8 without an encoding header; with one, git reads another subject than the signed bytes.
+  if (raw.slice(0, split).split('\n').some((line) => line.startsWith('encoding '))) return false;
   const signed = SIGNED.exec(raw.slice(split + 2));
   if (signed === null) return false;
-  const tree = headers.find((line) => line.startsWith('tree '))?.slice(5);
-  const parents = headers.filter((line) => line.startsWith('parent ')).map((line) => line.slice(7));
-  return tree !== undefined && key.verifiesObservation(tree, parents, signed[1] as string, signed[2] as string);
+  return key.verifiesObservation(tree, parents.split(' ').filter(Boolean), signed[1] as string, signed[2] as string);
 }
 
 /**
  * Whether the sync may build on `linear`: it signed that commit, or the
- * tracked branch holds it, so its every file already passed the tracked
- * branch's rules. A ref the sync wrote before it signed its commits is
- * trusted once its pull request merged.
+ * commit holds a tree the tracked branch held on its first-parent history,
+ * whose every file passed that branch's rules. A commit merged in from
+ * another branch is not enough: a branch's intermediate commits were never
+ * checked as the tracked branch. A `linear` the sync wrote before it signed
+ * its commits counts when its record holds the tracked branch's tree.
  */
 export async function trustedObservation(git: Git, linear: Oid, tracked: Oid, key: PushedKey): Promise<boolean> {
-  return (await signedObservation(git, linear, key)) || (await isAncestor(git, linear, tracked));
+  if (await signedObservation(git, linear, key)) return true;
+  const tree = await git.text(['rev-parse', `${linear}^{tree}`]);
+  const trees = (await git.text(['log', '--first-parent', '--format=%T', tracked])).split('\n');
+  return trees.includes(tree);
 }

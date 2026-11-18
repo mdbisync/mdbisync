@@ -106,7 +106,7 @@ export async function runPreflight(
     // The sync builds only on a `linear` it wrote: a commit someone else pushed there would reach its pull request unchecked.
     const linear = fetched.state.linear;
     const untrusted = linear !== null && !(await trustedObservation(git, linear, fetched.tracked, pushedKey(inputs)));
-    const refusal = checkSyncState(fetched.state, inputs.state, unfinished, pending, untrusted);
+    const refusal = checkSyncState(fetched.state, inputs.state, { initialSyncUnfinished: unfinished, linearUntrusted: untrusted, initialPullRequestPending: pending });
     if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   } else if (options.refusePendingInitialPullRequest === true) {
     // A new initial sync to Linear may replace an abandoned snapshot once
@@ -117,7 +117,7 @@ export async function runPreflight(
         if (await isAncestor(git, record, fetched.sync)) pending = true;
       }
     }
-    const refusal = checkSyncState(fetched.state, inputs.state, false, pending);
+    const refusal = checkSyncState(fetched.state, inputs.state, { initialPullRequestPending: pending });
     if (refusal?.code === 'initial-pull-request-pending') return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   }
 

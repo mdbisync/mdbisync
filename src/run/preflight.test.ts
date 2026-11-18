@@ -332,7 +332,7 @@ describe('preflight', () => {
           const { result, report } = await run('sync', world);
           assert.equal(result.exitCode, NO_STATE_EXIT_CODE);
           assert.equal(report.code, 'initial-sync-required');
-          assert.match(result.stdout, /refs\/mdbisync\/linear is at a commit the sync did not write/);
+          assert.match(result.stdout, /refs\/mdbisync\/linear is at a commit the sync did not sign/);
           assert.deepEqual(world.requests, []);
           assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear']), tip);
           assert.equal((await fixture.remote.run(['rev-parse', '--verify', '--quiet', 'refs/heads/mdbisync/linear'], { okCodes: [0, 1] })).code, 1);

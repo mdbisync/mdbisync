@@ -148,9 +148,11 @@ export async function commitTree(git: Git, spec: CommitSpec): Promise<Oid> {
 
   // State commits are never signed, whatever the machine's commit.gpgSign says.
   const args = ['commit-tree', '--no-gpg-sign', tree];
-  for (const parent of spec.parents) args.push('-p', parent);
+  // Git stores a parent given twice once: a signature covers the parents as stored.
+  const parents = [...new Set(spec.parents)];
+  for (const parent of parents) args.push('-p', parent);
   args.push('-F', '-');
-  const text = spec.sign === undefined ? spec.message : spec.sign(tree, spec.parents, spec.message);
+  const text = spec.sign === undefined ? spec.message : spec.sign(tree, parents, spec.message);
   return git.text(args, {
     input: text.endsWith('\n') ? text : `${text}\n`,
     env: {

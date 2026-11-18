@@ -863,9 +863,9 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     return [...listed.values()].reduce<string | null>((a, b) => (a === null || b > a ? b : a), null);
   }
 
-  /** Whether two commits have the same tree, parents and subject, so the newer one adds nothing. */
+  /** Whether two commits have the same tree, parents and message (its signature included), so the newer one adds nothing. */
   async function sameRecord(a: Oid, b: Oid): Promise<boolean> {
-    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%s', oid]);
+    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%B', oid]);
     return (await describe(a)) === (await describe(b));
   }
 

@@ -55,13 +55,30 @@ describe('state: signed linear commits', () => {
     assert.ok(await signedObservation(fixture.remote, await copy(signed, {}), key));
   });
 
-  it('trusts a commit the tracked branch holds, signed or not, and no other unsigned one', async () => {
+  it('refuses a signed message under an encoding header, which makes git read another subject', async () => {
+    const signed = await commit({ 'docs/a.md': '# A\n' }, { sign: key });
+    const raw = (await fixture.remote.run(['cat-file', 'commit', signed])).stdout.toString('utf8');
+    const split = raw.indexOf('\n\n');
+    const encoded = await fixture.remote.text(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: `${raw.slice(0, split)}\nencoding UTF-7${raw.slice(split)}` });
+    assert.equal(await signedObservation(fixture.remote, encoded, key), false);
+  });
+
+  it('signs the parents git stores when one is given twice', async () => {
+    const signed = await commit({ 'docs/a.md': '# A\n' }, { parents: [main, main], sign: key });
+    assert.equal(await fixture.remote.text(['show', '-s', '--format=%P', signed]), main);
+    assert.ok(await signedObservation(fixture.remote, signed, key));
+  });
+
+  it('trusts an unsigned commit only when it holds a tree of the tracked branch\'s own history', async () => {
     const planted = await commit({ 'docs/x.md': '# Planted\n' });
     assert.ok(await trustedObservation(fixture.remote, main, main, key));
     assert.equal(await trustedObservation(fixture.remote, planted, main, key), false);
-    // Once the tracked branch merged it, a person's rules passed it.
-    const merged = await commitTree(fixture.remote, { parents: [main, planted], base: planted, changes: new Map(), message: 'Merge', identity: IDENTITY });
-    assert.ok(await trustedObservation(fixture.remote, planted, merged, key));
+    // A commit merged in from another branch was never checked as the tracked branch, though the branch holds it.
+    const merged = await commitTree(fixture.remote, { parents: [main, planted], base: main, changes: new Map([['docs/b.md', '# B\n']]), message: 'Merge', identity: IDENTITY });
+    assert.equal(await trustedObservation(fixture.remote, planted, merged, key), false);
+    // A record of the tracked branch's tree, as the sync's write step made it before it signed, whatever its parents.
+    const record = await commitTree(fixture.remote, { parents: [planted, main], base: main, changes: new Map(), message: 'Sync: merge', identity: IDENTITY, skipIfUnchanged: false });
+    assert.ok(await trustedObservation(fixture.remote, record, merged, key));
     assert.ok(await trustedObservation(fixture.remote, await commit({ 'docs/a.md': '# A\n' }, { sign: key }), main, key));
   });
 });

@@ -121,7 +121,7 @@ export const MESSAGES = {
   'setup.target-not-found': 'not found in Linear: {targets}',
   'setup.target-ambiguous': 'more than one match in Linear: {targets}',
   'setup.target-shared': 'more than one folder maps to {targets}',
-  'setup.linear-untrusted': '{ref} is at a commit the sync did not write: someone else pushed it, and its files would reach the sync pull request unchecked. Run initial sync again to record the state anew. The sync wrote nothing.',
+  'setup.linear-untrusted': '{ref} is at a commit the sync did not sign: someone else pushed it, or the sync wrote it before it signed its records or under another linear-client-secret. Its files could reach the sync pull request unchecked. Run initial sync again to record the state anew. The sync wrote nothing.',
   'setup.initial-sync-unfinished': 'An initial sync stopped before it finished: run it again with the same inputs first. The sync wrote nothing.',
   'setup.initial-sync-required': '{ref} does not exist: run initial sync first. The sync wrote nothing.',
   'setup.initial-pull-request-pending': 'The pull request of the initial sync from Linear is not merged into {tracked} yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch {sync} and run initial sync again to replace the snapshot. The sync wrote nothing.',

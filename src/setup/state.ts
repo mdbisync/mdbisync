@@ -14,24 +14,26 @@ export interface StateRefusal {
   message: string;
 }
 
+/** What the preflight read about the state, beside its refs. */
+export interface StateFindings {
+  /** The `ids` ref is at a progress commit of an initial sync that stopped; its map may hold only part of the documents. */
+  initialSyncUnfinished?: boolean;
+  /** The sync did not sign `linear`'s tip, and the tracked branch never held its tree. */
+  linearUntrusted?: boolean;
+  /**
+   * `linear`'s history holds an initial sync's record from Linear that the
+   * tracked branch has not taken yet, wherever the tip has moved since.
+   */
+  initialPullRequestPending?: boolean;
+}
+
 /**
- * Returns the refusal when the sync has no state, or null when it may go on.
- * `initialSyncUnfinished`: the `ids` ref is at a progress commit of an
- * initial sync that stopped; its map may hold only part of the documents.
- * `initialPullRequestPending`: `linear`'s history holds an initial sync's
- * record from Linear that the tracked branch has not taken yet, wherever the
- * tip has moved since.
- * `linearUntrusted`: the sync did not write `linear`'s tip, and the tracked
- * branch does not hold it.
+ * Returns the refusal when the sync has no state it may build on, or null
+ * when it may go on. An untrusted tip comes before a pending record: that
+ * record is read from the same history, which may not be the sync's.
  */
-export function checkSyncState(
-  state: StateSnapshot,
-  config: StateConfig,
-  initialSyncUnfinished = false,
-  initialPullRequestPending = false,
-  linearUntrusted = false,
-): StateRefusal | null {
-  if (initialSyncUnfinished) {
+export function checkSyncState(state: StateSnapshot, config: StateConfig, findings: StateFindings = {}): StateRefusal | null {
+  if (findings.initialSyncUnfinished === true) {
     return {
       code: 'initial-sync-required',
       message: message('setup.initial-sync-unfinished'),
@@ -43,16 +45,16 @@ export function checkSyncState(
       message: message('setup.initial-sync-required', { ref: stateRef(config, 'linear') }),
     };
   }
-  if (initialPullRequestPending) {
-    return {
-      code: 'initial-pull-request-pending',
-      message: message('setup.initial-pull-request-pending', { tracked: config.trackedBranch, sync: config.syncBranch }),
-    };
-  }
-  if (linearUntrusted) {
+  if (findings.linearUntrusted === true) {
     return {
       code: 'initial-sync-required',
       message: message('setup.linear-untrusted', { ref: stateRef(config, 'linear') }),
+    };
+  }
+  if (findings.initialPullRequestPending === true) {
+    return {
+      code: 'initial-pull-request-pending',
+      message: message('setup.initial-pull-request-pending', { tracked: config.trackedBranch, sync: config.syncBranch }),
     };
   }
   return null;
