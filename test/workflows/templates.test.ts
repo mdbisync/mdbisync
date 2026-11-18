@@ -108,8 +108,9 @@ describe('workflow templates', () => {
         assert.deepEqual(parsed.concurrency, { group: 'mdbisync', 'cancel-in-progress': false });
       });
 
-      it('mints the GitHub App token first and checks out without stored credentials', () => {
-        const [token, checkout] = steps(file);
+      it('refuses any branch but main, then mints the GitHub App token and checks out without stored credentials', () => {
+        const [guard, token, checkout] = steps(file);
+        assert.equal(guard?.name, 'Refuse a branch other than main');
         assert.equal(token?.uses, APP_TOKEN);
         assert.equal(token?.id, 'app-token');
         assert.deepEqual(token?.with, { 'client-id': '${{ vars.MDBISYNC_APP_CLIENT_ID }}', 'private-key': '${{ secrets.MDBISYNC_APP_PRIVATE_KEY }}' });
