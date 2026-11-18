@@ -33,6 +33,9 @@ import { trackedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
 
+/** The subject of a capture commit on the `linear` ref: Linear members' text entering git. */
+export const CAPTURE_MESSAGE = 'Capture Linear changes';
+
 export interface CaptureOptions {
   config: StateConfig;
   /** The state refs left by the previous step, used as push leases. */
@@ -648,7 +651,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
-    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes' + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
+    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
     for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
       ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});
     }

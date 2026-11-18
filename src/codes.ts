@@ -53,7 +53,7 @@ export const LEFT_OUT_RULES = ['duplicate-title', 'title-too-long'] as const;
 export type LeftOutRule = (typeof LEFT_OUT_RULES)[number];
 
 /** Why an initial sync to Linear leaves a document out while writing it. */
-export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'markdown-complexity', 'upload-too-large', 'upload-unreadable', 'changed-during-run'] as const;
+export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'markdown-complexity', 'upload-too-large', 'upload-unreadable', 'link-provenance-unknown', 'changed-during-run'] as const;
 export type LeftOutAtWriteRule = (typeof LEFT_OUT_AT_WRITE_RULES)[number];
 
 /** Every rule a synchronized file can be left out by, in a plan or a sync. */

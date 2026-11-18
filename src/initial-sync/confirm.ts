@@ -38,6 +38,7 @@ import { type RunContext } from '../run/preflight.ts';
 import {
   type CommitIdentity,
   type Git,
+  type IdEntry,
   type IdMap,
   type Oid,
   type RefUpdate,
@@ -61,6 +62,8 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, placeKey, planInitialSync } from './plan.ts';
 import { type Place } from '../mapping/index.ts';
 import { readPlanSources, unchangedSince } from './run.ts';
+import { provenanceUnknownTrailer, readPlainLinkProvenance } from './provenance.ts';
+import { LINK_PROVENANCE_UNKNOWN } from './uploads.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { detectConflicts } from '../merge/index.ts';
@@ -218,6 +221,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const expected: StateSnapshot = { ...fetched.state };
   const resumed = (await readInitialSyncProgress(git, expected.ids)) !== null;
   const previous = await readIds(git, expected.ids);
+  // Which links came from Linear, rebuilt by document identity before anything is uploaded, and kept in the ids recorded.
+  const provenance = await readPlainLinkProvenance(git, expected, fetched.tracked, plan);
+  const withPlainFiles = (path: string, entry: IdEntry): IdEntry => {
+    const plain = provenance.plainFiles.get(path);
+    return plain === undefined ? entry : { ...entry, plainFiles: [...plain].sort(compare) };
+  };
   /** What the stopped run sent, by path, when this run resumes it; and what this run has sent. */
   const writtenBefore = resumed ? await readWrittenHashes(git, expected.ids) : new Map<string, string>();
   const sentHashes = new Map(writtenBefore);
@@ -255,7 +264,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const rememberedDocuments = new Map<string, LinearDocument>();
   const remember = (path: string, document: LinearDocument) => {
     const before = previous.get(path);
-    ids.set(path, before !== undefined && before.id === document.id && before.saved !== undefined ? { id: document.id, saved: before.saved } : { id: document.id });
+    ids.set(path, withPlainFiles(path, before !== undefined && before.id === document.id && before.saved !== undefined ? { id: document.id, saved: before.saved } : { id: document.id }));
     stored.set(path, document.content ?? '');
     rememberedDocuments.set(path, document);
   };
@@ -360,11 +369,13 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   for (const entry of plan.create) {
     const chosen = saved.get(entry.path);
     documentIds.set(entry.path, chosen !== undefined && !taken.has(chosen) ? chosen : newId());
-    ids.set(entry.path, { id: documentIds.get(entry.path) as string });
+    ids.set(entry.path, withPlainFiles(entry.path, { id: documentIds.get(entry.path) as string }));
   }
 
   try {
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads, documentIds });
+    for (const transform of transforms) {
+      await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads, documentIds, plainFiles: provenance.plainFiles, unknownProvenance: provenance.unknown });
+    }
 
     let written = 0;
     let beforeWriteReached = false;
@@ -472,7 +483,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         }
         if (error instanceof LinearReadBackError) {
           // Written, but what Linear stored is unknown: keep the id, and let the next run read the content.
-          ids.set(path, { id: error.document.id });
+          ids.set(path, withPlainFiles(path, { id: error.document.id }));
           unpushed += 1;
         }
         if (error instanceof LinearError) {
@@ -566,7 +577,18 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       }
     }
     const tracked = fetched.tracked;
-    let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: RECORD_MESSAGE, identity, skipIfUnchanged: false });
+    // The record carries the plain links' provenance too, so a sync that rebuilds lost ids keeps it.
+    // A document left out for unknown provenance stays unknown: a later recovery leaves it out again.
+    const unproven = result.leftOutAtWrite.flatMap(({ path, rule }) => {
+      const id = documentIds.get(path);
+      return rule === LINK_PROVENANCE_UNKNOWN && id !== undefined ? [provenanceUnknownTrailer(id)] : [];
+    });
+    const plainTrailers = [
+      ...[...finalIds.values()].flatMap((entry) => (entry.plainFiles ?? []).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`)),
+      ...unproven,
+    ].sort(compare);
+    const recordMessage = RECORD_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
+    let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false });
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;
 
     // New documents left out while writing keep their chosen ids, which other documents may link to.
@@ -607,9 +629,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     return { linear: linearCommit, moved: linearCommit !== expected.linear, reformatted, parents, hasTrackedParent };
   }
 
-  /** Whether two record commits have the same tree and parents, so the newer one adds nothing. */
+  /** Whether two record commits have the same tree, parents and message, so the newer one adds nothing. */
   async function sameRecord(a: Oid, b: Oid): Promise<boolean> {
-    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P', oid]);
+    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%B', oid]);
     return (await describe(a)) === (await describe(b));
   }
 }
