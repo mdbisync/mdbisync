@@ -187,9 +187,11 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
       await sandbox.cache.run(['init', '--quiet', '--bare']);
       const engine = await fixture.clone('engine');
       const person = await sandbox.clone(names, join(fixture.root, 'person'));
+      const engineApp = { clientId: 'client-id', clientSecret: 'client-secret' };
+      const credentials = { linearClientId: engineApp.clientId, linearClientSecret: engineApp.clientSecret, githubToken: 'app-token' };
       const ctx = {
         scenario, names, runDir: fixture.root, sandbox, live: {
-          sandbox, rest, repository: 'owner/repo', githubToken: 'app-token', githubTokenSource: 'app', app, editors: { 'editor-a': app, 'editor-b': app },
+          sandbox, rest, repository: 'owner/repo', githubToken: 'app-token', githubTokenSource: 'app', app, engineApp, editors: { 'editor-a': app, 'editor-b': app },
           tree: { paths: new Map(Object.keys(documents).map((p) => [p, p])), rewritten: new Map([[`${folder}/README.md`, readme]]), projects: new Map([['PROJECT_ENG_1', 'Field notes']]), teams: new Set(['ENG']), teamZones: new Map() },
           manifest: { files: Object.keys(documents).map((path) => ({ path, synced: true, kind: 'markdown', class: null, canary: null })) },
           projects: new Map([['PROJECT_ENG_1', { id: 'project-api', name: 'Field notes' }]]), teams: new Map([['ENG', { id: 'team-eng', key: 'ENG' }]]), documentUrlBase: 'https://linear.app/example-team/document',
@@ -203,7 +205,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         const summaryFile = join(fixture.root, 'summary.md');
         await rm(reportFile, { force: true });
         await rm(summaryFile, { force: true });
-        const env = engineInputs({ names, command, cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: 'client-id', linearClientSecret: 'client-secret', githubToken: 'app-token' }, reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: {}, timeoutMs: 30_000, linearUrl: LINEAR_API, mergeGraceSeconds: Number(args.mergeGraceSeconds ?? 0), ...(typeof args.checkDeadlineMinutes === 'number' ? { checkDeadlineMinutes: args.checkDeadlineMinutes } : {}), direction: 'git-to-linear', confirm: true });
+        const env = engineInputs({ names, command, cwd: engine.dir, repository: 'owner/repo', credentials, reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: {}, timeoutMs: 30_000, linearUrl: LINEAR_API, mergeGraceSeconds: Number(args.mergeGraceSeconds ?? 0), ...(typeof args.checkDeadlineMinutes === 'number' ? { checkDeadlineMinutes: args.checkDeadlineMinutes } : {}), direction: 'git-to-linear', confirm: true });
         await watchRun(ctx, { throughProxy: false }, async () => {
           const beforeDocuments = new Map(world.linear.documents.map((d) => [d.id, { ...d }]));
           const beforeComments = new Map([...world.linear.comments].map(([id, c]) => [id, { ...c }]));
@@ -263,7 +265,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         ctx.observations.set('pause.ownedBefore', new Set(ownedDocuments(ctx.owned).keys()));
         const runId = ctx.engine.results.length;
         const started = startEngine({
-          names, command: 'sync', cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: 'client-id', linearClientSecret: 'client-secret', githubToken: 'app-token' },
+          names, command: 'sync', cwd: engine.dir, repository: 'owner/repo', credentials,
           reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: { ...ctx.engine.env, MDBISYNC_GITHUB_API_URL: `${server.url}/github` },
           timeoutMs: ENGINE_TIMEOUT_MS, linearUrl: `${server.url}/linear`, mergeGraceSeconds: Number(args.mergeGraceSeconds ?? 0),
           ...(typeof args.checkDeadlineMinutes === 'number' ? { checkDeadlineMinutes: args.checkDeadlineMinutes } : {}), signal: t.signal,
