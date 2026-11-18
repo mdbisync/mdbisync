@@ -7,8 +7,10 @@
 // the folder in some commit (`trackedPlaces`).
 
 import { type Place, type Zone, collectAnnotations, nearestZone, placeOf, resolveZones } from '../mapping/index.ts';
+import { MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
 import { placeKey } from '../initial-sync/plan.ts';
-import { type Git, type Oid, readBlobs } from '../state/index.ts';
+import { type Git, type Oid } from '../state/index.ts';
+import { parseTreeListing } from '../state/objects.ts';
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
@@ -57,7 +59,9 @@ export async function pendingMove(git: Git, tracked: Oid, folder: string, from: 
   for (const line of records.split('\n')) {
     const space = line.indexOf(' ');
     if (space < 0 || !subjects.has(line.slice(space + 1))) continue;
-    const zone = nearestZone(await zonesAt(git, line.slice(0, space), readmes), folder);
+    const zones = await zonesAt(git, line.slice(0, space), readmes);
+    if (zones === undefined) return false;
+    const zone = nearestZone(zones, folder);
     if (zone !== undefined && placeKey(placeOf(zone)) === target) return false;
   }
   return true;
@@ -79,7 +83,8 @@ async function* zonesAlong(git: Git, tracked: Oid, readmes: readonly string[], f
   const log = await git.text(['--literal-pathspecs', 'log', '--first-parent', '--format=%H', tracked, '--', ...readmes]);
   for (const commit of log.split('\n')) {
     if (commit === '') continue;
-    yield { commit, zone: nearestZone(await zonesAt(git, commit, readmes), folder) };
+    const zones = await zonesAt(git, commit, readmes);
+    yield { commit, zone: zones === undefined ? undefined : nearestZone(zones, folder) };
   }
 }
 
@@ -91,14 +96,12 @@ function annotationChain(folder: string): string[] {
   return readmes;
 }
 
-async function zonesAt(git: Git, commit: string, readmes: readonly string[]): Promise<Map<string, Zone>> {
-  const { stdout } = await git.run(['--literal-pathspecs', 'ls-tree', '-z', '--full-tree', commit, '--', ...readmes]);
-  const entries = stdout.toString('utf8').split('\0').filter((record) => record !== '').flatMap((record) => {
-    const tab = record.indexOf('\t');
-    const [, type, oid] = record.slice(0, tab).split(' ');
-    return type === 'blob' ? [{ path: record.slice(tab + 1), oid: oid! }] : [];
-  });
-  const blobs = await readBlobs(git, entries.map((entry) => entry.oid));
+async function zonesAt(git: Git, commit: string, readmes: readonly string[]): Promise<Map<string, Zone> | undefined> {
+  const { stdout } = await git.run(['--literal-pathspecs', 'ls-tree', '-z', '-l', '--full-tree', commit, '--', ...readmes], { maxOutputBytes: MAPPING_TREE_BYTES });
+  const entries = parseTreeListing(stdout).filter((entry) => entry.type === 'blob');
+  // An unreadable annotation could override an inherited place.
+  if (entries.some((entry) => !readableBlob(entry))) return undefined;
+  const blobs = await new MappingBlobBudget().read(git, entries);
   const texts = new Map(entries.map((entry) => [entry.path, blobs.get(entry.oid)!.toString('utf8')]));
   return resolveZones(collectAnnotations(texts).annotations).zones;
 }

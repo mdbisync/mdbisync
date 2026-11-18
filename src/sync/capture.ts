@@ -6,9 +6,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { isMap, parseDocument, stringify } from 'yaml';
-import { isMarkdownPath, loadMapping, placeOf, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
+import { isMarkdownPath, placeOf, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
+import { checkMappingBudget, mapTree } from '../mapping/mapping.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
+import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
 import { fixLinearText, joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
@@ -17,7 +19,7 @@ import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { matchesObservedBody, observedDigest, readRecorded, recordedTime } from './recorded.ts';
@@ -145,7 +147,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   let published = false;
   try {
     // Capture the old place before a git annotation change moves its documents.
-    const recorded = await loadMapping(git, base);
+    const blobBudget = new MappingBlobBudget();
+    const entries = await listTree(git, base, MAPPING_TREE_BYTES);
+    const recorded = await mapTree(git, entries, blobBudget);
     const zones = new Map(mapping.zones);
     let changedPlace = false;
     // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch allows it.
@@ -167,7 +171,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     if (state.ids === null) {
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
-      const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
+      const paths = new Set(recorded.documents.map((document) => document.path));
+      const texts = await blobBudget.read(git, entries.filter((entry) => paths.has(entry.path)));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
       const plainProvenance = await readPlainFileProvenance(git, base);
       for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) {
@@ -178,9 +183,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
     const cursor = await readCaptureCursor(git, state.ids);
-    const entries = await listTree(git, base);
-    const textEntries = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
-    const blobs = await readBlobs(git, textEntries.map((entry) => entry.oid));
+    const recordedBlobs = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
+    const textEntries = recordedBlobs.filter(readableBlob);
+    const unreadIds = new Set(recordedBlobs.filter((entry) => !readableBlob(entry)).map((entry) => ids.get(entry.path)!.id));
+    for (const id of unreadIds) result.leftOut.push({id, rule: 'blob-too-large'});
+    const blobs = await blobBudget.read(git, textEntries);
     const previous = new Map(textEntries.map((entry) => [entry.path, blobs.get(entry.oid)!]));
     const byId = new Map([...ids].map(([path, entry]) => [entry.id, { path, entry }]));
     // A new document's id is reserved for its path until it is mapped. Documents an earlier run wrote may link to it, and
@@ -234,6 +241,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const gone = new Set<string>();
     const held = new Set<string>();
     for (const id of notFound) {
+      if (unreadIds.has(id)) continue;
       const place = recordedPlace(byId.get(id)!.path);
       if ((place !== undefined && answered.has(place)) || (heldBefore.has(id) && answered.size > 0)) gone.add(id);
       else held.add(id);
@@ -251,7 +259,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     const retained = new Map<string, string>();
     for (const [id, old] of byId) {
-      if (!excludedPath(old.path)) continue;
+      if (unreadIds.has(id) || !excludedPath(old.path)) continue;
       const baseline = await lastSynchronized(git, base, old.path, linear.facts, sides);
       baselines.set(old.path, baseline);
       const doc = listed.get(id);
@@ -315,8 +323,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Re-read bodies when a path changes so those inbound links are translated too.
     if (gone.size > 0 || [...listed.values()].some((doc) => {
       const old = byId.get(doc.id);
-      return old !== undefined && (!live(doc) || destination(doc, occupied) !== old.path);
+      return old !== undefined && !unreadIds.has(doc.id) && (!live(doc) || destination(doc, occupied) !== old.path);
     })) selected = [...listed.values()];
+    selected = selected.filter((doc) => !unreadIds.has(doc.id));
     const documents = new Map<string, LinearDocument>([...listed].filter(([, doc]) => placed(doc)));
     const work = new Map<string, LinearDocument>();
     // A document moved out of the places between the listing and this read is not taken into the map.
@@ -336,7 +345,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     // Only files already present in the branch are link targets until their
     // candidates pass. A blocked rename continues to point at its old file.
-    const documentIds = new Map([...ids].filter(([path]) => previous.has(path)).map(([path, entry]) => [path, entry.id]));
+    const documentIds = new Map([...ids].filter(([path, entry]) => previous.has(path) || unreadIds.has(entry.id)).map(([path, entry]) => [path, entry.id]));
     // A reserved id names its path too: a link written to a new document that is not created yet stays relative.
     for (const [id, path] of reservedById) if (!documentIds.has(path)) documentIds.set(path, id);
     for (const id of gone) {
@@ -374,7 +383,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
     const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool, undefined, uploadAccessProbe(linear));
-    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; text: string } };
+    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; observed?: string; compared?: { body: string; text: string } };
     const candidates = new Map<string, Candidate>();
     // A rejected target links to its accepted file, if it has one.
     const resetTargets = (rejected: ReadonlySet<string>, targets: Map<string, string>) => {
@@ -503,8 +512,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const {doc, path, head, assets} = candidate;
         const old = byId.get(id);
         let text: string;
+        let observed: string | undefined;
         try {
           text = textOf(candidate, documentIds);
+          if (assets.observedBody !== undefined) {
+            const observedCandidate = {...candidate, assets: {...assets, body: assets.observedBody}};
+            delete observedCandidate.compared;
+            observed = textOf(observedCandidate, documentIds);
+          }
         } catch (error) {
           if (!(error instanceof MarkdownLimitError)) throw error;
           result.leftOut.push({id, rule: 'markdown-complexity'});
@@ -513,8 +528,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           again = true;
           break;
         }
+        if (Buffer.byteLength(text) > MAPPING_FILE_BYTES || (observed !== undefined && Buffer.byteLength(observed) > MAPPING_FILE_BYTES)) {
+          result.leftOut.push({id, rule: 'blob-too-large'});
+          candidates.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
         candidate.files.set(path, text);
-        if (candidate.checked === text) continue;
+        if (candidate.checked === text && candidate.observed === observed) continue;
         let findings: SecurityFinding[] | null = [];
         if (!recordedAsIs(candidate, text)) {
           // Upload URLs also enter the cache ref. Scan the original text so
@@ -522,10 +544,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           const original = withNewUploadUrls(head + (doc.content ?? ''), assets.uploads, uploads) + ((assets.plainFiles?.length ?? 0) === 0 ? '' : `\n${assets.plainFiles!.join('\n')}\n`);
           if (original !== text) findings = await gate.check(new Map<string, FileContent>([[path, original], ...assets.files]));
           if (findings?.length === 0) findings = await gate.check(candidate.files);
-          if (findings?.length === 0 && assets.observedBody !== undefined) {
-            const observedCandidate = {...candidate, assets: {...assets, body: assets.observedBody}};
-            delete observedCandidate.compared;
-            const observed = textOf(observedCandidate, documentIds);
+          if (findings?.length === 0 && observed !== undefined) {
             if (observed !== text && observed !== original) findings = await gate.check(new Map([[path, observed], ...assets.files]));
             // The pull request step asks about the repaired text alone (`repairSet`): with the downloaded files
             // beside it, this run's check is another set, which the staged steps would not answer.
@@ -549,6 +568,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           break;
         }
         candidate.checked = text;
+        if (observed !== undefined) candidate.observed = observed;
       }
     }
     // The stage step stops here: the reads it kept end, and the rest of the run reads Linear itself.
@@ -623,10 +643,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
       const repaired = candidate.files.get(candidate.path)!;
-      if (candidate.assets.observedBody !== undefined) {
-        const observedCandidate = {...candidate, assets: {...candidate.assets, body: candidate.assets.observedBody}};
-        delete observedCandidate.compared;
-        const observed = textOf(observedCandidate, documentIds);
+      if (candidate.observed !== undefined) {
+        const observed = candidate.observed;
         candidate.files.set(candidate.path, observed);
         const deadUploads = candidate.assets.deadUploads ?? [];
         entry.pullRewrite = {hash: createHash('sha256').update(observed).digest('hex'), observedHash: createHash('sha256').update(candidate.doc.content ?? '').digest('hex'), replacement: String(repaired),
@@ -659,6 +677,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
+    if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
     for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
       ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});
     }
@@ -900,6 +919,7 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
   for (const item of result.leftOut) if (item.rule === 'attachment-budget') summary += `\nattachment-budget: ${JSON.stringify(item.id)}. Attachment count or bytes exceeded the document or run limit; reduce attachments and retry. The cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'image-repair-budget') summary += `\nimage-repair-budget: ${JSON.stringify(item.id)}. Image or link repair exceeded the document limit; simplify or split the document and retry. The cursor is held.`;
+  for (const item of result.leftOut) if (item.rule === 'blob-too-large') summary += `\nblob-too-large: ${JSON.stringify(item.id)}. The Markdown file exceeds the byte limit. Any previous file stays in place and the cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;

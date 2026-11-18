@@ -45,7 +45,7 @@ export const ANNOTATION_PROBLEM_KINDS = ['invalid-annotation', 'project-without-
 export type AnnotationProblemKind = (typeof ANNOTATION_PROBLEM_KINDS)[number];
 
 /** Why a `.md` file is not synchronized at all. */
-export const UNSYNCED_REASONS = ['outside-annotations', 'not-a-regular-file', 'binary', 'stored-in-lfs'] as const;
+export const UNSYNCED_REASONS = ['outside-annotations', 'not-a-regular-file', 'binary', 'stored-in-lfs', 'blob-too-large'] as const;
 export type UnsyncedReason = (typeof UNSYNCED_REASONS)[number];
 
 /** Why the initial sync's plan or the sync leaves a mapped file out, besides the `lint` rules. */
@@ -67,7 +67,7 @@ export const RECORD_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget'
 export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
 
 /** Why the sync's capture leaves a Linear document out. */
-export const CAPTURE_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'image-repair-budget', 'capture-translation', 'download-retry', 'security-unchecked'] as const;
+export const CAPTURE_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'image-repair-budget', 'blob-too-large', 'capture-translation', 'download-retry', 'security-unchecked'] as const;
 export type CaptureLeftOutRule = (typeof CAPTURE_LEFT_OUT_RULES)[number];
 
 /** The rule a file name read from Linear follows. */

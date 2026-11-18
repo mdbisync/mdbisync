@@ -8,9 +8,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readAnnotation } from '../mapping/index.ts';
+import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
+import { mapTree, requireReadableAnnotations } from '../mapping/mapping.ts';
+import { type TreeEntry } from '../state/objects.ts';
 import { lintInTree, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
-import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
+import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping } from '../mapping/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
@@ -346,8 +349,12 @@ export interface Side {
  * The same rules as the initial sync's plan.
  */
 async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts, observedRepairs?: IdMap): Promise<Side> {
-  const mapping = await loadMapping(git, treeish);
-  const blobs = await readBlobs(git, mapping.documents.map((document) => document.oid));
+  const entries = await listTree(git, treeish, MAPPING_TREE_BYTES);
+  requireReadableAnnotations(entries);
+  const budget = new MappingBlobBudget();
+  const mapping = await mapTree(git, entries, budget);
+  const paths = new Set(mapping.documents.map((document) => document.path));
+  const blobs = await budget.read(git, entries.filter((entry) => paths.has(entry.path)));
   const files = new Map<string, SideFile>();
   const leftOut: Array<{ path: string; rules: FileLeftOutRule[] }> = [];
   const leave = (path: string, rules: FileLeftOutRule[]) => leftOut.push({ path, rules: [...new Set(rules)].sort() });
@@ -421,8 +428,12 @@ export async function lastSynchronized(
 async function linkedFiles(git: Git, commits: readonly Oid[], path: string): Promise<string[]> {
   const linked = new Set<string>();
   for (const commit of commits) {
-    const blob = await git.run(['cat-file', 'blob', `${commit}:${path}`], { okCodes: [0, 128] });
+    const object = `${commit}:${path}`;
     // The commit removed the file: that version links nothing.
+    const result = await git.run(['cat-file', '-s', object], { okCodes: [0, 128], maxOutputBytes: 64 });
+    const size = Number(result.stdout.toString('utf8'));
+    if (result.code !== 0 || !Number.isSafeInteger(size) || size < 0 || size > MAPPING_FILE_BYTES) continue;
+    const blob = await git.run(['cat-file', 'blob', object], { okCodes: [0, 128], maxOutputBytes: MAPPING_FILE_BYTES });
     if (blob.code !== 0) continue;
     try {
       for (const link of findFileLinks(path, splitFile(blob.stdout.toString('utf8')).body, () => true)) {
@@ -490,10 +501,15 @@ export interface Resolved {
 async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolved> {
   const out: Resolved = { tree: input.tree, unresolved: [], moves: new Map(), comments: new Map(), restores: new Map(), marked: [], decided: [] };
   if (input.unmerged.length === 0) return out;
-  const [baseFiles, gitFiles, linearFiles] = await Promise.all([filesOf(git, input.base), filesOf(git, input.tracked), filesOf(git, input.linear)]);
+  const entriesByPath = async (side: Oid) => new Map((await listTree(git, side, MAPPING_TREE_BYTES)).map((entry) => [entry.path, entry]));
+  const [baseFiles, gitFiles, linearFiles] = await Promise.all([entriesByPath(input.base), entriesByPath(input.tracked), entriesByPath(input.linear)]);
   // Only documents the sync maps get marker paragraphs; other files (unmapped Markdown, images) stay unresolved.
   const mapped = new Set<string>();
-  for (const side of [input.base, input.tracked, input.linear]) for (const document of (await loadMapping(git, side)).documents) mapped.add(document.path);
+  for (const side of [baseFiles, gitFiles, linearFiles]) {
+    const entries = [...side.values()];
+    requireReadableAnnotations(entries);
+    for (const document of (await mapTree(git, entries, new MappingBlobBudget())).documents) mapped.add(document.path);
+  }
   const linearRenames = await renamesBetween(git, input.base, input.linear);
   const pathById = new Map([...input.ids].map(([path, entry]) => [entry.id, path]));
   const knownId = async (path: string) => input.knownId?.(path);
@@ -524,13 +540,15 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
   const removedCarriers = new Set<string>();
   const annotationOnly = async (path: string): Promise<boolean> => {
     if (path !== 'README.md' && !path.endsWith('/README.md')) return false;
-    const text = ((await readBlobs(git, [linearFiles.get(path) as Oid])).get(linearFiles.get(path) as Oid) as Buffer).toString('utf8');
+    const entry = linearFiles.get(path)!;
+    if (!readableBlob(entry)) return false;
+    const text = (await new MappingBlobBudget().read(git, [entry])).get(entry.oid)!.toString('utf8');
     if (splitFile(text).body.trim() !== '') return false;
     const annotation = readAnnotation(path, text);
     return 'annotation' in annotation && annotation.annotation !== null;
   };
 
-  const groups: Array<{ basePath: string | null; gitPath: string | null; linearPath: string | null; involved: string[] }> = [];
+  const groups: Array<{ base: TreeEntry | undefined; tracked: TreeEntry | undefined; linear: TreeEntry | undefined; involved: string[] }> = [];
   const seen = new Set<string>();
   for (const path of input.unmerged) {
     if (seen.has(path)) continue;
@@ -542,26 +560,29 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
     // A path of the group that one side holds for another document (git renamed onto a file Linear added) is a
     // collision of two documents: merging them would lose one, so it stays unresolved.
     const collides = involved.some((entry) => (linearFiles.has(entry) && entry !== linearPath && !removedCarriers.has(entry)) || (gitFiles.has(entry) && entry !== gitPath));
-    if (!collides && involved.every((entry) => mapped.has(entry) || !input.unmerged.includes(entry))) groups.push({ basePath, gitPath, linearPath, involved });
+    const base = basePath === null ? undefined : baseFiles.get(basePath);
+    const tracked = gitPath === null ? undefined : gitFiles.get(gitPath);
+    const linear = linearPath === null ? undefined : linearFiles.get(linearPath);
+    if (!collides && [base, tracked, linear].every((entry) => entry === undefined || readableBlob(entry)) &&
+      involved.every((entry) => mapped.has(entry) || !input.unmerged.includes(entry))) groups.push({ base, tracked, linear, involved });
     // Every path of the group waits, so neither document is trashed or overwritten until a person sorts it out.
     else out.unresolved.push(...involved);
   }
 
-  const blobs = await readBlobs(git, groups.flatMap(({ basePath, gitPath, linearPath }) => [
-    ...(basePath === null ? [] : [baseFiles.get(basePath) as Oid]),
-    ...(gitPath === null ? [] : [gitFiles.get(gitPath) as Oid]),
-    ...(linearPath === null ? [] : [linearFiles.get(linearPath) as Oid]),
-  ]));
-  const version = (files: Map<string, Oid>, path: string | null): Version | null =>
-    path === null ? null : { path, text: (blobs.get(files.get(path) as Oid) as Buffer).toString('utf8') };
+  const blobs = await new MappingBlobBudget().read(git, groups.flatMap(({ base, tracked, linear }) =>
+    [base, tracked, linear].filter((entry) => entry !== undefined)));
+  const version = (entry: TreeEntry | undefined): Version | null =>
+    entry === undefined ? null : { path: entry.path, text: blobs.get(entry.oid)!.toString('utf8') };
 
   const changes = new Map<string, string | null>();
-  for (const { basePath, gitPath, linearPath, involved } of groups) {
+  for (const { base, tracked, linear, involved } of groups) {
+    const basePath = base?.path ?? null;
+    const linearPath = linear?.path ?? null;
     const versions = {
       // Both sides added the path: an empty base, so the whole text is merged.
-      base: version(baseFiles, basePath) ?? { path: involved[0] as string, text: '' },
-      git: version(gitFiles, gitPath),
-      linear: version(linearFiles, linearPath),
+      base: version(base) ?? { path: involved[0] as string, text: '' },
+      git: version(tracked),
+      linear: version(linear),
     };
     let result: StructuralResult;
     let gone: StructuralSummary | undefined;
