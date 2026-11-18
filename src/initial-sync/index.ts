@@ -57,7 +57,7 @@ export {
   INITIAL_RECORD_SUBJECTS,
   confirmInitialSync,
 } from './confirm.ts';
-export { type BodyTransform, LeaveOutError, type TransformContext, type TransformInput, restoreBody, transformBody } from './transform.ts';
+export { type BodyTransform, LeaveOutError, type TransformContext, type TransformInput, relativeFileBlocks, restoreBody, transformBody } from './transform.ts';
 export {
   DEFAULT_UPLOAD_LIMIT,
   type FileLink,

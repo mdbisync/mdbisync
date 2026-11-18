@@ -11,7 +11,7 @@ import { checkMappingBudget, mapTree } from '../mapping/mapping.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
-import { fixLinearText, joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
+import { fixLinearText, joinFile, linkedFileCheck, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -501,7 +501,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // Compared again only when other link targets change the body.
       if (candidate.compared?.body !== body) {
         const unchanged = candidate.previousBody !== undefined && sameMarkdown(candidate.previousBody, body);
-        const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), candidate.doc.content ?? '');
+        const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), candidate.doc.content ?? '', linkedFileCheck(candidate.path, (file) => mapping.files.has(file)));
         candidate.compared = {body, text};
       }
       return candidate.compared.text;

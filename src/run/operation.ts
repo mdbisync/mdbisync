@@ -15,6 +15,7 @@ import {
   documentLinks,
   planFromRepository,
   planLinearToGitFromRepository,
+  relativeFileBlocks,
   renderConfirmed,
   renderDryRun,
   renderReverseConfirmed,
@@ -140,8 +141,9 @@ async function runWithSecurity(
   const pullRequestWrites = new Map<string, number>();
   const refsBefore = movedRefs(options.git);
 
-  // Uploads rewrite links to files that are not Markdown; document links, links to synchronized documents.
-  const transforms = () => [uploadsTransform({ config: inputs.state }), documentLinks()];
+  // Uploads rewrite links to files that are not Markdown; document links, links to synchronized documents; a file
+  // block left with a relative link is sent as Linear stores it.
+  const transforms = () => [uploadsTransform({ config: inputs.state }), documentLinks(), relativeFileBlocks()];
 
   const gitToLinear = async (context: RunContext, confirm: boolean) => {
     if (confirm) {

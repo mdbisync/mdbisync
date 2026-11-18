@@ -1065,7 +1065,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Written documents: the merge result's front matter and what Linear stored.
     for (const [path, { content, sent }] of stored) {
       const file = merge.result.get(path) as SideFile;
-      const text = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path, content, sent));
+      const text = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path, content, sent, context.mapping.files));
       if (resultFiles.get(path) !== undefined && text === textOf(file)) continue;
       changes.set(path, text);
     }

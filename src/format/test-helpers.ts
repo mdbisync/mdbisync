@@ -5,12 +5,17 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { type CommandResult, runFix } from './command.ts';
 
-/** What the `linear-format` hook (`mdbisync fix`) does to a file holding `text` at `path`, alone in a folder. */
-export function hookRun(path: string, text: string): CommandResult {
+/**
+ * What the `linear-format` hook (`mdbisync fix`) does to a file holding `text` at `path`, in a folder that holds
+ * only it and the other `files` (their text by path).
+ */
+export function hookRun(path: string, text: string, files: Readonly<Record<string, string>> = {}): CommandResult {
   const dir = mkdtempSync(join(tmpdir(), 'format-hook-'));
   try {
-    mkdirSync(join(dir, dirname(path)), { recursive: true });
-    writeFileSync(join(dir, path), text);
+    for (const [file, content] of Object.entries({ ...files, [path]: text })) {
+      mkdirSync(join(dir, dirname(file)), { recursive: true });
+      writeFileSync(join(dir, file), content);
+    }
     return runFix([path], dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });

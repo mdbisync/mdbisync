@@ -142,7 +142,11 @@ Blocks:
   starts with `/` or leads outside the repository), the sync cannot upload it and Linear keeps a
   plain link, so `fix` writes `* [Name](<path>)`. `fix` resolves links from
   the folder it runs in, which for the hook is the repository's top
-  folder.
+  folder. A link the sync keeps plain though its file is in the
+  repository (an image typed in Linear with a repository path, which the
+  sync turns into a link and never uploads) also gets the file block form
+  in git, as the hook writes it, and the sync sends it to Linear as the
+  plain link `* [Name](<path>)`, the form Linear stores for it.
 
 Inline text:
 

@@ -420,19 +420,52 @@ export function imageDestination(url: string): string {
  * A text made from a Linear document's `content`, in the form `fix` (and so
  * the `linear-format` hook) leaves unchanged. Linear's own text is not always
  * that form: it can store a table cell with a trailing space (`| a  |`).
- * Pass the whole file, front matter included, as the hook sees it.
+ * Pass the whole file, front matter included, as the hook sees it, and
+ * `inRepository`, whether a relative destination names a file of the
+ * repository the file is written to (`linkedFileCheck`), as the hook checks it.
  *
  * Only a re-spelling is taken: when `fix` would change the document itself
  * (it writes a setext heading's two lines as one), the file would no longer
  * hold what Linear holds, and the text stays as it is.
  */
-export function fixLinearText(text: string, content: string): string {
+export function fixLinearText(text: string, content: string, inRepository: (url: string) => boolean): string {
   // A relative link or image still in Linear's content was not uploaded, so
   // its file is not there: Linear keeps such a link as a link, not as a file
   // block, and so does a repair that turns such an image into a link.
   const notUploaded = relativeUrls(content, new Set(['link', 'image']));
-  const fixed = fixText(text, { linkedFileExists: (url) => !notUploaded.has(url) });
-  return fixed === text || sameMarkdown(splitFile(fixed).body, splitFile(text).body) ? fixed : text;
+  const linear = { linkedFileExists: (url: string) => !notUploaded.has(url) };
+  const fixed = fixText(text, linear);
+  if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body)) return text;
+  // The hook cannot tell: it writes a list item holding only a link to a file
+  // of the repository as a file block. Linear stores a file block it gets for
+  // a file it holds no upload of as that link again, so the file takes the
+  // hook's form. Only such blocks may differ from Linear's form: written
+  // back in that form, the text must be Linear's form again.
+  if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]!) && inRepository(url))) return fixed;
+  const hooked = fixText(text, { linkedFileExists: (url) => !notUploaded.has(url) || inRepository(url) });
+  return fixText(hooked, linear) === fixed ? hooked : fixed;
+}
+
+/**
+ * The body as Linear stores it after a write, for file blocks whose link is
+ * still relative: Linear holds no upload of such a file, and stores the
+ * block as the link on the item's line (`* [Name](<path>)`), so the text sent
+ * reads as the same Markdown as what Linear then holds. Every other text
+ * stays as written.
+ */
+export function relativeFileBlocksAsLinks(body: string): string {
+  const joins: Array<{ from: number; to: number }> = [];
+  visit(parse(body), (node) => {
+    if (node.type !== 'listItem' || node.children.length !== 1) return;
+    const [paragraph] = node.children;
+    if (paragraph?.type !== 'paragraph' || attachmentLink(paragraph) === undefined) return;
+    // A file block: the marker alone on its line, and the link on the next.
+    const gap = /[ \t]*\r?\n[ \t>]*$/.exec(body.slice(start(node), start(paragraph)));
+    if (gap !== null) joins.push({ from: start(paragraph) - gap[0].length, to: start(paragraph) });
+  });
+  let result = body;
+  for (const { from, to } of joins.reverse()) result = `${result.slice(0, from)} ${result.slice(to)}`;
+  return result;
 }
 
 /** The destinations of relative links in the text (no scheme, not an anchor), as written. */

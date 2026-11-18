@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { fixLinearText, fixText } from './fix.ts';
+import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { linkedFileCheck } from './lint.ts';
 
 const cases: Array<[string, string, string]> = [
@@ -101,16 +101,38 @@ describe('links to files that are not there', () => {
     const content = '* [Report](report.pdf)\n* ![Chart](chart.png)\n* \n  [Spec](https://uploads.linear.app/a/b/spec.pdf)';
     // The sync writes the upload as a file beside the document, and a repair turns the image into a link.
     const text = '* [Report](report.pdf)\n* [Chart](chart.png)\n* \n  [Spec](assets/spec.pdf)';
-    assert.equal(fixLinearText(text, content), '* [Report](<report.pdf>)\n* [Chart](<chart.png>)\n* \n  [Spec](assets/spec.pdf)');
+    assert.equal(fixLinearText(text, content, () => false), '* [Report](<report.pdf>)\n* [Chart](<chart.png>)\n* \n  [Spec](assets/spec.pdf)');
+  });
+
+  it('text from Linear writes a link Linear holds to a file of the repository in the hook\'s form', () => {
+    const content = '* [Report](<report.pdf>)\n* [Missing](<missing.pdf>)';
+    const inRepository = linkedFileCheck('docs/plan.md', (path) => path === 'docs/report.pdf');
+    // The hook finds `report.pdf` in the repository and writes a file block; Linear stores that block as its link again.
+    assert.equal(fixLinearText(content, content, inRepository), '* \n  [Report](report.pdf)\n* [Missing](<missing.pdf>)');
+    assert.equal(fixText(fixLinearText(content, content, inRepository), { linkedFileExists: inRepository }), '* \n  [Report](report.pdf)\n* [Missing](<missing.pdf>)');
+    // A rewrite that would change the document still leaves the text as it is.
+    const setext = 'Two\nlines\n---\n\n* [Report](<report.pdf>)';
+    assert.equal(fixLinearText(setext, setext, inRepository), setext);
+    // A file block that would no longer be a list item (a nested item right after its parent's text) is not written.
+    const nested = '* Parent\n  * [Report](<report.pdf>)';
+    assert.equal(fixLinearText(nested, nested, inRepository), nested);
+  });
+
+  it('a file block whose link is still relative is sent as Linear stores it, everything else as written', () => {
+    const body = '# Plan\n\n* \n  [Report](report.pdf)\n\n1. \n   [Data](data.csv)\n\n> * \n>   [Quoted](q.csv)\n\n'
+      + '* \n  [Spec](https://uploads.linear.app/a/spec.pdf)\n* \n  [Guide](guide.md)\n\n- [ ] \n      [Task](task.csv)';
+    assert.equal(relativeFileBlocksAsLinks(body), '# Plan\n\n* [Report](report.pdf)\n\n1. [Data](data.csv)\n\n> * [Quoted](q.csv)\n\n'
+      + '* \n  [Spec](https://uploads.linear.app/a/spec.pdf)\n* \n  [Guide](guide.md)\n\n- [ ] \n      [Task](task.csv)');
+    assert.equal(relativeFileBlocksAsLinks('* [Report](<report.pdf>)'), '* [Report](<report.pdf>)');
   });
 
   it('text from Linear is only re-spelled: a rewrite that would change the document leaves the text as it is', () => {
     const padded = '| Step | State |\n| -- | -- |\n| Draft  | tbd |';
-    assert.equal(fixLinearText(padded, padded), '| Step | State |\n| -- | -- |\n| Draft | tbd |');
+    assert.equal(fixLinearText(padded, padded, () => false), '| Step | State |\n| -- | -- |\n| Draft | tbd |');
     // `fix` writes a setext heading on one line, joining its lines with a space: another text.
     const setext = 'Two\nlines\n---\n\nText.';
     assert.notEqual(fixText(setext), setext);
-    assert.equal(fixLinearText(setext, setext), setext);
+    assert.equal(fixLinearText(setext, setext, () => false), setext);
   });
 });
 

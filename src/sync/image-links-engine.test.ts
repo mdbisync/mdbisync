@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { fakeFetch } from '../setup/test-helpers.ts';
+import { sameMarkdown, splitFile } from '../format/index.ts';
+import { hookRun } from '../format/test-helpers.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
 
 describe('image repairs through the sync pull request', () => {
@@ -102,6 +104,56 @@ describe('image repairs through the sync pull request', () => {
     await h.gitEdit(renamed, '# Plan\n\n![Repository image](../../../records.csv)\n');
     await h.settle();
     assert.equal(h.world.linear.uploads.length, before + 1, 'a repository-authored image should still upload');
+  });
+
+  it('writes a list item linking a plain repository file in the form the linear-format hook leaves unchanged', async () => {
+    const path = 'eng/notes/plan.md';
+    const csv = 'name,value\nExample,42\n';
+    await h.editRef('refs/heads/main', 'records.csv', csv);
+    const before = h.world.linear.uploads.length;
+    // Linear's form of a list item holding only a link it was sent unresolved: the link mark on the item's line,
+    // which it also stores for a file block whose file was not uploaded (the recorded list-item probe).
+    const linked = '# Plan\n\n* [Report](<../../records.csv>)';
+    const sent: string[] = [];
+    h.world.linear.store = (content) => {
+      sent.push(content);
+      return content.replace(/^\* \n {2}\[Report\]\(\.\.\/\.\.\/records\.csv\)$/m, '* [Report](<../../records.csv>)');
+    };
+    await h.editInLinear(path, '# Plan\n\n* ![Report](../../records.csv)\n');
+    await h.sync();
+    // The hook in CI finds the file in the repository, so it writes the item as a file block.
+    const branch = await h.show(`${SYNC_BRANCH}:${path}`);
+    assert.equal(splitFile(branch).body, '# Plan\n\n* \n  [Report](../../records.csv)');
+    assert.deepEqual(hookRun(path, branch, {'records.csv': csv}), {exitCode: 0, stdout: '', stderr: ''});
+    await h.settle();
+    // The file stays a plain link: Linear holds the link it stores for one, and nothing is uploaded.
+    assert.equal(h.world.linear.uploads.length, before);
+    const document = await h.documentOf(path);
+    assert.ok(sameMarkdown(document.content!, linked), document.content);
+    // What the sync records for Linear's link is the file as git holds it: no later pull request changes the file.
+    assert.equal(h.world.github.pullRequests.length, 1);
+    assert.equal(await h.show(`refs/heads/main:${path}`), branch);
+    assert.equal(await h.show(`refs/mdbisync/linear:${path}`), branch);
+    // The text sent keeps the link as Linear stores it, so Linear holds what was sent.
+    assert.ok(sent.length > 0 && sent.every((content) => content.includes('* [Report](../../records.csv)') && !content.includes('* \n')), JSON.stringify(sent));
+    // A later edit in Linear, written as Linear stores the item, is captured in the hook's form too.
+    await h.editInLinear(path, `${linked}\n\nAnother paragraph.\n`);
+    await h.sync();
+    const edited = await h.show(`${SYNC_BRANCH}:${path}`);
+    assert.equal(splitFile(edited).body, '# Plan\n\n* \n  [Report](../../records.csv)\n\nAnother paragraph.');
+    assert.deepEqual(hookRun(path, edited, {'records.csv': csv}), {exitCode: 0, stdout: '', stderr: ''});
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before);
+    assert.ok(sameMarkdown((await h.documentOf(path)).content!, `${linked}\n\nAnother paragraph.`));
+    assert.equal(h.world.github.pullRequests.length, 2);
+    assert.equal(await h.show(`refs/heads/main:${path}`), edited);
+    assert.equal(await h.show(`refs/mdbisync/linear:${path}`), edited);
+    // An edit in git reaches Linear: Linear's link is not taken for an edit made there.
+    await h.gitEdit(path, `${edited}\n\nA repository edit.`);
+    await h.settle();
+    assert.ok(sameMarkdown((await h.documentOf(path)).content!, `${linked}\n\nAnother paragraph.\n\nA repository edit.`), (await h.documentOf(path)).content);
+    assert.equal(h.world.github.pullRequests.length, 2);
+    assert.equal(h.world.linear.uploads.length, before);
   });
 
   // The fake keeps Linear text as written; the recorded format probe shows Linear itself splits the bang

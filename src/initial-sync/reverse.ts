@@ -25,7 +25,7 @@
 import { type FileContent, contentBytes, ContentSpool } from '../state/content.ts';
 import { checkPushScope } from '../sync/head-check.ts';
 import { posix } from 'node:path';
-import { fixLinearText, joinFile, splitFile } from '../format/index.ts';
+import { fixLinearText, joinFile, linkedFileCheck, splitFile } from '../format/index.ts';
 import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
@@ -568,7 +568,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
       const key = `${entry.path}\0${joined}`;
       let text = fixedTexts.get(key);
       if (text === undefined) {
-        text = fixLinearText(joined, contentOf(entry));
+        text = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)));
         fixedTexts.set(key, text);
       }
       return text;
@@ -605,7 +605,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
         checkImageRepairSize(content);
         if (linksLinearDocuments(content)) needsLinkBase = true;
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
-        const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, trackedBody);
+        const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content, input.mapping.files), uploads, trackedBody);
         // Initial import records only observations and writes nothing to Linear.
         // Defer a repair to the next ordinary capture, whose PR also records its provenance.
         if (captured.observedBody !== undefined) { imageBlocked.push(entry.path); continue; }

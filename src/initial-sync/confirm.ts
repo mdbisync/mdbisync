@@ -427,7 +427,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // require stored destinations to match what was sent before using it.
         if (document !== undefined && (holdsBody(document.content ?? '', body) || (
           sameLinkDestinations(document.content ?? '', body)
-          && holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body)), source)
+          && holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body, sources.input.mapping.files)), source)
         ))) {
           result.unchanged.push(path);
           remember(path, document);
@@ -577,7 +577,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const reformatted: string[] = [];
     for (const path of [...synced].sort(compare)) {
       const text = texts.get(path) as string;
-      const file = joinFile(splitFile(text).head, restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string));
+      const file = joinFile(splitFile(text).head, restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string, sources.input.mapping.files));
       if (file !== text) {
         changes.set(path, file);
         reformatted.push(path);

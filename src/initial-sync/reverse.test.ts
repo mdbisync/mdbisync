@@ -648,6 +648,28 @@ describe('initial sync from Linear to the tracked branch', () => {
     }
   });
 
+  it('writes a list item linking a repository file Linear holds as a plain link in the hook\'s form', async () => {
+    // The tracked file already links the picture, so the link is not new from Linear; Linear holds no upload of it.
+    const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+    const tracked = await commitTree(fixture.remote, {
+      parents: [main],
+      base: main,
+      changes: new Map([['eng/notes/plan.md', `---\nowner: platform\n---\n\n# Plan\n\n* [Diagram](<diagram.png>)\n\n${CANARY}`]]),
+      message: 'Link the diagram',
+      identity: { name: 'A person', email: 'person@example.com' },
+    });
+    await fixture.remote.run(['update-ref', 'refs/heads/main', tracked]);
+    const world = fakeWorld();
+    const stored = `# Plan\n\n* [Diagram](<diagram.png>)\n\nNew steps. ${CANARY}`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: stored } : d));
+    const { result } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    const file = await show('refs/mdbisync/linear:eng/notes/plan.md');
+    assert.equal(file, `---\nowner: platform\n---\n\n# Plan\n\n* \n  [Diagram](diagram.png)\n\nNew steps. ${CANARY}`);
+    assert.deepEqual(hookRun('eng/notes/plan.md', file, { 'eng/notes/diagram.png': TREE['eng/notes/diagram.png']! }), { exitCode: 0, stdout: '', stderr: '' });
+    assert.equal(world.linear.uploads.length, 0);
+  });
+
   it('leaves an initial attachment budget overrun out without partial files or Linear writes', async () => {
     const world = fakeWorld();
     const body = Array.from({length: 33}, (_, i) => `[File](${UPLOADS_HOST}/file-${i})`).join('\n');
