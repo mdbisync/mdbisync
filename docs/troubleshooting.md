@@ -516,6 +516,7 @@ content).
 - `a state ref moved while the run was writing`
 - `state moved while recording document marks`
 - `the planned document for <path> was not listed`
+- `the planned document for <path> was not read with its text`
 - `document-links: apply before prepare`
 - `the uploads transform was not prepared`
 - `project "<project>" of team "<team>" was not resolved`, `team "<team>" was not resolved`

@@ -1409,6 +1409,12 @@ describe('planning an initial sync from Linear', () => {
       assert.deepEqual(changedOut(encoded), [['older', 'notes/Q3%3A goals.md']]);
       assert.deepEqual([encoded.overwrite, encoded.create, encoded.remove], [[], [], []]);
 
+      // The newer one's own file, named with its id, stays too.
+      const both = { 'notes/Q3%3A goals.md': '# Goals\n', [`notes/Q3%3A goals~${suffix('newer')}.md`]: '# Newer\n' };
+      const kept = planLinearToGit({ ...input([listed('older', 'Q3: goals', '2026-01-01T00:00:00Z'), listed('newer', 'Q3: goals', '2026-01-02T00:00:00Z')], both), changed: gone('older') });
+      assert.deepEqual(changedOut(kept), [['newer', `notes/Q3%3A goals~${suffix('newer')}.md`], ['older', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([kept.overwrite, kept.create, kept.remove], [[], [], []]);
+
       const input2 = { ...input([listed('older', 'plan', '2026-01-01T00:00:00Z'), listed('newer', 'plan', '2026-01-02T00:00:00Z')], { 'notes/plan.md': '# Plan\n' }), changed: gone('older') };
       const forward = planInitialSync(input2);
       assert.deepEqual([forward.overwrite, forward.create, forward.trash], [[], [], []]);

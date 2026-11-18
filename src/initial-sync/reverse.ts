@@ -71,7 +71,7 @@ import { type SecurityFinding, type SecurityGate, checkTitle, securityGate } fro
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
-import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
+import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync, touchedTitles } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
@@ -142,14 +142,16 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
 
   // An encoded name belongs to the title it encodes: `Q3%3A goals.md` is the file of `Q3: goals`, even when
   // another document is titled `Q3%3A goals` (whose own name the rule encodes to `Q3%253A goals.md`).
-  // A document that changed during the run is never imported, and the file its name gives it stays as it is.
-  // It takes part in the naming like any document without a file, in the same oldest-first order.
+  // A document that changed during the run, or shares a title with one, is never imported, and the file its name
+  // gives it stays as it is. It takes part in the naming like any document without a file, in the same
+  // oldest-first order.
   const created = new Map(input.places.flatMap(({ documents }) => documents.map((document) => [document.id, document.createdAt] as const)));
   const oldestFirst = <T extends { documentId: string }>(entries: T[]) => entries.sort((a, b) => compare(created.get(a.documentId) ?? '', created.get(b.documentId) ?? '') || compare(a.documentId, b.documentId));
-  const changedIds = new Set(input.changed?.keys() ?? []);
+  const touched = touchedTitles(input);
   const changed = [...new Map(input.places.flatMap(({ place, documents }) => documents
-    .filter((document) => changedIds.has(document.id))
+    .filter((document) => !document.trashed && document.archivedAt === null && touched(place, document.title))
     .map((document) => [document.id, { path: plainPath(document.title, place), title: document.title, place, documentId: document.id }] as const))).values()];
+  const changedIds = new Set(changed.map((entry) => entry.documentId));
   const keepForChanged = (path: string, documentId: string) => {
     result.leftOut = result.leftOut.filter((other) => other.documentId !== documentId || input.treePaths.has(other.path));
     result.leftOut.push({ path, rules: ['changed-during-run'], lines: [], documentId });

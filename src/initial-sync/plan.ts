@@ -157,15 +157,8 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
     leaveOut(file.path, [file.reason]);
     leftOutTitles.set(titleIn(file.place, file.title), file.path);
   }
-  // The titles a changed document held or holds now: its listed title in its listed place and, when it was
-  // renamed or moved, its current title in any place (the plan knows places by name, the read by id).
   const changed = input.changed ?? new Map<string, LinearDocument | null>();
-  const changedTitles = new Set(input.places.flatMap(({ place, documents }) => documents.filter((document) => changed.has(document.id)).map((document) => titleIn(place, document.title))));
-  const changedAnywhere = new Set(input.places.flatMap(({ documents }) => documents.flatMap((document) => {
-    const current = changed.get(document.id);
-    return current && (current.title !== document.title || current.projectId !== document.projectId || current.teamId !== document.teamId) ? [current.title.normalize('NFC')] : [];
-  })));
-  const touched = (place: Place, title: string) => changedTitles.has(titleIn(place, title)) || changedAnywhere.has(title.normalize('NFC'));
+  const touched = touchedTitles(input);
   const live = (document: LinearDocument) => !document.trashed && document.archivedAt === null;
   const synced: MappedDocument[] = [];
   for (const document of mapping.documents) {
@@ -229,6 +222,23 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   plan.trash = byPath(plan.trash);
   plan.leftOut = byPath([...leftOut.values()]);
   return plan;
+}
+
+/**
+ * Whether a title in a place is one a changed document held or holds now
+ * (`PlanInput.changed`): its listed title in its listed place and, when it
+ * was renamed or moved, its current title in any place (the plan knows
+ * places by name, the read by id). No file or document of such a title is
+ * written, trashed or imported.
+ */
+export function touchedTitles(input: Pick<PlanInput, 'places' | 'changed'>): (place: Place, title: string) => boolean {
+  const changed = input.changed ?? new Map<string, LinearDocument | null>();
+  const listed = new Set(input.places.flatMap(({ place, documents }) => documents.filter((document) => changed.has(document.id)).map((document) => titleIn(place, document.title))));
+  const anywhere = new Set(input.places.flatMap(({ documents }) => documents.flatMap((document) => {
+    const current = changed.get(document.id);
+    return current && (current.title !== document.title || current.projectId !== document.projectId || current.teamId !== document.teamId) ? [current.title.normalize('NFC')] : [];
+  })));
+  return (place, title) => listed.has(titleIn(place, title)) || anywhere.has(title.normalize('NFC'));
 }
 
 /**
