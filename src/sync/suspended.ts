@@ -3,14 +3,17 @@
 import { checkedPullView, type RepairGate } from './pull-repairs.ts';
 import { randomUUID } from 'node:crypto';
 import { splitFile } from '../format/index.ts';
+import { MarkdownLimitError } from '../format/markdown.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
+import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, MappingBlobBudgetError, readableBlob } from '../mapping/blobs.ts';
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
 import { checkPushScope, oneLine, unverifiedNote, unverifiedPaths, withUnverifiedNote } from './head-check.ts';
 import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPullRequest, mergeInProgress, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { checkpoint } from '../test-hooks.ts';
-import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
+import { GitOutputLimitError } from '../state/git.ts';
+import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure, ExpectedCheck } from '../pull-request/index.ts';
@@ -47,7 +50,7 @@ export interface SuspendedResult {
   normalClosePending?: boolean;
   changed?: boolean;
   conflicts?: string[];
-  code?: 'github-failed' | 'merge-refused' | 'merge-blocked' | 'checks-missing' | 'head-unverified' | 'merge-misplaced';
+  code?: 'github-failed' | 'merge-refused' | 'merge-blocked' | 'checks-missing' | 'head-unverified' | 'merge-misplaced' | 'suspended-asset-discovery';
   /** For `checks-missing`: the expected checks never registered on the head; empty when it has no checks at all. */
   missing?: string[];
   /** For `head-unverified`: the files the merge would change that the sync does not merge by itself. */
@@ -111,17 +114,30 @@ async function changedPaths(git: Git, before: Oid, after: Oid): Promise<string[]
   return (await git.text(['diff', '--name-only', '--no-renames', '-z', before, after])).split('\0').filter(Boolean);
 }
 
-async function includeCapturedAssets(git: Git, linear: Oid, ids: IdMap, paths: Set<string>): Promise<void> {
-  const entries = new Map((await listTree(git, linear)).map((entry) => [entry.path, entry]));
-  const documents = [...ids].filter(([, entry]) => entry.suspended !== undefined)
-    .map(([path]) => entries.get(path)).filter((entry) => entry !== undefined).filter(isRegularFile);
-  const texts = await readBlobs(git, documents.map((entry) => entry.oid));
-  for (const document of documents) {
-    const body = splitFile((texts.get(document.oid) as Buffer).toString('utf8')).body;
-    for (const link of findFileLinks(document.path, body, (path) => {
-      const entry = entries.get(path);
-      return entry !== undefined && isRegularFile(entry);
-    })) if (!link.target.endsWith(MARKDOWN_EXTENSION)) paths.add(link.target);
+async function includeCapturedAssets(git: Git, linear: Oid, ids: IdMap, paths: Set<string>): Promise<SuspendedResult | undefined> {
+  const hold = (reason: string): SuspendedResult => ({ paths: [...paths].sort(), checks: [], code: 'suspended-asset-discovery', reason });
+  try {
+    const entries = new Map((await listTree(git, linear, MAPPING_TREE_BYTES)).map((entry) => [entry.path, entry]));
+    const documents = [...ids].filter(([, entry]) => entry.suspended !== undefined)
+      .map(([path]) => entries.get(path)).filter((entry) => entry !== undefined).filter(isRegularFile);
+    if (documents.some((entry) => !readableBlob(entry))) {
+      return hold(`A suspended document has no usable blob size or exceeds the ${MAPPING_FILE_BYTES}-byte file limit.`);
+    }
+    const texts = await new MappingBlobBudget().read(git, documents);
+    const assets = new Set<string>();
+    for (const document of documents) {
+      const body = splitFile(texts.get(document.oid)!.toString('utf8')).body;
+      for (const link of findFileLinks(document.path, body, (path) => {
+        const entry = entries.get(path);
+        return entry !== undefined && isRegularFile(entry);
+      })) if (!link.target.endsWith(MARKDOWN_EXTENSION)) assets.add(link.target);
+    }
+    for (const asset of assets) paths.add(asset);
+  } catch (error) {
+    if (error instanceof MappingBlobBudgetError) return hold(`The suspended documents exceed the ${MAPPING_BUDGET_BYTES}-byte Markdown budget.`);
+    if (error instanceof GitOutputLimitError) return hold(`A Git read during asset discovery exceeded its ${error.bytes}-byte output limit.`);
+    if (error instanceof MarkdownLimitError) return hold(`A suspended document exceeds the Markdown ${error.limit} limit.`);
+    return hold('The recorded tree or its document links could not be read safely.');
   }
 }
 
@@ -244,7 +260,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       const previousBases = await recordedBases(git, releasedHead);
       return release(context, options, ids, paths, releasedHead, previousBases.linear, tracked);
     }
-    await includeCapturedAssets(git, intake, ids, paths);
+    const hold = await includeCapturedAssets(git, intake, ids, paths);
+    if (hold !== undefined) return hold;
     head = await commit(context, options, await takePaths(git, tracked, intake, paths), intake === linear ? [tracked] : [tracked, intake], 'Restore suspended changes' + note(tracked, linear, intake));
     bases = { tracked, linear, view: intake };
   } else {
@@ -260,7 +277,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     await addEpisodes(context, options, ids, paths, []);
     // A repair the hooks pass after the lane took in its observation changes the view, not the Linear ref.
     if (bases.linear !== linear || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
-      await includeCapturedAssets(git, intake, ids, paths);
+      const hold = await includeCapturedAssets(git, intake, ids, paths);
+      if (hold !== undefined) return hold;
       // The intake never carries paths outside this lane. Mask them before
       // the merge, so their unrelated image/config conflicts cannot hold it.
       const input = await treeCommit(git, await takePaths(git, head, intake, paths), linear);

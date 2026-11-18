@@ -1,12 +1,19 @@
 // Suspended batches released with their documents, assets, and comment cleanup.
 
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES, MAPPING_TREE_BYTES } from '../mapping/blobs.ts';
+import { loadMapping } from '../mapping/index.ts';
+import { LinearClient } from '../linear/index.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
 import { HOLD_FAILED, MESSAGE_WITHHELD } from './hold.ts';
-import { touch } from '../setup/test-helpers.ts';
+import { GITHUB_API, fakeFetch, touch } from '../setup/test-helpers.ts';
+import { commitIds, commitTree, fetchState, PushedKey, readIds, resolveStateConfig } from '../state/index.ts';
+import { IDENTITY } from '../state/test-helpers.ts';
 import { describe, it } from 'node:test';
+import { pullRequestFailure, renderPullRequest, syncPullRequest } from './pull-request.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
 
 describe('sync: pull request release', () => {
@@ -119,6 +126,77 @@ describe('sync: pull request release', () => {
     assert.deepEqual((await h.fixture.remote.run(['show', `refs/heads/main:${asset}`])).stdout, bytes);
     assert.match((await documentOf(path)).content ?? '', /Photo/);
   });
+
+  for (const limit of ['file', 'batch', 'output'] as const) {
+    it(`keeps a green suspended batch in place when recorded documents exceed the ${limit} limit`, async (t) => {
+      const path = 'eng/notes/plan.md';
+      await suspendOne(path);
+      const remote = h.fixture.remote;
+      const head = await rev(SUSPENDED);
+      checksOn(head, PASSED);
+      const config = resolveStateConfig({});
+      const idsRef = 'refs/mdbisync/ids';
+      const linearRef = 'refs/mdbisync/linear';
+      const previous = await rev(linearRef);
+      const previousIds = await rev(idsRef);
+      const recordedIds = await readIds(remote, previousIds);
+      const changes = new Map<string, string>();
+      if (limit === 'file') {
+        changes.set(path, 'a'.repeat(MAPPING_FILE_BYTES + 1));
+      } else if (limit === 'batch') {
+        const body = 'a'.repeat(MAPPING_FILE_BYTES);
+        for (let i = 0; i <= Math.floor(MAPPING_BUDGET_BYTES / MAPPING_FILE_BYTES); i++) {
+          const extra = `eng/notes/recorded-${i}.md`;
+          changes.set(extra, body);
+          recordedIds.set(extra, { id: `doc-${i}`, suspended: { noticeId: randomUUID(), paths: [extra], checks: [] } });
+        }
+      } else changes.set(path, '# Plan\n\nAn updated record.\n');
+      const linear = await commitTree(remote, { parents: [previous], base: previous, changes, identity: IDENTITY, message: 'Record documents' });
+      const heldIds = await commitIds(remote, previousIds, recordedIds, IDENTITY);
+      await remote.run(['update-ref', linearRef, linear, previous]);
+      await remote.run(['update-ref', idsRef, heldIds, previousIds]);
+
+      const git = await h.fixture.clone('intake');
+      const fetched = await fetchState(git, config);
+      const mapping = await loadMapping(git, fetched.tracked);
+      const fetch = fakeFetch(h.world);
+      const run = git.run.bind(git);
+      const runGit = t.mock.method(git, 'run', (args: Parameters<typeof run>[0], options?: Parameters<typeof run>[1]) =>
+        run(args, limit === 'output' && args[0] === 'ls-tree' && args.at(-1) === linear
+          ? { ...options, maxOutputBytes: 1 } : options));
+      const result = await syncPullRequest({
+        git, fetched, mapping, targets: { teams: new Map(), projects: new Map() },
+        linear: new LinearClient({ token: 'test', fetch }), identity: IDENTITY, pushedKey: new PushedKey('test', 'owner/repo'),
+      }, {
+        config, state: fetched.state, github: { repository: 'owner/repo', token: 'test', apiUrl: GITHUB_API, fetch },
+        security: { check: async () => [] },
+      });
+
+      assert.equal(result.suspended?.code, 'suspended-asset-discovery');
+      assert.equal(result.suspended?.released, undefined);
+      const reasons = { file: /file limit/, batch: /Markdown budget/, output: /output limit/ };
+      assert.match(result.suspended?.reason ?? '', reasons[limit]);
+      assert.equal(pullRequestFailure(result)?.code, 'suspended-asset-discovery');
+      assert.match(renderPullRequest(result).join('\n'), /The batch stays suspended/);
+      assert.equal(await rev(SUSPENDED), head);
+      assert.equal(await rev('refs/heads/main'), fetched.tracked);
+      assert.equal(await rev(idsRef), heldIds);
+      assert.equal(await rev(linearRef), linear);
+      assert.ok(runGit.mock.calls.some(({ arguments: [args, options] }) =>
+        args[0] === 'ls-tree' && args.at(-1) === linear && options?.maxOutputBytes === MAPPING_TREE_BYTES));
+      assert.ok(runGit.mock.calls.every(({ arguments: [args] }) => args[0] !== 'cat-file' || args[1] !== '--batch'));
+
+      if (limit === 'file') {
+        const restored = await commitTree(remote, {
+          parents: [linear], base: linear, changes: new Map([[path, await show(`${previous}:${path}`)]]),
+          identity: IDENTITY, message: 'Restore the recorded plan',
+        });
+        await remote.run(['update-ref', linearRef, restored, linear]);
+        await releaseHeld();
+        assert.match(await show(`refs/heads/main:${path}`), /Held Linear edit/);
+      }
+    });
+  }
 
   it('L5-32: a suspended Linear deletion releases as a deletion, and a restore stays in the lane', async () => {
     const path = 'eng/notes/plan.md';

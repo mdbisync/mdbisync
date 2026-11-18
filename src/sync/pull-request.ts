@@ -155,6 +155,7 @@ export interface PullRequestResult {
    * - `state-moved`: the sync branch moved while this run worked, or the pull request's base or the tracked branch changed after the sync checked the merge.
    * - `github-failed`: GitHub refused or failed a request, or no answer came; `status` is its HTTP status, absent when no answer came.
    * - `head-unverified`: the merge would change files other than synchronized documents and their assets (`unverified`); the sync leaves the pull request to a person.
+   * - `suspended-asset-discovery`: the sync could not safely collect a suspended batch's assets and leaves the batch in place.
    * - `merge-misplaced`: GitHub merged the pull request somewhere other than on the tracked branch commit the sync checked (`misplaced`): its base or the tracked branch changed between the sync's last read and the merge. A setup error: a person checks the branch that took the merge.
    */
   code?: PullRequestCode;
@@ -164,7 +165,7 @@ export interface PullRequestResult {
   misplaced?: MisplacedMerge;
   /** GitHub's HTTP status for `merge-refused`, `merge-blocked` and `github-failed`. */
   status?: number;
-  /** GitHub's reason for `merge-refused` and `merge-blocked`, on one line; empty when it gave none. */
+  /** The reason for a merge refusal or suspended asset discovery hold, on one line. */
   reason?: string;
 }
 
@@ -201,6 +202,8 @@ export function pullRequestFailure(result: PullRequestResult | undefined): PullR
     case 'state-moved':
     case 'github-failed':
       return { kind: 'incomplete', code: result.code, message: message('pull-request.not-finished', { code: result.code }) };
+    case 'suspended-asset-discovery':
+      return { kind: 'incomplete', code: result.code, message: message('pull-request.suspended-asset-discovery', { code: result.code, reason: result.reason ?? '' }) };
     default:
       return null;
   }
@@ -239,6 +242,8 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
   if (suspended?.status !== undefined) result.status = suspended.status;
   if (suspended?.reason !== undefined) result.reason = suspended.reason;
   if (linear === null || suspended?.normalClosePending === true) return result;
+  // Without the full asset set, the normal lane cannot tell which files belong to the suspended batch.
+  if (suspended?.code === 'suspended-asset-discovery') return result;
   // A suspended merge that landed where the sync did not check it stops this run's pull request step: a person looks
   // first, and the next run checks the sync's changes again.
   if (suspended?.code === 'merge-misplaced') return result;
@@ -783,6 +788,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     if (hold.code === 'merge-refused' || hold.code === 'merge-blocked') lines.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, '');
     if (hold.code === 'merge-misplaced') lines.push(`Setup error: ${misplacedSummary('the suspended pull request', link, hold.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, '');
     if (hold.code === 'checks-missing') lines.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold.missing ?? [])}).`, CHECKS_MISSING_ADVICE, '');
+    if (hold.code === 'suspended-asset-discovery') lines.push(`The batch stays suspended (${hold.code}). ${hold.reason ?? ''}`, '');
     if (hold.normalClosePending === true) lines.push('The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.', '');
     if (hold.code === 'github-failed' && hold.normalClosePending !== true) lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
     if (hold.conflicts !== undefined) lines.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path) => `\`${path}\``).join(', ')}.`, '');
@@ -815,6 +821,8 @@ export function renderPullRequest(result: PullRequestResult): string[] {
   // A suspended head that waits for a person has its own line above; the normal lane's outcome still gets its line.
   const code = result.code === 'head-unverified' && result.unverified === undefined ? undefined : result.code;
   switch (code) {
+    case 'suspended-asset-discovery':
+      break; // The suspended section describes the hold.
     case 'conflict':
       lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
       break;
