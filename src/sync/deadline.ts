@@ -97,9 +97,11 @@ export interface ExpectedChecks {
 /**
  * Where a head's earlier checks are read: the description's note together with the branch's own history above `base`
  * (the tracked branch) down to `pushed`, the head the sync's own state records it last pushed on this branch; or the
- * commits the sync pushed it on this run. `base` is also where a configured Actions check's workflow file is read.
+ * commits the sync pushed it on this run, with `carried`, the checks the head it pushed on still waited for when the
+ * sync pushed only to run the checks again (see `checksAgain`). `base` is also where a configured Actions check's
+ * workflow file is read.
  */
-export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined } | { pushedFrom: readonly Oid[]; base: Oid };
+export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined } | { pushedFrom: readonly Oid[]; base: Oid; carried?: readonly ExpectedCheck[] };
 
 /** How many commits below a head are searched for a commit the sync made. */
 const EARLIER_HEAD_DEPTH = 50;
@@ -125,6 +127,7 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
   let complete = true;
   if ('pushedFrom' in earlier) {
     for (const parent of earlier.pushedFrom) observed.push(...await registeredChecks(github, parent));
+    observed.push(...earlier.carried ?? []);
   } else {
     const history = await earlierHeadChecks(earlier.git, github, head, earlier);
     complete = history !== null;
@@ -275,23 +278,32 @@ export function checksMissing(checks: CheckState, expectation: CheckExpectation)
 export const CHECKS_AGAIN_AFTER_MINUTES = 5;
 
 /**
- * Whether the sync pushes a commit of its own on `head`, with the same files, so that the checks run on it: someone
- * else pushed `head` (a formatter's fix pushed with a workflow's own token starts no other workflow), it has waited
- * `CHECKS_AGAIN_AFTER_MINUTES` since the description noted it, and it waits only for expected checks that never
- * registered on it. The sync cannot rerun a check, but its own push starts the repository's whole CI. A head the sync
- * pushed itself never gets one: if its checks still never start, the deadline reports `checks-missing`. So it happens
- * at most once for each head someone else pushed.
+ * Whether the sync pushes a commit of its own on `head`, a pull request's unchanged head, with the same files, so that
+ * the checks run on it: its push starts the repository's whole CI, and is recorded. Null when it does not; otherwise
+ * the checks `head` waited for, which the new commit must pass too (`carried` in `EarlierHeads`), so a check that never
+ * started is still expected there. It does in two cases:
+ *
+ * - The branch's history does not show `head`'s earlier checks (no head the sync recorded pushing is below it: the
+ *   branch was rewritten, or the sync last pushed it before it recorded its heads). The new commit ends that history;
+ *   nothing is carried, since what ran before is not known.
+ * - Someone else pushed `head` (a formatter's fix pushed with a workflow's own token starts no other workflow), it has
+ *   waited `CHECKS_AGAIN_AFTER_MINUTES` since the description noted it, nothing on it is pending or failed, and it waits
+ *   only for expected checks that never registered. The sync cannot rerun a check, so it pushes. Not when the sync's
+ *   last push was already such a commit (`againMessage`), so a formatter that pushes after every push of the sync gets
+ *   one at most, nor when `verified` says the sync would not push `head`'s files. If the checks still never start,
+ *   the deadline reports `checks-missing`, as for a head the sync pushed.
  */
-export async function checksAgainDue(github: GitHubRepository, head: Oid, required: readonly RequiredCheck[], earlier: { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined }, options: { mergeWithoutChecks?: boolean | undefined }): Promise<boolean> {
-  if (earlier.pushed === undefined || earlier.pushed === head) return false;
-  const now = new Date();
-  if (!pastDeadline(headSince(earlier.body, head, now), CHECKS_AGAIN_AFTER_MINUTES, now)) return false;
+export async function checksAgain(github: GitHubRepository, head: Oid, required: readonly RequiredCheck[], earlier: { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined }, options: { mergeWithoutChecks?: boolean | undefined; againMessage: string; verified: () => Promise<boolean> }): Promise<ExpectedCheck[] | null> {
   const expected = await expectedChecks(github, head, required, earlier);
-  // A head whose earlier checks are unknown gets the sync's commit anyway (see `expectedChecks`).
-  if (!expected.complete) return false;
+  if (!expected.complete || earlier.pushed === undefined) return [];
+  if (earlier.pushed === head) return null;
+  const now = new Date();
+  if (!pastDeadline(headSince(earlier.body, head, now), CHECKS_AGAIN_AFTER_MINUTES, now)) return null;
+  if ((await earlier.git.text(['show', '-s', '--format=%s', earlier.pushed])).startsWith(options.againMessage)) return null;
+  if (!(await options.verified())) return null;
   const expectation = checkExpectation(options, expected.checks);
   const checks = await readChecks(github, head, expectation);
-  return checks.state === 'pending' && checksMissing(checks, expectation);
+  return checks.state === 'pending' && checksMissing(checks, expectation) ? expected.observed : null;
 }
 
 /** The missing checks as Markdown code, or what is missing when no check ran at all. */

@@ -378,13 +378,24 @@ describe('sync: pull request suspension', () => {
     assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
     assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released a head that never ran `ci`');
     assert.equal(await rev(SUSPENDED), fixed);
+    // Five minutes on, the sync pushes a commit of its own with the same files, so CI runs; `ci` stays expected there.
+    h.backdate('mdbisync/suspended', 6);
+    const again = await sync(deadline);
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    const own = await rev(SUSPENDED);
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P%n%s', own]), `${fixed}\nRun the checks again on suspended changes`);
+    assert.equal(await rev(`${own}^{tree}`), await rev(`${fixed}^{tree}`));
+    checksOn(own, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const waitingOwn = await sync(deadline);
+    assert.equal(waitingOwn.report.pullRequest?.suspended?.released, undefined, 'released a head that never ran `ci`');
+    assert.equal(await rev(SUSPENDED), own, 'pushed again on a head the sync pushed itself');
     h.backdate('mdbisync/suspended', 11);
     const late = await sync(deadline);
     assert.equal(late.result.exitCode, SETUP_FAILED_EXIT_CODE, late.result.stderr);
     assert.equal(late.report.pullRequest?.suspended?.code, 'checks-missing');
     assert.deepEqual(late.report.pullRequest?.suspended?.missing, ['ci']);
     assert.match(late.summary, /suspended pull request has waited past the check deadline for checks that never started on its head \(missing `ci`\)/);
-    checksOn(fixed, [...PASSED, { name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    checksOn(own, [...PASSED, { name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
     const released = await sync(deadline);
     assert.ok(released.report.pullRequest?.suspended?.released);
     assert.match(await show(`refs/heads/main:${path}`), /Formatted/);
