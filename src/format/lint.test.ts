@@ -6,8 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { after, describe, it } from 'node:test';
 import { markdownFiles, runFix, runLint } from './command.ts';
 import { fixText } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
@@ -327,6 +327,25 @@ describe('lint and fix commands', () => {
       writeFileSync(path, source);
       assert.deepEqual(run('lint'), { exitCode: 1, stdout: message, stderr: '' });
       assert.deepEqual(run('fix'), { exitCode: 1, stdout: message, stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), source);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it('lint and fix report many unresolved references in one paragraph within seconds, and leave the file unchanged', () => {
+    // The parser took minutes on this 140 KB paragraph; the commands run in a child the test can stop.
+    const path = join(dir, 'brackets.md');
+    const source = '[a][r] '.repeat(20_000);
+    const cli = fileURLToPath(new URL('../cli.ts', import.meta.url));
+    const message = `brackets.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
+    try {
+      writeFileSync(path, source);
+      for (const command of ['lint', 'fix']) {
+        const child = spawnSync(process.execPath, [cli, command, 'brackets.md'], { cwd: dir, encoding: 'utf8', timeout: 30_000 });
+        assert.equal(child.signal, null, `${command} finished within the timeout`);
+        assert.deepEqual([child.status, child.stdout, child.stderr], [1, message, ''], command);
+      }
       assert.equal(readFileSync(path, 'utf8'), source);
     } finally {
       rmSync(path, { force: true });

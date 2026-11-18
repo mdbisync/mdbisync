@@ -295,14 +295,21 @@ Instead, split the file into several documents.
 
 Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are
 tables whose short rows, padded to the header width, would add over 250,000
-characters or take the tree over that node limit, and reference links whose
+characters or take the tree over that node limit, reference links whose
 destinations, each written in full, would take the text over 250,000
-characters. This keeps traversal and formatting bounded independently of the
+characters, and paragraphs whose inline syntax would take too long to
+parse. This keeps traversal and formatting bounded independently of the
 text length. `fix` writes every row of a table with as many cells as its
 header, the form Linear stores, so a wide header over many short rows grows
 far beyond its source. It also writes every reference link (`[text][ref]`)
-inline with its own copy of the destination, so many short references to one
-long definition grow the same way.
+inline with its own copy of the destination, so many short references to
+one long definition grow the same way. The
+parser's work on one paragraph, heading or table cell can grow with the
+square of its size: many unresolved brackets, escapes or emphasis
+markers, an unclosed `[` followed by many words, or tens of thousands of
+short lines in one paragraph. The parser counts that work as it reads and
+stops at a fixed budget that ordinary documents stay far below; split
+such a paragraph with blank lines.
 For example, this generates a document that exceeds the nesting limit:
 
 ```javascript
@@ -315,14 +322,21 @@ and this one a table whose padding is too large, from 2.4 KB of text:
 '|a'.repeat(300) + '|\n' + '|-'.repeat(300) + '|\n' + '|x|\n'.repeat(300)
 ```
 
-and this one references whose destinations would be written 20,000 times:
+and this one references whose destinations would be written 2,000 times:
 
 ```javascript
-'[a][r] '.repeat(20000) + '\n\n[r]: https://example.com/' + 'x'.repeat(100)
+'[a][r] '.repeat(2000) + '\n\n[r]: https://example.com/' + 'x'.repeat(1000)
+```
+
+and this one a paragraph whose unresolved references take too long to parse, from 140 KB of text:
+
+```javascript
+'[a][r] '.repeat(20_000)
 ```
 
 Reduce the nesting, fill in or split the table, write fewer references to a
-long destination, or split the document. `fix` leaves the text unchanged.
+long destination, split the paragraph, or split the document. `fix` leaves
+the text unchanged.
 Capture and initial import leave the document out of the current run,
 preserve any previously accepted text, and continue with other documents.
 
