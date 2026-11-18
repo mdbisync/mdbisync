@@ -58,7 +58,7 @@ import {
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
-import { readPlainLinkProvenance } from './provenance.ts';
+import { provenanceUnknownTrailer, readPlainLinkProvenance } from './provenance.ts';
 import { LINK_PROVENANCE_UNKNOWN } from './uploads.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { MarkdownLimitError, parse } from '../format/markdown.ts';
@@ -532,13 +532,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     }
     const tracked = fetched.tracked;
     // The record carries the plain links' provenance too, so a sync that rebuilds lost ids keeps it.
-    // A document left out for unknown provenance keeps its links protected: a later run must not upload them either.
-    const unproven = result.leftOutAtWrite.flatMap(({ path, rule, files }) => {
+    // A document left out for unknown provenance stays unknown: a later recovery leaves it out again.
+    const unproven = result.leftOutAtWrite.flatMap(({ path, rule }) => {
       const id = documentIds.get(path);
-      return rule === LINK_PROVENANCE_UNKNOWN && id !== undefined ? (files ?? []).map((target) => [id, target] as const) : [];
+      return rule === LINK_PROVENANCE_UNKNOWN && id !== undefined ? [provenanceUnknownTrailer(id)] : [];
     });
-    const plainTrailers = [...[...finalIds.values()].flatMap((entry) => (entry.plainFiles ?? []).map((target) => [entry.id, target] as const)), ...unproven]
-      .map(([id, target]) => `Plain-link: ${encodeURIComponent(id)} ${encodeURIComponent(target)}`);
+    const plainTrailers = [
+      ...[...finalIds.values()].flatMap((entry) => (entry.plainFiles ?? []).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`)),
+      ...unproven,
+    ].sort(compare);
     const recordMessage = RECORD_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
     let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false });
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;

@@ -13,19 +13,27 @@ import { type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_L
 import { readPlainFileProvenance } from '../sync/pull-repairs.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from '../sync/write.ts';
 import { SYNC_PULL_REQUEST_TITLE } from '../sync/pull-request.ts';
+import { CAPTURE_MESSAGE } from '../sync/capture.ts';
 import { type InitialSyncPlan } from './plan.ts';
 
-/** The subject of a capture commit on the `linear` ref: Linear members' text entering git. */
-export const CAPTURE_MESSAGE = 'Capture Linear changes';
+/**
+ * The trailer of an initial sync's record that names a document it left out
+ * because its provenance is unknown: a later recovery leaves it out again
+ * until its links no longer need provenance, instead of trusting the record.
+ */
+export function provenanceUnknownTrailer(id: string): string {
+  return `Provenance-unknown: ${encodeURIComponent(id)}`;
+}
 
 export interface PlainLinkProvenance {
   /** The targets of plain links that came from Linear, by document path. */
   plainFiles: Map<string, Set<string>>;
   /**
    * Documents Linear holds whose provenance the state cannot give: `linear`
-   * and their ids entries are lost, while the tracked branch has taken in
-   * Linear's text before. A non-image repository-file link in one leaves the
-   * document out instead of uploading the file.
+   * and their ids entries are lost while the tracked branch has taken in
+   * Linear's text before, or an earlier recovery left them out for that. A
+   * non-image repository-file link in one leaves the document out instead of
+   * uploading the file.
    */
   unknown: Set<string>;
 }
@@ -56,7 +64,7 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
     oldPaths.set(entry.id, (oldPaths.get(entry.id) ?? new Set()).add(path));
   }
   if (state.linear !== null) for (const [id, targets] of await readPlainFileProvenance(git, state.linear)) add(id, targets);
-  for (const [id, targets] of await readTrackedPlainFiles(git, tracked)) add(id, targets);
+  for (const [id, targets] of await readPlainFileProvenance(git, tracked, { firstParent: false })) add(id, targets);
 
   const plainFiles = new Map<string, Set<string>>();
   const matched = new Map(plan.overwrite.map((entry) => [entry.path, entry.documentId]));
@@ -72,13 +80,14 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
     return identities;
   };
   const planned = [...plan.create, ...plan.overwrite].map((entry) => ({ entry, identities: identify(entry) }));
-  // Provenance of a document no planned file is known to be (its title changed in Linear while the ids were lost):
-  // any file without an identity of its own may be it, so its targets protect those files too.
-  const orphaned = [...byId].filter(([id]) => !identified.has(id));
+  // With the ids lost, a document no planned file is known to be (its title changed in Linear, or another document
+  // took its title) may be any planned file, so its targets protect every one. With the ids, such a file is new.
+  const idsLost = entries.every((ids) => ids.size === 0);
+  const orphaned = idsLost ? [...byId].filter(([id]) => !identified.has(id)) : [];
   for (const { entry, identities } of planned) {
     const targets = new Set<string>();
     for (const ids of entries) for (const target of ids.get(entry.path)?.plainFiles ?? []) targets.add(target);
-    const sources = identities.size > 0 ? [...identities].map((id) => [id, byId.get(id)] as const) : orphaned;
+    const sources = [...[...identities].map((id) => [id, byId.get(id)] as const), ...orphaned];
     for (const [id, own] of sources) for (const target of own ?? []) {
       targets.add(target);
       // A relative link that stayed the same while its document moved names another path now: protect that one too.
@@ -90,10 +99,12 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
   // With `linear` present, its trailers and the ids are the whole record. Without it, an ids entry still is for
   // its document; any other document Linear holds may carry a Linear member's link the state no longer names.
   const unknown = new Set<string>();
-  if (state.linear === null && plan.overwrite.length > 0) {
-    const known = new Set(entries.flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
-    const unproven = plan.overwrite.filter((entry) => !known.has(entry.documentId));
-    if (unproven.length > 0 && await tookInLinear(git, tracked)) for (const entry of unproven) unknown.add(entry.path);
+  const known = new Set(entries.flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
+  const unproven = plan.overwrite.filter((entry) => !known.has(entry.documentId));
+  if (unproven.length > 0) {
+    const marked = state.linear === null ? new Set<string>() : await readProvenanceUnknown(git, state.linear);
+    const lost = state.linear === null && await tookInLinear(git, tracked);
+    for (const entry of unproven) if (lost || marked.has(entry.documentId)) unknown.add(entry.path);
   }
   return { plainFiles, unknown };
 }
@@ -106,24 +117,18 @@ function relocate(target: string, from: string, to: string): string {
 /** The ids commit an unfinished initial sync started from: the first one of `ids`' first-parent history that is not its progress. */
 async function idsBeforeProgress(git: Git, ids: Oid | null): Promise<Oid | null> {
   if (ids === null) return null;
-  const log = await git.text(['log', '--first-parent', '--format=%H %s', ids]);
-  for (const line of log.split('\n')) {
-    const cut = line.indexOf(' ');
-    if (cut !== -1 && line.slice(cut + 1) !== INITIAL_SYNC_PROGRESS) return line.slice(0, cut);
-  }
-  return null;
+  const found = (await git.text(['log', '--first-parent', '-1', '--format=%H', '--invert-grep', '--fixed-strings', `--grep=${INITIAL_SYNC_PROGRESS}`, ids])).trim();
+  return found === '' ? null : found;
 }
 
-/** `Plain-link:` trailers of every commit the tracked branch holds, by document id. */
-async function readTrackedPlainFiles(git: Git, tracked: Oid): Promise<Map<string, Set<string>>> {
-  const log = await git.text(['log', '--format=%B', '--grep=^Plain-link:', tracked]);
-  const result = new Map<string, Set<string>>();
-  for (const match of log.matchAll(/^Plain-link: (\S+) (\S+)$/gm)) {
+/** The documents an initial sync's record in `linear`'s first-parent history left out for unknown provenance. */
+async function readProvenanceUnknown(git: Git, linear: Oid): Promise<Set<string>> {
+  const log = await git.text(['log', '--first-parent', '--format=%B', '--grep=^Provenance-unknown:', linear]);
+  const result = new Set<string>();
+  for (const match of log.matchAll(/^Provenance-unknown: (\S+)$/gm)) {
     try {
-      const id = decodeURIComponent(match[1]!);
-      const target = decodeURIComponent(match[2]!);
-      result.set(id, (result.get(id) ?? new Set()).add(target));
-    } catch { /* A malformed trailer names nothing. */ }
+      result.add(decodeURIComponent(match[1]!));
+    } catch { /* A malformed trailer names no document. */ }
   }
   return result;
 }

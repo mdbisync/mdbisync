@@ -74,9 +74,13 @@ export async function stagePullRepairs(git: Git, state: StateSnapshot, zones: Re
   for (const [path, repair] of repairs) await gate.check(repairSet(path, repair.replacement));
 }
 
-/** Recover conservative plain-link provenance when the ids ref is rebuilt. */
-export async function readPlainFileProvenance(git: Git, linear: Oid): Promise<Map<string, Set<string>>> {
-  const log = await git.text(['log', '--first-parent', '--format=%B', '--grep=^Plain-link:', linear]);
+/**
+ * Recover conservative plain-link provenance when the ids ref is rebuilt.
+ * `firstParent: false` reads every commit `head` holds, as for a tracked
+ * branch; a trailer only withholds an upload, so it can never grant one.
+ */
+export async function readPlainFileProvenance(git: Git, linear: Oid, options: { firstParent?: boolean } = {}): Promise<Map<string, Set<string>>> {
+  const log = await git.text(['log', ...(options.firstParent === false ? [] : ['--first-parent']), '--format=%B', '--grep=^Plain-link:', linear]);
   const result = new Map<string, Set<string>>();
   for (const match of log.matchAll(/^Plain-link: (\S+) (\S+)$/gm)) {
     try {
