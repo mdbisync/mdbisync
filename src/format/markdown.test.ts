@@ -6,6 +6,43 @@ import { lintText } from './lint.ts';
 import { fixText } from './fix.ts';
 
 describe('Markdown traversal limits', () => {
+  it('refuses inline runs that take the parser minutes, counting their work as it goes', () => {
+    const inline = (error: unknown): boolean => error instanceof MarkdownLimitError && error.limit === 'inline';
+    // Each took from 25 seconds to over four minutes in one paragraph; refused, they take seconds at most.
+    for (const text of [
+      '[a][r] '.repeat(20_000),
+      '\\*a] '.repeat(30_000),
+      '*a* '.repeat(60_000),
+      'a_b c_d '.repeat(30_000),
+      '> [a][r] [a][r]\n'.repeat(10_000),
+      // An unclosed bracket, then words: each word start walks back to it.
+      '[' + 'a '.repeat(124_000),
+      // Hard-wrapped lines merged one splice at a time.
+      'a b\n'.repeat(62_000),
+    ]) {
+      const start = performance.now();
+      assert.throws(() => parse(text), inline);
+      assert.ok(performance.now() - start < 20_000, 'refused within seconds');
+    }
+    assert.deepEqual(lintText('doc.md', '[a][r] '.repeat(20_000)).map(({rule}) => rule), ['markdown-complexity']);
+  });
+
+  it('keeps long documents of ordinary blocks within the inline budget', () => {
+    for (const text of [
+      ('A paragraph with [a link](https://example.com), *emphasis* and `code`.\n\n').repeat(3_000),
+      '- [a][r] [a][r]\n'.repeat(10_000),
+      '| a | b |\n| - | - |\n' + '| [a][r] [a][r] | [a][r] [a][r] |\n'.repeat(5_000),
+      '```json\n' + '[1, 2] [3] \\* x]\n'.repeat(12_000) + '```\n',
+      // One paragraph at the content limit as plain text, a long one of prose over many lines, a long link title.
+      'x'.repeat(250_000),
+      'What has happened here, who knows *why*\n'.repeat(2_500),
+      `[r]: x "${'a&b; '.repeat(30_000)}"`,
+    ]) {
+      assert.ok(text.length > 50_000, 'the body is long');
+      assert.doesNotThrow(() => parse(text));
+    }
+  });
+
   it('rejects excessive reachable blockquote nesting before returning a tree', () => {
     assert.throws(() => parse('> '.repeat(130) + 'nesting-canary'), /Markdown.*depth/);
     const accepted = '> '.repeat(MARKDOWN_MAX_DEPTH - 2) + 'canary';
