@@ -6,7 +6,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
 import { paragraphEdit } from './fixtures.ts';
-import { MARKERS } from './conflicts.ts';
+import { markerBlock } from './conflicts.ts';
 import { Rng } from '../../corpus/rng.ts';
 import { ProductError, EnvBlockedError } from './results.ts';
 import { soakDrainPlan } from './soak-drain.ts';
@@ -65,20 +65,42 @@ export function burstEditCounts(options: Omit<BurstOptions, 'documents'>): { lin
  */
 export function editCapacity(versions: readonly string[], lastToken: string): number {
   if (versions.length === 0) return 0;
-  const perEdit = 2 * paragraphEdit('', undefined, lastToken).length + `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
+  const perEdit = 2 * paragraphEdit('', undefined, lastToken).length + `${markerBlock('git')}\n\n${markerBlock('linear')}\n\n${markerBlock('end')}\n\n`.length;
   const longest = Math.max(...versions.map((text) => text.length));
   return Math.max(0, Math.floor((CONTENT_LIMIT - 2 * longest) / perEdit));
 }
 
-/** Reserve all appends, duplicated conflict versions, and a marker set per edit on every candidate. */
+/** The Linear edit and the git push that `burst` sends to a document, by index into its documents. */
+const linearTarget = (index: number, documents: number) => index % documents;
+const gitTarget = (index: number, documents: number) => (index * 7 + 3) % documents;
+
+/** The most edits `burst`'s schedule sends to any one of `documents` documents. */
+function mostEditsPerDocument(counts: { linear: number; git: number }, documents: number): number {
+  const edits = new Array<number>(documents).fill(0);
+  for (let index = 0; index < counts.linear; index += 1) edits[linearTarget(index, documents)]! += 1;
+  for (let index = 0; index < counts.git; index += 1) edits[gitTarget(index, documents)]! += 1;
+  return Math.max(...edits);
+}
+
+/**
+ * The documents a burst edits: those with room for every edit the schedule
+ * sends to one document (its appends, duplicated conflict versions and a
+ * marker set per edit). Fewer documents take more edits each, so the set
+ * shrinks until every member has room.
+ */
 export function burstDocuments(
   documents: ReadonlyMap<string, readonly string[]>,
   options: Omit<BurstOptions, 'documents'>,
   lastToken: string,
 ): string[] {
   const counts = burstEditCounts(options);
-  const edits = counts.linear + counts.git;
-  const paths = [...documents].filter(([, versions]) => editCapacity(versions, lastToken) >= edits).map(([path]) => path);
+  let paths = [...documents.keys()];
+  for (;;) {
+    const need = paths.length === 0 ? Infinity : mostEditsPerDocument(counts, paths.length);
+    const fitting = paths.filter((path) => editCapacity(documents.get(path)!, lastToken) >= need);
+    if (fitting.length === paths.length) break;
+    paths = fitting;
+  }
   if (paths.length === 0) throw new Error('no document has room for the burst edits');
   return paths;
 }
@@ -120,11 +142,11 @@ export async function burst(driver: LoadDriver, options: BurstOptions): Promise<
   })());
   await Promise.all([
     guard(scheduled(options.linearEditsPerMinute, counts.linear, async (index) => {
-      await driver.linearEdit(index % 2 === 0 ? 'editor-a' : 'editor-b', options.documents[index % options.documents.length] as string);
+      await driver.linearEdit(index % 2 === 0 ? 'editor-a' : 'editor-b', options.documents[linearTarget(index, options.documents.length)] as string);
       result.linearEdits += 1;
     })),
     guard(scheduled(options.gitPushesPerMinute, counts.git, async (index) => {
-      await driver.gitEdit([options.documents[(index * 7 + 3) % options.documents.length] as string]);
+      await driver.gitEdit([options.documents[gitTarget(index, options.documents.length)] as string]);
       result.gitPushes += 1;
     })),
     syncing,

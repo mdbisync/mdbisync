@@ -31,7 +31,7 @@ import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
 import { type CheckState, mergeInProgress } from '../../../src/pull-request/merge.ts';
 import { CHECK_NAME, CHECK_WORKFLOW_PATH, readCheckState } from '../../corpus/check-workflow.ts';
-import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
+import { calloutDecoration, editParagraph, markerKindAt, noteSentence, removeMarker, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
@@ -1869,10 +1869,10 @@ export function publishedHookPin(text: string): { repo: string; rev: string } {
  */
 export function editInsideMarkers(text: string, version: 'git' | 'linear', token: string): string {
   const lines = text.split('\n');
-  const start = lines.indexOf(version === 'git' ? MARKERS.git : MARKERS.linear);
+  const start = lines.findIndex((_, index) => markerKindAt(lines, index) === version);
   if (start < 0) throw new ProductError('the document holds no conflict markers');
   const line = lines.findIndex((candidate, index) => index > start && candidate.trim() !== '');
-  if (line < 0 || Object.values(MARKERS).includes(lines[line] as never)) throw new ProductError('the conflict has an empty version');
+  if (line < 0 || markerKindAt(lines, line) !== null || calloutDecoration(lines[line] as string)) throw new ProductError('the conflict has an empty version');
   lines[line] = `${(lines[line] as string).replace(/\s+$/, '')} ${noteSentence(token)}`;
   return lines.join('\n');
 }
@@ -2188,8 +2188,9 @@ const LINEAR: Record<string, Executor> = {
   },
   'linear.remove-one-marker': async (ctx, args) => {
     await editorEdit(ctx, editorOf(args), targetPath(ctx, args.target), (text) => {
-      if (!text.split('\n').includes(MARKERS.end)) throw new ProductError('the document holds no end marker');
-      return text.split('\n').filter((line) => line !== MARKERS.end).join('\n');
+      const removed = removeMarker(text, 'end');
+      if (removed === null) throw new ProductError('the document holds no end marker');
+      return removed;
     });
   },
   'linear.edit-inside-markers': async (ctx, args) => {

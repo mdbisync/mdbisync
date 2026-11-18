@@ -11,7 +11,7 @@ import { Git, GitError, lfsReader, parseLfsPointer } from '../../../src/state/in
 import { fakeLfsServer } from '../../../src/state/test-helpers.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, noteSentence, resolveKeeping, scanMarkers } from './conflicts.ts';
+import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, markerBlock, MARKERS, noteSentence, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { CANARY_FIXTURE } from './security-canary.ts';
 import type { RunTree } from './corpus.ts';
@@ -944,9 +944,10 @@ describe('load', () => {
       ['near-linear.md', ['Small file.', nearLimit]],
       ['near-git.md', [nearLimit, 'Small document.']],
       ['notes.md', ['# Notes\n', '# Notes\n']],
+      ['plan.md', ['# Plan\n', '# Plan\n']],
     ]);
     const documents = burstDocuments(versions, options, 'abcdef-9999');
-    assert.deepEqual(documents, ['notes.md']);
+    assert.deepEqual(documents, ['notes.md', 'plan.md']);
     const texts = new Map([...versions].map(([path, values]) => [path, values[0] as string]));
     const tokens: string[] = [];
     const edit = async (path: string) => {
@@ -960,18 +961,23 @@ describe('load', () => {
     const result = await burst({ ...clock, linearEdit: async (_, path) => edit(path), gitEdit: async ([path]) => edit(path as string), sync: async () => void clock.sleep(60_000) }, { ...options, documents });
     assert.equal(result.linearEdits, 750);
     assert.equal(result.gitPushes, 15);
-    assert.ok(tokens.every((token) => texts.get('notes.md')?.includes(token)));
+    assert.ok(tokens.every((token) => documents.some((path) => texts.get(path)?.includes(token))));
     assert.equal(texts.get('near-git.md'), nearLimit);
     assert.equal(texts.get('near-linear.md'), 'Small file.');
   });
 
-  it('reserves exact append headroom and refuses an exhausted candidate set', () => {
+  it('reserves exact append headroom for the edits each document gets, and refuses an exhausted candidate set', () => {
+    // One Linear edit (to the first document) and one git push (to the fourth, modulo the count).
     const options = { durationMs: 60_000, linearEditsPerMinute: 1, gitPushesPerMinute: 1 };
     const token = 'abcdef-1000';
-    const growth = 2 * paragraphEdit('', undefined, token).length;
-    const markers = 2 * `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
-    const fitting = 'a'.repeat(Math.floor((250_000 - markers) / 2) - growth);
-    assert.deepEqual(burstDocuments(new Map([['fits.md', [fitting, fitting]], ['full.md', [fitting + 'a']]]), options, token), ['fits.md']);
+    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${markerBlock('git')}\n\n${markerBlock('linear')}\n\n${markerBlock('end')}\n\n`.length;
+    /** A version with room for exactly `edits` edits. */
+    const room = (edits: number) => 'a'.repeat(Math.floor((250_000 - edits * perEdit) / 2));
+    // Two documents take one edit each; one alone would take both.
+    assert.deepEqual(burstDocuments(new Map([['one.md', [room(1)]], ['other.md', [room(1)]]]), options, token), ['one.md', 'other.md']);
+    assert.throws(() => burstDocuments(new Map([['one.md', [room(1)]]]), options, token), /no document has room/);
+    // A document without room drops out, and the rest then take more edits each.
+    assert.deepEqual(burstDocuments(new Map([['fits.md', [room(2)]], ['full.md', [room(1) + 'a'.repeat(perEdit)]]]), options, token), ['fits.md']);
     assert.throws(() => burstDocuments(new Map([['full.md', ['a'.repeat(250_000)]]]), options, token), /no document has room/);
     assert.throws(() => burstDocuments(new Map(), options, token), /no document has room/);
   });
@@ -1198,7 +1204,7 @@ describe('load', () => {
     const total = counts['editor-a'] + counts['editor-b'] + counts.git;
     const token = soakToken(counts);
     // Each edit appends a note to both versions, and a conflict adds a marker set.
-    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
+    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${markerBlock('git')}\n\n${markerBlock('linear')}\n\n${markerBlock('end')}\n\n`.length;
     const nearLimit = 'a'.repeat(CONTENT_LIMIT - 1);
     // Room for exactly three edits: the seeded schedule picks it more often, so it fills up and drops out.
     const tight = 'b'.repeat(Math.floor((CONTENT_LIMIT - 3 * perEdit) / 2));
@@ -1244,12 +1250,14 @@ describe('load', () => {
     const counts = soakEditCounts(SOAK);
     const total = counts['editor-a'] + counts['editor-b'] + counts.git;
     const token = soakToken(counts);
-    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
-    const short = 'a'.repeat(Math.floor((CONTENT_LIMIT - (total - 1) * perEdit) / 2));
+    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${markerBlock('git')}\n\n${markerBlock('linear')}\n\n${markerBlock('end')}\n\n`.length;
+    // Room for one edit fewer than the schedule, in two documents: one alone cannot hold so many edits.
+    const room = (edits: number) => 'a'.repeat(Math.floor((CONTENT_LIMIT - edits * perEdit) / 2));
+    const half = Math.floor((total - 1) / 2);
     let edits = 0;
     const clock = fakeClock();
     const driver: SoakDriver = { ...clock, linearEdit: async () => { edits += 1; }, gitEdit: async () => { edits += 1; }, sync: async () => {}, checkInvariants: async () => ({ lostEdits: 0 }) };
-    await assert.rejects(soak(driver, { ...SOAK, documents: new Map([['short.md', [short]]]) }), new RegExp(`room for ${total - 1} of the ${total} soak edits`));
+    await assert.rejects(soak(driver, { ...SOAK, documents: new Map([['short.md', [room(half)]], ['other.md', [room(total - 1 - half)]]]) }), new RegExp(`room for ${total - 1} of the ${total} soak edits`));
     await assert.rejects(soak(driver, { ...SOAK, documents: new Map([['full.md', ['a'.repeat(CONTENT_LIMIT / 2)]], ['none.md', []]]) }), new RegExp(`room for 0 of the ${total} soak edits`));
     await assert.rejects(soak(driver, { ...SOAK, scheduleMs: 0, documents: new Map() }), /positive intervals/);
     await assert.rejects(soak(driver, { ...SOAK, invariantIntervalMs: Number.NaN, documents: new Map() }), /finite numbers/);

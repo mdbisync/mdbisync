@@ -131,6 +131,25 @@ function comparable(body: string): unknown {
   return strip(tree);
 }
 
+/**
+ * The text as the content of a block quote, the way Linear writes one: each
+ * line after `> `, a blank line as a bare `>`, except a blank line of a
+ * code block's content, which keeps the space (`> `).
+ */
+export function quoteLines(text: string): string {
+  const codeLines = new Set<number>();
+  // Only code directly in the quote: a nested quote has already written its
+  // blank code lines as `> `, and Linear's form of code in a list is unrecorded.
+  for (const node of parse(text).children) {
+    if (node.type !== 'code' || !node.position) continue;
+    for (let line = node.position.start.line; line <= node.position.end.line; line++) codeLines.add(line);
+  }
+  return text
+    .split('\n')
+    .map((line, index) => (line === '' && !codeLines.has(index + 1) ? '>' : `> ${line}`))
+    .join('\n');
+}
+
 export function start(node: Nodes): number {
   return node.position?.start.offset ?? 0;
 }

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Nodes } from 'mdast';
 import { parse, splitFile, visit } from '../format/markdown.ts';
 import { Git } from '../state/git.ts';
-import { detectConflicts, lines, lineText, markerLines, MARKERS } from './markers.ts';
+import { detectConflicts, findMarkerLines, lines, lineText, markerCallout, MARKERS, unquote } from './markers.ts';
 import type { Conflict } from './markers.ts';
 import { message } from '../messages.ts';
 
@@ -106,15 +106,35 @@ function conflictRanges(tokens: Token[]): Range[] {
   return merged;
 }
 
+/**
+ * Each token's lines without the marker blocks of an old conflict and the
+ * blank line after each: a marker line, or a marker callout with its color
+ * comment. Any other text typed into a marker callout stays, unquoted, so
+ * the old versions become ordinary text of the new conflict, never a nested
+ * mark.
+ */
 function withoutMarkers(tokens: Token[], side: Side): string[][] {
   const projection = tokens.flatMap((token) => content(token, side)).join('');
-  const markers = markerLines(projection);
-  let line = 0;
+  const source = lines(projection);
+  const blank = (line: number) => source[line - 1] !== undefined && lineText(unquote(source[line - 1]!)) === '';
+  const drop = new Set<number>();
+  const quoted = new Set<number>();
   // Classify markers in the complete document, before cutting out an arm:
   // quote and multiline inline-code context may start outside a Git hunk.
-  return tokens.map((token) => content(token, side).filter((text) => {
+  for (const [line, marker] of findMarkerLines(projection)) {
+    drop.add(line);
+    if (marker.calloutLine !== undefined) {
+      for (let comment = marker.startLine; comment < marker.calloutLine; comment++) drop.add(comment);
+      drop.add(marker.calloutLine);
+      for (let inside = marker.calloutLine; inside <= marker.endLine; inside++) quoted.add(inside);
+    }
+    if (blank(marker.endLine + 1)) drop.add(marker.endLine + 1);
+  }
+  let line = 0;
+  return tokens.map((token) => content(token, side).flatMap((text) => {
     line++;
-    return !markers.has(line) && !(markers.has(line - 1) && lineText(text) === '');
+    if (drop.has(line)) return [];
+    return [quoted.has(line) ? unquote(text) : text];
   }));
 }
 
@@ -186,7 +206,7 @@ function render(tokens: Token[], ranges: Range[], finalNewline: boolean): string
     const arms = (side: Side) => completeBlocks(armsWithoutMarkers[side].slice(range.start, range.end).flat().join('').replace(/^\n|\n$/g, ''));
     cursor = range.end;
     const last = tokens.slice(cursor).every((token) => content(token, 'ours').join('') === '');
-    text += `${MARKERS.git}\n\n${arms('ours')}\n\n${MARKERS.linear}\n\n${arms('theirs')}\n\n${MARKERS.end}${last && !finalNewline ? '' : '\n'}`;
+    text += `${markerCallout(MARKERS.git)}\n\n${arms('ours')}\n\n${markerCallout(MARKERS.linear)}\n\n${arms('theirs')}\n\n${markerCallout(MARKERS.end)}${last && !finalNewline ? '' : '\n'}`;
     const next = tokens[cursor];
     if (next?.kind === 'line' && lineText(next.text) !== '') text += '\n';
   }

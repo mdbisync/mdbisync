@@ -1,14 +1,23 @@
 // Conflict markers as the sync writes them, and the paragraph-level edits
 // that scenarios use to make or avoid conflicts.
 //
-// A conflict is three marker paragraphs around the two versions; the sync
-// finds them by exact line match, and so does the harness:
+// A conflict is three markers around the two versions. The sync writes each
+// marker as its own one-line warning callout, with the callout's color in a
+// comment directly above it; the first form, still found and resolved, was
+// the bare marker line. The sync finds markers by exact line match (after
+// the quote prefix), and so does the harness:
 //
-//   **Sync conflict: git version**
+//   <!-- linear:callout color=#f2c94c -->
+//   > [!WARNING]
+//   > **Sync conflict: git version**
+//
 //   <the tracked branch's version>
-//   **Sync conflict: Linear version**
+//
+//   ... the same callout with **Sync conflict: Linear version** ...
+//
 //   <Linear's version>
-//   **Sync conflict: end**
+//
+//   ... the same callout with **Sync conflict: end**
 
 export const MARKERS = {
   git: '**Sync conflict: git version**',
@@ -16,6 +25,19 @@ export const MARKERS = {
   end: '**Sync conflict: end**',
 } as const;
 export type MarkerKind = keyof typeof MARKERS;
+
+/** The color comment the sync writes above each marker callout. */
+export const CALLOUT_COMMENT = '<!-- linear:callout color=#f2c94c -->';
+
+/** A marker as the sync writes it: a one-line warning callout with its color comment. */
+export function markerBlock(kind: MarkerKind): string {
+  return `${CALLOUT_COMMENT}\n> [!WARNING]\n> ${MARKERS[kind]}`;
+}
+
+/** A line the sync writes around a marker in a callout: the color comment or the alert line. */
+export function calloutDecoration(line: string): boolean {
+  return /^<!--\s*linear:callout\b.*-->$/.test(line) || /^> ?\[!\w+\]\s*$/.test(line);
+}
 
 /** The conflict mark a conflicted document carries in Linear. */
 export const CONFLICT_MARK = { icon: 'Alert', color: 'orange' } as const;
@@ -65,9 +87,38 @@ function lines(text: string): string[] {
   return text.split('\n').map((line) => line.replace(/\r$/, ''));
 }
 
+/** A bare marker line. */
 function kindOf(line: string): MarkerKind | null {
   for (const kind of Object.keys(MARKERS) as MarkerKind[]) if (line === MARKERS[kind]) return kind;
   return null;
+}
+
+const ALERT_LINE = /^> ?\[!\w+\][ \t]*$/;
+
+/**
+ * The marker at a line: a bare marker line, or a quoted one directly after
+ * a callout's alert line, as the sync writes it. A marker in a plain quote
+ * is an example, as the sync treats it.
+ */
+export function markerKindAt(all: readonly string[], index: number): MarkerKind | null {
+  const line = all[index] ?? '';
+  const bare = kindOf(line);
+  if (bare !== null || !ALERT_LINE.test(all[index - 1] ?? '')) return bare;
+  return kindOf(line.replace(/^> ?/, ''));
+}
+
+/** The lines with each marker callout written as its bare marker line: color comment and alert line dropped. */
+function bareMarkers(all: readonly string[]): string[] {
+  const out: string[] = [];
+  all.forEach((line, index) => {
+    if (ALERT_LINE.test(line) && kindOf(all[index + 1] ?? '') === null && markerKindAt(all, index + 1) !== null) {
+      if (calloutDecoration(out.at(-1) ?? '')) out.pop();
+      return;
+    }
+    const kind = markerKindAt(all, index);
+    out.push(kind === null ? line : MARKERS[kind]);
+  });
+  return out;
 }
 
 /**
@@ -76,7 +127,7 @@ function kindOf(line: string): MarkerKind | null {
  * partial set (a marker line removed) still counts as one set.
  */
 export function scanMarkers(text: string): MarkerScan {
-  const all = lines(text);
+  const all = bareMarkers(lines(text));
   const sets: Array<MarkerSet & { at: Partial<Record<MarkerKind, number>> }> = [];
   let nested = 0;
   let markerLines = 0;
@@ -116,9 +167,32 @@ export function inConflict(text: string): boolean {
   return scanMarkers(text).markerLines > 0;
 }
 
-/** Removes every marker set, keeping one side's version. */
-export function resolveKeeping(text: string, side: 'git' | 'linear'): string {
+/**
+ * Removes every marker of one kind, as a person deleting it in an editor
+ * would: a bare marker line, or a marker callout whole with its color
+ * comment. Null when the text holds no such marker.
+ */
+export function removeMarker(text: string, kind: MarkerKind): string | null {
   const all = lines(text);
+  if (!all.some((_, index) => markerKindAt(all, index) === kind)) return null;
+  const out: string[] = [];
+  all.forEach((line, index) => {
+    if (markerKindAt(all, index) !== kind) {
+      out.push(line);
+      return;
+    }
+    // A callout goes whole: its alert line and the color comment above it.
+    if (line !== MARKERS[kind]) {
+      out.pop();
+      if (calloutDecoration(out.at(-1) ?? '')) out.pop();
+    }
+  });
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+/** Removes every marker set, keeping one side's version: the marker callouts go whole. */
+export function resolveKeeping(text: string, side: 'git' | 'linear'): string {
+  const all = bareMarkers(lines(text));
   const out: string[] = [];
   let state: 'outside' | MarkerKind = 'outside';
   let fence: string | null = null;
@@ -143,7 +217,7 @@ export type BlockKind = 'paragraph' | 'heading' | 'fence' | 'table' | 'ordered-l
 /** The kind of a block of Markdown (text between blank lines). */
 export function blockKind(block: string): BlockKind {
   const [first = '', ...rest] = block.split('\n');
-  if (kindOf(first) !== null) return 'marker';
+  if (block.split('\n').some((_, index, all) => markerKindAt(all, index) !== null)) return 'marker';
   if (first === '---') return 'front-matter';
   if (/^(```|~~~)/.test(first)) return 'fence';
   if (/^#{1,6}\s/.test(first)) return 'heading';
