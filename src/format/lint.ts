@@ -3,10 +3,10 @@
 // callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
-import type { Definition, Root } from 'mdast';
+import type { Definition, Root, Table } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, MarkdownLimitError, end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, MARKDOWN_MAX_NODES, MarkdownLimitError, end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
@@ -14,6 +14,8 @@ const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
 const LETTER = /[a-z]/i;
+/** Characters `fix` adds for each empty cell that pads a table row: the ` | ` before it (`Writer.table` in fix.ts). */
+const PADDING_CELL_LENGTH = 3;
 
 /** What `lint` may know about the file beyond its text. */
 export interface LintOptions {
@@ -82,6 +84,39 @@ export function lintText(file: string, text: string, options: LintOptions = {}):
   return sorted();
 }
 
+/**
+ * The empty cells `fix` adds to a table: it writes every row with as many
+ * cells as the header, the form Linear stores. A ragged table can grow far
+ * beyond its source then (a long header over many one-cell rows), so lint
+ * counts them before anything is written.
+ */
+/**
+ * The line of the table whose padding takes the written text or tree over
+ * its limit, or undefined when every table can be padded. Each empty cell
+ * `fix` adds is written as ` | ` and is a node of the written tree.
+ */
+export function paddingOverLimit(tree: Root): number | undefined {
+  let nodes = 0;
+  const tables: Table[] = [];
+  visit(tree, (node) => {
+    nodes++;
+    if (node.type === 'table') tables.push(node);
+  });
+  let added = 0;
+  for (const table of tables) {
+    added += paddingCells(table);
+    if (added * PADDING_CELL_LENGTH > CONTENT_LIMIT || nodes + added > MARKDOWN_MAX_NODES) return line(table);
+  }
+  return undefined;
+}
+
+function paddingCells(table: Table): number {
+  const width = table.children[0]?.children.length ?? 0;
+  let cells = 0;
+  for (const row of table.children) cells += Math.max(0, width - row.children.length);
+  return cells;
+}
+
 /** Whether the text has more Unicode code points than `CONTENT_LIMIT`, counted without copying it. */
 function overContentLimit(text: string): boolean {
   if (text.length <= CONTENT_LIMIT) return false;
@@ -101,6 +136,8 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
     if (rule !== undefined) report(rule, at);
   };
   const codeLines = new Set<number>();
+  const padded = paddingOverLimit(tree);
+  if (padded !== undefined) report('markdown-complexity', padded);
   visit(tree, (node, ancestors) => {
     switch (node.type) {
       case 'code':

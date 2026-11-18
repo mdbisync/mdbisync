@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { markdownFiles, runFix, runLint } from './command.ts';
+import { fixText } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
@@ -104,6 +105,30 @@ describe('lint rules', () => {
     assert.deepEqual(lintText('doc.md', 'a'.repeat(CONTENT_LIMIT + 1)).map((f) => f.rule), ['content-too-long']);
   });
 
+  // A long header over many one-cell rows: `fix` would write every row with the header's width.
+  const raggedTable = (width: number, rows: number): string => `${'|a'.repeat(width)}|\n${'|-'.repeat(width)}|\n${'|x|\n'.repeat(rows)}`;
+
+  // The previous code ran out of memory on this input; the timeout bounds lint and fix together.
+  it('refuses a table whose padding to the header width would be over the limits, and fix leaves it unchanged', { timeout: 60_000 }, () => {
+    const text = `Intro.\n\n${raggedTable(30_000, 30_000)}`;
+    assert.ok(text.length < CONTENT_LIMIT, 'the source is within the content limit');
+    assert.deepEqual(lintText('doc.md', text).map((f) => [f.rule, f.line]), [['markdown-complexity', 3]]);
+    assert.equal(fixText(text), text);
+    // Padding that alone adds over 250,000 characters, from a source of a few kilobytes.
+    assert.deepEqual(lintText('doc.md', raggedTable(300, 300)).map((f) => f.rule), ['markdown-complexity']);
+    // Small tables whose padding adds up over the limit: the table that crosses it is named.
+    const tables = Array.from({ length: 3 }, () => raggedTable(170, 170)).join('\n');
+    assert.deepEqual(lintText('doc.md', tables).map((f) => [f.rule, f.line]), [['markdown-complexity', 347]]);
+  });
+
+  it('keeps padding a ragged table within the limits', () => {
+    const text = raggedTable(200, 200);
+    assert.deepEqual(lintText('doc.md', text), []);
+    const fixed = fixText(text);
+    assert.equal(fixed.split('\n').length, 202);
+    assert.ok(fixed.split('\n').every((row) => row.split(' | ').length === 200), 'every row has the header width');
+  });
+
   it('stops at content-too-long: text over the limit is not linted further', () => {
     const text = `H~2~O\n\n<div>${'a'.repeat(CONTENT_LIMIT)} https://example.com</div>`;
     assert.deepEqual(lintText('doc.md', text).map((f) => [f.rule, f.line]), [['content-too-long', 1]]);
@@ -182,6 +207,20 @@ describe('lint and fix commands', () => {
       assert.equal(readFileSync(join(folder, 'assets', 'notes.md'), 'utf8'), '- a\n');
     } finally {
       rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('lint and fix report a table too large to pad and leave it unchanged', () => {
+    const path = join(dir, 'ragged.md');
+    const source = `${'|a'.repeat(30_000)}|\n${'|-'.repeat(30_000)}|\n${'|x|\n'.repeat(30_000)}`;
+    const message = `ragged.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
+    try {
+      writeFileSync(path, source);
+      assert.deepEqual(runLint(['ragged.md'], dir), { exitCode: 1, stdout: message, stderr: '' });
+      assert.deepEqual(runFix(['ragged.md'], dir), { exitCode: 1, stdout: message, stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), source);
+    } finally {
+      rmSync(path, { force: true });
     }
   });
 

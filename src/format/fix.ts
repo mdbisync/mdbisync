@@ -8,9 +8,9 @@
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
-import { lintText } from './lint.ts';
+import { lintText, paddingOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, isCallout, isCalloutComment, joinFile, parse, quoteLines, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, end, isCallout, isCalloutComment, joinFile, parse, quoteLines, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -28,16 +28,26 @@ export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
   const fixed = fixBody(body.replace(/\r\n?/g, '\n'), options);
-  return joinFile(head, fixed);
+  return fixed === undefined ? text : joinFile(head, fixed);
 }
 
-function fixBody(body: string, options: FixOptions): string {
+/** The body in Linear's form, or undefined when a rewrite takes it over the Markdown limits. */
+function fixBody(body: string, options: FixOptions): string | undefined {
   if (body.trim() === '') return '';
   let current = body;
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    const next = new Writer(current, parse(current), options).root();
+    let tree: Root;
+    try {
+      tree = parse(current);
+    } catch (error) {
+      if (error instanceof MarkdownLimitError) return undefined;
+      throw error;
+    }
+    // Lint checked the source; a rewrite may expose a table it did not see.
+    if (paddingOverLimit(tree) !== undefined) return undefined;
+    const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
   }
