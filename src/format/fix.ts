@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, joinFile, parse, splitFile, start, visit } from './markdown.ts';
+import { end, isCallout, isCalloutComment, joinFile, parse, quoteLines, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -74,12 +74,23 @@ class Writer {
     return this.blocks(this.tree.children);
   }
 
-  /** Sibling blocks, one blank line apart. Reference definitions are written inline instead. */
+  /**
+   * Sibling blocks, one blank line apart, except that Linear writes a
+   * callout's color comment directly above the callout. Reference
+   * definitions are written inline instead.
+   */
   private blocks(nodes: readonly (RootContent | BlockContent | DefinitionContent)[]): string {
-    return nodes
+    const written = nodes
       .filter((node) => node.type !== 'definition')
-      .flatMap((node) => this.block(node))
-      .join('\n\n');
+      .map((node) => ({ node, parts: this.block(node) }))
+      .filter(({ parts }) => parts.length > 0);
+    return written
+      .map(({ node, parts }, index) => {
+        const next = written[index + 1];
+        if (next === undefined) return parts.join('\n\n');
+        return parts.join('\n\n') + (isCalloutComment(node) && isCallout(next.node, this.source) ? '\n' : '\n\n');
+      })
+      .join('');
   }
 
   private block(node: RootContent | BlockContent | DefinitionContent): string[] {
@@ -95,7 +106,7 @@ class Writer {
         this.containers.push({ kind: 'quote' });
         const content = this.blocks(node.children);
         this.containers.pop();
-        return [prefixLines(content, '> ', '>')];
+        return [quoteLines(content)];
       }
       case 'list':
         return [this.list(node)];

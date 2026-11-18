@@ -71,6 +71,12 @@ rules:
 known_constructs:
   - construct: sync-conflict-markers
     class: unchanged
+  - construct: sync-conflict-callouts
+    class: unchanged
+  - construct: code-in-quote
+    class: unchanged
+  - construct: callout-color-comment-spaced
+    class: fixable
   - construct: heading-atx-h1
     class: unchanged
   - construct: heading-atx-h2
@@ -2123,6 +2129,46 @@ fixtures:
     basis: known
     canary: kx-9f26fea3
     note: "a conflict in a table takes the whole table"
+  - file: "conflict-markers/callout-markers.md"
+    group: conflict-markers
+    construct: sync-conflict-callouts
+    class: unchanged
+    basis: known
+    canary: kx-447cc5fd
+    corpus: false
+    note: "each marker line as its own one-line warning callout, versions as body text"
+  - file: "conflict-markers/callout-markers-blocks.md"
+    group: conflict-markers
+    construct: sync-conflict-callouts
+    class: unchanged
+    basis: known
+    canary: kx-26d0b3f3
+    corpus: false
+    note: "one-line marker callouts next to a table and a code block"
+  - file: "conflict-markers/callout-markers-color.md"
+    group: conflict-markers
+    construct: sync-conflict-callouts
+    class: unchanged
+    basis: known
+    canary: kx-8370d6da
+    corpus: false
+    note: "marker callouts with a color comment directly before each, as the sync writes them"
+  - file: "conflict-markers/callout-markers-color-blank.md"
+    group: conflict-markers
+    construct: callout-color-comment-spaced
+    class: fixable
+    basis: known
+    canary: kx-37060e33
+    corpus: false
+    note: "marker callouts with a color comment and a blank line before each; Linear writes the comment directly above the callout"
+  - file: "pairwise/code-blank-line-in-quote.md"
+    group: pairwise
+    construct: code-in-quote
+    class: unchanged
+    basis: known
+    canary: kx-2a414526
+    corpus: false
+    note: "a blank line inside a code block in a quote"
   - file: "conflict-markers/sync-markers-code.md"
     group: conflict-markers
     construct: sync-conflict-markers

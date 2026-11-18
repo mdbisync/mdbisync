@@ -1,0 +1,15 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"Example:","marks":{"attribution":"user"}}]},
+        {"type":"code_block","attrs":{"id":"<id>","language":"text"},"children":[{"text":"one\n\ntwo","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-2a414526","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { test } from 'node:test';
 import { detectConflicts, MARKERS, mergeMarkdown } from './index.ts';
+import { markerCallout } from './markers.ts';
 
+/** A conflict as the sync writes it: each marker a one-line callout. */
 const conflict = (ours: string, theirs: string) =>
+  `${markerCallout(MARKERS.git)}\n\n${ours}\n\n${markerCallout(MARKERS.linear)}\n\n${theirs}\n\n${markerCallout(MARKERS.end)}\n`;
+/** A conflict in the earlier form of bare marker paragraphs, as documents may still hold. */
+const bareConflict = (ours: string, theirs: string) =>
   `${MARKERS.git}\n\n${ours}\n\n${MARKERS.linear}\n\n${theirs}\n\n${MARKERS.end}\n`;
 
 test('L3-01: edits to separate paragraphs merge without markers', async () => {
@@ -57,7 +62,7 @@ test('front matter is merged apart from the body: either side\'s change is kept,
   assert.ok(overlap.text.startsWith(file(head('c', 'x'), '')), overlap.text);
   // A removal on the other side (a person's on the sync branch) is kept.
   const removed = await mergeMarkdown(base, file(head('a', 'x'), 'git\n'), 'linear\n');
-  assert.ok(removed.text.startsWith(MARKERS.git), removed.text);
+  assert.ok(removed.text.startsWith(markerCallout(MARKERS.git)), removed.text);
   // A document Linear added has no front matter, and the git side's added one stays.
   const added = await mergeMarkdown('', file(head('a', 'x'), 'git\n'), 'linear\n');
   assert.ok(added.text.startsWith(file(head('a', 'x'), '')), added.text);
@@ -66,7 +71,7 @@ test('front matter is merged apart from the body: either side\'s change is kept,
 test('L3-02: both versions of a paragraph appear between marker paragraphs', async () => {
   const result = await mergeMarkdown('old\n', 'git edit\n', 'Linear edit\n');
   assert.equal(result.text, conflict('git edit', 'Linear edit'));
-  assert.deepEqual(result.conflicts, [{ startLine: 1, endLine: 9, git: 'git edit', linear: 'Linear edit' }]);
+  assert.deepEqual(result.conflicts, [{ startLine: 1, endLine: 15, git: 'git edit', linear: 'Linear edit' }]);
 });
 
 for (const [scenario, block] of [
@@ -115,6 +120,14 @@ test('existing conflicts and one-sided edits are preserved', async () => {
   assert.equal(result.conflicts.length, 1);
 });
 
+test('an old bare mark stays as written while only one side edits inside it', async () => {
+  const base = bareConflict('old git', 'old Linear');
+  const ours = base.replace('old git', 'new git');
+  const result = await mergeMarkdown(base, ours, base);
+  assert.equal(result.text, ours);
+  assert.equal(result.conflicts.length, 1);
+});
+
 test('L3-22: code, quotes, inline code, escaped and near markers are ordinary text', () => {
   for (const marker of Object.values(MARKERS)) {
     for (const text of [`\`${marker}\`\n`, `> ${marker}\n`, `    ${marker}\n`, `~~~\n${marker}\n~~~\n`, `\\${marker}\n`, `${marker} extra\n`]) {
@@ -126,7 +139,8 @@ test('L3-22: code, quotes, inline code, escaped and near markers are ordinary te
 
 test('L3-22: fixture marker lookalikes do not become conflicts', async () => {
   const dir = new URL('../../test/fixtures/conflict-markers/', import.meta.url);
-  const names = (await readdir(dir)).filter((name) => name.endsWith('.md') && !name.startsWith('sync-markers-'));
+  const real = (name: string) => name.startsWith('sync-markers-') || name.startsWith('callout-markers');
+  const names = (await readdir(dir)).filter((name) => name.endsWith('.md') && !real(name));
   assert.ok(names.length > 0);
   for (const name of names) {
     assert.deepEqual(detectConflicts(await readFile(new URL(name, dir), 'utf8')), [], name);
@@ -163,9 +177,10 @@ test('partial marker removal remains a conflict until every marker is gone', () 
   }
 });
 
-test('existing marker fixtures are detected as one complete conflict', async () => {
+test('marker fixtures, bare and callout, are detected as one complete conflict', async () => {
   const dir = new URL('../../test/fixtures/conflict-markers/', import.meta.url);
-  for (const name of (await readdir(dir)).filter((name) => name.startsWith('sync-markers-') && name.endsWith('.md'))) {
+  const real = (name: string) => name.startsWith('sync-markers-') || name.startsWith('callout-markers');
+  for (const name of (await readdir(dir)).filter((name) => real(name) && name.endsWith('.md'))) {
     const found = detectConflicts(await readFile(new URL(name, dir), 'utf8'));
     assert.equal(found.length, 1, name);
     assert.equal(typeof found[0]?.git, 'string', name);
@@ -179,7 +194,7 @@ test('separate conflicts keep clean text between them and report source lines', 
   const result = await mergeMarkdown(base, base.replaceAll('old', 'git'), base.replaceAll('old', 'Linear'));
   assert.equal(result.text, `${conflict('git one', 'Linear one')}${between}${conflict('git two', 'Linear two')}`);
   assert.equal(result.conflicts.length, 2);
-  assert.equal(result.conflicts[1]?.startLine, 17);
+  assert.equal(result.conflicts[1]?.startLine, 23);
 });
 
 test('new markers do not remove literal marker examples inside a conflicted fence', async () => {
@@ -345,7 +360,7 @@ test('mixed newline styles do not widen a paragraph conflict to the document', a
 
 test('BOM-prefixed marker lines keep their source positions', () => {
   assert.deepEqual(detectConflicts(`\uFEFF${MARKERS.git}\n`), [{ startLine: 1, endLine: 1 }]);
-  assert.deepEqual(detectConflicts(`\uFEFF${conflict('git', 'Linear')}`), [{ startLine: 1, endLine: 9, git: 'git', linear: 'Linear' }]);
+  assert.deepEqual(detectConflicts(`\uFEFF${conflict('git', 'Linear')}`), [{ startLine: 1, endLine: 15, git: 'git', linear: 'Linear' }]);
   const file = `\uFEFF---\ntitle: Sample\n---\n\n${conflict('git', 'Linear')}`;
   assert.equal(detectConflicts(file)[0]?.startLine, 5);
   assert.deepEqual(detectConflicts(`\uFEFF~~~\n${MARKERS.git}\n~~~\n`), []);
@@ -354,5 +369,5 @@ test('BOM-prefixed marker lines keep their source positions', () => {
 test('a new conflict at the beginning of a BOM-prefixed file is detected', async () => {
   const result = await mergeMarkdown('\uFEFFold\n', '\uFEFFgit\n', 'Linear\n');
   assert.equal(result.text, `\uFEFF${conflict('git', 'Linear')}`);
-  assert.deepEqual(result.conflicts, [{ startLine: 1, endLine: 9, git: 'git', linear: 'Linear' }]);
+  assert.deepEqual(result.conflicts, [{ startLine: 1, endLine: 15, git: 'git', linear: 'Linear' }]);
 });

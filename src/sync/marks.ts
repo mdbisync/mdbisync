@@ -12,7 +12,7 @@ export const MARKS = {
   suspended: { icon: 'Cross', color: '#EB5757' },
 } as const;
 
-export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and remove every conflict marker paragraph throughout the document. The alert clears after the next sync.';
+export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and delete every "Sync conflict" marker throughout the document. The alert clears after the next sync.';
 
 /** The blocked mark's comment opens with this line; a list of hooks and lines follows. */
 export const BLOCKED_COMMENT = 'Security checks rejected this document. Fix the listed findings and sync again.';

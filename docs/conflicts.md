@@ -29,26 +29,40 @@ resolved in git or in Linear.
 
 ## The conflict markers
 
-A conflict is written into the document itself, as three marker paragraphs
-around the two versions:
+A conflict is written into the document itself, as three markers around the
+two versions:
 
-| Marker paragraph | What follows it |
+| Marker | What follows it |
 | --- | --- |
 | `**Sync conflict: git version**` | the tracked branch's version |
 | `**Sync conflict: Linear version**` | Linear's version |
 | `**Sync conflict: end**` | the rest of the document |
 
-They are ordinary bold paragraphs, so Linear shows them as text and keeps
-them exactly. The same text is in Linear and in the file on the tracked
+Each marker is its own one-line warning callout, so Linear shows it as a
+yellow box with an exclamation icon between the two versions:
+
+```markdown
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: git version**
+```
+
+The versions themselves stay ordinary text, between the callouts, with
+their own formatting. The comment above each callout is Linear's way of
+writing the callout's color; GitHub shows the callout as a warning and hides
+the comment. The same text is in Linear and in the file on the tracked
 branch: the sync pull request carries it there like any other change. Git's
 own `<<<<<<<` lines are never used; Linear would turn them into quotes and
 headings.
 
 A document is in conflict exactly when one of its lines is one of these
 marker lines, character for character, with nothing before or after it on
-the line. Marker lines inside a code block, an inline code span, a quote or
-an HTML block are only examples, like the ones on this page, and do not
-count.
+the line: inside a callout at the top level of the document (after its
+`> `), whatever the callout's kind or color, or on a line of its own, as
+conflicts written by earlier versions of the sync show them. Marker lines
+inside a code block, an inline code span, an HTML block, a plain quote or a
+callout inside another block are only examples, like the ones on this
+page, and do not count.
 
 ## A worked example
 
@@ -107,15 +121,21 @@ it becomes a conflict:
 ```markdown
 # Release plan
 
-**Sync conflict: git version**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: git version**
 
 The release ships on Tuesday.
 
-**Sync conflict: Linear version**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: Linear version**
 
 The release ships on Wednesday.
 
-**Sync conflict: end**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: end**
 
 ## Testing
 
@@ -128,7 +148,8 @@ Ask the release team in the team chat.
 
 ### In Linear
 
-- The document shows this text, with the marker paragraphs in bold.
+- The document shows the two versions with a warning callout before,
+  between and after them.
 - Its icon becomes the orange `Alert` icon. If the document had its own icon
   and color, the sync keeps them and puts them back exactly once the
   conflict is resolved. If the repository's security checks also reject the
@@ -142,8 +163,10 @@ Ask the release team in the team chat.
   new one):
 
   > This document contains conflicting versions. Edit the document here or
-  > in Git, keep the text you want, and remove every conflict marker
-  > paragraph throughout the document. The alert clears after the next sync.
+  > in Git, keep the text you want, and delete every "Sync conflict" marker
+  > throughout the document. The alert clears after the next sync.
+
+  In Linear, each marker is a callout: deleting the callout removes it.
 
 ### In git
 
@@ -162,8 +185,9 @@ needed.
 
 1. Keep the text you want. That can be one of the versions, both, or a new
    text that combines them.
-2. Remove all three marker paragraphs, and every other marker paragraph of
-   the document.
+2. Remove all three markers, and every other marker of the document. In
+   Linear, delete each marker's callout. In git, delete each marker's lines:
+   the comment, `> [!WARNING]` and the marker line.
 
 For the example above, the resolved paragraph might be:
 
@@ -183,8 +207,9 @@ writes the text to Linear, resolves the conflict comment and removes the
 
 While you resolve:
 
-- **Removing only some marker lines** keeps the document in conflict: the
-  icon stays until every marker line is gone.
+- **Removing only some markers** keeps the document in conflict: the icon
+  stays until every marker line is gone. A marker callout changed to
+  another kind or color is still a marker.
 - **Editing inside the markers** without resolving is an ordinary edit. It
   reaches the other side, and the markers and the icon stay.
 - **If both sides change the same lines again** before the conflict is
@@ -194,9 +219,9 @@ While you resolve:
 ## Whole tables, code blocks and lists
 
 Markers in the middle of a table, a code block or a list would break it: a
-table split by a marker paragraph loses its rows. So a conflict inside one of
-these takes in the whole block, and each version is a complete table, code
-block or list:
+table split by a marker loses its rows. So a conflict inside one of these
+takes in the whole block, and each version is a complete table, code block
+or list:
 
 - tables;
 - code blocks, including Mermaid diagrams;
@@ -238,21 +263,27 @@ the conflict holds both tables in full:
 ```markdown
 # Owners
 
-**Sync conflict: git version**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: git version**
 
 | Area | Owner |
 | --- | --- |
 | Docs | Ada |
 | Build | Ben |
 
-**Sync conflict: Linear version**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: Linear version**
 
 | Area | Owner |
 | --- | --- |
 | Docs | Ann |
 | Build | Ben |
 
-**Sync conflict: end**
+<!-- linear:callout color=#f2c94c -->
+> [!WARNING]
+> **Sync conflict: end**
 ```
 
 A flat bullet list, without nesting, stays line by line: the markers go

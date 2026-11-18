@@ -25,6 +25,22 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "conflict-markers/callout-markers-blocks.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/callout-markers-color-blank.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/callout-markers-color.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/callout-markers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "conflict-markers/diff3-in-fence.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -790,6 +806,10 @@
       "fixedPoint": true
     },
     "pairwise/bold-in-heading.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/code-blank-line-in-quote.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
