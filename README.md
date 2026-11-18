@@ -169,7 +169,9 @@ so its count follows advisories published after the release; the advisories it
 excepts are listed with their reasons in
 [`security/dependency-exceptions.json`](security/dependency-exceptions.json).
 Each release also carries an SPDX SBOM of its bundled packages
-(`sbom.spdx.json`).
+(`sbom.spdx.json`), and every file of a final release commit is signed with build
+provenance and SBOM attestations; [Verify a release](docs/usage.md#verify-a-release)
+shows how to check them.
 
 <p align="center">
   <a href="https://mdbisync.com/security/report">
