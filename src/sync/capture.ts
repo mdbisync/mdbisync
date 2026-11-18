@@ -27,7 +27,7 @@ import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
 import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
-import { imageLinks } from './image-links.ts';
+import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
 import { trackedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
@@ -354,11 +354,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (!live(doc)) continue;
       try {
         // Check every body, including those after the first linked document.
+        checkImageRepairSize(doc.content ?? '');
         if (linksLinearDocuments(doc.content ?? '')) needsLinkBase = true;
       } catch (error) {
-        if (!(error instanceof MarkdownLimitError)) throw error;
+        if (!(error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError)) throw error;
         limited.add(doc.id);
-        result.leftOut.push({id: doc.id, rule: 'markdown-complexity'});
+        result.leftOut.push({id: doc.id, rule: error instanceof ImageRepairBudgetError ? 'image-repair-budget' : 'markdown-complexity'});
       }
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
@@ -449,6 +450,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         }
         if (error instanceof MarkdownLimitError) result.leftOut.push({id: doc.id, rule: 'markdown-complexity'});
         else if (error instanceof AttachmentBudgetError) result.leftOut.push({id: doc.id, rule: 'attachment-budget'});
+        else if (error instanceof ImageRepairBudgetError) result.leftOut.push({id: doc.id, rule: 'image-repair-budget'});
         else if (error instanceof DownloadRetryError) result.leftOut.push({id: doc.id, rule: 'download-retry'});
         else result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
@@ -590,7 +592,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         // Linear's spelling of that version reads back as its text.
         return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
       } catch (error) {
-        if (error instanceof MarkdownLimitError) return false;
+        if (error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError) return false;
         // An image that version did not have: the document changed.
         if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
         throw error;
@@ -877,6 +879,7 @@ function placeKeyOf(place: {projectId?: string | null; teamId?: string | null}):
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
   for (const item of result.leftOut) if (item.rule === 'attachment-budget') summary += `\nattachment-budget: ${JSON.stringify(item.id)}. Attachment count or bytes exceeded the document or run limit; reduce attachments and retry. The cursor is held.`;
+  for (const item of result.leftOut) if (item.rule === 'image-repair-budget') summary += `\nimage-repair-budget: ${JSON.stringify(item.id)}. Image or link repair exceeded the document limit; simplify or split the document and retry. The cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;

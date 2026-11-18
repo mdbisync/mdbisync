@@ -147,7 +147,13 @@ mdbisync steps:
 This keeps the secrets out of what a hook can read. It does not contain a
 hook that attacks the runner: the hooks step shares the runner's disk with
 the other steps, and a hook that rewrites files there can reach a later
-step that holds the secrets. Use only hooks you trust. Each workflow mints the GitHub App's installation token with
+step that holds the secrets. Use only hooks you trust. Each workflow first refuses a run on any branch
+but main, the tracked branch, so a dispatch on another branch never runs
+that branch's files with the secrets (if the sync tracks another branch,
+name it in that step's `BRANCH`). The step is part of the workflow file on the branch
+a run uses, so someone who can push a branch can remove it there: to keep
+the secrets from such runs, make them secrets of an environment that only
+main may deploy to. Each workflow then mints the GitHub App's installation token with
 `actions/create-github-app-token`, checks out without stored credentials,
 and gives the App token and the Linear secrets to the mdbisync steps only.
 The mdbisync steps also take the token step's output `app-slug`: the sync's
@@ -523,3 +529,90 @@ resolved release SHA when updating it.
 The action's bundles include third-party packages under their own licenses;
 every release commit ships their license texts and notices in
 `dist/THIRD_PARTY_NOTICES.txt`.
+
+### Verify a release
+
+Before a final version is tagged, the release workflow runs:
+- the security gate above: the release scans of its source commit, CodeQL,
+  Dependabot and secret scanning;
+- the full test suite;
+- after the build, an offline install of the built CLI.
+
+Pre-releases run the tests and the install check too.
+
+After the tag is pushed, the workflow creates a draft GitHub Release. Once
+a maintainer publishes it, the release carries:
+- the security report (`security-report.md` and `security-summary.json`),
+  which lists the scan results, every dismissed finding with its reason and
+  the accepted risks;
+- the SPDX SBOM of the bundled packages (`sbom.spdx.json`);
+- the dependency scan (`dependency-scan.json`).
+
+Before the tag is pushed, the workflow signs two GitHub artifact
+attestations for the release:
+- a SLSA build provenance, which names the workflow, the repository and the
+  source commit;
+- the SBOM.
+
+Each attestation lists every file of the release commit as a subject
+(`action.yml`, `dist/`, `package.json` and the rest of its tree). A file
+whose bytes do not change between releases is a subject of every release's
+attestations. That is why the commands below verify `release.json`, which
+names the version and its source commit, and also filter by that commit.
+
+Pre-releases (any version with a hyphen, such as `v0.1.0-rc.1`) skip the
+gate, the report, the SBOM and the attestations. So `verify` fails for them
+by design.
+
+To check a final release you need the GitHub CLI 2.68 or newer, signed in
+(`gh auth login`; the attestation lookup needs a token even for this public
+repository), `jq`, and `sha256sum` (`shasum -a 256` on macOS). The commands
+use `v0.1.0` as the example version.
+
+1. Check out the release without line-ending conversion, so the files keep
+   the exact bytes that were signed, and read its source commit from the
+   tag message (`Source: <sha>`):
+
+   ```sh
+   git clone -c core.autocrlf=false --branch v0.1.0 --depth 1 https://github.com/mdbisync/mdbisync mdbisync-v0.1.0
+   cd mdbisync-v0.1.0
+   git cat-file -p v0.1.0 | grep '^Source: '
+   ```
+
+2. Verify the build provenance, then check every file of the checkout
+   against the paths and digests it signed. Put the source commit from the
+   tag message in `--source-digest`:
+
+   ```sh
+   gh attestation verify release.json --repo mdbisync/mdbisync \
+     --signer-workflow mdbisync/mdbisync/.github/workflows/release.yml \
+     --source-ref refs/heads/main --source-digest <source-sha> \
+     --format json > ../provenance.json &&
+   jq -r '.[0].verificationResult.statement.subject[] | "\(.digest.sha256)  \(.name)"' \
+     ../provenance.json > ../signed.sha256 &&
+   sha256sum -c ../signed.sha256
+   ```
+
+   `release.json` names the version, so its digest is unique to this
+   release. The last command prints `OK` for each signed file and fails on
+   any file whose bytes differ from what was signed for that path.
+
+3. Once the GitHub Release is published, check that its `sbom.spdx.json`
+   is the SBOM that was signed for this release:
+
+   ```sh
+   gh attestation verify release.json --repo mdbisync/mdbisync \
+     --signer-workflow mdbisync/mdbisync/.github/workflows/release.yml \
+     --source-ref refs/heads/main --source-digest <source-sha> \
+     --predicate-type https://spdx.dev/Document/v2.3 \
+     --format json > ../sbom-attestation.json &&
+   gh release download v0.1.0 --repo mdbisync/mdbisync --pattern sbom.spdx.json --dir .. &&
+   jq -e --slurpfile sbom ../sbom.spdx.json \
+     'any(.[]; .verificationResult.statement.predicate == $sbom[0])' ../sbom-attestation.json
+   ```
+
+   It prints `true` when the attached SBOM equals the signed one.
+
+Each step stops with a non-zero exit when its check fails: the file was
+changed, it was not built by this repository's release workflow on `main`,
+or it was built from another commit.
