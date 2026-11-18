@@ -8,7 +8,7 @@
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
-import { lintText, paddingOverLimit } from './lint.ts';
+import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
 import { MarkdownLimitError, end, isCallout, isCalloutComment, joinFile, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
@@ -27,7 +27,8 @@ export interface FixOptions {
  * Returns the text in Linear's form, or the text itself when lint finds a
  * construct Linear would lose or alter. Throws `MarkdownLimitError` when a
  * rewrite takes the text over the Markdown limits, which lint cannot see in
- * the source: an inline image that leaves its paragraph can expose a table.
+ * the source: an inline image that leaves its paragraph can expose a table
+ * or reference links.
  */
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
@@ -42,8 +43,8 @@ function fixBody(body: string, options: FixOptions): string {
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
     const tree = parse(current);
-    // Lint checked the source; a rewrite may expose a table it did not see.
-    if (paddingOverLimit(tree) !== undefined) throw new MarkdownLimitError('nodes');
+    // Lint checked the source; a rewrite may expose a table or references it did not see.
+    if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, current) !== undefined)) throw new MarkdownLimitError('nodes');
     const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;

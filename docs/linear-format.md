@@ -295,10 +295,14 @@ Instead, split the file into several documents.
 
 Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are
 tables whose short rows, padded to the header width, would add over 250,000
-characters or take the tree over that node limit. This keeps traversal and
-formatting bounded independently of the text length. `fix` writes every row
-of a table with as many cells as its header, the form Linear stores, so a
-wide header over many short rows grows far beyond its source.
+characters or take the tree over that node limit, and reference links whose
+destinations, each written in full, would take the text over 250,000
+characters. This keeps traversal and formatting bounded independently of the
+text length. `fix` writes every row of a table with as many cells as its
+header, the form Linear stores, so a wide header over many short rows grows
+far beyond its source. It also writes every reference link (`[text][ref]`)
+inline with its own copy of the destination, so many short references to one
+long definition grow the same way.
 For example, this generates a document that exceeds the nesting limit:
 
 ```javascript
@@ -311,7 +315,14 @@ and this one a table whose padding is too large, from 2.4 KB of text:
 '|a'.repeat(300) + '|\n' + '|-'.repeat(300) + '|\n' + '|x|\n'.repeat(300)
 ```
 
-Reduce the nesting, fill in or split the table, or split the document. `fix` leaves the text unchanged.
+and this one references whose destinations would be written 20,000 times:
+
+```javascript
+'[a][r] '.repeat(20000) + '\n\n[r]: https://example.com/' + 'x'.repeat(100)
+```
+
+Reduce the nesting, fill in or split the table, write fewer references to a
+long destination, or split the document. `fix` leaves the text unchanged.
 Capture and initial import leave the document out of the current run,
 preserve any previously accepted text, and continue with other documents.
 
