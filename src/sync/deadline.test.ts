@@ -155,6 +155,12 @@ describe('the checks a head must pass', () => {
     local.github.checks = new Map([[HEAD, [{ name: 'tests', status: 'completed', conclusion: 'success' }]]]);
     const repo = { ...github, fetch: fakeFetch(local) };
     const identity = encodeURIComponent(JSON.stringify({ path: '.github/workflows/ci.yml', revision: 'b'.repeat(40), event: 'pull_request' }));
+    // Another GitHub server's Actions App id, noted by an earlier version, reads as the Actions App.
+    for (const id of [FAKE_ACTIONS_APP_ID, 999]) {
+      const legacy = `<!-- head: sha=${HEAD} since=${since.toISOString()} checks=tests@run:${id}~${identity} -->`;
+      const read = await expectedChecks(repo, HEAD, [], { body: legacy, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
+      assert.deepEqual(read.checks, [{ name: 'tests', ...RUN }]);
+    }
     const body = `<!-- head: sha=${HEAD} since=${since.toISOString()} checks=tests@run:${FAKE_ACTIONS_APP_ID}~${identity} -->`;
     const expected = await expectedChecks(repo, HEAD, [], { body, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
     assert.deepEqual(expected.checks, [{ name: 'tests', ...RUN }]);

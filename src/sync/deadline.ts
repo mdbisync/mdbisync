@@ -23,9 +23,10 @@ const RED_MAIN_NOTE = /^<!-- red main: head=([0-9a-f]{40,64}) main=([0-9a-f]{40,
 
 /**
  * A noted check: its URI-encoded name and, after `@`, its publisher (`run:<app id>` or `status:<account id>`). Notes
- * written by earlier versions may end in `~` and a workflow identity, which is no longer read.
+ * written by earlier versions end an Actions check in `~` and a workflow identity: such a check is read as one of the
+ * GitHub Actions App, whatever App id its server gave, and the identity is not read.
  */
-const NOTED_CHECK = /^([^@]*)(?:@(run|status):(0|[1-9][0-9]{0,14}))?(?:~.*)?$/;
+const NOTED_CHECK = /^([^@]*)(?:@(run|status):(0|[1-9][0-9]{0,14}))?(~.*)?$/;
 
 /**
  * The hidden note that says since when the head has waited for its checks,
@@ -142,7 +143,7 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
           // A token a person broke names nothing; the checks registered on the noted head still count below.
           if (noted === null) continue;
           const check: ExpectedCheck = { name: decodeURIComponent(noted[1] as string) };
-          if (noted[2] !== undefined) check.publisher = { kind: noted[2] as 'run' | 'status', id: Number(noted[3]) };
+          if (noted[2] !== undefined) check.publisher = noted[2] === 'run' && noted[4] !== undefined ? ACTIONS_APP : { kind: noted[2] as 'run' | 'status', id: Number(noted[3]) };
           observed.push(check);
         } catch {
           // A name a person broke names nothing, as above.
