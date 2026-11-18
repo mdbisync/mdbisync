@@ -404,6 +404,7 @@ The `invalid-annotation` check names the `README.md` and the problem:
 | --- | --- | --- |
 | `invalid-annotation` | `<readme>: the front matter with linear-team or linear-project is not valid YAML` | Fix the YAML. |
 | `invalid-annotation` | `<readme>: <key> must be a non-empty name` | Give the key a team or project name. |
+| `invalid-annotation` | `<readme>: cannot check the folder annotation because the blob exceeds <bytes> bytes` | Reduce the README to 1,000,000 bytes or fewer. |
 | `project-without-team` | `<readme>: names a project, but neither it nor a folder above names a team` | Add `linear-team` to this folder or a folder above. |
 | `nested-team` | `<readme>: names a team inside the folder of team "<team>" (<folder>)` | Map one team per folder tree; remove the inner `linear-team`. |
 | `nested-project` | `<readme>: names a project inside the folder of project "<project>" (<folder>)` | Map one project per folder tree; remove the inner `linear-project`. |
@@ -440,8 +441,8 @@ the message. Most come from the workflow's configuration:
 
 | Message | What to do |
 | --- | --- |
-| `mapping-blob-budget` | The Markdown mapping exceeds its 64 MiB read budget. Reduce the amount of Markdown in the tree being mapped before retrying. |
-| `git-output-limit` | A bounded Git command exceeded its output limit. Mapping can read up to 16 MiB of Git tree metadata. Check the size and integrity of the tree being read. |
+| `mapping-blob-budget: Markdown blob reads exceed the <bytes>-byte budget` | Reduce the amount of Markdown in the tree being mapped to fit the 64 MiB read budget. |
+| `git-output-limit: command output exceeded <bytes> bytes` | Mapping can read up to 16 MiB of Git tree metadata. Check the size and integrity of the tree being read. |
 | `the direction and confirm inputs belong to an initial sync, and only to it` | Remove `direction` and `confirm` from the sync and check steps. |
 | `unknown operation: <name> (expected one of: <operations>)` | Set the action's `operation` to `sync` or `initial-sync`. |
 | `unknown security-step: <name> (expected one of: <steps>, or empty)` | Set `security-step` to `stage` or `apply`, or leave it empty. |
