@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { lstat, mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
-import { Git, type Oid, listTree, readBlobs, checkRepoPath, parseLfsPointer } from '../state/index.ts';
+import { Git, GitOutputLimitError, type Oid, type TreeEntry, listTree, readBlobs, checkRepoPath, parseLfsPointer } from '../state/index.ts';
 import { isGitDirectoryName } from '../state/objects.ts';
 import { createHash } from 'node:crypto';
 import { readHookConfig, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
@@ -37,6 +37,81 @@ function runHooks(dir: string, args: string[], env: Record<string, string | unde
   });
 }
 
+/** More bytes than any Git LFS pointer file holds. */
+const LFS_POINTER_BYTES = 1024;
+
+/** The most `cat-file` output one read of support files may produce; a larger file is streamed to disk alone. */
+export const SCRATCH_BATCH_BYTES = 16 * 1024 * 1024;
+/** The most files one read of support files asks for. */
+const SCRATCH_BATCH_FILES = 32;
+/** The most bytes of tracked files and link targets the scratch tree may hold by default. */
+export const SCRATCH_TREE_BYTES = 4 * 1024 * 1024 * 1024;
+
+/** The tracked tree is too large to reproduce for the hooks: the gate has no answer, and the run stops. */
+export class SecurityScratchBudgetError extends Error {
+  readonly code = 'security-scratch-budget';
+
+  constructor(bytes: number) {
+    super(message('sync.security-scratch-budget', { bytes }));
+    this.name = 'SecurityScratchBudgetError';
+  }
+}
+
+/** The bytes `cat-file --batch` writes for a blob: "<oid> blob <size>\n", the content, and a final newline. */
+function batchBytes(entry: TreeEntry & { size: number }): number {
+  return entry.oid.length + String(entry.size).length + 8 + entry.size;
+}
+
+/** A blob entry's listed size, checked: a missing or impossible size fails closed. */
+function blobSize(entry: TreeEntry): TreeEntry & { size: number } {
+  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error(message('sync.security-tree-differs'));
+  return entry as TreeEntry & { size: number };
+}
+
+/**
+ * Refuses a tracked tree whose files and link targets exceed `budget` bytes, by the sizes the tree lists and before
+ * any of them is read or any hook runs. Also checks every listed size, which the batched reads rely on.
+ */
+function checkScratchBudget(entries: readonly TreeEntry[], budget: number): void {
+  let total = 0;
+  for (const entry of entries) {
+    if (entry.type === 'blob') total += blobSize(entry).size;
+  }
+  if (total > budget) throw new SecurityScratchBudgetError(budget);
+}
+
+/**
+ * Reads blobs in batches of at most SCRATCH_BATCH_FILES files and SCRATCH_BATCH_BYTES of output, by the sizes the
+ * tree lists (which checkScratchBudget has checked), and hands each batch to `use`. A blob too large for a batch goes to `alone` instead, unread.
+ */
+async function readInBatches(
+  git: Git,
+  entries: readonly TreeEntry[],
+  use: (batch: readonly TreeEntry[], blobs: Map<Oid, Buffer>) => Promise<void>,
+  alone: (entry: TreeEntry) => Promise<void>,
+): Promise<void> {
+  let batch: TreeEntry[] = [];
+  let bytes = 0;
+  const flush = async () => {
+    if (batch.length === 0) return;
+    const blobs = await readBlobs(git, batch.map((entry) => entry.oid), bytes);
+    await use(batch, blobs);
+    batch = [];
+    bytes = 0;
+  };
+  for (const entry of entries) {
+    const size = batchBytes(entry as TreeEntry & { size: number });
+    if (size > SCRATCH_BATCH_BYTES) {
+      await alone(entry);
+      continue;
+    }
+    if (batch.length === SCRATCH_BATCH_FILES || bytes + size > SCRATCH_BATCH_BYTES) await flush();
+    batch.push(entry);
+    bytes += size;
+  }
+  await flush();
+}
+
 export interface SecurityGateOptions {
   /**
    * The hooks' whole environment. By default only `PATH`, `HOME` and `LANG`,
@@ -45,6 +120,8 @@ export interface SecurityGateOptions {
    * gives to hooks.
    */
   env?: Record<string, string | undefined>;
+  /** The most bytes of tracked files and link targets the scratch tree may hold; SCRATCH_TREE_BYTES by default. */
+  scratchBytes?: number;
 }
 
 /** The ids of the tracked commit's security hooks; none without a configuration. */
@@ -65,7 +142,13 @@ async function onlyDocumentsChanged(scratch: Git, dir: string, files: ReadonlyMa
     // A support file reached through a tracked link stays as tracked, even where the link leads to a document.
     if (linkedSupport.some((target) => path === target || path.startsWith(`${target}/`))) return false;
     if (isMarkdownPath(path)) continue;
-    const pointer = parseLfsPointer((await scratch.run(['cat-file', 'blob', `:${path}`])).stdout);
+    // Only an LFS pointer may differ, and a pointer is small: a larger tracked file is not read whole.
+    const read = await scratch.run(['cat-file', 'blob', `:${path}`], { maxOutputBytes: LFS_POINTER_BYTES }).catch((error: unknown) => {
+      if (error instanceof GitOutputLimitError) return null;
+      throw error;
+    });
+    if (read === null) return false;
+    const pointer = parseLfsPointer(read.stdout);
     const content = files.get(path);
     if (pointer === null || content === undefined) return false;
     const bytes = contentBytes(content);
@@ -95,28 +178,33 @@ async function throughLink(dir: string, path: string): Promise<boolean> {
  * (not its `.git`); one that leads outside it or nowhere, or any other difference between the scratch index and the
  * tracked tree, throws, and the gate fails closed.
  */
-async function reproduceTree(git: Git, tracked: Oid, scratch: Git, dir: string): Promise<{ tree: string; linkedSupport: string[] }> {
-  const entries = await listTree(git, tracked);
+async function reproduceTree(git: Git, tracked: Oid, entries: readonly TreeEntry[], scratch: Git, dir: string): Promise<{ tree: string; linkedSupport: string[] }> {
   for (const entry of entries) checkRepoPath(entry.path);
   const files = entries.filter((entry) => entry.type === 'blob' && ['100644', '100755'].includes(entry.mode));
   const links = entries.filter((entry) => entry.type === 'blob' && entry.mode === '120000');
   const gitlinks = entries.filter((entry) => entry.type === 'commit');
-  // Read supporting files in bounded batches; large repositories are not held in memory.
-  for (let at = 0; at < files.length; at += 32) {
-    const batch = files.slice(at, at + 32);
-    const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
+  const fileMode = (entry: TreeEntry) => (entry.mode === '100755' ? 0o755 : 0o644);
+  // Read supporting files in batches bounded by count and by the sizes the tree lists, so memory stays bounded
+  // however large the repository; a file too large for a batch is streamed to disk on its own.
+  await readInBatches(git, files, async (batch, blobs) => {
     for (const entry of batch) {
       await mkdir(dirname(join(dir, entry.path)), { recursive: true });
-      await writeFile(join(dir, entry.path), blobs.get(entry.oid)!, { mode: entry.mode === '100755' ? 0o755 : 0o644 });
+      await writeFile(join(dir, entry.path), blobs.get(entry.oid)!, { mode: fileMode(entry) });
     }
-  }
-  for (const entry of gitlinks) await mkdir(join(dir, entry.path), { recursive: true });
-  // Links last, so no file above is written through one.
-  const targets = await readBlobs(git, links.map((entry) => entry.oid));
-  for (const entry of links) {
+  }, async (entry) => {
     await mkdir(dirname(join(dir, entry.path)), { recursive: true });
-    await symlink(targets.get(entry.oid)!, join(dir, entry.path));
-  }
+    await git.runToFile(['cat-file', 'blob', entry.oid], join(dir, entry.path), fileMode(entry));
+  });
+  for (const entry of gitlinks) await mkdir(join(dir, entry.path), { recursive: true });
+  // Links last, so no file above is written through one. No file system takes a link target as long as a batch.
+  await readInBatches(git, links, async (batch, targets) => {
+    for (const entry of batch) {
+      await mkdir(dirname(join(dir, entry.path)), { recursive: true });
+      await symlink(targets.get(entry.oid)!, join(dir, entry.path));
+    }
+  }, async () => {
+    throw new Error(message('sync.security-link-outside'));
+  });
   const root = await realpath(dir);
   const linkedSupport: string[] = [];
   for (const entry of links) {
@@ -145,6 +233,7 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
   const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8' };
   const hooks = await securityHookIds(git, tracked);
   if (hooks.length > 0 && (await runHooks(git.dir, ['--version'], env)).code !== 0) throw new Error(message('sync.needs-pre-commit'));
+  const budget = options.scratchBytes ?? SCRATCH_TREE_BYTES;
   let dir: string | undefined;
   let scratch: Git;
   let baseline: string;
@@ -160,11 +249,13 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
       if (hooks.length === 0) return [];
       try {
         if (dir === undefined) {
+          const entries = await listTree(git, tracked);
+          checkScratchBudget(entries, budget);
           dir = await mkdtemp(join(tmpdir(), 'capture-security-'));
           scratch = new Git(dir);
           // The same object format, so the same tree has the same id in both repositories.
           await scratch.run(['init', '--quiet', `--object-format=${await git.text(['rev-parse', '--show-object-format'])}`]);
-          ({ tree: baseline, linkedSupport } = await reproduceTree(git, tracked, scratch, dir));
+          ({ tree: baseline, linkedSupport } = await reproduceTree(git, tracked, entries, scratch, dir));
         }
         // Restore only our disposable repository, including hook changes from the previous document.
         await scratch.run(['read-tree', '--reset', '-u', baseline]);
@@ -208,7 +299,9 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
           if (after === null || !after.equals(contentBytes(content))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         }
         return findings;
-      } catch {
+      } catch (error) {
+        // A tracked tree too large to reproduce gives no answer for any document: the run stops with its code.
+        if (error instanceof SecurityScratchBudgetError) throw error;
         // Spawn, filesystem and configuration failures must fail closed without exposing content.
         return [{ hook: SECURITY_ALIAS, line: 1 }];
       }

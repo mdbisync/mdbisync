@@ -445,6 +445,7 @@ the message. Most come from the workflow's configuration:
 | Message | What to do |
 | --- | --- |
 | `mapping-blob-budget: Markdown blob reads exceed the <bytes>-byte budget` | Reduce the amount of Markdown in the tree being mapped to fit the 64 MiB read budget. |
+| `security-scratch-budget: the tracked files the security hooks need exceed the <bytes>-byte scratch budget` | Before the security hooks check a document, the tracked branch's files are copied into a temporary repository, up to 4 GiB of regular files and link targets. Move large assets to Git LFS (only their small pointers count) or out of the repository. |
 | `git-output-limit: command output exceeded <bytes> bytes` | Mapping can read up to 16 MiB of Git tree metadata. Check the size and integrity of the tree being read. |
 | `the direction and confirm inputs belong to an initial sync, and only to it` | Remove `direction` and `confirm` from the sync and check steps. |
 | `unknown operation: <name> (expected one of: <operations>)` | Set the action's `operation` to `sync` or `initial-sync`. |
