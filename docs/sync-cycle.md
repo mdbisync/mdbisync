@@ -127,6 +127,16 @@ ongoing sync runs. You do not need to wait for a run to finish:
 - If an already tracked document changes in Linear between capture and its
   final re-read, the run skips that document. The next run captures the newer text and
   tries again; other documents keep syncing.
+- That window includes the run's wait for its sync pull request's checks,
+  up to `merge-grace-seconds`. A document that has a git change from
+  before the run started and is edited in Linear during that wait is
+  skipped, so the git change reaches Linear one run later. When the run
+  merged its sync pull request, that merge starts the next run.
+- A run that skipped or left out a document records Linear's answer
+  without the tracked branch as a parent. Until a later run records that
+  merge, the sync pull request's diff on GitHub, counted from an older
+  merge base, can also list git changes to other documents that this run
+  wrote to Linear. The tracked branch already holds them.
 - A run that stops after creating a document but before recording its id
   leaves the document in Linear. If you edit that document, nothing
   overwrites your edit: a later run takes the document over only if it
@@ -416,7 +426,10 @@ same check also fails on the tracked tip.
 
 - **Git to Linear:** a push to the tracked branch starts a run at once, so
   the change is in Linear when that run finishes, usually within a minute
-  or two. If another run is going, the new one waits for it.
+  or two. If another run is going, the new one waits for it. A document
+  edited in Linear while the run waits for its sync pull request's checks
+  gets the change one run later
+  ([editing while sync runs](#editing-while-sync-runs)).
 - **Linear to git:** the next run captures the edit. Between pushes that
   is a run from your own timer, GitHub's schedule or a run by hand. With
   a timer that is within its interval plus the run
