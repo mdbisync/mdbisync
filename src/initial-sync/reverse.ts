@@ -67,6 +67,7 @@ import {
 import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
 import { captureCursorTrailer, cursorTime, linkVariants, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
+import { observedDigest } from '../sync/recorded.ts';
 import { type SecurityFinding, type SecurityGate, checkTitle, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
@@ -799,6 +800,10 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
 
     const synced = new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
+    for (const {path, documentId} of entries) {
+      const document = documents.get(documentId)!;
+      finalIds.set(path, {...finalIds.get(path)!, observedDigest: observedDigest(document)});
+    }
     // A new document left out has no id: the capture reads every such document on every run, whatever the cursor.
     const through = captureCursor([...keptTracked].map((path) => documentOf.get(path) as string));
     // The READMEs kept without a document are named, so the sync does not take them for new documents.

@@ -8,9 +8,9 @@
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
-import { lintText } from './lint.ts';
+import { lintText, paddingOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, isCallout, isCalloutComment, joinFile, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, end, isCallout, isCalloutComment, joinFile, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -23,12 +23,16 @@ export interface FixOptions {
   linkedFileExists?: (url: string) => boolean;
 }
 
-/** Returns the text in Linear's form, or the text itself when lint finds a construct Linear would lose or alter. */
+/**
+ * Returns the text in Linear's form, or the text itself when lint finds a
+ * construct Linear would lose or alter. Throws `MarkdownLimitError` when a
+ * rewrite takes the text over the Markdown limits, which lint cannot see in
+ * the source: an inline image that leaves its paragraph can expose a table.
+ */
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
-  const fixed = fixBody(body.replace(/\r\n?/g, '\n'), options);
-  return joinFile(head, fixed);
+  return joinFile(head, fixBody(body.replace(/\r\n?/g, '\n'), options));
 }
 
 function fixBody(body: string, options: FixOptions): string {
@@ -37,7 +41,10 @@ function fixBody(body: string, options: FixOptions): string {
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    const next = new Writer(current, parse(current), options).root();
+    const tree = parse(current);
+    // Lint checked the source; a rewrite may expose a table it did not see.
+    if (paddingOverLimit(tree) !== undefined) throw new MarkdownLimitError('nodes');
+    const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
   }

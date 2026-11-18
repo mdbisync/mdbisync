@@ -289,15 +289,25 @@ Instead, split the file into several documents.
 
 ### `markdown-complexity`
 
-Markdown trees over 128 levels deep or 500,000 nodes are rejected. This
-keeps traversal and formatting bounded independently of the text length.
+Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are
+tables whose short rows, padded to the header width, would add over 250,000
+characters or take the tree over that node limit. This keeps traversal and
+formatting bounded independently of the text length. `fix` writes every row
+of a table with as many cells as its header, the form Linear stores, so a
+wide header over many short rows grows far beyond its source.
 For example, this generates a document that exceeds the nesting limit:
 
 ```javascript
 '> '.repeat(130) + 'Nested note.'
 ```
 
-Reduce the nesting or split the document. `fix` leaves the text unchanged.
+and this one a table whose padding is too large, from 2.4 KB of text:
+
+```javascript
+'|a'.repeat(300) + '|\n' + '|-'.repeat(300) + '|\n' + '|x|\n'.repeat(300)
+```
+
+Reduce the nesting, fill in or split the table, or split the document. `fix` leaves the text unchanged.
 Capture and initial import leave the document out of the current run,
 preserve any previously accepted text, and continue with other documents.
 

@@ -305,14 +305,14 @@ export class LinearClient {
    * content without a request and returns the stored content of a content
    * change: one request as measured, two when the facts call for a read-back.
    */
-  async updateDocument(id: string, patch: DocumentPatch): Promise<LinearDocument> {
+  async updateDocument(id: string, patch: DocumentPatch, withContent = false): Promise<LinearDocument> {
     this.#refuseTooLong('UpdateDocument', patch);
     const data = await this.mutate<{ documentUpdate: { success: boolean; document: RawDocument } }>(
       'UpdateDocument',
       `mutation UpdateDocument($id: String!, $input: DocumentUpdateInput!, $withContent: Boolean!) {
         documentUpdate(id: $id, input: $input) { success document { ${DOCUMENT_FIELDS} } }
       }`,
-      { id, input: patch, withContent: patch.content !== undefined },
+      { id, input: patch, withContent: withContent || patch.content !== undefined },
     );
     const updated = toDocument(succeeded('UpdateDocument', data.documentUpdate).document);
     this.stats.wrote('UpdateDocument');

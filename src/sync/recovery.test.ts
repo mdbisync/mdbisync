@@ -143,7 +143,11 @@ describe('sync: lost state and deleted branches', () => {
 
   const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
   const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
-  const ids = async () => JSON.parse(await show(`${STATE('ids')}:ids.json`)) as Record<string, { id: string }>;
+  const ids = async () => {
+    const entries = JSON.parse(await show(`${STATE('ids')}:ids.json`)) as Record<string, { id: string; observedDigest?: string }>;
+    for (const entry of Object.values(entries)) delete entry.observedDigest;
+    return entries;
+  };
   const live = () => world.linear.documents.filter((document) => document.trashed !== true && document.archivedAt === undefined);
 
   async function commit(changes: Record<string, string | Buffer | null>) {

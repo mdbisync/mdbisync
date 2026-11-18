@@ -68,7 +68,12 @@
       {
         "subject": "writes.git",
         "operator": "equal",
-        "expected": 0
+        "expected": 1
+      },
+      {
+        "subject": "writes.total",
+        "operator": "equal",
+        "expected": 1
       }
     ]
   }

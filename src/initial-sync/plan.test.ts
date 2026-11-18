@@ -172,6 +172,20 @@ describe('planInitialSync: images', () => {
   });
 });
 
+describe('planInitialSync: a table too large to pad', () => {
+  it('leaves out a file whose ragged table fix would pad past the limits, and plans its neighbor', () => {
+    const ragged = `${'|a'.repeat(30_000)}|\n${'|-'.repeat(30_000)}|\n${'|x|\n'.repeat(30_000)}`;
+    const { mapping, texts } = mapTree({
+      'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
+      'eng/table.md': `# Table\n\n${ragged}`,
+      'eng/small.md': `# Small\n\n| A | B |\n| -- | -- |\n| 1 |\n`,
+    });
+    const plan = planInitialSync({ mapping, texts, places: [{ place: ENG, documents: [] }] });
+    assert.deepEqual(plan.leftOut, [{ path: 'eng/table.md', rules: ['markdown-complexity'], lines: [3] }]);
+    assert.deepEqual(plan.create.map((entry) => entry.path), ['eng/README.md', 'eng/small.md']);
+  });
+});
+
 describe('renderDryRun', () => {
   it('escapes pipes in paths so a row stays one row', () => {
     const summary = renderDryRun({ create: [{ path: 'a|b.md', title: 'a|b', place: ENG }], overwrite: [], trash: [], leftOut: [] });

@@ -54,8 +54,10 @@ export interface MarkOptions {
   linear: MarkClient;
   /** Current image and security-hook findings. Blocked takes precedence over conflict. */
   blocked?: readonly BlockedFinding[];
+  /** Include content in responses when changing the decoration. */
+  includeUpdatedBody?: boolean;
   /** Must durably record the entry in ids before resolving. Never just queue it. */
-  persistEntry: (entry: IdEntry) => Promise<void>;
+  persistEntry: (entry: IdEntry, cleared?: LinearDocument) => Promise<void>;
   /**
    * The id of a new notice's comment; random by default. A caller that may run
    * again without the entry it saved (a rebuilt state) passes an id derived from
@@ -76,6 +78,7 @@ export interface MarkResult {
   state: MarkState;
   entry: IdEntry;
   updated: boolean;
+  updatedDocument?: LinearDocument;
   commented: boolean;
 }
 
@@ -167,13 +170,15 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
 
   if (state === 'clear') {
     if (entry.saved === undefined) return result;
+    let cleared: LinearDocument | undefined;
     if (document.icon !== entry.saved.icon || document.color !== entry.saved.color) {
-      await linear.updateDocument(document.id, { icon: entry.saved.icon, color: entry.saved.color });
+      cleared = await linear.updateDocument(document.id, { icon: entry.saved.icon, color: entry.saved.color }, options.includeUpdatedBody);
       result.updated = true;
+      result.updatedDocument = cleared;
     }
     // A blocked notice is forgotten here, not resolved.
     const { saved: _saved, ...restored } = entry;
-    await persistEntry(restored);
+    await persistEntry(restored, cleared);
     result.entry = restored;
     return result;
   }
@@ -192,7 +197,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   }
   const mark = MARKS[state];
   if (document.icon !== mark.icon || document.color !== mark.color) {
-    await linear.updateDocument(document.id, mark);
+    result.updatedDocument = await linear.updateDocument(document.id, mark, options.includeUpdatedBody);
     result.updated = true;
   }
   if (notice.posted) return result;

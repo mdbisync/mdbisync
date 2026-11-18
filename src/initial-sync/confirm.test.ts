@@ -12,7 +12,7 @@ import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { environmentName, readInputs } from '../run/inputs.ts';
 import { runPreflight } from '../run/preflight.ts';
-import { Git } from '../state/index.ts';
+import { Git, type IdEntry } from '../state/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { type ConfirmedResult, FINAL_IDS_MESSAGE, PROGRESS_MESSAGE, confirmInitialSync } from './confirm.ts';
@@ -99,7 +99,7 @@ describe('confirmed initial sync from git to Linear', () => {
     return Object.fromEntries(text.split('\n').filter(Boolean).map((line) => line.split(' ') as [string, string]));
   };
   const show = (spec: string) => fixture.remote.text(['show', spec]);
-  const readIds = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
+  const readIds = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, IdEntry>;
   const live = (world: FakeWorld) => world.linear.documents.filter((d) => d.trashed !== true && d.archivedAt === undefined);
 
   it('leaves an over-nested matched document out while initializing valid neighbors', async () => {
@@ -332,7 +332,13 @@ describe('confirmed initial sync from git to Linear', () => {
     const second = await run(world);
     assert.equal(second.result.exitCode, 0, second.result.stderr);
     // The resumed run creates the rest with the ids chosen before the stop, so links to them stay right.
-    assert.deepEqual(await readIds(), progress);
+    const completed = await readIds();
+    assert.deepEqual(Object.keys(completed).sort(), SYNCED_PATHS);
+    for (const path of SYNCED_PATHS) {
+      assert.equal(completed[path]?.id, progress[path]?.id);
+      assert.match(completed[path]?.observedDigest ?? '', /^[0-9a-f]{64}$/);
+      if (progress[path]?.observedDigest !== undefined) assert.equal(completed[path]?.observedDigest, progress[path].observedDigest);
+    }
     assert.equal(second.report.resumed, true);
     assert.equal(second.report.skippedCompletedCount, 2);
     assert.equal(second.report.writtenCount, SYNCED_PATHS.length - 2);
