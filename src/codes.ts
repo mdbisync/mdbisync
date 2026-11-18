@@ -56,8 +56,11 @@ export type LeftOutRule = (typeof LEFT_OUT_RULES)[number];
 export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'markdown-complexity', 'upload-too-large', 'upload-unreadable', 'link-provenance-unknown'] as const;
 export type LeftOutAtWriteRule = (typeof LEFT_OUT_AT_WRITE_RULES)[number];
 
+/** Why a dry run from Linear leaves out a document that would make a new file: the hooks refused its title, or had no answer for it. */
+export type TitleLeftOutRule = Extract<RecordLeftOutRule, 'security-hook' | 'security-unchecked'>;
+
 /** Every rule a synchronized file can be left out by, in a plan or a sync. */
-export type FileLeftOutRule = LintRule | UnsyncedReason | LeftOutRule | LeftOutAtWriteRule;
+export type FileLeftOutRule = LintRule | UnsyncedReason | LeftOutRule | LeftOutAtWriteRule | TitleLeftOutRule;
 
 /** Why an initial sync from Linear leaves a file out of its record, or keeps the tracked one. */
 export const RECORD_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'image-repair-budget', 'download-failed', 'image-blocked', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;

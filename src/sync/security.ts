@@ -220,9 +220,15 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
  * Asks the hooks about a document's title before it names a file, an `ids` key or a report line: the title as the
  * text of the file it would name, `path`, so hooks scoped to paths see it where the document would go. The path
  * stays in the disposable repository. Findings on the title carry line 0, which a notice reads as "in the title";
- * null when the gate has no answer.
+ * null when the gate has no answer, also for a path no gate can take (a tracked folder Git accepts but a repository
+ * path may not hold): the error would name the path, and with it the title, before any hook saw it.
  */
 export async function checkTitle(gate: SecurityGate, path: string, title: string): Promise<SecurityFinding[] | null> {
+  try {
+    checkRepoPath(path);
+  } catch {
+    return null;
+  }
   const findings = await gate.check(new Map([[path, `${title.normalize('NFC')}\n`]]));
   return findings === null ? null : findings.map(({ hook }) => ({ hook, line: 0 }));
 }

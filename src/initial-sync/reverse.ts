@@ -77,7 +77,7 @@ import { readPlanSources } from './run.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
 import { message } from '../messages.ts';
-import { type RecordCode, type RecordLeftOutRule } from '../codes.ts';
+import { type RecordCode, type RecordLeftOutRule, type TitleLeftOutRule } from '../codes.ts';
 
 /**
  * The subject of a `linear` record made by an initial sync from Linear to
@@ -209,11 +209,63 @@ function landsInPlace(mapping: RepositoryMapping, path: string, place: Place): b
   return placeKey(zonePlace) === placeKey(place);
 }
 
-/** The dry run's plan: reads the files and lists the documents, without content. */
-export async function planLinearToGitFromRepository(context: RunContext): Promise<ReversePlan> {
+/**
+ * The dry run's plan: reads the files and lists the documents, without content. Each new file's title is screened
+ * as in a confirmed run, so the job summary and the run report never hold a title the hooks refused or had no answer
+ * for: such a document is listed among the left-out ones under the name made from its id. `security` is the gate,
+ * the tracked branch's hooks by default.
+ */
+export async function planLinearToGitFromRepository(context: RunContext, security?: SecurityGate): Promise<ReversePlan> {
   const { input } = await readPlanSources(context);
   const treePaths = new Set((await listTree(context.git, context.fetched.tracked)).map((entry) => entry.path));
-  return planLinearToGit({ ...input, treePaths });
+  const plan = planLinearToGit({ ...input, treePaths });
+  if (plan.create.length === 0) {
+    // No title names a file: the hooks have nothing to read, and a run without pre-commit still gets its plan.
+    await security?.close?.();
+    return plan;
+  }
+  const gate = security ?? (await securityGate(context.git, context.fetched.tracked));
+  let held;
+  try {
+    held = await screenNewTitles(context, plan, treePaths, gate);
+  } finally {
+    await gate.close?.();
+  }
+  if (held.length > 0) {
+    plan.leftOut.push(...held.map(({ path, rule, documentId }) => ({ path, rules: [rule], lines: [], documentId })));
+    plan.leftOut.sort((a, b) => compare(a.path, b.path));
+  }
+  return plan;
+}
+
+/**
+ * Shows the hooks the title of each file the plan creates, at the path it would name. A title they refuse, or have
+ * no answer for, takes its entry out of `plan.create`; the document is held under a name made from its id, which
+ * never lands on a tree path or another planned file.
+ */
+async function screenNewTitles(
+  context: RunContext,
+  plan: ReversePlan,
+  treePaths: ReadonlySet<string>,
+  gate: SecurityGate,
+): Promise<Array<{ path: string; rule: TitleLeftOutRule; documentId: string }>> {
+  if (!gate.configured) return [];
+  const folders = new Map(annotatedPlaces(context.mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
+  const occupied = new Set([...treePaths, ...plan.overwrite.map((entry) => entry.path), ...plan.create.map((entry) => entry.path)]);
+  const screened: ReverseEntry[] = [];
+  const held: Array<{ path: string; rule: TitleLeftOutRule; documentId: string }> = [];
+  for (const entry of plan.create) {
+    const findings = await checkTitle(gate, entry.path, entry.title);
+    if (findings?.length === 0) {
+      screened.push(entry);
+      continue;
+    }
+    const path = documentPath(folders.get(placeKey(entry.place)) ?? '', entry.documentId, entry.documentId, occupied);
+    occupied.add(path);
+    held.push({ path, rule: findings === null ? 'security-unchecked' : 'security-hook', documentId: entry.documentId });
+  }
+  plan.create = screened;
+  return held;
 }
 
 export interface ReverseOptions {
@@ -334,25 +386,9 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
   };
 
   // A new file's name comes from its document's title, and the name reaches the progress commits, the record and
-  // this run's report, also one that stops at the sync branch check below. The hooks read each such title first;
-  // one they refuse, or have no answer for, leaves its document out under a name made from its id. The first
-  // capture after the record reads it again.
-  if (gate.configured) {
-    const folders = new Map(annotatedPlaces(context.mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
-    const occupied = new Set([...treePaths, ...plan.overwrite.map((entry) => entry.path), ...plan.create.map((entry) => entry.path)]);
-    const screened: ReverseEntry[] = [];
-    for (const entry of plan.create) {
-      const findings = await checkTitle(gate, entry.path, entry.title);
-      if (findings?.length === 0) {
-        screened.push(entry);
-        continue;
-      }
-      const held = documentPath(folders.get(placeKey(entry.place)) ?? '', entry.documentId, entry.documentId, occupied);
-      occupied.add(held);
-      result.leftOutAtRecord.push({ path: held, rule: findings === null ? 'security-unchecked' : 'security-hook' });
-    }
-    plan.create = screened;
-  }
+  // this run's report, also one that stops at the sync branch check below. The first capture after the record
+  // reads a document left out here again.
+  for (const { path, rule } of await screenNewTitles(context, plan, treePaths, gate)) result.leftOutAtRecord.push({ path, rule });
 
   let unpushed = 0;
   const pushProgress = async (): Promise<boolean> => {

@@ -101,8 +101,8 @@ export async function runOperation(
   if ((operation === 'initial-sync') !== (initialSync !== undefined)) {
     throw new Error(message('operation.initial-sync-inputs'));
   }
-  // Only a sync and a confirmed initial sync from Linear take Linear's text; nothing else has a set for the hooks.
-  if (security?.step === 'stage' && operation === 'initial-sync' && !(initialSync?.direction === 'linear-to-git' && initialSync.confirm)) {
+  // Only a sync and an initial sync from Linear take Linear's text or titles; nothing else has a set for the hooks.
+  if (security?.step === 'stage' && operation === 'initial-sync' && initialSync?.direction !== 'linear-to-git') {
     await stageNothing(security.folder, null);
     return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 }, writes: noWrites() };
   }
@@ -172,7 +172,15 @@ async function runWithSecurity(
       reverse = run.result;
       workSummary = renderReverseConfirmed(run.plan, run.result);
     } else {
-      const planned = await planLinearToGitFromRepository(context);
+      // A dry run writes nothing, but its summary and report name each new file after its title: the hooks read it first.
+      if (security?.step === 'stage') {
+        const gate = await stagingGate(context.git, context.fetched.tracked, security.folder);
+        if (gate.configured) await planLinearToGitFromRepository(context, gate);
+        staged = { sets: await gate.finish() };
+        workSummary = renderStaged(staged.sets);
+        return;
+      }
+      const planned = await planLinearToGitFromRepository(context, security?.step === 'apply' ? await answeringGate(context.git, context.fetched.tracked, security.folder) : undefined);
       plan = toReversePlanReport(planned, false);
       workSummary = renderReverseDryRun(planned);
     }
