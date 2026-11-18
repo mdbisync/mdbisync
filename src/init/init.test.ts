@@ -67,6 +67,9 @@ test('init keeps README content and custom hooks, and adds optional pinned secur
   assert.equal(securityHooks(readHookConfig(config)).length, 2);
   assert.match(config, /gitleaks.*:v?8\.30\.1@sha256:[a-f0-9]{64}/);
   assert.match(config, /--redact/);
+  // Document text comes from Linear, so an inline allow comment in it must not exempt a line.
+  assert.match(config, / dir --redact --no-banner --ignore-gitleaks-allow \.\n/);
+  assert.doesNotMatch(config, /[&*]a\d/, 'each example writes its own lists, without YAML anchors');
   assert.equal((await runCli(args, { cwd })).exitCode, 0);
   assert.equal(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), config);
   assert.equal(await readFile(join(cwd, 'guides/README.md'), 'utf8'), readme);
@@ -229,6 +232,49 @@ test('security opt-in refuses incompatible existing IDs and malformed hooks', as
     assert.equal(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), before);
     await assert.rejects(readFile(join(cwd, 'guides/README.md')), { code: 'ENOENT' });
   }
+});
+
+test('init updates a scanner hook an earlier init generated, and still refuses a changed one', async (t) => {
+  for (const args of [[...flags, '--security-hooks'], flags]) {
+    const cwd = await fixture(t);
+    assert.equal((await runCli([...flags, '--security-hooks'], { cwd })).exitCode, 0);
+    const current = await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8');
+    const earlier = `# our note\n${current.replace(' --ignore-gitleaks-allow .', ' .')}`;
+    assert.notEqual(earlier, `# our note\n${current}`);
+    await writeFile(join(cwd, '.pre-commit-config.yaml'), earlier);
+    const result = await runCli(args, { cwd });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), `# our note\n${current}`);
+  }
+  // An alias of the generated hook follows its anchor; a hook defined only outside `repos` is refused, not edited.
+  const aliased = await fixture(t);
+  assert.equal((await runCli([...flags, '--security-hooks'], { cwd: aliased })).exitCode, 0);
+  const generated = await readFile(join(aliased, '.pre-commit-config.yaml'), 'utf8');
+  const anchored = generated.replace('      - id: gitleaks', '      - &scanner\n        id: gitleaks') + '  - repo: local\n    hooks:\n      - *scanner\n';
+  await writeFile(join(aliased, '.pre-commit-config.yaml'), anchored.replace(' --ignore-gitleaks-allow .', ' .'));
+  assert.equal((await runCli(flags, { cwd: aliased })).exitCode, 0);
+  assert.equal(await readFile(join(aliased, '.pre-commit-config.yaml'), 'utf8'), anchored);
+  const scanner = /      - &scanner\n((?:        .*\n)+)/.exec(anchored)![1]!.replace(' --ignore-gitleaks-allow .', ' .').replace(/^        /gm, '  ');
+  const outside = `x-scanner: &outside\n${scanner}repos:\n  - repo: local\n    hooks:\n      - *outside\n`;
+  await writeFile(join(aliased, '.pre-commit-config.yaml'), outside);
+  const refused = await runCli(flags, { cwd: aliased });
+  assert.equal(refused.exitCode, 2);
+  assert.match(refused.stderr, /existing gitleaks hook differs/);
+  assert.equal(await readFile(join(aliased, '.pre-commit-config.yaml'), 'utf8'), outside);
+  // An entry anchored for another hook to share is refused, so that hook's command stays as it is.
+  const sharedEntry = generated.replace(' --ignore-gitleaks-allow .', ' .').replace(/entry: (\S+ dir --redact --no-banner \.)\n/, 'entry: &cmd $1\n') + '  - repo: local\n    hooks:\n      - { id: other-scan, name: Other, language: docker_image, entry: *cmd }\n';
+  assert.match(sharedEntry, /&cmd/);
+  await writeFile(join(aliased, '.pre-commit-config.yaml'), sharedEntry);
+  assert.equal((await runCli(flags, { cwd: aliased })).exitCode, 2);
+  assert.equal(await readFile(join(aliased, '.pre-commit-config.yaml'), 'utf8'), sharedEntry);
+  // An entry init never generated is the repository's own: init does not rewrite it.
+  const cwd = await fixture(t);
+  assert.equal((await runCli([...flags, '--security-hooks'], { cwd })).exitCode, 0);
+  const custom = (await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8')).replace(' --ignore-gitleaks-allow .', ' --verbose .');
+  await writeFile(join(cwd, '.pre-commit-config.yaml'), custom);
+  assert.equal((await runCli([...flags, '--security-hooks'], { cwd })).exitCode, 2);
+  assert.equal((await runCli(flags, { cwd })).exitCode, 0);
+  assert.equal(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), custom);
 });
 
 test('init reports regular-file folder paths as usage errors', async (t) => {

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
 import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { LINK_VARIANT_LINKS, type LinkVariantBudget, capture, linkVariants, linkVariantBudget, prepareLfs } from './capture.ts';
-import { type FileContent } from '../state/content.ts';
+import { type FileContent, contentBytes } from '../state/content.ts';
 import { candidateKey } from './staged.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
@@ -916,7 +916,8 @@ describe('capture from Linear', () => {
   });
 
   for (const status of [401, 403]) {
-    it(`stops capture on upload HTTP ${status} without marking any document or publishing`, async () => {
+    it(`stops capture on upload HTTP ${status} with a failing access probe, without marking any document or publishing`, async () => {
+      world.linear.uploadAccessStatus = 401;
       world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/file.png)';
       world.linear.documents.push({id:'aaa', title:'blocked', projectId:'project-api', content:'![External](https://example.com/file.png)', createdAt:'2026-01-04T00:00:00Z'});
       const before = context.fetched.state;
@@ -1073,6 +1074,73 @@ describe('capture from Linear', () => {
     assert.deepEqual(context.linear.stats.writes, wrote, 'the refused mark is not counted');
   });
 
+  describe('a title the security hooks refuse', () => {
+    // Hooks that read file content only, as secret scanners do: a title must reach them as text.
+    const TOKEN = ['title', 'canary', '5307'].join('-');
+    const gate = {configured: true, check: async (files: ReadonlyMap<string, FileContent>) => [...files.values()].some((content) => contentBytes(content).toString('utf8').includes(TOKEN)) ? [{hook: 'secret-check', line: 1}] : []};
+    const captureGated = () => capture(context, {config, state: context.fetched.state, identity: IDENTITY, security: gate});
+    /** Nothing pushed (paths, ids, messages, blobs) and nothing in the run's report holds the token. */
+    const assertNoToken = async (result: Awaited<ReturnType<typeof capture>>) => {
+      assert.ok(!(await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch'])).includes(TOKEN), 'the title reached the remote');
+      const report = JSON.stringify({summary: result.summary, changed: result.changed, removed: result.removed, blocked: result.blocked, leftOut: result.leftOut, warnings: result.writeBackWarnings});
+      assert.ok(!report.includes(TOKEN), report);
+    };
+
+    for (const body of ['clean', 'rejected'] as const) it(`blocks a new document under a name made from its id, with a ${body} body`, async () => {
+      world.linear.documents.push(
+        {id: 'titled', title: `Keys ${TOKEN}`, content: body === 'clean' ? 'Clean.\n' : `Body ${TOKEN}.\n`, projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'},
+        {id: 'ordinary', title: 'ordinary', content: 'Ordinary.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z'},
+      );
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = await captureGated();
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.blocked, [{id: 'titled', path: 'docs/titled.md', findings: [{hook: 'secret-check', line: 0}]}]);
+        const ids = await readIds(context.git, result.state.ids);
+        assert.equal(ids.get('docs/titled.md')?.id, 'titled');
+        assert.equal(ids.get('docs/ordinary.md')?.id, 'ordinary', 'a clean title keeps its path');
+        assert.equal(await text('docs/ordinary.md'), 'Ordinary.\n');
+        await assertNoToken(result);
+        await refresh();
+      }
+      assert.deepEqual(markOf(world.linear.documents.find(({id}) => id === 'titled')), MARKS.blocked);
+      assert.match(commentsOf('titled').join('\n'), /Hook `secret-check`, in the title\./);
+      // Renamed to a title the hooks pass, it takes the title's path.
+      Object.assign(world.linear.documents.find(({id}) => id === 'titled')!, {title: 'keys', content: 'Clean.\n', updatedAt: '2026-01-05T00:00:00Z'});
+      const accepted = await captureGated();
+      assert.deepEqual(accepted.blocked, []);
+      assert.equal(await text('docs/keys.md'), 'Clean.\n');
+      const ids = await readIds(context.git, accepted.state.ids);
+      assert.equal(ids.get('docs/keys.md')?.id, 'titled');
+      assert.equal(ids.has('docs/titled.md'), false);
+    });
+
+    it('moves a document an earlier run recorded under its title, without a file, to the name made from its id', async () => {
+      world.linear.documents.push({id: 'titled', title: `Keys ${TOKEN}`, content: 'Clean.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'});
+      // As an earlier release recorded a document whose text the hooks refused: under its title's path, with no file.
+      const state = context.fetched.state;
+      const recorded = await readIds(context.git, state.ids);
+      recorded.set(`docs/Keys ${TOKEN}.md`, {id: 'titled', saved: {icon: null, color: null}});
+      const next = await commitIds(context.git, state.ids, recorded, IDENTITY);
+      assert.equal((await pushAtomic(context.git, config, [{ref: stateRef(config, 'ids'), expected: state.ids, next}])).ok, true);
+      await refresh();
+      const result = await captureGated();
+      assert.deepEqual(result.blocked.map(({id, path}) => ({id, path})), [{id: 'titled', path: 'docs/titled.md'}]);
+      const ids = await readIds(context.git, result.state.ids);
+      assert.equal(ids.get('docs/titled.md')?.id, 'titled');
+      assert.ok(![...ids.keys()].some((path) => path.includes(TOKEN)), [...ids.keys()].join(', '));
+    });
+
+    it('keeps a renamed document at its accepted path', async () => {
+      Object.assign(world.linear.documents[0]!, {title: `plan ${TOKEN}`, content: 'Edited.\n', updatedAt: '2026-01-05T00:00:00Z'});
+      const result = await captureGated();
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.blocked, [{id: 'plan', path: 'docs/plan.md', findings: [{hook: 'secret-check', line: 0}]}]);
+      assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+      assert.equal((await readIds(context.git, result.state.ids)).get('docs/plan.md')?.id, 'plan');
+      await assertNoToken(result);
+    });
+  });
+
   it('counts the first marking of a blocked document and no write while it stays blocked', async () => {
     const gate = {configured: true, check: async () => [{hook:'secret-check', line:5}]};
     world.linear.documents[0]!.content = 'Rejected.\n';
@@ -1141,6 +1209,12 @@ describe('capture from Linear', () => {
     assert.equal((await fixture.remote.run(['cat-file','-e',`${stateRef(config,'linear')}:docs/blocked-new.md`],{okCodes:[0,128]})).code,128);
   });
 
+  /** Hooks that refuse the document's text, not the check of its title (the title alone, at the same path). */
+  const refusesBody = (files: ReadonlyMap<string, FileContent>, id: string) => {
+    const content = files.get(`docs/${id}.md`);
+    return content !== undefined && contentBytes(content).toString('utf8') !== `${id}\n`;
+  };
+
   it('stages a bounded number of texts for densely linked documents and records those that link a refused one', async () => {
     const count = 16;
     const ids = Array.from({ length: count }, (_, i) => `dense-${String(i).padStart(2, '0')}`);
@@ -1150,15 +1224,15 @@ describe('capture from Linear', () => {
     }
     const staged = new Set<string>();
     await capture(context, { config, state: context.fetched.state, identity: IDENTITY, stageOnly: true, security: { configured: true, check: async (files) => { staged.add(candidateKey(files)); return []; } } });
-    // A set for each changed document, and at most a bounded number of texts with refused targets for each.
-    assert.ok(staged.size <= count + 1 + count * (LINK_VARIANT_LINKS + 1), `${staged.size} sets staged`);
+    // A title and a set for each new document, and at most a bounded number of texts with refused targets for each.
+    assert.ok(staged.size <= 2 * count + 1 + count * (LINK_VARIANT_LINKS + 1), `${staged.size} sets staged`);
     // The apply step answers only what was staged; the hooks refuse one document that all the others link.
     const refused = ids[0]!;
     const result = await capture(context, {
       config,
       state: context.fetched.state,
       identity: IDENTITY,
-      security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : files.has(`docs/${refused}.md`) ? [{ hook: 'secret-check', line: 1 }] : []) },
+      security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : refusesBody(files, refused) ? [{ hook: 'secret-check', line: 1 }] : []) },
     });
     assert.deepEqual(result.blocked.map(({ id }) => id), [refused]);
     assert.deepEqual(result.leftOut, []);
@@ -1181,7 +1255,7 @@ describe('capture from Linear', () => {
         config,
         state: context.fetched.state,
         identity: IDENTITY,
-        security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : files.has(`docs/${refused}.md`) ? [{ hook: 'secret-check', line: 1 }] : []) },
+        security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : refusesBody(files, refused) ? [{ hook: 'secret-check', line: 1 }] : []) },
       });
       await refresh();
       return result;

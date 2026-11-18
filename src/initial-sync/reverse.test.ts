@@ -26,7 +26,8 @@ import { LINK_VARIANT_LINKS, capture } from '../sync/capture.ts';
 import { SYNC_BRANCH_MERGE_MESSAGE } from '../sync/pull-request.ts';
 import { candidateKey } from '../sync/staged.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
-import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
+import { type ReversePlan, type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit, pullRequestBody } from './reverse.ts';
+import { renderReverseConfirmed } from './summary.ts';
 import { MARKS } from '../sync/marks.ts';
 
 const CANARY = 'kx-7d20b4e1';
@@ -743,8 +744,20 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.linear.uploads.length, 0);
   });
 
-  it('stops when Linear refuses the run access to an upload, instead of leaving the document out', async () => {
+  it('keeps the tracked text of a document whose upload Linear refuses while the run access works, and records the rest', async () => {
     const world = fakeWorld();
+    const refused = `${UPLOADS_HOST}/0/refused.png`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Chart](${refused}) ${CANARY}\n` } : d));
+    world.linear.uploads.push({ filename: 'refused.png', contentType: 'image/png', size: 0, assetUrl: refused, status: 403 });
+    const report = await run(world);
+    assert.equal(report.result.exitCode, 0, report.result.stderr);
+    assert.deepEqual(report.report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/plan.md', rule: 'image-blocked' }]);
+    assert.doesNotMatch(await show('refs/mdbisync/linear:eng/notes/plan.md'), /refused\.png/);
+  });
+
+  it('stops when Linear refuses the run access to an upload and the access probe fails, instead of leaving the document out', async () => {
+    const world = fakeWorld();
+    world.linear.uploadAccessStatus = 401;
     const refused = `${UPLOADS_HOST}/0/refused.png`;
     world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Chart](${refused}) ${CANARY}\n` } : d));
     const base = fakeFetch(world);
@@ -1418,7 +1431,7 @@ describe('the security gate of an initial sync from Linear', () => {
    * the two steps (stage every set, run the hooks on them, apply from their
    * answers), and checks that the record holds only bytes the hooks passed.
    */
-  const gated = async (fixture: Fixture, world: FakeWorld, refused: (text: string) => boolean, steps: 1 | 2, stagedCount?: { sets: number }) => {
+  const gated = async (fixture: Fixture, world: FakeWorld, refused: (text: string) => boolean, steps: 1 | 2, stagedCount?: { sets: number }, progressBatch?: number) => {
     const config = resolveStateConfig({});
     const git = await fixture.clone('gate');
     const fetched = await fetchState(git, config);
@@ -1464,7 +1477,8 @@ describe('the security gate of an initial sync from Linear', () => {
         },
       };
     }
-    const { result } = await confirmLinearToGit(context, { config, github, security, stopAfterDocuments: undefined });
+    const { plan, result } = await confirmLinearToGit(context, { config, github, security, stopAfterDocuments: undefined, ...(progressBatch === undefined ? {} : { progressBatch }) });
+    lastPlan = plan;
     assert.equal(result.complete, true, result.code);
     const changed = (await fixture.remote.text(['diff', '--name-only', 'refs/heads/main', 'refs/mdbisync/linear'])).split('\n').filter((path) => path.endsWith('.md'));
     for (const path of changed) {
@@ -1475,8 +1489,33 @@ describe('the security gate of an initial sync from Linear', () => {
     return result;
   };
 
+  let lastPlan: ReversePlan | undefined;
+
   for (const steps of [1, 2] as const) {
     const mode = steps === 1 ? 'in one step' : 'with staged hooks';
+
+    it(`leaves out a new document whose title a hook refuses, under a name made from its id (${mode})`, async () => {
+      const fixture = await createFixture();
+      try {
+        await fixture.seed(TREE);
+        const world = fakeWorld();
+        const TOKEN = ['title', 'canary', '6114'].join('-');
+        world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-faq' ? { ...d, title: `faq ${TOKEN}` } : d));
+        // A progress commit after every document: the ids reach the remote before the record.
+        const result = await gated(fixture, world, (text) => text.includes(TOKEN), steps, undefined, 1);
+        assert.deepEqual(result.leftOutAtRecord, [{ path: 'eng/notes/doc-faq.md', rule: 'security-hook' }]);
+        assert.ok(result.progressPushes > 0);
+        assert.ok(!result.created.some((path) => path.includes('faq')), result.created.join(', '));
+        // A clean title keeps its path.
+        assert.ok(result.created.includes('eng/ops/runbook.md'));
+        const objects = await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch']);
+        assert.ok(!objects.includes(TOKEN), 'the title reached the remote');
+        const texts = [renderReverseConfirmed(lastPlan!, result), pullRequestBody(lastPlan!, result), ...[...world.github.pullRequests.values()].map((pr) => `${pr.title}\n${pr.body}`)];
+        for (const text of texts) assert.ok(!text.includes(TOKEN), text);
+      } finally {
+        await fixture.cleanup();
+      }
+    });
 
     it(`checks a document again when a document it links is left out by a hook, and keeps the refused link out (${mode})`, async () => {
       const fixture = await createFixture();

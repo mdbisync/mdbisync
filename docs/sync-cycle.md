@@ -295,6 +295,12 @@ When a repository security hook (a hook marked `alias: security`, see
 
   When the findings change, the same comment is edited to the new list.
 
+The hooks also check a document's title, as text, before the title names
+a new file. A finding there reads `Hook \`gitleaks\`, in the title.`, and
+until the title passes, the document keeps its last synchronized file, or,
+when it has none yet, the run's state and summary name it by its id
+(`<folder>/<document id>.md`), never by its title.
+
 Fix it by editing the document in Linear. The next run checks the new text;
 when the hooks pass, it synchronizes the document and puts its own icon and
 color back. The comment is not resolved: it stays open as the record of what

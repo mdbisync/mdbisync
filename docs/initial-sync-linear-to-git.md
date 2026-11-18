@@ -92,7 +92,9 @@ What it writes to git:
 
 When the repository has security hooks (marked `alias: security`), they
 check each document's text with the files it embeds before anything is
-pushed. A link to another new document becomes a relative link to its
+pushed. They check the title of each document without a file first: one
+they reject is left out under a name made from its id
+(`<folder>/<document id>.md`), never under its title. A link to another new document becomes a relative link to its
 file; when that document is left out, the link stays its Linear URL, and
 the documents that link to it are checked again with that text. Without
 the hooks, Linear's content reaches git unchecked, and the run's summary
@@ -133,7 +135,7 @@ file keeps the tracked branch's text and stays tied to its document.
 | `download-failed` | A file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed in its `assets/` folder. The first sync afterwards reads the document again. |
 | `front-matter-boundary` | The document's text starts with something that reads as front matter, so it would not stay the file's body. |
 | `title-not-a-path` | The new file would map back to another document or another folder's team or project. |
-| `security-hook` | A security hook reported a finding in the document's text or its files, including the Linear URL of a linked document that was left out. |
+| `security-hook` | A security hook reported a finding in the document's title, its text or its files, including the Linear URL of a linked document that was left out. |
 | `security-unchecked` | The security hooks have not seen this text, for example because their step did not run. |
 
 ### A run that stops

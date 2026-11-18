@@ -18,14 +18,14 @@ import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
-import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
+import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
+import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
 import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
 import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
@@ -366,7 +366,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
-    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool);
+    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool, undefined, uploadAccessProbe(linear));
     type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
     // A rejected target links to its accepted file, if it has one.
@@ -378,11 +378,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
     };
     const resetTarget = (id: string, targets: Map<string, string> = documentIds) => resetTargets(new Set([id]), targets);
-    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[]) => {
+    // Keyed by the document's recorded path by default.
+    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[], key = byId.get(doc.id)?.path ?? path) => {
       const old = byId.get(doc.id);
       const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-      ids.set(old?.path ?? path, {...old?.entry, id: doc.id, saved});
-      result.blocked.push({id: doc.id, path: old?.path ?? path, findings});
+      ids.set(key, {...old?.entry, id: doc.id, saved});
+      result.blocked.push({id: doc.id, path: key, findings});
       resetTarget(doc.id);
     };
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
@@ -403,6 +404,29 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const path = paths.get(doc.id)!;
       if (limited.has(doc.id)) continue;
+      // The title names the file, its `ids` key and the report's line: a name the record does not hold yet is
+      // shown to the hooks first. Until they pass it, the document keeps its accepted path or, when it has none,
+      // a name made from its id, also in place of a path an earlier run recorded for it without a file.
+      if (gate.configured && !previous.has(path)) {
+        const findings = await checkTitle(gate, path, doc.title);
+        if (findings === null) {
+          result.leftOut.push({id: doc.id, rule: 'security-unchecked'});
+          resetTarget(doc.id);
+          continue;
+        }
+        if (findings.length > 0) {
+          let held = old !== undefined && previous.has(old.path) ? old.path : undefined;
+          if (held === undefined) {
+            const available = new Set(reservations);
+            if (old !== undefined) available.delete(old.path);
+            held = documentPath(folderFor(doc)!, doc.id, doc.id, available, undefined, (candidate) => invalidZone(doc, candidate));
+            reservations.add(held);
+            if (old !== undefined && old.path !== held) ids.delete(old.path);
+          }
+          recordBlocked(doc, held, findings, held);
+          continue;
+        }
+      }
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {

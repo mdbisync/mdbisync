@@ -64,10 +64,10 @@ import {
   readUploads,
   stateRef,
 } from '../state/index.ts';
-import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
+import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
 import { captureCursorTrailer, cursorTime, linkVariants, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
-import { type SecurityFinding, type SecurityGate, securityGate } from '../sync/security.ts';
+import { type SecurityFinding, type SecurityGate, checkTitle, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
@@ -294,6 +294,16 @@ export interface ReverseRecord {
 }
 
 export async function confirmLinearToGit(context: RunContext, options: ReverseOptions): Promise<{ plan: ReversePlan; result: ReverseResult }> {
+  const gate = options.security ?? (await securityGate(context.git, context.fetched.tracked));
+  try {
+    return await confirmWithGate(context, options, gate);
+  } finally {
+    // Also when the run ends before its record; closing again is harmless.
+    await gate.close?.();
+  }
+}
+
+async function confirmWithGate(context: RunContext, options: ReverseOptions, gate: SecurityGate): Promise<{ plan: ReversePlan; result: ReverseResult }> {
   const { git, fetched } = context;
   const transforms = options.transforms ?? [];
   const identity = options.identity ?? context.identity;
@@ -321,6 +331,27 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     record: null,
     pullRequest: null,
   };
+
+  // A new file's name comes from its document's title, and the name reaches the progress commits, the record and
+  // this run's report, also one that stops at the sync branch check below. The hooks read each such title first;
+  // one they refuse, or have no answer for, leaves its document out under a name made from its id. The first
+  // capture after the record reads it again.
+  if (gate.configured) {
+    const folders = new Map(annotatedPlaces(context.mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
+    const occupied = new Set([...treePaths, ...plan.overwrite.map((entry) => entry.path), ...plan.create.map((entry) => entry.path)]);
+    const screened: ReverseEntry[] = [];
+    for (const entry of plan.create) {
+      const findings = await checkTitle(gate, entry.path, entry.title);
+      if (findings?.length === 0) {
+        screened.push(entry);
+        continue;
+      }
+      const held = documentPath(folders.get(placeKey(entry.place)) ?? '', entry.documentId, entry.documentId, occupied);
+      occupied.add(held);
+      result.leftOutAtRecord.push({ path: held, rule: findings === null ? 'security-unchecked' : 'security-hook' });
+    }
+    plan.create = screened;
+  }
 
   let unpushed = 0;
   const pushProgress = async (): Promise<boolean> => {
@@ -475,7 +506,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
     let entries = [...plan.overwrite, ...plan.create];
     const uploads = await readUploads(git, expected.uploads, context.pushedKey);
-    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool);
+    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool, undefined, uploadAccessProbe(context.linear));
     const failed: string[] = [];
     const budget: string[] = [];
     const repairBudget: string[] = [];
@@ -498,7 +529,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         if (captured.observedBody !== undefined) { imageBlocked.push(entry.path); continue; }
         bodies.set(entry.path, captured);
       } catch (error) {
-        // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload), ends the run, as in the capture.
+        // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload with a failing probe), ends the run, as in the capture.
         if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
         // An image that cannot be recorded here (a pending repair or a blocked upload): the
         // document's text does not enter git. This sync writes nothing to Linear, so the first sync
@@ -534,7 +565,6 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     keepTracked(imageBlocked, 'image-blocked');
     keepTracked(complexity, 'markdown-complexity');
     // The repository's security hooks see Linear's text and every downloaded file before any byte is pushed, as in the capture.
-    const gate = options.security ?? (await securityGate(git, fetched.tracked));
     // The text each document last passed the hooks with: a document is checked again only when its bytes change.
     const passed = new Map<string, string>();
     /**

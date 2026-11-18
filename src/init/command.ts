@@ -1,7 +1,7 @@
 // Repository setup is local: validate the entire change before writing files.
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { parseDocument, isMap, isSeq } from 'yaml';
+import { parseDocument, isMap, isScalar, isSeq } from 'yaml';
 import templates from './workflows.json' with { type: 'json' };
 import type { CliResult } from '../cli.ts';
 import { ANNOTATION_FILE, TEAM_KEY, PROJECT_KEY, resolveZones } from '../mapping/annotations.ts';
@@ -9,7 +9,7 @@ import { collectAnnotations } from '../mapping/mapping.ts';
 import { appCreationUrl } from '../setup/app.ts';
 import { QUICKSTART_URL } from '../setup/fixes.ts';
 import { PROJECT_URL } from '../version.ts';
-import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
+import { IGNORE_INLINE_ALLOW, LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { findFrontMatter } from '../mapping/front-matter.ts';
 import { message } from '../messages.ts';
 import { MINIMUM_RELEASE, OLDER_RELEASES, RELEASE_PIN } from './releases.ts';
@@ -141,6 +141,23 @@ function lfsAttributes(text: string | undefined): string {
 
 // The image digest pins the scanner's bytes as well as its version.
 export const SCANNER_IMAGE = 'ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f';
+// Document text comes from Linear, so an inline `gitleaks:allow` in it must not exempt a line;
+// exceptions belong in the repository's tracked `.gitleaks.toml` or `.gitleaksignore`.
+const SCANNER_ENTRY = `${SCANNER_IMAGE} dir --redact --no-banner ${IGNORE_INLINE_ALLOW} .`;
+/** Entries earlier releases of init generated, which init updates to the current one. */
+const EARLIER_SCANNER_ENTRIES: readonly string[] = [`${SCANNER_IMAGE} dir --redact --no-banner .`];
+/** The secret scanner hook `init --security-hooks` adds. */
+const SCANNER_HOOK: Readonly<Record<string, unknown>> & { id: string } = { id: 'gitleaks', name: 'Scan for secrets (Docker required)', alias: SECURITY_ALIAS, language: 'docker_image', entry: SCANNER_ENTRY, pass_filenames: false, stages: ['pre-commit', 'pre-push'] };
+/** The optional security hooks `init --security-hooks` adds. Each has its own lists, so the YAML gets no anchors. */
+const SECURITY_HOOK_EXAMPLES: ReadonlyArray<Readonly<Record<string, unknown>> & { id: string }> = [
+  SCANNER_HOOK,
+  { id: 'private-key-pattern', name: 'Private key pattern', alias: SECURITY_ALIAS, language: 'pygrep', entry: '-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----', args: ['--multiline'], stages: ['pre-commit', 'pre-push'] },
+];
+/** Whether a configured hook holds every key of the example with the same value. */
+function sameHook(hook: Readonly<Record<string, unknown>>, example: Readonly<Record<string, unknown>>): boolean {
+  return Object.entries(example).every(([key, value]) => JSON.stringify(hook[key]) === JSON.stringify(value));
+}
+
 function hookConfig(text: string | undefined, settings: Settings): string {
   const doc = document(text ?? 'default_install_hook_types: [pre-commit, pre-push]\nrepos: []\n');
   const repos = doc.get('repos');
@@ -155,22 +172,31 @@ function hookConfig(text: string | undefined, settings: Settings): string {
     repos.add(doc.createNode({ repo: PROJECT_URL, rev: settings.sha, hooks: [{ id: LINEAR_FORMAT_HOOK }] }));
     changed = true;
   }
+  // A scanner hook an earlier init generated gets the current entry, with or without --security-hooks.
+  data.repos.forEach((repo, at) => {
+    if (repo.repo !== 'local') return;
+    repo.hooks!.forEach((hook, index) => {
+      if (hook.id !== SCANNER_HOOK.id || !EARLIER_SCANNER_ENTRIES.includes(hook.entry as string) || !sameHook(hook, { ...SCANNER_HOOK, entry: hook.entry })) return;
+      // A hook or entry shared through a YAML alias or anchor is not edited: the edit would reach the other uses too.
+      const entry = doc.getIn(['repos', at, 'hooks', index, 'entry'], true);
+      if (!isMap(doc.getIn(['repos', at, 'hooks', index], true)) || !isScalar(entry) || entry.anchor) throw new InitError(message('init.security-hook-differs', { hook: SCANNER_HOOK.id }));
+      doc.setIn(['repos', at, 'hooks', index, 'entry'], SCANNER_ENTRY);
+      hook.entry = SCANNER_ENTRY;
+      changed = true;
+    });
+  });
   if (settings.security) {
-    const examples = [
-      { id: 'gitleaks', name: 'Scan for secrets (Docker required)', alias: SECURITY_ALIAS, language: 'docker_image', entry: `${SCANNER_IMAGE} dir --redact --no-banner .`, pass_filenames: false, stages: ['pre-commit', 'pre-push'] },
-      { id: 'private-key-pattern', name: 'Private key pattern', alias: SECURITY_ALIAS, language: 'pygrep', entry: '-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----', args: ['--multiline'], stages: ['pre-commit', 'pre-push'] },
-    ];
     const hooks = data.repos.flatMap((repo) => repo.hooks ?? []);
-    for (const example of examples) {
+    for (const example of SECURITY_HOOK_EXAMPLES) {
       const matches = hooks.filter((hook) => hook.id === example.id);
       for (const hook of matches) {
         const local = data.repos.some((repo) => repo.repo === 'local' && repo.hooks?.includes(hook));
-        if (!local || Object.entries(example).some(([key, value]) => JSON.stringify(hook[key]) !== JSON.stringify(value))) {
+        if (!local || !sameHook(hook, example)) {
           throw new InitError(message('init.security-hook-differs', { hook: example.id }));
         }
       }
     }
-    const missing = examples.filter((hook) => !hooks.some((existing) => existing.id === hook.id));
+    const missing = SECURITY_HOOK_EXAMPLES.filter((hook) => !hooks.some((existing) => existing.id === hook.id));
     if (missing.length) { repos.add(doc.createNode({ repo: 'local', hooks: missing })); changed = true; }
   }
   return changed ? doc.toString({ lineWidth: 0 }) : text!;
