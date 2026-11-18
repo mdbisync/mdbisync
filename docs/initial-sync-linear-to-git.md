@@ -137,6 +137,7 @@ file keeps the tracked branch's text and stays tied to its document.
 | `title-not-a-path` | The new file would map back to another document or another folder's team or project. |
 | `security-hook` | A security hook reported a finding in the document's title, its text or its files, including the Linear URL of a linked document that was left out. |
 | `security-unchecked` | The security hooks have not seen this text, for example because their step did not run. |
+| `changed-during-run` | The document changed in Linear between the listing and the read of its text: it moved to another team or project, was renamed, trashed, archived or edited, or is gone. It is not imported, and the file its title names stays as it is. Run again. |
 
 ### A run that stops
 

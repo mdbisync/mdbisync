@@ -27,7 +27,7 @@ import { checkPushScope } from '../sync/head-check.ts';
 import { posix } from 'node:path';
 import { joinFile, splitFile } from '../format/index.ts';
 import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
-import { type LinearDocument, LinearError } from '../linear/index.ts';
+import { LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
@@ -142,17 +142,35 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
 
   // An encoded name belongs to the title it encodes: `Q3%3A goals.md` is the file of `Q3: goals`, even when
   // another document is titled `Q3%3A goals` (whose own name the rule encodes to `Q3%253A goals.md`).
+  // A document that changed during the run is never imported, and the file its name gives it stays as it is.
+  // It takes part in the naming like any document without a file, in the same oldest-first order.
+  const created = new Map(input.places.flatMap(({ documents }) => documents.map((document) => [document.id, document.createdAt] as const)));
+  const oldestFirst = <T extends { documentId: string }>(entries: T[]) => entries.sort((a, b) => compare(created.get(a.documentId) ?? '', created.get(b.documentId) ?? '') || compare(a.documentId, b.documentId));
+  const changedIds = new Set(input.changed?.keys() ?? []);
+  const changed = [...new Map(input.places.flatMap(({ place, documents }) => documents
+    .filter((document) => changedIds.has(document.id))
+    .map((document) => [document.id, { path: plainPath(document.title, place), title: document.title, place, documentId: document.id }] as const))).values()];
+  const keepForChanged = (path: string, documentId: string) => {
+    result.leftOut = result.leftOut.filter((other) => other.documentId !== documentId || input.treePaths.has(other.path));
+    result.leftOut.push({ path, rules: ['changed-during-run'], lines: [], documentId });
+    named.set(documentId, path);
+  };
+
   const trash = [...plan.trash];
   const overwriteByPath = new Map(result.overwrite.map((entry) => [entry.path, entry]));
-  for (const entry of plan.trash) {
+  for (const entry of oldestFirst([...plan.trash, ...changed])) {
     const plain = plainPath(entry.title, entry.place);
     const other = overwriteByPath.get(plain);
     if (other === undefined || placeKey(other.place) !== placeKey(entry.place) || plainPath(other.title, other.place) === plain) continue;
     result.overwrite = result.overwrite.filter((candidate) => candidate !== other);
-    const claimed = { path: plain, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: other.fileTitle };
-    result.overwrite.push(claimed);
-    overwriteByPath.set(plain, claimed);
-    named.set(entry.documentId, plain);
+    overwriteByPath.delete(plain);
+    if (changedIds.has(entry.documentId)) keepForChanged(plain, entry.documentId);
+    else {
+      const claimed = { path: plain, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: other.fileTitle };
+      result.overwrite.push(claimed);
+      overwriteByPath.set(plain, claimed);
+      named.set(entry.documentId, plain);
+    }
     // The other document now has no file: it is named like any document without one.
     trash.push({ path: plain, title: other.title, place: other.place, documentId: other.documentId });
   }
@@ -160,10 +178,7 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
   // A file without a document by title can be one by the naming rule: the file an earlier run named for an encoded title.
   const gitOnly = new Map(plan.create.map((entry) => [entry.path, entry]));
   // Oldest first, as in the other direction: the older of two documents keeps the plain name.
-  const created = new Map(input.places.flatMap(({ documents }) => documents.map((document) => [document.id, document.createdAt] as const)));
-  const documentsOldestFirst = trash
-    .filter((entry) => !named.has(entry.documentId))
-    .sort((a, b) => compare(created.get(a.documentId) ?? '', created.get(b.documentId) ?? '') || compare(a.documentId, b.documentId));
+  const documentsOldestFirst = oldestFirst([...trash, ...changed].filter((entry) => !named.has(entry.documentId)));
   for (const entry of documentsOldestFirst) {
     const folder = folderOfPlace(entry.place);
     const plain = plainPath(entry.title, entry.place);
@@ -173,11 +188,20 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
       if (placeKey(file.place) !== placeKey(entry.place)) continue;
       const others = new Set([...input.treePaths].filter((other) => other !== path));
       if (documentPath(folder, entry.title, entry.documentId, others, path, invalid(entry.place)) !== path) continue;
-      result.overwrite.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: file.title });
-      named.set(entry.documentId, path);
       gitOnly.delete(path);
+      if (changedIds.has(entry.documentId)) keepForChanged(path, entry.documentId);
+      else {
+        result.overwrite.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: file.title });
+        named.set(entry.documentId, path);
+      }
       break;
     }
+  }
+  // A changed document without a file is reported under a name made from its id: no security hook has seen its
+  // title, which then reaches neither the job summary nor the report.
+  for (const entry of changed) if (!named.has(entry.documentId)) {
+    const reported = result.leftOut.find((other) => other.documentId === entry.documentId && !input.treePaths.has(other.path));
+    if (reported !== undefined) reported.path = documentPath(folderOfPlace(entry.place), entry.documentId, entry.documentId, input.treePaths);
   }
   for (const entry of gitOnly.values()) {
     if (annotations.has(entry.path)) result.kept.push({ path: entry.path, reason: 'annotation' });
@@ -187,7 +211,7 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
   const removed = new Set(result.remove);
   const occupied = new Set([...input.treePaths].filter((path) => !removed.has(path)));
   for (const entry of documentsOldestFirst) {
-    if (named.has(entry.documentId)) continue;
+    if (named.has(entry.documentId) || changedIds.has(entry.documentId)) continue;
     const folder = folderOfPlace(entry.place);
     const path = documentPath(folder, entry.title, entry.documentId, occupied, undefined, invalid(entry.place));
     result.create.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: posix.relative(folder, path).slice(0, -'.md'.length) });
@@ -311,6 +335,12 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
   const stopAfter = 'stopAfterDocuments' in options ? options.stopAfterDocuments : testStopAfterDocuments();
 
   const { input, documents } = await readPlanSources(context, { withContent: true });
+  /** A planned document's text, as read by id; a listing, which holds none, is never a body. */
+  const contentOf = (entry: ReverseEntry): string => {
+    const read = documents.get(entry.documentId);
+    if (read?.content === undefined) throw new Error(message('initial-sync.document-not-read', { path: entry.path }));
+    return read.content ?? '';
+  };
   const treePaths = new Set((await listTree(git, fetched.tracked)).map((entry) => entry.path));
   const plan = planLinearToGit({ ...input, treePaths });
 
@@ -514,7 +544,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     const complexity: string[] = [];
     let needsLinkBase = false;
     for (const entry of entries) {
-      const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
+      const content = contentOf(entry);
       const tracked = input.texts.get(entry.path);
       const trackedBody = markdownBaseline(tracked === undefined ? undefined : splitFile(tracked).body);
       if (trackedBody !== undefined) trackedBodies.set(entry.path, trackedBody);
@@ -604,7 +634,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
             // localization too, so it cannot hide a secret in a URL or its query.
             // That text does not depend on the links: a document checked again passed it already.
             const tracked = input.texts.get(entry.path);
-            const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
+            const content = contentOf(entry);
             const original = withNewUploadUrls(tracked === undefined ? content : joinFile(splitFile(tracked).head, content), added, uploads);
             let findings: SecurityFinding[] | null = [];
             if (original !== text && !passed.has(entry.path)) findings = await gate.check(new Map<string, FileContent>([[entry.path, original], ...files]));

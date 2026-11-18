@@ -9,6 +9,9 @@
 //    progress commits. A document whose text holds a conflict gets the
 //    conflict mark and its comment, as the sync's write step gives it.
 // 3. Move the documents without a file to Linear's trash.
+//    Before an overwrite or a trash, the document is read again (a batch of
+//    the next ones per request): one that moved, was trashed or was edited
+//    since the plan read it is left out (`changed-during-run`).
 // 4. Record: one atomic push of the final `ids`, `uploads` (created when
 //    missing) and `linear`, a commit whose parent is the tracked branch and
 //    whose tree is the tracked tree with each synchronized file's body
@@ -55,8 +58,9 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, planInitialSync } from './plan.ts';
-import { readPlanSources } from './run.ts';
+import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, placeKey, planInitialSync } from './plan.ts';
+import { type Place } from '../mapping/index.ts';
+import { readPlanSources, unchangedSince } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { detectConflicts } from '../merge/index.ts';
@@ -157,7 +161,11 @@ export interface ConfirmedResult {
   skippedCompleted: string[];
   /** Paths where a document without a file would be; the documents are in Linear's trash. */
   trashed: string[];
-  /** Files a transform left out while writing, with its rule. */
+  /**
+   * Files a transform left out while writing, with its rule; and documents
+   * that changed since the plan read them (`changed-during-run`), at the
+   * path of their file or where it would be, neither written nor trashed.
+   */
   leftOutAtWrite: LeftOutAtWrite[];
   failed: FailedWrite[];
   /** Paths not written because the run stopped first, the interrupted one included. */
@@ -306,6 +314,26 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     });
   };
 
+  /**
+   * A document as Linear holds it now (null: gone), read again just before
+   * its write or trash, together with the next ones (`PROGRESS_BATCH` per
+   * request) instead of one request each.
+   */
+  const readAgainCache = new Map<string, LinearDocument | null>();
+  /** Titles, by place, of an overwrite left out as changed: no document of them is trashed. */
+  const skippedTitles = new Set<string>();
+  const titleKey = (place: Place, title: string) => `${placeKey(place)}\0${title.normalize('NFC')}`;
+  const readAgain = async (id: string, upcoming: readonly string[]): Promise<LinearDocument | null> => {
+    if (!readAgainCache.has(id)) {
+      const ids = [...new Set([id, ...upcoming])].slice(0, PROGRESS_BATCH);
+      const found = new Map((await linear.getDocuments(ids)).map((document) => [document.id, document]));
+      for (const each of ids) readAgainCache.set(each, found.get(each) ?? null);
+    }
+    const current = readAgainCache.get(id) as LinearDocument | null;
+    readAgainCache.delete(id);
+    return current;
+  };
+
   const work: Work[] = [
     ...plan.overwrite.map((entry): Work => ({ kind: 'overwrite', entry })),
     ...plan.create.map((entry): Work => ({ kind: 'create', entry })),
@@ -405,6 +433,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           unpushed += 1;
           await reconcileMark(path, created, hash);
         } else {
+          // The document may have moved, been trashed or edited since the plan read it: write only the one planned.
+          const upcoming = work.slice(index + 1).flatMap((rest) => (rest.kind === 'overwrite' ? [rest.entry.documentId] : []));
+          const current = await readAgain(item.entry.documentId, upcoming);
+          if (current === null || !unchangedSince(current, document as LinearDocument)) {
+            result.leftOutAtWrite.push({ path, rule: 'changed-during-run' });
+            // Its title's other documents stay too: one of them may be the only match left.
+            skippedTitles.add(titleKey(item.entry.place, item.entry.title));
+            continue;
+          }
           const updated = await linear.updateDocument(item.entry.documentId, { content: body });
           remember(path, updated);
           sentHashes.set(path, hash);
@@ -457,6 +494,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           break;
         }
         try {
+          if (skippedTitles.has(titleKey(entry.place, entry.title))) continue;
+          // Trash only the document the plan read in its place, unchanged since. One that shares its would-be
+          // path with a planned file is not reported: that file is written as planned.
+          const listed = sources.documents.get(entry.documentId);
+          const current = await readAgain(entry.documentId, plan.trash.slice(index + 1).map((rest) => rest.documentId));
+          if (listed === undefined || current === null || !unchangedSince(current, listed)) {
+            if (!work.some((planned) => planned.entry.path === entry.path)) result.leftOutAtWrite.push({ path: entry.path, rule: 'changed-during-run' });
+            continue;
+          }
           await linear.trashDocument(entry.documentId);
           result.trashed.push(entry.path);
         } catch (error) {

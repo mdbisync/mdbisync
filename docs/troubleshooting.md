@@ -319,6 +319,7 @@ the reason is fixed. The summaries list each with its rules:
 | `title-too-long` | The title made from the file's path is longer than Linear accepts. | Use a shorter file name or folder path. |
 | `content-too-long` | The text is longer than the 250,000 characters Linear accepts. Its other rules are not checked until it is shorter. | Split the file, then lint the parts. |
 | `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes. | Reduce nesting or split the file. |
+| `changed-during-run` | An initial sync found the document changed in Linear while it ran: moved to another team or project, renamed, trashed, archived, edited or gone. The document and the file its title names are neither written, trashed nor imported. | Run the initial sync again. |
 | `outside-annotations` | The file is above every annotated folder. | Move it into an annotated folder, or annotate a folder above it. |
 | `not-a-regular-file` | The path is a symbolic link or another kind of file. | Replace it with a regular file. |
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |
