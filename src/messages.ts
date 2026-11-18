@@ -203,6 +203,7 @@ export const MESSAGES = {
   'initial-sync.misplaced': 'the recorded tree maps {count} files to other documents',
   'initial-sync.over-upload-limit': '{files}: over the upload limit of {limit} bytes',
   'initial-sync.lfs-extensions': '{files}: stored with LFS extensions, which are not supported',
+  'initial-sync.link-provenance-unknown': '{files}: linked as a plain link from a document Linear holds, and the state that names the links Linear members wrote is lost',
   'initial-sync.upload-unreadable': '{file} cannot be read: {reason}',
   'initial-sync.uploads-not-prepared': 'the uploads transform was not prepared',
 

@@ -8,6 +8,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { readBlobs, readUploads } from '../state/index.ts';
 import { type InitialSyncPlan, type PlaceDocuments, type PlanInput, annotatedPlaces, leaveOutAtWrite, planInitialSync } from './plan.ts';
 import { predictUploadLeaveOuts } from './uploads.ts';
+import { readPlainLinkProvenance } from './provenance.ts';
 
 export interface PlanSources {
   input: PlanInput;
@@ -54,5 +55,7 @@ export async function planFromRepository(context: RunContext, options: { remote:
   // Counted as the confirmed run counts them: before the uploads leave any document out.
   plan.capacity = assessCapacity(context, sources.containers, plan.create, options.cap);
   const uploads = await readUploads(context.git, context.fetched.state.uploads);
-  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads, { remote: options.remote }));
+  // The provenance the confirmed run rebuilds, so the dry run leaves out what it would.
+  const { plainFiles, unknown } = await readPlainLinkProvenance(context.git, context.fetched.state, context.fetched.tracked, plan);
+  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads, { remote: options.remote, plainFiles, unknownProvenance: unknown }));
 }
