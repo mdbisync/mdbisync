@@ -8,6 +8,7 @@
 // them back by document identity before it uploads anything, and keeps them
 // in the ids it records.
 
+import { posix } from 'node:path';
 import { type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_PROGRESS, readIds } from '../state/index.ts';
 import { readPlainFileProvenance } from '../sync/pull-repairs.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from '../sync/write.ts';
@@ -48,22 +49,41 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
     for (const target of targets) set.add(target);
     byId.set(id, set);
   };
-  for (const ids of entries) for (const entry of ids.values()) add(entry.id, entry.plainFiles ?? []);
+  /** Where the ids put each document before, so a target can follow a document that moved. */
+  const oldPaths = new Map<string, Set<string>>();
+  for (const ids of entries) for (const [path, entry] of ids) {
+    add(entry.id, entry.plainFiles ?? []);
+    oldPaths.set(entry.id, (oldPaths.get(entry.id) ?? new Set()).add(path));
+  }
   if (state.linear !== null) for (const [id, targets] of await readPlainFileProvenance(git, state.linear)) add(id, targets);
   for (const [id, targets] of await readTrackedPlainFiles(git, tracked)) add(id, targets);
 
   const plainFiles = new Map<string, Set<string>>();
   const matched = new Map(plan.overwrite.map((entry) => [entry.path, entry.documentId]));
-  for (const entry of [...plan.create, ...plan.overwrite]) {
-    const targets = new Set<string>();
+  const identified = new Set<string>();
+  const identify = (entry: { path: string }): Set<string> => {
     const identities = new Set<string>(entries.flatMap((ids): string[] => {
       const old = ids.get(entry.path);
-      for (const target of old?.plainFiles ?? []) targets.add(target);
       return old === undefined ? [] : [old.id];
     }));
     const documentId = matched.get(entry.path);
     if (documentId !== undefined) identities.add(documentId);
-    for (const id of identities) for (const target of byId.get(id) ?? []) targets.add(target);
+    for (const id of identities) identified.add(id);
+    return identities;
+  };
+  const planned = [...plan.create, ...plan.overwrite].map((entry) => ({ entry, identities: identify(entry) }));
+  // Provenance of a document no planned file is known to be (its title changed in Linear while the ids were lost):
+  // any file without an identity of its own may be it, so its targets protect those files too.
+  const orphaned = [...byId].filter(([id]) => !identified.has(id));
+  for (const { entry, identities } of planned) {
+    const targets = new Set<string>();
+    for (const ids of entries) for (const target of ids.get(entry.path)?.plainFiles ?? []) targets.add(target);
+    const sources = identities.size > 0 ? [...identities].map((id) => [id, byId.get(id)] as const) : orphaned;
+    for (const [id, own] of sources) for (const target of own ?? []) {
+      targets.add(target);
+      // A relative link that stayed the same while its document moved names another path now: protect that one too.
+      for (const from of oldPaths.get(id) ?? []) if (from !== entry.path) targets.add(relocate(target, from, entry.path));
+    }
     if (targets.size > 0) plainFiles.set(entry.path, targets);
   }
 
@@ -76,6 +96,11 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
     if (unproven.length > 0 && await tookInLinear(git, tracked)) for (const entry of unproven) unknown.add(entry.path);
   }
   return { plainFiles, unknown };
+}
+
+/** `target`, linked relatively from `from`, as the same link resolves from `to`. */
+function relocate(target: string, from: string, to: string): string {
+  return posix.normalize(posix.join(posix.dirname(to), posix.relative(posix.dirname(from), target)));
 }
 
 /** The ids commit an unfinished initial sync started from: the first one of `ids`' first-parent history that is not its progress. */
@@ -110,7 +135,8 @@ async function readTrackedPlainFiles(git: Git, tracked: Oid): Promise<Map<string
  * initial sync uploads every repository-file link as before.
  */
 async function tookInLinear(git: Git, tracked: Oid): Promise<boolean> {
-  const subjects = [CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, SYNC_PULL_REQUEST_TITLE];
-  const found = await git.text(['log', '-1', '--format=%H', '--fixed-strings', ...subjects.map((subject) => `--grep=${subject}`), tracked]);
-  return found.trim() !== '';
+  const subjects = new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, SYNC_PULL_REQUEST_TITLE]);
+  // Subjects only, so a commit that merely quotes one in its body does not count; a squash merge adds ` (#<n>)`.
+  const log = await git.text(['log', '--format=%s', '--fixed-strings', ...[...subjects].map((subject) => `--grep=${subject}`), tracked]);
+  return log.split('\n').some((subject) => subjects.has(subject.replace(/ \(#\d+\)$/, '')));
 }

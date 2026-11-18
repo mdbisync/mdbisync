@@ -102,5 +102,25 @@ describe('initial sync from git keeps plain-link provenance', () => {
     assert.equal(h.world.linear.uploads.length, before, 'recovery uploaded a file');
     assert.doesNotMatch((await h.documentOf(PLAN)).content!, /uploads\.linear\.app/);
     assert.deepEqual((await h.ids() as Record<string, { plainFiles?: string[] }>)[PLAN]?.plainFiles, [SECRET]);
+    // The record keeps the left-out link protected: running the recovery again uploads nothing either.
+    const again = await initialSync({ MDBISYNC_CONFIRM: 'false' });
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    const confirmed = await initialSync();
+    assert.equal(confirmed.result.exitCode, 0, confirmed.result.stderr);
+    assert.equal(h.world.linear.uploads.length, before, 'a second recovery uploaded the left-out link');
+    assert.doesNotMatch((await h.documentOf(ITEM)).content!, /uploads\.linear\.app/);
+    assert.deepEqual((await h.ids() as Record<string, { plainFiles?: string[] }>)[ITEM]?.plainFiles, [PUBLIC]);
+  });
+
+  it('with the ids ref deleted and the document renamed in Linear, so the run creates it anew', async () => {
+    await repairedLink();
+    const document = await h.documentOf(PLAN);
+    document.title = 'Plan renamed';
+    await deleteRef('ids');
+    const run = await initialSync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.ok(run.report.initialSync?.created.includes(PLAN), JSON.stringify(run.report.initialSync));
+    assert.ok(!h.world.linear.uploads.some((upload) => upload.filename === SECRET), 'recovery uploaded the file into the new document');
+    assert.doesNotMatch((await h.documentOf(PLAN)).content!, /uploads\.linear\.app/);
   });
 });
