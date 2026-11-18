@@ -275,8 +275,6 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       }
     }
   }
-  // A pushed head changes neither the pull request's description nor whether it is open.
-  const open = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
   // A head whose earlier checks the branch's history does not show, or one someone else pushed whose expected checks
   // never started, gets a commit of the sync's own on top, with the same files, as on the normal lane (see
   // `checksAgain`): its push runs the checks again and is recorded.
@@ -284,7 +282,9 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   let carried: ExpectedCheck[] = [];
   if (head === previous) {
     const unchanged = head;
-    const again = await checksAgain(options.github, unchanged, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: lastPushed(context, options, ids) },
+    // The branch exists while its head is unchanged. The lane reads the pull request again after its push.
+    const waiting = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+    const again = await checksAgain(options.github, unchanged, options.requiredChecks ?? [], { body: waiting?.body, git, base: tracked, pushed: lastPushed(context, options, ids) },
       { ...options, againMessage: SUSPENDED_CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, unchanged, context.mapping.zones)).length === 0 });
     if (again !== null) {
       carried = again.carried;
@@ -296,11 +296,13 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
   const pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
   if (pushUnverified.length > 0) {
+    const open = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
     const pr = previous === null ? undefined : (await ensurePullRequest(options.github, {head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body: withUnverifiedNote(open?.body ?? '', pushUnverified)})).pullRequest;
     return {paths: [...paths].sort(), checks: [], code: 'head-unverified', unverified: pushUnverified, ...(pr === undefined ? {} : {pullRequest: {number: pr.number, url: pr.url}})};
   }
   const changed = await push(context, options, ids, head, previous);
   const result: SuspendedResult = { paths: [...paths].sort(), checks: [], changed };
+  const open = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
   const old = /^<!-- suspended merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m.exec(open?.body ?? '');
   const earlier = old?.[1] === head && old?.[2] === tracked ? old : null;
   // The deadline runs from the push of this head, noted in the description; a new head starts it now.
