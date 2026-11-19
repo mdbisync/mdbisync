@@ -245,12 +245,13 @@ describe('sync: the tracked branch to Linear', () => {
       const laterPath = 'eng/notes/review.md';
       const first = await documentOf(firstPath);
       const later = await documentOf(laterPath);
-      const expected = activity === 'edited' ? '# Review\n\nUpdated in Linear.\n' : later.content;
+      const edit = '# Review\n\nUpdated in Linear.\n';
+      const expected = activity === 'edited' ? edit : later.content;
       await commit({ [firstPath]: '# Plan\n\nUpdated in git.\n', [laterPath]: change });
       let edited = false;
       world.linear.writes.reject = (name, variables) => {
         if (name === 'UpdateDocument' && variables.id === first.id) {
-          if (activity === 'edited') later.content = expected;
+          if (activity === 'edited') later.content = edit;
           else later.projectId = 'project-archive';
           touch(later);
           edited = true;
