@@ -146,7 +146,7 @@ describe('sync: the Linear request budget (I9)', () => {
   }
 
   /** The documents written in the whole scenario, counted as I9 counts them. */
-  const written = () => world.writes.filter((operation) => /document(Create|Update|Delete)|(Create|Update|Trash)Document/i.test(operation)).length;
+  const written = () => world.writes.filter((operation) => /document(Create|Update|Delete|Unarchive)|(Create|Update|Trash|Restore)Document/i.test(operation)).length;
 
   /** I9 over the whole scenario; `notices` is the conflict notice changes the runs reported, when the scenario counts them. */
   function assertBudget(runReports: Array<{ requests: string[]; report: RunReport }>, notices = 0) {

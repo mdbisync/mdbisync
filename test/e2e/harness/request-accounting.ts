@@ -76,7 +76,7 @@ export function isGraphql(entry: LogEntry): boolean {
 }
 
 export function isDocumentWrite(entry: { kind: string; operation: string; status: number | string; errorCodes?: string[] | undefined }): boolean {
-  return entry.kind === 'mutation' && /document(Create|Update|Delete)|(Create|Update|Trash)Document/i.test(entry.operation) && entry.status === 200 && (entry.errorCodes?.length ?? 0) === 0;
+  return entry.kind === 'mutation' && /document(Create|Update|Delete|Unarchive)|(Create|Update|Trash|Restore)Document/i.test(entry.operation) && entry.status === 200 && (entry.errorCodes?.length ?? 0) === 0;
 }
 
 /** Local counting stays exactly as before; remote GraphQL includes upload URL mutations. */

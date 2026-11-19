@@ -769,6 +769,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     return place.kind === 'project' ? targets.projects.has(projectKey(place.team, place.project)) : targets.teams.has(place.team);
   }
 
+  function movedSinceCapture(document: LinearDocument): boolean {
+    const captured = options.captured?.get(document.id);
+    return captured !== undefined && (captured.projectId !== document.projectId || captured.teamId !== document.teamId);
+  }
+
   /** Whether a document is in the project, or the team zone, of a place. */
   function inPlace(document: LinearDocument, place: Place): boolean {
     const where = placeId(targets, place);
@@ -786,7 +791,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const document = await linear.getDocument(change.id, { withContent: true });
     const rereadAt = performance.now();
     if (document !== null && !document.trashed && document.archivedAt === null) {
-      if (!(await unchangedSinceCapture(document, change.path))) return skip(change.path, 'edited-in-linear');
+      if (movedSinceCapture(document) || !(await unchangedSinceCapture(document, change.path))) return skip(change.path, 'edited-in-linear');
       await checkpoint('after-reread-before-write');
       await timed(() => linear.trashDocument(change.id), rereadAt);
     }
@@ -807,6 +812,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const document = await linear.getDocument(change.id, { withContent: true });
     const rereadAt = performance.now();
     if (document === null || document.trashed || document.archivedAt !== null) return skip(change.to, 'missing-in-linear');
+    if (movedSinceCapture(document)) return skip(change.to, 'edited-in-linear');
     const holds =
       (patch.content === undefined || (document.content != null && sameMarkdown(document.content, patch.content))) &&
       (patch.title === undefined || document.title.normalize('NFC') === patch.title) &&
@@ -854,11 +860,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const id = documentIds.get(change.path) as string;
     const listed = adoptable.get(change.path);
     const restoreId = change.restore?.recreate ?? change.restore?.id;
-    const restored = restoreId === undefined ? null : await linear.getDocument(restoreId, { withContent: true });
-    if (change.restore !== undefined && (change.restore.recreate === undefined || (restored !== null && (restored.trashed || restored.archivedAt !== null)))) {
-      return restore(change, file, body, restored, performance.now());
+    const restoreCandidate = restoreId === undefined ? null : await linear.getDocument(restoreId, { withContent: true });
+    if (change.restore !== undefined && (change.restore.recreate === undefined || (restoreCandidate !== null && (restoreCandidate.trashed || restoreCandidate.archivedAt !== null)))) {
+      return restore(change, file, body, restoreCandidate, performance.now());
     }
-    const existing = restored ?? (listed === undefined || listed.id === restoreId ? null : await linear.getDocument(listed.id, { withContent: true }));
+    const existing = restoreCandidate ?? (listed === undefined || listed.id === restoreId ? null : await linear.getDocument(listed.id, { withContent: true }));
     const rereadAt = performance.now();
     if (listed !== undefined && (existing === null || existing.trashed || existing.archivedAt !== null)) return skip(change.path, 'missing-in-linear');
     let document: LinearDocument;
@@ -880,7 +886,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         await checkpoint('after-reread-before-write');
         document = await timed(() => linear.updateDocument(adopted.id, { content: body }), rereadAt);
       }
-      if (change.restore?.recreate === undefined) result.adopted.push(change.path);
+      if (restoreCandidate === null) result.adopted.push(change.path);
     } else {
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
       await checkpoint('document-created-before-ids-push');
