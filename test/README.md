@@ -329,11 +329,13 @@ uploaded:
 - the repository variables `MDBISYNC_APP_CLIENT_ID` and
   `MDBISYNC_LINEAR_CLIENT_ID`, and repository secrets
   `MDBISYNC_APP_PRIVATE_KEY` and `MDBISYNC_LINEAR_CLIENT_SECRET`.
-  The renderer keeps those names and removes the `mdbisync` environment
-  declaration, including from the scheduled sync workflow. When migrating
-  the sandbox, refresh the scheduled workflow and the
-  [format probe](probe/README.md#daily-drift-run) if installed before
-  removing settings that older workflows still read;
+  The renderer keeps those names and the `mdbisync` environment declaration.
+  In the sandbox environment, set **Deployment branches and tags** to
+  **No restriction** so jobs can run from the per-run tracked branches and
+  the scheduler's default branch. Keep the sandbox credentials at
+  repository level. When migrating the sandbox, refresh the scheduled
+  workflow and the [format probe](probe/README.md#daily-drift-run) if
+  installed before removing settings that older workflows still read;
 - a self-hosted runner with the label `mdbisync-sandbox`: every job is
   rewritten to run on `[self-hosted, mdbisync-sandbox]`, so without such a
   runner the jobs stay queued;

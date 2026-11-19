@@ -136,9 +136,6 @@ export function renderForRun(template: string, options: RunWorkflowOptions): str
   if (!isMap(jobs)) throw new Error('the template has no jobs');
   for (const pair of jobs.items) {
     const job = pair.value as YAMLMap;
-    // Sandbox jobs use the template's credential names at repository level.
-    // The environment's deployment policy could block per-run branches.
-    if (job.get('environment') === 'mdbisync') job.delete('environment');
     job.set('runs-on', doc.createNode(SANDBOX_RUNNER));
     if (register) job.set('if', dispatchOnly(job.get('if')));
     patchSteps(doc, job, options);

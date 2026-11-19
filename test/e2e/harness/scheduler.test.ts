@@ -44,7 +44,7 @@ describe('the scheduled sync on the sandbox\'s default branch', () => {
     assert.equal(request.environment, undefined);
     assert.equal(request.steps[0]?.run, requestScript());
     const sync = parsed.jobs['sync']!;
-    assert.equal(sync.environment, undefined);
+    assert.equal(sync.environment, 'mdbisync');
     assert.equal(sync.name, scheduledJobName('sync', OUT('run')));
     assert.equal(sync.needs, 'request');
     assert.equal(sync.if, "needs.request.outputs.run != ''");

@@ -83,11 +83,11 @@ describe('workflow templates rendered for a run', () => {
     assert.ok(renderForRun(template, RUN).includes(`${ACTION_REPOSITORY}@${pin}`));
   });
 
-  it('uses sandbox repository secrets and guards sync jobs to the run\'s tracked branch', () => {
+  it('retains the sync environment and guards sync jobs to the run\'s tracked branch', () => {
     for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['initial-sync']]) {
       assert.deepEqual(jobsOf(readTemplate(file))[0]?.steps[0]?.env, { BRANCH: 'main' }, file);
       const [job] = jobsOf(renderForRun(readTemplate(file), RUN));
-      assert.equal(job?.environment, undefined, file);
+      assert.equal(job?.environment, 'mdbisync', file);
       assert.equal(job?.steps[0]?.name, BRANCH_GUARD_STEP, file);
       assert.deepEqual(job?.steps[0]?.env, { BRANCH: RUN.trackedBranch }, file);
     }
