@@ -63,8 +63,12 @@ drift, 1 drift, 2 the run could not finish or left its project behind.
 [`drift-workflow.yml`](drift-workflow.yml) runs the probe every day (and on
 demand) in a test repository with a self-hosted runner labeled
 `mdbisync-sandbox` and the repository variable `MDBISYNC_LINEAR_CLIENT_ID`
-and secret `MDBISYNC_LINEAR_CLIENT_SECRET`. Copy it to that repository's
-`.github/workflows/`. It checks out this repository at `main`, runs
+and secret `MDBISYNC_LINEAR_CLIENT_SECRET`. Install it there as
+`.github/workflows/format-probe.yml` with
+`node test/e2e/harness/cli.ts format-probe --install`, which commits this file
+as it is to the test repository's default branch; never edit the installed
+copy by hand. `node test/e2e/harness/cli.ts workflows` then lists the
+settings every workflow there reads. It checks out this repository at `main`, runs
 `npm run probe:format -- --no-facts` and fails on drift or an unfinished run,
 with an error annotation and a job summary line naming each drifted
 fixture. The report, the JSON

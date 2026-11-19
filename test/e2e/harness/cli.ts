@@ -13,6 +13,16 @@
 //   node test/e2e/harness/cli.ts scheduler [--install]
 //        prints the sandbox's scheduled sync workflow for the release under test; --install commits it
 //        to the sandbox's default branch (workflow-files.ts, renderScheduler)
+//   node test/e2e/harness/cli.ts format-probe [--install]
+//        prints the format probe's daily drift workflow (test/probe/drift-workflow.yml);
+//        --install commits it to the sandbox's default branch as format-probe.yml
+//   node test/e2e/harness/cli.ts workflows [--remove <file>]
+//        reads every workflow on the sandbox's default branch and prints, as JSON,
+//        the vars./secrets. names each reads and those the sandbox does not
+//        provide; exit 1 when any reads such a name or is not valid YAML
+//        (sandbox-workflows.ts). --remove first removes one such workflow
+//        that the harness does not install, since it has no source here to
+//        regenerate it from
 //   node test/e2e/harness/cli.ts dispatch-check [--keep-run] [--with-workflow]
 //        runs docs/own-scheduler.md's dispatch script, as published, against the
 //        sandbox: with an App token without Actions write (expects HTTP 403 and
@@ -73,6 +83,7 @@ import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-re
 import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
 import { runGit, walkthrough } from './walkthrough.ts';
 import { readHeldBodies } from './read-bodies.ts';
+import { failsRead, formatProbeWorkflow, FORMAT_PROBE_FILE, readSandboxWorkflows, removalRefusal } from './sandbox-workflows.ts';
 import { dispatchCheck, LeftOnSandboxError } from './dispatch-check.ts';
 
 const list = (value: string | undefined) => (value === undefined ? undefined : value.split(',').map((item) => item.trim()).filter(Boolean));
@@ -98,6 +109,7 @@ async function main(argv: string[]): Promise<number> {
       'keep-run': { type: 'boolean' },
       'with-workflow': { type: 'boolean' },
       paths: { type: 'string' },
+      remove: { type: 'string' },
     },
   });
   const command = positionals[0] ?? 'help';
@@ -146,6 +158,42 @@ async function main(argv: string[]): Promise<number> {
     const { commit } = await rest.putFile(path, text, 'Install the scheduled sync workflow');
     log(`installed ${path} on the default branch in ${commit}`);
     return 0;
+  }
+
+  if (command === 'format-probe') {
+    const text = formatProbeWorkflow();
+    if (values.install !== true) {
+      process.stdout.write(text);
+      return 0;
+    }
+    requireLiveConfig(config);
+    const rest = new SandboxRest(config, (await githubToken(config, 'actions')).token);
+    const path = `.github/workflows/${FORMAT_PROBE_FILE}`;
+    if ((await rest.fileText(path)) === text) {
+      log(`${path} on the default branch is already this file`);
+      return 0;
+    }
+    const { commit } = await rest.putFile(path, text, 'Install the format probe workflow');
+    log(`installed ${path} on the default branch in ${commit}`);
+    return 0;
+  }
+
+  if (command === 'workflows') {
+    requireLiveConfig(config);
+    const rest = new SandboxRest(config, (await githubToken(config, 'actions')).token);
+    let report = await readSandboxWorkflows(rest);
+    if (values.remove !== undefined) {
+      const refusal = removalRefusal(report, values.remove);
+      if (refusal !== undefined) throw new Error(`not removed: ${refusal}`);
+      const path = `.github/workflows/${values.remove}`;
+      // The version that was read: GitHub refuses the deletion when the file changed since.
+      const { sha } = report.files.find((entry) => entry.file === values.remove)!;
+      const { commit } = await rest.deleteFile(path, 'Remove a workflow that reads retired settings', sha);
+      log(`removed ${path} from the default branch in ${commit}`);
+      report = await readSandboxWorkflows(rest);
+    }
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return report.files.some(failsRead) ? 1 : 0;
   }
 
   // Long runs renew harness app tokens before expiry and revoke every minted token.
@@ -382,7 +430,7 @@ async function main(argv: string[]): Promise<number> {
       return gateExitCode([result], log);
     }
 
-    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|read-bodies|scheduler|dispatch-check|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
+    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|read-bodies|scheduler|format-probe|workflows|dispatch-check|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...] [--install] [--remove <file>]\n');
     return command === 'help' ? 0 : 2;
   } finally {
     try { await shared?.store.close?.(); }

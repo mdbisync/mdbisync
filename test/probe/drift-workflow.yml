@@ -1,7 +1,7 @@
 # A daily drift check of the format probe. It runs in a test repository with
-# a self-hosted runner labeled `mdbisync-sandbox`, not in this one: copy it
-# to that repository's `.github/workflows/format-probe.yml`, from where it
-# checks out this repository. It needs the test repository's variable
+# a self-hosted runner labeled `mdbisync-sandbox`, not in this one: install it
+# as that repository's `.github/workflows/format-probe.yml` with the harness's
+# `format-probe --install`, from where it checks out this repository. It needs the test repository's variable
 # MDBISYNC_LINEAR_CLIENT_ID and secret MDBISYNC_LINEAR_CLIENT_SECRET (an OAuth app
 # with client credentials, read and write, in a test Linear workspace).
 #
