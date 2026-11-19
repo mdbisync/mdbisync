@@ -423,6 +423,7 @@ step fails with the same message:
 | `missing command`, `unknown command: <name>` | Run `mdbisync --help` for the commands. |
 | `mdbisync requires Node 24 or newer; install it before running the hook.` | Install Node 24 or newer. |
 | `the input <name> is required` | Set the input in the workflow, or its `MDBISYNC_*` environment variable on the command line. |
+| `Set the MDBISYNC_APP_CLIENT_ID GitHub Actions variable.` or `Set the MDBISYNC_LINEAR_CLIENT_ID GitHub Actions variable.` | Set the named variable to the client ID for the corresponding app. See [sync environment setup](quickstart.md#sync-environment). |
 | `the input repository must be "owner/name" (it defaults to the workflow's repository)` | Give `repository` as `owner/name`, or leave it empty in a workflow. |
 | `the input document-cap must be a positive safe integer` | Give a whole number above zero. |
 | `the input merge-grace-seconds must be an integer from 0 to 120` | Give a whole number of seconds from 0 to 120. |

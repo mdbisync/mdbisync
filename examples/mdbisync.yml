@@ -62,6 +62,18 @@ jobs:
             echo "::error::Run this workflow on $BRANCH, not on $GITHUB_REF."
             exit 1
           fi
+      - name: Check sync variables
+        shell: bash
+        env:
+          MDBISYNC_APP_CLIENT_ID: ${{ vars.MDBISYNC_APP_CLIENT_ID }}
+          MDBISYNC_LINEAR_CLIENT_ID: ${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
+        run: |
+          for name in MDBISYNC_APP_CLIENT_ID MDBISYNC_LINEAR_CLIENT_ID; do
+            if [[ ! ${!name} =~ [^[:space:]] ]]; then
+              printf '::error::Set the %s GitHub Actions variable.\n' "$name"
+              exit 1
+            fi
+          done
       - name: Get the GitHub App token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
