@@ -48,9 +48,9 @@ describe('workflow templates rendered for a run', () => {
     assert.deepEqual(parsed.on['push'], { branches: [RUN.trackedBranch] });
     assert.deepEqual(jobsOf(text).map((job) => (job as { if?: string }).if), [DISPATCH_GUARD]);
     assert.deepEqual((parse(template) as { on: Record<string, unknown> }).on['workflow_dispatch'], parsed.on['workflow_dispatch'], 'the dispatch inputs stay the template\'s');
-    assert.doesNotMatch(text, /(?:vars|secrets)\.MDBISYNC_/, 'a template name was left');
-    assert.match(text, /vars\.SYNC_APP_CLIENT_ID/);
-    assert.match(text, /secrets\.LINEAR_TEST_APP_CLIENT_SECRET/);
+    assert.match(text, /vars\.MDBISYNC_APP_CLIENT_ID/);
+    assert.match(text, /secrets\.MDBISYNC_APP_PRIVATE_KEY/);
+    assert.match(text, /secrets\.MDBISYNC_LINEAR_CLIENT_SECRET/);
     const [job] = jobsOf(text);
     assert.deepEqual(job?.['runs-on'], SANDBOX_RUNNER);
     // The stage step gets the run's branches and refs too, and leaves the report to the apply step.
@@ -59,7 +59,7 @@ describe('workflow templates rendered for a run', () => {
     assert.equal(stage.with?.['cleanup-tokens'], false);
     assert.equal(stage.uses, `${ACTION_REPOSITORY}@${SHA}`);
     assert.equal(stage.with?.['tracked-branch'], RUN.trackedBranch);
-    assert.equal(stage.with?.['linear-client-id'], '${{ vars.LINEAR_TEST_APP_CLIENT_ID }}');
+    assert.equal(stage.with?.['linear-client-id'], '${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}');
     assert.equal(stage.with?.['report-file'], undefined);
     const index = job!.steps.findLastIndex((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`));
     const action = job!.steps[index]!;
@@ -130,8 +130,8 @@ describe('workflow templates rendered for a run', () => {
     assert.ok(!errors.some((error) => error.includes('Could not install')), errors.join('\n'));
   });
 
-  it('refuses a secret or variable the sandbox has no name for', () => {
-    assert.throws(() => renderForRun('x: ${{ secrets.MDBISYNC_OTHER }}\n', RUN), /no sandbox name for secrets\.MDBISYNC_OTHER/);
+  it('refuses a setting the sandbox does not provide', () => {
+    assert.throws(() => renderForRun('x: ${{ secrets.MDBISYNC_OTHER }}\n', RUN), /no sandbox setting for secrets\.MDBISYNC_OTHER/);
   });
 
   it('the sync: push on the run\'s branch, the schedule and dispatch kept, the run\'s group', () => {
@@ -162,7 +162,7 @@ describe('workflow templates rendered for a run', () => {
       assert.equal(hook.env?.['CANARY_HOOK_KEY'], '${{ secrets.CANARY_HOOK_KEY }}');
       assert.ok(Object.values(hook.env!).every(value => !/LINEAR|app-token/.test(value)));
       // The run's own secrets reach only the stage process, whose observer writes the baseline on the action's Node.
-      assert.equal(stage.env?.['CANARY_LINEAR_SECRET'], '${{ secrets.LINEAR_TEST_APP_CLIENT_SECRET }}');
+      assert.equal(stage.env?.['CANARY_LINEAR_SECRET'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}');
       assert.equal(stage.env?.['CANARY_APP_TOKEN'], '${{ steps.app-token.outputs.token }}');
       // A self-hosted runner need not have `node` on its PATH: no step the canary adds runs it.
       assert.deepEqual(steps.filter(step => /(^|[\s;&|(`"'])node(?=[\s"'`;)]|$)/m.test(step.run ?? '')).map(step => step.name), []);

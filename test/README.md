@@ -326,12 +326,14 @@ archives them with their run project.
 repository needs its own settings; the local configuration is not
 uploaded:
 
-- the repository variables `SYNC_APP_CLIENT_ID` and
-  `LINEAR_TEST_APP_CLIENT_ID`, and repository secrets `SYNC_APP_PRIVATE_KEY`
-  and `LINEAR_TEST_APP_CLIENT_SECRET`. Set the client-ID variable before
-  using the new workflows and keep the old client-ID secret while an
-  installed workflow still uses it. The renderer removes the `mdbisync`
-  environment declaration, including from the scheduled sync workflow;
+- the repository variables `MDBISYNC_APP_CLIENT_ID` and
+  `MDBISYNC_LINEAR_CLIENT_ID`, and repository secrets
+  `MDBISYNC_APP_PRIVATE_KEY` and `MDBISYNC_LINEAR_CLIENT_SECRET`.
+  The renderer keeps those names and removes the `mdbisync` environment
+  declaration, including from the scheduled sync workflow. When migrating
+  the sandbox, refresh the scheduled workflow and the
+  [format probe](probe/README.md#daily-drift-run) if installed before
+  removing settings that older workflows still read;
 - a self-hosted runner with the label `mdbisync-sandbox`: every job is
   rewritten to run on `[self-hosted, mdbisync-sandbox]`, so without such a
   runner the jobs stay queued;

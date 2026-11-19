@@ -62,8 +62,8 @@ drift, 1 drift, 2 the run could not finish or left its project behind.
 
 [`drift-workflow.yml`](drift-workflow.yml) runs the probe every day (and on
 demand) in a test repository with a self-hosted runner labeled
-`mdbisync-sandbox` and the secrets `LINEAR_TEST_APP_CLIENT_ID` and
-`LINEAR_TEST_APP_CLIENT_SECRET`; copy it to that repository's
+`mdbisync-sandbox` and the repository variable `MDBISYNC_LINEAR_CLIENT_ID`
+and secret `MDBISYNC_LINEAR_CLIENT_SECRET`. Copy it to that repository's
 `.github/workflows/`. It checks out this repository at `main`, runs
 `npm run probe:format -- --no-facts` and fails on drift or an unfinished run,
 with an error annotation and a job summary line naming each drifted

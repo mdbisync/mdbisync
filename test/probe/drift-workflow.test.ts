@@ -52,10 +52,10 @@ test("pins the same action versions as this repository's own workflows, which De
   for (const [action, pin] of used) assert.equal(pin, own.get(action), action);
 });
 
-test('probes without the fact measurements, with the app credentials from secrets', () => {
+test('probes without the fact measurements, using the configured Linear app', () => {
   assert.match(probeStep.run!, /npm run probe:format -- --no-facts --report "\$OUT\/report.md" --json "\$OUT\/result.json"/);
-  assert.equal(probeStep.env!.LINEAR_TEST_APP_CLIENT_ID, '${{ secrets.LINEAR_TEST_APP_CLIENT_ID }}');
-  assert.equal(probeStep.env!.LINEAR_TEST_APP_CLIENT_SECRET, '${{ secrets.LINEAR_TEST_APP_CLIENT_SECRET }}');
+  assert.equal(probeStep.env!.LINEAR_TEST_APP_CLIENT_ID, '${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}');
+  assert.equal(probeStep.env!.LINEAR_TEST_APP_CLIENT_SECRET, '${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}');
   assert.equal(probeStep.env!.OUT, '${{ runner.temp }}/format-probe');
   assert.equal(probeStep.shell, 'bash');
 });

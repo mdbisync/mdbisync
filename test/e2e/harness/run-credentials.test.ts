@@ -38,13 +38,13 @@ describe('what a workflow run can write with', () => {
   it('read secrets only in expressions GitHub evaluates, never in comments or a script\'s own words', () => {
     const steps = (lines: string) => `on: push\npermissions: {}\njobs:\n  sync:\n    runs-on: ubuntu-latest\n    steps:\n${lines}`;
     assert.deepEqual(workflowWriteCredentials(steps('      # token: ${{ secrets.PERSONAL_TOKEN }}\n      - run: echo "no secrets here"\n')), []);
-    assert.deepEqual(workflowWriteCredentials(steps('      - run: echo\n        env:\n          KEY: ${{ secrets.SYNC_APP_PRIVATE_KEY }}\n')), []);
+    assert.deepEqual(workflowWriteCredentials(steps('      - run: echo\n        env:\n          KEY: ${{ secrets.MDBISYNC_APP_PRIVATE_KEY }}\n')), []);
     assert.deepEqual(workflowWriteCredentials(steps('      - run: echo\n        env:\n          TOKEN: ${{ secrets . PERSONAL_TOKEN }}\n')), ['hands a job the secret PERSONAL_TOKEN']);
     assert.deepEqual(workflowWriteCredentials(steps('      - run: echo\n        env:\n          ALL: ${{ toJSON(secrets) }}\n')), ['hands a job the whole secrets context']);
     assert.deepEqual(workflowWriteCredentials(steps("      - run: echo\n        env:\n          ONE: ${{ secrets['PERSONAL_TOKEN'] }}\n")), ['hands a job the whole secrets context']);
     // GitHub reads context and secret names in any case.
     assert.deepEqual(workflowWriteCredentials(steps('      - run: echo\n        env:\n          TOKEN: ${{ SECRETS.PERSONAL_TOKEN }}\n')), ['hands a job the secret PERSONAL_TOKEN']);
-    assert.deepEqual(workflowWriteCredentials(steps('      - run: echo\n        env:\n          KEY: ${{ Secrets.sync_app_private_key }}\n')), []);
+    assert.deepEqual(workflowWriteCredentials(steps('      - run: echo\n        env:\n          KEY: ${{ Secrets.mdbisync_app_private_key }}\n')), []);
   });
 
   it('name a job that calls a reusable workflow, whose own jobs and secrets the file does not show', () => {

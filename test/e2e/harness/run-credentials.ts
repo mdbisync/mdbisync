@@ -8,7 +8,7 @@
 // as that App.
 
 import { isMap, isScalar, isSeq, parseDocument, type Node } from 'yaml';
-import { CANARY_SECRET, SANDBOX_NAMES } from './workflow-files.ts';
+import { CANARY_SECRET, SANDBOX_WORKFLOW_SETTINGS } from './workflow-files.ts';
 
 /** The step that mints the App's installation token in the templates. */
 const APP_TOKEN_ACTION = 'actions/create-github-app-token@';
@@ -20,9 +20,9 @@ const APP_TOKEN_ACTION = 'actions/create-github-app-token@';
  * credential other than the App's key, which mints only that App's tokens.
  */
 export const RUN_SECRETS: ReadonlySet<string> = new Set([
-  ...Object.values(SANDBOX_NAMES).filter((name) => name.startsWith('secrets.')).map((name) => name.slice('secrets.'.length)),
+  ...SANDBOX_WORKFLOW_SETTINGS.secrets,
   CANARY_SECRET,
-].map((name) => name.toUpperCase()));
+]);
 
 /**
  * Why a workflow, as GitHub ran it, could write to the repository with a

@@ -61,7 +61,7 @@ describe('the scheduled sync on the sandbox\'s default branch', () => {
       assert.equal(step.with?.['tracked-branch'], OUT('tracked-branch'));
       assert.equal(step.with?.['sync-branch'], OUT('sync-branch'));
       assert.equal(step.with?.['state-ref-prefix'], OUT('state-ref-prefix'));
-      assert.equal(step.with?.['linear-client-id'], '${{ vars.LINEAR_TEST_APP_CLIENT_ID }}');
+      assert.equal(step.with?.['linear-client-id'], '${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}');
     }
     assert.ok(sync.steps.some((step) => step.with?.['name'] === REPORT_ARTIFACT));
   });

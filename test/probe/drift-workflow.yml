@@ -1,8 +1,8 @@
 # A daily drift check of the format probe. It runs in a test repository with
 # a self-hosted runner labeled `mdbisync-sandbox`, not in this one: copy it
 # to that repository's `.github/workflows/format-probe.yml`, from where it
-# checks out this repository. It needs the test repository's secrets
-# LINEAR_TEST_APP_CLIENT_ID and LINEAR_TEST_APP_CLIENT_SECRET (an OAuth app
+# checks out this repository. It needs the test repository's variable
+# MDBISYNC_LINEAR_CLIENT_ID and secret MDBISYNC_LINEAR_CLIENT_SECRET (an OAuth app
 # with client credentials, read and write, in a test Linear workspace).
 #
 # The run fails on drift (exit 1) and when the probe could not finish
@@ -44,8 +44,8 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Probe Linear's forms against the recorded ones
         env:
-          LINEAR_TEST_APP_CLIENT_ID: ${{ secrets.LINEAR_TEST_APP_CLIENT_ID }}
-          LINEAR_TEST_APP_CLIENT_SECRET: ${{ secrets.LINEAR_TEST_APP_CLIENT_SECRET }}
+          LINEAR_TEST_APP_CLIENT_ID: ${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
+          LINEAR_TEST_APP_CLIENT_SECRET: ${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
           OUT: ${{ runner.temp }}/format-probe
         shell: bash
         run: |
