@@ -8,6 +8,8 @@
 //   node test/e2e/harness/cli.ts checklist --ids L6-05  prints a UI checklist without running
 //   node test/e2e/harness/cli.ts ui-result <run folder> <answered checklist> [--status-page <file>] [--evidence-dir <dir>]
 //        takes up a run held for its UI steps with the UI session's answers
+//   node test/e2e/harness/cli.ts read-bodies <run folder> [--paths path/to/a.md,path/to/b.md]
+//        writes read-bodies.json using the run's original state directory and Linear app
 //   node test/e2e/harness/cli.ts scheduler [--install]
 //        prints the sandbox's scheduled sync workflow for the release under test; --install commits it
 //        to the sandbox's default branch (workflow-files.ts, renderScheduler)
@@ -63,7 +65,7 @@ import { loadTestConfig } from './config.ts';
 import { REPO_ROOT } from './engine.ts';
 import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
 import { tokenLease } from './token-lease.ts';
-import { SandboxRest, githubToken } from './github.ts';
+import { SandboxRest, gitAuthEnv, githubToken } from './github.ts';
 import { newRunId, runNames, RUN_ID_PATTERN } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
 import { acquireLock, defaultStateDir, forgetRun, registerRun, requireStoppedLocalRun } from './locks.ts';
@@ -79,7 +81,8 @@ import { OwnershipLedger, ownedRuns } from './ownership.ts';
 import { loadHeldRun } from './held-run.ts';
 import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
-import { walkthrough } from './walkthrough.ts';
+import { runGit, walkthrough } from './walkthrough.ts';
+import { readHeldBodies } from './read-bodies.ts';
 import { failsRead, formatProbeWorkflow, FORMAT_PROBE_FILE, readSandboxWorkflows, removalRefusal } from './sandbox-workflows.ts';
 import { dispatchCheck, LeftOnSandboxError } from './dispatch-check.ts';
 
@@ -105,6 +108,7 @@ async function main(argv: string[]): Promise<number> {
       install: { type: 'boolean' },
       'keep-run': { type: 'boolean' },
       'with-workflow': { type: 'boolean' },
+      paths: { type: 'string' },
       remove: { type: 'string' },
     },
   });
@@ -210,22 +214,60 @@ async function main(argv: string[]): Promise<number> {
     beforeRequest: countAppRequest,
     log: (entry: LogEntry) => { process.stderr.write(`${JSON.stringify({ harnessRunId, app, ...entry })}\n`); },
   });
+  const connectApp = async (app: (typeof config.linearApps)[number], hooks: LinearHooks) => {
+    const token = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
+    tokens.push({ token, hooks });
+    let previous = token;
+    const current = tokenLease(token, (value) => value.expiresIn * 1000, async () => {
+      const next = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
+      tokens.push({ token: next, hooks });
+      // Keep the previous token tracked until its revocation is confirmed.
+      await revokeToken(previous.accessToken, { hooks, auth: previous.context });
+      tokens.splice(tokens.findIndex((entry) => entry.token === previous), 1);
+      previous = next;
+      return next;
+    });
+    return new LinearClient({ token: async () => (await current()).accessToken, auth: token.context, hooks });
+  };
   try {
-    for (const app of (command === 'run' && scenarios.some((scenario) => scenario.setup.state !== 'offline')) || command === 'ui-result' ? config.linearApps : []) {
-      const hooks = hooksFor(app.name);
-      const token = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
-      tokens.push({ token, hooks });
-      let previous = token;
-      const current = tokenLease(token, (value) => value.expiresIn * 1000, async () => {
-        const next = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
-        tokens.push({ token: next, hooks });
-        // Keep the previous token tracked until its revocation is confirmed.
-        await revokeToken(previous.accessToken, { hooks, auth: previous.context });
-        tokens.splice(tokens.findIndex((entry) => entry.token === previous), 1);
-        previous = next;
-        return next;
+    if (command === 'read-bodies') {
+      const [, runArg] = positionals;
+      const paths = list(values.paths);
+      if (runArg === undefined || positionals.length !== 2 || paths?.length === 0) {
+        throw new Error('usage: cli.ts read-bodies <run folder> [--paths path/to/a.md,path/to/b.md]');
+      }
+      const runDir = resolve(runArg);
+      const count = await readHeldBodies(runDir, paths, {
+        stateDir, scenarios: all,
+        readIds: async (held) => {
+          if (config.owner === '' || config.repo === '') throw new Error('the test sandbox URL is missing or invalid');
+          if (`${config.owner}/${config.repo}` !== held.live.repository) throw new Error('the test sandbox does not match the held run');
+          const token = await githubToken(config, 'local')
+            .catch((cause: unknown) => { throw new Error('could not authenticate to the test sandbox', { cause }); });
+          return runGit(config.gitUrl, gitAuthEnv(token.token)).ids(held.runId)
+            .catch((cause: unknown) => { throw new Error('could not read the held run ids from the test sandbox', { cause }); });
+        },
+        connect: async (held) => {
+          const app = config.linearApps.find(({ name }) => name === held.appName);
+          if (app === undefined) throw new Error('the held run app is missing from the test configuration');
+          const client = await connectApp(app, {})
+            .catch((cause: unknown) => { throw new Error('could not authenticate the held run app', { cause }); });
+          const apps = [{
+            name: app.name,
+            key: createHash('sha256').update(app.clientId).digest('hex'),
+            readBudget: async () => budgetFromStatus(await client.rateLimitStatus(), Date.now()),
+          }];
+          // A budget wait here would keep the UI continuation locked.
+          const governor = new Governor({ apps, stateDir, shared: await sharedAdmission(), maxWaitMs: 0 });
+          return { client, governor };
+        },
       });
-      appClients.set(app.name, new LinearClient({ token: async () => (await current()).accessToken, auth: token.context, hooks }));
+      process.stdout.write(`wrote read-bodies.json for ${count} documents\n`);
+      return 0;
+    }
+
+    for (const app of (command === 'run' && scenarios.some((scenario) => scenario.setup.state !== 'offline')) || command === 'ui-result' ? config.linearApps : []) {
+      appClients.set(app.name, await connectApp(app, hooksFor(app.name)));
     }
 
     if (command === 'dispatch-check') {
@@ -388,7 +430,7 @@ async function main(argv: string[]): Promise<number> {
       return gateExitCode([result], log);
     }
 
-    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler|format-probe|workflows|dispatch-check|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...] [--install] [--remove <file>]\n');
+    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|read-bodies|scheduler|format-probe|workflows|dispatch-check|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...] [--install] [--remove <file>]\n');
     return command === 'help' ? 0 : 2;
   } finally {
     try { await shared?.store.close?.(); }
