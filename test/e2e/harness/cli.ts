@@ -9,7 +9,7 @@
 //   node test/e2e/harness/cli.ts ui-result <run folder> <answered checklist> [--status-page <file>] [--evidence-dir <dir>]
 //        takes up a run held for its UI steps with the UI session's answers
 //   node test/e2e/harness/cli.ts read-bodies <run folder> [--paths path/to/a.md,path/to/b.md]
-//        writes read-bodies.json in the held run folder using the run's own Linear app
+//        writes read-bodies.json using the run's original state directory and Linear app
 //   node test/e2e/harness/cli.ts scheduler [--install]
 //        prints the sandbox's scheduled sync workflow for the release under test; --install commits it
 //        to the sandbox's default branch (workflow-files.ts, renderScheduler)

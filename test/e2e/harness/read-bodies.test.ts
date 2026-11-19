@@ -9,7 +9,7 @@ import { LinearClient } from '../../../src/linear/index.ts';
 import { Git } from '../../../src/state/index.ts';
 import { Governor, type App } from './governor.ts';
 import { HELD_RUN_FILE, saveHeldRun, type HeldRun } from './held-run.ts';
-import { acquireLock } from './locks.ts';
+import { acquireLock, registerRun } from './locks.ts';
 import { OwnershipLedger } from './ownership.ts';
 import { readHeldBodies } from './read-bodies.ts';
 import { GitStateStore, SharedAdmission } from './shared-state.ts';
@@ -44,6 +44,7 @@ function fixture(t: TestContext) {
   const ids = new Map([['docs/garden.md', 'doc-1'], ['docs/harbor.md', 'doc-2']]);
   const report = join(runDir, 'read-bodies.json');
   saveHeldRun(runDir, held);
+  registerRun(stateDir, runId, { holdUntil: held.holdUntil });
   return { runDir, stateDir, held, ids, report };
 }
 
@@ -64,7 +65,7 @@ it('reads project and team-zone bodies through a query under the held app reserv
     'Spring schedule', '', '![Rose](https://images.example.com/rose.png)', '![Plan][plan]', '',
     '> [plan]: https://files.example.com/plan.png', '',
     '| Bed | Plants |', '| --- | --- |', '| East | 12 |', '',
-    '```mermaid', 'graph TD; A-->B', '```', '', '> [!NOTE]', '> Water weekly.',
+    '```mermaid', 'graph TD; A-->B', '```', '', '<!-- linear:callout color=#f2c94c -->', '> [!NOTE]', '> Water weekly.',
   ].join('\n');
   const queries: string[][] = [];
   const client = new LinearClient({ token: 'fixture-token', fetch: async (_url, init) => {
@@ -110,7 +111,7 @@ it('reads project and team-zone bodies through a query under the held app reserv
       ],
       tables: ['| Bed | Plants |\n| --- | --- |\n| East | 12 |'],
       diagrams: ['```mermaid\ngraph TD; A-->B\n```'],
-      callouts: ['> [!NOTE]\n> Water weekly.'],
+      callouts: ['<!-- linear:callout color=#f2c94c -->\n> [!NOTE]\n> Water weekly.'],
     }, {
       path: 'docs/harbor.md', title: 'README', firstScreen: `![Plan](${readmeUrl})`,
       images: [{ url: readmeUrl, host: 'uploads.linear.app' }], tables: [], diagrams: [], callouts: [],
@@ -136,6 +137,7 @@ it('refuses a locked run, unknown paths and expired holds before connecting to L
   } finally {
     lock.release();
   }
+  await assert.rejects(readHeldBodies(runDir, undefined, { ...deps, stateDir: join(runDir, 'wrong-state') }), /needs its original state directory/);
   await assert.rejects(readHeldBodies(runDir, ['docs/missing.md'], deps), /requested path/);
   saveHeldRun(runDir, { ...held, holdUntil: 1 });
   await assert.rejects(readHeldBodies(runDir, undefined, deps), /hold has ended/);

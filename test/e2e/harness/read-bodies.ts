@@ -1,12 +1,12 @@
 import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { end, isCallout, parse, start, visit } from '../../../src/format/markdown.ts';
+import { end, isCallout, isCalloutComment, parse, start, visit } from '../../../src/format/markdown.ts';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import { redactUploadUrls } from './comparison-evidence.ts';
 import { COMPLEXITY_PER_REQUEST, type Governor } from './governor.ts';
 import { loadHeldRun, type HeldRun } from './held-run.ts';
 import { runNames } from './isolation.ts';
-import { acquireLock } from './locks.ts';
+import { acquireLock, requireLocalHold } from './locks.ts';
 import { ownedDocuments } from './ownership.ts';
 import { runTeamZones } from './runner.ts';
 import type { Scenario } from './spec.ts';
@@ -26,7 +26,13 @@ function bodyEvidence(document: LinearDocument) {
   const images = new Set<string>();
   const tables: string[] = [];
   const diagrams: string[] = [];
-  const callouts: string[] = [];
+  const callouts = tree.children.flatMap((node, index) => {
+    if (!isCallout(node, body)) return [];
+    const previous = tree.children[index - 1];
+    const first = previous !== undefined && isCalloutComment(previous) && previous.position?.end.line === (node.position?.start.line ?? 0) - 1
+      ? previous : node;
+    return [body.slice(start(first), end(node))];
+  });
   visit(tree, (node) => {
     if (node.type === 'image') images.add(node.url);
     if (node.type === 'imageReference') {
@@ -35,7 +41,6 @@ function bodyEvidence(document: LinearDocument) {
     }
     if (node.type === 'table') tables.push(body.slice(start(node), end(node)));
     if (node.type === 'code' && node.lang?.toLowerCase() === 'mermaid') diagrams.push(body.slice(start(node), end(node)));
-    if (isCallout(node, body)) callouts.push(body.slice(start(node), end(node)));
   });
   return {
     title: redactUploadUrls(document.title),
@@ -66,6 +71,7 @@ export async function readHeldBodies(runDir: string, paths: readonly string[] | 
     const held = loadHeldRun(runDir);
     if (held.runId !== runId) throw new Error('the held run changed while taking its lock');
     requireActiveHold(held);
+    requireLocalHold(deps.stateDir, runId, held.holdUntil);
     const owner = held.observations.get('admission.owner');
     if (typeof owner !== 'string' || owner === '') throw new Error('the held run has no shared reservation owner');
     const scenario = deps.scenarios.find((candidate) => candidate.id === held.scenarioId);
