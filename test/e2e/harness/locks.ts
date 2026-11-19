@@ -299,6 +299,16 @@ export function forgetRun(stateDir: string, runId: string): void {
   rmSync(join(stateDir, 'runs', `${runId}.json`), { force: true });
 }
 
+/** Confirm that the lock protecting a held read is in the original local state directory. */
+export function requireLocalHold(stateDir: string, runId: string, holdUntil: number): void {
+  let entry: LiveRun;
+  try { entry = JSON.parse(readFileSync(join(stateDir, 'runs', `${runId}.json`), 'utf8')) as LiveRun; }
+  catch { throw new Error('reading a held run needs its original state directory and run registration'); }
+  if (entry.runId !== runId || entry.host !== hostname() || entry.holdUntil !== holdUntil) {
+    throw new Error('the hold does not match its local run registration');
+  }
+}
+
 /** Recovery is local and explicit. Heartbeat age cannot prove a writer died.
  * Keep the ui-result lock while calling this and throughout recovery, so a
  * saved continuation cannot race the death check and ownership rotation. */
