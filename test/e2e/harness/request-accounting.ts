@@ -4,6 +4,10 @@ import type { LogEntry } from '../../../src/linear/index.ts';
 import type { RunContext } from './context.ts';
 import type { ProxyRequestRecord } from './fault-proxy.ts';
 
+/** I9 allowance for a document write and the run that carries it. */
+export const REQUESTS_PER_DOCUMENT = 2.5;
+export const REQUESTS_PER_RUN = 5;
+
 export interface RemoteRequests {
   runId: number;
   runAttempt: number;

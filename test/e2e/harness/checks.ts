@@ -2,7 +2,7 @@
 // scenario's own assertions. A check reports what failed in words and paths,
 // never document content.
 
-import { engineRequestCount, remoteRequests, isDocumentWrite } from './request-accounting.ts';
+import { engineRequestCount, remoteRequests, isDocumentWrite, REQUESTS_PER_DOCUMENT, REQUESTS_PER_RUN } from './request-accounting.ts';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
@@ -322,7 +322,7 @@ export function budgetHolds(requests: number, documentsWritten: number, runs: nu
 }
 
 export function budgetLimit(documentsWritten: number, runs: number, holdChanges = 0, conflictNotices = 0): number {
-  return 2.5 * documentsWritten + 5 * runs + 2 * holdChanges + 2 * conflictNotices;
+  return REQUESTS_PER_DOCUMENT * documentsWritten + REQUESTS_PER_RUN * runs + 2 * holdChanges + 2 * conflictNotices;
 }
 
 /** The documents whose conflict notice was set or resolved, over the runs' reports (`conflictNotices`), once each time. */
