@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Review the stock counts before the weekly order.","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "file",
+                      "attrs": {"contentAttribution":{"actorType":"user","userId":"<userId>"},"href":"../assets/inventory.csv","mimetype":"text/csv","name":"Inventory","size":30,"uploadState":"finished"}
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-8c3e8e5b","marks":{"attribution":"user"}}]}
+  ]
+}

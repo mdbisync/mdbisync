@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { linkedFileCheck } from './lint.ts';
-import { parse } from './markdown.ts';
+import { parse, splitFile } from './markdown.ts';
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],
@@ -141,6 +141,31 @@ describe('links to files that are not there', () => {
     // The hook also keeps the link on the marker line right after the parent's text.
     const nested = '* Parent\n  * [Report](<report.pdf>)';
     assert.equal(fixLinearText(nested, nested, inRepository), nested);
+  });
+
+  it("text from Linear writes a nested file block right after the parent's text on the item's line", () => {
+    // Linear writes the uploaded file below the empty marker, which Markdown would read as the parent's text.
+    const cases: Array<[string, string]> = [
+      ['* Parent\n  * \n    [Report](report.csv)', '* Parent\n  * [Report](<report.csv>)'],
+      ['* Parent\n  1. \n     [Report](report.csv)', '* Parent\n  1. [Report](<report.csv>)'],
+      ['* Parent\n  * \n    [Report](report.csv)\n  * Next', '* Parent\n  * [Report](<report.csv>)\n  * Next'],
+      ['---\ntitle: Plan\n---\n\n* Parent\n  * \n    [Report](report.csv)', '---\ntitle: Plan\n---\n\n* Parent\n  * [Report](<report.csv>)'],
+      // The first block goes on its item's line; the second is an item of that list and stays a block.
+      ['* Parent\n  * \n    [Report](report.csv)\n  * \n    [Data](report.csv)', '* Parent\n  * [Report](<report.csv>)\n  * \n    [Data](report.csv)'],
+      ['> * Parent\n>   * \n>     [Report](report.csv)', '> * Parent\n>   * [Report](<report.csv>)'],
+    ];
+    for (const [linear, expected] of cases) {
+      const content = splitFile(linear).body.replaceAll('](report.csv)', '](https://uploads.example/report.csv)');
+      const captured = fixLinearText(linear, content, () => true);
+      assert.equal(captured, expected, JSON.stringify(linear));
+      assert.equal(fixText(captured), captured, 'fix leaves the captured text');
+    }
+    // Literal text inside a code span stays as it is.
+    const code = '* Parent `x\n  *\n    [Report](report.csv) y`';
+    assert.equal(fixLinearText(code, code, () => true), code);
+    // A file block Markdown already reads as an item keeps Linear's form.
+    const loose = '* Parent\n\n  * \n    [Report](report.csv)';
+    assert.equal(fixLinearText(loose, loose.replace('](report.csv)', '](https://uploads.example/report.csv)'), () => true), loose);
   });
 
   it('a file block whose link is still relative is sent as Linear stores it, everything else as written', () => {

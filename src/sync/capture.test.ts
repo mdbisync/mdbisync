@@ -287,6 +287,36 @@ describe('capture from Linear', () => {
     assert.deepEqual(hookRun('docs/new.md', recorded), {exitCode: 0, stdout: '', stderr: ''});
   });
 
+  it('takes Linear\'s nested file block right after its parent\'s text as the git one-line item, and captures it in that form', async () => {
+    const oneLine = '* Review the counts.\n  * [Inventory](<report.csv>)\n  * Order more labels.';
+    const initial = await run();
+    const tracked = await commitTree(context.git, {parents: [initial.state.linear!], base: initial.state.linear, changes: new Map([['docs/plan.md', `---\ncategory: work\n---\n\n${oneLine}`], ['docs/report.csv', 'item,count\n']]), message: 'Attach a file', identity: IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const written = await writeTrackedToLinear(context, {config, state: initial.state});
+    assert.deepEqual(written.updated, ['docs/plan.md']);
+    const doc = world.linear.documents[0]!;
+    const sent = doc.content!;
+    const url = /\]\(<?([^)>]+)>?\)/.exec(sent)![1]!;
+    // Linear writes the uploaded file below the empty marker, which Markdown alone reads as the parent's text.
+    const stored = `* Review the counts.\n  * \n    [Inventory](${url})\n  * Order more labels.\n`;
+    assert.ok(!sameMarkdown(sent, stored.replace(`\n  * \n    [`, `\n  *\n  [`)), 'a flattened block is another document');
+    Object.assign(doc, {content: stored, updatedAt: '2026-01-06T00:00:00Z'});
+    await refresh();
+    const unchanged = await run();
+    assert.equal(unchanged.ok, true);
+    assert.equal(unchanged.state.linear, written.state.linear, 'the readback makes no change in git');
+    // An edit elsewhere in Linear is captured with the nested item on its line.
+    Object.assign(doc, {content: `${stored}\nChecked.\n`, updatedAt: '2026-01-07T00:00:00Z'});
+    await refresh();
+    const edited = await run();
+    assert.equal(edited.ok, true);
+    const file = await text('docs/plan.md');
+    assert.equal(file, `---\ncategory: work\n---\n\n${oneLine}\n\nChecked.`);
+    assert.deepEqual(hookRun('docs/plan.md', file), {exitCode: 0, stdout: '', stderr: ''});
+  });
+
   it('writes a Linear body that opens with a rule in the hook\'s form, under the file\'s front matter', async () => {
     // Read alone, the text between the two rules would look like front matter; the hook reads it as body.
     const stored = '---\n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n\n---\n\nAfter.';
