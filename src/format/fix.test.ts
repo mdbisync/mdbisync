@@ -153,6 +153,7 @@ describe('links to files that are not there', () => {
       // The first block goes on its item's line; the second is an item of that list and stays a block.
       ['* Parent\n  * \n    [Report](report.csv)\n  * \n    [Data](report.csv)', '* Parent\n  * [Report](<report.csv>)\n  * \n    [Data](report.csv)'],
       ['> * Parent\n>   * \n>     [Report](report.csv)', '> * Parent\n>   * [Report](<report.csv>)'],
+      ['Notes\r\n\r\n * Parent\r\n   * \r\n     [Report](report.csv)', 'Notes\n\n* Parent\n  * [Report](<report.csv>)'],
     ];
     for (const [linear, expected] of cases) {
       const content = splitFile(linear).body.replaceAll('](report.csv)', '](https://uploads.example/report.csv)');
