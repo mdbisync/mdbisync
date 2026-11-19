@@ -13,7 +13,7 @@ import { DocumentTooLongError, LINEAR_FACTS, LinearClient, LinearGraphQLError, L
 import { FakeLinear, fakeDocument, type ReceivedRequest } from '../linear/fake-linear.ts';
 import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, sentForm, toLinear } from './bank.ts';
 import { PROBE_FACTS, findLimit, isLeftover, isRefusal, runProbe } from './probe.ts';
-import { findDrift, refusalKey, writeRecord } from './record.ts';
+import { findDrift, keepReadbacks, refusalKey, writeRecord, yjsText } from './record.ts';
 import { diffLines, keptOnlyInYjs, renderReport } from './report.ts';
 import { summarizeContentState } from './yjs-summary.ts';
 
@@ -217,6 +217,33 @@ describe('format probe against a fake Linear', () => {
     const drift = findDrift(loadBank(bankDir), await probe());
     assert.deepEqual(drift.map((d) => [d.file, d.kind]), [['lists/dash.md', 'markdown']]);
     assert.match(drift[0]!.detail, /line 1/);
+  });
+
+  it('keeps Linear\'s forms of the drifted fixtures only, laid out like the record', async () => {
+    writeFileSync(join(bankDir, goldenMarkdownPath('lists/dash.md')), '* One\n* Two\n\nRef kx-00000002');
+    const run = await probe();
+    const drift = findDrift(loadBank(bankDir), run);
+    const dir = mkdtempSync(join(tmpdir(), 'probe-readbacks-'));
+    try {
+      assert.deepEqual(keepReadbacks(dir, run, drift), [goldenMarkdownPath('lists/dash.md'), goldenYjsPath('lists/dash.md'), 'drift.json']);
+      const dash = run.fixtures.find((r) => r.file === 'lists/dash.md')!;
+      assert.equal(readFileSync(join(dir, goldenMarkdownPath('lists/dash.md')), 'utf8'), dash.first);
+      assert.equal(readFileSync(join(dir, goldenYjsPath('lists/dash.md')), 'utf8'), yjsText(dash));
+      assert.deepEqual(JSON.parse(readFileSync(join(dir, 'drift.json'), 'utf8')), drift);
+      assert.deepEqual(keepReadbacks(dir, run, []), [], 'nothing drifted, nothing kept');
+      // A form that is no fixed point keeps its second readback; a refusal keeps Linear's answer.
+      const star = { ...run.fixtures.find((r) => r.file === 'lists/star.md')!, second: '- One\n- Two!' };
+      const large = run.fixtures.find((r) => r.file === 'size/large.md')!;
+      const kept = keepReadbacks(dir, { ...run, fixtures: [star, large] }, [
+        { file: 'lists/star.md', kind: 'fixed-point', detail: '' },
+        { file: 'size/large.md', kind: 'refusal', detail: '' },
+      ]);
+      assert.ok(kept.includes('lists/star.linear.second.md') && kept.includes('size/large.linear.refused.txt'), JSON.stringify(kept));
+      assert.equal(readFileSync(join(dir, 'lists/star.linear.second.md'), 'utf8'), '- One\n- Two!');
+      assert.equal(readFileSync(join(dir, 'size/large.linear.refused.txt'), 'utf8'), `${large.refused}\n`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('shows an image title kept in Yjs and lost in Markdown', async () => {

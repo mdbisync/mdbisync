@@ -28,7 +28,7 @@
               "children": [
                 {
                   "type": "image",
-                  "attrs": {"alt":"status icon","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../media/status-icon.png","uploadState":"finished"}
+                  "attrs": {"alt":"status icon","contentAttribution":{"actorType":"user","userId":"<userId>"},"uploadState":"finished"}
                 }
               ]
             }

@@ -25,7 +25,7 @@ import { resolveStateConfig, stateRef, suspendedBranch, Git } from '../../../src
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
-import { findDrift } from '../../probe/record.ts';
+import { findDrift, keepReadbacks } from '../../probe/record.ts';
 import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, contentCanaries, fetchRef, editsFound, expectsDocument, holdsToken, lostEdits, readSides, recordRefs, snapshotRefs, bodyOf, type Sides } from './checks.ts';
 import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
@@ -928,9 +928,14 @@ const RUN: Record<string, Executor> = {
       if (isProbeEnvironmentError(error)) throw new EnvBlockedError(`format probe could not finish: ${(error as Error).message}`);
       throw error;
     }
+    const drifts = findDrift(bank, run);
+    // Linear's forms of the drifted fixtures stay in the run folder: the projects holding them are gone after the run.
+    // They are kept before the cleanup verdict, which a leftover of an older run can fail.
+    const kept = keepReadbacks(join(ctx.runDir, `probe-${index}`), run, drifts);
+    if (kept.length > 0) ctx.log(`probe: kept ${kept.length} files of ${new Set(drifts.map((entry) => entry.file)).size} drifted fixtures in probe-${index}`);
     if (run.cleanup.some((line) => line.includes('NOT deleted'))) throw new EnvBlockedError('format probe left a project behind');
     const constructOf = new Map(run.fixtures.map((fixture) => [fixture.file, fixture.construct]));
-    const drift = [...new Set(findDrift(bank, run).map((entry) => constructOf.get(entry.file) ?? entry.file))].sort();
+    const drift = [...new Set(drifts.map((entry) => constructOf.get(entry.file) ?? entry.file))].sort();
     const probed = run.fixtures.filter((fixture) => fixture.refused === undefined && fixture.first !== undefined);
     const golden = new Map(probed.map((fixture) => [fixture.file, readOptional(join(bank.dir, goldenMarkdownPath(fixture.file))) ?? null]));
     ctx.observations.set('probe.firstReadback', new Map(probed.map((fixture) => [fixture.file, fixture.first])));

@@ -470,7 +470,9 @@ Instead, start the item with a line of text and put the block below it.
 An image must be a relative path to a file of the repository, not a URL,
 an absolute path or a path outside it. The sync uploads the files a
 document's images name; an image anywhere else would depend on the reader's
-network and on whether Linear keeps or copies it. The rule covers every
+network and on what Linear does with it. Linear has kept such an image,
+copied it to an upload of its own, and, most recently, kept only its alt
+text and dropped the image from the text. The rule covers every
 image: inline, reference-style and inside a link, with any URL (`https:`,
 `data:`), any path that starts with `/` and any path that leaves the
 repository. Plain links to URLs are not affected.

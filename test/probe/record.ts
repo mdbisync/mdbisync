@@ -2,8 +2,8 @@
 // beside each fixture, and a manifest with each fixture's fixed point and
 // refusal. A run is compared with them (drift) or written over them (update).
 
-import { rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { MANIFEST_FILE, goldenMarkdownPath, goldenYjsPath, readOptional, type Bank } from './bank.ts';
 import type { FixtureResult, ProbeRun } from './probe.ts';
 
@@ -160,6 +160,34 @@ export function writeRecord(bank: Bank, run: ProbeRun): void {
       .sort(([a], [b]) => a.localeCompare(b)),
   );
   writeFileSync(join(bank.dir, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+/**
+ * Keeps the forms Linear returned for the drifted fixtures under `dir`, laid
+ * out like the recorded forms beside the bank (`<name>.linear.md`, and
+ * `<name>.linear.second.md` when the second readback differs, plus
+ * `<name>.linear.yjs.json`), or the refusal as `<name>.linear.refused.txt`,
+ * and the drifts themselves in `drift.json`, so a drift can be read after the
+ * run's projects are gone. Returns the files written, relative to `dir`.
+ */
+export function keepReadbacks(dir: string, run: ProbeRun, drifts: Drift[]): string[] {
+  const drifted = new Set(drifts.map((entry) => entry.file));
+  const written: string[] = [];
+  const keep = (file: string, text: string) => {
+    mkdirSync(dirname(join(dir, file)), { recursive: true });
+    writeFileSync(join(dir, file), text);
+    written.push(file);
+  };
+  for (const result of run.fixtures) {
+    if (!drifted.has(result.file)) continue;
+    if (result.refused !== undefined) keep(result.file.replace(/\.md$/, '.linear.refused.txt'), `${result.refused}\n`);
+    if (result.first !== undefined) keep(goldenMarkdownPath(result.file), result.first);
+    if (result.second !== undefined && result.second !== result.first) keep(result.file.replace(/\.md$/, '.linear.second.md'), result.second);
+    const yjs = yjsText(result);
+    if (yjs !== undefined) keep(goldenYjsPath(result.file), yjs);
+  }
+  if (drifts.length > 0) keep('drift.json', `${JSON.stringify(drifts, null, 2)}\n`);
+  return written;
 }
 
 /** Where two texts first differ: line number and both lines, shortened. */
