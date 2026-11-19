@@ -196,8 +196,9 @@ function comparable(body: string): unknown {
 
 // A bullet or number marker alone on its line, after any quote prefix.
 const BARE_MARKER = /^((?: {0,3}>[ ]?)*)( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
-// Cheap test before a parse: a line, then a bare marker, then an indented line opening with `[`.
-const MAYBE_NESTED_BLOCK = /\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
+// A nonblank line, a bare marker, then an indented line opening with `[`.
+// Start at LF-delimited line boundaries so long text lines are scanned once.
+const MAYBE_NESTED_BLOCK = /(?:^|\n)[^\S\n]*\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
 
 /**
  * The body with each file block Markdown reads as text written on its
