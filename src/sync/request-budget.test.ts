@@ -4,7 +4,7 @@
 // scenarios make, a sync, runs until a run changes nothing (the pull request
 // opened and merged on the way), and one more run. Every request that
 // reaches Linear's API counts, the token's mint and revocation included:
-// the whole scenario stays within 1.5 requests per written document plus 5
+// the whole scenario stays within 2.5 requests per written document plus 5
 // per run (I9), and a run that changes nothing makes at most 5. A conflict
 // episode on three documents also counts 2 per conflict notice set or
 // resolved, as I9 does.
@@ -55,8 +55,8 @@ const THREE_DOCUMENTS: Record<string, string> = {
 
 /** I9's allowance per run: also the most a run that changes nothing may make. */
 const PER_RUN = 5;
-/** I9 as the scenarios check it. */
-const allowance = (written: number, runs: number, conflictNotices = 0) => 1.5 * written + PER_RUN * runs + 2 * conflictNotices;
+// Linear mutations take no version, so each guarded write needs one reread and one write.
+const allowance = (written: number, runs: number, conflictNotices = 0) => 2.5 * written + PER_RUN * runs + 2 * conflictNotices;
 
 describe('sync: the Linear request budget (I9)', () => {
   let fixture: Fixture;
@@ -146,7 +146,7 @@ describe('sync: the Linear request budget (I9)', () => {
   }
 
   /** The documents written in the whole scenario, counted as I9 counts them. */
-  const written = () => world.writes.filter((operation) => /document(Create|Update)|(Create|Update)Document/i.test(operation)).length;
+  const written = () => world.writes.filter((operation) => /document(Create|Update|Delete)|(Create|Update|Trash)Document/i.test(operation)).length;
 
   /** I9 over the whole scenario; `notices` is the conflict notice changes the runs reported, when the scenario counts them. */
   function assertBudget(runReports: Array<{ requests: string[]; report: RunReport }>, notices = 0) {

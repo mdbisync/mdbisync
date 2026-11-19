@@ -159,20 +159,19 @@ ongoing sync runs. You do not need to wait for a run to finish:
   from a person or CI. Closing its pull request causes a later run to open
   a replacement from the same branch.
 
-Sync reads each document again by ID before applying a regular update or
-sending it to the trash. Linear's document writes accept no version condition,
-so an edit made after that final read and before the write lands can still
-be lost.
+Incremental sync and confirmed initial sync reread each existing document
+by ID immediately before writing its content, changing its title or
+location, or moving it to the trash. A change
+detected by that reread leaves the document alone. Linear's `documentUpdate`
+and `documentDelete` mutations accept no version condition, so an edit
+saved between the final read and the mutation can still be lost. This is
+[an accepted risk](../security/accepted-risks.md#ar-005-a-linear-edit-saved-between-the-final-read-and-write).
 
-The run's `rereadWindowMs` measurement in the JSON report
+The incremental run's `rereadWindowMs` measurement in the JSON report
 ([`report-file`](configuration.md#action-inputs)) is the longest interval
-from receiving a read response to receiving a successful write response.
-For regular updates and trash operations it starts with the individual read.
-Recovery writes that restore a document or rewrite links when adopting it
-still use the batch read, so their interval includes earlier reads and writes
-in the batch. The measurement includes retries and starts when the client
-receives the read response. The race begins earlier, when Linear reads the
-document.
+from receiving the individual read response to receiving the successful
+write response. It includes retries. The race begins earlier, when Linear
+reads the document.
 
 In earlier tests using batch reads, the live test harness deliberately paused
 sync after the read while 100 edit markers were written. The held intervals

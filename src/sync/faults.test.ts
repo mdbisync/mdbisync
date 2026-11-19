@@ -116,7 +116,8 @@ function faultyFetch(world: FakeWorld) {
     const log = (status: Exchange['status'], injected: boolean) => state.exchanges.push({ operation: operationName, status, injected });
     const { http, budget, writeError, writeErrorOn, rejectId, onOperation, beforeOperation } = state.faults;
     const isWrite = operationName === 'CreateDocument' || operationName === 'UpdateDocument';
-    const asked = Array.isArray(variables.ids) ? [...(variables.ids as string[])].sort() : undefined;
+    const asked = Array.isArray(variables.ids) ? [...(variables.ids as string[])].sort()
+      : operationName === 'GetDocument' ? [variables.id as string] : undefined;
     if (beforeOperation?.operation === operationName && JSON.stringify(asked) === JSON.stringify([...beforeOperation.ids].sort())) {
       beforeOperation.occurrence -= 1;
       if (beforeOperation.occurrence === 0) beforeOperation.change();
@@ -751,7 +752,7 @@ describe('sync: rate limits and transport faults', () => {
     const created = await trashedAfterLostAnswer();
     const linking = await documentOf(pathOf(0));
     // The edit lands after the capture (the first read of the document), just before the write step reads it again.
-    transport.arm({ beforeOperation: { operation: 'GetDocuments', occurrence: 2, ids: [linking.id], change: () => {
+    transport.arm({ beforeOperation: { operation: 'GetDocument', occurrence: 1, ids: [linking.id], change: () => {
       linking.content = `${linking.content ?? ''}\n\nAdded in Linear.`;
       touch(linking);
     } } });
@@ -832,15 +833,14 @@ describe('sync: rate limits and transport faults', () => {
     assert.ok(!captured.includes(lost.id), 'the captured file links the trashed document');
   });
 
-  it('a 500 on the read before writing leaves the batch unwritten and unrecorded; the next run converges', async () => {
+  it('a 500 on a final read leaves that document unwritten and unrecorded; the next run converges', async () => {
     await editAll(3, 'Second text.');
-    // The write step's re-read asks for exactly the edited documents.
-    const edited = await Promise.all([0, 1, 2].map((index) => idOf(pathOf(index))));
-    transport.arm({ onOperation: { operation: 'GetDocuments', occurrence: 1, status: 500, ids: edited } });
+    const id = await idOf(pathOf(1));
+    transport.arm({ onOperation: { operation: 'GetDocument', occurrence: 1, status: 500, ids: [id] } });
     const run = await sync();
     assertPartial(run);
-    assert.deepEqual(run.writes, []);
-    assert.deepEqual(run.report.sync?.failed.map((entry) => entry.path).sort(), [pathOf(0), pathOf(1), pathOf(2)]);
+    assert.deepEqual(run.writes, ['UpdateDocument', 'UpdateDocument']);
+    assert.deepEqual(run.report.sync?.failed.map((entry) => [entry.path, entry.operation]), [[pathOf(1), 'GetDocument']]);
     assert.equal(run.report.rejectedDocumentNamed, false);
     await assertNextRunConverges();
   });

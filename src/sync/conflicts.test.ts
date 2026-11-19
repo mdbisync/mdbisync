@@ -437,6 +437,25 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.equal(world.linear.documents.filter((d) => d.title === document.title && !d.trashed).length, 1);
   });
 
+  it('L3-16: an edit saved after unarchiving is kept when the sync rereads before overwriting', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    touch(document);
+    const edited = PLAN.replace('Alpha paragraph.', 'Alpha paragraph, edited after unarchiving.');
+    world.linear.beforeQuery = (operation, variables) => {
+      if (operation !== 'GetDocument' || variables.id !== document.id || document.trashed) return;
+      document.content = edited;
+      touch(document);
+      delete world.linear.beforeQuery;
+    };
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.skipped, [{ path: DOC, reason: 'edited-in-linear' }]);
+    assert.deepEqual(first.report.sync?.restored, []);
+    assert.equal(document.content, edited);
+    assert.ok(!document.trashed);
+  });
+
   it('L3-16: when Linear no longer has the document, a new one is created with the git text and the summary says so', async () => {
     const document = await documentOf(DOC);
     document.trashed = true;

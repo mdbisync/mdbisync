@@ -15,7 +15,6 @@ export {
   IDS_MESSAGE,
   MERGE_RECORD_MESSAGE,
   PARTIAL_RECORD_MESSAGE,
-  REREAD_BATCH,
   type SkipReason,
   type SyncRecord,
   type WriteOptions,

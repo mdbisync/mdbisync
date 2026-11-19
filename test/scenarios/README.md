@@ -170,7 +170,7 @@ never stands in for it, since a later step could rewrite the documents.
 | I6 | An additional unchanged run writes no documents, commits or PRs. |
 | I7 | Each synchronized path has one existing document ID with its expected mapped title. |
 | I8 | No duplicate documents in the isolated project and team-zone scope. |
-| I9 | Requests are at most 1.5 per written document plus 5 per invocation. |
+| I9 | Requests are at most 2.5 per document created, updated or trashed plus 5 per invocation. |
 
 Assertions address dot-separated observation paths, including array indexes.
 `equal` performs deep equality against the literal `expected`; `same-as`

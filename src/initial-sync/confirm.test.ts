@@ -167,7 +167,7 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.deepEqual(report.summary?.leftOut, ['combined/Guide.md', 'combined/guide.md', 'eng/notes/formula.md']);
     assert.match(summary, /Linear now equals the tracked branch/);
 
-    // I9: at most 1.5 requests per written document plus 5 for the run.
+    // This create-only run needs no final rereads and stays within the lower budget.
     assert.ok(graphql <= 1.5 * SYNCED_PATHS.length + 5, `${graphql} requests`);
   });
 
@@ -278,6 +278,37 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.deepEqual(leftOut, ['eng/doc-retired.md', 'eng/notes/plan.md']);
     assert.ok(report.initialSync?.created.includes('eng/backend/notes.md'));
   });
+
+  for (const operation of ['UpdateDocument', 'TrashDocument'] as const) {
+    it(`skips a later document moved to another project during the first ${operation}`, async () => {
+      const world = fakeWorld();
+      const overwrite = operation === 'UpdateDocument';
+      const first = { id: 'doc-first', title: overwrite ? 'backend/notes' : 'retired-first', teamId: 'team-eng',
+        createdAt: '2026-01-01T00:00:01Z', content: 'First text.' };
+      const later = { id: 'doc-later', title: overwrite ? 'plan' : 'retired-later', projectId: 'project-api',
+        createdAt: '2026-01-01T00:00:02Z', content: 'Later text.', trashed: false };
+      world.linear.documents = [first, later];
+      let moved = false;
+      world.linear.writes.reject = (name, variables) => {
+        if (name === operation && variables.id === first.id) {
+          later.projectId = 'project-handbook';
+          touch(later);
+          moved = true;
+        }
+        return false;
+      };
+
+      const { result, report } = await run(world);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.ok(moved, 'the earlier document reached its write');
+      const path = overwrite ? 'eng/notes/plan.md' : 'eng/notes/doc-later.md';
+      assert.deepEqual(report.initialSync?.leftOutAtWrite, [{ path, rule: 'changed-during-run' }]);
+      assert.equal(later.content, 'Later text.');
+      assert.equal(later.trashed, false);
+      assert.equal(later.projectId, 'project-handbook');
+      assert.equal(world.writes.filter((name) => name === operation).length, 1);
+    });
+  }
 
   it('L1-18: run again with nothing changed writes nothing and leaves the refs as they are', async () => {
     const world = fakeWorld();
