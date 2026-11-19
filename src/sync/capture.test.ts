@@ -5,12 +5,13 @@ import { type Fixture, createFixture, IDENTITY, mergeOnGitHub, remoteRef } from 
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs, PushedKey } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES } from '../mapping/blobs.ts';
-import { LinearClient, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
+import { LinearClient, LinearReads, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
 import { fixText, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
@@ -1393,6 +1394,170 @@ describe('capture from Linear', () => {
     assert.deepEqual(again.blocked.map(({id}) => id), ['plan']);
     assert.deepEqual(movedRefs(context.git), moved, 'no ref moves');
     assert.deepEqual(context.linear.stats.writes, wrote, 'no Linear write');
+  });
+
+  describe('a document moved out of its place before its mark', () => {
+    const unmapped = 'project-private';
+    beforeEach(() => { world.linear.projects.push({id: unmapped, name: 'Private', teamIds: ['team-eng']}); });
+    const moveOut = (doc: (typeof world.linear.documents)[number], touch: boolean) => {
+      doc.projectId = unmapped;
+      if (touch) doc.updatedAt = '2026-02-01T00:00:00Z';
+    };
+
+    const moves = [
+      {name: 'to a project outside the synchronized places', move: (doc: (typeof world.linear.documents)[number]) => moveOut(doc, true), kept: undefined},
+      {name: 'to a project outside the synchronized places with its update time unchanged', move: (doc: (typeof world.linear.documents)[number]) => moveOut(doc, false), kept: undefined},
+      {name: 'to the trash', move: (doc: (typeof world.linear.documents)[number]) => { doc.trashed = true; doc.archivedAt = '2026-02-01T00:00:00Z'; }, kept: 'project-api'},
+      {name: 'to another synchronized project', move: (doc: (typeof world.linear.documents)[number]) => { doc.projectId = 'project-handbook'; }, kept: 'project-handbook'},
+    ];
+    for (const {name, move, kept} of moves) {
+      it(`gets no mark, comment or notice when it is blocked and moved ${name}, while an unmoved one is marked`, async () => {
+        const plan = world.linear.documents[0]!;
+        Object.assign(plan, {content: 'Rejected.\n', icon: 'Fire', color: '#123456'});
+        world.linear.documents.push({id: 'other', title: 'other', projectId: 'project-api', content: 'Rejected too.\n', createdAt: '2026-01-02T00:00:00Z'});
+        // The hooks answer after the run read the text: a member moves the document before the mark.
+        let moved = false;
+        const gate = {configured: true, check: async () => { if (!moved) { moved = true; move(plan); } return [{hook: 'secret-check', line: 1}]; }};
+        const result = await capture(context, {config, state: context.fetched.state, security: gate});
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.blocked.map(({id}) => id), ['other']);
+        assert.deepEqual(result.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+        assert.match(result.summary, /changed-during-run: "plan"/);
+        // Later steps see where the document is now, or nothing.
+        assert.equal(result.documents.get('plan')?.projectId, kept);
+        if (kept !== undefined) assert.equal(result.documents.get('plan')?.trashed, plan.trashed === true);
+        assert.deepEqual(markOf(plan), {icon: 'Fire', color: '#123456'});
+        assert.deepEqual(commentsOf('plan'), []);
+        // The entry stays as the run found it.
+        assert.deepEqual((await readIds(context.git, result.state.ids)).get('docs/plan.md'), {id: 'plan'});
+        assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+        // The unmoved blocked document is marked as before.
+        assert.deepEqual(markOf(world.linear.documents[1]), MARKS.blocked);
+        assert.equal(commentsOf('other').length, 1);
+        assert.deepEqual(Object.fromEntries(context.linear.stats.writes), {CommentOnDocument: 1, UpdateDocument: 1});
+      });
+    }
+
+    it('is not restored when its conflict was resolved and it left the place before a single-step run marked it', async () => {
+      const plan = world.linear.documents[0]!;
+      Object.assign(plan, {icon: 'Fire', color: '#123456', content: `${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`});
+      await run();
+      assert.deepEqual(markOf(plan), MARKS.conflict);
+      await refresh();
+      Object.assign(plan, {content: 'Resolved.\n', updatedAt: '2026-01-05T00:00:00Z'});
+      const wrote = new Map(context.linear.stats.writes);
+      const gate = {configured: true, check: async () => { if (plan.projectId !== unmapped) moveOut(plan, false); return []; }};
+      const result = await capture(context, {config, state: context.fetched.state, security: gate});
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+      assert.deepEqual(markOf(plan), MARKS.conflict, 'no icon change or restore');
+      assert.deepEqual(context.linear.stats.writes, wrote, 'no Linear write');
+      assert.equal(commentsOf('plan').length, 1);
+      const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
+      assert.equal(entry.saved?.notice?.kind, 'conflict');
+      // Its text was read and checked in place: it is captured as read.
+      assert.match(await text('docs/plan.md'), /Resolved\./);
+    });
+
+    for (const touch of [true, false]) {
+      it(`gets no mark, comment or notice in the apply step when it moved after staging${touch ? '' : ' with its update time unchanged'}`, async () => {
+        const dir = await mkdtemp(join(tmpdir(), 'moved-after-staging-'));
+        try {
+          const plan = world.linear.documents[0]!;
+          Object.assign(plan, {content: 'Rejected.\n', icon: 'Fire', color: '#123456'});
+          const gate = {configured: true, check: async () => [{hook: 'secret-check', line: 1}]};
+          const recording = LinearReads.recording();
+          recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+          const stage = new LinearClient({token: 'stage', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: recording});
+          const staged = await capture({...context, linear: stage}, {config, state: context.fetched.state, security: gate, stageOnly: true});
+          assert.equal(staged.ok, true);
+          await recording.save(dir);
+          recording.close();
+          moveOut(plan, touch);
+          const replaying = await LinearReads.replaying(dir);
+          assert.ok(replaying !== null);
+          const apply = new LinearClient({token: 'apply', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: replaying});
+          const applied = await capture({...context, linear: apply}, {config, state: context.fetched.state, security: gate});
+          replaying.close();
+          assert.equal(applied.ok, true);
+          assert.deepEqual(applied.blocked, []);
+          assert.deepEqual(applied.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+          assert.deepEqual(markOf(plan), {icon: 'Fire', color: '#123456'});
+          assert.deepEqual(commentsOf('plan'), []);
+          assert.equal(apply.stats.writes.size, 0, 'no updateDocument or ensureDocumentComment');
+          assert.deepEqual((await readIds(context.git, applied.state.ids)).get('docs/plan.md'), {id: 'plan'});
+        } finally { await rm(dir, {recursive: true, force: true}); }
+      });
+    }
+
+    it('gets its own decoration back from the trash only while it is still in the place the stage step read it in', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'restore-after-staging-'));
+      try {
+        const plan = world.linear.documents[0]!;
+        Object.assign(plan, {icon: 'Fire', color: '#123456', content: `${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`});
+        await run();
+        assert.deepEqual(markOf(plan), MARKS.conflict);
+        await refresh();
+        Object.assign(plan, {trashed: true, archivedAt: '2026-01-05T00:00:00Z', updatedAt: '2026-01-05T00:00:00Z'});
+        const gate = {configured: true, check: async () => []};
+        const recording = LinearReads.recording();
+        recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+        const stage = new LinearClient({token: 'stage', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: recording});
+        assert.equal((await capture({...context, linear: stage}, {config, state: context.fetched.state, security: gate, stageOnly: true})).ok, true);
+        await recording.save(dir);
+        recording.close();
+        moveOut(plan, false);
+        const replaying = await LinearReads.replaying(dir);
+        assert.ok(replaying !== null);
+        const apply = new LinearClient({token: 'apply', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: replaying});
+        const applied = await capture({...context, linear: apply}, {config, state: context.fetched.state, security: gate});
+        replaying.close();
+        assert.equal(applied.ok, true);
+        assert.deepEqual(applied.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+        assert.deepEqual(markOf(plan), MARKS.conflict, 'no restore outside the place');
+        assert.equal(apply.stats.writes.size, 0);
+      } finally { await rm(dir, {recursive: true, force: true}); }
+    });
+
+    it('keeps the file and the saved decoration of a document taken out of the trash between stage and apply, and gives it back later', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'untrashed-after-staging-'));
+      try {
+        const plan = world.linear.documents[0]!;
+        Object.assign(plan, {icon: 'Fire', color: '#123456', content: `${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`});
+        await run();
+        await refresh();
+        const before = (await readIds(context.git, context.fetched.state.ids)).get('docs/plan.md')!;
+        const file = await text('docs/plan.md');
+        assert.equal(before.saved?.icon, 'Fire');
+        Object.assign(plan, {trashed: true, archivedAt: '2026-01-05T00:00:00Z', updatedAt: '2026-01-05T00:00:00Z'});
+        const gate = {configured: true, check: async () => []};
+        const recording = LinearReads.recording();
+        recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+        const stage = new LinearClient({token: 'stage', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: recording});
+        assert.equal((await capture({...context, linear: stage}, {config, state: context.fetched.state, security: gate, stageOnly: true})).ok, true);
+        await recording.save(dir);
+        recording.close();
+        // A member takes it out of the trash, with its text resolved, before the apply step.
+        Object.assign(plan, {trashed: false, archivedAt: undefined, content: 'Resolved.\n', updatedAt: '2026-01-06T00:00:00Z'});
+        const replaying = await LinearReads.replaying(dir);
+        assert.ok(replaying !== null);
+        const apply = new LinearClient({token: 'apply', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: replaying});
+        const applied = await capture({...context, linear: apply}, {config, state: context.fetched.state, security: gate});
+        replaying.close();
+        assert.equal(applied.ok, true);
+        assert.deepEqual(applied.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+        assert.deepEqual(applied.removed, []);
+        assert.equal(apply.stats.writes.size, 0);
+        assert.deepEqual((await readIds(context.git, applied.state.ids)).get('docs/plan.md'), before);
+        assert.equal(await text('docs/plan.md'), file);
+        // The next run finds it in place with its conflict resolved: the mark clears and its own decoration comes back.
+        await refresh();
+        const next = await capture(context, {config, state: context.fetched.state, security: gate});
+        assert.equal(next.ok, true);
+        assert.deepEqual(markOf(plan), {icon: 'Fire', color: '#123456'});
+        assert.equal((await readIds(context.git, next.state.ids)).get('docs/plan.md')?.saved, undefined);
+      } finally { await rm(dir, {recursive: true, force: true}); }
+    });
   });
 
   it('retries a security comment after its post-push delivery fails', async () => {

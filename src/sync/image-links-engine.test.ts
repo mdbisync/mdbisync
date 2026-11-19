@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { fakeFetch } from '../setup/test-helpers.ts';
+import { fakeFetch, touch } from '../setup/test-helpers.ts';
 import { sameMarkdown, splitFile } from '../format/index.ts';
 import { hookRun } from '../format/test-helpers.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
@@ -105,6 +105,35 @@ describe('image repairs through the sync pull request', () => {
     await h.gitEdit(renamed, '# Plan\n\n![Repository image](../../../records.csv)\n');
     await h.settle();
     assert.equal(h.world.linear.uploads.length, before + 1, 'a repository-authored image should still upload');
+  });
+
+  it('records the plain targets of repaired links when Linear moves a document', async () => {
+    const path = 'eng/notes/plan.md';
+    const moved = 'eng/plan.md';
+    await h.editRef('refs/heads/main', 'eng/outline.txt', 'Draft outline.\n');
+    await h.editRef('refs/heads/main', 'outline.txt', 'Published outline.\n');
+    await h.editInLinear(path, '# Plan\n\n![Outline](../outline.txt)\n\n![Schedule](../schedule.txt)\n');
+    await h.settle();
+    const document = await h.documentOf(path);
+    assert.match(document.content!, /\[Outline\]\(<?\.\.\/outline\.txt>?\)/);
+    assert.doesNotMatch(document.content!, /!\[Outline\]/);
+
+    delete document.projectId;
+    document.teamId = 'team-eng';
+    document.content = document.content!.split('\n\n')
+      .filter(paragraph => !paragraph.includes('schedule.txt')).join('\n\n')
+      .replace('../outline.txt', '../%6Futline.txt#overview');
+    touch(document);
+    const uploads = h.world.linear.uploads.length;
+    const run = await h.sync();
+    assert.deepEqual(run.report.capture?.blocked, []);
+    const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
+    assert.equal(ids[moved]?.id, document.id);
+    assert.deepEqual(new Set(ids[moved].plainFiles), new Set(['eng/outline.txt', 'outline.txt', 'eng/schedule.txt']));
+    await h.settle();
+    const body = splitFile(await h.show(`refs/heads/main:${moved}`)).body;
+    assert.ok(sameMarkdown(body, document.content!), body);
+    assert.equal(h.world.linear.uploads.length, uploads);
   });
 
   for (const merged of [true, false]) it(`never binds an upload with equal bytes to a repository file a Linear member linked (repair merged first: ${merged})`, async () => {

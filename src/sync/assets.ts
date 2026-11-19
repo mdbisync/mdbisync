@@ -75,16 +75,26 @@ export class ImageBlockedError extends Error {
  * the document, so such a link reaching git would let anyone who can edit
  * the document in Linear publish any repository file there. A link to a
  * file the document's previous text already linked was written in the
- * repository and stays; links to Markdown documents upload
- * nothing and stay too.
+ * repository and stays; links to Markdown documents upload nothing and stay too.
+ * When a document moves, an unchanged plain destination can resolve to a new
+ * target. Return it with the findings so capture can retain its plain status.
  */
-export function typedFileLinkFindings(path: string, body: string, previousBody?: string, previousPath = path): FileFinding[] {
+export function checkTypedFileLinks(path: string, body: string, previousBody?: string, previousPath = path, plain: ReadonlySet<string> = new Set()): { findings: FileFinding[]; relocatedPlain: Set<string> } {
   const known = new Set<string>();
+  const movedTargets = new Map<string, Set<string>>();
+  const movedFolders = posix.dirname(path) !== posix.dirname(previousPath);
   if (previousBody !== undefined) {
     visit(parse(previousBody), (node) => {
       if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
       const target = resolveTarget(previousPath, node.url);
-      if (target !== null) known.add(target);
+      if (target === null) return;
+      known.add(target);
+      if (!movedFolders || !plain.has(target)) return;
+      const moved = resolveTarget(path, node.url);
+      if (moved === null || moved === target) return;
+      const targets = movedTargets.get(target) ?? new Set<string>();
+      targets.add(moved);
+      movedTargets.set(target, targets);
     });
   }
   // Only the first definition resolves an image reference and is checked by
@@ -92,10 +102,21 @@ export function typedFileLinkFindings(path: string, body: string, previousBody?:
   const imageLabels = new Set<string>();
   const definitions = new Map<string, Definition>();
   const candidates: Array<Link | Definition> = [];
+  const relocatedPlain = new Set<string>();
+  const continuedDestinations = new Set<string>();
   visit(parse(body), (node) => {
     if (node.type === 'imageReference') imageLabels.add(node.identifier);
     if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
     if (node.type === 'link' || node.type === 'definition') candidates.push(node);
+    if (movedTargets.size === 0 || (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition')) return;
+    const previousTarget = resolveTarget(previousPath, node.url);
+    if (previousTarget === null) return;
+    const targets = movedTargets.get(previousTarget);
+    if (targets === undefined) return;
+    const target = resolveTarget(path, node.url);
+    if (target === null || !targets.has(target)) return;
+    relocatedPlain.add(target);
+    continuedDestinations.add(node.url);
   });
   // Validate parsed URLs even when their source ranges cannot be rewritten:
   // formatting can turn a multiline destination into an ordinary file link.
@@ -106,9 +127,11 @@ export function typedFileLinkFindings(path: string, body: string, previousBody?:
   });
   const findings: FileFinding[] = [];
   links.forEach((node, index) => {
-    if (!known.has(resolveTarget(path, node.url) as string)) findings.push({ file: index + 1, total: links.length, line: line(node), reason: 'not-uploaded' });
+    if (!continuedDestinations.has(node.url) && !known.has(resolveTarget(path, node.url) as string)) {
+      findings.push({ file: index + 1, total: links.length, line: line(node), reason: 'not-uploaded' });
+    }
   });
-  return findings;
+  return {findings, relocatedPlain};
 }
 
 /**
@@ -282,7 +305,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   const capture = async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path, plain: ReadonlySet<string> = new Set()): Promise<CapturedAssets> => {
     checkImageRepairSize(body);
     // Repository-file links typed in Linear retain their separate gate. Images are repaired after upload checks.
-    const notUploaded = typedFileLinkFindings(path, body, previousBody, previousPath);
+    const {findings: notUploaded, relocatedPlain} = checkTypedFileLinks(path, body, previousBody, previousPath, plain);
     if (notUploaded.length > 0) throw new ImageBlockedError(notUploaded);
     const sourceImages = imagesOf(body);
     const sourceDestinations = destinations(body);
@@ -295,7 +318,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       const source = imageLinks(body, deadUploads);
       const rewritten = observedBody === body ? source.body
         : imageLinks(observedBody, deadUploads, new Set(source.images.map(image => image.image))).body;
-      const plainFiles = sourceImages.flatMap(image => { const target = !isUpload(image.url) ? resolveTarget(path, image.url) : null; return target === null ? [] : [target]; });
+      const plainFiles = [...relocatedPlain];
+      for (const image of sourceImages) {
+        const target = !isUpload(image.url) ? resolveTarget(path, image.url) : null;
+        if (target !== null) plainFiles.push(target);
+      }
       return {body: rewritten, plainFiles, ...(rewritten === observedBody ? {} : {observedBody, deadUploads: [...deadUploads]}), files, uploads};
     };
     const files = new Map<string, FileContent>();
@@ -313,9 +340,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     // Files the sync takes from Linear live in an `assets/` folder beside the documents that embed them.
     const assetsFolder = posix.join(posix.dirname(path), ASSETS_FOLDER);
     const assetsUsable = !notFolders.has(assetsFolder);
+    const plainTarget = (target: string) => plain.has(target) || relocatedPlain.has(target);
     /** The capture of these bytes in the document's own `assets/` folder: a file there named by their hash. */
     const captureOf = (hash: string): string | undefined => (hashPaths.get(hash) ?? []).find((candidate) =>
-      posix.dirname(candidate) === assetsFolder && isCaptureName(candidate) && posix.basename(candidate).startsWith(hash));
+      !plainTarget(candidate) && posix.dirname(candidate) === assetsFolder && isCaptureName(candidate) && posix.basename(candidate).startsWith(hash));
     /**
      * The repository file holding these bytes: the one the previous text linked, else their capture in the
      * document's own `assets/` folder, else a file the previous text linked that could not be read (its
@@ -343,6 +371,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       const names = isCaptureName(own) && !own.startsWith(hash) ? [] : [own];
       for (const name of [...names, `${hash}${posix.extname(source)}`]) {
         const target = posix.join(assetsFolder, name);
+        if (plainTarget(target)) continue;
         // Any other entry at that path (a symbolic link, a Markdown file, a folder) holds other content.
         const existing = pathHashes.get(target) ?? placed.get(target) ?? (notFolders.has(target) || folders.has(target) ? '' : undefined);
         if (existing === hash) return target;
@@ -362,7 +391,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
         // A file a Linear member linked is never reused, whatever else links it: until its repair is merged, the
         // previous text still holds the member's image, so the text cannot tell the member's link from the repository's.
-        if (plain.has(link.target)) continue;
+        if (plainTarget(link.target)) continue;
         if (await reusable(link.target) === 'unreadable') {
           const hash = pathHashes.get(link.target)!;
           if (!unreadableLinks.has(hash)) unreadableLinks.set(hash, link.target);
@@ -473,7 +502,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
           assetPath = posix.join(assetsFolder, `${hash}${extension}`);
           // A file or symbolic link named `assets` stays: the document waits until its author moves it.
           const chosen = placed.get(assetPath);
-          if (!assetsUsable || notFolders.has(assetPath) || folders.has(assetPath) || (chosen !== undefined && chosen !== hash)) throw new Error(message('assets.destination-exists'));
+          if (!assetsUsable || plainTarget(assetPath) || notFolders.has(assetPath) || folders.has(assetPath) || (chosen !== undefined && chosen !== hash)) throw new Error(message('assets.destination-exists'));
           placed.set(assetPath, hash);
         }
         // Each document owns its candidate bytes until its security check passes.

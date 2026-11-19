@@ -67,7 +67,7 @@ export const RECORD_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget'
 export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
 
 /** Why the sync's capture leaves a Linear document out. */
-export const CAPTURE_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'image-repair-budget', 'blob-too-large', 'capture-translation', 'download-retry', 'security-unchecked'] as const;
+export const CAPTURE_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'image-repair-budget', 'blob-too-large', 'capture-translation', 'download-retry', 'security-unchecked', 'changed-during-run'] as const;
 export type CaptureLeftOutRule = (typeof CAPTURE_LEFT_OUT_RULES)[number];
 
 /** The rule a file name read from Linear follows. */
