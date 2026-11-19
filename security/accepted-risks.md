@@ -69,3 +69,19 @@ and actions you trust, pin third-party actions to full commit hashes, and
 review changes to `.github/workflows/` on every branch like any other code.
 Limit who may push branches, since a workflow on any branch runs with the
 repository's token.
+
+## AR-005: A Linear edit saved between the final read and write
+
+**Accepted.** 2026-11-19.
+
+**The risk.** An edit saved in Linear after the sync's final read of a
+document and before its update or trash mutation takes effect can be
+overwritten or lost.
+
+**Why it is accepted.** Incremental sync and confirmed initial sync reread
+each existing document by ID immediately before writing it. Linear's
+`documentUpdate` and `documentDelete` mutations take no version condition,
+so the check and mutation cannot be atomic.
+
+**What you can do.** For a critical edit, stop ongoing sync, wait for the
+active run to finish, save the edit, then enable sync again.

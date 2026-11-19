@@ -251,9 +251,9 @@ describe('check helpers', () => {
     assert.deepEqual(contentCanaries(files).map((file) => file.canary), ['kx-00000001', 'kx-00000003']);
   });
 
-  it('hold I9 at 1.5 requests per written document plus 5 per run', () => {
-    assert.ok(budgetHolds(155, 100, 1));
-    assert.ok(!budgetHolds(156, 100, 1));
+  it('hold I9 at 2.5 requests per written document plus 5 per run', () => {
+    assert.ok(budgetHolds(255, 100, 1));
+    assert.ok(!budgetHolds(256, 100, 1));
   });
 
   it('allows I9 2 more requests per document whose suspended mark or comment changed', () => {

@@ -236,6 +236,41 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  for (const [operation, change] of [
+    ['update', '# Review\n\nUpdated in git.\n'],
+    ['trash', null],
+  ] as const) {
+    for (const activity of ['edited', 'moved'] as const) it(`skips a later document's ${operation} when it is ${activity} in Linear during the first write`, async () => {
+      const firstPath = 'eng/notes/plan.md';
+      const laterPath = 'eng/notes/review.md';
+      const first = await documentOf(firstPath);
+      const later = await documentOf(laterPath);
+      const edit = '# Review\n\nUpdated in Linear.\n';
+      const expected = activity === 'edited' ? edit : later.content;
+      await commit({ [firstPath]: '# Plan\n\nUpdated in git.\n', [laterPath]: change });
+      let edited = false;
+      world.linear.writes.reject = (name, variables) => {
+        if (name === 'UpdateDocument' && variables.id === first.id) {
+          if (activity === 'edited') later.content = edit;
+          else later.projectId = 'project-archive';
+          touch(later);
+          edited = true;
+        }
+        return false;
+      };
+
+      const { result, report, writes } = await sync();
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.ok(edited, 'the earlier document reached its write');
+      assert.deepEqual(report.sync?.skipped, [{ path: laterPath, reason: 'edited-in-linear' }]);
+      assert.deepEqual(report.sync?.updated, [firstPath]);
+      assert.deepEqual(writes, ['UpdateDocument']);
+      assert.equal(later.content, expected);
+      if (activity === 'moved') assert.equal(later.projectId, 'project-archive');
+      assert.notEqual(later.trashed, true);
+    });
+  }
+
   it('L2-01: an edited paragraph reaches its document in one request; the record is a merge commit', async () => {
     const previous = await rev('refs/mdbisync/linear');
     const before = await documentOf('eng/backend/notes.md');
@@ -251,7 +286,7 @@ describe('sync: the tracked branch to Linear', () => {
     await assertMergeRecord(previous);
     // The record holds the tracked tree: Linear kept the text.
     assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
-    // I9: one read again and one write, plus setup and one capacity list per annotated container.
+    // I9 includes the final read and write.
     const capacityLists = report.capacity.length;
     assert.equal(capacityLists, 3);
     assert.ok(graphql <= 1 * 1.5 + 5 + capacityLists, `requests: ${graphql}`);

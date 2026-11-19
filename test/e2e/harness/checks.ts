@@ -2,7 +2,7 @@
 // scenario's own assertions. A check reports what failed in words and paths,
 // never document content.
 
-import { engineRequestCount, remoteRequests, isDocumentWrite } from './request-accounting.ts';
+import { engineRequestCount, remoteRequests, isDocumentWrite, REQUESTS_PER_DOCUMENT, REQUESTS_PER_RUN } from './request-accounting.ts';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
@@ -312,7 +312,7 @@ export function scanCanaries(texts: ReadonlyMap<string, string>, canaries: Itera
 }
 
 /**
- * I9: requests per written document stay at or under 1.5, plus at most 5 per
+ * I9: requests per written document stay at or under 2.5, plus at most 5 per
  * run, plus at most 2 per document whose suspended mark or comment was set,
  * changed or cleared in a run, plus at most 2 per document whose conflict
  * notice was set or resolved in a run.
@@ -322,7 +322,7 @@ export function budgetHolds(requests: number, documentsWritten: number, runs: nu
 }
 
 export function budgetLimit(documentsWritten: number, runs: number, holdChanges = 0, conflictNotices = 0): number {
-  return 1.5 * documentsWritten + 5 * runs + 2 * holdChanges + 2 * conflictNotices;
+  return REQUESTS_PER_DOCUMENT * documentsWritten + REQUESTS_PER_RUN * runs + 2 * holdChanges + 2 * conflictNotices;
 }
 
 /** The documents whose conflict notice was set or resolved, over the runs' reports (`conflictNotices`), once each time. */

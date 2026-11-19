@@ -4,6 +4,10 @@ import type { LogEntry } from '../../../src/linear/index.ts';
 import type { RunContext } from './context.ts';
 import type { ProxyRequestRecord } from './fault-proxy.ts';
 
+/** I9 allowance for a document write and the run that carries it. */
+export const REQUESTS_PER_DOCUMENT = 2.5;
+export const REQUESTS_PER_RUN = 5;
+
 export interface RemoteRequests {
   runId: number;
   runAttempt: number;
@@ -76,7 +80,7 @@ export function isGraphql(entry: LogEntry): boolean {
 }
 
 export function isDocumentWrite(entry: { kind: string; operation: string; status: number | string; errorCodes?: string[] | undefined }): boolean {
-  return entry.kind === 'mutation' && /document(Create|Update)|(Create|Update)Document/i.test(entry.operation) && entry.status === 200 && (entry.errorCodes?.length ?? 0) === 0;
+  return entry.kind === 'mutation' && /document(Create|Update|Delete|Unarchive)|(Create|Update|Trash|Restore)Document/i.test(entry.operation) && entry.status === 200 && (entry.errorCodes?.length ?? 0) === 0;
 }
 
 /** Local counting stays exactly as before; remote GraphQL includes upload URL mutations. */

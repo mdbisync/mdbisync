@@ -474,13 +474,13 @@ describe('sync: lost state and deleted branches', () => {
     const subject = () => fixture.remote.text(['log', '-1', '--format=%s', '--fixed-strings', `--grep=${UPLOADS_REBUILDING}`, `--grep=${UPLOADS_REBUILT}`, STATE('uploads')]);
     assert.equal(await subject(), UPLOADS_REBUILDING);
 
-    // The next run's read of every linking document is answered with a rate limit.
-    const linking = live().filter((d) => d.title === 'diagram' || d.title === 'chart').map((d) => d.id).sort();
+    // The next run's first final read of a linking document is answered with a rate limit.
+    const linking = new Set(live().filter((d) => d.title === 'diagram' || d.title === 'chart').map((d) => d.id));
     const base = fakeFetch(world);
     let limited = 0;
     fetchOverride = async (input, init) => {
-      const body = String(input).endsWith('/graphql') ? (JSON.parse(String(init?.body)) as { operationName?: string; variables?: { ids?: string[]; withContent?: boolean } }) : undefined;
-      if (body?.operationName === 'GetDocuments' && body.variables?.withContent === true && JSON.stringify([...(body.variables.ids ?? [])].sort()) === JSON.stringify(linking)) {
+      const body = String(input).endsWith('/graphql') ? (JSON.parse(String(init?.body)) as { operationName?: string; variables?: { id?: string; withContent?: boolean } }) : undefined;
+      if (body?.operationName === 'GetDocument' && body.variables?.withContent === true && body.variables.id !== undefined && linking.has(body.variables.id)) {
         limited += 1;
         return new Response(JSON.stringify({ errors: [{ message: 'limited', extensions: { code: 'RATELIMITED' } }] }), { status: 429, headers: { 'content-type': 'application/json' } });
       }

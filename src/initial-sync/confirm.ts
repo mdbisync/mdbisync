@@ -332,26 +332,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     }
   };
 
-  /**
-   * A document as Linear holds it now (null: gone), read again just before
-   * its write or trash, together with the next ones (`PROGRESS_BATCH` per
-   * request) instead of one request each.
-   */
-  const readAgainCache = new Map<string, LinearDocument | null>();
   /** Titles, by place, of an overwrite left out as changed: no document of them is trashed. */
   const skippedTitles = new Set<string>();
   const titleKey = (place: Place, title: string) => `${placeKey(place)}\0${title.normalize('NFC')}`;
-  const readAgain = async (id: string, upcoming: readonly string[]): Promise<LinearDocument | null> => {
-    if (!readAgainCache.has(id)) {
-      const ids = [...new Set([id, ...upcoming])].slice(0, PROGRESS_BATCH);
-      const found = new Map((await linear.getDocuments(ids)).map((document) => [document.id, document]));
-      for (const each of ids) readAgainCache.set(each, found.get(each) ?? null);
-    }
-    const current = readAgainCache.get(id) as LinearDocument | null;
-    readAgainCache.delete(id);
-    return current;
-  };
-
   const work: Work[] = [
     ...plan.overwrite.map((entry): Work => ({ kind: 'overwrite', entry })),
     ...plan.create.map((entry): Work => ({ kind: 'create', entry })),
@@ -465,8 +448,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           await reconcileMark(path, created, hash);
         } else {
           // The document may have moved, been trashed or edited since the plan read it: write only the one planned.
-          const upcoming = work.slice(index + 1).flatMap((rest) => (rest.kind === 'overwrite' ? [rest.entry.documentId] : []));
-          const current = await readAgain(item.entry.documentId, upcoming);
+          const current = await linear.getDocument(item.entry.documentId);
           if (current === null || !unchangedSince(current, document as LinearDocument)) {
             result.leftOutAtWrite.push({ path, rule: 'changed-during-run' });
             // Its title's other documents stay too: one of them may be the only match left.
@@ -529,7 +511,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           // Trash only the document the plan read in its place, unchanged since. One that shares its would-be
           // path with a planned file is not reported: that file is written as planned.
           const listed = sources.documents.get(entry.documentId);
-          const current = await readAgain(entry.documentId, plan.trash.slice(index + 1).map((rest) => rest.documentId));
+          const current = await linear.getDocument(entry.documentId);
           if (listed === undefined || current === null || !unchangedSince(current, listed)) {
             if (!work.some((planned) => planned.entry.path === entry.path)) result.leftOutAtWrite.push({ path: entry.path, rule: 'changed-during-run' });
             continue;

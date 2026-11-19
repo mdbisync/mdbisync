@@ -216,12 +216,12 @@ describe('sync: pull request suspension', () => {
     }
     await sync();
     checksOn(await rev(SYNC_BRANCH), FAILED);
-    // I9: 1.5 per written document, 5 per run, and 2 per document whose suspended mark or comment changed.
+    // I9: 2.5 per written document, 5 per run, and 2 per document whose suspended mark or comment changed.
     const withinBudget = (run: Awaited<ReturnType<typeof sync>>) => {
       const marks = run.report.pullRequest?.holdMarks;
       const changes = (marks?.set.length ?? 0) + (marks?.updated.length ?? 0) + (marks?.cleared.length ?? 0);
       const written = run.writes.filter((write) => write === 'CreateDocument').length + run.writes.filter((write) => write === 'UpdateDocument').length - changes;
-      assert.ok(run.linearRequests <= 1.5 * Math.max(written, 0) + 5 + 2 * changes, `${run.linearRequests} Linear requests for ${changes} mark changes and ${written} written documents`);
+      assert.ok(run.linearRequests <= 2.5 * Math.max(written, 0) + 5 + 2 * changes, `${run.linearRequests} Linear requests for ${changes} mark changes and ${written} written documents`);
     };
     const first = await sync();
     assert.ok(first.report.pullRequest?.suspended);
@@ -268,7 +268,7 @@ describe('sync: pull request suspension', () => {
       const marks = run.report.pullRequest?.holdMarks;
       const changes = (marks?.set.length ?? 0) + (marks?.updated.length ?? 0) + (marks?.cleared.length ?? 0);
       const written = run.writes.filter((write) => write === 'CreateDocument').length + run.writes.filter((write) => write === 'UpdateDocument').length - changes;
-      assert.ok(run.linearApiRequests <= 1.5 * Math.max(written, 0) + 5 + 2 * changes, `${run.linearApiRequests} Linear requests for ${changes} mark changes and ${written} written documents`);
+      assert.ok(run.linearApiRequests <= 2.5 * Math.max(written, 0) + 5 + 2 * changes, `${run.linearApiRequests} Linear requests for ${changes} mark changes and ${written} written documents`);
     };
     const released = await releaseHeld();
     assert.equal(released.report.pullRequest?.holdMarks?.cleared.length, HOLD_MARK_LIMIT);

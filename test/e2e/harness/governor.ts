@@ -19,13 +19,11 @@ import { join } from 'node:path';
 import { acquireLock, acquireSlot, processAlive, type Lock } from './locks.ts';
 import type { Scenario } from './spec.ts';
 import { soakDrainPlan, soakDrainSyncs } from './soak-drain.ts';
+import { REQUESTS_PER_DOCUMENT, REQUESTS_PER_RUN } from './request-accounting.ts';
 
 export const MAX_WORKERS_PER_APP = 4;
 /** Documents per slice; the corpus manifest replaces these when it is known. */
 export const SLICE_DOCUMENTS: Record<Scenario['slice'], number> = { mini: 12, bank: 270, mid: 212, full: 2030 };
-/** I9: requests per written document, plus a fixed allowance per engine run. */
-export const REQUESTS_PER_DOCUMENT = 1.5;
-export const REQUESTS_PER_RUN = 5;
 /** What the harness itself spends per scenario: projects, seeding, checks, cleanup. */
 export const HARNESS_REQUESTS_PER_DOCUMENT = 2;
 export const HARNESS_REQUESTS_FIXED = 30;
