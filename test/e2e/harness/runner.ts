@@ -945,6 +945,7 @@ export function resultOf(
     ...(ctx.proxy === null ? {} : { answerSizes: answerSizes(ctx.proxy.requests) }),
     ...(ctx.observations.has('conflictMarks') ? { conflictMarks: ctx.observations.get('conflictMarks') as NonNullable<ScenarioResult['conflictMarks']> } : {}),
     ...(ctx.observations.has('imageGate.record') ? { imageGate: ctx.observations.get('imageGate.record') as NonNullable<ScenarioResult['imageGate']> } : {}),
+    ...(ctx.observations.has('typedImage.record') ? { typedImage: ctx.observations.get('typedImage.record') as NonNullable<ScenarioResult['typedImage']> } : {}),
   };
 }
 

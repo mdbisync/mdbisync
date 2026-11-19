@@ -107,6 +107,11 @@ line in the text Linear stored. `linear.inspect-image-repair` reads the unchange
 Linear document, raw observation, proposed link version and pull request
 description before merge. The following settle writes the link back; the
 scenario checks both sides, image positions, unchanged marks and no image notice.
+L6-14 checks the same repair for an external image a person types in the
+editor: its checklist gives the exact Markdown to type, with the run id in the
+alt text, and `linear.await-typed-image` waits until Linear saved it, records
+what Linear stored for it (the image as typed, an upload, another image
+destination, or no image) and takes the stored text as the repair's source.
 
 An argument named `variants` or `orderings` expands into independent subcases,
 each with a fresh copy of setup and the complete step sequence and assertions.

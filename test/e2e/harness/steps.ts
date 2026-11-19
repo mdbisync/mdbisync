@@ -36,7 +36,7 @@ import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { TYPING_METRICS } from './ui-checklist.ts';
-import { commentsWithState, destinationKind, imageGateRecord, imagePlace, placeLabel, withoutImage, writtenImagePath, type ImageRepairSource } from './image-gate.ts';
+import { commentsWithState, destinationKind, findTypedImage, imageGateRecord, imagePlace, imagesIn, placeLabel, typedImage, withoutImage, writtenImagePath, type ImageRepairSource, type TypedImageRecord } from './image-gate.ts';
 import { initFiles } from './init-files.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -2118,7 +2118,8 @@ const LINEAR: Record<string, Executor> = {
     if (source === undefined) throw new Error('image inspection needs linear.image-path first');
     const world = live(ctx);
     const document = await linearContent(ctx, source.path);
-    const record = await imageGateRecord(world.app, document.content, source.token);
+    // The image-gate record speaks of the path `linear.image-path` wrote; a typed image has its own record.
+    const record = ctx.observations.has('imageGate.blocked') ? await imageGateRecord(world.app, document.content, source.token) : null;
     if (record !== null) ctx.observations.set('imageGate.record', record);
     const git = await ctx.person();
     const config = resolveStateConfig({trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix});
@@ -2135,6 +2136,60 @@ const LINEAR: Record<string, Executor> = {
       comments: (await commentsWithState(world.app, document.id)).map(comment => comment.body),
       number: pr.number, description: pr.body ?? '',
     });
+  },
+  // L6-14: a person typed an external image in the editor (`ui.type-external-image`). Wait, bounded, until Linear's
+  // saved document holds it, record what Linear stored for it (the kind only), and record the text before any sync
+  // as the repair's independent source, as `linear.image-path` does for an API write.
+  'linear.await-typed-image': async (ctx, args) => {
+    const typing = ctx.scenario.steps.find((step) => step.kind === 'ui' && step.action === 'type-external-image');
+    if (typing === undefined) throw new Error('linear.await-typed-image needs a ui.type-external-image step');
+    const typed = typedImage(typing.args, ctx.names.runId);
+    // The scenario's default target: the document the checklist names.
+    const path = targetPath(ctx);
+    const id = await documentId(ctx, path);
+    setTarget(ctx, path, id);
+    // The images the document had before the typing: its tracked file's, the run being converged.
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const imagesBefore = imagesIn(await readWorking(git, path)).length;
+    const timeoutSeconds = typeof args.timeoutSeconds === 'number' ? args.timeoutSeconds : IMAGE_SAVE_TIMEOUT_SECONDS;
+    const deadline = Date.now() + timeoutSeconds * 1000;
+    const editor = live(ctx).editors[editorOf(args)];
+    let content: string;
+    let previous: string | undefined;
+    let found: ReturnType<typeof findTypedImage>;
+    // An image read twice in the same text ends the wait: text without one may be the typing saved before the editor
+    // made it an image, and a text still changing would make a stale source for the repair's checks.
+    for (;;) {
+      const [document] = await editor.getDocuments([id], { withContent: true });
+      if (document === undefined) throw new ProductError('a recorded document does not exist in Linear');
+      content = document.content ?? '';
+      found = findTypedImage(content, typed, imagesBefore);
+      if ((found?.place !== undefined && content === previous) || Date.now() >= deadline) break;
+      previous = content;
+      await delay(ctx.checkPollMs ?? IMAGE_SAVE_POLL_MS, undefined, { signal: ctx.signal });
+    }
+    // Nothing of the typing in the saved text: Linear dropped the image or never saved the typing, which the
+    // harness cannot tell apart.
+    ctx.observations.set('typedImage.record', { stored: found?.stored ?? 'not-observed' } satisfies TypedImageRecord);
+    if (found === null) throw new Error(`linear.await-typed-image: Linear's saved document held neither the typed image, its URL nor a new image ${timeoutSeconds} seconds after the typing was answered`);
+    // Only an external image is the case the repair is for: a link, an upload or another destination is Linear's
+    // answer about its editor, recorded in the result, not a verdict on the sync.
+    if (found.stored !== 'external' || found.place === undefined) throw new Error(`Linear stored the typed image as ${found.stored}, not as the external image typed`);
+    const { place } = found;
+    if (!place.inline || content[place.offset] !== '!') throw new Error('the stored image has no inline spelling for the expected link');
+    if (content !== previous) throw new Error(`linear.await-typed-image: Linear's saved document was still changing ${timeoutSeconds} seconds after the typing was answered`);
+    ctx.log(`linear.await-typed-image: Linear saved the typed image as an external image (image ${place.image} of ${place.total}, line ${place.line})`);
+    // The link the repair writes: the image without its `!`, with the URL as its text when Linear kept no alt text.
+    const emptyAlt = content.startsWith('![]', place.offset);
+    const expected = emptyAlt
+      ? `${content.slice(0, place.offset)}[${typed.url}]${content.slice(place.offset + 3)}`
+      : content.slice(0, place.offset) + content.slice(place.offset + 1);
+    const document = await linearContent(ctx, path);
+    ctx.observations.set('imageRepair.source', {
+      path, token: typed.alt, body: content, expected,
+      image: place.image, total: place.total, line: place.line, icon: document.icon, color: document.color,
+    } satisfies ImageRepairSource);
   },
   // How the blocked document looks before the editor fixes it (L2-42), then the fix: the image is removed.
   'linear.remove-image': async (ctx, args) => {
@@ -2456,7 +2511,8 @@ const OTHER: Record<string, Executor> = {
 
 const UI_ACTIONS = [
   'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-cleared', 'ui.inspect-conflict', 'ui.inspect-released', 'ui.inspect-rendering',
-  'ui.inspect-suspended', 'ui.paste-image', 'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write', 'ui.type-two-editors', 'ui.verify-editor',
+  'ui.inspect-suspended', 'ui.inspect-typed-link', 'ui.paste-image', 'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write',
+  'ui.type-external-image', 'ui.type-two-editors', 'ui.verify-editor',
 ];
 
 /** Every step action the schema knows, with its executor. UI steps are run by the UI session, not here. */

@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "id": "L6-14",
+  "slice": "mini",
+  "mode": "ui",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "ui",
+      "action": "verify-editor",
+      "args": {
+        "actor": "editor-a",
+        "requireIdleSeconds": 120
+      }
+    },
+    {
+      "kind": "ui",
+      "action": "type-external-image",
+      "args": {
+        "actor": "editor-a",
+        "imageUrl": "https://example.com/harbor-map.png"
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "await-typed-image",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "linear",
+      "action": "inspect-image-repair",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    },
+    {
+      "kind": "ui",
+      "action": "inspect-typed-link",
+      "args": {
+        "actor": "editor-a"
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "imageRepair.observedOriginal",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.proposedLink",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.listedInPr",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.merged",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.trackedLink",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.storedLink",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.marksUnchanged",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "imageRepair.imageNotices",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "tracked.body",
+        "operator": "same-as",
+        "expected": "linear.body"
+      },
+      {
+        "subject": "pullRequests.lintFindings",
+        "operator": "equal",
+        "expected": []
+      },
+      {
+        "subject": "ui.linkShown",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

@@ -95,6 +95,12 @@ export function renderRunMarkdown(report: HarnessReport): string {
       lines.push(`| ${result.id} | ${result.runId} | ${storedDestination} | ${uploadStatus === undefined ? 'n/a' : uploadStatus ?? 'request failed'} |`);
     }
   }
+  const typed = report.results.filter((result) => result.typedImage !== undefined);
+  if (typed.length > 0) {
+    lines.push('', '## Typed image', '', 'What Linear stored for the external image a person typed in the editor: the image as typed (external), an upload, another image destination, or no image (a link or text).', '',
+      '| Scenario | Run | Stored |', '| --- | --- | --- |');
+    for (const result of typed) lines.push(`| ${result.id} | ${result.runId} | ${result.typedImage!.stored} |`);
+  }
   return `${lines.join('\n')}\n`;
 }
 

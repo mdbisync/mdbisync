@@ -104,6 +104,8 @@ export interface ScenarioResult {
   conflictMarks?: { mapped: number; marked: import('./subjects.ts').ConflictMarkRecord[] };
   /** The image-gate scenario's blocked image: the kind of destination Linear stored and, for an upload, its HTTP status; never the URL. */
   imageGate?: import('./image-gate.ts').ImageGateRecord;
+  /** The image a person typed in the editor (L6-14): the kind of thing Linear stored for it; never the URL. */
+  typedImage?: import('./image-gate.ts').TypedImageRecord;
 }
 
 export const EXPECTED_RED_FILE = fileURLToPath(new URL('../expected-red.json', import.meta.url));

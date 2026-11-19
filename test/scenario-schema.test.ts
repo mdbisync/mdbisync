@@ -89,6 +89,9 @@ test('operation arguments and step ordering reject invalid contracts', () => {
   rejects('L6-08', s => { s.steps[2].args.actors = ['editr-b']; }, /invalid editor role/);
   rejects('L6-06', s => { s.steps.splice(1, 1); }, /UI editor must be verified/);
   rejects('L6-01', s => { s.steps[0].args.requireIdleSeconds = 119; }, /requireIdleSeconds must be at least 120/);
+  rejects('L6-14', s => { delete s.steps[1].args.imageUrl; }, /missing argument imageUrl/);
+  rejects('L6-14', s => { s.steps[1].args.imageUrl = 'javascript:alert(1)'; }, /imageUrl must be a plain http\(s\) URL/);
+  rejects('L6-14', s => { s.steps[1].args.imageUrl = 'https://example.com/a).png'; }, /imageUrl must be a plain http\(s\) URL/);
   rejects('L5-06', s => { s.steps[1].args.retryAfter = 5; }, /retryAfter must be null/);
   rejects('L5-06', s => { s.steps[1].args.status = 600; }, /invalid response\/check status/);
   rejects('L5-06', s => { s.steps[1].args.requestNumber = 30.2; }, /requestNumber must be an integer/);

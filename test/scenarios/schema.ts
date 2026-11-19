@@ -59,6 +59,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "git.scratch-hook": ["fixture", "source"],
   "kill.engine": ["checkpoint"],
   "linear.await-image": ["actor", "target", "timeoutSeconds"],
+  "linear.await-typed-image": ["actor", "timeoutSeconds"],
   "linear.conflict-again": ["actor"],
   "linear.create": ["actor", "characters", "fixture", "title"],
   "linear.delete-permanently": ["actor", "fixture"],
@@ -107,10 +108,12 @@ export const operationArguments: Record<string, readonly string[]> = {
   "ui.inspect-released": ["actor"],
   "ui.inspect-rendering": ["actor", "coverAllConstructs", "group", "sampleCount"],
   "ui.inspect-suspended": ["actor"],
+  "ui.inspect-typed-link": ["actor"],
   "ui.paste-image": ["actor"],
   "ui.rename-trash-restore": ["actor", "title"],
   "ui.resolve-markers": ["actor"],
   "ui.type-during-write": ["actor", "durationSeconds", "target"],
+  "ui.type-external-image": ["actor", "imageUrl"],
   "ui.type-two-editors": ["actor", "actors", "durationSeconds"],
   "ui.verify-editor": ["actor", "requireIdleSeconds"],
 };
@@ -136,7 +139,7 @@ function list(value: unknown): asserts value is unknown[] {
   assert.ok(Array.isArray(value) && value.length > 0, 'expected nonempty array');
 }
 
-const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name lane operation path project ref scope service source storage target title'.split(' '));
+const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group imageUrl input missing name lane operation path project ref scope service source storage target title'.split(' '));
 const booleanArguments = new Set('reset flaky document allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
 const numericArguments = new Set('minutes checkDeadlineMinutes characters cleanEdits conflictingDocuments count documents drainSyncs durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds serverErrorTicks serverErrorTotal stopAfterDocuments teams timeoutSeconds times typingSeconds'.split(' '));
 const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
@@ -149,6 +152,7 @@ const requiredArguments: Record<string, string[]> = {
     'fault.pause': ['checkpoint'],
     'kill.engine': ['checkpoint'],
     'ui.verify-editor': ['requireIdleSeconds'],
+    'ui.type-external-image': ['imageUrl'],
 };
 function validateArguments(kind: string, action: string, args: ObjectValue): void {
   const allowed = operationArguments[`${kind}.${action}`];
@@ -193,7 +197,15 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
   if (args.direction !== undefined) oneOf(args.direction, ['git-to-linear', 'linear-to-git'], 'direction');
   if (args.event !== undefined) oneOf(args.event, ['push', 'pull_request', 'workflow_dispatch', 'schedule'], 'event');
   if (kind === 'ui' && action === 'verify-editor') assert.ok((args.requireIdleSeconds as number) >= 120, 'requireIdleSeconds must be at least 120');
+  if (args.imageUrl !== undefined) assert.match(args.imageUrl as string, TYPED_IMAGE_URL, 'imageUrl must be a plain http(s) URL');
 }
+
+/**
+ * The URL a person types by hand as an image's Markdown destination (`ui.type-external-image`): plain http(s), with
+ * nothing that would end or escape the destination, be decoded by a Markdown reader (`&`, `\`) or end the
+ * checklist's code span.
+ */
+export const TYPED_IMAGE_URL = /^https?:\/\/[^\s()<>[\]\\&`"']+$/;
 
 /** The files intentionally use the JSON subset of YAML 1.2. Reject other syntax. */
 export function validateScenario(value: unknown, filename: string): void {
