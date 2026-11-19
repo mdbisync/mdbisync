@@ -194,12 +194,10 @@ async function main(argv: string[]): Promise<number> {
         readIds: async (held) => {
           if (config.owner === '' || config.repo === '') throw new Error('the test sandbox URL is missing or invalid');
           if (`${config.owner}/${config.repo}` !== held.live.repository) throw new Error('the test sandbox does not match the held run');
-          try {
-            const token = await githubToken(config, 'local');
-            return await runGit(config.gitUrl, gitAuthEnv(token.token)).ids(held.runId);
-          } catch {
-            throw new Error('could not read the held run ids from the test sandbox');
-          }
+          const token = await githubToken(config, 'local')
+            .catch((cause: unknown) => { throw new Error('could not authenticate to the test sandbox', { cause }); });
+          return runGit(config.gitUrl, gitAuthEnv(token.token)).ids(held.runId)
+            .catch((cause: unknown) => { throw new Error('could not read the held run ids from the test sandbox', { cause }); });
         },
         connect: async (held) => {
           const app = config.linearApps.find(({ name }) => name === held.appName);
@@ -211,7 +209,8 @@ async function main(argv: string[]): Promise<number> {
             key: createHash('sha256').update(app.clientId).digest('hex'),
             readBudget: async () => budgetFromStatus(await client.rateLimitStatus(), Date.now()),
           }];
-          const governor = new Governor({ apps, stateDir, shared: await sharedAdmission() });
+          // A budget wait here would keep the UI continuation locked.
+          const governor = new Governor({ apps, stateDir, shared: await sharedAdmission(), maxWaitMs: 0 });
           return { client, governor };
         },
       });

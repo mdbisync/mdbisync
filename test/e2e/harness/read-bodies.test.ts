@@ -10,6 +10,7 @@ import { Git } from '../../../src/state/index.ts';
 import { Governor, type App } from './governor.ts';
 import { HELD_RUN_FILE, saveHeldRun, type HeldRun } from './held-run.ts';
 import { acquireLock } from './locks.ts';
+import { OwnershipLedger } from './ownership.ts';
 import { readHeldBodies } from './read-bodies.ts';
 import { GitStateStore, SharedAdmission } from './shared-state.ts';
 import { loadScenarios } from './spec.ts';
@@ -55,12 +56,13 @@ it('reads project and team-zone bodies through a query under the held app reserv
   t.after(() => store.close());
   const grant = await governor.admit(scenario, runId, { requests: 2, complexity: 800 }, app.name);
   await grant.claimZones!(['team-1']);
+  new OwnershipLedger(stateDir, runId).record({ kind: 'document', id: 'doc-2', confirmed: true });
   held.observations.set('admission.owner', grant.owner);
   saveHeldRun(runDir, held);
   const before = readFileSync(join(runDir, HELD_RUN_FILE), 'utf8');
   const body = [
     'Spring schedule', '', '![Rose](https://images.example.com/rose.png)', '![Plan][plan]', '',
-    '[plan]: https://files.example.com/plan.png', '',
+    '> [plan]: https://files.example.com/plan.png', '',
     '| Bed | Plants |', '| --- | --- |', '| East | 12 |', '',
     '```mermaid', 'graph TD; A-->B', '```', '', '> [!NOTE]', '> Water weekly.',
   ].join('\n');
@@ -78,7 +80,7 @@ it('reads project and team-zone bodies through a query under the held app reserv
       trashed: false, archivedAt: null, createdAt: '2025-01-01', updatedAt: '2025-01-01',
     };
     const nodes = [
-      { ...doc, id: 'doc-2', title: `${runId}/Harbor notes`, content: null, project: null, team: { id: 'team-1' } },
+      { ...doc, id: 'doc-2', title: 'README', content: '![Plan](https://uploads.linear.app/signed-path?token=fixture-signature)', project: null, team: { id: 'team-1' } },
       { ...doc, id: 'doc-1', title: 'Garden notes', content: body, project: { id: 'project-1' }, team: null },
     ];
     return Response.json({ data: { documents: { nodes: nodes.filter(({ id }) => variables.ids.includes(id)) } } });
@@ -93,7 +95,12 @@ it('reads project and team-zone bodies through a query under the held app reserv
 
   assert.equal(await readHeldBodies(runDir, undefined, deps), 2);
   assert.deepEqual(queries, [['doc-1', 'doc-2']]);
-  assert.deepEqual(JSON.parse(readFileSync(report, 'utf8')), {
+  const raw = readFileSync(report, 'utf8');
+  const evidence = JSON.parse(raw);
+  assert.doesNotMatch(raw, /signed-path|fixture-signature|fixture-token/);
+  const readmeUrl = evidence.documents[1]?.images[0]?.url;
+  assert.match(readmeUrl, /^https:\/\/uploads\.linear\.app\/redacted-[0-9a-f]{64}$/);
+  assert.deepEqual(evidence, {
     runId, scenarioId: scenario.id,
     documents: [{
       path: 'docs/garden.md', title: 'Garden notes', firstScreen: body,
@@ -105,7 +112,8 @@ it('reads project and team-zone bodies through a query under the held app reserv
       diagrams: ['```mermaid\ngraph TD; A-->B\n```'],
       callouts: ['> [!NOTE]\n> Water weekly.'],
     }, {
-      path: 'docs/harbor.md', title: `${runId}/Harbor notes`, firstScreen: '', images: [], tables: [], diagrams: [], callouts: [],
+      path: 'docs/harbor.md', title: 'README', firstScreen: `![Plan](${readmeUrl})`,
+      images: [{ url: readmeUrl, host: 'uploads.linear.app' }], tables: [], diagrams: [], callouts: [],
     }],
   });
   assert.equal(statSync(report).mode & 0o777, 0o600);
