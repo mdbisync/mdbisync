@@ -83,5 +83,5 @@ each existing document by ID immediately before writing it. Linear's
 `documentUpdate` and `documentDelete` mutations take no version condition,
 so the check and mutation cannot be atomic.
 
-**What you can do.** For a critical edit, pause ongoing sync, wait for the
-active run to finish, save the edit, then resume sync.
+**What you can do.** For a critical edit, stop ongoing sync, wait for the
+active run to finish, save the edit, then enable sync again.

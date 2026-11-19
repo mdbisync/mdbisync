@@ -31,6 +31,7 @@ import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
 import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, keptAnnotationsTrailers, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
+import { unchangedSince } from '../initial-sync/run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
 import { linkDestinations, resolveRelative } from '../initial-sync/links.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../initial-sync/uploads.ts';
@@ -912,9 +913,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // in a place an annotation change left this run), or the configured containers list it now. Any other stays.
     const before = seen ?? inPlaces.get(removed.id);
     if (before === undefined) return skip(change.path, 'missing-in-linear');
-    if ((seen === undefined && !removed.trashed && removed.archivedAt === null) || before.updatedAt !== removed.updatedAt
-      || before.title !== removed.title || before.trashed !== removed.trashed || before.archivedAt !== removed.archivedAt
-      || before.projectId !== removed.projectId || before.teamId !== removed.teamId) return skip(change.path, 'edited-in-linear');
+    if ((seen === undefined && !removed.trashed && removed.archivedAt === null) || !unchangedSince(removed, before)) return skip(change.path, 'edited-in-linear');
     if (removed.trashed || removed.archivedAt !== null) {
       await linear.restoreDocument(removed.id);
       // Unarchiving changes status and may change the timestamp. The text and location should still be the same.
