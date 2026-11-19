@@ -55,7 +55,7 @@ var require_identity = __commonJS({
     var isDocument = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === DOC;
     var isMap3 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === MAP;
     var isPair = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === PAIR;
-    var isScalar = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SCALAR;
+    var isScalar2 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SCALAR;
     var isSeq2 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SEQ;
     function isCollection(node2) {
       if (node2 && typeof node2 === "object")
@@ -77,7 +77,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node2) => (isScalar(node2) || isCollection(node2)) && !!node2.anchor;
+    var hasAnchor = (node2) => (isScalar2(node2) || isCollection(node2)) && !!node2.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -92,7 +92,7 @@ var require_identity = __commonJS({
     exports.isMap = isMap3;
     exports.isNode = isNode;
     exports.isPair = isPair;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.isSeq = isSeq2;
   }
 });
@@ -4003,10 +4003,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start: start2, key, sep: sep3, value } = collItem;
+        const { start: start2, key, sep: sep4, value } = collItem;
         const keyProps = resolveProps.resolveProps(start2, {
           indicator: "explicit-key-ind",
-          next: key ?? sep3?.[0],
+          next: key ?? sep4?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4020,7 +4020,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep3) {
+          if (!keyProps.anchor && !keyProps.tag && !sep4) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map4.comment)
@@ -4044,7 +4044,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map4.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep3 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep4 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4060,7 +4060,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep3, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep4, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4151,7 +4151,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end2) {
         let hasSpace = false;
-        let sep3 = "";
+        let sep4 = "";
         for (const token of end2) {
           const { source, type } = token;
           switch (type) {
@@ -4165,13 +4165,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep3 + cb;
-              sep3 = "";
+                comment += sep4 + cb;
+              sep4 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep3 += source;
+                sep4 += source;
               hasSpace = true;
               break;
             default:
@@ -4214,18 +4214,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start: start2, key, sep: sep3, value } = collItem;
+        const { start: start2, key, sep: sep4, value } = collItem;
         const props = resolveProps.resolveProps(start2, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep3?.[0],
+          next: key ?? sep4?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep3 && !value) {
+          if (!props.anchor && !props.tag && !sep4 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4279,8 +4279,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap3 && !sep3 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep3, null, props, onError);
+        if (!isMap3 && !sep4 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep4, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4292,7 +4292,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep3 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep4 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4303,8 +4303,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap3 && !props.found && ctx.options.strict) {
-              if (sep3)
-                for (const st of sep3) {
+              if (sep4)
+                for (const st of sep4) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4321,7 +4321,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep3, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep4, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4501,7 +4501,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep3 = "";
+      let sep4 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines2[i][0].slice(trimIndent) + "\n";
@@ -4518,24 +4518,24 @@ var require_resolve_block_scalar = __commonJS({
           indent2 = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep3 + indent2.slice(trimIndent) + content4;
-          sep3 = "\n";
+          value += sep4 + indent2.slice(trimIndent) + content4;
+          sep4 = "\n";
         } else if (indent2.length > trimIndent || content4[0] === "	") {
-          if (sep3 === " ")
-            sep3 = "\n";
-          else if (!prevMoreIndented && sep3 === "\n")
-            sep3 = "\n\n";
-          value += sep3 + indent2.slice(trimIndent) + content4;
-          sep3 = "\n";
+          if (sep4 === " ")
+            sep4 = "\n";
+          else if (!prevMoreIndented && sep4 === "\n")
+            sep4 = "\n\n";
+          value += sep4 + indent2.slice(trimIndent) + content4;
+          sep4 = "\n";
           prevMoreIndented = true;
         } else if (content4 === "") {
-          if (sep3 === "\n")
+          if (sep4 === "\n")
             value += "\n";
           else
-            sep3 = "\n";
+            sep4 = "\n";
         } else {
-          value += sep3 + content4;
-          sep3 = " ";
+          value += sep4 + content4;
+          sep4 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4718,25 +4718,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep3 = " ";
+      let sep4 = " ";
       let pos = line2.lastIndex;
       while (match = line2.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep3 === "\n")
-            res += sep3;
+          if (sep4 === "\n")
+            res += sep4;
           else
-            sep3 = "\n";
+            sep4 = "\n";
         } else {
-          res += sep3 + lm;
-          sep3 = " ";
+          res += sep4 + lm;
+          sep4 = " ";
         }
         pos = line2.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep3 + (match?.[1] ?? "");
+      return res + sep4 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5546,14 +5546,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start: start2, key, sep: sep3, value }) {
+    function stringifyItem({ start: start2, key, sep: sep4, value }) {
       let res = "";
       for (const st of start2)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep3)
-        for (const st of sep3)
+      if (sep4)
+        for (const st of sep4)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -5637,7 +5637,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM2:
@@ -5721,7 +5721,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR;
     exports.isCollection = isCollection;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -6720,18 +6720,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start2 = getFirstKeyStartProps(prev);
-          let sep3;
+          let sep4;
           if (scalar.end) {
-            sep3 = scalar.end;
-            sep3.push(this.sourceToken);
+            sep4 = scalar.end;
+            sep4.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep3 = [this.sourceToken];
+            sep4 = [this.sourceToken];
           const map4 = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start: start2, key: scalar, sep: sep3 }]
+            items: [{ start: start2, key: scalar, sep: sep4 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map4;
@@ -6884,15 +6884,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start3 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep3 = it.sep;
-                  sep3.push(this.sourceToken);
+                  const sep4 = it.sep;
+                  sep4.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start3, key, sep: sep3 }]
+                    items: [{ start: start3, key, sep: sep4 }]
                   });
                 } else if (start2.length > 0) {
                   it.sep = it.sep.concat(start2, this.sourceToken);
@@ -7086,13 +7086,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start2 = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep3 = fc.end.splice(1, fc.end.length);
-            sep3.push(this.sourceToken);
+            const sep4 = fc.end.splice(1, fc.end.length);
+            sep4.push(this.sourceToken);
             const map4 = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start: start2, key: fc, sep: sep3 }]
+              items: [{ start: start2, key: fc, sep: sep4 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map4;
@@ -7377,6 +7377,7 @@ import { appendFile } from "node:fs/promises";
 // src/messages.ts
 var MESSAGES = {
   "assets.budget": "attachment budget exceeded; reduce attachments and retry",
+  "assets.image-repair-budget": "Markdown exceeds the image repair budget.",
   "assets.spool-changed": "temporary attachment content changed; retry the run",
   "assets.spool-budget": "temporary attachment storage budget exceeded; reduce attachments and retry",
   // The command line and the action.
@@ -7423,7 +7424,7 @@ var MESSAGES = {
   "inputs.app-slug": "the input app-slug must be a GitHub App slug (letters, digits and hyphens)",
   "inputs.merge-grace": "the input merge-grace-seconds must be an integer from 0 to 120",
   "inputs.check-deadline": "the input check-deadline-minutes must be an integer from 10 to 1440",
-  "inputs.required-checks": "the input required-checks must name each check with the publisher it must come from, one per line, as `<name> @ actions:<workflow file>`, `<name> @ app:<App id>` or `<name> @ status:<account id>`, with names of at most 255 characters; this line is not: {line}",
+  "inputs.required-checks": "the input required-checks must name each check with the publisher it must come from, one per line, as `<name> @ actions` for a GitHub Actions job, `<name> @ app:<App id>` or `<name> @ status:<account id>`, with names of at most 255 characters; this line is not: {line}",
   "inputs.merge-without-checks": "the input merge-without-checks must be true or false",
   "inputs.direction": "the input direction {problem} (initial sync never picks a direction itself)",
   "inputs.direction-missing": "is required",
@@ -7446,6 +7447,7 @@ var MESSAGES = {
   "pull-request.initial-pending": "stopped short ({code}): an initial sync from Linear waits for a person to merge it",
   "pull-request.head-unverified": "waits for a person ({code}): the sync pull request also changes files that are not synchronized documents or their assets ({files}); a person reviews and merges it",
   "pull-request.not-finished": "not finished ({code}); run it again",
+  "pull-request.suspended-asset-discovery": "the batch stays suspended ({code}). {reason}",
   // The setup check.
   "setup.left-out": "{count} files left out, not synced: {files}{more}",
   "setup.left-out-more": ", and {count} more",
@@ -7469,6 +7471,7 @@ var MESSAGES = {
   "setup.sync-branch-rules-open": "{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch",
   "setup.sync-branch-rule-restricted": "{rule} restricted",
   "setup.sync-branch-rule-open": "{rule} not restricted on {branches}",
+  "setup.security-hooks-inline-allow": "security hook {hooks} runs Gitleaks without {flag}, so an inline gitleaks:allow comment in a document from Linear exempts its line; add {flag} (init updates the hook it generated) and keep exceptions in .gitleaks.toml or .gitleaksignore",
   "setup.security-hooks-missing": 'no pre-commit hook marked "alias: {alias}": content is pushed unchecked',
   "setup.hooks-invalid-yaml": "{file} is not valid YAML",
   "setup.hooks-no-repos": '{file} has no "repos" list',
@@ -7481,16 +7484,19 @@ var MESSAGES = {
   "setup.target-not-found": "not found in Linear: {targets}",
   "setup.target-ambiguous": "more than one match in Linear: {targets}",
   "setup.target-shared": "more than one folder maps to {targets}",
+  "setup.linear-untrusted": "{ref} is at a commit the sync did not sign: someone else pushed it, or the sync wrote it before it signed its records or under another linear-client-secret. Its files could reach the sync pull request unchecked. Run initial sync again to record the state anew. The sync wrote nothing.",
   "setup.initial-sync-unfinished": "An initial sync stopped before it finished: run it again with the same inputs first. The sync wrote nothing.",
   "setup.initial-sync-required": "{ref} does not exist: run initial sync first. The sync wrote nothing.",
   "setup.initial-pull-request-pending": "The pull request of the initial sync from Linear is not merged into {tracked} yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch {sync} and run initial sync again to replace the snapshot. The sync wrote nothing.",
   // Annotations and the mapping.
+  "annotations.blob-too-large": "{readme}: cannot check the folder annotation because the blob exceeds {bytes} bytes",
   "annotations.invalid-yaml": "{readme}: the front matter with {teamKey} or {projectKey} is not valid YAML",
   "annotations.empty-name": "{readme}: {key} must be a non-empty name",
   "annotations.nested-team": '{readme}: names a team inside the folder of team "{team}" ({folder})',
   "annotations.nested-project": '{readme}: names a project inside the folder of project "{project}" ({folder})',
   "annotations.project-without-team": "{readme}: names a project, but neither it nor a folder above names a team",
   "mapping.content-not-read": "the content of {path} was not read",
+  "mapping.blob-budget": "mapping-blob-budget: Markdown blob reads exceed the {bytes}-byte budget",
   // State refs and their files.
   "config.invalid-remote": 'remote "{remote}" is not a valid remote name',
   "config.invalid-branch": '{key} "{branch}" is not a valid branch name: {problem}',
@@ -7501,6 +7507,7 @@ var MESSAGES = {
   "config.prefix-outside-refs": 'refPrefix "{prefix}" must start with "refs/" and name a folder under it',
   "config.prefix-reserved": 'refPrefix "{prefix}" must not be under refs/heads, refs/tags or refs/remotes',
   "git.failed": "git {args} failed with exit code {code}: {stderr}",
+  "git.output-limit": "git-output-limit: command output exceeded {bytes} bytes",
   "lfs.needs-git-lfs": "files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync",
   "objects.missing": "git object {oid} is missing",
   "objects.not-blob": "git object {oid} is a {type}, not a blob",
@@ -7547,9 +7554,6 @@ var MESSAGES = {
   "github.updating": "updating a pull request",
   "github.closing": "closing a pull request",
   "github.sending": "sending {method} to the pull request API",
-  "github.reading-workflow-runs": "reading the workflow runs of the sync pull request",
-  "github.reading-workflow-revision": "reading the workflow revision of the sync pull request",
-  "github.reading-workflow-jobs": "reading the workflow jobs of the sync pull request",
   "github.reading-check-runs": "reading the check runs of the sync pull request",
   "github.reading-annotations": "reading the annotations of a failed check run",
   "github.reading-statuses": "reading the commit statuses of the sync pull request",
@@ -7557,6 +7561,7 @@ var MESSAGES = {
   // Initial sync.
   "initial-sync.state-moved": "a state ref moved while the run was writing",
   "initial-sync.document-not-listed": "the planned document for {path} was not listed",
+  "initial-sync.document-not-read": "the planned document for {path} was not read with its text",
   "initial-sync.links-not-prepared": "document-links: apply before prepare",
   "initial-sync.project-not-resolved": 'project "{project}" of team "{team}" was not resolved',
   "initial-sync.team-not-resolved": 'team "{team}" was not resolved',
@@ -7564,12 +7569,13 @@ var MESSAGES = {
   "initial-sync.misplaced": "the recorded tree maps {count} files to other documents",
   "initial-sync.over-upload-limit": "{files}: over the upload limit of {limit} bytes",
   "initial-sync.lfs-extensions": "{files}: stored with LFS extensions, which are not supported",
+  "initial-sync.link-provenance-unknown": "{files}: linked as a plain link from a document Linear holds, and the state that names the links Linear members wrote is lost",
   "initial-sync.upload-unreadable": "{file} cannot be read: {reason}",
   "initial-sync.uploads-not-prepared": "the uploads transform was not prepared",
   // The sync.
   "sync.needs-initial-sync": "run initial sync first",
   "sync.places-unresolved": "the previously recorded document places could not be resolved",
-  "sync.recorded-place-unknown": "the recorded state names a Linear place for {folder} that the tracked branch never named; the state refs were changed outside the sync",
+  "sync.recorded-place-unknown": "the recorded state names a Linear place for {folder} that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync",
   "sync.lost-lease": "state moved while recording document marks",
   "sync.no-lfs-pointer": "LFS did not return a pointer",
   "sync.lfs-pointer-mismatch": "LFS returned a pointer to other content than it was given",
@@ -7581,6 +7587,9 @@ var MESSAGES = {
   "sync.invalid-update-time": "a document has an invalid update time",
   "sync.invalid-security-config": "invalid security hook configuration",
   "sync.needs-pre-commit": "security hooks require pre-commit on PATH; install pre-commit before capture",
+  "sync.security-link-outside": "a tracked symbolic link leads outside the tree the security hooks check",
+  "sync.security-tree-differs": "the tree the security hooks check differs from the tracked tree",
+  "sync.security-scratch-budget": "security-scratch-budget: the tracked files the security hooks need exceed the {bytes}-byte scratch budget",
   "sync.no-runner-temp": "RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job",
   "sync.staged-version": "the staged candidates come from another version of the action",
   "sync.staged-hash": "the staged manifest names a file that is not a content hash",
@@ -7998,6 +8007,18 @@ var LinearReads = class _LinearReads {
     if (this.mode !== "record" || this.#ended || answer.status < 200 || answer.status >= 300) return;
     this.#add(key, { ...answer, body: this.#spool.put(answer.body) });
   }
+  /** A mark of what is kept so far, for `dropSince`. */
+  mark() {
+    return this.#order.length;
+  }
+  /**
+   * Drops the answers kept since `mark`: reads whose result the caller threw
+   * away (a listing it started again), so the next step never takes them.
+   */
+  dropSince(mark2) {
+    if (this.mode !== "record") return;
+    for (const key of this.#order.splice(mark2).reverse()) this.#answers.get(key)?.pop();
+  }
   /** The capture ended: nothing more is kept or answered. */
   end() {
     this.#ended = true;
@@ -8090,6 +8111,11 @@ var GraphQLTransport = class {
     const answer = await this.#network(operation, "query", requestBody);
     if (key !== void 0) this.reads?.keep(key, { status: answer.status, type: "application/json", body: Buffer.from(answer.text, "utf8") });
     return answer.data;
+  }
+  /** A read that must reflect the token as it is now: never answered from the read store, never kept in it. */
+  async queryLive(operation, query, variables = {}) {
+    if (this.#stopped) throw this.#refuse(operation, "query", this.#stopped);
+    return (await this.#network(operation, "query", JSON.stringify({ query, variables, operationName: operation }))).data;
   }
   /** Every write obtains its answer directly from the network, never the read store. */
   async mutate(operation, query, variables = {}) {
@@ -8218,6 +8244,7 @@ var MAX_PAGE_SIZE = 250;
 var DEFAULT_PAGE_SIZE = MAX_PAGE_SIZE;
 var CREATE_ATTEMPTS = 3;
 var UPLOAD_TIMEOUT_MS = 12e4;
+var LISTING_ATTEMPTS = 3;
 var DOCUMENT_FIELDS = `
   id title slugId icon color trashed archivedAt createdAt updatedAt documentContentId
   content @include(if: $withContent)
@@ -8303,7 +8330,7 @@ var LinearClient = class {
    * Reads one document by id with `document(id:)`, which answers for trashed
    * and archived documents too; null when Linear no longer has the id.
    */
-  async getDocument(id) {
+  async getDocument(id, { withContent = false } = {}) {
     try {
       const data = await this.request(
         "GetDocument",
@@ -8311,7 +8338,7 @@ var LinearClient = class {
         `query GetDocument($id: String!, $withContent: Boolean!) {
           document(id: $id) { ${DOCUMENT_FIELDS} }
         }`,
-        { id, withContent: false }
+        { id, withContent }
       );
       return data.document === null ? null : toDocument(data.document);
     } catch (error) {
@@ -8370,14 +8397,14 @@ var LinearClient = class {
    * content without a request and returns the stored content of a content
    * change: one request as measured, two when the facts call for a read-back.
    */
-  async updateDocument(id, patch) {
+  async updateDocument(id, patch, withContent = false) {
     this.#refuseTooLong("UpdateDocument", patch);
     const data = await this.mutate(
       "UpdateDocument",
       `mutation UpdateDocument($id: String!, $input: DocumentUpdateInput!, $withContent: Boolean!) {
         documentUpdate(id: $id, input: $input) { success document { ${DOCUMENT_FIELDS} } }
       }`,
-      { id, input: patch, withContent: patch.content !== void 0 }
+      { id, input: patch, withContent: withContent || patch.content !== void 0 }
     );
     const updated = toDocument(succeeded("UpdateDocument", data.documentUpdate).document);
     this.stats.wrote("UpdateDocument");
@@ -8646,7 +8673,24 @@ var LinearClient = class {
     if (!stored) throw new LinearReadBackError(operation, written);
     return stored;
   }
+  /**
+   * Every document the filter matches, page by page. When Linear forgets the
+   * cursor of a later page, the listing restarts from the first page, at most
+   * `LISTING_ATTEMPTS` listings in all; the last refusal is then thrown as is,
+   * also when the client stopped meanwhile, so the run names Linear's detail.
+   */
   async #pagedDocuments(operation, filter, options) {
+    for (let attempt = 1; ; attempt += 1) {
+      const kept = this.transport.reads?.mark();
+      try {
+        return await this.#listPages(operation, filter, options);
+      } catch (error) {
+        if (!isCursorNotFound(error) || attempt >= LISTING_ATTEMPTS || this.stopped) throw error;
+        if (kept !== void 0) this.transport.reads?.dropSince(kept);
+      }
+    }
+  }
+  async #listPages(operation, filter, options) {
     const result = [];
     let after = null;
     do {
@@ -8684,6 +8728,9 @@ function succeeded(operation, payload) {
 function toDocument(raw) {
   const { project, team, trashed, ...rest } = raw;
   return { ...rest, projectId: project?.id ?? null, teamId: team?.id ?? null, trashed: trashed === true };
+}
+function isCursorNotFound(error) {
+  return error instanceof LinearGraphQLError && error.code === "INPUT_ERROR" && /cursor not found/i.test(error.detail ?? "");
 }
 function clampPageSize(pageSize) {
   return Math.max(1, Math.min(MAX_PAGE_SIZE, Math.floor(pageSize ?? DEFAULT_PAGE_SIZE)));
@@ -8913,6 +8960,8 @@ function suspendedBranch(config) {
 
 // src/state/git.ts
 import { spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 var GitError = class extends Error {
   args;
   code;
@@ -8923,6 +8972,14 @@ var GitError = class extends Error {
     this.args = args;
     this.code = code4;
     this.stderr = stderr;
+  }
+};
+var GitOutputLimitError = class extends Error {
+  bytes;
+  constructor(bytes) {
+    super(message("git.output-limit", { bytes }));
+    this.name = "GitOutputLimitError";
+    this.bytes = bytes;
   }
 };
 var BASE_ENV = {
@@ -8941,22 +8998,44 @@ var Git = class {
     this.dir = dir;
     this.env = env;
   }
-  run(args, options = {}) {
+  environment(options) {
     const env = options.onlyEnv !== void 0 ? { ...BASE_ENV, ...options.onlyEnv } : { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
     for (const key of Object.keys(env)) {
       if (env[key] === void 0) delete env[key];
     }
+    return env;
+  }
+  run(args, options = {}) {
+    const env = this.environment(options);
     const okCodes = options.okCodes ?? [0];
     return new Promise((resolve3, reject) => {
       const child = spawn("git", args, { cwd: this.dir, env, stdio: ["pipe", "pipe", "pipe"] });
       const out = [];
       const err = [];
-      child.stdout.on("data", (chunk) => out.push(chunk));
-      child.stderr.on("data", (chunk) => err.push(chunk));
+      let exceededLimit;
+      const collector = (chunks, limit) => {
+        let bytes = 0;
+        return (chunk) => {
+          if (exceededLimit !== void 0) return;
+          bytes += chunk.length;
+          if (limit !== void 0 && bytes > limit) {
+            exceededLimit = limit;
+            child.kill("SIGKILL");
+            return;
+          }
+          chunks.push(chunk);
+        };
+      };
+      child.stdout.on("data", collector(out, options.maxOutputBytes));
+      child.stderr.on("data", collector(err, options.maxOutputBytes === void 0 ? void 0 : 64 * 1024));
       child.on("error", reject);
       child.stdin.on("error", () => {
       });
       child.on("close", (code4) => {
+        if (exceededLimit !== void 0) {
+          reject(new GitOutputLimitError(exceededLimit));
+          return;
+        }
         const result = {
           code: code4 ?? -1,
           stdout: Buffer.concat(out),
@@ -8967,6 +9046,34 @@ var Git = class {
       });
       child.stdin.end(options.input ?? "");
     });
+  }
+  /**
+   * Runs git and writes its standard output to a new file at `path` as it
+   * arrives, so output of any size is never held in memory. Standard error
+   * is capped at 64 KiB. A failing exit is a `GitError`.
+   */
+  async runToFile(args, path2, fileMode) {
+    const child = spawn("git", args, { cwd: this.dir, env: this.environment({}), stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      if (stderr.length < 64 * 1024) stderr += chunk.toString("utf8");
+    });
+    const exited = new Promise((resolve3, reject) => {
+      child.on("error", reject);
+      child.on("close", (code5) => resolve3(code5 ?? -1));
+    });
+    exited.catch(() => {
+    });
+    try {
+      await pipeline(child.stdout, createWriteStream(path2, { flags: "wx", mode: fileMode }));
+    } catch (error) {
+      child.kill("SIGKILL");
+      await exited.catch(() => {
+      });
+      throw error;
+    }
+    const code4 = await exited;
+    if (code4 !== 0) throw new GitError(args, code4, stderr);
   }
   /** Runs git and returns standard output as text without the final newline. */
   async text(args, options = {}) {
@@ -9008,12 +9115,60 @@ var PushedKey = class {
     const expected = Buffer.from(this.#mac(ref, record.head), "hex");
     return timingSafeEqual(expected, Buffer.from(record.mac, "hex")) ? record.head : void 0;
   }
+  /** Bind the uploaded bytes and their URL to this repository. */
+  uploadMac(hash, url) {
+    return createHmac("sha256", this.#key).update(JSON.stringify(["upload-v1", this.#repository, hash, url])).digest("hex");
+  }
+  verifiesUpload(hash, url, mac) {
+    if (typeof mac !== "string" || !PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.uploadMac(hash, url), "hex"), Buffer.from(mac, "hex"));
+  }
+  /**
+   * The signature of a `linear` state commit the sync writes: its tree, its
+   * parents and its message, bound to this repository (see `observation.ts`).
+   */
+  observationMac(tree, parents, text6) {
+    return createHmac("sha256", this.#key).update(JSON.stringify(["linear-v1", this.#repository, tree, parents, text6])).digest("hex");
+  }
+  verifiesObservation(tree, parents, text6, mac) {
+    if (!PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.observationMac(tree, parents, text6), "hex"), Buffer.from(mac, "hex"));
+  }
   #mac(ref, head) {
     return createHmac("sha256", this.#key).update(`${this.#repository}
 ${ref}
 ${head}`).digest("hex");
   }
 };
+
+// src/state/observation.ts
+var SIGNATURE = "Sync-signature";
+var SIGNED = new RegExp(`^([\\s\\S]*)\\n\\n${SIGNATURE}: ([0-9a-f]{64})\\n$`);
+function signObservation(key) {
+  return (tree, parents, message2) => {
+    const text6 = message2.replace(/\n+$/, "");
+    return `${text6}
+
+${SIGNATURE}: ${key.observationMac(tree, parents, text6)}
+`;
+  };
+}
+async function signedObservation(git, commit2, key) {
+  const [tree = "", parents = ""] = (await git.text(["show", "-s", "--format=%T%n%P", commit2])).split("\n");
+  const raw = (await git.run(["cat-file", "commit", commit2])).stdout.toString("utf8");
+  const split = raw.indexOf("\n\n");
+  if (split < 0) return false;
+  if (raw.slice(0, split).split("\n").some((line2) => line2.startsWith("encoding "))) return false;
+  const signed = SIGNED.exec(raw.slice(split + 2));
+  if (signed === null) return false;
+  return key.verifiesObservation(tree, parents.split(" ").filter(Boolean), signed[1], signed[2]);
+}
+async function trustedObservation(git, linear, tracked, key) {
+  if (await signedObservation(git, linear, key)) return true;
+  const tree = await git.text(["rev-parse", `${linear}^{tree}`]);
+  const trees = (await git.text(["log", "--first-parent", "--format=%T", tracked])).split("\n");
+  return trees.includes(tree);
+}
 
 // src/state/lfs.ts
 import { createHash as createHash3 } from "node:crypto";
@@ -9106,10 +9261,15 @@ size ${pointer.size}
   try {
     const result = await git.run([...remoteArgs, "lfs", "smudge", "--", path2], {
       input: pointerText,
-      env: { GIT_LFS_SKIP_SMUDGE: void 0 }
+      env: { GIT_LFS_SKIP_SMUDGE: void 0 },
+      // A failed smudge may return the pointer itself.
+      maxOutputBytes: Math.max(pointer.size, MAX_POINTER_SIZE)
     });
     content4 = result.stdout;
   } catch (error) {
+    if (error instanceof GitOutputLimitError) {
+      return { ok: false, reason: `LFS object ${pointer.oid} could not be read (output limit exceeded)` };
+    }
     if (!(error instanceof GitError)) throw error;
     if (!await runs()) throw new GitLfsMissingError();
     return { ok: false, reason: `LFS object ${pointer.oid} could not be read (exit code ${error.code})` };
@@ -9125,8 +9285,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join3 } from "node:path";
 var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
-async function listTree(git, treeish) {
-  const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish]);
+async function listTree(git, treeish, maxOutputBytes) {
+  const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
+  return parseTreeListing(stdout);
+}
+function parseTreeListing(stdout) {
   const entries = [];
   for (const record of stdout.toString("utf8").split("\0")) {
     if (record === "") continue;
@@ -9143,11 +9306,11 @@ async function listTree(git, treeish) {
   }
   return entries;
 }
-async function readBlobs(git, oids) {
+async function readBlobs(git, oids, maxOutputBytes) {
   const unique = [...new Set(oids)];
   const result = /* @__PURE__ */ new Map();
   if (unique.length === 0) return result;
-  const { stdout } = await git.run(["cat-file", "--batch"], { input: unique.join("\n") + "\n" });
+  const { stdout } = await git.run(["cat-file", "--batch"], { input: unique.join("\n") + "\n", maxOutputBytes });
   let offset = 0;
   for (const oid of unique) {
     const end2 = stdout.indexOf(10, offset);
@@ -9187,11 +9350,13 @@ async function commitTree(git, spec) {
     const parentTree = await git.text(["rev-parse", `${spec.parents[0]}^{tree}`]);
     if (parentTree === tree) return spec.parents[0];
   }
-  const args = ["commit-tree", "--no-gpg-sign", tree];
-  for (const parent of spec.parents) args.push("-p", parent);
+  const args = ["-c", "i18n.commitEncoding=UTF-8", "commit-tree", "--no-gpg-sign", tree];
+  const parents = [...new Set(spec.parents)];
+  for (const parent of parents) args.push("-p", parent);
   args.push("-F", "-");
+  const text6 = spec.sign === void 0 ? spec.message : spec.sign(tree, parents, spec.message);
   return git.text(args, {
-    input: spec.message.endsWith("\n") ? spec.message : `${spec.message}
+    input: text6.endsWith("\n") ? text6 : `${text6}
 `,
     env: {
       GIT_AUTHOR_NAME: spec.identity.name,
@@ -9374,6 +9539,7 @@ function parsePorcelain(output) {
 }
 var IDS_FILE = "ids.json";
 var UPLOADS_FILE = "uploads.json";
+var UPLOAD_MACS_FILE = "upload-macs.json";
 async function readIds(git, commit2) {
   const data = await readJsonFile(git, commit2, IDS_FILE);
   const map4 = /* @__PURE__ */ new Map();
@@ -9391,11 +9557,16 @@ function checkUniqueDocumentIds(ids) {
     seen.add(entry.id);
   }
 }
-async function readUploads(git, commit2) {
-  const data = await readJsonFile(git, commit2, UPLOADS_FILE);
+async function readUploads(git, commit2, key) {
+  const [data, macs] = await Promise.all([
+    readJsonFile(git, commit2, UPLOADS_FILE),
+    readJsonFile(git, commit2, UPLOAD_MACS_FILE, { optional: true })
+  ]);
   const map4 = /* @__PURE__ */ new Map();
   for (const [hash, url] of Object.entries(data)) {
     if (!/^[0-9a-f]{64}$/.test(hash) || typeof url !== "string") throw new Error(message("state.invalid-entry", { file: UPLOADS_FILE }));
+    if (!/^https:\/\/uploads\.linear\.app\//i.test(url) || /[<>\\\s\x00-\x1f\x7f]/u.test(url)) continue;
+    if (!key.verifiesUpload(hash, url, macs[hash])) continue;
     map4.set(hash, url);
   }
   return map4;
@@ -9516,9 +9687,13 @@ async function uploadsRebuilding(git, commit2) {
   const subject = await git.text(["log", "-1", "--format=%s", "--fixed-strings", `--grep=${UPLOADS_REBUILDING}`, `--grep=${UPLOADS_REBUILT}`, commit2]);
   return subject.trim() === UPLOADS_REBUILDING;
 }
-function commitUploads(git, parent, uploads, identity, options = {}) {
-  const data = Object.fromEntries([...uploads.entries()].sort(([a], [b]) => compareStrings(a, b)));
-  return commitJsonFiles(git, parent, /* @__PURE__ */ new Map([[UPLOADS_FILE, data]]), options.message ?? "Update upload cache", identity, options.always === true);
+function commitUploads(git, parent, uploads, identity, key, options = {}) {
+  const entries = [...uploads.entries()].sort(([a], [b]) => compareStrings(a, b));
+  const data = Object.fromEntries(entries);
+  const macs = Object.fromEntries(entries.map(([hash, url]) => [hash, key.uploadMac(hash, url)]));
+  const files = /* @__PURE__ */ new Map([[UPLOADS_FILE, data]]);
+  if (entries.length > 0) files.set(UPLOAD_MACS_FILE, macs);
+  return commitJsonFiles(git, parent, files, options.message ?? "Update upload cache", identity, options.always === true);
 }
 function compareStrings(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -9527,6 +9702,7 @@ function isIdEntry(value) {
   if (typeof value !== "object" || value === null) return false;
   const entry = value;
   if (typeof entry.id !== "string" || entry.id === "") return false;
+  if (entry.observedDigest !== void 0 && (typeof entry.observedDigest !== "string" || !/^[0-9a-f]{64}$/.test(entry.observedDigest))) return false;
   if (entry.plainFiles !== void 0 && (!Array.isArray(entry.plainFiles) || !entry.plainFiles.every((path2) => typeof path2 === "string"))) return false;
   if (entry.releasePaths !== void 0 && (!Array.isArray(entry.releasePaths) || !entry.releasePaths.every((path2) => typeof path2 === "string"))) return false;
   if (entry.releaseBase !== void 0 && (typeof entry.releaseBase !== "string" || !/^[0-9a-f]{40,64}$/.test(entry.releaseBase))) return false;
@@ -9552,18 +9728,25 @@ function isMarkNotice(value) {
   const notice = value;
   return typeof notice.id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(notice.id) && (notice.kind === "conflict" || notice.kind === "blocked") && typeof notice.bodyHash === "string" && /^[0-9a-f]{64}$/.test(notice.bodyHash) && typeof notice.posted === "boolean";
 }
-async function readJsonFile(git, commit2, file) {
+async function readJsonFile(git, commit2, file, options = {}) {
   if (commit2 === null) return {};
   const read = await git.run(["cat-file", "blob", `${commit2}:${file}`], { okCodes: [0, 128] });
-  if (read.code !== 0) throw new Error(message("state.file-missing", { file, commit: commit2 }));
+  if (read.code !== 0) {
+    if (options.optional) return {};
+    throw new Error(message("state.file-missing", { file, commit: commit2 }));
+  }
   const blob = read.stdout;
   let data;
   try {
     data = JSON.parse(blob.toString("utf8"));
   } catch {
+    if (options.optional) return {};
     throw new Error(message("state.invalid-json", { file, commit: commit2 }));
   }
-  if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error(message("state.not-object", { file, commit: commit2 }));
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    if (options.optional) return {};
+    throw new Error(message("state.not-object", { file, commit: commit2 }));
+  }
   return data;
 }
 function commitJsonFiles(git, parent, files, message2, identity, always = false) {
@@ -9625,7 +9808,7 @@ var LINT_RULES = {
   "table-hash-cell": "A table body cell starting with # becomes a heading.",
   "image-in-link": "The link around an image is dropped.",
   "content-too-long": "Documents over 250,000 characters are rejected.",
-  "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected.",
+  "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax would take too long to parse.",
   "duplicate-title": "Two files map to one document title.",
   "table-alignment": "Table column alignment is dropped.",
   "link-scheme": "Links must use http, https, mailto, a path or a fragment.",
@@ -9679,8 +9862,7 @@ var PERMISSION_PROBES = [
     requires: "contents:write"
   },
   { permission: "checks:read", method: "GET", path: (commit2) => `/commits/${commit2}/check-runs?per_page=1` },
-  { permission: "statuses:read", method: "GET", path: (commit2) => `/commits/${commit2}/statuses?per_page=1` },
-  { permission: "actions:read", method: "GET", path: () => "/actions/runs?per_page=1" }
+  { permission: "statuses:read", method: "GET", path: (commit2) => `/commits/${commit2}/statuses?per_page=1` }
 ];
 async function checkGitHub(target) {
   const request2 = requester(target);
@@ -9952,100 +10134,14 @@ function isTransportError(error) {
 
 // src/pull-request/merge.ts
 import { setTimeout as sleep } from "node:timers/promises";
-
-// src/pull-request/actions.ts
-var PAGE_SIZE = 100;
-var MAX_PAGES = 10;
-var PASSING = /* @__PURE__ */ new Set(["success", "neutral", "skipped"]);
-var positive = (value) => Number.isSafeInteger(value) && value > 0;
-async function actionsJobs(target, sha, suite) {
-  const jobs = /* @__PURE__ */ new Map();
-  const answer = await request(target, "GET", `/actions/runs?check_suite_id=${suite}&head_sha=${sha}&per_page=2`);
-  const body2 = answer.json;
-  if (answer.status !== 200 || !Array.isArray(body2?.workflow_runs) || typeof body2.total_count !== "number") {
-    throw new PullRequestError(message("github.reading-workflow-runs"), answer.status);
-  }
-  if (body2.total_count !== 1 || body2.workflow_runs.length !== 1) return jobs;
-  const run = body2.workflow_runs[0];
-  if (!run || !positive(run.id) || run.check_suite_id !== suite || run.head_sha !== sha || typeof run.head_repository?.full_name !== "string" || run.head_repository.full_name.toLowerCase() !== target.repository.toLowerCase() || typeof run.path !== "string") return jobs;
-  let revision;
-  let moved;
-  if (run.event === "dynamic" && ["dynamic/github-code-scanning/codeql", "dynamic/github-code-quality/codeql"].includes(run.path) && positive(run.workflow_id)) {
-    revision = `github-managed:${run.workflow_id}`;
-  } else {
-    if (!["push", "pull_request", "workflow_dispatch"].includes(String(run.event))) return jobs;
-    if (run.event === "pull_request") {
-      const inferred = await inferredPullRequestWorkflowRevision(target, sha, run);
-      if (typeof inferred === "object") moved = inferred;
-      else revision = inferred;
-    } else revision = await workflowRevision(target, sha, run.path);
-  }
-  const workflow = revision === void 0 ? null : { path: run.path, revision, event: run.event };
-  await readJobs(target, sha, run.id, workflow, moved, jobs);
-  return jobs;
-}
-async function inferredPullRequestWorkflowRevision(target, sha, run) {
-  const api = (target.apiUrl ?? "https://api.github.com").replace(/\/$/, "");
-  const repository = `${api}/repos/${target.repository}`.toLowerCase();
-  if (!Array.isArray(run.pull_requests) || run.pull_requests.length > 1) return void 0;
-  if (run.pull_requests.length === 0) return { path: run.path, event: "pull_request" };
-  const pr = run.pull_requests[0];
-  const base = pr?.base;
-  if (typeof pr?.head?.sha !== "string" || !/^[0-9a-f]{40,64}$/.test(pr.head.sha) || base?.ref !== (target.baseBranch ?? "main") || typeof base.sha !== "string" || !/^[0-9a-f]{40,64}$/.test(base.sha) || typeof base.repo?.url !== "string" || base.repo.url.toLowerCase() !== repository) return void 0;
-  const headRevision = await workflowRevision(target, sha, run.path);
-  if (pr.head.sha !== sha) {
-    const baseRevision2 = base.sha === sha ? headRevision : await workflowRevision(target, base.sha, run.path);
-    return { path: run.path, event: "pull_request", ...headRevision !== void 0 && headRevision === baseRevision2 ? { standIn: headRevision } : {} };
-  }
-  if (base.sha === sha) return headRevision;
-  const baseRevision = await workflowRevision(target, base.sha, run.path);
-  if (headRevision === baseRevision) return headRevision;
-  const compared = await request(target, "GET", `/compare/${base.sha}...${sha}`);
-  const common = compared.json?.merge_base_commit?.sha;
-  if (compared.status !== 200) throw new PullRequestError(message("github.reading-workflow-revision"), compared.status);
-  if (typeof common !== "string" || !/^[0-9a-f]{40,64}$/.test(common)) return void 0;
-  const ancestorRevision = await workflowRevision(target, common, run.path);
-  if (headRevision === ancestorRevision) return baseRevision;
-  if (baseRevision === ancestorRevision) return headRevision;
-  return void 0;
-}
-var WORKFLOW_FILE = /^\.github\/workflows\/[^/\\\x00-\x1f]+\.ya?ml$/;
-async function workflowRevision(target, sha, path2) {
-  if (!WORKFLOW_FILE.test(path2)) return void 0;
-  const encoded = path2.split("/").map(encodeURIComponent).join("/");
-  const file = await request(target, "GET", `/contents/${encoded}?ref=${sha}`);
-  const blob = file.json;
-  if (file.status === 404) return void 0;
-  if (file.status !== 200) throw new PullRequestError(message("github.reading-workflow-revision"), file.status);
-  return blob?.type === "file" && typeof blob.sha === "string" && /^[0-9a-f]{40,64}$/.test(blob.sha) ? blob.sha : void 0;
-}
-async function readJobs(target, sha, run, workflow, moved, jobs) {
-  const api = (target.apiUrl ?? "https://api.github.com").replace(/\/$/, "");
-  const prefix = `${api}/repos/${target.repository}/check-runs/`;
-  for (let page = 1; page <= MAX_PAGES; page += 1) {
-    const answer = await request(target, "GET", `/actions/runs/${run}/jobs?filter=latest&per_page=${PAGE_SIZE}&page=${page}`);
-    const body2 = answer.json;
-    if (answer.status !== 200 || !Array.isArray(body2?.jobs) || typeof body2.total_count !== "number") {
-      throw new PullRequestError(message("github.reading-workflow-jobs"), answer.status);
-    }
-    for (const job of body2.jobs) {
-      if (typeof job.name !== "string" || job.run_id !== run || job.head_sha !== sha || typeof job.check_run_url !== "string" || !job.check_run_url.toLowerCase().startsWith(prefix.toLowerCase())) continue;
-      const suffix = job.check_run_url.slice(prefix.length);
-      if (!/^[1-9][0-9]*$/.test(suffix) || !positive(Number(suffix))) continue;
-      const outcome2 = job.status !== "completed" ? "pending" : typeof job.conclusion === "string" && PASSING.has(job.conclusion) ? "passed" : "failed";
-      jobs.set(Number(suffix), { workflow, ...workflow === null && moved !== void 0 ? { moved } : {}, name: job.name, outcome: outcome2 });
-    }
-    if (page * PAGE_SIZE >= body2.total_count || body2.jobs.length === 0) break;
-  }
-}
-
-// src/pull-request/merge.ts
 var PASSING_CONCLUSIONS = /* @__PURE__ */ new Set(["success", "neutral", "skipped"]);
-var MAX_PAGES2 = 10;
-var PAGE_SIZE2 = 100;
+var MAX_PAGES = 10;
+var PAGE_SIZE = 100;
 var REAL_CLOCK = { now: () => performance.now(), sleep: (ms) => sleep(ms), timeout: (ms) => AbortSignal.timeout(ms) };
 var CommitNotFoundError = class extends PullRequestError {
 };
+var ACTIONS_APP = { kind: "run", id: 15368 };
+var ACTIONS_APP_SLUG = "github-actions";
 async function readChecks(target, sha, expect = {}) {
   const creators = (expect.checks ?? []).some(({ publisher: publisher2 }) => publisher2?.kind === "status");
   return checkState(await readCommitChecks(target, sha, { creators }), expect);
@@ -10055,9 +10151,8 @@ async function readCommitChecks(target, sha, options) {
   const unlisted = [];
   let seen = 0;
   let hasRuns = false;
-  const suites = /* @__PURE__ */ new Map();
   for (let page = 1; ; page += 1) {
-    const answer2 = await request(target, "GET", `/commits/${sha}/check-runs?per_page=${PAGE_SIZE2}&page=${page}`);
+    const answer2 = await request(target, "GET", `/commits/${sha}/check-runs?per_page=${PAGE_SIZE}&page=${page}`);
     const body2 = answer2.json;
     if (answer2.status !== 200 || body2 === null || typeof body2.total_count !== "number" || !Array.isArray(body2.check_runs)) {
       const ErrorType = page === 1 && (answer2.status === 404 || answer2.status === 422) ? CommitNotFoundError : PullRequestError;
@@ -10067,29 +10162,17 @@ async function readCommitChecks(target, sha, options) {
     for (const run of body2.check_runs) {
       const name = typeof run.name === "string" ? run.name : "unnamed check";
       const outcome2 = run.status !== "completed" ? "pending" : typeof run.conclusion === "string" && PASSING_CONCLUSIONS.has(run.conclusion) ? "passed" : "failed";
-      const check2 = commitCheck(name, outcome2, publisher("run", run.app?.id), run.html_url, run.id);
-      if (run.app?.slug === "github-actions") {
-        const suite = run.check_suite?.id;
-        let job;
-        if (Number.isSafeInteger(suite) && suite > 0) {
-          if (!suites.has(suite)) suites.set(suite, await actionsJobs(target, sha, suite));
-          job = suites.get(suite)?.get(run.id);
-        }
-        if (job?.name !== name) job = void 0;
-        check2.workflow = job?.workflow ?? null;
-        if (job?.moved !== void 0) check2.moved = job.moved;
-        if (check2.outcome === "passed") check2.outcome = job?.workflow ? job.outcome : "pending";
-      }
-      checks.push(check2);
+      const from = run.app?.slug === ACTIONS_APP_SLUG ? ACTIONS_APP : publisher("run", run.app?.id);
+      checks.push(commitCheck(name, outcome2, from, run.html_url, run.id));
     }
     seen += body2.check_runs.length;
     if (seen >= body2.total_count) break;
-    if (body2.check_runs.length === 0 || page === MAX_PAGES2) {
+    if (body2.check_runs.length === 0 || page === MAX_PAGES) {
       unlisted.push(`${body2.total_count - seen} more check runs`);
       break;
     }
   }
-  const answer = await request(target, "GET", `/commits/${sha}/status?per_page=${PAGE_SIZE2}`);
+  const answer = await request(target, "GET", `/commits/${sha}/status?per_page=${PAGE_SIZE}`);
   const combined = answer.json;
   if (answer.status !== 200 || combined === null || typeof combined.total_count !== "number" || !Array.isArray(combined.statuses)) {
     throw new PullRequestError(message("github.reading-statuses"), answer.status);
@@ -10106,12 +10189,12 @@ async function readCommitChecks(target, sha, options) {
 }
 async function statusCreators(target, sha, ids) {
   const creators = /* @__PURE__ */ new Map();
-  for (let page = 1; page <= MAX_PAGES2 && creators.size < ids.size; page += 1) {
-    const answer = await request(target, "GET", `/commits/${sha}/statuses?per_page=${PAGE_SIZE2}&page=${page}`);
+  for (let page = 1; page <= MAX_PAGES && creators.size < ids.size; page += 1) {
+    const answer = await request(target, "GET", `/commits/${sha}/statuses?per_page=${PAGE_SIZE}&page=${page}`);
     if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message("github.reading-statuses"), answer.status);
     const listed = answer.json;
     for (const status of listed) if (ids.has(status.id) && !creators.has(status.id)) creators.set(status.id, status.creator?.id);
-    if (listed.length < PAGE_SIZE2) break;
+    if (listed.length < PAGE_SIZE) break;
   }
   return creators;
 }
@@ -10128,12 +10211,6 @@ function commitCheck(name, outcome2, from, url, checkRunId) {
   return check2;
 }
 function publishedBy(check2, expected) {
-  if (expected.workflow === void 0 && check2.workflow !== void 0) return false;
-  if (expected.workflow !== void 0) {
-    const actual = check2.workflow;
-    const wanted = expected.workflow;
-    if (!actual || !wanted || actual.path !== wanted.path || actual.revision !== wanted.revision || actual.event === "dynamic" !== (wanted.event === "dynamic")) return false;
-  }
   if (expected.publisher === void 0) return true;
   return expected.publisher.id > 0 && check2.publisher.kind === expected.publisher.kind && check2.publisher.id === expected.publisher.id;
 }
@@ -10173,7 +10250,7 @@ var MAX_ANNOTATION_PAGES = 5;
 async function readAnnotations(target, checkRunId) {
   const annotations = [];
   for (let page = 1; page <= MAX_ANNOTATION_PAGES; page += 1) {
-    const answer = await request(target, "GET", `/check-runs/${checkRunId}/annotations?per_page=${PAGE_SIZE2}&page=${page}`);
+    const answer = await request(target, "GET", `/check-runs/${checkRunId}/annotations?per_page=${PAGE_SIZE}&page=${page}`);
     if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message("github.reading-annotations"), answer.status);
     const items = answer.json;
     for (const item of items) {
@@ -10181,7 +10258,7 @@ async function readAnnotations(target, checkRunId) {
       const line2 = Number.isSafeInteger(item.start_line) && item.start_line > 0 ? item.start_line : 0;
       annotations.push({ path: item.path, line: line2, message: item.message, ...typeof item.title === "string" && item.title !== "" ? { title: item.title } : {} });
     }
-    if (items.length < PAGE_SIZE2) break;
+    if (items.length < PAGE_SIZE) break;
   }
   return annotations;
 }
@@ -15472,6 +15549,7 @@ function webmHeader(bytes) {
 }
 var SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 var XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
+var MAX_SVG_COMPLEXITY = 5e4;
 var STATIC_SVG_ELEMENTS = /* @__PURE__ */ new Set([
   "svg",
   "g",
@@ -15543,24 +15621,40 @@ function safeSvg(bytes) {
     const document4 = parseXml(xml, { preserveDocumentType: true });
     const root2 = document4.root;
     if (root2 === null || root2.name.split(":").at(-1) !== "svg") return false;
-    const nodes = document4.children.map((node2) => ({ node: node2, scope: /* @__PURE__ */ new Map([["", SVG_NAMESPACE]]) }));
-    while (nodes.length > 0) {
-      const { node: node2, scope: parent } = nodes.pop();
+    const scope = /* @__PURE__ */ new Map([["", SVG_NAMESPACE]]);
+    const undo = [];
+    const stack = [{ children: document4.children, next: 0, undoLength: 0 }];
+    let complexity2 = 0;
+    while (stack.length > 0) {
+      const frame = stack.at(-1);
+      if (frame.next === frame.children.length) {
+        while (undo.length > frame.undoLength) {
+          const [prefix, previous3] = undo.pop();
+          if (previous3 === void 0) scope.delete(prefix);
+          else scope.set(prefix, previous3);
+        }
+        stack.pop();
+        continue;
+      }
+      const node2 = frame.children[frame.next++];
       if (node2.type === "doctype" || node2.type === "pi") return false;
       if (!(node2 instanceof XmlElement)) continue;
-      let scope = parent;
-      for (const [key, value] of Object.entries(node2.attributes)) {
+      if (++complexity2 > MAX_SVG_COMPLEXITY) return false;
+      const undoLength = undo.length;
+      const attributes = Object.entries(node2.attributes);
+      for (const [key, value] of attributes) {
         const prefix = declaredPrefix(key);
         if (prefix === null) return false;
         if (prefix === void 0) continue;
-        if (scope === parent) scope = new Map(parent);
+        if (++complexity2 > MAX_SVG_COMPLEXITY) return false;
+        undo.push([prefix, scope.get(prefix)]);
         scope.set(prefix, value);
       }
       const name = node2.name.split(":");
       if (name.length > 2 || scope.get(name.length === 2 ? name[0] : "") !== SVG_NAMESPACE) return false;
       if (!STATIC_SVG_ELEMENTS.has(name.at(-1))) return false;
       if (name.at(-1) === "style" && (node2.children.some((child) => child instanceof XmlElement) || loadsCss(node2.text))) return false;
-      for (const [key, value] of Object.entries(node2.attributes)) {
+      for (const [key, value] of attributes) {
         if (declaredPrefix(key) !== void 0) continue;
         const parts = key.split(":");
         if (parts.length > 2) return false;
@@ -15568,7 +15662,7 @@ function safeSvg(bytes) {
         if (prefix === "xml" ? !["lang", "space"].includes(local) : prefix !== "" && scope.get(prefix) !== XLINK_NAMESPACE) return false;
         if (local.toLowerCase().startsWith("on") || local === "href" && !value.startsWith("#") || loadsCss(value)) return false;
       }
-      nodes.push(...node2.children.map((child) => ({ node: child, scope })));
+      stack.push({ children: node2.children, next: 0, undoLength });
     }
     return true;
   } catch {
@@ -24521,6 +24615,7 @@ function lineCount(text6) {
 }
 var MARKDOWN_MAX_DEPTH = 128;
 var MARKDOWN_MAX_NODES = 5e5;
+var INLINE_WORK_LIMIT = 25e7;
 var MarkdownLimitError = class extends Error {
   limit;
   constructor(limit) {
@@ -24530,10 +24625,42 @@ var MarkdownLimitError = class extends Error {
   }
 };
 function parse2(body2, mdastExtensions = []) {
-  const tree = fromMarkdown(body2, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
+  const tree = fromMarkdown(body2, { extensions: [gfm(), inlineBudget()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
   visit2(tree, () => {
   });
   return tree;
+}
+var isAsciiAlphanumeric = (code4) => code4 !== null && (code4 >= 48 && code4 <= 57 || code4 >= 65 && code4 <= 90 || code4 >= 97 && code4 <= 122);
+var SPLIT_CODES = [33, 38, 42, 60, 91, 92, 93, 95, 96, 126, -5, -4, -3];
+var WORD_CODES = [43, 45, 46];
+for (let code4 = 48; code4 <= 122; code4++) if (isAsciiAlphanumeric(code4)) WORD_CODES.push(code4);
+function inlineBudget() {
+  let work = 0;
+  const bracketed = /* @__PURE__ */ new WeakSet();
+  const count4 = function() {
+    work += this.events.length;
+    if (work > INLINE_WORK_LIMIT) throw new MarkdownLimitError("inline");
+    return false;
+  };
+  const split = { name: "inlineBudget", tokenize: (_effects, _ok, nok) => nok, previous: count4 };
+  const bracket = {
+    ...split,
+    previous() {
+      bracketed.add(this);
+      return count4.call(this);
+    }
+  };
+  const word = {
+    ...split,
+    previous(previous3) {
+      return bracketed.has(this) && !isAsciiAlphanumeric(previous3) ? count4.call(this) : false;
+    }
+  };
+  const text6 = {};
+  for (const code4 of SPLIT_CODES) text6[code4] = split;
+  for (const code4 of WORD_CODES) text6[code4] = word;
+  text6[91] = bracket;
+  return { text: text6 };
 }
 function markdownBaseline(body2) {
   if (body2 === void 0) return void 0;
@@ -24551,7 +24678,7 @@ function sameMarkdown(a, b) {
 }
 var LINEAR_SYNTAX_ESCAPES = { "\\$": "\uE000", "\\+": "\uE001" };
 function comparable(body2) {
-  const marked = body2.replace(/\\[$+]/g, (escape2) => LINEAR_SYNTAX_ESCAPES[escape2]).replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, "$1 \uE002");
+  const marked = nestedFileBlocksOnItemLine(body2).replace(/\\[$+]/g, (escape2) => LINEAR_SYNTAX_ESCAPES[escape2]).replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, "$1 \uE002");
   const tree = parse2(marked);
   const strip = (node2) => {
     const { position: _position, ...rest } = node2;
@@ -24560,6 +24687,62 @@ function comparable(body2) {
     return rest;
   };
   return strip(tree);
+}
+var BARE_MARKER = /^((?: {0,3}>[ ]?)*)( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
+var MAYBE_NESTED_BLOCK = /\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
+function nestedFileBlocksOnItemLine(body2) {
+  if (!MAYBE_NESTED_BLOCK.test(body2)) return body2;
+  const lines2 = body2.split("\n");
+  const joins = /* @__PURE__ */ new Map();
+  visit2(parse2(body2), (node2) => {
+    if (node2.type !== "paragraph") return;
+    for (const [index2, link2] of node2.children.entries()) {
+      const before = node2.children[index2 - 1];
+      if (link2.type !== "link" || before?.type !== "text") continue;
+      const linkLine = link2.position.start.line - 1;
+      const markerLine = linkLine - 1;
+      if (markerLine < node2.position.start.line || before.position.start.line - 1 > markerLine) continue;
+      const marker = BARE_MARKER.exec(lines2[markerLine]);
+      if (marker === null) continue;
+      const [, prefix, spaces, bullet] = marker;
+      const column = prefix.length + spaces.length + bullet.length + 1;
+      const line2 = lines2[linkLine];
+      if (link2.position.start.column - 1 !== column || line2.slice(0, column) !== prefix + " ".repeat(column - prefix.length)) continue;
+      if (link2.position.end.line - 1 !== linkLine || line2.slice(link2.position.end.column - 1).trim() !== "") continue;
+      joins.set(markerLine, column);
+      break;
+    }
+  });
+  if (joins.size === 0) return body2;
+  const result = [];
+  for (let index2 = 0; index2 < lines2.length; index2++) {
+    const column = joins.get(index2);
+    if (column === void 0) {
+      result.push(lines2[index2]);
+      continue;
+    }
+    result.push(`${lines2[index2].replace(/[ \t\r]*$/, "")} ${lines2[index2 + 1].slice(column)}`);
+    index2++;
+  }
+  return result.join("\n");
+}
+function isCalloutComment(node2) {
+  return node2?.type === "html" && /^<!--\s*linear:callout\b[^]*?-->$/.test(node2.value);
+}
+var ALERT = /^\[!\w+\][ \t]*$/;
+function isCallout(node2, source) {
+  if (node2.type !== "blockquote" || !node2.position) return false;
+  const first = source.split("\n")[node2.position.start.line - 1] ?? "";
+  return ALERT.test(first.replace(/\r$/, "").replace(/^ {0,3}> ?/, ""));
+}
+function quoteLines(text6) {
+  const codeLines = /* @__PURE__ */ new Set();
+  if (!/^(`{3,}|~{3,})/m.test(text6)) return text6.split("\n").map((line2) => line2 === "" ? ">" : `> ${line2}`).join("\n");
+  for (const node2 of parse2(text6).children) {
+    if (node2.type !== "code" || !node2.position) continue;
+    for (let line2 = node2.position.start.line; line2 <= node2.position.end.line; line2++) codeLines.add(line2);
+  }
+  return text6.split("\n").map((line2, index2) => line2 === "" && !codeLines.has(index2 + 1) ? ">" : `> ${line2}`).join("\n");
 }
 function start(node2) {
   return node2.position?.start.offset ?? 0;
@@ -24613,12 +24796,36 @@ function allowedLink(url) {
   const normalized = url.replace(/[\u0000-\u0020\u007f]/g, "");
   return !/^[a-z][a-z\d+.-]*:/i.test(normalized) || /^(?:https?|mailto):/i.test(normalized);
 }
+function destination(url) {
+  return url.replace(/ /g, "%20").replace(/\\(?=[!-/:-@[-`{-~])/g, "\\\\").replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, "&amp;");
+}
+function linkDestination(url) {
+  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`));
+  const trailing = /\\*$/.exec(inner)[0].length;
+  return `<${inner}${trailing % 2 === 1 ? "\\" : ""}>`;
+}
+function imageDestination(url) {
+  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+function bracketedLabel(source, open2) {
+  let depth2 = 0;
+  for (let at = open2; at < source.length; at++) {
+    const char = source[at];
+    if (char === "\\") at++;
+    else if (char === "[") depth2++;
+    else if (char === "]" && --depth2 === 0) return source.slice(open2 + 1, at);
+  }
+  return "";
+}
 
 // src/format/lint.ts
 var GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 var QUOTE_PREFIX = /^ {0,3}> ?/;
 var ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-var URL_OR_LINK_ATTRIBUTE = /[a-z][a-z0-9+.-]*:\/\/|\b(?:src|href)\s*=/i;
+var LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
+var SCHEME_CHARACTER = /[a-z0-9+.-]/i;
+var LETTER = /[a-z]/i;
+var PADDING_CELL_LENGTH = 3;
 function linkedFileCheck(documentPath2, isFile) {
   return (url) => {
     const target = resolveTarget(documentPath2, url);
@@ -24632,23 +24839,101 @@ function lintText(file, text6, options = {}) {
   const { head, body: body2 } = splitFile(text6);
   const offset = lineCount(head);
   const findings = [];
+  const reported = /* @__PURE__ */ new Set();
   const report = (rule, bodyLine) => {
-    if (findings.some((f) => f.rule === rule && f.line === bodyLine + offset)) return;
+    const key = `${rule}:${bodyLine}`;
+    if (reported.has(key)) return;
+    reported.add(key);
     findings.push({ file, line: bodyLine + offset, rule, message: LINT_RULES[rule] });
   };
+  const sorted = () => findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
   if (inAssetsFolder(file)) report("document-in-assets-folder", 1);
   const content4 = body2.replace(/\r\n?/g, "\n");
-  if ([...content4].length > CONTENT_LIMIT) report("content-too-long", 1);
+  if (overContentLimit(content4)) {
+    report("content-too-long", 1);
+    return sorted();
+  }
   let tree;
   try {
     tree = parse2(content4);
   } catch (error) {
     if (!(error instanceof MarkdownLimitError)) throw error;
     report("markdown-complexity", 1);
-    return findings;
+    return sorted();
   }
   lintTree(file, tree, content4, report, options);
-  return findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
+  return sorted();
+}
+function paddingOverLimit(tree) {
+  let nodes = 0;
+  const tables = [];
+  visit2(tree, (node2) => {
+    nodes++;
+    if (node2.type === "table") tables.push(node2);
+  });
+  let added = 0;
+  for (const table of tables) {
+    added += paddingCells(table);
+    if (added * PADDING_CELL_LENGTH > CONTENT_LIMIT || nodes + added > MARKDOWN_MAX_NODES) return line(table);
+  }
+  return void 0;
+}
+function referencesOverLimit(tree, body2) {
+  const definitions = /* @__PURE__ */ new Map();
+  const dropped = [];
+  const references = [];
+  visit2(tree, (node2) => {
+    if (node2.type === "definition") {
+      dropped.push(node2);
+      if (!definitions.has(node2.identifier)) definitions.set(node2.identifier, node2);
+    }
+    if (node2.type === "linkReference" || node2.type === "imageReference") references.push(node2);
+  });
+  if (references.length === 0) return void 0;
+  const destinations2 = /* @__PURE__ */ new Map();
+  const destinationLength = (reference, url) => {
+    const key = `${reference.type}:${reference.identifier}`;
+    let length2 = destinations2.get(key);
+    if (length2 === void 0) {
+      length2 = codePoints(reference.type === "linkReference" ? linkDestination(url) : imageDestination(url));
+      destinations2.set(key, length2);
+    }
+    return length2;
+  };
+  const length = (from, to) => codePoints(body2.slice(from, to));
+  let written = codePoints(body2) - dropped.reduce((sum, node2) => sum + length(start(node2), end(node2)), 0);
+  let crossing;
+  for (const reference of references) {
+    const definition3 = definitions.get(reference.identifier);
+    if (definition3 === void 0) continue;
+    const label = reference.type === "linkReference" ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body2, start(reference) + 1)) + 5;
+    const before = written;
+    written += label + destinationLength(reference, definition3.url) - length(start(reference), end(reference));
+    if ((before <= CONTENT_LIMIT || crossing === void 0) && written > CONTENT_LIMIT) crossing = line(reference);
+  }
+  return written > CONTENT_LIMIT ? crossing : void 0;
+}
+function childrenLength(reference, length) {
+  const first = reference.children[0];
+  const last = reference.children.at(-1);
+  return first === void 0 || last === void 0 ? 0 : length(start(first), end(last));
+}
+function codePoints(text6) {
+  let count4 = 0;
+  for (const _ of text6) count4++;
+  return count4;
+}
+function paddingCells(table) {
+  const width = table.children[0]?.children.length ?? 0;
+  let cells = 0;
+  for (const row of table.children) cells += Math.max(0, width - row.children.length);
+  return cells;
+}
+function overContentLimit(text6) {
+  if (text6.length <= CONTENT_LIMIT) return false;
+  let count4 = 0;
+  for (const _ of text6) if (++count4 > CONTENT_LIMIT) return true;
+  return false;
 }
 function lintTree(file, tree, body2, report, options) {
   const definitions = /* @__PURE__ */ new Map();
@@ -24660,6 +24945,13 @@ function lintTree(file, tree, body2, report, options) {
     if (rule !== void 0) report(rule, at);
   };
   const codeLines = /* @__PURE__ */ new Set();
+  const padded = paddingOverLimit(tree);
+  if (padded !== void 0) report("markdown-complexity", padded);
+  const expanded = referencesOverLimit(tree, body2);
+  if (expanded !== void 0) {
+    report("markdown-complexity", expanded);
+    return;
+  }
   visit2(tree, (node2, ancestors) => {
     switch (node2.type) {
       case "code":
@@ -24726,7 +25018,7 @@ function lintTree(file, tree, body2, report, options) {
         break;
       }
       case "html":
-        if (URL_OR_LINK_ATTRIBUTE.test(node2.value)) report("url-in-html", line(node2));
+        if (hasUrlOrLinkAttribute(node2.value)) report("url-in-html", line(node2));
         break;
       default:
         break;
@@ -24763,19 +25055,29 @@ function duplicateTitles(files) {
   }
   return [...groups.values()].filter((group) => group.length > 1).flatMap((group) => group.map((file) => ({ file, line: 1, rule: "duplicate-title", message: `${LINT_RULES["duplicate-title"]} (${group.filter((other) => other !== file).join(", ")})` })));
 }
+function hasUrlOrLinkAttribute(html2) {
+  if (LINK_ATTRIBUTE.test(html2)) return true;
+  for (let at = html2.indexOf("://"); at !== -1; at = html2.indexOf("://", at + 1)) {
+    for (let i = at - 1; i >= 0 && SCHEME_CHARACTER.test(html2[i]); i--) {
+      if (LETTER.test(html2[i])) return true;
+    }
+  }
+  return false;
+}
 
 // src/format/fix.ts
 function fixText(text6, options = {}) {
   if (lintText("", text6).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text6;
   const { head, body: body2 } = splitFile(text6);
-  const fixed = fixBody(body2.replace(/\r\n?/g, "\n"), options);
-  return joinFile(head, fixed);
+  return joinFile(head, fixBody(body2.replace(/\r\n?/g, "\n"), options));
 }
 function fixBody(body2, options) {
   if (body2.trim() === "") return "";
   let current = body2;
   for (let pass = 0; pass < 5; pass++) {
-    const next = new Writer(current, parse2(current), options).root();
+    const tree = parse2(current);
+    if (pass > 0 && (paddingOverLimit(tree) !== void 0 || referencesOverLimit(tree, current) !== void 0)) throw new MarkdownLimitError("nodes");
+    const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
   }
@@ -24801,9 +25103,18 @@ var Writer = class {
   root() {
     return this.blocks(this.tree.children);
   }
-  /** Sibling blocks, one blank line apart. Reference definitions are written inline instead. */
+  /**
+   * Sibling blocks, one blank line apart, except that Linear writes a
+   * callout's color comment directly above the callout. Reference
+   * definitions are written inline instead.
+   */
   blocks(nodes) {
-    return nodes.filter((node2) => node2.type !== "definition").flatMap((node2) => this.block(node2)).join("\n\n");
+    const written = nodes.filter((node2) => node2.type !== "definition").map((node2) => ({ node: node2, parts: this.block(node2) })).filter(({ parts }) => parts.length > 0);
+    return written.map(({ node: node2, parts }, index2) => {
+      const next = written[index2 + 1];
+      if (next === void 0) return parts.join("\n\n");
+      return parts.join("\n\n") + (isCalloutComment(node2) && isCallout(next.node, this.source) ? "\n" : "\n\n");
+    }).join("");
   }
   block(node2) {
     switch (node2.type) {
@@ -24817,7 +25128,7 @@ var Writer = class {
         this.containers.push({ kind: "quote" });
         const content4 = this.blocks(node2.children);
         this.containers.pop();
-        return [prefixLines(content4, "> ", ">")];
+        return [quoteLines(content4)];
       }
       case "list":
         return [this.list(node2)];
@@ -24855,16 +25166,16 @@ ${math[1]}
     }
     return parts.map((part) => this.inline(part).trim()).filter((part) => part !== "");
   }
-  list(node2) {
+  list(node2, interruptsParagraph = false) {
     return node2.children.map((item, index2) => {
       const marker = item.checked !== null && item.checked !== void 0 ? `- [${item.checked ? "X" : " "}]` : node2.ordered ? `${(node2.start ?? 1) + index2}.` : "*";
-      return this.listItem(item, marker);
+      return this.listItem(item, marker, interruptsParagraph && index2 === 0);
     }).join("\n");
   }
-  listItem(item, marker) {
+  listItem(item, marker, interruptsParagraph) {
     const indent2 = " ".repeat(marker.split(" ")[0].length + 1);
     const [first] = item.children;
-    const attachment = first?.type === "paragraph" && item.children.length === 1 ? attachmentLink(first) : void 0;
+    const attachment = itemAttachment(item);
     if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
       const path2 = attachment.url.split(/[?#]/)[0];
       const bullet = marker === "*";
@@ -24872,16 +25183,20 @@ ${math[1]}
         const label = this.inline(attachment.children);
         const destination2 = imageDestination(attachment.url);
         if (bullet && VIDEO.test(path2)) return `${marker} [${label}](${destination2})`;
-        return `${marker} 
+        if (!interruptsParagraph || marker.startsWith("- ")) {
+          return `${marker} 
 ${indent2}[${label}](${destination2})`;
+        }
       }
     }
     if (first === void 0) return marker;
     this.containers.push({ kind: "item", indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
     let content4 = "";
     item.children.forEach((child, index2) => {
-      if (index2 > 0) content4 += child.type === "list" && item.children[index2 - 1]?.type === "paragraph" ? "\n" : "\n\n";
-      content4 += this.block(child).join("\n\n");
+      const previous3 = item.children[index2 - 1];
+      const interrupts = child.type === "list" && previous3?.type === "paragraph" && (!child.ordered || (child.start ?? 1) === 1) && child.children[0].children.length > 0 && !(child.position.start.line > previous3.position.end.line + 1 && startsWithFileBlock(child));
+      if (index2 > 0) content4 += interrupts ? "\n" : "\n\n";
+      content4 += child.type === "list" ? this.list(child, interrupts) : this.block(child).join("\n\n");
     });
     this.containers.pop();
     return `${marker} ${prefixLines(content4, indent2, "").slice(indent2.length)}`;
@@ -24993,18 +25308,11 @@ ${indent2}[${label}](${destination2})`;
   }
   /** Linear writes every link destination in angle brackets, without a title. */
   link(children, url) {
-    return `[${this.inline(children)}](<${destination(url).replace(/</g, "%3C").replace(/>/g, "%3E")}>)`;
+    return `[${this.inline(children)}](${linkDestination(url)})`;
   }
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
   label(open2) {
-    let depth2 = 0;
-    for (let at = open2; at < this.source.length; at++) {
-      const char = this.source[at];
-      if (char === "\\") at++;
-      else if (char === "[") depth2++;
-      else if (char === "]" && --depth2 === 0) return this.source.slice(open2 + 1, at);
-    }
-    return "";
+    return bracketedLabel(this.source, open2);
   }
 };
 function textEdits(source, from, to, keepAt) {
@@ -25049,21 +25357,49 @@ function insideLine(source, at) {
   const after = source.slice(at + 2, lineEnd);
   return before !== "" && !/^[ \t#]*$/.test(after);
 }
-function destination(url) {
-  return url.replace(/ /g, "%20").replace(/\\(?=[!-/:-@[-`{-~])/g, "\\\\").replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, "&amp;");
+function fixLinearText(linearText, content4, inRepository) {
+  const split = splitFile(linearText);
+  const text6 = joinFile(split.head, nestedFileBlocksOnItemLine(split.body));
+  const notUploaded = relativeUrls(content4, /* @__PURE__ */ new Set(["link", "image"]));
+  const linear = { linkedFileExists: (url) => !notUploaded.has(url) };
+  const fixed = fixText(text6, linear);
+  if (fixed !== text6 && !sameMarkdown(splitFile(fixed).body, splitFile(text6).body)) return text6;
+  if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]) && inRepository(url))) return fixed;
+  const hooked = fixText(text6, { linkedFileExists: (url) => !notUploaded.has(url) || inRepository(url) });
+  return fixText(hooked, linear) === fixed ? hooked : fixed;
 }
-function imageDestination(url) {
-  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+function relativeFileBlocksAsLinks(body2) {
+  const joins = [];
+  visit2(parse2(body2), (node2) => {
+    if (node2.type !== "listItem" || node2.children.length !== 1) return;
+    const [paragraph2] = node2.children;
+    if (paragraph2?.type !== "paragraph" || attachmentLink(paragraph2) === void 0) return;
+    const gap = /[ \t]*\r?\n[ \t>]*$/.exec(body2.slice(start(node2), start(paragraph2)));
+    if (gap !== null) joins.push({ from: start(paragraph2) - gap[0].length, to: start(paragraph2) });
+  });
+  let result = body2;
+  for (const { from, to } of joins.reverse()) result = `${result.slice(0, from)} ${result.slice(to)}`;
+  return result;
 }
-function relativeLinkUrls(text6) {
+function relativeUrls(text6, types) {
   const urls = /* @__PURE__ */ new Set();
   visit2(parse2(splitFile(text6).body), (node2) => {
-    if (node2.type === "link" && !/^[a-z][a-z0-9+.-]*:/i.test(node2.url) && !node2.url.startsWith("#")) urls.add(node2.url);
+    if ((node2.type === "link" || node2.type === "image") && types.has(node2.type) && !/^[a-z][a-z0-9+.-]*:/i.test(node2.url) && !node2.url.startsWith("#")) urls.add(node2.url);
   });
   return urls;
 }
 var VIDEO = /\.(?:mp4|mov|webm)$/i;
 var AUDIO = /\.mp3$/i;
+function startsWithFileBlock(list4) {
+  const [item] = list4.children;
+  if (item === void 0) return false;
+  const link2 = itemAttachment(item);
+  return link2 !== void 0 && link2.position.start.line > item.position.start.line;
+}
+function itemAttachment(item) {
+  const [first] = item.children;
+  return first?.type === "paragraph" && item.children.length === 1 ? attachmentLink(first) : void 0;
+}
 function attachmentLink(paragraph2) {
   const [only] = paragraph2.children;
   if (paragraph2.children.length !== 1 || only?.type !== "link") return void 0;
@@ -25128,6 +25464,17 @@ function isFileAt(root2, path2) {
     return false;
   }
 }
+function fixedText(file, text6, cwd) {
+  try {
+    return fixText(text6, { linkedFileExists: linkedFileResolver(file, cwd) });
+  } catch (error) {
+    if (error instanceof MarkdownLimitError) return void 0;
+    throw error;
+  }
+}
+function complexity(file) {
+  return { file, line: 1, rule: "markdown-complexity", message: LINT_RULES["markdown-complexity"] };
+}
 function runLint(paths, cwd = process.cwd()) {
   const problem = badPaths(paths, cwd);
   if (problem !== void 0) return { exitCode: USAGE_ERROR, stdout: "", stderr: `${problem}
@@ -25138,7 +25485,9 @@ function runLint(paths, cwd = process.cwd()) {
   const unfixed = files.filter((file) => {
     if (failing.has(file)) return false;
     const text6 = readFileSync2(join5(cwd, file), "utf8");
-    return fixText(text6, { linkedFileExists: linkedFileResolver(file, cwd) }) !== text6;
+    const fixed = fixedText(file, text6, cwd);
+    if (fixed === void 0) findings.push(complexity(file));
+    return fixed !== void 0 && fixed !== text6;
   });
   const stdout = describe(findings) + unfixed.map((file) => `${file}: not in Linear's form; run fix
 `).join("");
@@ -25156,8 +25505,9 @@ function runFix(paths, cwd = process.cwd()) {
     if (failing.has(file)) continue;
     const path2 = join5(cwd, file);
     const text6 = readFileSync2(path2, "utf8");
-    const fixed = fixText(text6, { linkedFileExists: linkedFileResolver(file, cwd) });
-    if (fixed !== text6) {
+    const fixed = fixedText(file, text6, cwd);
+    if (fixed === void 0) before.push(complexity(file));
+    else if (fixed !== text6) {
       writeFileSync2(path2, fixed);
       changed2.push(file);
     }
@@ -25170,7 +25520,7 @@ function runFix(paths, cwd = process.cwd()) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "0.1.0-rc.17" : packageJson.version;
+var VERSION2 = true ? "0.1.0-rc.18" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -25198,10 +25548,10 @@ function fixUrl(code4) {
 
 // src/sync/capture.ts
 var import_yaml2 = __toESM(require_dist(), 1);
-import { createHash as createHash13 } from "node:crypto";
+import { createHash as createHash16 } from "node:crypto";
 import { mkdtemp as mkdtemp5, rm as rm5 } from "node:fs/promises";
 import { tmpdir as tmpdir6 } from "node:os";
-import { join as join10, posix as posix7 } from "node:path";
+import { join as join10, posix as posix9 } from "node:path";
 
 // src/mapping/front-matter.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -25303,6 +25653,59 @@ function display(folder) {
   return folder === "" ? "the repository root" : `${folder}/`;
 }
 
+// src/mapping/blobs.ts
+var MAPPING_FILE_BYTES = 4 * CONTENT_LIMIT;
+var MAPPING_TREE_BYTES = 16 * 1024 * 1024;
+var MAPPING_BUDGET_BYTES = 64 * 1024 * 1024;
+var BATCH_BYTES = 4 * 1024 * 1024;
+var MappingBlobBudgetError = class extends Error {
+  code = "mapping-blob-budget";
+  constructor() {
+    super(message("mapping.blob-budget", { bytes: MAPPING_BUDGET_BYTES }));
+    this.name = "MappingBlobBudgetError";
+  }
+};
+function readableBlob(entry) {
+  return entry.size !== null && Number.isSafeInteger(entry.size) && entry.size >= 0 && entry.size <= MAPPING_FILE_BYTES;
+}
+var MappingBlobBudget = class {
+  remaining = MAPPING_BUDGET_BYTES;
+  charged = /* @__PURE__ */ new Set();
+  cache = /* @__PURE__ */ new Map();
+  /** Reuse the same entry objects for each pass over the tree. */
+  check(entries) {
+    for (const entry of entries) {
+      if (!readableBlob(entry) || this.charged.has(entry)) continue;
+      this.charged.add(entry);
+      this.remaining -= entry.size;
+      if (this.remaining < 0) throw new MappingBlobBudgetError();
+    }
+  }
+  async read(git, entries) {
+    this.check(entries);
+    const unique = /* @__PURE__ */ new Map();
+    for (const entry of entries) {
+      if (!readableBlob(entry)) continue;
+      unique.set(entry.oid, entry.oid.length + String(entry.size).length + 8 + entry.size);
+    }
+    let batch = [];
+    let bytes = 0;
+    const readBatch = async () => {
+      for (const [oid, content4] of await readBlobs(git, batch, bytes)) this.cache.set(oid, content4);
+      batch = [];
+      bytes = 0;
+    };
+    for (const [oid, size] of unique) {
+      if (this.cache.has(oid)) continue;
+      if (bytes + size > BATCH_BYTES) await readBatch();
+      batch.push(oid);
+      bytes += size;
+    }
+    await readBatch();
+    return new Map([...unique.keys()].map((oid) => [oid, this.cache.get(oid)]));
+  }
+};
+
 // src/mapping/mapping.ts
 var MARKDOWN_EXTENSION = ".md";
 function annotationFiles(entries) {
@@ -25335,6 +25738,10 @@ function mapFiles(entries, zones, contents) {
       unsynced.push({ path: entry.path, reason: "not-a-regular-file", title: titleOf(entry.path, zone), place: placeOf(zone) });
       continue;
     }
+    if (!readableBlob(entry)) {
+      unsynced.push({ path: entry.path, reason: "blob-too-large", title: titleOf(entry.path, zone), place: placeOf(zone) });
+      continue;
+    }
     const content4 = contents.get(entry.oid);
     if (content4 === void 0) throw new Error(message("mapping.content-not-read", { path: entry.path }));
     const problem = contentProblem(content4);
@@ -25349,14 +25756,45 @@ function mapFiles(entries, zones, contents) {
   return { documents, unsynced, leftOut, files };
 }
 async function loadMapping(git, commit2) {
-  const entries = await listTree(git, commit2);
+  return mapTree(git, await listTree(git, commit2, MAPPING_TREE_BYTES), new MappingBlobBudget());
+}
+async function mapTree(git, entries, budget) {
+  const annotations = await readTreeAnnotations(git, entries, budget);
+  const contents = await budget.read(git, candidateFiles(entries, annotations.zones));
+  return { ...annotations, ...mapFiles(entries, annotations.zones, contents) };
+}
+async function checkMappingBudget(git, commit2, knownPaths) {
+  const entries = await listTree(git, commit2, MAPPING_TREE_BYTES);
+  requireReadableAnnotations(entries);
+  const budget = new MappingBlobBudget();
+  const { zones } = await readTreeAnnotations(git, entries, budget);
+  budget.check(candidateFiles(entries, zones));
+  budget.check(entries.filter((entry) => entry.type === "blob" && knownPaths.has(entry.path)));
+}
+var UnreadableAnnotationError = class extends Error {
+};
+function requireReadableAnnotations(entries) {
+  const entry = annotationFiles(entries).find((entry2) => !readableBlob(entry2));
+  if (entry !== void 0) throw new UnreadableAnnotationError(oversizedAnnotation(entry.path).message);
+}
+function oversizedAnnotation(readme) {
+  return { readme, kind: "invalid-annotation", message: message("annotations.blob-too-large", { readme, bytes: MAPPING_FILE_BYTES }) };
+}
+async function readTreeAnnotations(git, entries, budget) {
   const readmeEntries = annotationFiles(entries);
-  const readmeBlobs = await readBlobs(git, readmeEntries.map((entry) => entry.oid));
-  const readmes = new Map(readmeEntries.map((entry) => [entry.path, readmeBlobs.get(entry.oid).toString("utf8")]));
+  const readmeBlobs = await budget.read(git, readmeEntries);
+  const unreadableAnnotations = [];
+  const readmes = /* @__PURE__ */ new Map();
+  for (const entry of readmeEntries) {
+    if (readableBlob(entry)) {
+      readmes.set(entry.path, readmeBlobs.get(entry.oid).toString("utf8"));
+    } else {
+      unreadableAnnotations.push(oversizedAnnotation(entry.path));
+    }
+  }
   const { annotations, problems: readProblems } = collectAnnotations(readmes);
   const { zones, problems: zoneProblems } = resolveZones(annotations);
-  const contents = await readBlobs(git, candidateFiles(entries, zones).map((entry) => entry.oid));
-  return { annotations, zones, problems: [...readProblems, ...zoneProblems], ...mapFiles(entries, zones, contents) };
+  return { annotations, zones, problems: [...unreadableAnnotations, ...readProblems, ...zoneProblems] };
 }
 function titleKey(place, title) {
   const where = place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
@@ -25589,6 +26027,8 @@ function linkedPart(url) {
 var PRE_COMMIT_CONFIG = ".pre-commit-config.yaml";
 var SECURITY_ALIAS = "security";
 var LINEAR_FORMAT_HOOK = "linear-format";
+var IGNORE_INLINE_ALLOW = "--ignore-gitleaks-allow";
+var IGNORES_INLINE_ALLOW = /(?:^|\s)--ignore-gitleaks-allow(?:=true)?(?=\s|$)/;
 var LOCAL_REPOS = /* @__PURE__ */ new Set(["local", "meta"]);
 function readHookConfig(text6) {
   if (text6 === null) return { hooks: [] };
@@ -25606,7 +26046,8 @@ function readHookConfig(text6) {
     const source = typeof repo.repo === "string" ? repo.repo : "";
     for (const hook of repo.hooks) {
       if (!isRecord(hook) || typeof hook.id !== "string") continue;
-      hooks.push(typeof hook.alias === "string" ? { id: hook.id, repo: source, alias: hook.alias } : { id: hook.id, repo: source });
+      const command = [hook.entry, ...Array.isArray(hook.args) ? hook.args : []].filter((part) => typeof part === "string").join(" ");
+      hooks.push({ id: hook.id, repo: source, ...typeof hook.alias === "string" ? { alias: hook.alias } : {}, ...command ? { command } : {} });
     }
   }
   return { hooks };
@@ -25616,8 +26057,10 @@ function securityHooks(config) {
 }
 function checkSecurityHooks(config) {
   const ids = securityHooks(config);
-  if (ids.length > 0) return passed("security-hooks", `security hooks present: ${ids.join(", ")}`);
-  return warning("security-hooks", message("setup.security-hooks-missing", { alias: SECURITY_ALIAS }));
+  if (ids.length === 0) return warning("security-hooks", message("setup.security-hooks-missing", { alias: SECURITY_ALIAS }));
+  const allowing = config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS && /gitleaks/i.test(`${hook.id} ${hook.command ?? ""}`) && !IGNORES_INLINE_ALLOW.test(hook.command ?? ""));
+  if (allowing.length > 0) return warning("security-hooks", message("setup.security-hooks-inline-allow", { hooks: allowing.map((hook) => hook.id).join(", "), flag: IGNORE_INLINE_ALLOW }));
+  return passed("security-hooks", `security hooks present: ${ids.join(", ")}`);
 }
 function checkLinearFormatHook(config) {
   if (config.invalid !== void 0) return failed("linear-format-hook", "linear-format-hook-required", config.invalid);
@@ -25664,9 +26107,9 @@ var LEFT_OUT_NAMED = 20;
 function checkLeftOut(mapping) {
   const files = [...mapping.leftOut].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   if (files.length === 0) return passed("left-out-files", "no files left out");
-  const named2 = files.slice(0, LEFT_OUT_NAMED).map((file) => `${file.path} (${file.rule})`);
+  const named = files.slice(0, LEFT_OUT_NAMED).map((file) => `${file.path} (${file.rule})`);
   const more = files.length > LEFT_OUT_NAMED ? message("setup.left-out-more", { count: files.length - LEFT_OUT_NAMED }) : "";
-  return warning("left-out-files", message("setup.left-out", { count: files.length, files: named2.join(", "), more }));
+  return warning("left-out-files", message("setup.left-out", { count: files.length, files: named.join(", "), more }));
 }
 function checkAnnotations(mapping) {
   if (mapping.problems.length > 0) {
@@ -25679,8 +26122,8 @@ function checkAnnotations(mapping) {
 }
 
 // src/setup/state.ts
-function checkSyncState(state, config, initialSyncUnfinished = false, initialPullRequestPending2 = false) {
-  if (initialSyncUnfinished) {
+function checkSyncState(state, config, findings = {}) {
+  if (findings.initialSyncUnfinished === true) {
     return {
       code: "initial-sync-required",
       message: message("setup.initial-sync-unfinished")
@@ -25692,7 +26135,13 @@ function checkSyncState(state, config, initialSyncUnfinished = false, initialPul
       message: message("setup.initial-sync-required", { ref: stateRef(config, "linear") })
     };
   }
-  if (initialPullRequestPending2) {
+  if (findings.linearUntrusted === true) {
+    return {
+      code: "initial-sync-required",
+      message: message("setup.linear-untrusted", { ref: stateRef(config, "linear") })
+    };
+  }
+  if (findings.initialPullRequestPending === true) {
     return {
       code: "initial-pull-request-pending",
       message: message("setup.initial-pull-request-pending", { tracked: config.trackedBranch, sync: config.syncBranch })
@@ -25725,7 +26174,7 @@ function renderStateRefusal(refusal) {
 }
 
 // src/initial-sync/confirm.ts
-import { createHash as createHash7, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash14, randomUUID as randomUUID4 } from "node:crypto";
 
 // src/test-hooks.ts
 import { existsSync as existsSync2, mkdirSync, renameSync, writeFileSync as writeFileSync3 } from "node:fs";
@@ -25801,6 +26250,22 @@ async function transformBody(transforms, path2, body2) {
   for (const transform of transforms) current = await transform.apply({ path: path2, body: current });
   return current;
 }
+function relativeFileBlocks() {
+  const written = /* @__PURE__ */ new Map();
+  return {
+    name: "relative-file-blocks",
+    async apply({ path: path2, body: body2 }) {
+      const sent = relativeFileBlocksAsLinks(body2);
+      if (sent === body2) written.delete(path2);
+      else written.set(path2, { sent, file: body2 });
+      return sent;
+    },
+    restore({ path: path2, body: body2 }) {
+      const entry = written.get(path2);
+      return entry !== void 0 && body2 === entry.sent ? entry.file : body2;
+    }
+  };
+}
 function sameLinkDestinations(content4, sent) {
   const destinations2 = (text6) => {
     const urls = [];
@@ -25813,27 +26278,32 @@ function sameLinkDestinations(content4, sent) {
   const expected = destinations2(sent);
   return actual.length === expected.length && actual.every((url, index2) => url === expected[index2]);
 }
-function restoreBody(transforms, path2, content4, sent) {
+function restoreBody(transforms, path2, content4, sent, files) {
   const kept = sameMarkdown(content4, sent);
   let current = kept ? sent : content4;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path: path2, body: current, kept });
   if (kept) return current;
-  const notUploaded = relativeLinkUrls(content4);
-  return fixText(current, { linkedFileExists: (url) => !notUploaded.has(url) });
+  return fixLinearText(current, content4, linkedFileCheck(path2, (file) => files.has(file)));
 }
 
 // src/initial-sync/uploads.ts
 var DEFAULT_UPLOAD_LIMIT = 10 * 1024 * 1024;
 var UPLOAD_TOO_LARGE = "upload-too-large";
 var UPLOAD_UNREADABLE = "upload-unreadable";
+var LINK_PROVENANCE_UNKNOWN = "link-provenance-unknown";
 var HASH_BATCH_BYTES = 64 * 1024 * 1024;
 var MAX_POINTER_SIZE2 = 1024;
 var UPLOAD_BATCH_FILES = 20;
 var UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
 async function predictUploadLeaveOuts(git, tracked, plan, texts, uploads, options) {
-  const limit = options.limit ?? DEFAULT_UPLOAD_LIMIT;
   const { files } = await treeFiles(git, tracked);
-  const planned = plannedLinks(plan, files, texts);
+  const { planned, unproven } = plannedLinks(plan, files, texts, options.plainFiles, options.unknownProvenance);
+  const judged = await predictPlanned(git, files, planned, uploads, options);
+  const result = [...unproven].map(([path2, unprovenFiles]) => ({ path: path2, rule: LINK_PROVENANCE_UNKNOWN, files: unprovenFiles }));
+  return [...result, ...judged].sort((a, b) => compare2(a.path, b.path));
+}
+async function predictPlanned(git, files, planned, uploads, options) {
+  const limit = Math.min(options.limit ?? DEFAULT_UPLOAD_LIMIT, UPLOAD_BATCH_BYTES);
   const targets = [...new Set([...planned.values()].flat())];
   const linked = /* @__PURE__ */ new Map();
   await hashLinkedFiles(git, files, linked, targets, MAX_POINTER_SIZE2);
@@ -25857,18 +26327,21 @@ async function predictUploadLeaveOuts(git, tracked, plan, texts, uploads, option
       result.push({ path: path2, rule: leaveOut.rule, files: leaveOut.files });
       continue;
     }
-    const toRead = filesToRead(own6, linked, uploaded);
-    const unread = [...toRead.values()].find(unreadable);
-    if (unread !== void 0) {
-      result.push({ path: path2, rule: UPLOAD_UNREADABLE, files: [unread] });
-      continue;
+    const batches = uploadBatches(filesToRead(own6, linked, uploaded), linked);
+    for (const [index2, batch] of batches.entries()) {
+      const unread = [...batch.pending.values()].find(unreadable);
+      if (unread !== void 0) {
+        result.push({ path: path2, rule: UPLOAD_UNREADABLE, files: [unread] });
+        break;
+      }
+      const taken = { hashes: new Set(batch.pending.keys()), bytes: batch.bytes };
+      if (index2 === batches.length - 1) {
+        const later = order.slice(position2 + 1).map((next) => planned.get(next));
+        await fillBatch(taken, later, linked, limit, uploaded, async () => {
+        }, async (pending) => ![...pending.values()].some(unreadable));
+      }
+      for (const hash of taken.hashes) uploaded.add(hash);
     }
-    if (toRead.size === 0) continue;
-    const batch = { hashes: new Set(toRead.keys()), bytes: [...toRead.values()].reduce((sum, target) => sum + file(target).size, 0) };
-    const later = order.slice(position2 + 1).map((next) => planned.get(next));
-    await fillBatch(batch, later, linked, limit, uploaded, async () => {
-    }, async (pending) => ![...pending.values()].some(unreadable));
-    for (const hash of batch.hashes) uploaded.add(hash);
   }
   return result;
 }
@@ -25888,7 +26361,7 @@ async function fillBatch(batch, later, linked, limit, uploaded, prepare, read) {
     if (targets.some((target) => file(target).size > limit)) continue;
     const pending = new Map([...filesToRead(targets, linked, uploaded)].filter(([hash]) => !batch.hashes.has(hash)));
     if (pending.size === 0) continue;
-    const pendingBytes = [...pending.values()].reduce((sum, target) => sum + file(target).size, 0);
+    const pendingBytes = [...pending.values()].reduce((sum, target) => sum + uploadBytes(file(target)), 0);
     if (batch.hashes.size + pending.size > UPLOAD_BATCH_FILES || batch.bytes + pendingBytes > UPLOAD_BATCH_BYTES) break;
     if (!await read(pending)) continue;
     for (const hash of pending.keys()) batch.hashes.add(hash);
@@ -25916,6 +26389,24 @@ function filesToRead(targets, linked, uploaded) {
   }
   return byHash;
 }
+function uploadBytes(file) {
+  return file.lfs ? Math.max(file.size, MAX_POINTER_SIZE2) : file.size;
+}
+function uploadBatches(files, linked) {
+  const batches = [];
+  let batch = { pending: /* @__PURE__ */ new Map(), bytes: 0 };
+  for (const [hash, target] of files) {
+    const bytes = uploadBytes(linked.get(target));
+    if (batch.pending.size === UPLOAD_BATCH_FILES || batch.bytes + bytes > UPLOAD_BATCH_BYTES) {
+      batches.push(batch);
+      batch = { pending: /* @__PURE__ */ new Map(), bytes: 0 };
+    }
+    batch.pending.set(hash, target);
+    batch.bytes += bytes;
+  }
+  if (batch.pending.size > 0) batches.push(batch);
+  return batches;
+}
 async function treeFiles(git, tracked) {
   const files = /* @__PURE__ */ new Map();
   const markdown = /* @__PURE__ */ new Map();
@@ -25926,16 +26417,22 @@ async function treeFiles(git, tracked) {
   }
   return { files, markdown };
 }
-function plannedLinks(plan, files, texts, plainFiles) {
+function plannedLinks(plan, files, texts, plainFiles, unknownProvenance) {
   const isFile = (path2) => files.has(path2);
   const planned = /* @__PURE__ */ new Map();
+  const unproven = /* @__PURE__ */ new Map();
   for (const { path: path2 } of [...plan.create, ...plan.overwrite]) {
     const text6 = texts.get(path2);
     if (text6 === void 0) continue;
-    const targets = [...new Set(uploadableLinks(path2, splitFile(text6).body, isFile, plainFiles?.get(path2)).map((link2) => link2.target))];
+    const links = uploadableLinks(path2, splitFile(text6).body, isFile, plainFiles?.get(path2), unknownProvenance?.has(path2) === true);
+    if (links.unproven.length > 0) {
+      unproven.set(path2, links.unproven);
+      continue;
+    }
+    const targets = [...new Set(links.links.map((link2) => link2.target))];
     if (targets.length > 0) planned.set(path2, targets);
   }
-  return planned;
+  return { planned, unproven };
 }
 async function hashLinkedFiles(git, files, linked, paths, readUpTo) {
   const toRead = [];
@@ -25967,7 +26464,7 @@ async function hashLinkedFiles(git, files, linked, paths, readUpTo) {
   }
 }
 function uploadsTransform(options) {
-  const limit = options.limit ?? DEFAULT_UPLOAD_LIMIT;
+  const limit = Math.min(options.limit ?? DEFAULT_UPLOAD_LIMIT, UPLOAD_BATCH_BYTES);
   let context;
   const files = /* @__PURE__ */ new Map();
   const linked = /* @__PURE__ */ new Map();
@@ -25999,8 +26496,7 @@ function uploadsTransform(options) {
     const inputs = items.map(({ target, content: content4 }) => ({
       filename: posix2.basename(target),
       contentType: contentTypeOf(target),
-      // A copy, so the bytes sent are a whole ArrayBuffer of their own, as the client's type requires.
-      bytes: new Uint8Array(content4)
+      bytes: content4.buffer instanceof ArrayBuffer ? new Uint8Array(content4.buffer, content4.byteOffset, content4.byteLength) : new Uint8Array(content4)
     }));
     const results = await linear.uploadFiles(inputs);
     items.forEach(({ hash }, index2) => uploads.set(hash, results[index2].assetUrl));
@@ -26017,19 +26513,27 @@ function uploadsTransform(options) {
     return result;
   };
   const uploadMissing = async (path2, targets) => {
-    const { git, uploads } = context;
-    const own6 = await readFiles2(filesToRead(targets, linked, uploads));
-    if (!Array.isArray(own6)) {
-      const entry = files.get(own6.target);
-      const file = linked.get(own6.target);
-      if (!file.absent) file.absent = (await missingLfsObjects(git, options.config.remote, [entry.oid])).has(file.hash);
-      throw new LeaveOutError(UPLOAD_UNREADABLE, message("initial-sync.upload-unreadable", { file: own6.target, reason: own6.unreadable }), [own6.target], { missingLfsObject: file.absent });
+    const { git, linear, uploads } = context;
+    const batches = uploadBatches(filesToRead(targets, linked, uploads), linked);
+    for (const [index2, batch] of batches.entries()) {
+      if (linear.stopped !== void 0) throw new LinearStoppedError("FileUploads", linear.stopped);
+      const own6 = await readFiles2(batch.pending);
+      if (!Array.isArray(own6)) {
+        const entry = files.get(own6.target);
+        const file = linked.get(own6.target);
+        if (!file.absent) file.absent = (await missingLfsObjects(git, options.config.remote, [entry.oid])).has(file.hash);
+        throw new LeaveOutError(UPLOAD_UNREADABLE, message("initial-sync.upload-unreadable", { file: own6.target, reason: own6.unreadable }), [own6.target], { missingLfsObject: file.absent });
+      }
+      if (index2 === batches.length - 1) await uploadLastBatch(path2, own6, batch.bytes);
+      else await uploadAll(own6);
     }
-    if (own6.length === 0) return;
+  };
+  const uploadLastBatch = async (path2, own6, bytes) => {
+    const { git, uploads } = context;
     const batch = [...own6];
     const position2 = order.indexOf(path2);
     const later = (position2 === -1 ? [] : order.slice(position2 + 1)).map((next) => planned.get(next));
-    const taken = { hashes: new Set(batch.map((item) => item.hash)), bytes: batch.reduce((sum, item) => sum + item.content.length, 0) };
+    const taken = { hashes: new Set(own6.map((item) => item.hash)), bytes };
     await fillBatch(taken, later, linked, limit, uploads, (next) => hashFiles(git, next), async (pending) => {
       const files2 = await readFiles2(pending);
       if (!Array.isArray(files2)) return false;
@@ -26056,12 +26560,16 @@ function uploadsTransform(options) {
         const blob = blobs.get(tree.markdown.get(path2).oid);
         if (parseLfsPointer(blob) === null) texts.set(path2, blob.toString("utf8"));
       }
-      for (const [path2, targets] of plannedLinks(ctx.plan, files, texts, ctx.plainFiles)) planned.set(path2, targets);
+      for (const [path2, targets] of plannedLinks(ctx.plan, files, texts, ctx.plainFiles, ctx.unknownProvenance).planned) planned.set(path2, targets);
       order.push(...[...planned.keys()].sort(compare2));
     },
     async apply({ path: path2, body: body2 }) {
       if (context === void 0) throw new Error(message("initial-sync.uploads-not-prepared"));
-      const fileLinks = uploadableLinks(path2, body2, isFile, context.plainFiles?.get(path2));
+      const uploadable = uploadableLinks(path2, body2, isFile, context.plainFiles?.get(path2), context.unknownProvenance?.has(path2) === true);
+      if (uploadable.unproven.length > 0) {
+        throw new LeaveOutError(LINK_PROVENANCE_UNKNOWN, message("initial-sync.link-provenance-unknown", { files: uploadable.unproven.join(", ") }), uploadable.unproven);
+      }
+      const fileLinks = uploadable.links;
       if (fileLinks.length === 0) return body2;
       const targets = [...new Set(fileLinks.map((link2) => link2.target))];
       await hashFiles(context.git, targets);
@@ -26071,7 +26579,16 @@ function uploadsTransform(options) {
       const { uploads } = context;
       const urls = fileLinks.map((link2) => uploads.get(linked.get(link2.target).hash));
       links.set(path2, fileLinks.map((link2) => ({ written: link2.written, hash: linked.get(link2.target).hash, suffix: link2.suffix })));
-      return replaceRanges(body2, fileLinks.map((link2, index2) => ({ from: link2.from, to: link2.to, text: urls[index2] + link2.suffix })));
+      return replaceRanges(body2, fileLinks.map((link2, index2) => {
+        const url = withUploadSuffix(urls[index2], link2.suffix);
+        const bracketed = link2.written.startsWith("<");
+        const text6 = bracketed || /[()\\]/.test(url) ? linkDestination(url) : imageDestination(url);
+        return {
+          from: link2.from - Number(bracketed),
+          to: link2.to + Number(bracketed),
+          text: link2.inTable ? text6.replaceAll("|", "&#124;") : text6
+        };
+      }));
     },
     restore({ path: path2, body: body2 }) {
       const fileLinks = links.get(path2);
@@ -26080,12 +26597,26 @@ function uploadsTransform(options) {
     }
   };
 }
+function uploadDestinationUrl(url) {
+  return url.replace(/[\s<>\x00-\x1f\x7f]/gu, (character) => encodeURIComponent(character));
+}
+function withUploadSuffix(url, suffix) {
+  const destination2 = uploadDestinationUrl(url);
+  if (suffix === "") return destination2;
+  const base = destination2.split("#")[0];
+  const trailing = uploadDestinationUrl(suffix);
+  const searchAt = base.indexOf("?");
+  if (!trailing.startsWith("?") || searchAt === -1) return base + trailing;
+  const search2 = trailing.split("#")[0];
+  if (base.slice(searchAt) === search2) return base + trailing.slice(search2.length);
+  return base + "&" + trailing.slice(1);
+}
 function restoreFileLinks(body2, written, uploads) {
   const raws = /* @__PURE__ */ new Map();
   for (const link2 of written) {
     const url = uploads.get(link2.hash);
     if (url === void 0) continue;
-    const key = url + link2.suffix;
+    const key = withUploadSuffix(url, link2.suffix);
     raws.set(key, [...raws.get(key) ?? [], link2.written]);
   }
   if (raws.size === 0) return body2;
@@ -26100,9 +26631,9 @@ function restoreFileLinks(body2, written, uploads) {
   }
   return replaceRanges(body2, replacements);
 }
-function uploadableLinks(path2, body2, isFile, plain) {
+function uploadableLinks(path2, body2, isFile, plain, unknown2 = false) {
   const links = findFileLinks(path2, body2, isFile);
-  if (plain === void 0 || plain.size === 0) return links;
+  if (links.length === 0 || (plain === void 0 || plain.size === 0) && !unknown2) return { links, unproven: [] };
   const imageUrls = /* @__PURE__ */ new Set();
   const labels = /* @__PURE__ */ new Set();
   const definitions = /* @__PURE__ */ new Map();
@@ -26119,15 +26650,16 @@ function uploadableLinks(path2, body2, isFile, plain) {
     const target = resolveTarget(path2, url);
     return target === null ? [] : [target];
   }));
-  return links.filter((link2) => !plain.has(link2.target) || images.has(link2.target));
+  const kept = links.filter((link2) => plain?.has(link2.target) !== true || images.has(link2.target));
+  return { links: kept, unproven: unknown2 ? [...new Set(kept.filter((link2) => !images.has(link2.target)).map((link2) => link2.target))] : [] };
 }
 function findFileLinks(documentPath2, body2, isFile) {
   const result = [];
-  for (const { node: node2, range, outer } of destinations(body2)) {
+  for (const { node: node2, range, outer, inTable } of destinations(body2)) {
     const target = resolveTarget(documentPath2, node2.url);
     if (target === null || !isFile(target)) continue;
     const cut = node2.url.search(/[?#]/);
-    result.push({ ...range, written: body2.slice(outer.from, outer.to), target, suffix: cut === -1 ? "" : node2.url.slice(cut) });
+    result.push({ ...range, written: body2.slice(outer.from, outer.to), target, suffix: cut === -1 ? "" : node2.url.slice(cut), inTable });
   }
   return result;
 }
@@ -26144,10 +26676,10 @@ function destinations(body2) {
     ranges.set(node2, { range: { from: from + Number(angle), to: to - Number(angle) }, outer: { from, to } });
   };
   const tree = parse2(body2, [{ enter: { resourceDestination: destination2, definitionDestination: destination2 } }]);
-  visit2(tree, (node2) => {
+  visit2(tree, (node2, ancestors) => {
     if (node2.type !== "link" && node2.type !== "image" && node2.type !== "definition") return;
     const found = ranges.get(node2);
-    if (found !== void 0) result.push({ node: node2, ...found });
+    if (found !== void 0) result.push({ node: node2, ...found, inTable: ancestors.some((parent) => parent.type === "tableCell") });
   });
   return result.sort((a, b) => a.range.from - b.range.from);
 }
@@ -26200,38 +26732,322 @@ function compare2(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-// src/initial-sync/run.ts
-async function readPlanSources(context, options = {}) {
-  const { git, mapping, linear } = context;
-  const files = [...mapping.documents, ...mapping.leftOut];
-  const blobs = await readBlobs(git, files.map((file) => file.oid));
-  const texts = new Map(files.map((file) => [file.path, blobs.get(file.oid).toString("utf8")]));
-  const places = [];
-  const documents = /* @__PURE__ */ new Map();
-  const containers = await readContainerDocuments(context);
-  if (options.withContent) {
-    const liveIds = [...new Set([...containers.values()].flat().filter((document4) => !document4.trashed && document4.archivedAt === null).map((document4) => document4.id))];
-    for (const document4 of await linear.getDocuments(liveIds, { withContent: true })) documents.set(document4.id, document4);
-  }
-  for (const { place } of annotatedPlaces(mapping.zones)) {
-    const listed = containers.get(containerKey(context, place));
-    for (const document4 of listed) if (!documents.has(document4.id)) documents.set(document4.id, document4);
-    places.push({ place, documents: listed });
-  }
-  return { input: { mapping, texts, places, facts: linear.facts }, documents, containers };
+// src/initial-sync/provenance.ts
+import { posix as posix6 } from "node:path";
+
+// src/sync/pull-repairs.ts
+import { createHash as createHash7 } from "node:crypto";
+
+// src/sync/head-check.ts
+var MERGED_MODES = /* @__PURE__ */ new Set(["100644", "100755", "000000"]);
+var NO_FILE = "000000";
+function keepsRegularMode(before, after) {
+  if (!MERGED_MODES.has(before) || !MERGED_MODES.has(after)) return false;
+  return before === after || before === NO_FILE || after === NO_FILE;
 }
-async function planFromRepository(context, options) {
-  const sources = await readPlanSources(context);
-  const plan = planInitialSync(sources.input);
-  plan.capacity = assessCapacity(context, sources.containers, plan.create, options.cap);
-  const uploads = await readUploads(context.git, context.fetched.state.uploads);
-  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads, { remote: options.remote }));
+function isSyncedChange(path2, mode, zones) {
+  if (!MERGED_MODES.has(mode)) return false;
+  if (path2.split("/").some((segment) => segment.toLowerCase() === ".github")) return false;
+  const name = path2.slice(path2.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  const extension2 = dot > 0 ? name.slice(dot) : "";
+  if (extension2 !== MARKDOWN_EXTENSION && !UPLOAD_EXTENSIONS.has(extension2)) return false;
+  return nearestZone(zones, folderOf(path2)) !== void 0;
+}
+function keepsAnnotation(path2, before, after) {
+  const read = (text6) => JSON.stringify(text6 === null ? { annotation: null } : readAnnotation(path2, text6));
+  return read(before) === read(after);
+}
+var LISTED_UNVERIFIED = 20;
+function oneLine(path2) {
+  return path2.replace(/[\u0000-\u001f\u007f]/g, "?");
+}
+function quoted(path2) {
+  return `\`${oneLine(path2).replaceAll("`", "?")}\``;
+}
+function unverifiedList(paths) {
+  const named = paths.slice(0, LISTED_UNVERIFIED).map(quoted).join(", ");
+  return paths.length > LISTED_UNVERIFIED ? `${named} and ${paths.length - LISTED_UNVERIFIED} more` : named;
+}
+function unverifiedNote(paths) {
+  return `The sync does not merge this pull request: it also changes files that are not synchronized documents or their assets (${paths.length}): ${unverifiedList(paths)}. A person reviews and merges it, or removes those changes from this branch.`;
+}
+async function unverifiedPaths(git, before, after, zones) {
+  const raw = (await git.run(["diff-tree", "-r", "-z", "--no-renames", "--raw", before, after])).stdout.toString("utf8");
+  const fields = raw.split("\0");
+  const paths = [];
+  const readmes = [];
+  for (let index2 = 0; index2 + 1 < fields.length; index2 += 2) {
+    const [oldMode = "", newMode = "", from = "", to = ""] = fields[index2].slice(1).split(" ");
+    const path2 = fields[index2 + 1];
+    if (!keepsRegularMode(oldMode, newMode) || !isSyncedChange(path2, newMode, zones)) paths.push(path2);
+    else if (path2.split("/").at(-1) === ANNOTATION_FILE) {
+      readmes.push({ path: path2, from: oldMode === NO_FILE ? null : from, to: newMode === NO_FILE ? null : to });
+    }
+  }
+  if (readmes.length > 0) {
+    const blobs = await readBlobs(git, readmes.flatMap(({ from, to }) => [from, to].filter((oid) => oid !== null)));
+    const text6 = (oid) => oid === null ? null : blobs.get(oid).toString("utf8");
+    for (const { path: path2, from, to } of readmes) if (!keepsAnnotation(path2, text6(from), text6(to))) paths.push(path2);
+  }
+  return paths.sort();
+}
+function withUnverifiedNote(body2, paths) {
+  const kept = body2.split("\n").filter((line2) => !line2.startsWith("The sync does not merge this pull request:")).join("\n").trimEnd();
+  return `${kept}
+
+${unverifiedNote(paths)}
+`;
+}
+var UnverifiedHead = class extends Error {
+  paths;
+  constructor(paths) {
+    super(unverifiedNote(paths));
+    this.paths = paths;
+  }
+};
+async function checkPushScope(git, tracked, next, zones) {
+  const paths = await unverifiedPaths(git, tracked, next, zones);
+  if (paths.length > 0) throw new UnverifiedHead(paths);
 }
 
-// src/merge/merge.ts
-import { mkdtemp as mkdtemp2, writeFile as writeFile2, rm as rm2 } from "node:fs/promises";
+// src/sync/security.ts
+import { spawn as spawn2 } from "node:child_process";
+import { lstat, mkdtemp as mkdtemp2, mkdir as mkdir2, writeFile as writeFile2, readFile as readFile2, realpath, rm as rm2, symlink } from "node:fs/promises";
 import { tmpdir as tmpdir3 } from "node:os";
-import { join as join7 } from "node:path";
+import { dirname, join as join7, sep as sep2 } from "node:path";
+import { createHash as createHash5 } from "node:crypto";
+function runHooks(dir, args, env) {
+  return new Promise((resolve3) => {
+    const child = spawn2("pre-commit", args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: "never", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    const collect = (chunk) => {
+      if (output.length < 2e6) output += chunk.toString("utf8");
+    };
+    child.stdout.on("data", collect);
+    child.stderr.on("data", collect);
+    const timer = setTimeout(() => child.kill("SIGKILL"), 12e4);
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve3({ code: -1, output: "" });
+    });
+    child.on("close", (code4) => {
+      clearTimeout(timer);
+      resolve3({ code: code4 ?? -1, output });
+    });
+  });
+}
+var LFS_POINTER_BYTES = 1024;
+var SCRATCH_BATCH_BYTES = 16 * 1024 * 1024;
+var SCRATCH_BATCH_FILES = 32;
+var SCRATCH_TREE_BYTES = 4 * 1024 * 1024 * 1024;
+var SecurityScratchBudgetError = class extends Error {
+  code = "security-scratch-budget";
+  constructor(bytes) {
+    super(message("sync.security-scratch-budget", { bytes }));
+    this.name = "SecurityScratchBudgetError";
+  }
+};
+function batchBytes(entry) {
+  return entry.oid.length + String(entry.size).length + 8 + entry.size;
+}
+function blobSize(entry) {
+  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error(message("sync.security-tree-differs"));
+  return entry;
+}
+function checkScratchBudget(entries, budget) {
+  let total = 0;
+  for (const entry of entries) {
+    if (entry.type === "blob") total += blobSize(entry).size;
+  }
+  if (total > budget) throw new SecurityScratchBudgetError(budget);
+}
+async function readInBatches(git, entries, use, alone) {
+  let batch = [];
+  let bytes = 0;
+  const flush = async () => {
+    if (batch.length === 0) return;
+    const blobs = await readBlobs(git, batch.map((entry) => entry.oid), bytes);
+    await use(batch, blobs);
+    batch = [];
+    bytes = 0;
+  };
+  for (const entry of entries) {
+    const size = batchBytes(entry);
+    if (size > SCRATCH_BATCH_BYTES) {
+      await alone(entry);
+      continue;
+    }
+    if (batch.length === SCRATCH_BATCH_FILES || bytes + size > SCRATCH_BATCH_BYTES) await flush();
+    batch.push(entry);
+    bytes += size;
+  }
+  await flush();
+}
+async function securityHookIds(git, tracked) {
+  const read = await git.run(["cat-file", "blob", `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
+  const config = readHookConfig(read.code === 0 ? read.stdout.toString("utf8") : null);
+  if (config.invalid !== void 0) throw new Error(message("sync.invalid-security-config"));
+  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+}
+async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
+  const changed2 = (await scratch.run(["diff", "--name-only", "--no-renames", "-z"])).stdout.toString("utf8").split("\0").filter((path2) => path2 !== "");
+  for (const path2 of changed2) {
+    if (linkedSupport.some((target) => path2 === target || path2.startsWith(`${target}/`))) return false;
+    if (isMarkdownPath(path2)) continue;
+    const read = await scratch.run(["cat-file", "blob", `:${path2}`], { maxOutputBytes: LFS_POINTER_BYTES }).catch((error) => {
+      if (error instanceof GitOutputLimitError) return null;
+      throw error;
+    });
+    if (read === null) return false;
+    const pointer = parseLfsPointer(read.stdout);
+    const content4 = files.get(path2);
+    if (pointer === null || content4 === void 0) return false;
+    const bytes = contentBytes(content4);
+    if (pointer.size !== bytes.length || pointer.oid !== createHash5("sha256").update(bytes).digest("hex")) return false;
+    if (!(await readFile2(join7(dir, path2))).equals(bytes)) return false;
+  }
+  return true;
+}
+async function throughLink(dir, path2) {
+  const parts = path2.split("/");
+  for (let at = 1; at <= parts.length; at++) {
+    const found = await lstat(join7(dir, ...parts.slice(0, at))).catch(() => null);
+    if (found === null) return false;
+    if (found.isSymbolicLink()) return true;
+  }
+  return false;
+}
+async function reproduceTree(git, tracked, entries, scratch, dir) {
+  for (const entry of entries) checkRepoPath(entry.path);
+  const files = entries.filter((entry) => entry.type === "blob" && ["100644", "100755"].includes(entry.mode));
+  const links = entries.filter((entry) => entry.type === "blob" && entry.mode === "120000");
+  const gitlinks = entries.filter((entry) => entry.type === "commit");
+  const fileMode = (entry) => entry.mode === "100755" ? 493 : 420;
+  await readInBatches(git, files, async (batch, blobs) => {
+    for (const entry of batch) {
+      await mkdir2(dirname(join7(dir, entry.path)), { recursive: true });
+      await writeFile2(join7(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
+    }
+  }, async (entry) => {
+    await mkdir2(dirname(join7(dir, entry.path)), { recursive: true });
+    await git.runToFile(["cat-file", "blob", entry.oid], join7(dir, entry.path), fileMode(entry));
+  });
+  for (const entry of gitlinks) await mkdir2(join7(dir, entry.path), { recursive: true });
+  await readInBatches(git, links, async (batch, targets) => {
+    for (const entry of batch) {
+      await mkdir2(dirname(join7(dir, entry.path)), { recursive: true });
+      await symlink(targets.get(entry.oid), join7(dir, entry.path));
+    }
+  }, async () => {
+    throw new Error(message("sync.security-link-outside"));
+  });
+  const root2 = await realpath(dir);
+  const linkedSupport = [];
+  for (const entry of links) {
+    const target = await realpath(join7(dir, entry.path));
+    const inside = target.slice(root2.length + 1).split(sep2);
+    if (!target.startsWith(root2 + sep2) || isGitDirectoryName(inside[0])) throw new Error(message("sync.security-link-outside"));
+    if (!isMarkdownPath(entry.path)) linkedSupport.push(inside.join("/"));
+  }
+  await mkdir2(join7(dir, ".git", "info"), { recursive: true });
+  await writeFile2(join7(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
+  await scratch.run(["add", "--all", "--force"]);
+  if (gitlinks.length > 0) {
+    await scratch.run(["update-index", "-z", "--index-info"], { input: gitlinks.map((entry) => `160000 ${entry.oid}	${entry.path}\0`).join("") });
+  }
+  const tree = await scratch.text(["write-tree"]);
+  if (tree !== await git.text(["rev-parse", `${tracked}^{tree}`])) throw new Error(message("sync.security-tree-differs"));
+  return { tree, linkedSupport };
+}
+async function securityGate(git, tracked, options = {}) {
+  const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C.UTF-8" };
+  const hooks = await securityHookIds(git, tracked);
+  if (hooks.length > 0 && (await runHooks(git.dir, ["--version"], env)).code !== 0) throw new Error(message("sync.needs-pre-commit"));
+  const budget = options.scratchBytes ?? SCRATCH_TREE_BYTES;
+  let dir;
+  let scratch;
+  let baseline;
+  let linkedSupport = [];
+  const close = async () => {
+    if (dir !== void 0) await rm2(dir, { recursive: true, force: true });
+    dir = void 0;
+  };
+  return {
+    configured: hooks.length > 0,
+    close,
+    async check(files) {
+      if (hooks.length === 0) return [];
+      try {
+        if (dir === void 0) {
+          const entries = await listTree(git, tracked);
+          checkScratchBudget(entries, budget);
+          dir = await mkdtemp2(join7(tmpdir3(), "capture-security-"));
+          scratch = new Git(dir);
+          await scratch.run(["init", "--quiet", `--object-format=${await git.text(["rev-parse", "--show-object-format"])}`]);
+          ({ tree: baseline, linkedSupport } = await reproduceTree(git, tracked, entries, scratch, dir));
+        }
+        await scratch.run(["read-tree", "--reset", "-u", baseline]);
+        await scratch.run(["clean", "-fdx", "--quiet"]);
+        for (const [path2, content4] of files) {
+          checkRepoPath(path2);
+          if (path2 === PRE_COMMIT_CONFIG || path2.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
+          if (await throughLink(dir, path2)) return [{ hook: SECURITY_ALIAS, line: 1 }];
+          await mkdir2(dirname(join7(dir, path2)), { recursive: true });
+          await writeFile2(join7(dir, path2), contentBytes(content4));
+        }
+        if (!await onlyDocumentsChanged(scratch, dir, files, linkedSupport)) return [{ hook: SECURITY_ALIAS, line: 1 }];
+        await scratch.run(["add", "--force", "--", ...files.keys()]);
+        const findings = [];
+        let ran = false;
+        for (const stage of ["pre-commit", "pre-push"]) {
+          const result = await runHooks(dir, ["run", SECURITY_ALIAS, "--hook-stage", stage, "--files", ...files.keys()], env);
+          if (result.code !== 0 && result.output.trim() === `No hook with id \`security\` in stage \`${stage}\``) continue;
+          ran = true;
+          if (result.code !== 0) {
+            const failed2 = hooks.filter((id) => result.output.includes(`- hook id: ${id}
+`));
+            const escaped = [...files.keys()].map((path2) => path2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+            const located = new RegExp(`(?:${escaped.join("|")}):(\\d+)(?::|\\b)`, "g");
+            const matches = [...result.output.matchAll(located)];
+            const lines2 = matches.map((match) => Number(match[1])).filter((line2) => Number.isSafeInteger(line2) && line2 > 0);
+            for (const hook of failed2.length > 0 ? failed2 : [SECURITY_ALIAS]) findings.push({ hook, line: lines2[0] ?? 1 });
+          }
+        }
+        if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
+        for (const [path2, content4] of files) {
+          const after = await readFile2(join7(dir, path2)).catch(() => null);
+          if (after === null || !after.equals(contentBytes(content4))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
+        }
+        return findings;
+      } catch (error) {
+        if (error instanceof SecurityScratchBudgetError) throw error;
+        return [{ hook: SECURITY_ALIAS, line: 1 }];
+      }
+    }
+  };
+}
+async function checkTitle(gate, path2, title) {
+  try {
+    checkRepoPath(path2);
+  } catch {
+    return null;
+  }
+  const findings = await gate.check(/* @__PURE__ */ new Map([[path2, `${title.normalize("NFC")}
+`]]));
+  return findings === null ? null : findings.map(({ hook }) => ({ hook, line: 0 }));
+}
+
+// src/sync/merge.ts
+import { createHash as createHash6 } from "node:crypto";
+import { mkdtemp as mkdtemp4, rm as rm4 } from "node:fs/promises";
+import { tmpdir as tmpdir5 } from "node:os";
+import { join as join9 } from "node:path";
+
+// src/merge/merge.ts
+import { mkdtemp as mkdtemp3, writeFile as writeFile3, rm as rm3 } from "node:fs/promises";
+import { tmpdir as tmpdir4 } from "node:os";
+import { join as join8 } from "node:path";
 
 // src/merge/markers.ts
 var MARKERS = {
@@ -26239,36 +27055,63 @@ var MARKERS = {
   linear: "**Sync conflict: Linear version**",
   end: "**Sync conflict: end**"
 };
+var CALLOUT_COMMENT = "<!-- linear:callout color=#f2c94c -->";
+function markerCallout(marker) {
+  return `${CALLOUT_COMMENT}
+> [!WARNING]
+> ${marker}`;
+}
 function lines(text6) {
   return text6.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 }
 function lineText(text6) {
   return text6.replace(/\r?\n$/, "");
 }
-function markerLines(text6) {
+function unquote(text6) {
+  return text6.replace(/^ {0,3}> ?/, "");
+}
+function findMarkerLines(text6) {
   const { head, body: body2 } = splitFile(text6);
   const offset = lineCount(head);
+  const tree = parse2(body2);
+  const source = lines(body2);
+  const callout = (node2, ancestors) => ancestors.length === 1 && isCallout(node2, body2);
   const excluded = [];
-  visit2(parse2(body2), (node2) => {
-    if (["code", "inlineCode", "blockquote", "html"].includes(node2.type) && node2.position) {
-      excluded.push([node2.position.start.line + offset, node2.position.end.line + offset]);
+  visit2(tree, (node2, ancestors) => {
+    if (["code", "inlineCode", "html", "blockquote"].includes(node2.type) && !callout(node2, ancestors) && node2.position) {
+      excluded.push([node2.position.start.line, node2.position.end.line]);
     }
+  });
+  const quotes = [];
+  tree.children.forEach((node2, index2) => {
+    if (!callout(node2, [tree]) || !node2.position) return;
+    const previous3 = tree.children[index2 - 1];
+    const first = node2.position.start.line;
+    quotes.push([first, node2.position.end.line, isCalloutComment(previous3) ? previous3.position.start.line : first]);
   });
   const values = Object.values(MARKERS);
   const found = /* @__PURE__ */ new Map();
-  lines(body2).forEach((text7, i) => {
-    const number = i + 1 + offset;
-    const value = lineText(text7);
-    if (values.includes(value) && !excluded.some(([a, b]) => number >= a && number <= b)) {
-      found.set(number, value);
-    }
+  source.forEach((text7, i) => {
+    const line2 = i + 1;
+    if (excluded.some(([a, b]) => line2 >= a && line2 <= b)) return;
+    const quote = quotes.find(([a, b]) => line2 >= a && line2 <= b);
+    const value = quote ? unquote(lineText(text7)) : lineText(text7);
+    if (!values.includes(value)) return;
+    found.set(line2 + offset, quote ? { value, startLine: quote[2] + offset, endLine: quote[1] + offset, calloutLine: quote[0] + offset } : { value, startLine: line2 + offset, endLine: line2 + offset });
+  });
+  const inCallout = [...found].filter(([, marker]) => marker.calloutLine !== void 0);
+  inCallout.forEach(([line2, marker], index2) => {
+    const previous3 = inCallout[index2 - 1]?.[1];
+    const next = inCallout[index2 + 1]?.[1];
+    if (previous3?.calloutLine === marker.calloutLine) marker.startLine = line2;
+    if (next?.calloutLine === marker.calloutLine) marker.endLine = line2;
   });
   return found;
 }
-function arm(source, start2, end2) {
-  const content4 = source.slice(start2, end2);
-  if (content4[0] !== void 0 && lineText(content4[0]) === "") content4.shift();
-  if (content4.at(-1) !== void 0 && lineText(content4.at(-1)) === "") content4.pop();
+function arm(source, after, before) {
+  const content4 = source.slice(after, before - 1);
+  while (content4[0] !== void 0 && lineText(content4[0]) === "") content4.shift();
+  while (content4.at(-1) !== void 0 && lineText(content4.at(-1)) === "") content4.pop();
   return content4.join("").replace(/\r?\n$/, "");
 }
 function detectConflicts(text6) {
@@ -26276,22 +27119,22 @@ function detectConflicts(text6) {
   const found = [];
   let start2;
   let middle;
-  for (const [number, value] of markerLines(text6)) {
-    if (value === MARKERS.git) {
-      if (start2 !== void 0) found.push({ startLine: start2, endLine: number - 1 });
-      start2 = number;
+  for (const marker of findMarkerLines(text6).values()) {
+    if (marker.value === MARKERS.git) {
+      if (start2 !== void 0) found.push({ startLine: start2.startLine, endLine: marker.startLine - 1 });
+      start2 = marker;
       middle = void 0;
-    } else if (value === MARKERS.linear && start2 !== void 0 && middle === void 0) {
-      middle = number;
-    } else if (value === MARKERS.end && start2 !== void 0) {
-      found.push(middle === void 0 ? { startLine: start2, endLine: number } : { startLine: start2, endLine: number, git: arm(source, start2, middle - 1), linear: arm(source, middle, number - 1) });
+    } else if (marker.value === MARKERS.linear && start2 !== void 0 && middle === void 0) {
+      middle = marker;
+    } else if (marker.value === MARKERS.end && start2 !== void 0) {
+      found.push(middle === void 0 ? { startLine: start2.startLine, endLine: marker.endLine } : { startLine: start2.startLine, endLine: marker.endLine, git: arm(source, start2.endLine, middle.startLine), linear: arm(source, middle.endLine, marker.startLine) });
       start2 = void 0;
       middle = void 0;
     } else if (start2 === void 0) {
-      found.push({ startLine: number, endLine: number });
+      found.push({ startLine: marker.startLine, endLine: marker.endLine });
     }
   }
-  if (start2 !== void 0) found.push({ startLine: start2, endLine: source.length });
+  if (start2 !== void 0) found.push({ startLine: start2.startLine, endLine: source.length });
   return found.sort((a, b) => a.startLine - b.startLine);
 }
 
@@ -26336,10 +27179,15 @@ function blockRanges(tokens, side) {
     const end2 = tokenAtLine[Math.min(endLine, source.length) - 1];
     if (start2 !== void 0 && end2 !== void 0) ranges.push({ start: start2, end: end2 + 1 });
   };
-  visit2(parse2(text6), (node2) => {
+  const tree = parse2(text6);
+  visit2(tree, (node2) => {
     if ((["code", "table", "blockquote", "inlineCode", "html", "heading"].includes(node2.type) || node2.type === "list" && (node2.ordered || nestedList(node2))) && node2.position) {
       add(node2.position.start.line, node2.position.end.line);
     }
+  });
+  tree.children.forEach((node2, index2) => {
+    const next = tree.children[index2 + 1];
+    if (isCalloutComment(node2) && next?.type === "blockquote" && node2.position && next.position) add(node2.position.start.line, next.position.end.line);
   });
   for (const conflict of detectConflicts(text6)) add(conflict.startLine, conflict.endLine);
   return ranges;
@@ -26372,12 +27220,16 @@ function conflictRanges(tokens) {
 }
 function withoutMarkers(tokens, side) {
   const projection = tokens.flatMap((token) => content3(token, side)).join("");
-  const markers = markerLines(projection);
+  const source = lines(projection);
+  const blank = (line3) => source[line3 - 1] !== void 0 && lineText(source[line3 - 1]) === "";
+  const drop = /* @__PURE__ */ new Set();
+  for (const [line3, marker] of findMarkerLines(projection)) {
+    drop.add(line3);
+    if (marker.calloutLine !== void 0) for (let header = marker.startLine; header <= marker.calloutLine; header++) drop.add(header);
+    if (line3 === marker.endLine && blank(line3 + 1)) drop.add(line3 + 1);
+  }
   let line2 = 0;
-  return tokens.map((token) => content3(token, side).filter((text6) => {
-    line2++;
-    return !markers.has(line2) && !(markers.has(line2 - 1) && lineText(text6) === "");
-  }));
+  return tokens.map((token) => content3(token, side).filter(() => !drop.has(++line2)));
 }
 function completeBlocks(text6) {
   const insertions = [];
@@ -26427,15 +27279,15 @@ function render2(tokens, ranges, finalNewline) {
     const arms = (side) => completeBlocks(armsWithoutMarkers[side].slice(range.start, range.end).flat().join("").replace(/^\n|\n$/g, ""));
     cursor = range.end;
     const last = tokens.slice(cursor).every((token) => content3(token, "ours").join("") === "");
-    text6 += `${MARKERS.git}
+    text6 += `${markerCallout(MARKERS.git)}
 
 ${arms("ours")}
 
-${MARKERS.linear}
+${markerCallout(MARKERS.linear)}
 
 ${arms("theirs")}
 
-${MARKERS.end}${last && !finalNewline ? "" : "\n"}`;
+${markerCallout(MARKERS.end)}${last && !finalNewline ? "" : "\n"}`;
     const next = tokens[cursor];
     if (next?.kind === "line" && lineText(next.text) !== "") text6 += "\n";
   }
@@ -26446,7 +27298,7 @@ async function mergeHeads(dir, withBom) {
   const heads = Object.fromEntries(Object.entries(withBom).map(([name, text6]) => [name, text6.replace(/^﻿/, "")]));
   if (heads.theirs === heads.base || heads.ours === heads.theirs) return bom + heads.ours;
   if (heads.ours === heads.base) return bom + heads.theirs;
-  await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile2(join7(dir, `head-${name}`), text6, { mode: 384 })));
+  await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile3(join8(dir, `head-${name}`), text6, { mode: 384 })));
   const merged = await new Git(dir).run(["merge-file", "--stdout", "head-ours", "head-base", "head-theirs"], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
   return bom + (merged.code === 0 ? merged.stdout.toString("utf8") : heads.ours);
 }
@@ -26457,10 +27309,10 @@ async function mergeMarkdown(base, ours, theirs) {
   base = splitFile(base).body.replaceAll("\r\n", "\n");
   ours = gitFile.body.replaceAll("\r\n", "\n");
   theirs = splitFile(theirs).body.replaceAll("\r\n", "\n");
-  const dir = await mkdtemp2(join7(tmpdir3(), "markdown-merge-"));
+  const dir = await mkdtemp3(join8(tmpdir4(), "markdown-merge-"));
   try {
     const head = await mergeHeads(dir, heads);
-    await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile2(join7(dir, name), text7, { mode: 384 })));
+    await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile3(join8(dir, name), text7, { mode: 384 })));
     let size = 7;
     for (const text7 of [base, ours, theirs]) {
       for (const run of text7.matchAll(/<+|=+|>+/g)) size = Math.max(size, run[0].length + 1);
@@ -26488,7 +27340,7 @@ async function mergeMarkdown(base, ours, theirs) {
     const text6 = head + (result.code === 0 ? raw : render2(tokens, conflictRanges(tokens), finalNewline)).replaceAll("\n", eol2);
     return { text: text6, conflicts: detectConflicts(text6) };
   } finally {
-    await rm2(dir, { recursive: true, force: true });
+    await rm3(dir, { recursive: true, force: true });
   }
 }
 
@@ -26589,563 +27441,516 @@ async function resolveStructural(input) {
   ]);
 }
 
-// src/sync/marks.ts
-import { createHash as createHash5, randomUUID } from "node:crypto";
-var MARKS = {
-  conflict: { icon: "Alert", color: "#F2994A" },
-  blocked: { icon: "Cross", color: "#EB5757" },
-  /** The same red cross as blocked: both say the document's changes do not reach Git, and the comment says why. */
-  suspended: { icon: "Cross", color: "#EB5757" }
-};
-var CONFLICT_COMMENT = "This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and remove every conflict marker paragraph throughout the document. The alert clears after the next sync.";
-var BLOCKED_COMMENT = "Security checks rejected this document. Fix the listed findings and sync again.";
-async function resolveHold(linear, hold, documentId) {
-  if (await linear.commentExists(hold.id, documentId)) await linear.resolveComment(hold.id);
-}
-function releasedHold(entry) {
-  return entry.suspended === void 0 && entry.saved?.hold !== void 0;
-}
-function noConflictNotices() {
-  return { set: [], resolved: [] };
-}
-var IMAGE_BLOCKED_COMMENT = "Some images in this document cannot be synchronized. Fix the listed images and sync again.";
-function blockedComment(findings) {
-  const images = findings.filter((finding) => "image" in finding);
-  const files = findings.filter((finding) => "file" in finding);
-  const hooks = findings.filter((finding) => "hook" in finding);
-  const locations = [...new Set(hooks.map(({ hook, line: line2 }) => {
-    const name = /^[a-zA-Z0-9_.-]{1,128}$/.test(hook) ? hook : "security-check";
-    const location = Number.isSafeInteger(line2) && line2 > 0 ? `, line ${line2}` : "";
-    return `- Hook \`${name}\`${location}.`;
-  }))].sort();
-  const sections = [];
-  const imageReasons = {
-    "not-uploaded": "not uploaded to this workspace. Upload the file instead of linking to it.",
-    "unreadable": "the uploaded file cannot be read. Remove it or upload it again.",
-    "too-large": "the uploaded file is larger than 10 MB.",
-    "unsupported-type": "the uploaded file is not a supported image or document. Remove it or upload the original file."
-  };
-  if (images.length > 0) sections.push(`${IMAGE_BLOCKED_COMMENT}
-
-${images.map(({ image: image2, total, line: line2, reason }) => `- Image ${image2} of ${total} (line ${line2}): ${imageReasons[reason]}`).join("\n")}`);
-  if (files.length > 0) sections.push(`Some files in this document cannot be synchronized. Fix the listed files and sync again.
-
-${files.map(({ file, total, line: line2, reason }) => `- File ${file} of ${total} (line ${line2}): ${imageReasons[reason]}`).join("\n")}`);
-  if (locations.length > 0) sections.push(`${BLOCKED_COMMENT}
-
-${locations.join("\n")}`);
-  return sections.join("\n\n");
-}
-async function reconcileDocumentMark(options) {
-  const { document: document4, linear, persistEntry } = options;
-  if (document4.id !== options.entry.id) throw new Error(message("sync.entry-mismatch"));
-  if (document4.content === void 0) throw new Error(message("sync.needs-content"));
-  let entry = structuredClone(options.entry);
-  const blocked = options.blocked ?? [];
-  const state = blocked.length > 0 ? "blocked" : detectConflicts(document4.content ?? "").length > 0 ? "conflict" : "clear";
-  const result = { state, entry, updated: false, commented: false };
-  if (document4.trashed || document4.archivedAt !== null) return result;
-  if (entry.suspended !== void 0 && blocked.length === 0) return result;
-  const body2 = state === "clear" ? "" : state === "conflict" ? CONFLICT_COMMENT : blockedComment(blocked);
-  const bodyHash = createHash5("sha256").update(body2).digest("hex");
-  const previousNotice = entry.saved?.notice;
-  const changesDecoration = state !== "clear" && (document4.icon !== MARKS[state].icon || document4.color !== MARKS[state].color);
-  const changesNotice = previousNotice !== void 0 && (previousNotice.kind !== state || !previousNotice.posted || previousNotice.bodyHash !== bodyHash || changesDecoration);
-  const noticeExists = changesNotice ? await linear.commentExists(previousNotice.id, document4.id) : false;
-  if (releasedHold(entry) && entry.saved !== void 0) {
-    if (state === "clear" && entry.saved.notice === void 0) return result;
-    await resolveHold(linear, entry.saved.hold, document4.id);
-    const { hold: _hold, ...saved2 } = entry.saved;
-    entry = { ...entry, saved: saved2 };
-    await persistEntry(entry);
-    result.entry = entry;
-  }
-  if (entry.saved?.notice !== void 0 && entry.saved.notice.kind !== state) {
-    if (noticeExists) await linear.resolveComment(entry.saved.notice.id);
-    if (entry.saved.notice.kind === "conflict") options.onConflictNotice?.("resolved");
-  }
-  if (state === "clear") {
-    if (entry.saved === void 0) return result;
-    if (document4.icon !== entry.saved.icon || document4.color !== entry.saved.color) {
-      await linear.updateDocument(document4.id, { icon: entry.saved.icon, color: entry.saved.color });
-      result.updated = true;
+// src/sync/merge.ts
+async function mergeLocally(git, linear, tracked, ids, facts = LINEAR_FACTS, options = {}) {
+  let mergeTracked = tracked;
+  let mergeBase = options.base;
+  const frozen = new Set([...ids].flatMap(([path2, entry]) => entry.suspended === void 0 ? [] : [path2, ...entry.suspended.paths]));
+  const released = [...ids].filter(([, entry]) => entry.releaseBase !== void 0);
+  if (frozen.size > 0 || released.length > 0) {
+    mergeBase ??= await git.text(["merge-base", linear, tracked]);
+    let baseTree = mergeBase;
+    const releaseGroups = /* @__PURE__ */ new Map();
+    for (const [path2, entry] of released) {
+      const paths = releaseGroups.get(entry.releaseBase) ?? /* @__PURE__ */ new Set();
+      for (const selected of entry.releasePaths ?? [path2]) paths.add(selected);
+      releaseGroups.set(entry.releaseBase, paths);
     }
-    const { saved: _saved, ...restored } = entry;
-    await persistEntry(restored);
-    result.entry = restored;
-    return result;
-  }
-  if (!document4.documentContentId) throw new Error(message("sync.needs-comment-target"));
-  const saved = entry.saved ?? { icon: document4.icon, color: document4.color };
-  const previous3 = saved.notice;
-  const notice = previous3?.kind === state ? { ...previous3, bodyHash, posted: previous3.posted && previous3.bodyHash === bodyHash } : { id: options.noticeId?.(state) ?? randomUUID(), kind: state, bodyHash, posted: false };
-  if (entry.saved === void 0 || previous3?.kind !== state || previous3.bodyHash !== bodyHash) {
-    entry = { ...entry, saved: { ...saved, notice } };
-    await persistEntry(entry);
-    result.entry = entry;
-  }
-  const mark2 = MARKS[state];
-  if (document4.icon !== mark2.icon || document4.color !== mark2.color) {
-    await linear.updateDocument(document4.id, mark2);
-    result.updated = true;
-  }
-  if (notice.posted) return result;
-  const comment = await linear.ensureDocumentComment(document4.documentContentId, body2, notice.id, true);
-  if (state === "conflict") options.onConflictNotice?.("set");
-  const posted = { ...entry, saved: { ...saved, notice: { ...notice, posted: true } } };
-  await persistEntry(posted);
-  result.entry = posted;
-  result.commented = comment.created;
-  return result;
-}
-
-// src/sync/recorded.ts
-var RECORDED = /^Document-recorded: (\S+) (\S+)$/gm;
-function recordedTime(updatedAt) {
-  const time = new Date(updatedAt);
-  if (!Number.isFinite(time.getTime())) throw new Error(message("sync.invalid-update-time"));
-  return time.toISOString();
-}
-function recordedTrailers(recorded) {
-  return [...recorded].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([id, time]) => `Document-recorded: ${id} ${recordedTime(time)}`);
-}
-function withRecorded(message2, recorded) {
-  return recorded.size === 0 ? message2 : `${message2}
-
-${recordedTrailers(recorded).join("\n")}`;
-}
-async function readRecorded(git, ids) {
-  if (ids === null) return /* @__PURE__ */ new Map();
-  const cursor = (await git.text(["log", "-1", "--format=%H", "--grep=^Capture-through:", ids])).trim();
-  const log = await git.text(["log", "--format=%B%x00", cursor === "" ? ids : `${cursor}..${ids}`]);
-  const recorded = /* @__PURE__ */ new Map();
-  for (const message2 of log.split("\0")) {
-    const seen = /* @__PURE__ */ new Map();
-    for (const match of message2.matchAll(RECORDED)) seen.set(match[1], match[2]);
-    for (const [id, time] of seen) if (!recorded.has(id)) recorded.set(id, time);
-  }
-  return recorded;
-}
-
-// src/sync/stable-id.ts
-import { createHash as createHash6 } from "node:crypto";
-function stableId(...parts) {
-  const hex = createHash6("sha256").update(parts.join("\0")).digest("hex");
-  const variant = (parseInt(hex[16], 16) & 3 | 8).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
-
-// src/initial-sync/confirm.ts
-var FINAL_IDS_MESSAGE = "Initial sync: document ids";
-var KEPT_ANNOTATION = /^Kept-annotation: (".*")$/gm;
-function keptAnnotationTrailer(path2) {
-  return `Kept-annotation: ${JSON.stringify(path2)}`;
-}
-var KEPT_ANNOTATIONS_RECORDED = "Kept-annotations: recorded";
-function keptAnnotationsTrailers(kept) {
-  return [KEPT_ANNOTATIONS_RECORDED, ...[...kept].sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map(keptAnnotationTrailer)];
-}
-async function readKeptAnnotations(git, ids) {
-  if (ids === null) return /* @__PURE__ */ new Set();
-  const log = await git.text(["log", "--format=%B", "--fixed-strings", `--grep=${FINAL_IDS_MESSAGE}`, `--grep=${KEPT_ANNOTATIONS_RECORDED}`, "-1", ids]);
-  const lines2 = log.split("\n");
-  if (lines2[0] !== FINAL_IDS_MESSAGE && !lines2.includes(KEPT_ANNOTATIONS_RECORDED)) return /* @__PURE__ */ new Set();
-  return new Set([...log.matchAll(KEPT_ANNOTATION)].map((match) => JSON.parse(match[1])));
-}
-var RECORD_MESSAGE = "Initial sync: Linear's state";
-var INITIAL_RECORD_SUBJECTS = /* @__PURE__ */ new Set([RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD]);
-var PROGRESS_BATCH = 25;
-var StateMovedError = class extends Error {
-  constructor() {
-    super(message("initial-sync.state-moved"));
-    this.name = "StateMovedError";
-  }
-};
-async function confirmInitialSync(context, options) {
-  const { git, fetched, targets, linear } = context;
-  const transforms = options.transforms ?? [];
-  const identity = options.identity ?? context.identity;
-  const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
-  const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
-  const checkpoint2 = options.checkpoint ?? ((name) => checkpoint(name));
-  const newId = options.newId ?? randomUUID2;
-  const sources = await readPlanSources(context, { withContent: true });
-  const plan = planInitialSync(sources.input);
-  plan.capacity = assessCapacity(context, sources.containers, plan.create, options.documentCap);
-  const texts = sources.input.texts;
-  const expected = { ...fetched.state };
-  const resumed = await readInitialSyncProgress(git, expected.ids) !== null;
-  const previous3 = await readIds(git, expected.ids);
-  const writtenBefore = resumed ? await readWrittenHashes(git, expected.ids) : /* @__PURE__ */ new Map();
-  const sentHashes = new Map(writtenBefore);
-  const ids = resumed ? new Map(previous3) : /* @__PURE__ */ new Map();
-  const uploads = await readUploads(git, expected.uploads);
-  const uploadsAtStart = uploads.size;
-  const stored = /* @__PURE__ */ new Map();
-  const sent = /* @__PURE__ */ new Map();
-  const result = {
-    complete: false,
-    resumed,
-    created: [],
-    overwritten: [],
-    unchanged: [],
-    skippedCompleted: [],
-    trashed: [],
-    leftOutAtWrite: [],
-    failed: [],
-    notAttempted: [],
-    progressPushes: 0,
-    progressRecorded: true,
-    conflictNotices: noConflictNotices(),
-    record: null
-  };
-  if (capacityBlocked(plan.capacity)) {
-    result.code = "container-cap";
-    result.notAttempted = [...plan.create, ...plan.overwrite, ...plan.trash].map((entry) => entry.path).sort();
-    return { plan, result };
-  }
-  const rememberedDocuments = /* @__PURE__ */ new Map();
-  const remember = (path2, document4) => {
-    const before = previous3.get(path2);
-    ids.set(path2, before !== void 0 && before.id === document4.id && before.saved !== void 0 ? { id: document4.id, saved: before.saved } : { id: document4.id });
-    stored.set(path2, document4.content ?? "");
-    rememberedDocuments.set(path2, document4);
-  };
-  let unpushed = 0;
-  let uploadsPushed = uploads.size;
-  const pushProgress = async () => {
-    const updates = [];
-    const idsCommit = await commitIds(git, expected.ids, ids, identity, {
-      message: initialSyncProgressMessage(fetched.tracked),
-      always: true,
-      written: sentHashes
-    });
-    updates.push({ ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit });
-    if (uploads.size !== uploadsAtStart || expected.uploads !== null) {
-      const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
-      updates.push({ ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit });
+    for (const [base2, paths] of releaseGroups) baseTree = await takePaths(git, baseTree, base2, paths);
+    if (frozen.size > 0) {
+      baseTree = await takePaths(git, baseTree, linear, frozen);
+      mergeTracked = await treeCommit(git, await takePaths(git, tracked, linear, frozen), tracked);
     }
-    const pushed = await pushAtomic(git, options.config, updates);
-    if (!pushed.ok) throw new StateMovedError();
-    expected.ids = idsCommit;
-    if (updates.length > 1) expected.uploads = updates[1].next;
-    result.progressPushes += 1;
-    unpushed = 0;
-    uploadsPushed = uploads.size;
-  };
-  const reconcileMark = async (path2, document4, hash, listed = document4) => {
-    const entry = ids.get(path2);
-    if (entry === void 0 || entry.id !== document4.id || document4.content === void 0) return;
-    const shown = entry.saved === void 0 && listed.icon === MARKS.conflict.icon && listed.color === MARKS.conflict.color && detectConflicts(listed.content ?? "").length > 0;
-    await reconcileDocumentMark({
-      document: document4,
-      entry: shown ? { ...entry, saved: { icon: null, color: null } } : entry,
-      linear,
-      noticeId: (state) => stableId("initial-sync", state, document4.id, hash),
-      onConflictNotice: (change) => result.conflictNotices[change].push(path2),
-      persistEntry: async (next) => {
-        ids.set(path2, next);
-        await pushProgress();
-      }
-    });
-  };
-  const work = [
-    ...plan.overwrite.map((entry) => ({ kind: "overwrite", entry })),
-    ...plan.create.map((entry) => ({ kind: "create", entry }))
-  ].sort((a, b) => compare3(a.entry.path, b.entry.path));
-  const documentIds = /* @__PURE__ */ new Map();
-  for (const entry of plan.overwrite) documentIds.set(entry.path, entry.documentId);
-  const reserved = await readReservedIds(git, expected.ids);
-  const saved = /* @__PURE__ */ new Map();
-  for (const entry of plan.create) {
-    const chosen = (resumed ? previous3.get(entry.path)?.id : void 0) ?? reserved.get(entry.path);
-    if (chosen !== void 0 && !sources.documents.has(chosen)) saved.set(entry.path, chosen);
+    mergeBase = await treeCommit(git, baseTree, mergeBase);
   }
-  const taken = /* @__PURE__ */ new Set();
-  if (saved.size > 0) for (const document4 of await linear.getDocuments([...new Set(saved.values())])) taken.add(document4.id);
-  for (const entry of plan.create) {
-    const chosen = saved.get(entry.path);
-    documentIds.set(entry.path, chosen !== void 0 && !taken.has(chosen) ? chosen : newId());
-    ids.set(entry.path, { id: documentIds.get(entry.path) });
-  }
-  try {
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads, documentIds });
-    let written = 0;
-    let beforeWriteReached = false;
-    for (let index2 = 0; index2 < work.length; index2 += 1) {
-      const item = work[index2];
-      const { path: path2 } = item.entry;
-      const stop = linear.stopped ?? (stopAfter !== void 0 && written >= stopAfter ? { kind: "test-threshold", documents: stopAfter } : void 0);
-      if (stop !== void 0) {
-        result.stopped = stop;
-        result.notAttempted = work.slice(index2).map((rest) => rest.entry.path);
-        break;
-      }
-      const document4 = item.kind === "overwrite" ? sources.documents.get(item.entry.documentId) : void 0;
-      if (item.kind === "overwrite" && document4 === void 0) throw new Error(message("initial-sync.document-not-listed", { path: path2 }));
-      try {
-        if (document4 !== void 0) parse2(document4.content ?? "");
-        const source = splitFile(texts.get(path2)).body;
-        const body2 = await transformBody(transforms, path2, source);
-        const hash = sha2563(body2);
-        sent.set(path2, body2);
-        if (document4 !== void 0 && resumed && previous3.get(path2)?.id === document4.id && writtenBefore.get(path2) === hash) {
-          result.skippedCompleted.push(path2);
-          sentHashes.set(path2, hash);
-          remember(path2, document4);
-          await reconcileMark(path2, document4, hash);
-          continue;
-        }
-        if (document4 !== void 0 && (holdsBody(document4.content ?? "", body2) || sameLinkDestinations(document4.content ?? "", body2) && holdsBody(fixText(restoreBody(transforms, path2, document4.content ?? "", body2)), source))) {
-          result.unchanged.push(path2);
-          remember(path2, document4);
-          await reconcileMark(path2, document4, hash);
-          continue;
-        }
-        if (!beforeWriteReached) {
-          beforeWriteReached = true;
-          await checkpoint2("before-write");
-        }
-        if (item.kind === "create") {
-          const title = item.entry.title.normalize("NFC");
-          const id = documentIds.get(path2);
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body2 });
-          remember(path2, created);
-          sentHashes.set(path2, hash);
-          result.created.push(path2);
-          await checkpoint2("document-created-before-ids-push");
-          written += 1;
-          unpushed += 1;
-          await reconcileMark(path2, created, hash);
-        } else {
-          const updated = await linear.updateDocument(item.entry.documentId, { content: body2 });
-          remember(path2, updated);
-          sentHashes.set(path2, hash);
-          result.overwritten.push(path2);
-          written += 1;
-          unpushed += 1;
-          await reconcileMark(path2, updated, hash, document4);
-        }
-      } catch (error) {
-        if (error instanceof MarkdownLimitError) {
-          result.leftOutAtWrite.push({ path: path2, rule: "markdown-complexity" });
-          continue;
-        }
-        if (error instanceof LeaveOutError) {
-          result.leftOutAtWrite.push(error.files.length > 0 ? { path: path2, rule: error.rule, files: [...error.files] } : { path: path2, rule: error.rule });
-          continue;
-        }
-        if (error instanceof DocumentTooLongError) {
-          result.leftOutAtWrite.push({ path: path2, rule: "content-too-long" });
-          continue;
-        }
-        if (error instanceof LinearStoppedError) {
-          result.stopped = error.reason;
-          result.notAttempted = work.slice(index2).map((rest) => rest.entry.path);
-          break;
-        }
-        if (error instanceof LinearReadBackError) {
-          ids.set(path2, { id: error.document.id });
-          unpushed += 1;
-        }
-        if (error instanceof LinearError) {
-          result.failed.push({ path: path2, operation: error.operation, error: describeLinearError(error) });
-          continue;
-        }
-        throw error;
-      }
-      if (unpushed >= batch) await pushProgress();
+  const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase);
+  const { tree, unresolved: conflicts } = resolved;
+  const linearSide = await synchronizedFiles(git, linear, facts, ids);
+  const resultSide = await synchronizedFiles(git, tree, facts);
+  const conflicted = new Set(conflicts);
+  const changes = [];
+  const unchanged = [];
+  const held = [];
+  const claimed = /* @__PURE__ */ new Set();
+  const blobs = await readBlobs(git, [...linearSide.files.values(), ...resultSide.files.values()].map((file) => file.oid));
+  const body2 = (oid) => splitFile(blobs.get(oid).toString("utf8")).body;
+  for (const [from, entry] of [...ids].sort(([a], [b]) => compare3(a, b))) {
+    if (conflicted.has(from)) {
+      claimed.add(from);
+      continue;
     }
-    const writesDone = result.stopped === void 0 && result.failed.length === 0;
-    if (writesDone) {
-      for (let index2 = 0; index2 < plan.trash.length; index2 += 1) {
-        const entry = plan.trash[index2];
-        if (linear.stopped !== void 0) {
-          result.stopped = linear.stopped;
-          result.notAttempted = plan.trash.slice(index2).map((rest) => rest.path);
-          break;
-        }
-        try {
-          await linear.trashDocument(entry.documentId);
-          result.trashed.push(entry.path);
-        } catch (error) {
-          if (error instanceof LinearStoppedError) {
-            result.stopped = error.reason;
-            result.notAttempted = plan.trash.slice(index2).map((rest) => rest.path);
-            break;
-          }
-          if (error instanceof LinearError) {
-            result.failed.push({ path: entry.path, operation: error.operation, error: describeLinearError(error) });
-            continue;
-          }
-          throw error;
+    let to;
+    const decidedPath = resolved.moves.get(from);
+    if (decidedPath !== void 0 && resultSide.files.has(decidedPath) && !ids.has(decidedPath)) to = decidedPath;
+    else if (resultSide.files.has(from)) to = from;
+    else {
+      const renamed2 = renames.get(from);
+      if (renamed2 !== void 0 && !ids.has(renamed2) && !claimed.has(renamed2)) {
+        if (resultSide.files.has(renamed2) && !conflicted.has(renamed2)) to = renamed2;
+        else if (conflicted.has(renamed2) || resultSide.leftOutPaths.has(renamed2)) {
+          claimed.add(renamed2);
+          held.push({ id: entry.id, from, to: renamed2 });
+          continue;
         }
       }
     }
-    if (result.stopped !== void 0 || result.failed.length > 0) {
-      if (unpushed > 0 || uploads.size !== uploadsPushed || await readInitialSyncProgress(git, expected.ids) === null) await pushProgress();
-      result.code = result.stopped !== void 0 ? "stopped" : "write-failed";
-      return { plan, result };
+    if (to === void 0) {
+      if (resultSide.leftOutPaths.has(from)) continue;
+      changes.push({ kind: "trash", id: entry.id, path: from });
+      continue;
     }
-    await checkpoint2("after-write-before-record");
-    const recorded = await record();
-    if (recorded === null) {
-      result.code = "state-moved";
-      result.progressRecorded = unpushed === 0;
-      return { plan, result };
+    claimed.add(to);
+    const next = resultSide.files.get(to);
+    const previous3 = linearSide.files.get(from);
+    if (previous3 === void 0 && entry.releaseBase !== void 0) {
+      const version = { path: to, text: blobs.get(next.oid).toString("utf8") };
+      const input = { base: { path: from, text: "" }, git: version, linear: null };
+      const restored = await resolveStructural(input);
+      const gone = (await resolveStructural({ ...input, linearGone: true })).summary;
+      changes.push({ kind: "create", path: to, restore: { id: entry.id, gone } });
+      if (restored.summary !== null) resolved.decided.push({ path: to, summary: restored.summary });
+      continue;
     }
-    result.record = recorded;
-    result.complete = true;
-    return { plan, result };
-  } catch (error) {
-    if (error instanceof StateMovedError) {
-      result.code = "state-moved";
-      result.progressRecorded = unpushed === 0;
-      return { plan, result };
-    }
-    if (unpushed > 0 || uploads.size !== uploadsPushed) await pushProgress().catch(() => void 0);
-    throw error;
+    const change = {
+      kind: "keep",
+      id: entry.id,
+      from,
+      to,
+      content: previous3 === void 0 || body2(previous3.oid) !== body2(next.oid),
+      title: previous3 === void 0 || previous3.title.normalize("NFC") !== next.title.normalize("NFC"),
+      place: previous3 === void 0 || placeKey(previous3.place) !== placeKey(next.place)
+    };
+    const comment = resolved.comments.get(from);
+    if (comment !== void 0 && (change.title || change.place)) change.comment = comment;
+    if (change.content || change.title || change.place) changes.push(change);
+    else unchanged.push(change);
   }
-  async function record() {
-    const synced = /* @__PURE__ */ new Set([...result.created, ...result.overwritten, ...result.unchanged, ...result.skippedCompleted]);
-    const finalIds = new Map([...ids].filter(([path2]) => synced.has(path2)));
-    const changes = /* @__PURE__ */ new Map();
-    const reformatted = [];
-    for (const path2 of [...synced].sort(compare3)) {
-      const text6 = texts.get(path2);
-      const file = joinFile(splitFile(text6).head, restoreBody(transforms, path2, stored.get(path2) ?? "", sent.get(path2)));
-      if (file !== text6) {
-        changes.set(path2, file);
-        reformatted.push(path2);
+  const renamedTo = new Map([...renames].map(([from, to]) => [to, from]));
+  const renamedFrom = (path2) => {
+    const from = renamedTo.get(path2);
+    if (from === void 0 || !isReadme(from) || ids.has(from) || !linearSide.files.has(from) || resultSide.files.has(from)) return void 0;
+    return from;
+  };
+  const keptMoves = /* @__PURE__ */ new Map();
+  for (const path2 of resultSide.files.keys()) {
+    if (!claimed.has(path2) && !conflicted.has(path2)) {
+      const file = resultSide.files.get(path2);
+      const source = linearSide.files.has(path2) ? path2 : renamedFrom(path2);
+      const previous3 = source === void 0 ? void 0 : linearSide.files.get(source);
+      const unchanged2 = previous3 !== void 0 && body2(previous3.oid) === body2(file.oid);
+      const keptByName = source !== void 0 && options.keptAnnotations?.has(source) === true;
+      const kept = unchanged2 && (body2(file.oid) === "" || keptByName);
+      if (isReadme(path2) && kept) {
+        const annotation = readAnnotation(path2, blobs.get(file.oid).toString("utf8"));
+        if ("annotation" in annotation && annotation.annotation !== null) {
+          if (keptByName && source !== path2) keptMoves.set(source, path2);
+          continue;
+        }
       }
+      const restore = resolved.restores.get(path2);
+      changes.push(restore === void 0 ? { kind: "create", path: path2 } : { kind: "create", path: path2, restore });
     }
-    const tracked = fetched.tracked;
-    let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: RECORD_MESSAGE, identity, skipIfUnchanged: false });
-    if (expected.linear !== null && await sameRecord(expected.linear, linearCommit)) linearCommit = expected.linear;
-    const created = new Set(plan.create.map((entry) => entry.path));
-    const stillReserved = new Map(
-      result.leftOutAtWrite.filter(({ path: path2 }) => created.has(path2)).map(({ path: path2 }) => [path2, documentIds.get(path2)])
-    );
-    const entries = new Map([...plan.create, ...plan.overwrite].map((entry) => [entry.path, entry]));
-    const recorded = new Map(
-      [...result.created, ...result.overwritten, ...result.unchanged].flatMap((path2) => {
-        const document4 = rememberedDocuments.get(path2);
-        const entry = entries.get(path2);
-        if (document4 === void 0 || entry === void 0) return [];
-        const where = placeId(targets, entry.place);
-        const placed = "projectId" in where ? document4.projectId === where.projectId : document4.projectId === null && document4.teamId === where.teamId;
-        return placed && document4.title.normalize("NFC") === entry.title.normalize("NFC") ? [[document4.id, document4.updatedAt]] : [];
-      })
-    );
-    const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
-      reserved: stillReserved,
-      message: withRecorded(FINAL_IDS_MESSAGE, recorded),
-      always: await readInitialSyncProgress(git, expected.ids) !== null
-    });
-    const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
-    const updates = [
-      { ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit },
-      { ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit },
-      // Initial sync replaces `linear`: its new record does not descend from an earlier one.
-      { ref: stateRef(options.config, "linear"), expected: expected.linear, next: linearCommit, replace: true }
-    ];
-    const pushed = await pushAtomic(git, options.config, updates);
-    if (!pushed.ok) return null;
-    const parents = (await git.text(["show", "-s", "--format=%P", linearCommit])).split(" ").filter(Boolean);
-    const hasTrackedParent = parents.length === 1 && parents[0] === tracked;
-    return { linear: linearCommit, moved: linearCommit !== expected.linear, reformatted, parents, hasTrackedParent };
   }
-  async function sameRecord(a, b) {
-    const describe2 = (oid) => git.text(["show", "-s", "--format=%T %P", oid]);
-    return await describe2(a) === await describe2(b);
+  changes.sort((a, b) => compare3(changePath(a), changePath(b)));
+  return {
+    base,
+    tree,
+    conflicts,
+    marked: resolved.marked.filter((path2) => resultSide.files.has(path2)).sort(compare3),
+    decided: resolved.decided,
+    linear: linearSide.files,
+    result: resultSide.files,
+    leftOut: resultSide.leftOut,
+    changes,
+    unchanged: unchanged.sort((a, b) => compare3(a.to, b.to)),
+    held,
+    texts: blobs,
+    keptMoves
+  };
+}
+var ID_HISTORY_DEPTH = 100;
+function knownIdLookup(git, idsCommit, ids) {
+  let history;
+  const versions = /* @__PURE__ */ new Map();
+  return async (path2) => {
+    const current = ids.get(path2);
+    if (current !== void 0) return current.id;
+    history ??= idsCommit === null ? [] : (await git.text(["rev-list", "--first-parent", "-n", String(ID_HISTORY_DEPTH), idsCommit])).split("\n").filter(Boolean);
+    for (const commit2 of history) {
+      let map4 = versions.get(commit2);
+      if (map4 === void 0) {
+        map4 = await readIds(git, commit2);
+        versions.set(commit2, map4);
+      }
+      const entry = map4.get(path2);
+      if (entry !== void 0) return entry.id;
+    }
+    return void 0;
+  };
+}
+async function mergeWithMarkers(git, linearSide, gitSide, ids, knownId, explicitBase) {
+  const base = explicitBase ?? await git.text(["merge-base", linearSide, gitSide]);
+  const merged = await git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ...explicitBase === void 0 ? [] : [`--merge-base=${explicitBase}`], linearSide, gitSide], { okCodes: [0, 1] });
+  const [gitTree, ...rest] = merged.stdout.toString("utf8").split("\0");
+  if (gitTree === void 0 || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message("sync.no-merge-tree"));
+  const unmerged = [...new Set(rest.filter((path2) => path2 !== ""))].sort(compare3);
+  const renames = await renamesBetween(git, base, gitSide);
+  const resolved = await resolveConflicts(git, { base, linear: linearSide, tracked: gitSide, tree: gitTree, unmerged, renames, ids, knownId });
+  return { base, renames, resolved };
+}
+function changePath(change) {
+  return change.kind === "keep" ? change.to : change.path;
+}
+function placeKey(place) {
+  return place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
+}
+async function synchronizedFiles(git, treeish, facts, observedRepairs) {
+  const entries = await listTree(git, treeish, MAPPING_TREE_BYTES);
+  requireReadableAnnotations(entries);
+  const budget = new MappingBlobBudget();
+  const mapping = await mapTree(git, entries, budget);
+  const paths = new Set(mapping.documents.map((document4) => document4.path));
+  const blobs = await budget.read(git, entries.filter((entry) => paths.has(entry.path)));
+  const files = /* @__PURE__ */ new Map();
+  const leftOut = [];
+  const leave = (path2, rules) => leftOut.push({ path: path2, rules: [...new Set(rules)].sort() });
+  for (const document4 of mapping.documents) {
+    const rules = lintInTree(document4.path, blobs.get(document4.oid).toString("utf8"), mapping.files).map((finding) => finding.rule);
+    if (lengthRefusal({ title: document4.title }, facts) !== void 0) rules.push("title-too-long");
+    const repair = observedRepairs?.get(document4.path)?.pullRewrite;
+    const observed = repair !== void 0 && createHash6("sha256").update(blobs.get(document4.oid)).digest("hex") === repair.hash;
+    if (rules.length > 0 && !observed) leave(document4.path, rules);
+    else files.set(document4.path, toSideFile(document4));
   }
+  for (const file of mapping.leftOut) leave(file.path, [file.rule]);
+  for (const file of mapping.unsynced) if (file.place !== void 0) leave(file.path, [file.reason]);
+  leftOut.sort((a, b) => compare3(a.path, b.path));
+  return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)) };
 }
-function sha2563(text6) {
-  return createHash7("sha256").update(text6, "utf8").digest("hex");
+async function leftOutFiles(git, treeish, facts = LINEAR_FACTS) {
+  return (await synchronizedFiles(git, treeish, facts)).leftOut;
 }
-function holdsBody(content4, body2) {
-  return sameMarkdown(content4, body2) || content4 === fixText(body2);
+var BASELINE_DEPTH = 20;
+async function lastSynchronized(git, linear, path2, facts = LINEAR_FACTS, sides = /* @__PURE__ */ new Map(), oldest) {
+  for (const commit2 of await baselineCommits(git, linear, path2, oldest)) {
+    const file = await synchronizedAt(git, commit2, path2, facts, sides);
+    if (file !== void 0) return { commit: commit2, file, text: (await readBlobs(git, [file.oid])).get(file.oid).toString("utf8") };
+  }
+  return null;
+}
+async function baselineCommits(git, linear, path2, oldest) {
+  const range = oldest === void 0 ? [linear] : [linear, "--not", `${oldest}^@`];
+  const log = async (paths) => {
+    const commits = (await git.text(["--literal-pathspecs", "log", "--first-parent", "--format=%H", "-n", String(BASELINE_DEPTH), ...range, "--", ...paths])).split("\n").filter(Boolean);
+    return oldest !== void 0 && commits.length < BASELINE_DEPTH && !commits.includes(oldest) ? [...commits, oldest] : commits;
+  };
+  const versions = await log([path2]);
+  const linked = await linkedFiles(git, versions, path2);
+  return linked.length === 0 ? versions : await log([path2, ...linked]);
+}
+async function synchronizedAt(git, commit2, path2, facts, sides) {
+  if (!sides.has(commit2)) sides.set(commit2, synchronizedFiles(git, commit2, facts));
+  return (await sides.get(commit2)).files.get(path2);
+}
+async function linkedFiles(git, commits, path2) {
+  const linked = /* @__PURE__ */ new Set();
+  for (const commit2 of commits) {
+    const object = `${commit2}:${path2}`;
+    const result = await git.run(["cat-file", "-s", object], { okCodes: [0, 128], maxOutputBytes: 64 });
+    const size = Number(result.stdout.toString("utf8"));
+    if (result.code !== 0 || !Number.isSafeInteger(size) || size < 0 || size > MAPPING_FILE_BYTES) continue;
+    const blob = await git.run(["cat-file", "blob", object], { okCodes: [0, 128], maxOutputBytes: MAPPING_FILE_BYTES });
+    if (blob.code !== 0) continue;
+    try {
+      for (const link2 of findFileLinks(path2, splitFile(blob.stdout.toString("utf8")).body, () => true)) {
+        if (!link2.target.endsWith(MARKDOWN_EXTENSION)) linked.add(link2.target);
+      }
+    } catch (error) {
+      if (!(error instanceof MarkdownLimitError)) throw error;
+    }
+  }
+  return [...linked];
+}
+function toSideFile(document4) {
+  return { path: document4.path, oid: document4.oid, title: document4.title, place: document4.place };
+}
+async function resolveConflicts(git, input) {
+  const out = { tree: input.tree, unresolved: [], moves: /* @__PURE__ */ new Map(), comments: /* @__PURE__ */ new Map(), restores: /* @__PURE__ */ new Map(), marked: [], decided: [] };
+  if (input.unmerged.length === 0) return out;
+  const entriesByPath = async (side) => new Map((await listTree(git, side, MAPPING_TREE_BYTES)).map((entry) => [entry.path, entry]));
+  const [baseFiles, gitFiles, linearFiles] = await Promise.all([entriesByPath(input.base), entriesByPath(input.tracked), entriesByPath(input.linear)]);
+  const mapped = /* @__PURE__ */ new Set();
+  for (const side of [baseFiles, gitFiles, linearFiles]) {
+    const entries = [...side.values()];
+    requireReadableAnnotations(entries);
+    for (const document4 of (await mapTree(git, entries, new MappingBlobBudget())).documents) mapped.add(document4.path);
+  }
+  const linearRenames = await renamesBetween(git, input.base, input.linear);
+  const pathById = new Map([...input.ids].map(([path2, entry]) => [entry.id, path2]));
+  const knownId = async (path2) => input.knownId?.(path2);
+  const basePathOf = (path2) => {
+    if (baseFiles.has(path2)) return path2;
+    for (const [from, to] of [...input.renames, ...linearRenames]) if (to === path2 && baseFiles.has(from)) return from;
+    return null;
+  };
+  const linearPathOf = async (basePath) => {
+    const id = await knownId(basePath);
+    const byId = id === void 0 ? void 0 : pathById.get(id);
+    if (byId !== void 0 && linearFiles.has(byId)) return byId;
+    const renamed2 = linearRenames.get(basePath);
+    if (renamed2 !== void 0 && linearFiles.has(renamed2)) return renamed2;
+    if (!linearFiles.has(basePath)) return null;
+    if (id !== void 0 && byId === void 0 && await annotationOnly(basePath)) {
+      removedCarriers.add(basePath);
+      return null;
+    }
+    return basePath;
+  };
+  const removedCarriers = /* @__PURE__ */ new Set();
+  const annotationOnly = async (path2) => {
+    if (path2 !== "README.md" && !path2.endsWith("/README.md")) return false;
+    const entry = linearFiles.get(path2);
+    if (!readableBlob(entry)) return false;
+    const text6 = (await new MappingBlobBudget().read(git, [entry])).get(entry.oid).toString("utf8");
+    if (splitFile(text6).body.trim() !== "") return false;
+    const annotation = readAnnotation(path2, text6);
+    return "annotation" in annotation && annotation.annotation !== null;
+  };
+  const groups = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const path2 of input.unmerged) {
+    if (seen.has(path2)) continue;
+    const basePath = basePathOf(path2);
+    const gitPath = basePath === null ? gitFiles.has(path2) ? path2 : null : input.renames.get(basePath) ?? (gitFiles.has(basePath) ? basePath : null);
+    const linearPath = basePath === null ? linearFiles.has(path2) ? path2 : null : await linearPathOf(basePath);
+    const involved = [...new Set([path2, basePath, gitPath, linearPath].filter((entry) => entry !== null))];
+    for (const entry of involved) seen.add(entry);
+    const collides = involved.some((entry) => linearFiles.has(entry) && entry !== linearPath && !removedCarriers.has(entry) || gitFiles.has(entry) && entry !== gitPath);
+    const base = basePath === null ? void 0 : baseFiles.get(basePath);
+    const tracked = gitPath === null ? void 0 : gitFiles.get(gitPath);
+    const linear = linearPath === null ? void 0 : linearFiles.get(linearPath);
+    if (!collides && [base, tracked, linear].every((entry) => entry === void 0 || readableBlob(entry)) && involved.every((entry) => mapped.has(entry) || !input.unmerged.includes(entry))) groups.push({ base, tracked, linear, involved });
+    else out.unresolved.push(...involved);
+  }
+  const blobs = await new MappingBlobBudget().read(git, groups.flatMap(({ base, tracked, linear }) => [base, tracked, linear].filter((entry) => entry !== void 0)));
+  const version = (entry) => entry === void 0 ? null : { path: entry.path, text: blobs.get(entry.oid).toString("utf8") };
+  const changes = /* @__PURE__ */ new Map();
+  for (const { base, tracked, linear, involved } of groups) {
+    const basePath = base?.path ?? null;
+    const linearPath = linear?.path ?? null;
+    const versions = {
+      // Both sides added the path: an empty base, so the whole text is merged.
+      base: version(base) ?? { path: involved[0], text: "" },
+      git: version(tracked),
+      linear: version(linear)
+    };
+    let result;
+    let gone;
+    try {
+      result = await resolveStructural(versions);
+      if (result.kind === "linear-deleted-git-changed" && result.path !== null) {
+        gone = (await resolveStructural({ ...versions, linearGone: true })).summary;
+      }
+    } catch (error) {
+      if (!(error instanceof MarkdownLimitError)) throw error;
+      out.unresolved.push(...involved);
+      continue;
+    }
+    for (const path2 of involved) changes.set(path2, null);
+    if (result.path !== null && result.text !== null) changes.set(result.path, result.text);
+    if (linearPath !== null && result.path !== null && result.path !== linearPath) out.moves.set(linearPath, result.path);
+    if (linearPath !== null && result.linear.comment !== void 0) out.comments.set(linearPath, result.linear.comment);
+    let summary2 = result.summary;
+    if (result.kind === "linear-deleted-git-changed" && result.path !== null) {
+      const id = basePath === null ? void 0 : await knownId(basePath);
+      if (id !== void 0) out.restores.set(result.path, { id, gone });
+      else summary2 = gone;
+    }
+    if (result.path !== null && result.conflicts.length > 0) out.marked.push(result.path);
+    if (summary2 !== null) out.decided.push({ path: result.path ?? basePath ?? involved[0], summary: summary2 });
+  }
+  out.tree = await buildTree(git, input.tree, changes);
+  out.unresolved.sort(compare3);
+  return out;
+}
+async function renamesBetween(git, from, to) {
+  const { stdout } = await git.run(["diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--diff-filter=R", "--name-status", "-z", from, to]);
+  const parts = stdout.toString("utf8").split("\0");
+  const renames = /* @__PURE__ */ new Map();
+  for (let index2 = 0; index2 + 2 < parts.length; index2 += 3) {
+    const [status, old, renamed2] = [parts[index2], parts[index2 + 1], parts[index2 + 2]];
+    if (status?.startsWith("R") && old !== void 0 && renamed2 !== void 0) renames.set(old, renamed2);
+  }
+  return renames;
+}
+async function alreadyMerged(git, linear, tracked) {
+  return (await git.run(["merge-base", "--is-ancestor", tracked, linear], { okCodes: [0, 1] })).code === 0;
+}
+async function mergedInitialRecord(git, linear, tracked) {
+  const [subject] = (await git.text(["show", "-s", "--format=%s", linear])).split("\n");
+  if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
+  if (!await isAncestor(git, linear, tracked)) return false;
+  const [linearTree, trackedTree] = (await git.text(["rev-parse", `${linear}^{tree}`, `${tracked}^{tree}`])).split("\n");
+  return linearTree === trackedTree;
+}
+async function filesOf(git, treeish) {
+  return new Map((await listTree(git, treeish)).map((entry) => [entry.path, entry.oid]));
 }
 function compare3(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
-
-// src/sync/head-check.ts
-var MERGED_MODES = /* @__PURE__ */ new Set(["100644", "100755", "000000"]);
-var NO_BLOB = "0".repeat(40);
-function isSyncedChange(path2, mode, zones) {
-  if (!MERGED_MODES.has(mode)) return false;
-  if (path2.split("/").some((segment) => segment.toLowerCase() === ".github")) return false;
-  const name = path2.slice(path2.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
-  const extension2 = dot > 0 ? name.slice(dot) : "";
-  if (extension2 !== MARKDOWN_EXTENSION && !UPLOAD_EXTENSIONS.has(extension2)) return false;
-  return nearestZone(zones, folderOf(path2)) !== void 0;
-}
-function keepsAnnotation(path2, before, after) {
-  const read = (text6) => JSON.stringify(text6 === null ? { annotation: null } : readAnnotation(path2, text6));
-  return read(before) === read(after);
-}
-var LISTED_UNVERIFIED = 20;
-function oneLine(path2) {
-  return path2.replace(/[\u0000-\u001f\u007f]/g, "?");
-}
-function quoted(path2) {
-  return `\`${oneLine(path2).replaceAll("`", "?")}\``;
-}
-function unverifiedList(paths) {
-  const named2 = paths.slice(0, LISTED_UNVERIFIED).map(quoted).join(", ");
-  return paths.length > LISTED_UNVERIFIED ? `${named2} and ${paths.length - LISTED_UNVERIFIED} more` : named2;
-}
-function unverifiedNote(paths) {
-  return `The sync does not merge this pull request: it also changes files that are not synchronized documents or their assets (${paths.length}): ${unverifiedList(paths)}. A person reviews and merges it, or removes those changes from this branch.`;
-}
-async function unverifiedPaths(git, before, after, zones) {
-  const raw = (await git.run(["diff-tree", "-r", "-z", "--no-renames", "--raw", before, after])).stdout.toString("utf8");
-  const fields = raw.split("\0");
-  const paths = [];
-  const readmes = [];
-  for (let index2 = 0; index2 + 1 < fields.length; index2 += 2) {
-    const [, mode = "", from = NO_BLOB, to = NO_BLOB] = fields[index2].split(" ");
-    const path2 = fields[index2 + 1];
-    if (!isSyncedChange(path2, mode, zones)) paths.push(path2);
-    else if (path2.split("/").at(-1) === ANNOTATION_FILE) readmes.push({ path: path2, from, to });
+async function takePaths(git, into, from, paths) {
+  const entries = new Map((await listTree(git, from)).map((entry) => [entry.path, entry]));
+  for (const path2 of paths) checkRepoPath(path2, { removal: !entries.has(path2) });
+  const dir = await mkdtemp4(join9(tmpdir5(), "lane-index-"));
+  const env = { GIT_INDEX_FILE: join9(dir, "index") };
+  try {
+    await git.run(["read-tree", `${into}^{tree}`], { env });
+    const zero = "0".repeat(await git.text(["rev-parse", "--show-object-format"]) === "sha256" ? 64 : 40);
+    const input = [...paths].map((path2) => {
+      const entry = entries.get(path2);
+      return entry === void 0 ? `0 ${zero}	${path2}\0` : `${entry.mode} ${entry.oid}	${path2}\0`;
+    }).join("");
+    if (input) await git.run(["update-index", "-z", "--index-info"], { env, input });
+    return await git.text(["write-tree"], { env });
+  } finally {
+    await rm4(dir, { recursive: true, force: true });
   }
-  if (readmes.length > 0) {
-    const blobs = await readBlobs(git, readmes.flatMap(({ from, to }) => [from, to].filter((oid) => oid !== NO_BLOB)));
-    const text6 = (oid) => oid === NO_BLOB ? null : blobs.get(oid).toString("utf8");
-    for (const { path: path2, from, to } of readmes) if (!keepsAnnotation(path2, text6(from), text6(to))) paths.push(path2);
+}
+function treeCommit(git, tree, parent) {
+  return commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [parent], message: "Merge input", identity: NEUTRAL_IDENTITY });
+}
+function isReadme(path2) {
+  return path2 === "README.md" || path2.endsWith("/README.md");
+}
+
+// src/sync/pull-repairs.ts
+var repairSet = (path2, replacement) => /* @__PURE__ */ new Map([[path2, replacement]]);
+async function pendingRepairs(git, linear, ids, zones, paths) {
+  const counts2 = /* @__PURE__ */ new Map();
+  for (const entry of ids.values()) counts2.set(entry.id, (counts2.get(entry.id) ?? 0) + 1);
+  const pending = [...ids].filter(([path2, entry]) => entry.pullRewrite !== void 0 && counts2.get(entry.id) === 1 && (paths === void 0 || paths.has(path2)));
+  const repairs = /* @__PURE__ */ new Map();
+  if (pending.length === 0) return repairs;
+  const entries = new Map((await listTree(git, linear, MAPPING_TREE_BYTES)).map((entry) => [entry.path, entry]));
+  const files = candidateFiles([...entries.values()], zones);
+  const blobs = await new MappingBlobBudget().read(git, files);
+  const documents = new Set(mapFiles([...entries.values()], zones, blobs).documents.map((document4) => document4.path));
+  for (const [path2, entry] of pending) {
+    const file = entries.get(path2);
+    if (!documents.has(path2) || file === void 0 || !isSyncedChange(path2, file.mode, zones)) continue;
+    const source = blobs.get(file.oid);
+    const repair = entry.pullRewrite;
+    if (source === void 0 || createHash7("sha256").update(source).digest("hex") !== repair.hash) continue;
+    if (source.toString("utf8") === repair.replacement) continue;
+    repairs.set(path2, repair);
   }
-  return paths.sort();
+  return repairs;
 }
-function withUnverifiedNote(body2, paths) {
-  const kept = body2.split("\n").filter((line2) => !line2.startsWith("The sync does not merge this pull request:")).join("\n").trimEnd();
-  return `${kept}
-
-${unverifiedNote(paths)}
-`;
-}
-var UnverifiedHead = class extends Error {
-  paths;
-  constructor(paths) {
-    super(unverifiedNote(paths));
-    this.paths = paths;
+async function checkedPullView(git, linear, ids, zones, identity, gate, hold, paths) {
+  const changes = /* @__PURE__ */ new Map();
+  const held = /* @__PURE__ */ new Set();
+  const notes = [];
+  for (const [path2, repair] of await pendingRepairs(git, linear, ids, zones, paths)) {
+    const findings = await gate.check(repairSet(path2, repair.replacement));
+    if (findings === null || findings.length > 0) {
+      held.add(path2);
+      continue;
+    }
+    changes.set(path2, repair.replacement);
+    for (const image2 of repair.images) notes.push(`- ${oneLine(path2)}: image ${image2.image} of ${image2.total} (line ${image2.line}).`);
   }
-};
-async function checkPushScope(git, tracked, next, zones) {
-  const paths = await unverifiedPaths(git, tracked, next, zones);
-  if (paths.length > 0) throw new UnverifiedHead(paths);
+  if (changes.size === 0 && held.size === 0) return { commit: linear, notes };
+  let tree = changes.size === 0 ? await git.text(["rev-parse", `${linear}^{tree}`]) : await buildTree(git, linear, changes);
+  if (held.size > 0) tree = await takePaths(git, tree, hold, held);
+  if (tree === await git.text(["rev-parse", `${linear}^{tree}`])) return { commit: linear, notes };
+  const date = await git.text(["show", "-s", "--format=%cI", linear]);
+  const commit2 = await git.text(["commit-tree", "--no-gpg-sign", tree, "-p", linear, "-m", "Apply checked image and link repairs"], { env: {
+    GIT_AUTHOR_NAME: identity.name,
+    GIT_AUTHOR_EMAIL: identity.email,
+    GIT_COMMITTER_NAME: identity.name,
+    GIT_COMMITTER_EMAIL: identity.email,
+    GIT_AUTHOR_DATE: date,
+    GIT_COMMITTER_DATE: date
+  } });
+  return { commit: commit2, notes };
+}
+async function stagePullRepairs(git, state, zones, gate) {
+  if (state.linear === null) return;
+  const repairs = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones);
+  for (const [path2, repair] of repairs) await gate.check(repairSet(path2, repair.replacement));
+}
+async function readPlainFileProvenance(git, linear, options = {}) {
+  const log = await git.text(["log", ...options.firstParent === false ? [] : ["--first-parent"], "--format=%B", "--grep=^Plain-link:", linear]);
+  const result = /* @__PURE__ */ new Map();
+  for (const match of log.matchAll(/^Plain-link: (\S+) (\S+)$/gm)) {
+    try {
+      const id = decodeURIComponent(match[1]);
+      const target = decodeURIComponent(match[2]);
+      if (!result.has(id)) result.set(id, /* @__PURE__ */ new Set());
+      result.get(id).add(target);
+    } catch {
+    }
+  }
+  return result;
 }
 
-// src/initial-sync/reverse.ts
-import { posix as posix6 } from "node:path";
+// src/sync/write.ts
+import { createHash as createHash12, randomUUID as randomUUID3 } from "node:crypto";
+import { posix as posix5 } from "node:path";
 
-// src/sync/assets.ts
+// src/sync/paths.ts
 import { createHash as createHash8 } from "node:crypto";
-import { posix as posix4 } from "node:path";
+import { posix as posix3 } from "node:path";
+var PATH_RULE = "percent-encode-unsafe-segments";
+var escapeFirst = (text6) => text6 === "" ? "%00" : `%${text6.charCodeAt(0).toString(16).toUpperCase()}${text6.slice(1)}`;
+function shorten(name, source) {
+  if (Buffer.byteLength(name) <= 180) return name;
+  const short = `${[...name].slice(0, 40).join("")}~${createHash8("sha256").update(source).digest("hex").slice(0, 16)}`;
+  return isGitDirectoryName(short) ? escapeFirst(short) : short;
+}
+function titlePath(title) {
+  return title.normalize("NFC").split("/").map((part) => {
+    let safe2 = part.replace(/[%\\\u0000-\u001f\u007f:*?"<>|]/g, (char) => char === "*" ? "%2A" : encodeURIComponent(char));
+    if (safe2 === "" || safe2 === "." || safe2 === ".." || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(safe2)) safe2 = escapeFirst(safe2);
+    safe2 = safe2.replace(/[. ]+$/, (suffix) => [...suffix].map((char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`).join(""));
+    if (isGitDirectoryName(safe2) || safe2.toLowerCase() === ".github") safe2 = escapeFirst(safe2);
+    return shorten(safe2, part);
+  }).join("/");
+}
+function inFolder(folder, name) {
+  return folder === "" && name.startsWith("-") ? `%2D${name.slice(1)}` : posix3.join(folder, name);
+}
+function titleFile(folder, title) {
+  return `${inFolder(folder, titlePath(title))}.md`;
+}
+function pathKey(path2) {
+  return path2.normalize("NFC").toLowerCase();
+}
+function documentPath(folder, title, id, occupied, previous3, invalid2 = () => false) {
+  const keys = [...occupied].map(pathKey);
+  const inAssets = (path2) => inAssetsFolder(folder === "" ? path2 : path2.slice(folder.length + 1));
+  const conflicts = (path2) => inAssets(path2) || invalid2(path2) || keys.some((key) => key === pathKey(path2) || key.startsWith(`${pathKey(path2)}/`) || pathKey(path2).startsWith(`${key}/`));
+  let candidate = titleFile(folder, title);
+  const raw = `${folder === "" ? "" : `${folder}/`}${title}.md`;
+  if (previous3 === raw && !conflicts(previous3) && !(folder === "" && raw.startsWith("-")) && !previous3.split("/").some(isGitDirectoryName)) return previous3;
+  const suffix = createHash8("sha256").update(id).digest("hex").slice(0, 12);
+  const flattened = titlePath(title).replaceAll("/", "%2F");
+  const flat = shorten(flattened, title);
+  if (previous3 !== void 0 && !conflicts(previous3)) {
+    const prefix = inFolder(folder, `${flat}~${suffix}`);
+    if (previous3 === `${prefix}.md` || previous3.startsWith(`${prefix}-`) && /^\d+\.md$/.test(previous3.slice(prefix.length + 1))) return previous3;
+  }
+  if (!conflicts(candidate)) return candidate;
+  for (let index2 = 0; ; index2 += 1) {
+    candidate = inFolder(folder, `${flat}~${suffix}${index2 === 0 ? "" : `-${index2}`}.md`);
+    if (!conflicts(candidate)) return candidate;
+    if (index2 > occupied.size + 1) throw new Error(message("sync.no-safe-path"));
+  }
+}
 
 // src/initial-sync/links.ts
-import { posix as posix3 } from "node:path";
+import { posix as posix4 } from "node:path";
 function documentUrlBase(urlKey) {
   return `https://linear.app/${urlKey}/document`;
 }
@@ -27161,13 +27966,13 @@ function resolveRelative(fromPath, url) {
   } catch {
     return void 0;
   }
-  const joined = decoded.startsWith("/") ? decoded.slice(1) : posix3.join(posix3.dirname(fromPath), decoded);
-  const path2 = posix3.normalize(joined);
+  const joined = decoded.startsWith("/") ? decoded.slice(1) : posix4.join(posix4.dirname(fromPath), decoded);
+  const path2 = posix4.normalize(joined);
   if (path2 === "." || path2.startsWith("../") || path2 === ".." || path2.endsWith("/")) return void 0;
   return { path: path2, fragment };
 }
 function relativeLink(fromPath, toPath) {
-  const relative3 = posix3.relative(posix3.dirname(fromPath), toPath);
+  const relative3 = posix4.relative(posix4.dirname(fromPath), toPath);
   return relative3.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
 function linkDestinations(body2) {
@@ -27353,1295 +28158,194 @@ function documentLinks() {
   };
 }
 
-// src/sync/image-links.ts
-function text5(value) {
-  return toMarkdown({ type: "root", children: [{ type: "paragraph", children: [{ type: "text", value }] }] }).trimEnd();
-}
-function imageLinks(body2, deadUploads = /* @__PURE__ */ new Set(), onlyImages) {
-  const tree = parse2(body2);
-  const offset = body2.startsWith("\uFEFF") ? 1 : 0;
-  const definitions = /* @__PURE__ */ new Map();
-  visit2(tree, (node2) => {
-    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+// src/sync/fix-hooks.ts
+async function nameFixingHooks(git, tracked, files) {
+  if (files.length === 0) return;
+  const config = readHookConfig(await git.text(["show", `${tracked}:${PRE_COMMIT_CONFIG}`]));
+  const configured = new Set(config.hooks.map((hook) => hook.id));
+  await mapLimit(files, 4, async (file) => {
+    const trailers = await git.text(["--literal-pathspecs", "log", "-1", "--format=%(trailers:key=Pre-commit-fix,valueonly)", tracked, "--", file.path]);
+    const hooks = [...new Set(trailers.split("\n").map((id) => id.trim()).filter((id) => configured.has(id)))].sort();
+    if (hooks.length > 0) file.hooks = hooks;
   });
-  const images = [];
-  const edits = [];
-  let count4 = 0;
-  visit2(tree, (node2) => {
-    if (node2.type === "image" || node2.type === "imageReference") count4++;
-  });
-  let index2 = 0;
-  visit2(tree, (node2, ancestors) => {
-    const enclosingRemoved = ancestors.some((parent) => parent.type === "link" && !allowedLink(parent.url) || parent.type === "linkReference" && !allowedLink(definitions.get(parent.identifier) ?? ""));
-    if (node2.type === "link" || node2.type === "linkReference") {
-      const url2 = node2.type === "link" ? node2.url : definitions.get(node2.identifier) ?? "";
-      if (!allowedLink(url2) && !enclosingRemoved) edits.push({ from: start(node2) + offset, to: end(node2) + offset, text: "" });
-      return;
-    }
-    if (node2.type !== "image" && node2.type !== "imageReference") return;
-    index2++;
-    const url = node2.type === "image" ? node2.url : definitions.get(node2.identifier);
-    if (url === void 0) return;
-    if (onlyImages !== void 0 && !onlyImages.has(index2)) return;
-    let upload = false;
-    try {
-      const parsed = new URL(url);
-      upload = parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.port === "" && parsed.username === "" && parsed.password === "";
-    } catch {
-    }
-    if (upload && !deadUploads.has(url.split("#")[0]) && !deadUploads.has(url) && !ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference")) return;
-    images.push({ image: index2, total: count4, line: line(node2) });
-    if (enclosingRemoved) return;
-    let replacement = "";
-    if (url !== "" && allowedLink(url)) {
-      const label = node2.alt || url;
-      replacement = ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference") ? text5(label) : toMarkdown({ type: "root", children: [{ type: "paragraph", children: [{ type: "link", url, children: [{ type: "text", value: label }] }] }] }, { resourceLink: true }).trimEnd();
-    }
-    if (ancestors.some((parent) => parent.type === "tableCell")) replacement = replacement.replace(/\|/g, "&#124;");
-    edits.push({ from: start(node2) + offset, to: end(node2) + offset, text: replacement, ...replacement.startsWith("[") ? { url } : {} });
-  });
-  visit2(tree, (node2) => {
-    if (node2.type === "definition" && !allowedLink(node2.url)) edits.push({ from: start(node2) + offset, to: end(node2) + offset, text: "" });
-  });
-  let repaired;
-  return { images, get body() {
-    return repaired ??= rewrite2(body2, tree, offset, edits);
-  } };
-}
-function destinationsOf(tree, offset) {
-  const definitions = /* @__PURE__ */ new Map();
-  visit2(tree, (node2) => {
-    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
-  });
-  const found = /* @__PURE__ */ new Map();
-  visit2(tree, (node2) => {
-    const url = node2.type === "link" || node2.type === "image" || node2.type === "definition" ? node2.url : node2.type === "linkReference" || node2.type === "imageReference" ? definitions.get(node2.identifier) : void 0;
-    if (url !== void 0) found.set(start(node2) + offset, url);
-  });
-  return found;
-}
-function rewrite2(body2, tree, offset, edits) {
-  let expected = [...destinationsOf(tree, offset)];
-  let result = body2;
-  for (const edit of edits.sort((a, b) => b.from - a.from)) {
-    result = result.slice(0, edit.from) + edit.text + result.slice(edit.to);
-    const shift = edit.text.length - (edit.to - edit.from);
-    expected = expected.flatMap(([at, url]) => at < edit.from ? [[at, url]] : at < edit.to ? [] : [[at + shift, url]]);
-    if (edit.url !== void 0) expected.push([edit.from, edit.url]);
-  }
-  let allowed = new Map(expected);
-  const resultOffset = result.startsWith("\uFEFF") ? 1 : 0;
-  for (; ; ) {
-    const added = [...destinationsOf(parse2(result), resultOffset)].filter(([at, url]) => allowed.get(at) !== url && "![<".includes(result[at])).map(([at]) => at);
-    if (added.length === 0) return result;
-    for (const at of added.sort((a, b) => b - a)) {
-      result = result.slice(0, at) + "\\" + result.slice(at);
-      allowed = new Map([...allowed].map(([place, url]) => [place >= at ? place + 1 : place, url]));
-    }
-  }
 }
 
-// src/sync/assets.ts
-var AttachmentBudgetError = class extends Error {
-  constructor() {
-    super(message("assets.budget"));
-  }
+// src/sync/marks.ts
+import { createHash as createHash9, randomUUID } from "node:crypto";
+var MARKS = {
+  conflict: { icon: "Alert", color: "#F2994A" },
+  blocked: { icon: "Alert", color: "#EB5757" },
+  suspended: { icon: "Alert", color: "#EB5757" }
 };
-var ATTACHMENT_LIMITS = Object.freeze({ documentCount: 32, documentBytes: 32 * 1024 * 1024, runCount: 256, runBytes: 256 * 1024 * 1024 });
-var LIMIT = 10 * 1024 * 1024;
-function isUpload(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.username === "" && parsed.password === "" && parsed.port === "";
-  } catch {
-    return false;
-  }
+var CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and delete every "Sync conflict" marker throughout the document. The alert clears after the next sync.';
+var BLOCKED_COMMENT = "Security checks rejected this document. Fix the listed findings and sync again.";
+async function resolveHold(linear, hold, documentId) {
+  if (await linear.commentExists(hold.id, documentId)) await linear.resolveComment(hold.id);
 }
-function withNewUploadUrls(text6, added, cache) {
-  const urls = [...new Set([...added].filter(([hash, url]) => cache.get(hash) !== url).map(([, url]) => url))];
-  return urls.length === 0 ? text6 : `${text6}
-${urls.join("\n")}
-`;
+function releasedHold(entry) {
+  return entry.suspended === void 0 && entry.saved?.hold !== void 0;
 }
-var ImageBlockedError = class extends Error {
-  findings;
-  constructor(findings) {
-    super(message("assets.not-allowed"));
-    this.findings = findings;
-  }
-};
-function typedFileLinkFindings(path2, body2, previousBody, previousPath = path2) {
-  const known = /* @__PURE__ */ new Set();
-  if (previousBody !== void 0) {
-    visit2(parse2(previousBody), (node2) => {
-      if (node2.type !== "link" && node2.type !== "image" && node2.type !== "definition") return;
-      const target = resolveTarget(previousPath, node2.url);
-      if (target !== null) known.add(target);
-    });
-  }
-  const imageLabels = /* @__PURE__ */ new Set();
-  const definitions = /* @__PURE__ */ new Map();
-  const candidates2 = [];
-  visit2(parse2(body2), (node2) => {
-    if (node2.type === "imageReference") imageLabels.add(node2.identifier);
-    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2);
-    if (node2.type === "link" || node2.type === "definition") candidates2.push(node2);
-  });
-  const links = candidates2.filter((node2) => {
-    if (node2.type === "definition" && imageLabels.has(node2.identifier) && definitions.get(node2.identifier) === node2) return false;
-    const target = resolveTarget(path2, node2.url);
-    return target !== null && !target.endsWith(MARKDOWN_EXTENSION);
-  });
-  const findings = [];
-  links.forEach((node2, index2) => {
-    if (!known.has(resolveTarget(path2, node2.url))) findings.push({ file: index2 + 1, total: links.length, line: line(node2), reason: "not-uploaded" });
-  });
-  return findings;
+function noConflictNotices() {
+  return { set: [], resolved: [] };
 }
-function encodeSuffix(suffix) {
-  const encodePiece = (piece) => encodeFragment(piece).replace(/[()]/g, (char) => char === "(" ? "%28" : "%29");
-  const encode2 = (part) => part.split("&").map((piece, index2) => (index2 === 0 ? "" : /^#?[A-Za-z0-9]+;/.test(piece) ? "%26" : "&") + encodePiece(piece)).join("");
-  const hashAt = suffix.indexOf("#");
-  const query = hashAt === -1 ? suffix : suffix.slice(0, hashAt);
-  const fragment = hashAt === -1 ? void 0 : suffix.slice(hashAt + 1);
-  return (query === "" ? "" : `?${encode2(query.slice(1))}`) + (fragment === void 0 ? "" : `#${encode2(fragment)}`);
-}
-function imagesOf(body2) {
-  const tree = parse2(body2);
-  const definitions = /* @__PURE__ */ new Map();
-  visit2(tree, (node2) => {
-    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
-  });
-  const images = [];
-  visit2(tree, (node2) => {
-    if (node2.type === "image") images.push({ url: node2.url, line: line(node2) });
-    else if (node2.type === "imageReference") images.push({ url: definitions.get(node2.identifier) ?? "", line: line(node2) });
-  });
-  return images;
-}
-var DownloadRetryError = class extends Error {
-  constructor(cause) {
-    super(message("assets.download-failed"), { cause });
-  }
-};
-var DownloadBlockedError = class extends Error {
-  reason;
-  constructor(reason) {
-    super(message("assets.download-failed"));
-    this.reason = reason;
-  }
-};
-async function download(url, fetcher, reads, budget, consume) {
-  if (!isUpload(url)) throw new Error(message("assets.not-allowed"));
-  const key = uploadReadKey(url);
-  const kept = reads?.take(key);
-  if (kept !== void 0) consume(kept.body.length);
-  if (kept !== void 0 && kept.body.length > budget) throw new AttachmentBudgetError();
-  if (kept !== void 0 && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
-  try {
-    const response = await fetcher(url, { redirect: "manual", signal: AbortSignal.timeout(3e4) });
-    if (response.status !== 200) await response.body?.cancel().catch(() => {
-    });
-    if (response.status === 401 || response.status === 403) throw new LinearHttpError("DownloadUpload", response.status);
-    if (response.status === 429 || response.status >= 500) throw new DownloadRetryError();
-    if (response.status === 404 || response.status === 410) throw new DownloadBlockedError("dead");
-    if (response.status !== 200 || response.body === null) throw new DownloadBlockedError("unreadable");
-    if (Number(response.headers.get("content-length") ?? 0) > LIMIT) {
-      await response.body.cancel().catch(() => {
-      });
-      throw new DownloadBlockedError("too-large");
-    }
-    if (Number(response.headers.get("content-length") ?? 0) > budget) {
-      await response.body.cancel().catch(() => {
-      });
-      throw new AttachmentBudgetError();
-    }
-    const chunks = [];
-    let size = 0;
-    for await (const chunk of response.body) {
-      consume(chunk.length);
-      size += chunk.length;
-      if (size > LIMIT) throw new DownloadBlockedError("too-large");
-      if (size > budget) throw new AttachmentBudgetError();
-      chunks.push(Buffer.from(chunk));
-    }
-    const asset = { bytes: Buffer.concat(chunks), type: response.headers.get("content-type")?.split(";")[0]?.trim() ?? "" };
-    reads?.keep(key, { status: response.status, type: asset.type, body: asset.bytes });
-    return asset;
-  } catch (error) {
-    if (error instanceof AttachmentBudgetError || error instanceof LinearError || error instanceof DownloadBlockedError || error instanceof DownloadRetryError) throw error;
-    throw new DownloadRetryError(error);
-  }
-}
-function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = new ContentSpool(), limits = ATTACHMENT_LIMITS) {
-  const hashPaths = /* @__PURE__ */ new Map();
-  const pathHashes = /* @__PURE__ */ new Map();
-  const notFolders = /* @__PURE__ */ new Set();
-  const folders = /* @__PURE__ */ new Set();
-  const placed = /* @__PURE__ */ new Map();
-  let indexed = false;
-  const index2 = async () => {
-    if (indexed) return;
-    const tree = await listTree(git, base);
-    for (const entry of tree) {
-      notFolders.add(entry.path);
-      for (let folder = posix4.dirname(entry.path); folder !== "." && !folders.has(folder); folder = posix4.dirname(folder)) folders.add(folder);
-    }
-    const entries = tree.filter((entry) => entry.type === "blob" && ["100644", "100755"].includes(entry.mode) && !entry.path.toLowerCase().endsWith(".md"));
-    for (let at = 0; at < entries.length; ) {
-      const batch = [];
-      let bytes = 0;
-      while (at < entries.length && (batch.length === 0 || bytes + (entries[at].size ?? 0) <= 32 * 1024 * 1024)) {
-        const entry = entries[at++];
-        bytes += entry.size ?? 0;
-        batch.push(entry);
-      }
-      const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
-      for (const entry of batch) {
-        const blob = blobs.get(entry.oid);
-        const hash = parseLfsPointer(blob)?.oid ?? createHash8("sha256").update(blob).digest("hex");
-        hashPaths.set(hash, [...hashPaths.get(hash) ?? [], entry.path]);
-        pathHashes.set(entry.path, hash);
-      }
-    }
-    indexed = true;
+var IMAGE_BLOCKED_COMMENT = "Some images in this document cannot be synchronized. Fix the listed images and sync again.";
+function blockedComment(findings) {
+  const images = findings.filter((finding) => "image" in finding);
+  const files = findings.filter((finding) => "file" in finding);
+  const hooks = findings.filter((finding) => "hook" in finding);
+  const locations = [...new Set(hooks.map(({ hook, line: line2 }) => {
+    const name = /^[a-zA-Z0-9_.-]{1,128}$/.test(hook) ? hook : "security-check";
+    const location = line2 === 0 ? ", in the title" : Number.isSafeInteger(line2) && line2 > 0 ? `, line ${line2}` : "";
+    return `- Hook \`${name}\`${location}.`;
+  }))].sort();
+  const sections = [];
+  const imageReasons = {
+    "not-uploaded": "not uploaded to this workspace. Upload the file instead of linking to it.",
+    "unreadable": "the uploaded file cannot be read. Remove it or upload it again.",
+    "too-large": "the uploaded file is larger than 10 MB.",
+    "unsupported-type": "the uploaded file is not a supported image or document. Remove it or upload the original file."
   };
-  const reuse = /* @__PURE__ */ new Map();
-  const reusable = async (path2) => {
-    if (!reuse.has(path2)) {
-      const read = (await readFiles(git, config, base, [path2])).get(path2);
-      reuse.set(path2, read?.ok !== true ? "unreadable" : admitsCapturedFile(path2, read.content) ? "admitted" : "refused");
-    }
-    return reuse.get(path2);
-  };
-  const downloaded = /* @__PURE__ */ new Map();
-  let runCount = 0;
-  let runBytes = 0;
-  const failed2 = /* @__PURE__ */ new Map();
-  const capture2 = async (path2, body2, uploads, previousBody, previousPath = path2) => {
-    const notUploaded = typedFileLinkFindings(path2, body2, previousBody, previousPath);
-    if (notUploaded.length > 0) throw new ImageBlockedError(notUploaded);
-    const sourceImages = imagesOf(body2);
-    const sourceDestinations = destinations(body2);
-    const ordinaryUrls = new Set(sourceDestinations.filter(({ node: node2 }) => node2.type === "link").map(({ node: node2 }) => node2.url));
-    const definitions = /* @__PURE__ */ new Map();
-    for (const { node: node2 } of sourceDestinations) if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
-    visit2(parse2(body2), (node2) => {
-      if (node2.type === "linkReference") {
-        const url = definitions.get(node2.identifier);
-        if (url !== void 0) ordinaryUrls.add(url);
-      }
-    });
-    const deadUploads = /* @__PURE__ */ new Set();
-    const finish = (observedBody, files2, uploads2) => {
-      const changed2 = new Set(imageLinks(body2, deadUploads).images.map((image2) => image2.image));
-      const rewritten = imageLinks(observedBody, deadUploads, changed2).body;
-      const plainFiles = sourceImages.flatMap((image2) => {
-        const target = !isUpload(image2.url) ? resolveTarget(path2, image2.url) : null;
-        return target === null ? [] : [target];
-      });
-      return { body: rewritten, plainFiles, ...rewritten === observedBody ? {} : { observedBody, deadUploads: [...deadUploads] }, files: files2, uploads: uploads2 };
-    };
-    const files = /* @__PURE__ */ new Map();
-    const additions = /* @__PURE__ */ new Map();
-    const originalBody = body2;
-    const rejected = /* @__PURE__ */ new Map();
-    let retry;
-    const cachedUrls = [...uploads.values()];
-    const knownUpload = (url) => cachedUrls.some((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`));
-    if (!sourceDestinations.some(({ node: node2 }) => isUpload(node2.url) || knownUpload(node2.url))) return finish(body2, files, additions);
-    await index2();
-    const assetsFolder = posix4.join(posix4.dirname(path2), ASSETS_FOLDER);
-    const assetsUsable = !notFolders.has(assetsFolder);
-    const captureOf = (hash) => (hashPaths.get(hash) ?? []).find((candidate) => posix4.dirname(candidate) === assetsFolder && isCaptureName(candidate) && posix4.basename(candidate).startsWith(hash));
-    const place = (hash) => preferredPaths.get(hash) ?? captureOf(hash) ?? unreadableLinks.get(hash);
-    const copies = /* @__PURE__ */ new Map();
-    const oldAssetsFolder = posix4.join(posix4.dirname(previousPath), ASSETS_FOLDER);
-    const copyTarget = (source, hash) => {
-      if (!assetsUsable) return void 0;
-      const same = captureOf(hash);
-      if (same !== void 0) return same;
-      const own6 = posix4.basename(source);
-      const names = isCaptureName(own6) && !own6.startsWith(hash) ? [] : [own6];
-      for (const name of [...names, `${hash}${posix4.extname(source)}`]) {
-        const target = posix4.join(assetsFolder, name);
-        const existing = pathHashes.get(target) ?? placed.get(target) ?? (notFolders.has(target) || folders.has(target) ? "" : void 0);
-        if (existing === hash) return target;
-        if (existing === void 0) {
-          placed.set(target, hash);
-          return target;
-        }
-      }
-      return void 0;
-    };
-    const preferredPaths = /* @__PURE__ */ new Map();
-    const unreadableLinks = /* @__PURE__ */ new Map();
-    const spellings = /* @__PURE__ */ new Map();
-    if (previousBody !== void 0) {
-      for (const link2 of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
-        if (await reusable(link2.target) === "unreadable") {
-          const hash2 = pathHashes.get(link2.target);
-          if (!unreadableLinks.has(hash2)) unreadableLinks.set(hash2, link2.target);
-          continue;
-        }
-        const hash = pathHashes.get(link2.target);
-        const moved = assetsFolder !== oldAssetsFolder && posix4.dirname(link2.target) === oldAssetsFolder;
-        const copy = moved ? preferredPaths.get(hash) ?? copyTarget(link2.target, hash) : void 0;
-        const target = copy ?? link2.target;
-        if (copy !== void 0 && !pathHashes.has(copy) && !copies.has(copy)) copies.set(copy, link2.target);
-        if (!preferredPaths.has(hash)) preferredPaths.set(hash, target);
-        const raw = previousPath === path2 ? link2.written : posix4.relative(posix4.dirname(path2), target).split("/").map(encodeURIComponent).join("/") + link2.suffix;
-        const key = hash + link2.suffix;
-        if (!spellings.has(key)) spellings.set(key, []);
-        spellings.get(key).push(previousPath !== path2 && link2.written.startsWith("<") ? `<${raw}>` : raw);
-      }
-    }
-    const occurrences = /* @__PURE__ */ new Map();
-    const spelling = (key, opener) => {
-      const choices = spellings.get(key);
-      if (choices === void 0) return void 0;
-      const index3 = occurrences.get(key) ?? 0;
-      occurrences.set(key, index3 + 1);
-      const written = choices[Math.min(index3, choices.length - 1)];
-      const inner = written.startsWith("<") ? written.slice(1, -1) : written;
-      if (/[<>]/.test(inner)) return written;
-      if (opener === "<" || written.startsWith("<") && /[()]/.test(inner)) return `<${inner}>`;
-      return inner.replace(/\s/g, encodeURIComponent);
-    };
-    const previousLinks = /* @__PURE__ */ new Set();
-    if (previousBody !== void 0) visit2(parse2(previousBody), (node2) => {
-      if (node2.type === "link" && isUpload(node2.url)) previousLinks.add(node2.url);
-    });
-    const externalImages = new Set(sourceImages.filter((image2) => !isUpload(image2.url)).map((image2) => image2.url));
-    const references = sourceDestinations.filter(({ node: node2 }) => (isUpload(node2.url) || knownUpload(node2.url)) && !(node2.type !== "link" && externalImages.has(node2.url)) && !(node2.type === "link" && previousLinks.has(node2.url) && !knownUpload(node2.url)));
-    const canonical = (url) => cachedUrls.filter((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`)).sort((a, b) => b.length - a.length)[0] ?? url.split("#")[0];
-    const unique = new Set(references.map(({ node: node2 }) => canonical(node2.url)));
-    if (unique.size > limits.documentCount) throw new AttachmentBudgetError();
-    let documentBytes = 0;
-    const counted = /* @__PURE__ */ new Set();
-    const replacements = [];
-    for (const { node: node2, range, outer } of references) {
-      const cached = cachedUrls.filter((known) => node2.url === known || node2.url.startsWith(`${known}?`) || node2.url.startsWith(`${known}#`)).sort((a, b) => b.length - a.length)[0];
-      const hashAt = node2.url.indexOf("#");
-      const url = cached ?? (hashAt === -1 ? node2.url : node2.url.slice(0, hashAt));
-      const suffix = cached === void 0 ? hashAt === -1 ? "" : node2.url.slice(hashAt) : node2.url.slice(cached.length);
-      let hash = [...uploads].find(([, known]) => known === url)?.[0];
-      let assetPath = hash === void 0 ? void 0 : place(hash);
-      if (assetPath !== void 0) {
-        const source = copies.get(assetPath);
-        const state = await reusable(source ?? assetPath);
-        if (state === "refused") {
-          rejected.set(node2.url, "unsupported-type");
-          continue;
-        }
-        if (state === "unreadable") assetPath = void 0;
-        else if (source !== void 0) {
-          const read = (await readFiles(git, config, base, [source])).get(source);
-          if (read?.ok !== true) throw new Error(message("assets.not-allowed"));
-          if (!admitsCapturedFile(assetPath, read.content)) {
-            rejected.set(node2.url, "unsupported-type");
-            continue;
-          }
-          if (!counted.has(assetPath)) {
-            documentBytes += read.content.length;
-            counted.add(assetPath);
-          }
-          if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
-          files.set(assetPath, read.content);
-        }
-      }
-      if (assetPath === void 0) {
-        let asset = downloaded.get(url);
-        if (asset === void 0) {
-          try {
-            if (!isUpload(url)) {
-              rejected.set(node2.url, "unreadable");
-              continue;
-            }
-            const failure = failed2.get(url);
-            if (failure !== void 0) throw failure;
-            if (runCount >= limits.runCount || runBytes >= limits.runBytes || documentBytes >= limits.documentBytes) throw new AttachmentBudgetError();
-            runCount++;
-            const fresh = await download(url, fetcher, reads, Math.min(limits.runBytes - runBytes, limits.documentBytes - documentBytes), (size) => {
-              runBytes += size;
-              documentBytes += size;
-            });
-            counted.add(url);
-            asset = { file: spool.put(fresh.bytes), type: fresh.type };
-          } catch (error) {
-            if (error instanceof DownloadBlockedError || error instanceof DownloadRetryError) failed2.set(url, error);
-            if (error instanceof DownloadRetryError) {
-              retry = error;
-              continue;
-            }
-            if (!(error instanceof DownloadBlockedError)) throw error;
-            if (error.reason === "dead" && sourceImages.some((image2) => image2.url === node2.url) && !ordinaryUrls.has(node2.url)) {
-              deadUploads.add(url);
-              deadUploads.add(node2.url);
-              continue;
-            }
-            rejected.set(node2.url, error.reason === "dead" ? "unreadable" : error.reason);
-            continue;
-          }
-          downloaded.set(url, asset);
-        }
-        if (!counted.has(url)) {
-          documentBytes += asset.file.size;
-          counted.add(url);
-        }
-        if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
-        hash = asset.file.hash;
-        assetPath = place(hash);
-        if (assetPath !== void 0 && !admitsCapturedFile(assetPath, contentBytes(asset.file))) {
-          rejected.set(node2.url, "unsupported-type");
-          continue;
-        }
-        if (assetPath === void 0) {
-          const extension2 = uploadExtension(contentBytes(asset.file));
-          if (extension2 === null) {
-            rejected.set(node2.url, "unsupported-type");
-            continue;
-          }
-          assetPath = posix4.join(assetsFolder, `${hash}${extension2}`);
-          const chosen = placed.get(assetPath);
-          if (!assetsUsable || notFolders.has(assetPath) || folders.has(assetPath) || chosen !== void 0 && chosen !== hash) throw new Error(message("assets.destination-exists"));
-          placed.set(assetPath, hash);
-        }
-        files.set(assetPath, asset.file);
-      }
-      additions.set(hash, url);
-      const cut = node2.url.search(/[?#]/);
-      const spelled = preferredPaths.get(hash) === assetPath ? spelling(hash + (cut === -1 ? "" : node2.url.slice(cut)), body2[outer.from]) : void 0;
-      if (spelled !== void 0) {
-        replacements.push({ ...outer, text: spelled });
-        continue;
-      }
-      replacements.push({ ...range, text: posix4.relative(posix4.dirname(path2), assetPath).split("/").map(encodeURIComponent).join("/") + encodeSuffix(suffix) });
-    }
-    if (rejected.size > 0) {
-      const images = imagesOf(originalBody);
-      const findings = images.flatMap((image2, index3) => rejected.has(image2.url) ? [{ image: index3 + 1, total: images.length, line: image2.line, reason: rejected.get(image2.url) }] : []);
-      const tree = parse2(originalBody);
-      const definitions2 = /* @__PURE__ */ new Map();
-      visit2(tree, (node2) => {
-        if (node2.type === "definition" && !definitions2.has(node2.identifier)) definitions2.set(node2.identifier, node2.url);
-      });
-      const files2 = [];
-      visit2(tree, (node2) => {
-        const url = node2.type === "link" ? node2.url : node2.type === "linkReference" ? definitions2.get(node2.identifier) : void 0;
-        if (url !== void 0 && (isUpload(url) || knownUpload(url))) files2.push({ url, line: line(node2) });
-      });
-      files2.forEach((file, index3) => {
-        const reason = rejected.get(file.url);
-        if (reason !== void 0 && reason !== "not-uploaded") findings.push({ file: index3 + 1, total: files2.length, line: file.line, reason });
-      });
-      if (findings.length > 0) throw new ImageBlockedError(findings);
-      throw new Error(message("assets.not-allowed"));
-    }
-    if (retry !== void 0) throw retry;
-    let result = body2;
-    for (const replacement of replacements.sort((a, b) => b.from - a.from)) result = result.slice(0, replacement.from) + replacement.text + result.slice(replacement.to);
-    return finish(result, files, additions);
-  };
-  return Object.assign(capture2, { close: () => spool.close() });
-}
+  if (images.length > 0) sections.push(`${IMAGE_BLOCKED_COMMENT}
 
-// src/sync/security.ts
-import { spawn as spawn2 } from "node:child_process";
-import { mkdtemp as mkdtemp3, mkdir as mkdir2, writeFile as writeFile3, readFile as readFile2, rm as rm3 } from "node:fs/promises";
-import { tmpdir as tmpdir4 } from "node:os";
-import { dirname, join as join8 } from "node:path";
-import { createHash as createHash9 } from "node:crypto";
-function runHooks(dir, args, env) {
-  return new Promise((resolve3) => {
-    const child = spawn2("pre-commit", args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: "never", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
-    let output = "";
-    const collect = (chunk) => {
-      if (output.length < 2e6) output += chunk.toString("utf8");
-    };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
-    const timer = setTimeout(() => child.kill("SIGKILL"), 12e4);
-    child.on("error", () => {
-      clearTimeout(timer);
-      resolve3({ code: -1, output: "" });
-    });
-    child.on("close", (code4) => {
-      clearTimeout(timer);
-      resolve3({ code: code4 ?? -1, output });
-    });
-  });
-}
-async function securityHookIds(git, tracked) {
-  const read = await git.run(["cat-file", "blob", `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
-  const config = readHookConfig(read.code === 0 ? read.stdout.toString("utf8") : null);
-  if (config.invalid !== void 0) throw new Error(message("sync.invalid-security-config"));
-  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
-}
-async function onlyDocumentsChanged(scratch, dir, files) {
-  const changed2 = (await scratch.run(["diff", "--name-only", "--no-renames", "-z"])).stdout.toString("utf8").split("\0").filter((path2) => path2 !== "");
-  for (const path2 of changed2) {
-    if (isMarkdownPath(path2)) continue;
-    const pointer = parseLfsPointer((await scratch.run(["cat-file", "blob", `:${path2}`])).stdout);
-    const content4 = files.get(path2);
-    if (pointer === null || content4 === void 0) return false;
-    const bytes = contentBytes(content4);
-    if (pointer.size !== bytes.length || pointer.oid !== createHash9("sha256").update(bytes).digest("hex")) return false;
-    if (!(await readFile2(join8(dir, path2))).equals(bytes)) return false;
-  }
-  return true;
-}
-async function securityGate(git, tracked, options = {}) {
-  const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C.UTF-8" };
-  const hooks = await securityHookIds(git, tracked);
-  if (hooks.length > 0 && (await runHooks(git.dir, ["--version"], env)).code !== 0) throw new Error(message("sync.needs-pre-commit"));
-  let dir;
-  let scratch;
-  let baseline;
-  const close = async () => {
-    if (dir !== void 0) await rm3(dir, { recursive: true, force: true });
-    dir = void 0;
-  };
-  return {
-    configured: hooks.length > 0,
-    close,
-    async check(files) {
-      if (hooks.length === 0) return [];
-      try {
-        if (dir === void 0) {
-          dir = await mkdtemp3(join8(tmpdir4(), "capture-security-"));
-          scratch = new Git(dir);
-          await scratch.run(["init", "--quiet"]);
-          const entries = (await listTree(git, tracked)).filter((entry) => entry.type === "blob" && ["100644", "100755"].includes(entry.mode));
-          for (let at = 0; at < entries.length; at += 32) {
-            const batch = entries.slice(at, at + 32);
-            const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
-            for (const entry of batch) {
-              checkRepoPath(entry.path);
-              await mkdir2(dirname(join8(dir, entry.path)), { recursive: true });
-              await writeFile3(join8(dir, entry.path), blobs.get(entry.oid), { mode: entry.mode === "100755" ? 493 : 420 });
-            }
-          }
-          await scratch.run(["add", "--all"]);
-          baseline = await scratch.text(["write-tree"]);
-        }
-        await scratch.run(["read-tree", "--reset", "-u", baseline]);
-        await scratch.run(["clean", "-fdx", "--quiet"]);
-        for (const [path2, content4] of files) {
-          checkRepoPath(path2);
-          if (path2 === PRE_COMMIT_CONFIG || path2.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
-          await mkdir2(dirname(join8(dir, path2)), { recursive: true });
-          await writeFile3(join8(dir, path2), contentBytes(content4));
-        }
-        if (!await onlyDocumentsChanged(scratch, dir, files)) return [{ hook: SECURITY_ALIAS, line: 1 }];
-        await scratch.run(["add", "--force", "--", ...files.keys()]);
-        const findings = [];
-        let ran = false;
-        for (const stage of ["pre-commit", "pre-push"]) {
-          const result = await runHooks(dir, ["run", SECURITY_ALIAS, "--hook-stage", stage, "--files", ...files.keys()], env);
-          if (result.code !== 0 && result.output.trim() === `No hook with id \`security\` in stage \`${stage}\``) continue;
-          ran = true;
-          if (result.code !== 0) {
-            const failed2 = hooks.filter((id) => result.output.includes(`- hook id: ${id}
-`));
-            const escaped = [...files.keys()].map((path2) => path2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-            const located = new RegExp(`(?:${escaped.join("|")}):(\\d+)(?::|\\b)`, "g");
-            const matches = [...result.output.matchAll(located)];
-            const lines2 = matches.map((match) => Number(match[1])).filter((line2) => Number.isSafeInteger(line2) && line2 > 0);
-            for (const hook of failed2.length > 0 ? failed2 : [SECURITY_ALIAS]) findings.push({ hook, line: lines2[0] ?? 1 });
-          }
-        }
-        if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
-        for (const [path2, content4] of files) {
-          const after = await readFile2(join8(dir, path2)).catch(() => null);
-          if (after === null || !after.equals(contentBytes(content4))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
-        }
-        return findings;
-      } catch {
-        return [{ hook: SECURITY_ALIAS, line: 1 }];
-      }
-    }
-  };
-}
+${images.map(({ image: image2, total, line: line2, reason }) => `- Image ${image2} of ${total} (line ${line2}): ${imageReasons[reason]}`).join("\n")}`);
+  if (files.length > 0) sections.push(`Some files in this document cannot be synchronized. Fix the listed files and sync again.
 
-// src/sync/paths.ts
-import { createHash as createHash10 } from "node:crypto";
-import { posix as posix5 } from "node:path";
-var PATH_RULE = "percent-encode-unsafe-segments";
-var escapeFirst = (text6) => text6 === "" ? "%00" : `%${text6.charCodeAt(0).toString(16).toUpperCase()}${text6.slice(1)}`;
-function shorten(name, source) {
-  if (Buffer.byteLength(name) <= 180) return name;
-  const short = `${[...name].slice(0, 40).join("")}~${createHash10("sha256").update(source).digest("hex").slice(0, 16)}`;
-  return isGitDirectoryName(short) ? escapeFirst(short) : short;
-}
-function titlePath(title) {
-  return title.normalize("NFC").split("/").map((part) => {
-    let safe2 = part.replace(/[%\\\u0000-\u001f\u007f:*?"<>|]/g, (char) => char === "*" ? "%2A" : encodeURIComponent(char));
-    if (safe2 === "" || safe2 === "." || safe2 === ".." || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(safe2)) safe2 = escapeFirst(safe2);
-    safe2 = safe2.replace(/[. ]+$/, (suffix) => [...suffix].map((char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`).join(""));
-    if (isGitDirectoryName(safe2) || safe2.toLowerCase() === ".github") safe2 = escapeFirst(safe2);
-    return shorten(safe2, part);
-  }).join("/");
-}
-function inFolder(folder, name) {
-  return folder === "" && name.startsWith("-") ? `%2D${name.slice(1)}` : posix5.join(folder, name);
-}
-function titleFile(folder, title) {
-  return `${inFolder(folder, titlePath(title))}.md`;
-}
-function pathKey(path2) {
-  return path2.normalize("NFC").toLowerCase();
-}
-function documentPath(folder, title, id, occupied, previous3, invalid2 = () => false) {
-  const keys = [...occupied].map(pathKey);
-  const inAssets = (path2) => inAssetsFolder(folder === "" ? path2 : path2.slice(folder.length + 1));
-  const conflicts = (path2) => inAssets(path2) || invalid2(path2) || keys.some((key) => key === pathKey(path2) || key.startsWith(`${pathKey(path2)}/`) || pathKey(path2).startsWith(`${key}/`));
-  let candidate = titleFile(folder, title);
-  const raw = `${folder === "" ? "" : `${folder}/`}${title}.md`;
-  if (previous3 === raw && !conflicts(previous3) && !(folder === "" && raw.startsWith("-")) && !previous3.split("/").some(isGitDirectoryName)) return previous3;
-  const suffix = createHash10("sha256").update(id).digest("hex").slice(0, 12);
-  const flattened = titlePath(title).replaceAll("/", "%2F");
-  const flat = shorten(flattened, title);
-  if (previous3 !== void 0 && !conflicts(previous3)) {
-    const prefix = inFolder(folder, `${flat}~${suffix}`);
-    if (previous3 === `${prefix}.md` || previous3.startsWith(`${prefix}-`) && /^\d+\.md$/.test(previous3.slice(prefix.length + 1))) return previous3;
-  }
-  if (!conflicts(candidate)) return candidate;
-  for (let index2 = 0; ; index2 += 1) {
-    candidate = inFolder(folder, `${flat}~${suffix}${index2 === 0 ? "" : `-${index2}`}.md`);
-    if (!conflicts(candidate)) return candidate;
-    if (index2 > occupied.size + 1) throw new Error(message("sync.no-safe-path"));
-  }
-}
+${files.map(({ file, total, line: line2, reason }) => `- File ${file} of ${total} (line ${line2}): ${imageReasons[reason]}`).join("\n")}`);
+  if (locations.length > 0) sections.push(`${BLOCKED_COMMENT}
 
-// src/initial-sync/reverse.ts
-var REVERSE_RECORD_MESSAGE = INITIAL_SYNC_FROM_LINEAR_RECORD;
-var PULL_REQUEST_TITLE = "Initial sync from Linear";
-function planLinearToGit(input) {
-  const plan = planInitialSync(input);
-  const annotations = new Set(input.mapping.annotations.map((annotation) => annotation.readme));
-  const result = { overwrite: plan.overwrite.map(entryOf), create: [], remove: [], kept: [], leftOut: [...plan.leftOut] };
-  const folders = new Map(annotatedPlaces(input.mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
-  const invalid2 = (place) => (candidate) => !landsInPlace(input.mapping, candidate, place);
-  const folderOfPlace = (place) => folders.get(placeKey(place)) ?? "";
-  const plainPath = (title, place) => titleFile(folderOfPlace(place), title);
-  const named2 = /* @__PURE__ */ new Map();
-  const trash = [...plan.trash];
-  const overwriteByPath = new Map(result.overwrite.map((entry) => [entry.path, entry]));
-  for (const entry of plan.trash) {
-    const plain = plainPath(entry.title, entry.place);
-    const other = overwriteByPath.get(plain);
-    if (other === void 0 || placeKey(other.place) !== placeKey(entry.place) || plainPath(other.title, other.place) === plain) continue;
-    result.overwrite = result.overwrite.filter((candidate) => candidate !== other);
-    const claimed = { path: plain, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: other.fileTitle };
-    result.overwrite.push(claimed);
-    overwriteByPath.set(plain, claimed);
-    named2.set(entry.documentId, plain);
-    trash.push({ path: plain, title: other.title, place: other.place, documentId: other.documentId });
+${locations.join("\n")}`);
+  return sections.join("\n\n");
+}
+function planMark(document4, entry, blocked) {
+  const state = blocked.length > 0 ? "blocked" : detectConflicts(document4.content ?? "").length > 0 ? "conflict" : "clear";
+  const body2 = state === "clear" ? "" : state === "conflict" ? CONFLICT_COMMENT : blockedComment(blocked);
+  const bodyHash = createHash9("sha256").update(body2).digest("hex");
+  const previousNotice = entry.saved?.notice;
+  const changesDecoration = state !== "clear" && (document4.icon !== MARKS[state].icon || document4.color !== MARKS[state].color);
+  const resolvesNotice = previousNotice?.kind === "conflict" && state !== "conflict";
+  const updatesNotice = previousNotice?.kind === state && (!previousNotice.posted || previousNotice.bodyHash !== bodyHash || changesDecoration);
+  return { state, body: body2, bodyHash, previousNotice, changesDecoration, resolvesNotice, updatesNotice };
+}
+function markWritesLinear(document4, entry, blocked = []) {
+  if (document4.trashed || document4.archivedAt !== null) return false;
+  if (entry.suspended !== void 0 && blocked.length === 0) return false;
+  const { state, bodyHash, previousNotice, changesDecoration, resolvesNotice, updatesNotice } = planMark(document4, entry, blocked);
+  if (releasedHold(entry) && entry.saved !== void 0) return !(state === "clear" && entry.saved.notice === void 0);
+  if (resolvesNotice || updatesNotice) return true;
+  if (state === "clear") return entry.saved !== void 0 && (document4.icon !== entry.saved.icon || document4.color !== entry.saved.color);
+  return changesDecoration || previousNotice?.kind !== state || !previousNotice.posted || previousNotice.bodyHash !== bodyHash;
+}
+async function reconcileDocumentMark(options) {
+  const { document: document4, linear, persistEntry } = options;
+  if (document4.id !== options.entry.id) throw new Error(message("sync.entry-mismatch"));
+  if (document4.content === void 0) throw new Error(message("sync.needs-content"));
+  let entry = structuredClone(options.entry);
+  const blocked = options.blocked ?? [];
+  const { state, body: body2, bodyHash, previousNotice, resolvesNotice, updatesNotice } = planMark(document4, entry, blocked);
+  const result = { state, entry, updated: false, commented: false };
+  if (document4.trashed || document4.archivedAt !== null) return result;
+  if (entry.suspended !== void 0 && blocked.length === 0) return result;
+  const changesNotice = previousNotice !== void 0 && (resolvesNotice || updatesNotice);
+  const noticeExists = changesNotice ? await linear.commentExists(previousNotice.id, document4.id) : false;
+  if (releasedHold(entry) && entry.saved !== void 0) {
+    if (state === "clear" && entry.saved.notice === void 0) return result;
+    await resolveHold(linear, entry.saved.hold, document4.id);
+    const { hold: _hold, ...saved2 } = entry.saved;
+    entry = { ...entry, saved: saved2 };
+    await persistEntry(entry);
+    result.entry = entry;
   }
-  const gitOnly = new Map(plan.create.map((entry) => [entry.path, entry]));
-  const created = new Map(input.places.flatMap(({ documents }) => documents.map((document4) => [document4.id, document4.createdAt])));
-  const documentsOldestFirst = trash.filter((entry) => !named2.has(entry.documentId)).sort((a, b) => compare4(created.get(a.documentId) ?? "", created.get(b.documentId) ?? "") || compare4(a.documentId, b.documentId));
-  for (const entry of documentsOldestFirst) {
-    const folder = folderOfPlace(entry.place);
-    const plain = plainPath(entry.title, entry.place);
-    for (const [path2, file] of gitOnly) {
-      if (path2 !== plain && !(path2.startsWith(folder === "" ? "" : `${folder}/`) && path2.includes("~"))) continue;
-      if (placeKey(file.place) !== placeKey(entry.place)) continue;
-      const others = new Set([...input.treePaths].filter((other) => other !== path2));
-      if (documentPath(folder, entry.title, entry.documentId, others, path2, invalid2(entry.place)) !== path2) continue;
-      result.overwrite.push({ path: path2, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: file.title });
-      named2.set(entry.documentId, path2);
-      gitOnly.delete(path2);
-      break;
+  if (resolvesNotice) {
+    if (noticeExists && previousNotice !== void 0) await linear.resolveComment(previousNotice.id);
+    options.onConflictNotice?.("resolved");
+  }
+  if (state === "clear") {
+    if (entry.saved === void 0) return result;
+    let cleared;
+    if (document4.icon !== entry.saved.icon || document4.color !== entry.saved.color) {
+      cleared = await linear.updateDocument(document4.id, { icon: entry.saved.icon, color: entry.saved.color }, options.includeUpdatedBody);
+      result.updated = true;
+      result.updatedDocument = cleared;
     }
+    const { saved: _saved, ...restored } = entry;
+    await persistEntry(restored, cleared);
+    result.entry = restored;
+    return result;
   }
-  for (const entry of gitOnly.values()) {
-    if (annotations.has(entry.path)) result.kept.push({ path: entry.path, reason: "annotation" });
-    else result.remove.push(entry.path);
+  if (!document4.documentContentId) throw new Error(message("sync.needs-comment-target"));
+  const saved = entry.saved ?? { icon: document4.icon, color: document4.color };
+  const previous3 = saved.notice;
+  const notice = previous3?.kind === state ? { ...previous3, bodyHash, posted: previous3.posted && previous3.bodyHash === bodyHash } : { id: options.noticeId?.(state) ?? randomUUID(), kind: state, bodyHash, posted: false };
+  if (entry.saved === void 0 || previous3?.kind !== state || previous3.bodyHash !== bodyHash) {
+    entry = { ...entry, saved: { ...saved, notice } };
+    await persistEntry(entry);
+    result.entry = entry;
   }
-  const removed = new Set(result.remove);
-  const occupied = new Set([...input.treePaths].filter((path2) => !removed.has(path2)));
-  for (const entry of documentsOldestFirst) {
-    if (named2.has(entry.documentId)) continue;
-    const folder = folderOfPlace(entry.place);
-    const path2 = documentPath(folder, entry.title, entry.documentId, occupied, void 0, invalid2(entry.place));
-    result.create.push({ path: path2, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: posix6.relative(folder, path2).slice(0, -".md".length) });
-    occupied.add(path2);
+  const mark2 = MARKS[state];
+  if (document4.icon !== mark2.icon || document4.color !== mark2.color) {
+    result.updatedDocument = await linear.updateDocument(document4.id, mark2, options.includeUpdatedBody);
+    result.updated = true;
   }
-  result.overwrite.sort((a, b) => compare4(a.path, b.path));
-  result.create.sort((a, b) => compare4(a.path, b.path));
-  result.remove.sort(compare4);
-  result.leftOut.sort((a, b) => compare4(a.path, b.path));
+  if (notice.posted) return result;
+  const comment = await linear.ensureDocumentComment(document4.documentContentId, body2, notice.id, true);
+  if (state === "conflict") options.onConflictNotice?.("set");
+  const posted = { ...entry, saved: { ...saved, notice: { ...notice, posted: true } } };
+  await persistEntry(posted);
+  result.entry = posted;
+  result.commented = comment.created;
   return result;
 }
-function landsInPlace(mapping, path2, place) {
-  const zone = nearestZone(mapping.zones, folderOf(path2));
-  if (zone === void 0) return false;
-  const zonePlace = zone.project !== void 0 ? { kind: "project", team: zone.team, project: zone.project } : { kind: "team", team: zone.team };
-  return placeKey(zonePlace) === placeKey(place);
+
+// src/sync/stable-id.ts
+import { createHash as createHash10 } from "node:crypto";
+function stableId(...parts) {
+  const hex = createHash10("sha256").update(parts.join("\0")).digest("hex");
+  const variant = (parseInt(hex[16], 16) & 3 | 8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
-async function planLinearToGitFromRepository(context) {
-  const { input } = await readPlanSources(context);
-  const treePaths = new Set((await listTree(context.git, context.fetched.tracked)).map((entry) => entry.path));
-  return planLinearToGit({ ...input, treePaths });
+
+// src/sync/suspended.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+
+// src/sync/merge-destination.ts
+import { setTimeout as sleep3 } from "node:timers/promises";
+var LANDING_READS = 3;
+var LANDING_PAUSE_MS = 1e3;
+async function remoteTip(git, config) {
+  const ref = branchRef(config.trackedBranch);
+  return (await lsRemote(git, config.remote, [ref])).get(ref) ?? null;
 }
-async function confirmLinearToGit(context, options) {
-  const { git, fetched } = context;
-  const transforms = options.transforms ?? [];
-  const identity = options.identity ?? context.identity;
-  const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
-  const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
-  const { input, documents } = await readPlanSources(context, { withContent: true });
-  const treePaths = new Set((await listTree(git, fetched.tracked)).map((entry) => entry.path));
-  const plan = planLinearToGit({ ...input, treePaths });
-  const expected = { ...fetched.state };
-  const resumed = await readInitialSyncProgress(git, expected.ids) !== null;
-  const previous3 = await readIds(git, expected.ids);
-  const ids = resumed ? new Map(previous3) : /* @__PURE__ */ new Map();
-  const result = {
-    complete: false,
-    resumed,
-    overwritten: [],
-    created: [],
-    skippedCompleted: [],
-    removed: [],
-    leftOutAtRecord: [],
-    notAttempted: [],
-    progressPushes: 0,
-    record: null,
-    pullRequest: null
-  };
-  let unpushed = 0;
-  const pushProgress = async () => {
-    if (options.stageOnly === true) {
-      unpushed = 0;
-      return true;
-    }
-    const next = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked), always: true });
-    const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, "ids"), expected: expected.ids, next }]);
-    if (!pushed.ok) return false;
-    expected.ids = next;
-    result.progressPushes += 1;
-    unpushed = 0;
-    return true;
-  };
-  if (fetched.sync !== null && !await isOwnRecord(fetched.sync) && !await isAncestor(git, fetched.sync, fetched.tracked)) {
-    result.code = "sync-branch-changed";
-    return { plan, result };
-  }
-  const work = [...plan.overwrite.map((entry) => ({ kind: "overwrite", entry })), ...plan.create.map((entry) => ({ kind: "create", entry }))].sort(
-    (a, b) => compare4(a.entry.path, b.entry.path)
-  );
-  const completed = (entry) => resumed && previous3.get(entry.path)?.id === entry.documentId;
-  let taken = 0;
-  for (let index2 = 0; index2 < work.length; index2 += 1) {
-    const { kind, entry } = work[index2];
-    if (completed(entry)) {
-      result.skippedCompleted.push(entry.path);
-      continue;
-    }
-    if (stopAfter !== void 0 && taken >= stopAfter) {
-      result.stopped = { kind: "test-threshold", documents: stopAfter };
-      result.notAttempted = work.slice(index2).filter((rest) => !completed(rest.entry)).map((rest) => rest.entry.path);
-      break;
-    }
-    const before = previous3.get(entry.path);
-    ids.set(entry.path, before !== void 0 && before.id === entry.documentId && before.saved !== void 0 ? { id: entry.documentId, saved: before.saved } : { id: entry.documentId });
-    (kind === "overwrite" ? result.overwritten : result.created).push(entry.path);
-    taken += 1;
-    if (before?.id !== entry.documentId) unpushed += 1;
-    if (unpushed >= batch && !await pushProgress()) return { plan, result: { ...result, code: "state-moved" } };
-  }
-  if (result.stopped !== void 0) {
-    if (unpushed > 0 && !await pushProgress()) return { plan, result: { ...result, code: "state-moved" } };
-    result.code = "stopped";
-    return { plan, result };
-  }
-  const spool = new ContentSpool();
-  let recorded;
+async function destinationHolds(git, config, github, number, tracked) {
+  const [pr, tip] = await Promise.all([readPullRequest(github, number), remoteTip(git, config)]);
+  return pr.state === "open" && pr.base === config.trackedBranch && tip === tracked;
+}
+async function verifyMerge(git, config, github, number, tracked, merged) {
+  let base;
   try {
-    recorded = await record();
-  } finally {
-    spool.close();
-  }
-  if (recorded === "staged") return { plan, result };
-  if (recorded === "sync-branch-changed") {
-    result.code = "sync-branch-changed";
-    return { plan, result };
-  }
-  if (recorded === null) {
-    result.code = "state-moved";
-    return { plan, result };
-  }
-  result.record = recorded;
-  result.removed = [...plan.remove];
-  try {
-    if (recorded.needsPullRequest) {
-      const { pullRequest, opened, updated } = await ensurePullRequest(options.github, {
-        head: options.config.syncBranch,
-        base: options.config.trackedBranch,
-        title: PULL_REQUEST_TITLE,
-        body: pullRequestBody(plan, result)
-      });
-      result.pullRequest = { ...pullRequest, opened, updated };
-    } else if (recorded.closesPullRequest) {
-      const open2 = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
-      if (open2 !== null) {
-        await closePullRequest(options.github, open2.number);
-        result.closedPullRequest = open2.number;
-      }
-    }
+    base = (await readPullRequest(github, number)).base;
   } catch (error) {
-    result.code = "pull-request-failed";
-    if (error instanceof PullRequestError && error.status !== void 0) result.pullRequestStatus = error.status;
-    return { plan, result };
+    if (!(error instanceof PullRequestError)) throw error;
+    base = null;
   }
-  result.complete = true;
-  return { plan, result };
-  async function record() {
-    const bodies = /* @__PURE__ */ new Map();
-    const trackedBodies = /* @__PURE__ */ new Map();
-    let linkBase;
-    const documentOf = new Map([...plan.overwrite, ...plan.create].map((entry) => [entry.path, entry.documentId]));
-    let linkMemo;
-    const linkMap = (base) => {
-      if (linkMemo?.entries !== entries || linkMemo.kept !== keptTracked.size) {
-        const ids2 = new Map([...entries.map((entry) => [entry.path, entry.documentId]), ...[...keptTracked].map((path2) => [path2, documentOf.get(path2)])]);
-        linkMemo = { entries, kept: keptTracked.size, map: { base, ids: ids2 } };
-      }
-      return linkMemo.map;
-    };
-    const restored = (entry, ids2) => {
-      const { body: body2 } = bodies.get(entry.path);
-      if (linkBase === void 0) return body2;
-      const map4 = ids2 === void 0 ? linkMap(linkBase) : { base: linkBase, ids: ids2 };
-      const seen = /* @__PURE__ */ new Map();
-      const tracked = trackedBodies.get(entry.path);
-      if (tracked !== void 0) linksToLinear(tracked, entry.path, map4, seen);
-      return linksFromLinear(body2, entry.path, map4, seen);
-    };
-    const textOf = (entry, ids2) => {
-      const body2 = restored(entry, ids2);
-      const tracked = input.texts.get(entry.path);
-      if (tracked === void 0) return body2;
-      return joinFile(splitFile(tracked).head, body2);
-    };
-    const leaveOut = (paths, rule) => {
-      const out = new Set(paths);
-      if (out.size === 0) return;
-      for (const path2 of out) {
-        result.leftOutAtRecord.push({ path: path2, rule });
-        ids.delete(path2);
-      }
-      entries = entries.filter((entry) => !out.has(entry.path));
-      result.created = result.created.filter((path2) => !out.has(path2));
-      result.overwritten = result.overwritten.filter((path2) => !out.has(path2));
-      result.skippedCompleted = result.skippedCompleted.filter((path2) => !out.has(path2));
-    };
-    let entries = [...plan.overwrite, ...plan.create];
-    const uploads = await readUploads(git, expected.uploads);
-    const download2 = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool);
-    const failed2 = [];
-    const budget = [];
-    const imageBlocked = [];
-    const complexity = [];
-    let needsLinkBase = false;
-    for (const entry of entries) {
-      const content4 = documents.get(entry.documentId).content ?? "";
-      const tracked = input.texts.get(entry.path);
-      const trackedBody = markdownBaseline(tracked === void 0 ? void 0 : splitFile(tracked).body);
-      if (trackedBody !== void 0) trackedBodies.set(entry.path, trackedBody);
-      try {
-        if (linksLinearDocuments(content4)) needsLinkBase = true;
-        const captured = await download2(entry.path, restoreBody(transforms, entry.path, content4, content4), uploads, trackedBody);
-        if (captured.observedBody !== void 0) {
-          imageBlocked.push(entry.path);
-          continue;
-        }
-        bodies.set(entry.path, captured);
-      } catch (error) {
-        if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
-        if (error instanceof MarkdownLimitError) complexity.push(entry.path);
-        else if (error instanceof AttachmentBudgetError) budget.push(entry.path);
-        else if (error instanceof ImageBlockedError) imageBlocked.push(entry.path);
-        else failed2.push(entry.path);
-      }
-    }
-    if (needsLinkBase) linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
-    const created = new Set(plan.create.map((entry) => entry.path));
-    const keptTracked = /* @__PURE__ */ new Set();
-    const keepTracked = (paths, rule) => {
-      if (paths.length === 0) return;
-      const kept2 = new Set(paths.filter((path2) => !created.has(path2)));
-      for (const path2 of kept2) {
-        result.leftOutAtRecord.push({ path: path2, rule });
-        keptTracked.add(path2);
-      }
-      entries = entries.filter((entry) => !kept2.has(entry.path));
-      result.overwritten = result.overwritten.filter((path2) => !kept2.has(path2));
-      leaveOut(paths.filter((path2) => created.has(path2)), rule);
-    };
-    keepTracked(budget, "attachment-budget");
-    keepTracked(failed2, "download-failed");
-    keepTracked(imageBlocked, "image-blocked");
-    keepTracked(complexity, "markdown-complexity");
-    const gate = options.security ?? await securityGate(git, fetched.tracked);
-    const passed2 = /* @__PURE__ */ new Map();
-    const screen = async () => {
-      for (; ; ) {
-        const before = entries.length;
-        const tooComplex = [];
-        const frontMatter = [];
-        for (const entry of entries) {
-          try {
-            if (splitFile(textOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
-          } catch (error) {
-            if (!(error instanceof MarkdownLimitError)) throw error;
-            tooComplex.push(entry.path);
-          }
-        }
-        keepTracked(tooComplex, "markdown-complexity");
-        keepTracked(frontMatter, "front-matter-boundary");
-        if (gate.configured) {
-          const blocked = [];
-          const unchecked = [];
-          for (const entry of entries) {
-            const { files, uploads: added } = bodies.get(entry.path);
-            const text6 = textOf(entry);
-            if (passed2.get(entry.path) === text6) continue;
-            const newUploads = [...added].some(([hash, url]) => uploads.get(hash) !== url);
-            if (files.size === 0 && !newUploads && text6 === input.texts.get(entry.path)) continue;
-            const tracked = input.texts.get(entry.path);
-            const content4 = documents.get(entry.documentId).content ?? "";
-            const original = withNewUploadUrls(tracked === void 0 ? content4 : joinFile(splitFile(tracked).head, content4), added, uploads);
-            let findings = [];
-            if (original !== text6 && !passed2.has(entry.path)) findings = await gate.check(new Map([[entry.path, original], ...files]));
-            if (findings?.length === 0) findings = await gate.check(new Map([[entry.path, text6], ...files]));
-            if (findings === null) unchecked.push(entry.path);
-            else if (findings.length > 0) blocked.push(entry.path);
-            else passed2.set(entry.path, text6);
-          }
-          keepTracked(blocked, "security-hook");
-          keepTracked(unchecked, "security-unchecked");
-        }
-        if (entries.length === before) return;
-      }
-    };
-    let lfsObjects = [];
-    const stored = /* @__PURE__ */ new Map();
-    const same = (a, b) => a === null || b === null ? a === b : contentBytes(a).equals(contentBytes(b));
-    let commit2;
-    try {
-      await screen();
-      context.linear.transport.reads?.end();
-      if (options.stageOnly === true) {
-        if (gate.configured && linkBase !== void 0) {
-          const candidates2 = new Map(
-            entries.map((entry) => [entry.path, { entry, path: entry.path, files: new Map([...bodies.get(entry.path).files, [entry.path, textOf(entry)]]) }])
-          );
-          const linkIds = linkMap(linkBase).ids;
-          const reset = (paths, ids2) => {
-            for (const path2 of paths) if (created.has(path2)) ids2.delete(path2);
-          };
-          for (const set of linkVariants(candidates2, (candidate, ids2) => textOf(candidate.entry, ids2), reset, linkIds)) await gate.check(set);
-        }
-        return "staged";
-      }
-      commit2 = await build(entries);
-      for (let attempt = 0; ; attempt += 1) {
-        const misplaced = mismatches(await loadMapping(git, commit2), entries);
-        if (misplaced.length === 0) break;
-        const newPaths = entries.filter((entry) => created.has(entry.path)).map((entry) => entry.path);
-        if (attempt === 0) {
-          const moved = misplaced.some((path2) => !created.has(path2));
-          const newReadmes = moved ? newPaths.filter((path2) => /(^|\/)README\.md$/.test(path2)) : [];
-          leaveOut([...misplaced.filter((path2) => created.has(path2)), ...newReadmes], "title-not-a-path");
-        } else if (attempt === 1 && newPaths.length > 0) {
-          leaveOut(newPaths, "title-not-a-path");
-        } else {
-          throw new Error(message("initial-sync.misplaced", { count: misplaced.length }));
-        }
-        await screen();
-        commit2 = await build(entries);
-      }
-    } finally {
-      await gate.close?.();
-    }
-    async function build(list4) {
-      const changes = /* @__PURE__ */ new Map();
-      for (const entry of list4) {
-        for (const [path2, bytes] of bodies.get(entry.path).files) changes.set(path2, bytes);
-        changes.set(entry.path, textOf(entry));
-      }
-      for (const path2 of plan.remove) changes.set(path2, null);
-      const fresh = new Map([...changes].filter(([path2, content4]) => !same(stored.get(path2)?.input ?? null, content4) || !stored.has(path2)));
-      if (fresh.size > 0) for (const [path2, output] of (await prepareLfs(git, fetched.tracked, fresh)).changes) stored.set(path2, { input: fresh.get(path2), output });
-      const prepared = new Map([...changes.keys()].map((path2) => [path2, stored.get(path2).output]));
-      lfsObjects = [
-        ...new Set(
-          [...changes.keys()].map((path2) => stored.get(path2)).filter(({ input: input2, output }) => output !== null && output !== input2).map(({ output }) => parseLfsPointer(contentBytes(output))?.oid).filter((oid) => oid !== void 0)
-        )
-      ];
-      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false });
-    }
-    const trees = (await git.text(["show", "-s", "--format=%T", commit2, fetched.tracked])).split("\n");
-    const changesTracked = trees[0] !== trees[1];
-    for (const previousRecord of [expected.linear, fetched.sync]) {
-      if (previousRecord !== null && await sameRecord(previousRecord, commit2)) {
-        commit2 = previousRecord;
-        break;
-      }
-    }
-    const syncOpen = fetched.sync !== null && fetched.sync !== commit2 && !await isAncestor(git, fetched.sync, fetched.tracked);
-    if (syncOpen && !await isOwnRecord(fetched.sync)) return "sync-branch-changed";
-    const moveSync = fetched.sync !== commit2 && changesTracked;
-    if (moveSync) await checkPushScope(git, fetched.tracked, commit2, context.mapping.zones);
-    const synced = /* @__PURE__ */ new Set([...entries.map((entry) => entry.path), ...keptTracked]);
-    const finalIds = new Map([...ids].filter(([path2]) => synced.has(path2)));
-    const through = captureCursor([...keptTracked].map((path2) => documentOf.get(path2)));
-    const kept = plan.kept.map((entry) => entry.path);
-    const trailers = [...through === null ? [] : [captureCursorTrailer(through)], ...kept.map(keptAnnotationTrailer)];
-    const previousKept = await readKeptAnnotations(git, expected.ids);
-    const markersMoved = through !== null && through !== await readCaptureCursor(git, expected.ids) || previousKept.size !== kept.length || kept.some((path2) => !previousKept.has(path2));
-    const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
-      message: trailers.length === 0 ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}
-
-${trailers.join("\n")}`,
-      always: markersMoved || await readInitialSyncProgress(git, expected.ids) !== null,
-      // The sync branch moves to the record with this commit: the ids name it as the sync's own push.
-      ...moveSync ? { syncPushed: context.pushedKey.record(branchRef(options.config.syncBranch), commit2) } : {}
-    });
-    const finalUploads = new Map(uploads);
-    for (const entry of entries) for (const [hash, url] of bodies.get(entry.path).uploads) finalUploads.set(hash, url);
-    const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity);
-    if (lfsObjects.length > 0) await git.run(["lfs", "push", "--object-id", options.config.remote, ...lfsObjects]);
-    const updates = [
-      { ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit },
-      { ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit },
-      // Initial sync replaces `linear`: its new record does not descend from an earlier one.
-      { ref: stateRef(options.config, "linear"), expected: expected.linear, next: commit2, replace: true }
-    ];
-    if (moveSync) updates.push({ ref: branchRef(options.config.syncBranch), expected: fetched.sync, next: commit2, replace: true });
-    const pushed = await pushAtomic(git, options.config, updates);
-    if (!pushed.ok) return null;
-    const parents = (await git.text(["show", "-s", "--format=%P", commit2])).split(" ").filter(Boolean);
-    return {
-      linear: commit2,
-      moved: pushed.updated.length > 0,
-      parents,
-      hasTrackedParent: parents.length === 1 && parents[0] === fetched.tracked,
-      changesTracked,
-      needsPullRequest: changesTracked,
-      closesPullRequest: !changesTracked && syncOpen
-    };
-  }
-  function captureCursor(pendingIds) {
-    const listed = new Map(input.places.flatMap(({ documents: placed }) => placed.map((document4) => [document4.id, cursorTime(document4)])));
-    if (pendingIds.length > 0) return pendingIds.map((id) => listed.get(id)).reduce((a, b) => b < a ? b : a);
-    return [...listed.values()].reduce((a, b) => a === null || b > a ? b : a, null);
-  }
-  async function sameRecord(a, b) {
-    const describe2 = (oid) => git.text(["show", "-s", "--format=%T %P%n%s", oid]);
-    return await describe2(a) === await describe2(b);
-  }
-  async function isOwnRecord(oid) {
-    const [subject, email, parents] = (await git.text(["show", "-s", "--format=%s%n%ae%n%P", oid])).split("\n");
-    return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? "").split(" ").filter(Boolean).length === 1;
+  if (base !== null && base !== config.trackedBranch) return { branch: base, commit: merged };
+  for (let read = 1; ; read += 1) {
+    const landing = await onTracked(git, config, tracked, merged);
+    if (landing === "checked") return null;
+    if (landing === "unchecked") return { branch: config.trackedBranch, commit: merged };
+    if (read === LANDING_READS) return { branch: base, commit: merged };
+    await sleep3(LANDING_PAUSE_MS);
   }
 }
-function mismatches(mapping, entries) {
-  const mapped = new Map(mapping.documents.map((document4) => [document4.path, document4]));
-  return entries.filter((entry) => {
-    const file = mapped.get(entry.path);
-    return file === void 0 || placeKey(file.place) !== placeKey(entry.place) || file.title.normalize("NFC") !== entry.fileTitle.normalize("NFC");
-  }).map((entry) => entry.path).sort(compare4);
+async function onTracked(git, config, tracked, merged) {
+  const tip = await remoteTip(git, config);
+  if (tip === null) return "absent";
+  await git.run(["fetch", "--no-tags", "--no-write-fetch-head", config.remote, branchRef(config.trackedBranch)]);
+  if ((await git.run(["merge-base", "--is-ancestor", merged, tip], { okCodes: [0, 1, 128] })).code !== 0) return "absent";
+  return await git.text(["rev-parse", `${merged}^1`]) === tracked ? "checked" : "unchecked";
 }
-function pullRequestBody(plan, result) {
-  const out = new Set(result.leftOutAtRecord.map((entry) => entry.path));
-  const overwritten = plan.overwrite.filter((entry) => !out.has(entry.path)).length;
-  const created = plan.create.filter((entry) => !out.has(entry.path)).length;
-  const lines2 = [
-    "This pull request makes the synchronized folders equal to Linear, as an initial sync from Linear asked.",
-    "",
-    `- ${count(overwritten, "file")} take Linear's text (front matter kept);`,
-    `- ${count(created, "file")} are new, one per document only in Linear;`,
-    `- ${count(plan.remove.length, "file")} are removed: they have no document in Linear.`,
-    "",
-    "Review it and merge it with a merge commit. The sync does not merge it, because it removes files, and it does not run until this pull request is merged. Removed files stay in the history."
-  ];
-  if (plan.remove.length > 0) {
-    lines2.push("", "### Removed files", "");
-    for (const path2 of plan.remove.slice(0, 100)) lines2.push(`- \`${path2.replace(/`/g, "'")}\``);
-    if (plan.remove.length > 100) lines2.push(`- and ${plan.remove.length - 100} more`);
-  }
-  return `${lines2.join("\n")}
-`;
-}
-function entryOf(entry) {
-  return { path: entry.path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: entry.title };
-}
-function count(n, noun) {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
-}
-function compare4(a, b) {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-// src/initial-sync/summary.ts
-var DIRECTIONS = ["git-to-linear", "linear-to-git"];
-function toPlanReport(plan, direction, confirm) {
-  const paths = (entries) => entries.map((entry) => entry.path);
-  return {
-    capacity: plan.capacity ?? [],
-    direction,
-    confirm,
-    plan: {
-      create: paths(plan.create),
-      overwrite: paths(plan.overwrite),
-      trash: paths(plan.trash),
-      remove: [],
-      paths: [.../* @__PURE__ */ new Set([...paths(plan.create), ...paths(plan.overwrite), ...paths(plan.trash)])].sort(compare5)
-    },
-    leftOut: paths(plan.leftOut),
-    leftOutFiles: plan.leftOut,
-    collisionPaths: plan.leftOut.filter((entry) => entry.rules.includes("duplicate-title")).map((entry) => entry.path)
-  };
-}
-function renderDryRun(plan) {
-  const lines2 = [
-    "## Initial sync from git to Linear: dry run",
-    "",
-    "Nothing was written. Run again with `confirm` set to `true` to make Linear equal to the tracked branch:",
-    "",
-    `- create ${count2(plan.create.length, "document")};`,
-    `- overwrite ${count2(plan.overwrite.length, "document")} with the file's text (same document, comments kept);`,
-    `- move ${count2(plan.trash.length, "document")} without a file to Linear's trash, from which they can be restored;`,
-    `- leave out ${count2(plan.leftOut.length, "file")}, which stay in git only until they are fixed.`,
-    ""
-  ];
-  pushTable(lines2, "Create", ["Path", "In Linear"], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]), true);
-  pushTable(lines2, "Overwrite", ["Path", "In Linear", "Document"], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Move to trash", ["Path", "In Linear", "Document"], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
-  return lines2.join("\n") + renderCapacity(plan.capacity ?? []);
-}
-function renderConfirmed(plan, result) {
-  const outcome2 = result.complete ? "Linear now equals the tracked branch, and the sync state is recorded." : result.code === "container-cap" ? "Nothing was written. Reduce planned additions or increase document-cap after checking the container limit." : result.code === "state-moved" ? "A state ref moved while this run was writing, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done." : "The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already written are skipped.";
-  const lines2 = [
-    "## Initial sync from git to Linear",
-    "",
-    outcome2,
-    "",
-    `- created ${count2(result.created.length, "document")};`,
-    `- overwrote ${count2(result.overwritten.length, "document")} with the file's text (same document, comments kept);`,
-    `- left ${count2(result.unchanged.length, "document")} as they were: they already held the file's text;`,
-    ...result.resumed ? [`- skipped ${count2(result.skippedCompleted.length, "document")} written by the run this one continued;`] : [],
-    `- moved ${count2(result.trashed.length, "document")} without a file to Linear's trash, from which they can be restored;`,
-    `- left out ${count2(plan.leftOut.length + result.leftOutAtWrite.length, "file")}, which stay in git only until they are fixed.`,
-    ""
-  ];
-  if (result.stopped !== void 0) {
-    const why = result.stopped.kind === "test-threshold" ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
-    lines2.push(`Stopped: ${why}. Not written yet: ${count2(result.notAttempted.length, "item")}.`, "");
-  }
-  pushTable(lines2, "Failed", ["Path", "Operation", "Error"], result.failed.map((entry) => [entry.path, entry.operation, entry.error]), false);
-  pushTable(lines2, "Moved to trash", ["Path"], result.trashed.map((path2) => [path2]), false);
-  pushTable(
-    lines2,
-    "Left out",
-    ["Path", "Rules", "Lines", "Collides with, or the files"],
-    [...leftOutRows(plan.leftOut), ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, "", (entry.files ?? []).join(", ")])],
-    false
-  );
-  if (result.record !== null && result.record.reformatted.length > 0) {
-    lines2.push(
-      `Linear stores ${count2(result.record.reformatted.length, "file")} in a different form than the tracked branch; the next sync proposes that form in its pull request.`,
-      ""
-    );
-  }
-  return lines2.join("\n") + renderCapacity(plan.capacity ?? []);
-}
-function toReversePlanReport(plan, confirm) {
-  const paths = (entries) => entries.map((entry) => entry.path);
-  return {
-    direction: "linear-to-git",
-    confirm,
-    plan: {
-      create: paths(plan.create),
-      overwrite: paths(plan.overwrite),
-      trash: [],
-      remove: [...plan.remove],
-      paths: [.../* @__PURE__ */ new Set([...paths(plan.create), ...paths(plan.overwrite), ...plan.remove])].sort(compare5)
-    },
-    leftOut: paths(plan.leftOut),
-    leftOutFiles: plan.leftOut,
-    collisionPaths: plan.leftOut.filter((entry) => entry.rules.includes("duplicate-title")).map((entry) => entry.path),
-    // Nothing is created in Linear, so no container comes closer to its document cap.
-    capacity: []
-  };
-}
-function renderReverseDryRun(plan) {
-  const lines2 = [
-    "## Initial sync from Linear to the tracked branch: dry run",
-    "",
-    "Nothing was written. Run again with `confirm` set to `true` to open one pull request that makes the synchronized folders equal to Linear. A person merges it; the sync never does, because it removes files:",
-    "",
-    `- overwrite ${count2(plan.overwrite.length, "file")} with the document's text (front matter kept);`,
-    `- create ${count2(plan.create.length, "file")}, one per document without a file;`,
-    `- remove ${count2(plan.remove.length, "file")} without a document (they stay in the history);`,
-    `- keep ${count2(plan.kept.length, "file")} without a document that hold a folder's annotation;`,
-    `- leave out ${count2(plan.leftOut.length, "file or document", "files or documents")}.`,
-    ""
-  ];
-  pushTable(lines2, "Overwrite", ["Path", "Document"], plan.overwrite.map((entry) => [entry.path, entry.documentId]), true);
-  pushTable(lines2, "Create", ["Path", "From Linear", "Document"], plan.create.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Remove", ["Path"], plan.remove.map((path2) => [path2]), true);
-  pushTable(lines2, "Kept", ["Path", "Why"], plan.kept.map((entry) => [entry.path, "holds the annotation of its folder"]), false);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
-  return lines2.join("\n");
-}
-function renderReverseConfirmed(plan, result) {
-  const outcome2 = result.complete ? result.pullRequest === null ? `The tracked branch already equals Linear: no pull request is needed. The sync state is recorded.${result.closedPullRequest === void 0 ? "" : ` Pull request #${result.closedPullRequest} of an earlier run had nothing left to carry and is closed.`}` : `The sync state is recorded and pull request #${result.pullRequest.number} ${result.pullRequest.opened ? "is open" : "was already open"}. A person reviews and merges it; the sync does not run until it is merged.` : result.code === "state-moved" ? "A state ref moved while this run was working, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done." : result.code === "pull-request-failed" ? `The sync state is recorded, but the pull request could not be opened (${result.pullRequestStatus === void 0 ? "GitHub could not be reached" : `GitHub answered HTTP ${result.pullRequestStatus}`}). Run initial sync again with the same inputs to open it.` : result.code === "sync-branch-changed" ? "The sync branch holds commits this sync did not make, so nothing was recorded. Merge or close its pull request and delete the branch, then run initial sync again." : "The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already taken are skipped.";
-  const lines2 = [
-    "## Initial sync from Linear to the tracked branch",
-    "",
-    outcome2,
-    "",
-    `- took ${count2(result.overwritten.length, "document")} into existing files and ${count2(result.created.length, "document")} into new files;`,
-    ...result.resumed ? [`- skipped ${count2(result.skippedCompleted.length, "document")} taken by the run this one continued;`] : [],
-    `- ${result.record === null ? "will remove" : "removes"} ${count2(plan.remove.length, "file")} without a document;`,
-    `- left out ${count2(plan.leftOut.length + result.leftOutAtRecord.length, "file or document", "files or documents")}.`,
-    ""
-  ];
-  if (result.stopped !== void 0) {
-    const why = result.stopped.kind === "test-threshold" ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
-    lines2.push(`Stopped: ${why}. Not taken yet: ${count2(result.notAttempted.length, "document")}.`, "");
-  }
-  pushTable(lines2, "Remove", ["Path"], plan.remove.map((path2) => [path2]), false);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtRecord.map((entry) => [entry.path, entry.rule, "", ""])], false);
-  return lines2.join("\n");
-}
-var LEFT_OUT_HEAD = ["Path", "Rules", "Lines", "Collides with, or the files"];
-function leftOutRows(entries) {
-  return entries.map((entry) => [entry.path, entry.rules.join(", "), entry.lines.join(", "), (entry.collidesWith ?? entry.files ?? []).join(", ")]);
-}
-function pushTable(lines2, title, head, rows, always) {
-  if (rows.length === 0 && !always) return;
-  lines2.push(`### ${title} (${rows.length})`, "");
-  if (rows.length === 0) {
-    lines2.push("None.", "");
-    return;
-  }
-  lines2.push(`| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
-  for (const row of rows) lines2.push(`| ${row.map(cell).join(" | ")} |`);
-  lines2.push("");
-}
-function count2(n, noun, plural = `${noun}s`) {
-  return `${n} ${n === 1 ? noun : plural}`;
-}
-function compare5(a, b) {
-  return a < b ? -1 : a > b ? 1 : 0;
+async function mergedHead(git, merged, head) {
+  const parent = await git.run(["rev-parse", "--verify", "--quiet", `${merged}^2`], { okCodes: [0, 1] });
+  return parent.code === 0 && parent.stdout.toString("utf8").trim() === head;
 }
 
 // src/sync/deadline.ts
@@ -28650,25 +28354,24 @@ var MIN_CHECK_DEADLINE_MINUTES = 10;
 var MAX_CHECK_DEADLINE_MINUTES = 1440;
 var HEAD_NOTE = /^<!-- head: sha=([0-9a-f]{40,64}) since=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z)(?: checks=([^\s]*))? -->\r?$/m;
 var RED_MAIN_NOTE = /^<!-- red main: head=([0-9a-f]{40,64}) main=([0-9a-f]{40,64}) checks=([^\s]*) -->\r?$/m;
-var NOTED_CHECK = /^([^@]*)(?:@(run|status):(0|[1-9][0-9]{0,14}))?(?:~(.*))?$/;
+var NOTED_CHECK = /^([^@]*)(?:@(run|status):(0|[1-9][0-9]{0,14}))?(~.*)?$/;
 function headNote(head, since, checks = []) {
   const expected = checks.length === 0 ? "" : ` checks=${checks.map(notedCheck).join(",")}`;
   return `<!-- head: sha=${head} since=${since.toISOString()}${expected} -->`;
 }
 function notedCheck(check2) {
   const name = encodeURIComponent(check2.name);
-  const from = check2.publisher === void 0 ? name : `${name}@${check2.publisher.kind}:${check2.publisher.id}`;
-  return check2.workflow === void 0 ? from : `${from}~${encodeURIComponent(JSON.stringify(check2.workflow))}`;
+  return check2.publisher === void 0 ? name : `${name}@${check2.publisher.kind}:${check2.publisher.id}`;
 }
-var REQUIRED_CHECK = /^(.+?)\s*@\s*(?:(app|status):([1-9][0-9]{0,14})|actions:(.+))$/;
+var REQUIRED_CHECK = /^(.+?)\s*@\s*(?:(app|status):([1-9][0-9]{0,14})|(actions))$/;
 var CHECK_NAME_LENGTH = 255;
-var SHARED_PUBLISHERS = /* @__PURE__ */ new Set(["run:15368", "status:41898282"]);
+var SHARED_PUBLISHERS = /* @__PURE__ */ new Set([`run:${ACTIONS_APP.id}`, "status:41898282"]);
 function requiredCheck(line2) {
   const match = REQUIRED_CHECK.exec(line2.trim());
   if (match === null) return void 0;
   const name = match[1].trim();
   if (name.length > CHECK_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(name)) return void 0;
-  if (match[4] !== void 0) return WORKFLOW_FILE.test(match[4]) ? { name, workflow: match[4] } : void 0;
+  if (match[4] !== void 0) return { name, publisher: ACTIONS_APP };
   const id = Number(match[3]);
   const publisher2 = { kind: match[2] === "app" ? "run" : "status", id };
   return Number.isSafeInteger(id) && !SHARED_PUBLISHERS.has(`${publisher2.kind}:${id}`) ? { name, publisher: publisher2 } : void 0;
@@ -28679,6 +28382,7 @@ async function expectedChecks(github, head, required, earlier) {
   let complete = true;
   if ("pushedFrom" in earlier) {
     for (const parent of earlier.pushedFrom) observed.push(...await registeredChecks(github, parent));
+    observed.push(...earlier.carried ?? []);
   } else {
     const history = await earlierHeadChecks(earlier.git, github, head, earlier);
     complete = history !== null;
@@ -28690,11 +28394,7 @@ async function expectedChecks(github, head, required, earlier) {
         try {
           if (noted2 === null) continue;
           const check2 = { name: decodeURIComponent(noted2[1]) };
-          if (noted2[2] !== void 0) check2.publisher = { kind: noted2[2], id: Number(noted2[3]) };
-          if (noted2[4] !== void 0) {
-            const workflow = JSON.parse(decodeURIComponent(noted2[4]));
-            check2.workflow = workflow && typeof workflow.path === "string" && typeof workflow.revision === "string" && ["push", "pull_request", "workflow_dispatch", "dynamic"].includes(String(workflow.event)) ? workflow : null;
-          }
+          if (noted2[2] !== void 0) check2.publisher = noted2[2] === "run" && noted2[4] !== void 0 ? ACTIONS_APP : { kind: noted2[2], id: Number(noted2[3]) };
           observed.push(check2);
         } catch {
         }
@@ -28703,46 +28403,29 @@ async function expectedChecks(github, head, required, earlier) {
       if (noted !== head) observed.push(...await registeredChecks(github, noted));
     }
   }
-  if ("pushedFrom" in earlier || complete && earlier.pushed === head) {
-    const revisions = /* @__PURE__ */ new Map();
-    const current = (await registeredChecks(github, head)).filter((entry) => entry.moved === void 0);
-    for (const check2 of observed) {
-      const ran = check2.moved ?? check2.workflow;
-      if (!ran || ran.event === "dynamic") continue;
-      const path2 = ran.path;
-      if (!revisions.has(path2)) {
-        const verified = current.find((entry) => entry.name === check2.name && entry.workflow?.path === path2 && entry.publisher?.kind === check2.publisher?.kind && entry.publisher?.id === check2.publisher?.id)?.workflow;
-        revisions.set(path2, verified?.revision ?? await workflowRevision(github, head, path2));
-      }
-      const revision = revisions.get(path2);
-      check2.workflow = revision === void 0 ? null : { path: path2, event: ran.event, revision };
-    }
-  }
-  const listed = distinct(observed.filter(({ name }) => !/^[0-9]+ more (check runs|commit statuses)$/.test(name)).map(({ moved: _moved, ...check2 }) => check2));
-  const configured = [];
-  const blobs = /* @__PURE__ */ new Map();
-  for (const check2 of required) {
-    if ("publisher" in check2) {
-      configured.push({ name: check2.name, publisher: check2.publisher });
-      continue;
-    }
-    if (!blobs.has(check2.workflow)) blobs.set(check2.workflow, await workflowRevision(github, earlier.base, check2.workflow));
-    const revision = blobs.get(check2.workflow);
-    configured.push({ name: check2.name, workflow: revision === void 0 ? null : { path: check2.workflow, event: "push", revision } });
-  }
-  return { checks: distinct([...listed, ...configured]), observed: listed, complete };
+  const listed = distinct(observed.filter(({ name }) => !/^[0-9]+ more (check runs|commit statuses)$/.test(name)));
+  return { checks: distinct([...listed, ...required]), observed: listed, complete };
 }
 async function earlierHeadChecks(git, github, head, { base, pushed }) {
   if (pushed === void 0) return null;
   const commits = (await git.text(["rev-list", "--first-parent", "-n", String(EARLIER_HEAD_DEPTH + 2), head, "--not", base])).split("\n").filter(Boolean);
   const own6 = commits[0] === pushed;
+  const until = own6 ? checksAgainFrom(await git.text(["show", "-s", "--format=%B", pushed])) : pushed;
   const checks = [];
   for (const [index2, commit2] of commits.slice(1).entries()) {
     if (index2 === EARLIER_HEAD_DEPTH) return null;
     checks.push(...await registeredChecks(github, commit2));
-    if (own6 || commit2 === pushed) return checks;
+    if (until === void 0 || commit2 === until) return checks;
   }
-  return own6 ? checks : null;
+  return own6 && until === void 0 ? checks : null;
+}
+var CHECKS_AGAIN_FROM = /^Checks-again-from: ([0-9a-f]{40,64})$/m;
+function checksAgainTrailer(from) {
+  return `Checks-again-from: ${from}
+`;
+}
+function checksAgainFrom(message2) {
+  return CHECKS_AGAIN_FROM.exec(message2)?.[1];
 }
 function distinct(checks) {
   const byKey = new Map(checks.map((check2) => [notedCheck(check2), check2]));
@@ -28750,11 +28433,7 @@ function distinct(checks) {
 }
 async function registeredChecks(github, sha) {
   try {
-    return (await commitChecks(github, sha)).checks.map(({ name, publisher: publisher2, workflow, moved }) => {
-      if (workflow !== null || moved === void 0) return { name, publisher: publisher2, ...workflow === void 0 ? {} : { workflow } };
-      const { standIn, ...source } = moved;
-      return { name, publisher: publisher2, workflow: standIn === void 0 ? null : { ...source, revision: standIn }, moved: source };
-    });
+    return (await commitChecks(github, sha)).checks.map(({ name, publisher: publisher2 }) => ({ name, publisher: publisher2 }));
   } catch (error) {
     if (error instanceof CommitNotFoundError) return [];
     throw error;
@@ -28771,6 +28450,19 @@ function checkExpectation(options, checks) {
 }
 function checksMissing(checks, expectation) {
   return checks.pending.length === 0 && ((checks.missing?.length ?? 0) > 0 || !checks.hasChecks && expectation.allowNone !== true);
+}
+var CHECKS_AGAIN_AFTER_MINUTES = 5;
+async function checksAgain(github, head, required, earlier, options) {
+  const expected = await expectedChecks(github, head, required, earlier);
+  if (!expected.complete || earlier.pushed === void 0) return { carried: [] };
+  if (earlier.pushed === head) return null;
+  const now = /* @__PURE__ */ new Date();
+  if (!pastDeadline(headSince(earlier.body, head, now), CHECKS_AGAIN_AFTER_MINUTES, now)) return null;
+  if ((await earlier.git.text(["show", "-s", "--format=%s", earlier.pushed])).startsWith(options.againMessage)) return null;
+  if (!await options.verified()) return null;
+  const expectation = checkExpectation(options, expected.checks);
+  const checks = await readChecks(github, head, expectation);
+  return checks.state === "pending" && checksMissing(checks, expectation) ? { carried: expected.observed, from: earlier.pushed } : null;
 }
 function missingText(missing) {
   return missing.length === 0 ? "no check ran on its head" : `missing ${codeNames(missing)}`;
@@ -28819,1712 +28511,6 @@ function mainVerdict(checks, names) {
 }
 function codeNames(names) {
   return names.map((name) => `\`${name.replace(/[`\r\n]/g, " ")}\``).join(", ");
-}
-
-// src/run/inputs.ts
-var InputError = class extends Error {
-  constructor(message2) {
-    super(message2);
-    this.name = "InputError";
-  }
-};
-function environmentName(name) {
-  return `MDBISYNC_${name.toUpperCase().replace(/-/g, "_")}`;
-}
-var APP_SLUG = /^[A-Za-z0-9-]+$/;
-function readInputs(get, env = process.env, options = {}) {
-  const value = (name) => get(name).trim();
-  const required = (name) => {
-    const given = value(name);
-    if (given === "") throw new InputError(message("inputs.required", { name }));
-    return given;
-  };
-  const linear = { clientId: required("linear-client-id"), clientSecret: required("linear-client-secret") };
-  const token = required("github-token");
-  const repository = value("repository") || (env.GITHUB_REPOSITORY ?? "").trim();
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
-    throw new InputError(message("inputs.repository"));
-  }
-  const inputs = {
-    linear,
-    github: { token, repository },
-    state: stateConfig(value("tracked-branch"), value("sync-branch"), value("state-ref-prefix"))
-  };
-  const appSlug = value("app-slug");
-  if (appSlug === "" && options.appSlugRequired === true) {
-    throw new InputError(message("inputs.app-slug-required"));
-  }
-  if (appSlug !== "") {
-    if (!APP_SLUG.test(appSlug)) throw new InputError(message("inputs.app-slug"));
-    inputs.github.appSlug = appSlug;
-  }
-  const linearApiUrl = value("linear-api-url");
-  if (linearApiUrl !== "") inputs.linear.apiUrl = linearApiUrl;
-  const githubApiUrl = value("github-api-url") || (env.GITHUB_API_URL ?? "").trim();
-  if (githubApiUrl !== "") inputs.github.apiUrl = githubApiUrl;
-  const reportFile = value("report-file");
-  if (reportFile !== "") inputs.reportFile = reportFile;
-  const cap = value("document-cap");
-  if (cap !== "") {
-    if (!/^[1-9][0-9]*$/.test(cap) || !Number.isSafeInteger(Number(cap))) throw new InputError(message("inputs.document-cap"));
-    inputs.documentCap = Number(cap);
-  }
-  const grace = value("merge-grace-seconds");
-  if (grace !== "") {
-    if (!/^(0|[1-9][0-9]*)$/.test(grace) || Number(grace) > 120) throw new InputError(message("inputs.merge-grace"));
-    inputs.mergeGraceSeconds = Number(grace);
-  }
-  const deadline = value("check-deadline-minutes");
-  if (deadline !== "") {
-    if (!/^[1-9][0-9]*$/.test(deadline) || Number(deadline) < MIN_CHECK_DEADLINE_MINUTES || Number(deadline) > MAX_CHECK_DEADLINE_MINUTES) {
-      throw new InputError(message("inputs.check-deadline"));
-    }
-    inputs.checkDeadlineMinutes = Number(deadline);
-  }
-  const requiredChecks = value("required-checks");
-  if (requiredChecks !== "") inputs.requiredChecks = checkList(requiredChecks);
-  const unchecked = value("merge-without-checks");
-  if (unchecked !== "") {
-    if (unchecked !== "true" && unchecked !== "false") throw new InputError(message("inputs.merge-without-checks"));
-    inputs.mergeWithoutChecks = unchecked === "true";
-  }
-  return inputs;
-}
-function checkList(list4) {
-  const lines2 = [...new Set(list4.split(/\r?\n/).map((line2) => line2.trim()).filter(Boolean))];
-  return lines2.map((line2) => {
-    const check2 = requiredCheck(line2);
-    if (check2 === void 0) throw new InputError(message("inputs.required-checks", { line: line2 }));
-    return check2;
-  });
-}
-function stateConfig(trackedBranch, syncBranch, refPrefix) {
-  try {
-    return resolveStateConfig({ trackedBranch, syncBranch, refPrefix });
-  } catch (error) {
-    if (error instanceof StateConfigError) throw new InputError(error.message);
-    throw error;
-  }
-}
-function readInitialSyncInputs(get) {
-  const direction = get("direction").trim();
-  if (!DIRECTIONS.includes(direction)) {
-    const problem = direction === "" ? message("inputs.direction-missing") : message("inputs.direction-unknown", { directions: DIRECTIONS.join(", "), direction });
-    throw new InputError(message("inputs.direction", { problem }));
-  }
-  return { direction, confirm: get("confirm").trim() === "true" };
-}
-
-// src/run/preflight.ts
-async function runPreflight(operation, inputs, options, work) {
-  const { git } = options;
-  const fetched = await fetchState(git, inputs.state);
-  if (operation === "sync") {
-    const unfinished = await readInitialSyncProgress(git, fetched.state.ids) !== null;
-    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, tracked: fetched.tracked });
-    const refusal = checkSyncState(fetched.state, inputs.state, unfinished, pending);
-    if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
-  } else if (options.refusePendingInitialPullRequest === true) {
-    let pending = false;
-    if (fetched.sync !== null) {
-      for (const record of await pendingInitialRecords(git, { linear: fetched.state.linear, tracked: fetched.tracked })) {
-        if (await isAncestor(git, record, fetched.sync)) pending = true;
-      }
-    }
-    const refusal = checkSyncState(fetched.state, inputs.state, false, pending);
-    if (refusal?.code === "initial-pull-request-pending") return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
-  }
-  const mapping = await loadMapping(git, fetched.tracked);
-  const hooks = readHookConfig(await readTrackedFile(git, fetched.tracked, PRE_COMMIT_CONFIG));
-  const syncBranches = [inputs.state.syncBranch, suspendedBranch(inputs.state)];
-  const github = await checkGitHub({ ...inputs.github, commit: fetched.tracked, syncBranches, ...options.fetch ? { fetch: options.fetch } : {} });
-  const stats = new RequestStats();
-  const requestHooks = { log: options.log };
-  const tokenOptions = { hooks: requestHooks, baseUrl: inputs.linear.apiUrl, stats, ...options.fetch ? { fetch: options.fetch } : {} };
-  const credentials = { clientId: inputs.linear.clientId, clientSecret: inputs.linear.clientSecret };
-  const onRevokeError = (error) => options.warn(message("run.revoke-failed", { reason: error instanceof Error ? error.message : String(error) }));
-  let minted = false;
-  const reads = options.reads;
-  const runOptions = { ...tokenOptions, onRevokeError, ...options.tokenLifecycle ? { lifecycle: options.tokenLifecycle } : {} };
-  const withToken = (work2) => {
-    const known = reads?.token;
-    if (known != null) return withDeferredRunToken(credentials, known, runOptions, (token) => work2({ ...token, accessToken: () => token.accessToken() }));
-    return withRunToken(credentials, runOptions, (token) => {
-      reads?.tokenMinted(token.scope, token.context);
-      return work2(token);
-    });
-  };
-  try {
-    return await withToken(async (token) => {
-      minted = true;
-      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context, ...reads ? { reads } : {} });
-      let setup;
-      try {
-        const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
-        setup = report;
-        if (report.ok && targets !== void 0 && work !== void 0) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY, pushedKey: new PushedKey(inputs.linear.clientSecret, inputs.github.repository) });
-        return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
-      } catch (error) {
-        if (!(error instanceof LinearStoppedError)) throw error;
-        return { ...stoppedOutcome(operation, error.reason, setup), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
-      }
-    });
-  } catch (error) {
-    if (minted || !isCredentialError(error)) throw error;
-    const { report } = await runSetupCheck({ mapping, hooks, github, linear: { error: message("setup.linear-refused-credentials") } });
-    return outcome(operation, report);
-  }
-}
-function stoppedOutcome(operation, stopped, setup) {
-  const summary2 = renderStoppedBeforeWriting(stopped, operation === "sync");
-  return {
-    operation,
-    ok: false,
-    stopped,
-    summary: setup === void 0 ? summary2 : `${renderSetupSummary(setup).trimEnd()}
-
-${summary2}`,
-    ...setup === void 0 ? {} : { setup }
-  };
-}
-function outcome(operation, report) {
-  const result = { operation, ok: report.ok, summary: renderSetupSummary(report), setup: report };
-  if (report.code !== void 0) result.code = report.code;
-  return result;
-}
-async function readTrackedFile(git, commit2, path2) {
-  const result = await git.run(["cat-file", "blob", `${commit2}:${path2}`], { okCodes: [0, 128] });
-  return result.code === 0 ? result.stdout.toString("utf8") : null;
-}
-
-// src/run/capacity.ts
-var DEFAULT_DOCUMENT_CAP = 1e3;
-function containerKey(context, place) {
-  return documentPlaceKey(placeId(context.targets, place));
-}
-function documentPlaceKey(place) {
-  return JSON.stringify("projectId" in place ? { projectId: place.projectId } : { teamId: place.teamId });
-}
-async function readContainerDocuments(context) {
-  const places = [...new Map(annotatedPlaces(context.mapping.zones).map(({ place }) => [containerKey(context, place), placeId(context.targets, place)])).values()];
-  return containersOf(context, await context.linear.listDocumentsInPlaces(places, { includeArchived: true }));
-}
-function containersOf(context, listed) {
-  const documents = /* @__PURE__ */ new Map();
-  for (const { place } of annotatedPlaces(context.mapping.zones)) documents.set(containerKey(context, place), []);
-  for (const document4 of listed) {
-    const place = document4.projectId !== null ? { projectId: document4.projectId } : document4.teamId !== null ? { teamId: document4.teamId } : void 0;
-    if (place !== void 0) documents.get(documentPlaceKey(place))?.push(document4);
-  }
-  return documents;
-}
-function assessCapacity(context, documents, creates, cap = DEFAULT_DOCUMENT_CAP) {
-  const planned = /* @__PURE__ */ new Map();
-  for (const { place } of creates) {
-    const key = containerKey(context, place);
-    planned.set(key, (planned.get(key) ?? 0) + 1);
-  }
-  const result = /* @__PURE__ */ new Map();
-  for (const { place } of annotatedPlaces(context.mapping.zones)) {
-    const key = containerKey(context, place);
-    if (result.has(key)) continue;
-    const listed = documents.get(key);
-    if (listed === void 0) throw new Error(message("run.container-not-read"));
-    const unique = [...new Map(listed.map((document4) => [document4.id, document4])).values()];
-    const trashed = unique.filter((document4) => document4.trashed).length;
-    const archived = unique.filter((document4) => !document4.trashed && document4.archivedAt !== null).length;
-    const count4 = planned.get(key) ?? 0;
-    const total = unique.length + count4;
-    result.set(key, {
-      place,
-      live: unique.length - trashed - archived,
-      trashed,
-      archived,
-      planned: count4,
-      total,
-      cap,
-      status: total > cap ? "over-cap" : total >= cap * 0.9 ? "warning" : "ok"
-    });
-  }
-  return [...result.values()];
-}
-function capacityBlocked(capacity) {
-  return capacity.some((container) => container.status === "over-cap");
-}
-function renderCapacity(capacity) {
-  const reported = capacity.filter((container) => container.status !== "ok");
-  if (reported.length === 0) return "";
-  return [
-    "### Container document capacity",
-    "",
-    capacityBlocked(capacity) ? "Stopped before any write: a container would exceed its document cap." : "Warning: a container is within 10% of its document cap. The run may proceed.",
-    "",
-    "Counts include trashed and archived documents returned by Linear with `includeArchived: true`. Moving a document to trash does not free capacity.",
-    "",
-    "| Container | Live | Trashed | Archived | Planned additions | Total | Cap | Status |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
-    ...reported.map((c) => `| ${cell(placeLabel(c.place))} | ${c.live} | ${c.trashed} | ${c.archived} | ${c.planned} | ${c.total} | ${c.cap} | ${c.status} |`),
-    ""
-  ].join("\n");
-}
-
-// src/initial-sync/plan.ts
-function annotatedPlaces(zones) {
-  const places = /* @__PURE__ */ new Map();
-  for (const zone of [...zones.values()].sort((a, b) => compare6(zoneFolder(a), zoneFolder(b)))) {
-    const place = zone.project !== void 0 ? { kind: "project", team: zone.team, project: zone.project } : { kind: "team", team: zone.team };
-    const key = placeKey(place);
-    if (!places.has(key)) places.set(key, { place, folder: zoneFolder(zone) });
-  }
-  return [...places.values()];
-}
-function placeId(targets, place) {
-  if (place.kind === "project") {
-    const project = targets.projects.get(projectKey(place.team, place.project));
-    if (project === void 0) throw new Error(message("initial-sync.project-not-resolved", { project: place.project, team: place.team }));
-    return { projectId: project.id };
-  }
-  const team = targets.teams.get(place.team);
-  if (team === void 0) throw new Error(message("initial-sync.team-not-resolved", { team: place.team }));
-  return { teamId: team.id };
-}
-function placeKey(place) {
-  return place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
-}
-function planInitialSync(input) {
-  const facts = input.facts ?? LINEAR_FACTS;
-  const { mapping } = input;
-  const leftOut = /* @__PURE__ */ new Map();
-  const leaveOut = (path2, rules, lines2 = [], collidesWith) => {
-    const entry = leftOut.get(path2) ?? { path: path2, rules: [], lines: [] };
-    entry.rules = [.../* @__PURE__ */ new Set([...entry.rules, ...rules])].sort();
-    entry.lines = [.../* @__PURE__ */ new Set([...entry.lines, ...lines2])].sort((a, b) => a - b);
-    if (collidesWith !== void 0) entry.collidesWith = [...collidesWith].sort(compare6);
-    leftOut.set(path2, entry);
-  };
-  const textOf = (path2) => {
-    const text6 = input.texts.get(path2);
-    if (text6 === void 0) throw new Error(message("initial-sync.text-not-read", { path: path2 }));
-    return text6;
-  };
-  const lint = (path2, title) => {
-    const findings = lintInTree(path2, textOf(path2), mapping.files);
-    if (findings.length > 0) leaveOut(path2, findings.map((f) => f.rule), findings.map((f) => f.line));
-    if (lengthRefusal({ title }, facts) !== void 0) leaveOut(path2, ["title-too-long"]);
-  };
-  const leftOutTitles = /* @__PURE__ */ new Map();
-  for (const file of mapping.leftOut) {
-    leaveOut(file.path, [file.rule], [], file.collidesWith);
-    lint(file.path, file.title);
-    leftOutTitles.set(titleIn(file.place, file.title), file.path);
-  }
-  for (const file of mapping.unsynced) {
-    if (file.place === void 0 || file.title === void 0) continue;
-    leaveOut(file.path, [file.reason]);
-    leftOutTitles.set(titleIn(file.place, file.title), file.path);
-  }
-  const synced = [];
-  for (const document4 of mapping.documents) {
-    lint(document4.path, document4.title);
-    if (leftOut.has(document4.path)) leftOutTitles.set(titleIn(document4.place, document4.title), document4.path);
-    else synced.push(document4);
-  }
-  const plan = { create: [], overwrite: [], trash: [], leftOut: [] };
-  const filesByTitle = new Map(synced.map((document4) => [titleIn(document4.place, document4.title), document4]));
-  const matched = /* @__PURE__ */ new Set();
-  const folders = new Map(annotatedPlaces(mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
-  for (const { place, documents } of input.places) {
-    const oldestFirst = [...documents].sort((a, b) => compare6(a.createdAt, b.createdAt) || compare6(a.id, b.id));
-    for (const document4 of oldestFirst) {
-      if (document4.trashed || document4.archivedAt !== null) continue;
-      const key = titleIn(place, document4.title);
-      const file = filesByTitle.get(key);
-      if (file !== void 0 && !matched.has(key)) {
-        matched.add(key);
-        plan.overwrite.push({ path: file.path, title: file.title, place, documentId: document4.id });
-        continue;
-      }
-      const leftOutPath = leftOutTitles.get(key);
-      if (leftOutPath !== void 0) {
-        const entry = leftOut.get(leftOutPath);
-        if (entry.documentId === void 0) {
-          entry.documentId = document4.id;
-          continue;
-        }
-      }
-      const folder = folders.get(placeKey(place)) ?? "";
-      plan.trash.push({ path: `${folder === "" ? "" : `${folder}/`}${document4.title}.md`, title: document4.title, place, documentId: document4.id });
-    }
-  }
-  for (const document4 of synced) {
-    if (!matched.has(titleIn(document4.place, document4.title))) plan.create.push({ path: document4.path, title: document4.title, place: document4.place });
-  }
-  const byPath = (entries) => entries.sort((a, b) => compare6(a.path, b.path));
-  plan.create = byPath(plan.create);
-  plan.overwrite = byPath(plan.overwrite);
-  plan.trash = byPath(plan.trash);
-  plan.leftOut = byPath([...leftOut.values()]);
-  return plan;
-}
-function leaveOutAtWrite(plan, entries) {
-  if (entries.length === 0) return plan;
-  const byPath = new Map(entries.map((entry) => [entry.path, entry]));
-  const leftOut = [...plan.leftOut];
-  const add = (path2, documentId) => {
-    const found = byPath.get(path2);
-    if (found === void 0) return;
-    leftOut.push({ path: path2, rules: [found.rule], lines: [], files: [...found.files], ...documentId !== void 0 ? { documentId } : {} });
-  };
-  for (const entry of plan.create) add(entry.path);
-  for (const entry of plan.overwrite) add(entry.path, entry.documentId);
-  return {
-    ...plan,
-    create: plan.create.filter((entry) => !byPath.has(entry.path)),
-    overwrite: plan.overwrite.filter((entry) => !byPath.has(entry.path)),
-    leftOut: leftOut.sort((a, b) => compare6(a.path, b.path))
-  };
-}
-function titleIn(place, title) {
-  return `${placeKey(place)}\0${title.normalize("NFC")}`;
-}
-function zoneFolder(zone) {
-  return zone.projectFolder ?? zone.teamFolder;
-}
-function compare6(a, b) {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-// src/run/stop.ts
-var PARTIAL = message("run.partial");
-function renderStop(stop) {
-  const why = stop.kind === "test-threshold" ? `the test threshold of ${stop.documents} documents` : describeStop(stop);
-  const lines2 = [`Stopped: ${why}.`, ""];
-  const limits = stop.kind === "test-threshold" ? void 0 : stop.limits;
-  if (limits !== void 0) {
-    lines2.push("Linear's rate-limit headers at the stop:", "", "| Header | Value |", "| --- | --- |");
-    for (const name of Object.keys(limits).sort()) lines2.push(`| ${cell(name)} | ${cell(limits[name] ?? "")} |`);
-    lines2.push("");
-  }
-  return lines2;
-}
-function renderStoppedBeforeWriting(stop, partial) {
-  const outcome2 = partial ? `Stopped before any write; ${PARTIAL}: the next run starts again.` : "Stopped before any write: run it again once the limit has reset.";
-  return ["## Linear stopped the run", "", outcome2, "", ...renderStop(stop)].join("\n");
-}
-
-// src/sync/merge.ts
-import { createHash as createHash11 } from "node:crypto";
-import { mkdtemp as mkdtemp4, rm as rm4 } from "node:fs/promises";
-import { tmpdir as tmpdir5 } from "node:os";
-import { join as join9 } from "node:path";
-async function mergeLocally(git, linear, tracked, ids, facts = LINEAR_FACTS, options = {}) {
-  let mergeTracked = tracked;
-  let mergeBase = options.base;
-  const frozen = new Set([...ids].flatMap(([path2, entry]) => entry.suspended === void 0 ? [] : [path2, ...entry.suspended.paths]));
-  const released = [...ids].filter(([, entry]) => entry.releaseBase !== void 0);
-  if (frozen.size > 0 || released.length > 0) {
-    mergeBase ??= await git.text(["merge-base", linear, tracked]);
-    let baseTree = mergeBase;
-    const releaseGroups = /* @__PURE__ */ new Map();
-    for (const [path2, entry] of released) {
-      const paths = releaseGroups.get(entry.releaseBase) ?? /* @__PURE__ */ new Set();
-      for (const selected of entry.releasePaths ?? [path2]) paths.add(selected);
-      releaseGroups.set(entry.releaseBase, paths);
-    }
-    for (const [base2, paths] of releaseGroups) baseTree = await takePaths(git, baseTree, base2, paths);
-    if (frozen.size > 0) {
-      baseTree = await takePaths(git, baseTree, linear, frozen);
-      mergeTracked = await treeCommit(git, await takePaths(git, tracked, linear, frozen), tracked);
-    }
-    mergeBase = await treeCommit(git, baseTree, mergeBase);
-  }
-  const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase);
-  const { tree, unresolved: conflicts } = resolved;
-  const linearSide = await synchronizedFiles(git, linear, facts, ids);
-  const resultSide = await synchronizedFiles(git, tree, facts);
-  const conflicted = new Set(conflicts);
-  const changes = [];
-  const unchanged = [];
-  const held = [];
-  const claimed = /* @__PURE__ */ new Set();
-  const blobs = await readBlobs(git, [...linearSide.files.values(), ...resultSide.files.values()].map((file) => file.oid));
-  const body2 = (oid) => splitFile(blobs.get(oid).toString("utf8")).body;
-  for (const [from, entry] of [...ids].sort(([a], [b]) => compare7(a, b))) {
-    if (conflicted.has(from)) {
-      claimed.add(from);
-      continue;
-    }
-    let to;
-    const decidedPath = resolved.moves.get(from);
-    if (decidedPath !== void 0 && resultSide.files.has(decidedPath) && !ids.has(decidedPath)) to = decidedPath;
-    else if (resultSide.files.has(from)) to = from;
-    else {
-      const renamed2 = renames.get(from);
-      if (renamed2 !== void 0 && !ids.has(renamed2) && !claimed.has(renamed2)) {
-        if (resultSide.files.has(renamed2) && !conflicted.has(renamed2)) to = renamed2;
-        else if (conflicted.has(renamed2) || resultSide.leftOutPaths.has(renamed2)) {
-          claimed.add(renamed2);
-          held.push({ id: entry.id, from, to: renamed2 });
-          continue;
-        }
-      }
-    }
-    if (to === void 0) {
-      if (resultSide.leftOutPaths.has(from)) continue;
-      changes.push({ kind: "trash", id: entry.id, path: from });
-      continue;
-    }
-    claimed.add(to);
-    const next = resultSide.files.get(to);
-    const previous3 = linearSide.files.get(from);
-    if (previous3 === void 0 && entry.releaseBase !== void 0) {
-      const version = { path: to, text: blobs.get(next.oid).toString("utf8") };
-      const input = { base: { path: from, text: "" }, git: version, linear: null };
-      const restored = await resolveStructural(input);
-      const gone = (await resolveStructural({ ...input, linearGone: true })).summary;
-      changes.push({ kind: "create", path: to, restore: { id: entry.id, gone } });
-      if (restored.summary !== null) resolved.decided.push({ path: to, summary: restored.summary });
-      continue;
-    }
-    const change = {
-      kind: "keep",
-      id: entry.id,
-      from,
-      to,
-      content: previous3 === void 0 || body2(previous3.oid) !== body2(next.oid),
-      title: previous3 === void 0 || previous3.title.normalize("NFC") !== next.title.normalize("NFC"),
-      place: previous3 === void 0 || placeKey2(previous3.place) !== placeKey2(next.place)
-    };
-    const comment = resolved.comments.get(from);
-    if (comment !== void 0 && (change.title || change.place)) change.comment = comment;
-    if (change.content || change.title || change.place) changes.push(change);
-    else unchanged.push(change);
-  }
-  const renamedTo = new Map([...renames].map(([from, to]) => [to, from]));
-  const renamedFrom = (path2) => {
-    const from = renamedTo.get(path2);
-    if (from === void 0 || !isReadme(from) || ids.has(from) || !linearSide.files.has(from) || resultSide.files.has(from)) return void 0;
-    return from;
-  };
-  const keptMoves = /* @__PURE__ */ new Map();
-  for (const path2 of resultSide.files.keys()) {
-    if (!claimed.has(path2) && !conflicted.has(path2)) {
-      const file = resultSide.files.get(path2);
-      const source = linearSide.files.has(path2) ? path2 : renamedFrom(path2);
-      const previous3 = source === void 0 ? void 0 : linearSide.files.get(source);
-      const unchanged2 = previous3 !== void 0 && body2(previous3.oid) === body2(file.oid);
-      const keptByName = source !== void 0 && options.keptAnnotations?.has(source) === true;
-      const kept = unchanged2 && (body2(file.oid) === "" || keptByName);
-      if (isReadme(path2) && kept) {
-        const annotation = readAnnotation(path2, blobs.get(file.oid).toString("utf8"));
-        if ("annotation" in annotation && annotation.annotation !== null) {
-          if (keptByName && source !== path2) keptMoves.set(source, path2);
-          continue;
-        }
-      }
-      const restore = resolved.restores.get(path2);
-      changes.push(restore === void 0 ? { kind: "create", path: path2 } : { kind: "create", path: path2, restore });
-    }
-  }
-  changes.sort((a, b) => compare7(changePath(a), changePath(b)));
-  return {
-    base,
-    tree,
-    conflicts,
-    marked: resolved.marked.filter((path2) => resultSide.files.has(path2)).sort(compare7),
-    decided: resolved.decided,
-    linear: linearSide.files,
-    result: resultSide.files,
-    leftOut: resultSide.leftOut,
-    changes,
-    unchanged: unchanged.sort((a, b) => compare7(a.to, b.to)),
-    held,
-    texts: blobs,
-    keptMoves
-  };
-}
-var ID_HISTORY_DEPTH = 100;
-function knownIdLookup(git, idsCommit, ids) {
-  let history;
-  const versions = /* @__PURE__ */ new Map();
-  return async (path2) => {
-    const current = ids.get(path2);
-    if (current !== void 0) return current.id;
-    history ??= idsCommit === null ? [] : (await git.text(["rev-list", "--first-parent", "-n", String(ID_HISTORY_DEPTH), idsCommit])).split("\n").filter(Boolean);
-    for (const commit2 of history) {
-      let map4 = versions.get(commit2);
-      if (map4 === void 0) {
-        map4 = await readIds(git, commit2);
-        versions.set(commit2, map4);
-      }
-      const entry = map4.get(path2);
-      if (entry !== void 0) return entry.id;
-    }
-    return void 0;
-  };
-}
-async function mergeWithMarkers(git, linearSide, gitSide, ids, knownId, explicitBase) {
-  const base = explicitBase ?? await git.text(["merge-base", linearSide, gitSide]);
-  const merged = await git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ...explicitBase === void 0 ? [] : [`--merge-base=${explicitBase}`], linearSide, gitSide], { okCodes: [0, 1] });
-  const [gitTree, ...rest] = merged.stdout.toString("utf8").split("\0");
-  if (gitTree === void 0 || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message("sync.no-merge-tree"));
-  const unmerged = [...new Set(rest.filter((path2) => path2 !== ""))].sort(compare7);
-  const renames = await renamesBetween(git, base, gitSide);
-  const resolved = await resolveConflicts(git, { base, linear: linearSide, tracked: gitSide, tree: gitTree, unmerged, renames, ids, knownId });
-  return { base, renames, resolved };
-}
-function changePath(change) {
-  return change.kind === "keep" ? change.to : change.path;
-}
-function placeKey2(place) {
-  return place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
-}
-async function synchronizedFiles(git, treeish, facts, observedRepairs) {
-  const mapping = await loadMapping(git, treeish);
-  const blobs = await readBlobs(git, mapping.documents.map((document4) => document4.oid));
-  const files = /* @__PURE__ */ new Map();
-  const leftOut = [];
-  const leave = (path2, rules) => leftOut.push({ path: path2, rules: [...new Set(rules)].sort() });
-  for (const document4 of mapping.documents) {
-    const rules = lintInTree(document4.path, blobs.get(document4.oid).toString("utf8"), mapping.files).map((finding) => finding.rule);
-    if (lengthRefusal({ title: document4.title }, facts) !== void 0) rules.push("title-too-long");
-    const repair = observedRepairs?.get(document4.path)?.pullRewrite;
-    const observed = repair !== void 0 && createHash11("sha256").update(blobs.get(document4.oid)).digest("hex") === repair.hash;
-    if (rules.length > 0 && !observed) leave(document4.path, rules);
-    else files.set(document4.path, toSideFile(document4));
-  }
-  for (const file of mapping.leftOut) leave(file.path, [file.rule]);
-  for (const file of mapping.unsynced) if (file.place !== void 0) leave(file.path, [file.reason]);
-  leftOut.sort((a, b) => compare7(a.path, b.path));
-  return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)) };
-}
-async function leftOutFiles(git, treeish, facts = LINEAR_FACTS) {
-  return (await synchronizedFiles(git, treeish, facts)).leftOut;
-}
-var BASELINE_DEPTH = 20;
-async function lastSynchronized(git, linear, path2, facts = LINEAR_FACTS, sides = /* @__PURE__ */ new Map(), oldest) {
-  const range = oldest === void 0 ? [linear] : [linear, "--not", `${oldest}^@`];
-  const log = async (paths) => {
-    const commits = (await git.text(["--literal-pathspecs", "log", "--first-parent", "--format=%H", "-n", String(BASELINE_DEPTH), ...range, "--", ...paths])).split("\n").filter(Boolean);
-    return oldest !== void 0 && commits.length < BASELINE_DEPTH && !commits.includes(oldest) ? [...commits, oldest] : commits;
-  };
-  const versions = await log([path2]);
-  const linked = await linkedFiles(git, versions, path2);
-  const candidates2 = linked.length === 0 ? versions : await log([path2, ...linked]);
-  for (const commit2 of candidates2) {
-    if (!sides.has(commit2)) sides.set(commit2, synchronizedFiles(git, commit2, facts));
-    const file = (await sides.get(commit2)).files.get(path2);
-    if (file !== void 0) return { commit: commit2, file, text: (await readBlobs(git, [file.oid])).get(file.oid).toString("utf8") };
-  }
-  return null;
-}
-async function linkedFiles(git, commits, path2) {
-  const linked = /* @__PURE__ */ new Set();
-  for (const commit2 of commits) {
-    const blob = await git.run(["cat-file", "blob", `${commit2}:${path2}`], { okCodes: [0, 128] });
-    if (blob.code !== 0) continue;
-    try {
-      for (const link2 of findFileLinks(path2, splitFile(blob.stdout.toString("utf8")).body, () => true)) {
-        if (!link2.target.endsWith(MARKDOWN_EXTENSION)) linked.add(link2.target);
-      }
-    } catch (error) {
-      if (!(error instanceof MarkdownLimitError)) throw error;
-    }
-  }
-  return [...linked];
-}
-function toSideFile(document4) {
-  return { path: document4.path, oid: document4.oid, title: document4.title, place: document4.place };
-}
-async function resolveConflicts(git, input) {
-  const out = { tree: input.tree, unresolved: [], moves: /* @__PURE__ */ new Map(), comments: /* @__PURE__ */ new Map(), restores: /* @__PURE__ */ new Map(), marked: [], decided: [] };
-  if (input.unmerged.length === 0) return out;
-  const [baseFiles, gitFiles, linearFiles] = await Promise.all([filesOf(git, input.base), filesOf(git, input.tracked), filesOf(git, input.linear)]);
-  const mapped = /* @__PURE__ */ new Set();
-  for (const side of [input.base, input.tracked, input.linear]) for (const document4 of (await loadMapping(git, side)).documents) mapped.add(document4.path);
-  const linearRenames = await renamesBetween(git, input.base, input.linear);
-  const pathById = new Map([...input.ids].map(([path2, entry]) => [entry.id, path2]));
-  const knownId = async (path2) => input.knownId?.(path2);
-  const basePathOf = (path2) => {
-    if (baseFiles.has(path2)) return path2;
-    for (const [from, to] of [...input.renames, ...linearRenames]) if (to === path2 && baseFiles.has(from)) return from;
-    return null;
-  };
-  const linearPathOf = async (basePath) => {
-    const id = await knownId(basePath);
-    const byId = id === void 0 ? void 0 : pathById.get(id);
-    if (byId !== void 0 && linearFiles.has(byId)) return byId;
-    const renamed2 = linearRenames.get(basePath);
-    if (renamed2 !== void 0 && linearFiles.has(renamed2)) return renamed2;
-    if (!linearFiles.has(basePath)) return null;
-    if (id !== void 0 && byId === void 0 && await annotationOnly(basePath)) {
-      removedCarriers.add(basePath);
-      return null;
-    }
-    return basePath;
-  };
-  const removedCarriers = /* @__PURE__ */ new Set();
-  const annotationOnly = async (path2) => {
-    if (path2 !== "README.md" && !path2.endsWith("/README.md")) return false;
-    const text6 = (await readBlobs(git, [linearFiles.get(path2)])).get(linearFiles.get(path2)).toString("utf8");
-    if (splitFile(text6).body.trim() !== "") return false;
-    const annotation = readAnnotation(path2, text6);
-    return "annotation" in annotation && annotation.annotation !== null;
-  };
-  const groups = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const path2 of input.unmerged) {
-    if (seen.has(path2)) continue;
-    const basePath = basePathOf(path2);
-    const gitPath = basePath === null ? gitFiles.has(path2) ? path2 : null : input.renames.get(basePath) ?? (gitFiles.has(basePath) ? basePath : null);
-    const linearPath = basePath === null ? linearFiles.has(path2) ? path2 : null : await linearPathOf(basePath);
-    const involved = [...new Set([path2, basePath, gitPath, linearPath].filter((entry) => entry !== null))];
-    for (const entry of involved) seen.add(entry);
-    const collides = involved.some((entry) => linearFiles.has(entry) && entry !== linearPath && !removedCarriers.has(entry) || gitFiles.has(entry) && entry !== gitPath);
-    if (!collides && involved.every((entry) => mapped.has(entry) || !input.unmerged.includes(entry))) groups.push({ basePath, gitPath, linearPath, involved });
-    else out.unresolved.push(...involved);
-  }
-  const blobs = await readBlobs(git, groups.flatMap(({ basePath, gitPath, linearPath }) => [
-    ...basePath === null ? [] : [baseFiles.get(basePath)],
-    ...gitPath === null ? [] : [gitFiles.get(gitPath)],
-    ...linearPath === null ? [] : [linearFiles.get(linearPath)]
-  ]));
-  const version = (files, path2) => path2 === null ? null : { path: path2, text: blobs.get(files.get(path2)).toString("utf8") };
-  const changes = /* @__PURE__ */ new Map();
-  for (const { basePath, gitPath, linearPath, involved } of groups) {
-    const versions = {
-      // Both sides added the path: an empty base, so the whole text is merged.
-      base: version(baseFiles, basePath) ?? { path: involved[0], text: "" },
-      git: version(gitFiles, gitPath),
-      linear: version(linearFiles, linearPath)
-    };
-    let result;
-    let gone;
-    try {
-      result = await resolveStructural(versions);
-      if (result.kind === "linear-deleted-git-changed" && result.path !== null) {
-        gone = (await resolveStructural({ ...versions, linearGone: true })).summary;
-      }
-    } catch (error) {
-      if (!(error instanceof MarkdownLimitError)) throw error;
-      out.unresolved.push(...involved);
-      continue;
-    }
-    for (const path2 of involved) changes.set(path2, null);
-    if (result.path !== null && result.text !== null) changes.set(result.path, result.text);
-    if (linearPath !== null && result.path !== null && result.path !== linearPath) out.moves.set(linearPath, result.path);
-    if (linearPath !== null && result.linear.comment !== void 0) out.comments.set(linearPath, result.linear.comment);
-    let summary2 = result.summary;
-    if (result.kind === "linear-deleted-git-changed" && result.path !== null) {
-      const id = basePath === null ? void 0 : await knownId(basePath);
-      if (id !== void 0) out.restores.set(result.path, { id, gone });
-      else summary2 = gone;
-    }
-    if (result.path !== null && result.conflicts.length > 0) out.marked.push(result.path);
-    if (summary2 !== null) out.decided.push({ path: result.path ?? basePath ?? involved[0], summary: summary2 });
-  }
-  out.tree = await buildTree(git, input.tree, changes);
-  out.unresolved.sort(compare7);
-  return out;
-}
-async function renamesBetween(git, from, to) {
-  const { stdout } = await git.run(["diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--diff-filter=R", "--name-status", "-z", from, to]);
-  const parts = stdout.toString("utf8").split("\0");
-  const renames = /* @__PURE__ */ new Map();
-  for (let index2 = 0; index2 + 2 < parts.length; index2 += 3) {
-    const [status, old, renamed2] = [parts[index2], parts[index2 + 1], parts[index2 + 2]];
-    if (status?.startsWith("R") && old !== void 0 && renamed2 !== void 0) renames.set(old, renamed2);
-  }
-  return renames;
-}
-async function alreadyMerged(git, linear, tracked) {
-  return (await git.run(["merge-base", "--is-ancestor", tracked, linear], { okCodes: [0, 1] })).code === 0;
-}
-async function mergedInitialRecord(git, linear, tracked) {
-  const [subject] = (await git.text(["show", "-s", "--format=%s", linear])).split("\n");
-  if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
-  if (!await isAncestor(git, linear, tracked)) return false;
-  const [linearTree, trackedTree] = (await git.text(["rev-parse", `${linear}^{tree}`, `${tracked}^{tree}`])).split("\n");
-  return linearTree === trackedTree;
-}
-async function filesOf(git, treeish) {
-  return new Map((await listTree(git, treeish)).map((entry) => [entry.path, entry.oid]));
-}
-function compare7(a, b) {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-async function takePaths(git, into, from, paths) {
-  const entries = new Map((await listTree(git, from)).map((entry) => [entry.path, entry]));
-  for (const path2 of paths) checkRepoPath(path2, { removal: !entries.has(path2) });
-  const dir = await mkdtemp4(join9(tmpdir5(), "lane-index-"));
-  const env = { GIT_INDEX_FILE: join9(dir, "index") };
-  try {
-    await git.run(["read-tree", `${into}^{tree}`], { env });
-    const zero = "0".repeat(await git.text(["rev-parse", "--show-object-format"]) === "sha256" ? 64 : 40);
-    const input = [...paths].map((path2) => {
-      const entry = entries.get(path2);
-      return entry === void 0 ? `0 ${zero}	${path2}\0` : `${entry.mode} ${entry.oid}	${path2}\0`;
-    }).join("");
-    if (input) await git.run(["update-index", "-z", "--index-info"], { env, input });
-    return await git.text(["write-tree"], { env });
-  } finally {
-    await rm4(dir, { recursive: true, force: true });
-  }
-}
-function treeCommit(git, tree, parent) {
-  return commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [parent], message: "Merge input", identity: NEUTRAL_IDENTITY });
-}
-function isReadme(path2) {
-  return path2 === "README.md" || path2.endsWith("/README.md");
-}
-
-// src/sync/pull-repairs.ts
-import { createHash as createHash12 } from "node:crypto";
-var repairSet = (path2, replacement) => /* @__PURE__ */ new Map([[path2, replacement]]);
-async function pendingRepairs(git, linear, ids, zones, paths) {
-  const counts2 = /* @__PURE__ */ new Map();
-  for (const entry of ids.values()) counts2.set(entry.id, (counts2.get(entry.id) ?? 0) + 1);
-  const pending = [...ids].filter(([path2, entry]) => entry.pullRewrite !== void 0 && counts2.get(entry.id) === 1 && (paths === void 0 || paths.has(path2)));
-  const repairs = /* @__PURE__ */ new Map();
-  if (pending.length === 0) return repairs;
-  const entries = new Map((await listTree(git, linear)).map((entry) => [entry.path, entry]));
-  const files = candidateFiles([...entries.values()], zones);
-  const blobs = await readBlobs(git, files.map((file) => file.oid));
-  const documents = new Set(mapFiles([...entries.values()], zones, blobs).documents.map((document4) => document4.path));
-  for (const [path2, entry] of pending) {
-    const file = entries.get(path2);
-    if (!documents.has(path2) || file === void 0 || !isSyncedChange(path2, file.mode, zones)) continue;
-    const source = blobs.get(file.oid);
-    const repair = entry.pullRewrite;
-    if (source === void 0 || createHash12("sha256").update(source).digest("hex") !== repair.hash) continue;
-    if (source.toString("utf8") === repair.replacement) continue;
-    repairs.set(path2, repair);
-  }
-  return repairs;
-}
-async function checkedPullView(git, linear, ids, zones, identity, gate, hold, paths) {
-  const changes = /* @__PURE__ */ new Map();
-  const held = /* @__PURE__ */ new Set();
-  const notes = [];
-  for (const [path2, repair] of await pendingRepairs(git, linear, ids, zones, paths)) {
-    const findings = await gate.check(repairSet(path2, repair.replacement));
-    if (findings === null || findings.length > 0) {
-      held.add(path2);
-      continue;
-    }
-    changes.set(path2, repair.replacement);
-    for (const image2 of repair.images) notes.push(`- ${oneLine(path2)}: image ${image2.image} of ${image2.total} (line ${image2.line}).`);
-  }
-  if (changes.size === 0 && held.size === 0) return { commit: linear, notes };
-  let tree = changes.size === 0 ? await git.text(["rev-parse", `${linear}^{tree}`]) : await buildTree(git, linear, changes);
-  if (held.size > 0) tree = await takePaths(git, tree, hold, held);
-  if (tree === await git.text(["rev-parse", `${linear}^{tree}`])) return { commit: linear, notes };
-  const date = await git.text(["show", "-s", "--format=%cI", linear]);
-  const commit2 = await git.text(["commit-tree", "--no-gpg-sign", tree, "-p", linear, "-m", "Apply checked image and link repairs"], { env: {
-    GIT_AUTHOR_NAME: identity.name,
-    GIT_AUTHOR_EMAIL: identity.email,
-    GIT_COMMITTER_NAME: identity.name,
-    GIT_COMMITTER_EMAIL: identity.email,
-    GIT_AUTHOR_DATE: date,
-    GIT_COMMITTER_DATE: date
-  } });
-  return { commit: commit2, notes };
-}
-async function stagePullRepairs(git, state, zones, gate) {
-  if (state.linear === null) return;
-  const repairs = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones);
-  for (const [path2, repair] of repairs) await gate.check(repairSet(path2, repair.replacement));
-}
-async function readPlainFileProvenance(git, linear) {
-  const log = await git.text(["log", "--first-parent", "--format=%B", "--grep=^Plain-link:", linear]);
-  const result = /* @__PURE__ */ new Map();
-  for (const match of log.matchAll(/^Plain-link: (\S+) (\S+)$/gm)) {
-    try {
-      const id = decodeURIComponent(match[1]);
-      const target = decodeURIComponent(match[2]);
-      if (!result.has(id)) result.set(id, /* @__PURE__ */ new Set());
-      result.get(id).add(target);
-    } catch {
-    }
-  }
-  return result;
-}
-
-// src/sync/tracked-places.ts
-function trackedPlaces(git, tracked, current) {
-  const allowed = new Set([...current.values()].map((zone) => placeKey(placeOf(zone))));
-  const answers = /* @__PURE__ */ new Map();
-  return (folder, place) => {
-    if (allowed.has(placeKey(place))) return Promise.resolve(true);
-    const key = `${folder}\0${placeKey(place)}`;
-    let answer = answers.get(key);
-    if (answer === void 0) answers.set(key, answer = named(git, tracked, folder, place));
-    return answer;
-  };
-}
-async function named(git, tracked, folder, place) {
-  const readmes = annotationChain(folder);
-  const log = await git.text(["--literal-pathspecs", "log", "--first-parent", "--format=%H", tracked, "--", ...readmes]);
-  for (const commit2 of log.split("\n")) {
-    if (commit2 === "") continue;
-    const zone = nearestZone(await zonesAt(git, commit2, readmes), folder);
-    if (zone !== void 0 && placeKey(placeOf(zone)) === placeKey(place)) return true;
-  }
-  return false;
-}
-function annotationChain(folder) {
-  const readmes = ["README.md"];
-  const parts = folder === "" ? [] : folder.split("/");
-  for (let depth2 = 1; depth2 <= parts.length; depth2++) readmes.push(`${parts.slice(0, depth2).join("/")}/README.md`);
-  return readmes;
-}
-async function zonesAt(git, commit2, readmes) {
-  const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "--full-tree", commit2, "--", ...readmes]);
-  const entries = stdout.toString("utf8").split("\0").filter((record) => record !== "").flatMap((record) => {
-    const tab = record.indexOf("	");
-    const [, type, oid] = record.slice(0, tab).split(" ");
-    return type === "blob" ? [{ path: record.slice(tab + 1), oid }] : [];
-  });
-  const blobs = await readBlobs(git, entries.map((entry) => entry.oid));
-  const texts = new Map(entries.map((entry) => [entry.path, blobs.get(entry.oid).toString("utf8")]));
-  return resolveZones(collectAnnotations(texts).annotations).zones;
-}
-
-// src/sync/rebuild.ts
-async function rebuildIds({ git, record, linear, facts, targets, allowedPlace, documents, files: treeFiles2, unmapped }) {
-  const keyOf = (place, title) => `${"projectId" in place ? `project:${place.projectId}` : `team:${place.teamId}`}\0${title.normalize("NFC")}`;
-  const files = /* @__PURE__ */ new Map();
-  const places = /* @__PURE__ */ new Map();
-  const byPlace = /* @__PURE__ */ new Map();
-  const add = (path2, title, place) => {
-    if (files.has(keyOf(place, title))) return;
-    places.set(JSON.stringify(place), place);
-    files.set(keyOf(place, title), path2);
-    const folder = path2.slice(0, -(title.length + ".md".length)).replace(/\/$/, "");
-    byPlace.set(JSON.stringify(place), [...byPlace.get(JSON.stringify(place)) ?? [], { folder, path: path2 }]);
-  };
-  let initial;
-  const sides = /* @__PURE__ */ new Map();
-  const leftOut = [...unmapped];
-  for (const document4 of documents) {
-    if (lintInTree(document4.path, document4.text, treeFiles2).length > 0 || lengthRefusal({ title: document4.title }, facts) !== void 0) {
-      leftOut.push(document4.path);
-      continue;
-    }
-    if (!await allowedPlace(folderOf(document4.path), document4.place)) continue;
-    let place;
-    try {
-      place = placeId(targets, document4.place);
-    } catch {
-      continue;
-    }
-    add(document4.path, document4.title, place);
-  }
-  for (const path2 of leftOut) {
-    initial ??= latestInitialRecord(git, record);
-    const oldest = await lifetimeStart(git, record, path2, await initial);
-    const last = oldest === void 0 ? null : await lastSynchronized(git, record, path2, facts, sides, oldest);
-    if (last === null || !await allowedPlace(folderOf(path2), last.file.place)) continue;
-    const place = await lastPlace(linear, targets, last.file.place);
-    if (place !== void 0) add(path2, last.file.title, place);
-  }
-  const allPaths = new Set(documents.map((document4) => document4.path));
-  const ids = /* @__PURE__ */ new Map();
-  const listed = await linear.listDocumentsInPlaces([...places.values()], { includeArchived: true });
-  const gone = (document4) => document4.trashed || document4.archivedAt !== null;
-  const order = listed.sort((a, b) => Number(gone(a)) - Number(gone(b)) || compare8(a.createdAt, b.createdAt) || compare8(a.id, b.id));
-  const unmatched = [];
-  for (const document4 of order) {
-    if (document4.projectId === null && document4.teamId === null) continue;
-    const place = document4.projectId !== null ? { projectId: document4.projectId } : { teamId: document4.teamId };
-    const path2 = files.get(keyOf(place, document4.title));
-    if (path2 !== void 0 && !ids.has(path2)) ids.set(path2, { id: document4.id });
-    else unmatched.push({ document: document4, place });
-  }
-  const leftFiles = new Map([...byPlace].map(([place, list4]) => [place, list4.filter(({ path: path2 }) => !ids.has(path2))]));
-  const taken = new Set([...ids.values()].map((entry) => entry.id));
-  for (const { document: document4, place } of unmatched) {
-    const candidates2 = leftFiles.get(JSON.stringify(place)) ?? [];
-    if (taken.has(document4.id) || candidates2.length === 0) continue;
-    const index2 = candidates2.findIndex(({ folder, path: path2 }) => documentPath(folder, document4.title, document4.id, new Set([...allPaths].filter((other) => other !== path2)), path2) === path2);
-    if (index2 < 0) continue;
-    ids.set(candidates2[index2].path, { id: document4.id });
-    taken.add(document4.id);
-    candidates2.splice(index2, 1);
-  }
-  return ids;
-}
-async function latestInitialRecord(git, record) {
-  const log = await git.text(["log", "--first-parent", "--format=%H %s", "--fixed-strings", ...[...INITIAL_RECORD_SUBJECTS].map((subject) => `--grep=${subject}`), record]);
-  for (const line2 of log.split("\n")) {
-    const space = line2.indexOf(" ");
-    if (space > 0 && INITIAL_RECORD_SUBJECTS.has(line2.slice(space + 1))) return line2.slice(0, space);
-  }
-  return void 0;
-}
-async function lifetimeStart(git, record, path2, initial) {
-  if (initial === void 0) return void 0;
-  const added = (await git.text(["--literal-pathspecs", "log", "--first-parent", "--diff-filter=A", "--format=%H", "-1", record, "--", path2])).trim();
-  return added !== "" && added !== initial && await isAncestor(git, initial, added) ? added : initial;
-}
-async function lastPlace(linear, targets, place) {
-  try {
-    return placeId(targets, place);
-  } catch {
-    const lookup = await resolveTargets(linear, [{ team: place.team, teamFolder: "", ...place.kind === "project" ? { project: place.project, projectFolder: "" } : {} }]);
-    return lookup.targets === void 0 ? void 0 : placeId(lookup.targets, place);
-  }
-}
-function compare8(a, b) {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-// src/sync/capture.ts
-var CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
-function captureCursorTrailer(through) {
-  return `Capture-through: ${through}`;
-}
-function cursorTime(document4) {
-  return recordedTime(document4.updatedAt);
-}
-var HELD = /^Removal-held: (\S+)$/gm;
-async function readHeld(context, state) {
-  if (state.ids === null) return /* @__PURE__ */ new Set();
-  const log = await context.git.text(["log", "--format=%B", "--grep=^Capture document ids", "-1", state.ids]);
-  return new Set([...log.matchAll(HELD)].map((match) => match[1]));
-}
-async function readCaptureCursor(git, ids) {
-  if (ids === null) return null;
-  const log = await git.text(["log", "--format=%B", "--grep=^Capture-through:", "-1", ids]);
-  return CURSOR.exec(log)?.[1] ?? null;
-}
-var NotDownloaded = class extends Error {
-};
-async function capture(context, options) {
-  const { git, linear, fetched } = context;
-  let mapping = context.mapping;
-  let targets = context.targets;
-  const state = { ...options.state };
-  const base = state.linear;
-  if (base === null) throw new Error(message("sync.needs-initial-sync"));
-  const identity = options.identity ?? context.identity;
-  const ids = await readIds(git, state.ids);
-  const uploads = await readUploads(git, state.uploads);
-  const reserved = await readReservedIds(git, state.ids);
-  const superseded = await readSupersededIds(git, state.ids);
-  const gate = options.security ?? await securityGate(git, fetched.tracked);
-  const result = { ok: true, state, documents: /* @__PURE__ */ new Map(), blocked: [], changed: [], removed: [], heldRemovals: [], leftOut: [], writeBackWarnings: [], summary: "", conflictNotices: noConflictNotices() };
-  const spool = new ContentSpool();
-  let published = false;
-  try {
-    const recorded = await loadMapping(git, base);
-    const zones = new Map(mapping.zones);
-    let changedPlace = false;
-    const allowedPlace = trackedPlaces(git, fetched.tracked, mapping.zones);
-    for (const [folder, old] of recorded.zones) {
-      const current = zones.get(folder);
-      if (current !== void 0 && (old.team !== current.team || old.project !== current.project)) {
-        if (!await allowedPlace(folder, placeOf(old))) throw new Error(message("sync.recorded-place-unknown", { folder: folder === "" ? "the repository root" : `${folder}/` }));
-        zones.set(folder, old);
-        changedPlace = true;
-      }
-    }
-    if (changedPlace) {
-      mapping = { ...mapping, zones };
-      const resolved = await resolveTargets(linear, zones.values());
-      if (resolved.targets === void 0) throw new Error(message("sync.places-unresolved"));
-      targets = resolved.targets;
-    }
-    if (state.ids === null) {
-      const texts = await readBlobs(git, recorded.documents.map((document4) => document4.oid));
-      const documents2 = recorded.documents.map((document4) => ({ ...document4, text: texts.get(document4.oid).toString("utf8") }));
-      const plainProvenance = await readPlainFileProvenance(git, base);
-      for (const [path2, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents: documents2, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) {
-        const plainFiles = plainProvenance.get(entry.id);
-        ids.set(path2, plainFiles === void 0 ? entry : { ...entry, plainFiles: [...plainFiles] });
-      }
-      result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
-    }
-    const cursor = await readCaptureCursor(git, state.ids);
-    const entries = await listTree(git, base);
-    const textEntries = entries.filter((entry) => entry.type === "blob" && ids.has(entry.path));
-    const blobs = await readBlobs(git, textEntries.map((entry) => entry.oid));
-    const previous3 = new Map(textEntries.map((entry) => [entry.path, blobs.get(entry.oid)]));
-    const byId = new Map([...ids].map(([path2, entry]) => [entry.id, { path: path2, entry }]));
-    const reservedById = new Map([...reserved].filter(([path2, id]) => !ids.has(path2) && !byId.has(id) && isMarkdownPath(path2) && mapping.files.has(path2)).map(([path2, id]) => [id, path2]));
-    const occupied = /* @__PURE__ */ new Set([...entries.map((entry) => entry.path), ...ids.keys()]);
-    const annotationHead = (path2) => {
-      if (posix7.basename(path2) !== "README.md" || !mapping.zones.has(folderOf(path2))) return void 0;
-      const prior = previous3.get(path2)?.toString("utf8");
-      if (prior === void 0) return void 0;
-      const read = readAnnotation(path2, prior);
-      return "annotation" in read && read.annotation !== null ? splitFile(prior).head : void 0;
-    };
-    const listed = /* @__PURE__ */ new Map();
-    const folders = /* @__PURE__ */ new Map();
-    const places = annotatedPlaces(mapping.zones).map(({ place, folder }) => {
-      const resolved = placeId(targets, place);
-      folders.set(placeKeyOf(resolved), folder);
-      return resolved;
-    });
-    const recordedPlace = (path2) => {
-      const zone = nearestZone(mapping.zones, folderOf(path2));
-      if (zone === void 0) return void 0;
-      const resolved = placeId(targets, zone.project === void 0 ? { kind: "team", team: zone.team } : { kind: "project", team: zone.team, project: zone.project });
-      return placeKeyOf(resolved);
-    };
-    const inPlaces = await linear.listDocumentsInPlaces(places, { includeArchived: true });
-    for (const document4 of inPlaces) listed.set(document4.id, document4);
-    if (!changedPlace) result.containers = containersOf(context, inPlaces);
-    const missing = [...byId.keys()].filter((id) => !listed.has(id));
-    for (const document4 of await linear.getDocuments(missing)) listed.set(document4.id, document4);
-    const notFound = [];
-    for (const id of missing.filter((id2) => !listed.has(id2))) {
-      const document4 = await linear.getDocument(id);
-      if (document4 === null) notFound.push(id);
-      else listed.set(id, document4);
-    }
-    const answered = new Set(inPlaces.map(placeKeyOf));
-    const heldBefore = await readHeld(context, state);
-    const gone = /* @__PURE__ */ new Set();
-    const held = /* @__PURE__ */ new Set();
-    for (const id of notFound) {
-      const place = recordedPlace(byId.get(id).path);
-      if (place !== void 0 && answered.has(place) || heldBefore.has(id) && answered.size > 0) gone.add(id);
-      else held.add(id);
-    }
-    const baselines = /* @__PURE__ */ new Map();
-    const sides = /* @__PURE__ */ new Map();
-    const excludedPath = (path2) => {
-      const mapped = recorded.documents.find((document4) => document4.path === path2);
-      const prior = previous3.get(path2);
-      return mapped === void 0 || prior !== void 0 && lintInTree(path2, prior.toString("utf8"), recorded.files).length > 0 || lengthRefusal({ title: mapped.title }, linear.facts) !== void 0;
-    };
-    const retained = /* @__PURE__ */ new Map();
-    for (const [id, old] of byId) {
-      if (!excludedPath(old.path)) continue;
-      const baseline = await lastSynchronized(git, base, old.path, linear.facts, sides);
-      baselines.set(old.path, baseline);
-      const doc = listed.get(id);
-      if (baseline === null || doc === void 0 || doc.title.normalize("NFC") !== baseline.file.title.normalize("NFC")) continue;
-      if (!await allowedPlace(folderOf(old.path), baseline.file.place)) continue;
-      let resolved;
-      try {
-        resolved = placeId(targets, baseline.file.place);
-      } catch {
-        const place = baseline.file.place;
-        const lookup = await resolveTargets(linear, [{ team: place.team, teamFolder: "", ...place.kind === "project" ? { project: place.project, projectFolder: "" } : {} }]);
-        if (lookup.targets === void 0) continue;
-        resolved = placeId(lookup.targets, place);
-      }
-      if ("projectId" in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) retained.set(id, old.path);
-    }
-    const folderFor = (doc) => folders.get(placeKeyOf(doc));
-    const placed = (doc) => folderFor(doc) !== void 0 || retained.has(doc.id);
-    const live = (doc) => !doc.trashed && doc.archivedAt === null && placed(doc);
-    const normalizedTime = cursorTime;
-    const recordedTimes = await readRecorded(git, state.ids);
-    const asRecorded = (doc) => recordedTimes.get(doc.id) === normalizedTime(doc);
-    const marked = (doc) => {
-      const entry = byId.get(doc.id)?.entry;
-      return entry?.saved !== void 0 && (entry.suspended === void 0 || entry.saved.notice?.kind === "blocked");
-    };
-    let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || marked(doc) || !asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor));
-    const invalidZone = (doc, path2) => {
-      const zone = nearestZone(mapping.zones, folderOf(path2));
-      if (zone === void 0) return true;
-      const place = zone.project === void 0 ? { kind: "team", team: zone.team } : { kind: "project", team: zone.team, project: zone.project };
-      const target = placeId(targets, place);
-      return "projectId" in target ? target.projectId !== doc.projectId : doc.projectId !== null || target.teamId !== doc.teamId;
-    };
-    const destination2 = (doc, occupied2, allocated2 = /* @__PURE__ */ new Map()) => {
-      if (retained.has(doc.id)) return retained.get(doc.id);
-      const own6 = reservedById.get(doc.id);
-      if (own6 !== void 0 && !occupied2.has(own6) && !allocated2.has(own6) && !invalidZone(doc, own6) && documentPath(folderFor(doc), doc.title, doc.id, occupied2, own6, (path2) => invalidZone(doc, path2)) === own6) return own6;
-      const old = byId.get(doc.id);
-      const available = new Set(occupied2);
-      if (old !== void 0 && (!allocated2.has(old.path) || allocated2.get(old.path) === doc.id)) available.delete(old.path);
-      const prior = old !== void 0 && !mapping.files.has(old.path) && old.path.split("/").some((part) => part.toLowerCase() === ".github") ? void 0 : old?.path;
-      return documentPath(folderFor(doc), doc.title, doc.id, available, prior, (path2) => invalidZone(doc, path2));
-    };
-    if (gone.size > 0 || [...listed.values()].some((doc) => {
-      const old = byId.get(doc.id);
-      return old !== void 0 && (!live(doc) || destination2(doc, occupied) !== old.path);
-    })) selected = [...listed.values()];
-    const documents = new Map([...listed].filter(([, doc]) => placed(doc)));
-    const work = /* @__PURE__ */ new Map();
-    for (const doc of await linear.getDocuments(selected.filter(live).map((doc2) => doc2.id), { withContent: true })) {
-      if (placed(doc)) documents.set(doc.id, doc);
-      else documents.delete(doc.id);
-      work.set(doc.id, doc);
-    }
-    for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
-    result.documents = documents;
-    const changes = /* @__PURE__ */ new Map();
-    const removeBody = (path2) => {
-      const next2 = annotationHead(path2) ?? null;
-      changes.set(path2, next2);
-      return next2 === null ? previous3.has(path2) : previous3.get(path2)?.equals(contentBytes(next2)) !== true;
-    };
-    const documentIds = new Map([...ids].filter(([path2]) => previous3.has(path2)).map(([path2, entry]) => [path2, entry.id]));
-    for (const [id, path2] of reservedById) if (!documentIds.has(path2)) documentIds.set(path2, id);
-    for (const id of gone) {
-      const old = byId.get(id);
-      const changedFile = removeBody(old.path);
-      const retained2 = keptForLane(old.entry);
-      if (!retained2) ids.delete(old.path);
-      documentIds.delete(old.path);
-      if (!retained2 || changedFile) result.removed.push(old.path);
-    }
-    for (const id of held) result.heldRemovals.push(byId.get(id).path);
-    const paths = /* @__PURE__ */ new Map();
-    const reservations = new Set(occupied);
-    const allocated = /* @__PURE__ */ new Map();
-    const reservedFirst = (a, b) => Number(reservedById.has(b.id)) - Number(reservedById.has(a.id)) || a.id.localeCompare(b.id);
-    for (const doc of [...work.values()].filter(live).sort(reservedFirst)) {
-      const path2 = destination2(doc, reservations, allocated);
-      allocated.set(path2, doc.id);
-      paths.set(doc.id, path2);
-      reservations.add(path2);
-    }
-    const limited = /* @__PURE__ */ new Set();
-    let needsLinkBase = false;
-    for (const doc of work.values()) {
-      if (!live(doc)) continue;
-      try {
-        if (linksLinearDocuments(doc.content ?? "")) needsLinkBase = true;
-      } catch (error) {
-        if (!(error instanceof MarkdownLimitError)) throw error;
-        limited.add(doc.id);
-        result.leftOut.push({ id: doc.id, rule: "markdown-complexity" });
-      }
-    }
-    const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : void 0;
-    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool);
-    const candidates2 = /* @__PURE__ */ new Map();
-    const resetTargets = (rejected, targets2) => {
-      for (const [path2, target] of targets2) if (rejected.has(target)) targets2.delete(path2);
-      for (const id of rejected) {
-        const old = byId.get(id);
-        if (old !== void 0 && previous3.has(old.path)) targets2.set(old.path, id);
-      }
-    };
-    const resetTarget = (id, targets2 = documentIds) => resetTargets(/* @__PURE__ */ new Set([id]), targets2);
-    const recordBlocked = (doc, path2, findings) => {
-      const old = byId.get(doc.id);
-      const saved = old?.entry.saved ?? { icon: doc.icon, color: doc.color };
-      ids.set(old?.path ?? path2, { ...old?.entry, id: doc.id, saved });
-      result.blocked.push({ id: doc.id, path: old?.path ?? path2, findings });
-      resetTarget(doc.id);
-    };
-    for (const doc of [...work.values()].sort((a, b) => a.id.localeCompare(b.id))) {
-      const old = byId.get(doc.id);
-      if (!live(doc)) {
-        if (old !== void 0) {
-          const saved = old.entry.saved;
-          if (saved !== void 0 && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) await linear.updateDocument(doc.id, { icon: saved.icon, color: saved.color });
-          const changedFile = removeBody(old.path);
-          const retained2 = keptForLane(old.entry);
-          if (!retained2) ids.delete(old.path);
-          documentIds.delete(old.path);
-          if (!retained2 || changedFile) result.removed.push(old.path);
-        }
-        continue;
-      }
-      const path2 = paths.get(doc.id);
-      if (limited.has(doc.id)) continue;
-      const prior = splitFile(old === void 0 ? "" : previous3.get(old.path)?.toString("utf8") ?? "");
-      const head = old !== void 0 && path2 !== old.path && annotationHead(old.path) !== void 0 ? relocatedHead(prior.head) : prior.head;
-      try {
-        const previousBody = old === void 0 ? void 0 : markdownBaseline(prior.body);
-        const assets = await downloadAssets(path2, doc.content ?? "", uploads, previousBody, old?.path);
-        const candidate = { doc, path: path2, head, assets, files: new Map([[path2, joinFile(head, assets.body)], ...assets.files]) };
-        if (old?.path === path2 && previousBody !== void 0) candidate.previousBody = previousBody;
-        candidates2.set(doc.id, candidate);
-        resetTarget(doc.id);
-        if (old !== void 0) documentIds.delete(old.path);
-        documentIds.set(path2, doc.id);
-      } catch (error) {
-        if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
-        if (error instanceof ImageBlockedError) {
-          const security = await gate.check(/* @__PURE__ */ new Map([[path2, head + (doc.content ?? "")]]));
-          if (security === null) {
-            result.leftOut.push({ id: doc.id, rule: "security-unchecked" });
-            resetTarget(doc.id);
-          } else {
-            recordBlocked(doc, path2, [...error.findings, ...security]);
-          }
-          continue;
-        }
-        if (error instanceof MarkdownLimitError) result.leftOut.push({ id: doc.id, rule: "markdown-complexity" });
-        else if (error instanceof AttachmentBudgetError) result.leftOut.push({ id: doc.id, rule: "attachment-budget" });
-        else if (error instanceof DownloadRetryError) result.leftOut.push({ id: doc.id, rule: "download-retry" });
-        else result.leftOut.push({ id: doc.id, rule: "capture-translation" });
-      }
-    }
-    const recordedAsIs = (candidate, text6) => {
-      const old = byId.get(candidate.doc.id);
-      const { assets } = candidate;
-      return assets.observedBody === void 0 && old?.path === candidate.path && old.entry.saved === void 0 && previous3.get(candidate.path)?.equals(Buffer.from(text6)) === true && assets.files.size === 0 && assets.uploads.size === 0;
-    };
-    const textOf = (candidate, targets2) => {
-      let body2 = candidate.assets.body;
-      if (linkBase !== void 0) {
-        const aliases = superseded.size === 0 ? void 0 : new Map([...superseded].filter(([id, path2]) => targets2.has(path2) && targets2.get(path2) !== id));
-        const map4 = { base: linkBase, ids: new Map(targets2), aliases };
-        const seen = /* @__PURE__ */ new Map();
-        if (candidate.previousBody !== void 0) linksToLinear(candidate.previousBody, candidate.path, map4, seen);
-        body2 = linksFromLinear(body2, candidate.path, map4, seen);
-      }
-      if (candidate.compared?.body !== body2) {
-        const { assets } = candidate;
-        const newAssets = assets.files.size > 0 || [...assets.uploads].some(([hash, url]) => uploads.get(hash) !== url);
-        candidate.compared = { body: body2, same: candidate.previousBody !== void 0 && !newAssets && sameMarkdown(candidate.previousBody, body2) };
-      }
-      return joinFile(candidate.head, candidate.compared.same ? candidate.previousBody : body2);
-    };
-    let again = true;
-    while (again) {
-      again = false;
-      for (const [id, candidate] of candidates2) {
-        const { doc, path: path2, head, assets } = candidate;
-        const old = byId.get(id);
-        let text6;
-        try {
-          text6 = textOf(candidate, documentIds);
-        } catch (error) {
-          if (!(error instanceof MarkdownLimitError)) throw error;
-          result.leftOut.push({ id, rule: "markdown-complexity" });
-          candidates2.delete(id);
-          resetTarget(id);
-          again = true;
-          break;
-        }
-        candidate.files.set(path2, text6);
-        if (candidate.checked === text6) continue;
-        let findings = [];
-        if (!recordedAsIs(candidate, text6)) {
-          const original = withNewUploadUrls(head + (doc.content ?? ""), assets.uploads, uploads) + ((assets.plainFiles?.length ?? 0) === 0 ? "" : `
-${assets.plainFiles.join("\n")}
-`);
-          if (original !== text6) findings = await gate.check(new Map([[path2, original], ...assets.files]));
-          if (findings?.length === 0) findings = await gate.check(candidate.files);
-          if (findings?.length === 0 && assets.observedBody !== void 0) {
-            const observedCandidate = { ...candidate, assets: { ...assets, body: assets.observedBody } };
-            delete observedCandidate.compared;
-            const observed = textOf(observedCandidate, documentIds);
-            if (observed !== text6 && observed !== original) findings = await gate.check(new Map([[path2, observed], ...assets.files]));
-            if (findings?.length === 0 && candidate.files.size > 1) findings = await gate.check(repairSet(path2, text6));
-          }
-        }
-        if (findings === null) {
-          result.leftOut.push({ id, rule: "security-unchecked" });
-          candidates2.delete(id);
-          resetTarget(id);
-          again = true;
-          break;
-        }
-        if (findings.length > 0) {
-          recordBlocked(doc, path2, findings);
-          candidates2.delete(id);
-          again = true;
-          break;
-        }
-        candidate.checked = text6;
-      }
-    }
-    linear.transport.reads?.end();
-    if (options.stageOnly === true) {
-      const refused = new Set([...candidates2.keys()].filter((id) => {
-        const saved = byId.get(id)?.entry.saved;
-        return saved !== void 0 && saved.notice?.kind !== "conflict";
-      }));
-      const budget = linkVariantBudget();
-      if (linkBase !== void 0) for (const set of linkVariants(candidates2, textOf, resetTargets, documentIds, { refused, settled: recordedAsIs, budget })) await gate.check(set);
-      result.summary = `Staged ${candidates2.size} changed documents for the security hooks.`;
-      if (budget.short === true) result.summary += ` ${message("sync.link-variant-budget")}`;
-      return result;
-    }
-    const unmarked = /* @__PURE__ */ new Set();
-    if (linear.transport.reads?.mode === "replay") {
-      const marking = [
-        ...result.blocked.map(({ id }) => id),
-        ...[...candidates2].filter(([id, { doc }]) => byId.get(id)?.entry.saved !== void 0 || detectConflicts(doc.content ?? "").length > 0).map(([id]) => id)
-      ];
-      const current = marking.length === 0 ? /* @__PURE__ */ new Map() : new Map((await linear.getDocuments(marking, { withContent: true })).map((doc) => [doc.id, doc]));
-      for (const blocked of result.blocked) {
-        const now = current.get(blocked.id);
-        const then = documents.get(blocked.id);
-        if (now === void 0 || then === void 0 || now.updatedAt === then.updatedAt) continue;
-        documents.set(blocked.id, { ...now, content: then.content ?? null });
-        const entry = ids.get(blocked.path);
-        if (entry !== void 0 && byId.get(blocked.id)?.entry.saved === void 0) ids.set(blocked.path, { ...entry, saved: { icon: now.icon, color: now.color } });
-      }
-      for (const [id, { doc }] of candidates2) if (marking.includes(id) && current.get(id)?.updatedAt !== doc.updatedAt) unmarked.add(id);
-    }
-    const acceptedAssets = /* @__PURE__ */ new Map();
-    const asLastAccepted = async (candidate) => {
-      const baseline = excludedPath(candidate.path) ? baselines.get(candidate.path) : void 0;
-      if (baseline == null || candidate.assets.files.size === 0) return false;
-      const captureAtBaseline = acceptedAssets.get(baseline.commit) ?? createAssetCapture(git, options.config, baseline.commit, () => Promise.reject(new NotDownloaded()));
-      acceptedAssets.set(baseline.commit, captureAtBaseline);
-      const { head, body: body2 } = splitFile(baseline.text);
-      let assets;
-      try {
-        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? "", uploads, body2);
-        return assets.files.size === 0 && textOf({ doc: candidate.doc, path: candidate.path, head, assets, files: /* @__PURE__ */ new Map(), previousBody: body2 }, documentIds) === baseline.text;
-      } catch (error) {
-        if (error instanceof MarkdownLimitError) return false;
-        if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
-        throw error;
-      }
-    };
-    for (const [id, candidate] of candidates2) {
-      const old = byId.get(id);
-      if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
-      if (old !== void 0 && old.path !== candidate.path) {
-        removeBody(old.path);
-        ids.delete(old.path);
-        result.removed.push(old.path);
-      }
-      const entry = { ...old?.entry, id };
-      delete entry.pullRewrite;
-      const plainFiles = [.../* @__PURE__ */ new Set([...old?.entry.plainFiles ?? [], ...candidate.assets.plainFiles ?? []])];
-      if (plainFiles.length > 0) entry.plainFiles = plainFiles;
-      const repaired = candidate.files.get(candidate.path);
-      if (candidate.assets.observedBody !== void 0) {
-        const observedCandidate = { ...candidate, assets: { ...candidate.assets, body: candidate.assets.observedBody } };
-        delete observedCandidate.compared;
-        const observed = textOf(observedCandidate, documentIds);
-        candidate.files.set(candidate.path, observed);
-        const deadUploads = candidate.assets.deadUploads ?? [];
-        entry.pullRewrite = {
-          hash: createHash13("sha256").update(observed).digest("hex"),
-          observedHash: createHash13("sha256").update(candidate.doc.content ?? "").digest("hex"),
-          replacement: String(repaired),
-          images: imageLinks(candidate.doc.content ?? "", new Set(deadUploads)).images
-        };
-        if (old?.entry.pullRewrite?.hash === entry.pullRewrite.hash && old.entry.pullRewrite.source !== void 0) entry.pullRewrite.source = old.entry.pullRewrite.source;
-      }
-      ids.set(candidate.path, entry);
-      for (const [path2, content4] of candidate.files) {
-        const prior = previous3.get(path2);
-        if (path2 === candidate.path && old?.path === path2 && prior !== void 0 && excludedPath(path2)) {
-          const baseline = baselines.get(path2);
-          if (baseline != null && splitFile(baseline.text).body === splitFile(String(content4)).body) continue;
-        }
-        if (previous3.get(path2)?.equals(contentBytes(content4)) !== true) {
-          changes.set(path2, content4);
-          result.changed.push(path2);
-        }
-      }
-      for (const [hash, url] of candidate.assets.uploads) uploads.set(hash, url);
-    }
-    const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
-    const trailers = [...through === null ? [] : [captureCursorTrailer(through)], ...[...held].sort().map((id) => `Removal-held: ${id}`)];
-    const commitMessage = trailers.length === 0 ? "Capture document ids" : `Capture document ids
-
-${trailers.join("\n")}`;
-    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
-    const prepared = await prepareLfs(git, fetched.tracked, changes);
-    const plainTrailers = [...ids.values()].flatMap((entry) => (entry.plainFiles ?? []).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
-    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: "Capture Linear changes" + (plainTrailers.length === 0 ? "" : `
-
-${plainTrailers.join("\n")}`), identity });
-    for (const [path2, entry] of ids) if (candidates2.has(entry.id) && entry.pullRewrite !== void 0 && entry.pullRewrite.source === void 0) {
-      ids.set(path2, { ...entry, pullRewrite: { ...entry.pullRewrite, source: linearCommit } });
-    }
-    const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
-    const always = held.size > 0 || heldBefore.size > 0 || through !== cursor && recordsChange;
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
-    if (prepared.oids.length > 0) await git.run(["lfs", "push", "--object-id", options.config.remote, ...prepared.oids]);
-    const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
-    const pushed = await pushAtomic(git, options.config, ["linear", "ids", "uploads"].map((store) => ({ ref: stateRef(options.config, store), expected: state[store], next: next[store] })));
-    if (!pushed.ok) {
-      result.ok = false;
-      result.code = "state-moved";
-    } else {
-      result.state = next;
-      published = true;
-      for (const candidate of candidates2.values()) {
-        const refusal = lengthRefusal({ content: candidate.doc.content ?? "" }, linear.facts);
-        if (refusal !== void 0) result.writeBackWarnings.push({ path: candidate.path, code: "linear-content-too-large-to-write-back", length: refusal.length, limit: refusal.limit });
-      }
-      const lostLease = new Error(message("sync.lost-lease"));
-      const marked2 = [
-        ...[...candidates2.values()].filter(({ doc }) => !unmarked.has(doc.id)).map(({ doc, path: path2 }) => ({ doc, path: path2, blocked: [] })),
-        ...result.blocked.map(({ id, path: path2, findings }) => ({ doc: documents.get(id), path: path2, blocked: findings }))
-      ];
-      try {
-        for (const { doc, path: path2, blocked } of marked2) {
-          const before = ids.get(path2);
-          const outcome2 = await reconcileDocumentMark({
-            document: doc,
-            entry: before,
-            linear,
-            blocked,
-            onConflictNotice: (change) => result.conflictNotices[change].push(path2),
-            persistEntry: async (entry) => {
-              ids.set(path2, entry);
-              const tip = await commitIds(git, result.state.ids, ids, identity, { reserved, superseded, message: "Capture document marks" });
-              const updated = { ...next, ids: tip };
-              const saved = await pushAtomic(git, options.config, ["linear", "ids", "uploads"].map((store) => ({ ref: stateRef(options.config, store), expected: result.state[store], next: updated[store] })));
-              if (!saved.ok) {
-                result.ok = false;
-                result.code = "state-moved";
-                throw lostLease;
-              }
-              result.state = updated;
-            }
-          });
-          if (outcome2.updated) {
-            const mark2 = outcome2.state === "clear" ? before.saved : MARKS[outcome2.state];
-            const listed2 = documents.get(doc.id);
-            if (mark2 !== void 0 && listed2 !== void 0) documents.set(doc.id, { ...listed2, icon: mark2.icon, color: mark2.color });
-          }
-        }
-      } catch (error) {
-        if (error !== lostLease) throw error;
-      }
-    }
-    result.summary = renderCapture(result, gate.configured);
-    return result;
-  } catch (error) {
-    if (!(error instanceof LinearStoppedError) && !(error instanceof LinearError && isTransientLinearError(error))) throw error;
-    result.ok = false;
-    if (error instanceof LinearStoppedError) {
-      result.code = "stopped";
-      result.stopped = error.reason;
-    } else {
-      result.code = "linear-failed";
-      result.failure = { operation: error.operation, error: describeLinearError(error) };
-    }
-    if (!published) {
-      result.changed = [];
-      result.removed = [];
-      result.heldRemovals = [];
-    }
-    result.summary = renderCapture(result, gate.configured);
-    return result;
-  } finally {
-    spool.close();
-    await gate.close?.();
-  }
-}
-function keptForLane(entry) {
-  return entry.suspended !== void 0 || entry.releaseBase !== void 0 || releasedHold(entry);
-}
-var LINK_VARIANT_TARGETS = 4;
-var LINK_VARIANT_LINKS = 8;
-var linkVariantBudget = () => ({ sets: 256, work: 32 * 1024 * 1024 });
-function* linkVariants(candidates2, textOf, reset, documentIds, options = {}) {
-  const budget = options.budget ?? linkVariantBudget();
-  const refused = [...candidates2.keys()].filter((id) => options.refused?.has(id) === true);
-  const passes = refused.length > 0 ? [{ targets: refused, allOnly: true }, { targets: refused, allOnly: false }, { targets: [.../* @__PURE__ */ new Set([...refused, ...candidates2.keys()])], allOnly: false }] : [{ targets: [...candidates2.keys()], allOnly: false }];
-  const order = [...candidates2].sort(([a], [b]) => Number(options.refused?.has(a) === true) - Number(options.refused?.has(b) === true));
-  const staged = /* @__PURE__ */ new Map();
-  const unlinked = /* @__PURE__ */ new Map();
-  for (const pass of passes) {
-    const passUnlinked = unlinked.get(pass.targets) ?? /* @__PURE__ */ new Set();
-    unlinked.set(pass.targets, passUnlinked);
-    for (const [id, candidate] of order) {
-      if (passUnlinked.has(id)) continue;
-      if (budget.sets <= 0) {
-        budget.short = true;
-        return;
-      }
-      const accepted = candidate.files.get(candidate.path);
-      const without = (rejected, free = false) => {
-        const cost = accepted.length + documentIds.size + rejected.length;
-        if (budget.work < cost) {
-          budget.short = true;
-          return void 0;
-        }
-        const targets = new Map(documentIds);
-        reset(new Set(rejected), targets);
-        const text6 = textOf(candidate, targets);
-        if (!(free && (text6 === accepted || options.settled?.(candidate, text6) === true))) budget.work -= cost + Math.max(0, text6.length - accepted.length);
-        return text6;
-      };
-      const others = pass.targets.filter((other) => other !== id);
-      if (others.length === 0) continue;
-      const all2 = without(others, true);
-      if (all2 === void 0) continue;
-      if (all2 === accepted) {
-        passUnlinked.add(id);
-        continue;
-      }
-      const alone = /* @__PURE__ */ new Map();
-      const find = (group, text6) => {
-        if (alone.size >= LINK_VARIANT_LINKS) return;
-        if (group.length === 1) {
-          alone.set(group[0], text6);
-          return;
-        }
-        const first = group.slice(0, group.length >> 1);
-        const second = group.slice(group.length >> 1);
-        const firstText = without(first);
-        if (firstText === void 0) return;
-        if (firstText === accepted) {
-          find(second, text6);
-          return;
-        }
-        find(first, firstText);
-        if (alone.size >= LINK_VARIANT_LINKS) return;
-        const secondText = without(second);
-        if (secondText !== void 0 && secondText !== accepted) find(second, secondText);
-      };
-      if (!pass.allOnly) find(others, all2);
-      const texts = /* @__PURE__ */ new Set([...alone.values(), all2]);
-      const linked = [...alone.keys()];
-      if (linked.length <= LINK_VARIANT_TARGETS) {
-        for (let mask = 1; mask < 2 ** linked.length - 1; mask += 1) {
-          const rejected = linked.filter((_, bit) => mask >> bit & 1);
-          if (rejected.length < 2) continue;
-          const text6 = without(rejected);
-          if (text6 === void 0) break;
-          texts.add(text6);
-        }
-      }
-      const done = staged.get(id) ?? /* @__PURE__ */ new Set();
-      staged.set(id, done);
-      for (const text6 of texts) {
-        const hash = createHash13("sha256").update(text6).digest("hex");
-        if (text6 === accepted || done.has(hash) || options.settled?.(candidate, text6) === true) continue;
-        if (budget.sets <= 0) {
-          budget.short = true;
-          return;
-        }
-        budget.sets -= 1;
-        done.add(hash);
-        yield new Map([...candidate.files, [candidate.path, text6]]);
-      }
-    }
-  }
-}
-function relocatedHead(head) {
-  const front = findFrontMatter(head);
-  if (front === null) return head;
-  const document4 = (0, import_yaml2.parseDocument)(front.yaml, { logLevel: "error", prettyErrors: false });
-  const metadata = document4.toJS();
-  delete metadata[TEAM_KEY];
-  delete metadata[PROJECT_KEY];
-  document4.delete(TEAM_KEY);
-  document4.delete(PROJECT_KEY);
-  if ((0, import_yaml2.isMap)(document4.contents) && document4.contents.items.length === 0) return "";
-  let yaml;
-  try {
-    yaml = document4.toString();
-  } catch {
-    yaml = (0, import_yaml2.stringify)(metadata);
-  }
-  return `---
-${yaml}---
-
-`;
-}
-function placeKeyOf(place) {
-  return place.projectId != null ? `project:${place.projectId}` : `team:${place.teamId}`;
-}
-function renderCapture(result, configured) {
-  let summary2 = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
-  for (const item of result.leftOut) if (item.rule === "attachment-budget") summary2 += `
-attachment-budget: ${JSON.stringify(item.id)}. Attachment count or bytes exceeded the document or run limit; reduce attachments and retry. The cursor is held.`;
-  for (const item of result.leftOut) if (item.rule === "download-retry") summary2 += `
-download-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
-  if (result.heldRemovals.length > 0) {
-    summary2 += `
-Removal held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path2) => JSON.stringify(path2)).join(", ")}.`;
-  }
-  if (result.rebuiltIds !== void 0) {
-    summary2 += `
-The document id map was lost: rebuilt by matching titles to paths, ${result.rebuiltIds.matched} of ${result.rebuiltIds.files} files matched. A document renamed in Linear since the last run comes back as a new file next to its old one.`;
-  }
-  if (result.stopped !== void 0) summary2 += `
-Capture partial, will continue.
-
-${renderStop(result.stopped).join("\n")}`;
-  if (result.failure !== void 0) summary2 += `
-Capture partial, will continue: Linear failed ${result.failure.operation} (${result.failure.error}).`;
-  if (!configured) summary2 += "\nContent is pushed unchecked: no security hooks are configured.";
-  for (const warning2 of result.writeBackWarnings) {
-    summary2 += `
-${warning2.code}: ${JSON.stringify(warning2.path)} (${warning2.length} characters; limit ${warning2.limit}). Preserved in git; Linear will not accept it back if it is changed in git while still over the limit.`;
-  }
-  return summary2;
-}
-async function prepareLfs(git, tracked, changes) {
-  const dir = await mkdtemp5(join10(tmpdir6(), "capture-attributes-"));
-  const env = { GIT_INDEX_FILE: join10(dir, "index") };
-  const result = new Map(changes);
-  const oids = [];
-  try {
-    await git.run(["read-tree", tracked], { env });
-    for (const [path2, content4] of changes) {
-      if (content4 === null) continue;
-      const attributes = await git.run(["check-attr", "--cached", "-z", "--stdin", "filter"], { input: `${path2}\0`, env });
-      if (attributes.stdout.toString("utf8").split("\0")[2] !== "lfs") continue;
-      const bytes = contentBytes(content4);
-      const cleaned = await git.run(["lfs", "clean"], { input: bytes });
-      const pointer = parseLfsPointer(cleaned.stdout);
-      if (!cleaned.stdout.equals(bytes)) {
-        if (pointer === null) throw new Error(message("sync.no-lfs-pointer"));
-        if (pointer.size !== bytes.length || pointer.oid !== createHash13("sha256").update(bytes).digest("hex")) throw new Error(message("sync.lfs-pointer-mismatch"));
-      }
-      if (pointer !== null) oids.push(pointer.oid);
-      result.set(path2, cleaned.stdout);
-    }
-    return { changes: result, oids: [...new Set(oids)] };
-  } finally {
-    await rm5(dir, { recursive: true, force: true });
-  }
-}
-
-// src/sync/hold.ts
-import { createHash as createHash14 } from "node:crypto";
-
-// src/sync/suspended.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
-
-// src/sync/merge-destination.ts
-import { setTimeout as sleep3 } from "node:timers/promises";
-var LANDING_READS = 3;
-var LANDING_PAUSE_MS = 1e3;
-async function remoteTip(git, config) {
-  const ref = branchRef(config.trackedBranch);
-  return (await lsRemote(git, config.remote, [ref])).get(ref) ?? null;
-}
-async function destinationHolds(git, config, github, number, tracked) {
-  const [pr, tip] = await Promise.all([readPullRequest(github, number), remoteTip(git, config)]);
-  return pr.state === "open" && pr.base === config.trackedBranch && tip === tracked;
-}
-async function verifyMerge(git, config, github, number, tracked, merged) {
-  let base;
-  try {
-    base = (await readPullRequest(github, number)).base;
-  } catch (error) {
-    if (!(error instanceof PullRequestError)) throw error;
-    base = null;
-  }
-  if (base !== null && base !== config.trackedBranch) return { branch: base, commit: merged };
-  for (let read = 1; ; read += 1) {
-    const landing = await onTracked(git, config, tracked, merged);
-    if (landing === "checked") return null;
-    if (landing === "unchecked") return { branch: config.trackedBranch, commit: merged };
-    if (read === LANDING_READS) return { branch: base, commit: merged };
-    await sleep3(LANDING_PAUSE_MS);
-  }
-}
-async function onTracked(git, config, tracked, merged) {
-  const tip = await remoteTip(git, config);
-  if (tip === null) return "absent";
-  await git.run(["fetch", "--no-tags", "--no-write-fetch-head", config.remote, branchRef(config.trackedBranch)]);
-  if ((await git.run(["merge-base", "--is-ancestor", merged, tip], { okCodes: [0, 1, 128] })).code !== 0) return "absent";
-  return await git.text(["rev-parse", `${merged}^1`]) === tracked ? "checked" : "unchecked";
-}
-async function mergedHead(git, merged, head) {
-  const parent = await git.run(["rev-parse", "--verify", "--quiet", `${merged}^2`], { okCodes: [0, 1] });
-  return parent.code === 0 && parent.stdout.toString("utf8").trim() === head;
 }
 
 // src/sync/suspended.ts
@@ -30576,15 +28562,28 @@ async function changedPaths(git, before, after) {
   return (await git.text(["diff", "--name-only", "--no-renames", "-z", before, after])).split("\0").filter(Boolean);
 }
 async function includeCapturedAssets(git, linear, ids, paths) {
-  const entries = new Map((await listTree(git, linear)).map((entry) => [entry.path, entry]));
-  const documents = [...ids].filter(([, entry]) => entry.suspended !== void 0).map(([path2]) => entries.get(path2)).filter((entry) => entry !== void 0).filter(isRegularFile);
-  const texts = await readBlobs(git, documents.map((entry) => entry.oid));
-  for (const document4 of documents) {
-    const body2 = splitFile(texts.get(document4.oid).toString("utf8")).body;
-    for (const link2 of findFileLinks(document4.path, body2, (path2) => {
-      const entry = entries.get(path2);
-      return entry !== void 0 && isRegularFile(entry);
-    })) if (!link2.target.endsWith(MARKDOWN_EXTENSION)) paths.add(link2.target);
+  const hold = (reason) => ({ paths: [...paths].sort(), checks: [], code: "suspended-asset-discovery", reason });
+  try {
+    const entries = new Map((await listTree(git, linear, MAPPING_TREE_BYTES)).map((entry) => [entry.path, entry]));
+    const documents = [...ids].filter(([, entry]) => entry.suspended !== void 0).map(([path2]) => entries.get(path2)).filter((entry) => entry !== void 0).filter(isRegularFile);
+    if (documents.some((entry) => !readableBlob(entry))) {
+      return hold(`A suspended document has no usable blob size or exceeds the ${MAPPING_FILE_BYTES}-byte file limit.`);
+    }
+    const texts = await new MappingBlobBudget().read(git, documents);
+    const assets = /* @__PURE__ */ new Set();
+    for (const document4 of documents) {
+      const body2 = splitFile(texts.get(document4.oid).toString("utf8")).body;
+      for (const link2 of findFileLinks(document4.path, body2, (path2) => {
+        const entry = entries.get(path2);
+        return entry !== void 0 && isRegularFile(entry);
+      })) if (!link2.target.endsWith(MARKDOWN_EXTENSION)) assets.add(link2.target);
+    }
+    for (const asset of assets) paths.add(asset);
+  } catch (error) {
+    if (error instanceof MappingBlobBudgetError) return hold(`The suspended documents exceed the ${MAPPING_BUDGET_BYTES}-byte Markdown budget.`);
+    if (error instanceof GitOutputLimitError) return hold(`A Git read during asset discovery exceeded its ${error.bytes}-byte output limit.`);
+    if (error instanceof MarkdownLimitError) return hold(`A suspended document exceeds the Markdown ${error.limit} limit.`);
+    return hold("The recorded tree or its document links could not be read safely.");
   }
 }
 async function persistIds(context, options, ids, syncPushed) {
@@ -30639,7 +28638,7 @@ async function addEpisodes(context, options, ids, paths, checks, timedOut = []) 
     if (id !== void 0 && ![...ids.values()].some((entry) => entry.id === id)) ids.set(path2, { id });
   }
   for (const [path2, entry] of ids) if (paths.has(path2) && entry.suspended === void 0) {
-    entry.suspended = { noticeId: randomUUID3(), paths: [path2], checks: [...checks], ...timedOut.length > 0 ? { timedOut: [...timedOut] } : {} };
+    entry.suspended = { noticeId: randomUUID2(), paths: [path2], checks: [...checks], ...timedOut.length > 0 ? { timedOut: [...timedOut] } : {} };
     delete entry.releaseBase;
     delete entry.releasePaths;
   }
@@ -30680,7 +28679,8 @@ async function maintainSuspended(context, options) {
       const previousBases = await recordedBases(git, releasedHead);
       return release(context, options, ids, paths, releasedHead, previousBases.linear, tracked);
     }
-    await includeCapturedAssets(git, intake, ids, paths);
+    const hold = await includeCapturedAssets(git, intake, ids, paths);
+    if (hold !== void 0) return hold;
     head = await commit(context, options, await takePaths(git, tracked, intake, paths), intake === linear ? [tracked] : [tracked, intake], "Restore suspended changes" + note(tracked, linear, intake));
     bases = { tracked, linear, view: intake };
   } else {
@@ -30693,7 +28693,8 @@ async function maintainSuspended(context, options) {
     for (const path2 of await changedPaths(git, tracked, head)) paths.add(path2);
     await addEpisodes(context, options, ids, paths, []);
     if (bases.linear !== linear || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
-      await includeCapturedAssets(git, intake, ids, paths);
+      const hold = await includeCapturedAssets(git, intake, ids, paths);
+      if (hold !== void 0) return hold;
       const input = await treeCommit(git, await takePaths(git, head, intake, paths), linear);
       const base = await treeCommit(git, await takePaths(git, head, bases.view ?? bases.linear, paths), bases.linear);
       const tree = await mergeTree(git, input, head, base, ids, options.state.ids);
@@ -30706,8 +28707,22 @@ async function maintainSuspended(context, options) {
       }
     }
   }
-  if (head === previous3 && !(await expectedChecks(options.github, head, [], { body: void 0, git, base: tracked, pushed: lastPushed(context, options, ids) })).complete) {
-    head = await commit(context, options, await git.text(["rev-parse", `${head}^{tree}`]), [head], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view));
+  let carried = [];
+  if (head === previous3) {
+    const unchanged = head;
+    const waiting = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+    const again = await checksAgain(
+      options.github,
+      unchanged,
+      options.requiredChecks ?? [],
+      { body: waiting?.body, git, base: tracked, pushed: lastPushed(context, options, ids) },
+      { ...options, againMessage: SUSPENDED_CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, unchanged, context.mapping.zones)).length === 0 }
+    );
+    if (again !== null) {
+      carried = again.carried;
+      const trailer = again.from === void 0 ? "" : checksAgainTrailer(again.from);
+      head = await commit(context, options, await git.text(["rev-parse", `${unchanged}^{tree}`]), [unchanged], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view) + trailer);
+    }
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== void 0);
   if (anchor?.suspended !== void 0) anchor.suspended.paths = [...paths].sort();
@@ -30723,7 +28738,7 @@ async function maintainSuspended(context, options) {
   const old = /^<!-- suspended merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m.exec(open2?.body ?? "");
   const earlier = old?.[1] === head && old?.[2] === tracked ? old : null;
   const since = headSince(open2?.body, head, /* @__PURE__ */ new Date());
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous3 ? { pushedFrom: previous3 === null ? [] : [previous3], base: tracked } : { body: open2?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous3 ? { pushedFrom: previous3 === null ? [] : [previous3], carried } : { body: open2?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
   const held = unverified.length === 0 ? "" : `
 ${unverifiedNote(unverified)}
@@ -30850,7 +28865,7 @@ async function suspendBatch(context, options, failed2, normalNumber, failures, t
   await checkpoint("before-suspension-push");
   await push2(context, options, ids, head, previous3, { expected: failed2, next: normal });
   const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
-  const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous3 === null ? [failed2] : [previous3, failed2], base: tracked });
+  const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous3 === null ? [failed2] : [previous3, failed2] });
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
   const held = unverified.length === 0 ? "" : `${unverifiedNote(unverified)}
 
@@ -30870,7 +28885,821 @@ ${held}${headNote(head, /* @__PURE__ */ new Date(), observed)}
   return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed2, paths: batchPaths, checks: failures, ...late }, ...!closed ? { normalClosePending: true } : {}, ...unverified.length > 0 ? { code: "head-unverified", unverified } : {}, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }
 
+// src/sync/recorded.ts
+import { createHash as createHash11 } from "node:crypto";
+var RECORDED = /^Document-recorded: (\S+) (\S+)$/gm;
+function observedDigest(document4) {
+  if (document4.content === void 0) return void 0;
+  return createHash11("sha256").update(JSON.stringify([document4.content, document4.updatedAt])).digest("hex");
+}
+function matchesObservedBody(document4, observed) {
+  return document4.id === observed.id && document4.content !== void 0 && document4.content === observed.content && document4.title === observed.title && document4.projectId === observed.projectId && document4.teamId === observed.teamId && !document4.trashed && document4.archivedAt === null;
+}
+function recordedTime(updatedAt) {
+  const time = new Date(updatedAt);
+  if (!Number.isFinite(time.getTime())) throw new Error(message("sync.invalid-update-time"));
+  return time.toISOString();
+}
+function recordedTrailers(recorded) {
+  return [...recorded].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([id, time]) => `Document-recorded: ${id} ${recordedTime(time)}`);
+}
+function withRecorded(message2, recorded) {
+  return recorded.size === 0 ? message2 : `${message2}
+
+${recordedTrailers(recorded).join("\n")}`;
+}
+async function readRecorded(git, ids) {
+  if (ids === null) return /* @__PURE__ */ new Map();
+  const cursor = (await git.text(["log", "-1", "--format=%H", "--grep=^Capture-through:", ids])).trim();
+  const log = await git.text(["log", "--format=%B%x00", cursor === "" ? ids : `${cursor}..${ids}`]);
+  const recorded = /* @__PURE__ */ new Map();
+  for (const message2 of log.split("\0")) {
+    const seen = /* @__PURE__ */ new Map();
+    for (const match of message2.matchAll(RECORDED)) seen.set(match[1], match[2]);
+    for (const [id, time] of seen) if (!recorded.has(id)) recorded.set(id, time);
+  }
+  return recorded;
+}
+
+// src/sync/write.ts
+var MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
+var PARTIAL_RECORD_MESSAGE = "Sync: Linear's state, part of the tracked branch taken in";
+var IDS_MESSAGE = "Sync: document ids";
+var StopWriting = class extends Error {
+};
+var StateMovedError = class extends Error {
+};
+async function writeTrackedToLinear(context, options) {
+  const { git, fetched, targets, linear } = context;
+  const transforms = options.transforms?.() ?? [];
+  const tipTransforms = options.transforms?.() ?? [];
+  const identity = options.identity ?? context.identity;
+  const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
+  const checkpoint2 = options.checkpoint ?? ((name) => checkpoint(name));
+  const newId = options.newId ?? randomUUID3;
+  const expected = { ...options.state };
+  const tracked = fetched.tracked;
+  const linearTip = expected.linear;
+  if (linearTip === null) throw new Error(message("sync.write-before-record"));
+  const result = {
+    complete: false,
+    changed: false,
+    resumed: await wentOnFromPartial(git, [context.fetched.state.linear, linearTip]),
+    updated: [],
+    relocated: [],
+    created: [],
+    trashed: [],
+    adopted: [],
+    restored: [],
+    conflicts: [],
+    decided: [],
+    skipped: [],
+    leftOut: [],
+    leftOutAtWrite: [],
+    failed: [],
+    notAttempted: [],
+    rereadWindowMs: null,
+    conflictNotices: noConflictNotices(),
+    record: null,
+    state: { ...expected }
+  };
+  const readContainers = async () => {
+    try {
+      return await readContainerDocuments(context);
+    } catch (error) {
+      if (!(error instanceof LinearError)) throw error;
+      result.notAttempted = context.mapping.documents.map((document4) => document4.path).sort();
+      if (error instanceof LinearStoppedError) {
+        result.code = "stopped";
+        result.stopped = error.reason;
+      } else {
+        result.code = "write-failed";
+        result.failed = result.notAttempted.map((path2) => ({ path: path2, operation: error.operation, error: describeLinearError(error) }));
+      }
+      return void 0;
+    }
+  };
+  const cacheLost = await uploadsRebuilding(git, expected.uploads);
+  const ids = await readIds(git, expected.ids);
+  const frozen = suspendedPaths(ids);
+  const plainFiles = new Map([...ids].map(([path2, entry]) => [path2, new Set(entry.plainFiles ?? [])]));
+  const releasing = [...ids.values()].some((entry) => entry.releaseBase !== void 0);
+  for (const [path2, entry] of ids) if (entry.suspended !== void 0) result.skipped.push({ path: path2, reason: "suspended" });
+  const nothingNew = await alreadyMerged(git, linearTip, tracked) || await mergedInitialRecord(git, linearTip, tracked);
+  if (nothingNew && !cacheLost && !releasing) {
+    result.leftOut = await leftOutFiles(git, linearTip, linear.facts);
+    await nameFixingHooks(git, tracked, result.leftOut);
+    const containers2 = options.containers ?? await readContainers();
+    if (containers2 === void 0) return result;
+    result.capacity = assessCapacity(context, containers2, [], options.documentCap);
+    if (capacityBlocked(result.capacity)) {
+      result.code = "container-cap";
+      return result;
+    }
+    result.complete = true;
+    return result;
+  }
+  const reserved = await readReservedIds(git, expected.ids);
+  const supersededBefore = await readSupersededIds(git, expected.ids);
+  const knownId = knownIdLookup(git, expected.ids, ids);
+  const keptAnnotations = await readKeptAnnotations(git, expected.ids);
+  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations });
+  if (nothingNew && !releasing) merge.changes.length = 0;
+  const pendingRepairs2 = /* @__PURE__ */ new Set();
+  for (const [path2, entry] of ids) {
+    if (entry.pullRewrite?.source === void 0 || frozen.has(path2)) continue;
+    if (!await isAncestor(git, entry.pullRewrite.source, tracked) || !await repairMerged(git, entry.pullRewrite.source, tracked, path2, entry.pullRewrite.replacement)) {
+      pendingRepairs2.add(path2);
+      result.skipped.push({ path: path2, reason: "pull-repair-pending" });
+    }
+  }
+  merge.changes = merge.changes.filter((change) => !pathsOf(change).some((path2) => frozen.has(path2) || pendingRepairs2.has(path2)));
+  merge.unchanged = merge.unchanged.filter((change) => !frozen.has(change.from) && !frozen.has(change.to) && !pendingRepairs2.has(change.from) && !pendingRepairs2.has(change.to));
+  result.leftOut = merge.leftOut;
+  await nameFixingHooks(git, tracked, result.leftOut);
+  const containerListing = (await writesNothing() ? options.containers : void 0) ?? await readContainers();
+  if (containerListing === void 0) return result;
+  const containers = containerListing;
+  const inPlaces = new Map([...containers.values()].flat().map((document4) => [document4.id, document4]));
+  await findGoneRestores();
+  for (const path2 of merge.conflicts) if (merge.result.has(path2) || merge.linear.has(path2) || ids.has(path2)) result.skipped.push({ path: path2, reason: "conflict" });
+  for (const entry of merge.held) result.skipped.push({ path: entry.from, reason: "renamed-to-unwritable" });
+  await checkpoint2("after-local-merge-before-record");
+  const uploads = await readUploads(git, expected.uploads, context.pushedKey);
+  const resultFiles = await filesOf(git, merge.tree);
+  const linearFiles = await filesOf(git, linearTip);
+  const texts = merge.texts;
+  const textOf = (file) => texts.get(file.oid).toString("utf8");
+  const candidate = await git.text(["commit-tree", "--no-gpg-sign", merge.tree, "-p", linearTip, "-p", tracked, "-m", "merge result"], {
+    env: { GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email, GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email }
+  });
+  const creates = merge.changes.filter((change) => change.kind === "create");
+  const adoptable = await adoptableDocuments(creates.filter((change) => change.restore === void 0));
+  const restoresInPlace = (change) => {
+    if (change.restore === void 0 || change.restore.recreate !== void 0) return false;
+    const destination2 = merge.result.get(change.path);
+    return containers.get(containerKey(context, destination2.place))?.some((document4) => document4.id === change.restore?.id) === true;
+  };
+  const additions = creates.filter((change) => !adoptable.has(change.path) && !restoresInPlace(change)).map((change) => merge.result.get(change.path));
+  for (const change of merge.changes) {
+    if (change.kind !== "keep" || !change.place) continue;
+    const destination2 = merge.result.get(change.to);
+    const present = containers.get(containerKey(context, destination2.place))?.some((document4) => document4.id === change.id);
+    if (!present) additions.push(destination2);
+  }
+  result.capacity = assessCapacity(context, containers, additions, options.documentCap);
+  if (capacityBlocked(result.capacity)) {
+    result.code = "container-cap";
+    result.notAttempted = merge.changes.map(changePath);
+    return result;
+  }
+  const taken = /* @__PURE__ */ new Set();
+  const usingReserved = new Set(creates.filter((change) => !adoptable.has(change.path) && reserved.has(change.path)).map((change) => change.path));
+  let unchecked;
+  try {
+    const saved = [...new Set([...usingReserved].map((path2) => reserved.get(path2)))];
+    for (const id of saved) if (inPlaces.has(id)) taken.add(id);
+    const unlisted = saved.filter((id) => !inPlaces.has(id));
+    if (unlisted.length > 0) for (const document4 of await linear.getDocuments(unlisted, { withContent: false })) taken.add(document4.id);
+  } catch (error) {
+    if (error instanceof LinearStoppedError) {
+      result.stopped = error.reason;
+      result.notAttempted = merge.changes.map(changePath);
+      result.code = "stopped";
+      return result;
+    }
+    if (!(error instanceof LinearError)) throw error;
+    unchecked = error;
+  }
+  const documentIds = /* @__PURE__ */ new Map();
+  for (const [path2, entry] of ids) documentIds.set(path2, entry.id);
+  for (const change of merge.changes) if (change.kind === "keep") documentIds.set(change.to, change.id);
+  for (const change of creates) {
+    const saved = reserved.get(change.path);
+    const restoreId = change.restore?.recreate ?? change.restore?.id;
+    documentIds.set(change.path, restoreId ?? adoptable.get(change.path)?.id ?? (saved !== void 0 && !taken.has(saved) ? saved : newId()));
+  }
+  const stored = /* @__PURE__ */ new Map();
+  for (const change of [...merge.changes, ...merge.unchanged]) if (change.kind === "keep" && change.from !== change.to) {
+    const plain = plainFiles.get(change.from);
+    if (plain !== void 0) {
+      const relocated = [...plain].map((target) => posix5.normalize(posix5.join(posix5.dirname(change.to), posix5.relative(posix5.dirname(change.from), target))));
+      plainFiles.set(change.to, /* @__PURE__ */ new Set([...plain, ...relocated]));
+    }
+  }
+  const nextIds = new Map(ids);
+  for (const change of merge.unchanged) {
+    if (change.from === change.to) continue;
+    const entry = nextIds.get(change.from);
+    const plain = plainFiles.get(change.to);
+    nextIds.set(change.to, plain === void 0 || plain.size === 0 ? entry : { ...entry, plainFiles: [...plain] });
+    nextIds.delete(change.from);
+    documentIds.set(change.to, change.id);
+  }
+  const nextReserved = new Map([...reserved].filter(([path2]) => resultFiles.has(path2)));
+  for (const change of creates) if (!adoptable.has(change.path)) nextReserved.set(change.path, documentIds.get(change.path));
+  const notDone = [];
+  const leftOutNew = [];
+  const leftOutForGood = (change, error) => (error.rule === UPLOAD_TOO_LARGE || error.rule === UPLOAD_UNREADABLE && error.missingLfsObject) && change.kind === "create" && change.restore === void 0 && !adoptable.has(change.path) && change.path !== "README.md" && !change.path.endsWith("/README.md");
+  const tipUploads = cacheLost ? /* @__PURE__ */ new Map() : new Map(uploads);
+  const movedTo = new Map([...merge.unchanged, ...merge.changes].flatMap((change) => change.kind === "keep" && change.from !== change.to ? [[change.from, change.to]] : []));
+  const superseded = new Map(
+    [...supersededBefore].map(([id, path2]) => [id, movedTo.get(path2) ?? path2]).filter(([id, path2]) => resultFiles.has(path2) && documentIds.has(path2) && documentIds.get(path2) !== id)
+  );
+  for (const [path2, id] of reserved) if (documentIds.has(path2) && documentIds.get(path2) !== id) superseded.set(id, path2);
+  const relinks = /* @__PURE__ */ new Map();
+  if (superseded.size > 0 && transforms.length > 0) {
+    const targets2 = new Set(superseded.values());
+    const linked = (path2, text6, from = path2) => {
+      let destinations2;
+      try {
+        destinations2 = linkDestinations(splitFile(text6).body);
+      } catch (error) {
+        if (!(error instanceof MarkdownLimitError)) throw error;
+        relinks.set(path2, new Set(targets2));
+        return;
+      }
+      const found = destinations2.flatMap((destination2) => {
+        const target = resolveRelative(from, destination2.url)?.path;
+        return target !== void 0 && targets2.has(target) ? [target] : [];
+      });
+      if (found.length > 0) relinks.set(path2, /* @__PURE__ */ new Set([...relinks.get(path2) ?? [], ...found]));
+    };
+    const covered = /* @__PURE__ */ new Set();
+    for (const change of [...merge.unchanged, ...merge.changes]) {
+      if (change.kind === "trash") {
+        covered.add(change.path);
+        const tip2 = merge.linear.get(change.path);
+        if (tip2 !== void 0) linked(change.path, textOf(tip2));
+      }
+      if (change.kind !== "keep") continue;
+      covered.add(change.from);
+      linked(change.to, textOf(merge.result.get(change.to)));
+      const tip = merge.linear.get(change.from);
+      if (tip !== void 0) linked(change.to, textOf(tip), change.from);
+    }
+    const rest = [...ids.keys()].flatMap((path2) => {
+      const oid = covered.has(path2) ? void 0 : resultFiles.get(path2) ?? linearFiles.get(path2);
+      return oid === void 0 ? [] : [[path2, oid]];
+    });
+    const blobs = await readBlobs(git, rest.map(([, oid]) => oid));
+    for (const [path2, oid] of rest) linked(path2, blobs.get(oid).toString("utf8"));
+  }
+  const keptSuperseded = /* @__PURE__ */ new Set();
+  const nextSuperseded = () => new Map([...superseded].filter(([id, path2]) => keptSuperseded.has(id) || [...relinks].some(([document4, paths]) => paths.has(path2) && !stored.has(document4) && !result.trashed.includes(document4))));
+  let written = 0;
+  const timed = async (write, rereadAt) => {
+    const done = await write();
+    const window = Math.round((performance.now() - rereadAt) * 10) / 10;
+    result.rereadWindowMs = Math.max(result.rereadWindowMs ?? 0, window);
+    return done;
+  };
+  try {
+    const plan = transformPlan();
+    for (const transform of transforms) await transform.prepare?.({ git, tracked: candidate, linear, plan, uploads, documentIds, plainFiles });
+    for (const transform of tipTransforms) await transform.prepare?.({ git, tracked: linearTip, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads: tipUploads, documentIds, plainFiles });
+    await findLinkedFileChanges();
+    const changes = merge.changes;
+    const stopAt = (from, reason) => {
+      result.stopped = reason;
+      const rest = changes.slice(from);
+      result.notAttempted = rest.map(changePath);
+      notDone.push(...rest);
+      throw new StopWriting();
+    };
+    if (changes.length > 0) await checkpoint2("before-write");
+    for (let index2 = 0; index2 < changes.length; index2 += 1) {
+      const change = changes[index2];
+      const stop = linear.stopped ?? (stopAfter !== void 0 && written >= stopAfter ? { kind: "test-threshold", documents: stopAfter } : void 0);
+      if (stop !== void 0) stopAt(index2, stop);
+      const path2 = changePath(change);
+      if (change.kind === "create" && unchecked !== void 0 && usingReserved.has(path2)) {
+        result.failed.push({ path: path2, operation: unchecked.operation, error: describeLinearError(unchecked) });
+        notDone.push(change);
+        continue;
+      }
+      try {
+        const done = await apply(change);
+        if (done) written += 1;
+        else notDone.push(change);
+      } catch (error) {
+        if (error instanceof MarkdownLimitError) {
+          result.leftOutAtWrite.push({ path: path2, rule: "markdown-complexity" });
+          notDone.push(change);
+          continue;
+        }
+        if (error instanceof LeaveOutError) {
+          result.leftOutAtWrite.push(error.files.length > 0 ? { path: path2, rule: error.rule, files: [...error.files] } : { path: path2, rule: error.rule });
+          if (leftOutForGood(change, error)) leftOutNew.push(change);
+          else notDone.push(change);
+          continue;
+        }
+        if (error instanceof LinearStoppedError) stopAt(index2, error.reason);
+        if (error instanceof LinearError) {
+          result.failed.push({ path: path2, operation: error.operation, error: describeLinearError(error) });
+          notDone.push(change);
+          continue;
+        }
+        throw error;
+      }
+    }
+  } catch (error) {
+    if (error instanceof StateMovedError) {
+      result.code = "state-moved";
+      return result;
+    }
+    if (error instanceof LinearStoppedError) {
+      result.stopped = error.reason;
+      result.notAttempted = merge.changes.map(changePath);
+      notDone.splice(0, notDone.length, ...merge.changes);
+    } else if (!(error instanceof StopWriting)) throw error;
+  }
+  if (written > 0) result.changed = true;
+  const undone = /* @__PURE__ */ new Set([
+    ...notDone.flatMap(pathsOf),
+    ...result.notAttempted,
+    ...result.skipped.map((entry) => entry.path),
+    ...result.failed.map((entry) => entry.path),
+    ...result.leftOutAtWrite.map((entry) => entry.path)
+  ]);
+  result.conflicts = merge.marked.filter((path2) => !undone.has(path2));
+  result.decided = merge.decided.filter((entry) => !undone.has(entry.path));
+  await checkpoint2("after-write-before-record");
+  const allDone = notDone.length === 0 && merge.conflicts.length === 0 && merge.held.length === 0 && pendingRepairs2.size === 0;
+  const recorded = await record(allDone);
+  if (recorded === null) {
+    result.code = "state-moved";
+    return result;
+  }
+  if (result.stopped !== void 0) result.code = "stopped";
+  else if (result.failed.length > 0) result.code = "write-failed";
+  result.complete = allDone;
+  return result;
+  async function findLinkedFileChanges() {
+    if (transforms.length === 0) return;
+    const changedNames = /* @__PURE__ */ new Set();
+    for (const path2 of /* @__PURE__ */ new Set([...linearFiles.keys(), ...resultFiles.keys()])) {
+      if (!path2.endsWith(".md") && linearFiles.get(path2) !== resultFiles.get(path2)) changedNames.add(path2.slice(path2.lastIndexOf("/") + 1));
+    }
+    const keptText = [...merge.unchanged, ...merge.changes.filter((change) => change.kind === "keep" && !change.content)];
+    for (const change of keptText) if (relinks.has(change.to)) markContent(change);
+    const sameText = keptText.filter((change) => !relinks.has(change.to));
+    const relinked = [];
+    if (!cacheLost && changedNames.size === 0 && !sameText.some((change) => change.from !== change.to)) {
+      sortChanges();
+      return;
+    }
+    const comparisonTransforms = options.transforms?.() ?? [];
+    for (const transform of comparisonTransforms) await transform.prepare?.({ git, tracked: candidate, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads, documentIds, plainFiles });
+    for (const change of sameText) {
+      const next = merge.result.get(change.to);
+      const previous3 = merge.linear.get(change.from);
+      const text6 = textOf(next);
+      const moved = change.from !== change.to;
+      if (!moved && !cacheLost && ![...changedNames].some((name) => text6.includes(name) || text6.includes(encodeURI(name)) || text6.includes(encodeURIComponent(name)))) continue;
+      let differs;
+      try {
+        const written2 = await transformBody(comparisonTransforms, change.to, splitFile(text6).body);
+        if (cacheLost && !moved) {
+          const links = await transformBody(tipTransforms, change.from, splitFile(textOf(previous3)).body).then(() => false, (error) => error instanceof UploadRefusedError);
+          if (links) relinked.push({ change, written: written2 });
+          continue;
+        }
+        differs = written2 !== await transformBody(tipTransforms, change.from, splitFile(textOf(previous3)).body);
+      } catch (error) {
+        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
+        differs = true;
+      }
+      if (differs) markContent(change);
+    }
+    if (relinked.length > 0) {
+      let held;
+      try {
+        held = new Map((await linear.getDocuments(relinked.map(({ change }) => change.id), { withContent: true })).map((document4) => [document4.id, document4.content]));
+      } catch (error) {
+        if (!(error instanceof LinearError) || error instanceof LinearStoppedError) throw error;
+      }
+      for (const { change, written: written2 } of relinked) if (held?.get(change.id) !== written2) markContent(change);
+    }
+    sortChanges();
+    function markContent(change) {
+      if (merge.changes.includes(change)) change.content = true;
+      else merge.changes.push({ ...change, content: true });
+    }
+    function sortChanges() {
+      merge.changes.sort((a, b) => compare4(changePath(a), changePath(b)));
+    }
+  }
+  async function adoptableDocuments(changes) {
+    const found = /* @__PURE__ */ new Map();
+    if (changes.length === 0) return found;
+    const mapped = new Set([...ids.values()].map((entry) => entry.id));
+    const byPlace = /* @__PURE__ */ new Map();
+    for (const change of changes) {
+      const file = merge.result.get(change.path);
+      const key = containerKey(context, file.place);
+      const group = byPlace.get(key) ?? { place: file.place, paths: [] };
+      group.paths.push(change.path);
+      byPlace.set(key, group);
+    }
+    for (const { place, paths } of byPlace.values()) {
+      const listed = (containers.get(containerKey(context, place)) ?? []).filter((document4) => !document4.trashed && document4.archivedAt === null);
+      const oldestFirst = [...listed].sort((a, b) => compare4(a.createdAt, b.createdAt) || compare4(a.id, b.id));
+      for (const path2 of paths) {
+        const title = merge.result.get(path2).title.normalize("NFC");
+        const fits = (candidate2) => !mapped.has(candidate2.id) && candidate2.title.normalize("NFC") === title;
+        const document4 = oldestFirst.find((candidate2) => candidate2.id === reserved.get(path2) && fits(candidate2)) ?? oldestFirst.find(fits);
+        if (document4 !== void 0) {
+          mapped.add(document4.id);
+          found.set(path2, document4);
+        }
+      }
+    }
+    return found;
+  }
+  async function unchangedSinceCapture(held, path2) {
+    if (held.trashed || held.archivedAt !== null) return false;
+    const synchronized = merge.linear.get(path2);
+    if (synchronized !== void 0) {
+      const entry = ids.get(path2);
+      return holdsVersion(held, synchronized, textOf(synchronized), tipTransforms, entry?.id === held.id ? entry.observedDigest : void 0);
+    }
+    const baseline = await lastSynchronized(git, linearTip, path2, linear.facts);
+    if (baseline === null) return false;
+    const baselineTransforms = options.transforms?.() ?? [];
+    const plan = { create: [], overwrite: [], trash: [], leftOut: [] };
+    for (const transform of baselineTransforms) {
+      await transform.prepare?.({ git, tracked: baseline.commit, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds, plainFiles });
+    }
+    return holdsVersion(held, baseline.file, baseline.text, baselineTransforms);
+  }
+  function withCurrentIds(document4) {
+    if (superseded.size === 0 || document4.content == null) return document4;
+    const held = document4.content;
+    let content4 = "";
+    let at = 0;
+    for (const { from, to, id, path: path2 } of supersededLinks(held)) {
+      content4 += held.slice(at, from) + held.slice(from, to).replace(id, documentIds.get(path2));
+      at = to;
+    }
+    content4 += held.slice(at);
+    return content4 === held ? document4 : { ...document4, content: content4 };
+  }
+  function supersededLinks(text6) {
+    return linkDestinations(text6).flatMap(({ from, to, url }) => {
+      const id = /^https:\/\/linear\.app\/[^/]+\/document\/([^/#?]+)/.exec(url)?.[1];
+      const path2 = id === void 0 ? void 0 : superseded.get(id);
+      return id === void 0 || path2 === void 0 ? [] : [{ from, to, id, path: path2 }];
+    });
+  }
+  async function holdsVersion(held, file, text6, through, digest) {
+    const document4 = withCurrentIds(held);
+    const folder = file.path.slice(0, -(file.title.length + ".md".length)).replace(/\/$/, "");
+    const occupied = new Set([...linearFiles.keys()].filter((path2) => path2 !== file.path));
+    if (document4.title.normalize("NFC") !== file.title.normalize("NFC") && documentPath(folder, document4.title, document4.id, occupied, file.path) !== file.path) return false;
+    if (resolves(file.place) && !inPlace(document4, file.place)) return false;
+    const repair = ids.get(file.path)?.pullRewrite;
+    if (repair !== void 0 && createHash12("sha256").update(text6).digest("hex") === repair.hash) {
+      return createHash12("sha256").update(document4.content ?? "").digest("hex") === repair.observedHash;
+    }
+    let expected2;
+    try {
+      expected2 = await transformBody(through, file.path, splitFile(text6).body);
+    } catch (error) {
+      if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
+      return digest !== void 0 && digest === observedDigest(held);
+    }
+    return sameMarkdown(document4.content ?? "", expected2);
+  }
+  function resolves(place) {
+    return place.kind === "project" ? targets.projects.has(projectKey(place.team, place.project)) : targets.teams.has(place.team);
+  }
+  function movedSinceCapture(document4) {
+    const captured = options.captured?.get(document4.id);
+    return captured !== void 0 && (captured.projectId !== document4.projectId || captured.teamId !== document4.teamId);
+  }
+  function inPlace(document4, place) {
+    const where = placeId(targets, place);
+    return "projectId" in where ? document4.projectId === where.projectId : document4.projectId === null && document4.teamId === where.teamId;
+  }
+  async function apply(change) {
+    if (change.kind === "trash") return trash(change);
+    if (change.kind === "keep") return keep(change);
+    return create(change);
+  }
+  async function trash(change) {
+    const document4 = await linear.getDocument(change.id, { withContent: true });
+    const rereadAt = performance.now();
+    if (document4 !== null && !document4.trashed && document4.archivedAt === null) {
+      if (movedSinceCapture(document4) || !await unchangedSinceCapture(document4, change.path)) return skip(change.path, "edited-in-linear");
+      await checkpoint2("after-reread-before-write");
+      await timed(() => linear.trashDocument(change.id), rereadAt);
+    }
+    forgetEntry(change.path);
+    result.trashed.push(change.path);
+    return true;
+  }
+  async function keep(change) {
+    const file = merge.result.get(change.to);
+    const patch = {};
+    let readBack;
+    if (change.content) patch.content = await transformBody(transforms, change.to, splitFile(textOf(file)).body);
+    if (change.title) patch.title = file.title.normalize("NFC");
+    if (change.place) Object.assign(patch, placePatch(file.place));
+    const document4 = await linear.getDocument(change.id, { withContent: true });
+    const rereadAt = performance.now();
+    if (document4 === null || document4.trashed || document4.archivedAt !== null) return skip(change.to, "missing-in-linear");
+    if (movedSinceCapture(document4)) return skip(change.to, "edited-in-linear");
+    const holds = (patch.content === void 0 || document4.content != null && sameMarkdown(document4.content, patch.content)) && (patch.title === void 0 || document4.title.normalize("NFC") === patch.title) && (!resolves(file.place) || inPlace(document4, file.place));
+    if (holds) {
+      if (patch.content !== void 0) {
+        stored.set(change.to, { content: document4.content ?? "", sent: patch.content, document: document4 });
+        readBack = document4;
+      }
+    } else {
+      if (!await unchangedSinceCapture(document4, change.from)) return skip(change.to, "edited-in-linear");
+      await checkpoint2("after-reread-before-write");
+      const updated = await timed(() => linear.updateDocument(change.id, patch), rereadAt);
+      if (patch.content !== void 0) {
+        stored.set(change.to, { content: updated.content ?? "", sent: patch.content, document: updated });
+        readBack = updated;
+      }
+    }
+    if (change.comment !== void 0 && document4.documentContentId !== null) {
+      await linear.ensureDocumentComment(document4.documentContentId, change.comment, stableId("retitled", change.id, merge.base));
+    }
+    const entry = nextIds.get(change.from);
+    nextIds.delete(change.from);
+    const next = entry !== void 0 && entry.id === change.id ? { ...entry } : { id: change.id };
+    if (change.content) {
+      delete next.pullRewrite;
+      delete next.observedDigest;
+    }
+    const plain = plainFiles.get(change.to);
+    if (plain !== void 0 && plain.size > 0) next.plainFiles = [...plain];
+    nextIds.set(change.to, next);
+    if (readBack !== void 0) await reconcileMark(change.to, readBack);
+    if (change.content) result.updated.push(change.to);
+    if (change.from !== change.to || change.title || change.place) result.relocated.push({ from: change.from, to: change.to });
+    return true;
+  }
+  async function create(change) {
+    const file = merge.result.get(change.path);
+    const body2 = await transformBody(transforms, change.path, splitFile(textOf(file)).body);
+    const id = documentIds.get(change.path);
+    const listed = adoptable.get(change.path);
+    const restoreId = change.restore?.recreate ?? change.restore?.id;
+    const restoreCandidate = restoreId === void 0 ? null : await linear.getDocument(restoreId, { withContent: true });
+    if (change.restore !== void 0 && (change.restore.recreate === void 0 || restoreCandidate !== null && (restoreCandidate.trashed || restoreCandidate.archivedAt !== null))) {
+      return restore(change, file, body2, restoreCandidate, performance.now());
+    }
+    const existing = restoreCandidate ?? (listed === void 0 || listed.id === restoreId ? null : await linear.getDocument(listed.id, { withContent: true }));
+    const rereadAt = performance.now();
+    if (listed !== void 0 && (existing === null || existing.trashed || existing.archivedAt !== null)) return skip(change.path, "missing-in-linear");
+    let document4;
+    if (existing !== null) {
+      const adopted = existing;
+      if (!inPlace(adopted, file.place) || adopted.title.normalize("NFC") !== file.title.normalize("NFC")) return skip(change.path, "edited-in-linear");
+      const held = withCurrentIds(adopted);
+      if (!sameMarkdown(held.content ?? "", body2)) {
+        for (const { id: id2 } of supersededLinks(adopted.content ?? "")) keptSuperseded.add(id2);
+        return skip(change.path, "edited-in-linear");
+      }
+      document4 = adopted;
+      if (held !== adopted) {
+        await checkpoint2("after-reread-before-write");
+        document4 = await timed(() => linear.updateDocument(adopted.id, { content: body2 }), rereadAt);
+      }
+      if (restoreCandidate === null) result.adopted.push(change.path);
+    } else {
+      document4 = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize("NFC"), content: body2 });
+      await checkpoint2("document-created-before-ids-push");
+    }
+    stored.set(change.path, { content: document4.content ?? "", sent: body2, document: document4 });
+    nextIds.set(change.path, { id: document4.id });
+    result.created.push(change.path);
+    await reconcileMark(change.path, document4);
+    return true;
+  }
+  async function restore(change, file, body2, removed, rereadAt) {
+    if (removed === null) return skip(change.path, "missing-in-linear");
+    const seen = options.captured?.get(removed.id);
+    const before = seen ?? inPlaces.get(removed.id);
+    if (before === void 0) return skip(change.path, "missing-in-linear");
+    if (seen === void 0 && !removed.trashed && removed.archivedAt === null || !unchangedSince(removed, before)) return skip(change.path, "edited-in-linear");
+    if (removed.trashed || removed.archivedAt !== null) {
+      await linear.restoreDocument(removed.id);
+      const restored = await linear.getDocument(removed.id, { withContent: true });
+      rereadAt = performance.now();
+      if (restored === null || restored.trashed || restored.archivedAt !== null) return skip(change.path, "missing-in-linear");
+      if (restored.title !== removed.title || restored.projectId !== removed.projectId || restored.teamId !== removed.teamId || restored.content !== removed.content) return skip(change.path, "edited-in-linear");
+    }
+    await checkpoint2("after-reread-before-write");
+    const document4 = await timed(() => linear.updateDocument(removed.id, { content: body2, title: file.title.normalize("NFC"), ...placePatch(file.place) }), rereadAt);
+    result.restored.push(change.path);
+    stored.set(change.path, { content: document4.content ?? "", sent: body2, document: document4 });
+    const previous3 = nextIds.get(change.path);
+    const entry = previous3?.id === document4.id ? { ...previous3 } : { id: document4.id };
+    delete entry.observedDigest;
+    nextIds.set(change.path, entry);
+    await reconcileMark(change.path, document4);
+    return true;
+  }
+  async function writesNothing() {
+    if (merge.changes.length > 0 || cacheLost || releasing || supersededBefore.size > 0) return false;
+    if ([...reserved].some(([path2, id]) => ids.has(path2) && ids.get(path2)?.id !== id)) return false;
+    return merge.tree === await git.text(["rev-parse", `${linearTip}^{tree}`]);
+  }
+  async function findGoneRestores() {
+    const restoring = merge.changes.filter((change) => change.kind === "create" && change.restore !== void 0);
+    if (restoring.length === 0) return;
+    let found;
+    try {
+      found = await linear.getDocuments(restoring.map((change) => change.restore.id));
+    } catch (error) {
+      if (!(error instanceof LinearError)) throw error;
+      return;
+    }
+    const present = new Set(found.map((document4) => document4.id));
+    for (const change of restoring) {
+      const restore2 = change.restore;
+      if (present.has(restore2.id)) continue;
+      change.restore = { ...restore2, recreate: stableId("recreated", restore2.id) };
+      const entry = merge.decided.find((decided) => decided.path === change.path);
+      if (entry !== void 0) entry.summary = restore2.gone;
+    }
+  }
+  async function reconcileMark(path2, document4) {
+    const entry = nextIds.get(path2);
+    if (entry === void 0 || entry.id !== document4.id || document4.content === void 0) return;
+    const outcome2 = await reconcileDocumentMark({
+      document: document4,
+      entry,
+      linear,
+      includeUpdatedBody: true,
+      onConflictNotice: (change) => result.conflictNotices[change].push(path2),
+      persistEntry: async (next) => {
+        nextIds.set(path2, next);
+        await pushIds();
+      }
+    });
+    const updated = outcome2.updatedDocument;
+    const written2 = stored.get(path2);
+    if (written2 !== void 0 && updated !== void 0 && matchesObservedBody(updated, document4)) written2.document = updated;
+  }
+  function forgetEntry(path2) {
+    const entry = nextIds.get(path2);
+    if (entry !== void 0 && releasedHold(entry)) return;
+    nextIds.delete(path2);
+  }
+  async function pushIds() {
+    for (const path2 of nextIds.keys()) nextReserved.delete(path2);
+    const next = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved, superseded: nextSuperseded() });
+    const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, "ids"), expected: expected.ids, next }]);
+    if (!pushed.ok) throw new StateMovedError();
+    expected.ids = next;
+  }
+  function placePatch(place) {
+    const where = placeId(targets, place);
+    return "projectId" in where ? { projectId: where.projectId } : { teamId: where.teamId, projectId: null };
+  }
+  function skip(path2, reason) {
+    result.skipped.push({ path: path2, reason });
+    return false;
+  }
+  function transformPlan() {
+    const plan = { create: [], overwrite: [], trash: [], leftOut: [] };
+    for (const change of merge.changes) {
+      if (change.kind === "trash") continue;
+      const path2 = changePath(change);
+      const file = merge.result.get(path2);
+      if (change.kind === "keep") plan.overwrite.push({ path: path2, title: file.title, place: file.place, documentId: change.id });
+      else plan.create.push({ path: path2, title: file.title, place: file.place });
+    }
+    plan.leftOut = merge.leftOut.map((entry) => ({ path: entry.path, rules: entry.rules, lines: [] }));
+    return plan;
+  }
+  async function record(merged) {
+    const changes = /* @__PURE__ */ new Map();
+    const fromTip = /* @__PURE__ */ new Set();
+    const keepTip = (path2) => fromTip.add(path2);
+    for (const [path2, { content: content4, sent }] of stored) {
+      const file = merge.result.get(path2);
+      const text6 = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path2, content4, sent, context.mapping.files));
+      if (resultFiles.get(path2) !== void 0 && text6 === textOf(file)) continue;
+      changes.set(path2, text6);
+    }
+    for (const change of notDone) for (const path2 of pathsOf(change)) keepTip(path2);
+    for (const path2 of merge.conflicts) keepTip(path2);
+    if (!merged) {
+      for (const path2 of /* @__PURE__ */ new Set([...linearFiles.keys(), ...resultFiles.keys()])) {
+        const derived = !path2.endsWith(".md") || path2 === "README.md" || path2.endsWith("/README.md");
+        if (derived && linearFiles.get(path2) !== resultFiles.get(path2)) keepTip(path2);
+      }
+    }
+    for (const entry of merge.held) keepTip(entry.from);
+    for (const path2 of pendingRepairs2) keepTip(path2);
+    if (!merged) for (const path2 of [...merge.leftOut.map((entry) => entry.path), ...leftOutNew.map((change) => change.path)]) keepTip(path2);
+    const tipBlobs = await readBlobs(git, [...fromTip].flatMap((path2) => linearFiles.has(path2) ? [linearFiles.get(path2)] : []));
+    for (const path2 of fromTip) {
+      const oid = linearFiles.get(path2);
+      changes.set(path2, oid === void 0 ? null : tipBlobs.get(oid));
+    }
+    const parents = merged ? [linearTip, tracked] : [linearTip];
+    const previousPlain = new Map([...ids.values()].map((entry) => [entry.id, new Set(entry.plainFiles ?? [])]));
+    const plainTrailers = [...nextIds.values()].flatMap((entry) => (entry.plainFiles ?? []).filter((target) => !previousPlain.get(entry.id)?.has(target)).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
+    const message2 = (merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE) + (plainTrailers.length === 0 ? "" : `
+
+${plainTrailers.join("\n")}`);
+    const commit2 = await commitTree(git, { parents, base: merge.tree, changes, message: message2, identity, skipIfUnchanged: plainTrailers.length === 0, sign: signObservation(context.pushedKey) });
+    if (merged) {
+      for (const [path2, entry] of nextIds) if (entry.releaseBase !== void 0) {
+        delete entry.releaseBase;
+        delete entry.releasePaths;
+        if (!resultFiles.has(path2) && !linearFiles.has(path2)) forgetEntry(path2);
+      }
+    }
+    for (const path2 of nextIds.keys()) nextReserved.delete(path2);
+    const asWritten = /* @__PURE__ */ new Map();
+    for (const [path2, { document: document4 }] of stored) {
+      const file = merge.result.get(path2);
+      if (fromTip.has(path2) || file === void 0 || document4.title.normalize("NFC") !== file.title.normalize("NFC") || !inPlace(document4, file.place)) continue;
+      const entry = nextIds.get(path2);
+      nextIds.set(path2, { ...entry, observedDigest: observedDigest(document4) });
+      if (merged) asWritten.set(document4.id, document4.updatedAt);
+    }
+    const keptMoved = merged && merge.keptMoves.size > 0;
+    const kept = [...keptAnnotations].map((path2) => merge.keptMoves.get(path2) ?? path2).filter((path2) => merge.result.has(path2) && !nextIds.has(path2));
+    const trailers = [...recordedTrailers(asWritten), ...keptMoved ? keptAnnotationsTrailers(kept) : []];
+    const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}
+
+${trailers.join("\n")}`;
+    const createBranch = options.createSyncBranch === true && commit2 !== linearTip && (await unverifiedPaths(git, tracked, commit2, context.mapping.zones)).length === 0;
+    const idsOf = (syncPushed) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...syncPushed === void 0 ? {} : { syncPushed } });
+    let recordedIds = await idsOf(createBranch ? context.pushedKey.record(branchRef(options.config.syncBranch), commit2) : void 0);
+    const rebuilt = cacheLost && merged && result.stopped === void 0 ? { message: UPLOADS_REBUILT, always: true } : {};
+    const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey, rebuilt);
+    const updates = (ids2) => [
+      { ref: stateRef(options.config, "linear"), expected: linearTip, next: commit2 },
+      { ref: stateRef(options.config, "ids"), expected: expected.ids, next: ids2 },
+      ...uploadsCommit === null ? [] : [{ ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit }]
+    ];
+    let pushed = await pushAtomic(git, options.config, createBranch ? [...updates(recordedIds), { ref: branchRef(options.config.syncBranch), expected: null, next: commit2 }] : updates(recordedIds));
+    if (!pushed.ok && pushed.reason === "rejected" && createBranch) {
+      recordedIds = await idsOf();
+      pushed = await pushAtomic(git, options.config, updates(recordedIds));
+    }
+    if (!pushed.ok) return null;
+    if (pushed.updated.length > 0) result.changed = true;
+    result.state = { linear: commit2, ids: recordedIds, uploads: uploadsCommit };
+    const recorded2 = { commit: commit2, kind: merged ? "merge" : "ordinary", parents: commit2 === linearTip ? [] : parents };
+    result.record = commit2 === linearTip ? null : recorded2;
+    return recorded2;
+  }
+}
+var UploadRefusedError = class extends LinearError {
+  constructor() {
+    super("FileUpload", message("linear.not-in-upload-cache"));
+  }
+};
+function withoutUploads(client) {
+  return new Proxy(client, {
+    get(target, property) {
+      if (property === "uploadFile" || property === "uploadFiles") {
+        return async () => {
+          throw new UploadRefusedError();
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+}
+async function wentOnFromPartial(git, tips) {
+  for (const tip of new Set(tips)) {
+    if (tip !== null && await git.text(["log", "-1", "--format=%s", tip]) === PARTIAL_RECORD_MESSAGE) return true;
+  }
+  return false;
+}
+function pathsOf(change) {
+  if (change.kind === "keep") return change.from === change.to ? [change.to] : [change.from, change.to];
+  return [change.path];
+}
+function compare4(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+async function repairMerged(git, source, tracked, path2, replacement) {
+  const blob = await git.text(["hash-object", "--stdin"], { input: replacement });
+  const commits = (await git.text(["log", "--format=%H", `--find-object=${blob}`, `${source}..${tracked}`])).split("\n").filter((line2) => line2 !== "");
+  for (const commit2 of commits) {
+    const found = await git.run(["rev-parse", "--verify", "--quiet", `${commit2}:${path2}`], { okCodes: [0, 1, 128] });
+    if (found.code === 0 && found.stdout.toString("utf8").trim() === blob) return true;
+  }
+  return false;
+}
+
 // src/sync/hold.ts
+import { createHash as createHash13 } from "node:crypto";
 var HOLD_MARK_LIMIT = 50;
 var ANNOTATIONS_PER_CHECK = 10;
 var ANNOTATION_LENGTH = 200;
@@ -30881,8 +29710,8 @@ var HOLD_UNNAMED = "The checks of this change have not passed yet; this comment 
 var HOLD_FOOTER = "The failure may come from another document of the same change. If a line above names this document, edit it here to try again; the hold also clears when the check is fixed in Git.";
 var MESSAGE_WITHHELD = "withheld: it repeats the comment the request sent";
 var LINEAR_MESSAGE_LENGTH = 300;
-var sha2564 = (text6) => createHash14("sha256").update(text6).digest("hex");
-var failureKey = (failure) => sha2564(JSON.stringify({ checks: failure.checks, timedOut: failure.timedOut ?? [] }));
+var sha2563 = (text6) => createHash13("sha256").update(text6).digest("hex");
+var failureKey = (failure) => sha2563(JSON.stringify({ checks: failure.checks, timedOut: failure.timedOut ?? [] }));
 function linkTarget(url) {
   return url.replace(/[()[\]<>!\s"'`\\]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
 }
@@ -31006,7 +29835,7 @@ async function reconcileHoldMarks(context, options) {
       continue;
     }
     const next = await bodyOf(path2, entry, failure);
-    if (sha2564(next.body) === hold.bodyHash) quiet.push({ path: path2, entry: withHold(entry, { ...hold, ...next.failure === void 0 ? {} : { failure: next.failure } }) });
+    if (sha2563(next.body) === hold.bodyHash) quiet.push({ path: path2, entry: withHold(entry, { ...hold, ...next.failure === void 0 ? {} : { failure: next.failure } }) });
     else work.push({ kind: "update", path: path2, entry, document: document4, ...next });
   }
   const order = { clear: 0, set: 1, update: 2, repaint: 3 };
@@ -31092,7 +29921,7 @@ async function reconcileHoldMarks(context, options) {
       } else {
         if (document4.icon !== MARKS.suspended.icon || document4.color !== MARKS.suspended.color) await linear.updateDocument(document4.id, MARKS.suspended);
         await linear.updateDocumentComment(hold.id, item.body);
-        ids.set(path2, withHold(item.entry, { ...hold, bodyHash: sha2564(item.body), ...item.failure === void 0 ? {} : { failure: item.failure } }));
+        ids.set(path2, withHold(item.entry, { ...hold, bodyHash: sha2563(item.body), ...item.failure === void 0 ? {} : { failure: item.failure } }));
         result.updated.push(path2);
       }
     }
@@ -31137,7 +29966,7 @@ function writeFailure(error, path2, sent) {
   return failure;
 }
 function newHold(item) {
-  return { id: item.entry.suspended.noticeId, bodyHash: sha2564(item.body), posted: false, ...item.failure === void 0 ? {} : { failure: item.failure } };
+  return { id: item.entry.suspended.noticeId, bodyHash: sha2563(item.body), posted: false, ...item.failure === void 0 ? {} : { failure: item.failure } };
 }
 function withHold(entry, hold, document4) {
   const saved = entry.saved ?? { icon: document4?.icon ?? null, color: document4?.color ?? null };
@@ -31145,6 +29974,243 @@ function withHold(entry, hold, document4) {
 }
 function holdChanges(result) {
   return result === void 0 ? 0 : result.set.length + result.updated.length + result.cleared.length + (result.unresolved?.length ?? 0);
+}
+
+// src/sync/tracked-places.ts
+function syncedPlaces(git, tracked, current, listed, facts) {
+  const anywhere = new Set([...current.values()].map((zone) => placeKey2(placeOf(zone))));
+  const answers = /* @__PURE__ */ new Map();
+  const history = new TrackedHistory(git, tracked, facts);
+  return async (path2, place) => {
+    const key = placeKey2(place);
+    const zone = nearestZone(listed, folderOf(path2));
+    if (anywhere.has(key) || zone !== void 0 && placeKey2(placeOf(zone)) === key) return true;
+    let places = answers.get(path2);
+    if (places === void 0) answers.set(path2, places = history.placesWhileSynchronized(path2));
+    return (await places).has(key);
+  };
+}
+var TrackedHistory = class {
+  sides = /* @__PURE__ */ new Map();
+  moves = /* @__PURE__ */ new Map();
+  line;
+  git;
+  tracked;
+  facts;
+  constructor(git, tracked, facts) {
+    this.git = git;
+    this.tracked = tracked;
+    this.facts = facts;
+  }
+  async placesWhileSynchronized(path2) {
+    const places = /* @__PURE__ */ new Set();
+    const commits = await baselineCommits(this.git, this.tracked, path2);
+    const states = [];
+    const files = /* @__PURE__ */ new Map();
+    const synchronized = async (index2) => {
+      if (index2 < states.length) return states[index2];
+      if (index2 !== states.length || index2 >= commits.length) return void 0;
+      let file;
+      try {
+        file = await synchronizedAt(this.git, commits[index2], path2, this.facts, this.sides);
+      } catch (error) {
+        if (error instanceof UnreadableAnnotationError || error instanceof MappingBlobBudgetError || error instanceof GitOutputLimitError) return void 0;
+        throw error;
+      }
+      states.push(file !== void 0);
+      if (file !== void 0) files.set(index2, file);
+      return file !== void 0;
+    };
+    const next = async (from, wanted) => {
+      for (let index2 = from; ; index2++) {
+        const state = await synchronized(index2);
+        if (state === void 0) return void 0;
+        if (state === wanted) return index2;
+      }
+    };
+    const newest = await next(0, true);
+    if (newest === void 0) return places;
+    await this.addPlaces(path2, commits, newest, files.get(newest), places);
+    if (newest === 0) {
+      const leftOut = await next(1, false);
+      const before = leftOut === void 0 ? void 0 : await next(leftOut + 1, true);
+      if (before !== void 0) await this.addPlaces(path2, commits, before, files.get(before), places);
+    }
+    return places;
+  }
+  /** The place of the version at `commits[index]`, and the folder's places from its moves before `commits[index - 1]`. */
+  async addPlaces(path2, commits, index2, file, places) {
+    places.add(placeKey2(file.place));
+    const line2 = await this.linePositions();
+    const start2 = line2.get(commits[index2]);
+    const end2 = index2 === 0 ? -1 : line2.get(commits[index2 - 1]);
+    if (start2 === void 0 || end2 === void 0) return;
+    const folder = folderOf(path2);
+    for (const { commit: commit2, zone } of await this.folderMoves(folder)) {
+      const position2 = line2.get(commit2);
+      if (zone !== void 0 && position2 !== void 0 && position2 < start2 && position2 > end2) places.add(placeKey2(placeOf(zone)));
+    }
+  }
+  folderMoves(folder) {
+    let moves2 = this.moves.get(folder);
+    if (moves2 === void 0) {
+      this.moves.set(folder, moves2 = (async () => {
+        const all2 = [];
+        for await (const entry of zonesAlong(this.git, this.tracked, annotationChain(folder), folder)) all2.push(entry);
+        return all2;
+      })());
+    }
+    return moves2;
+  }
+  /** Each commit of the tracked branch's first-parent line by its distance from the tip. */
+  linePositions() {
+    this.line ??= this.git.text(["rev-list", "--first-parent", this.tracked]).then((text6) => new Map(text6.split("\n").filter(Boolean).map((commit2, position2) => [commit2, position2])));
+    return this.line;
+  }
+};
+async function pendingMove(git, tracked, folder, from, to) {
+  const readmes = annotationChain(folder);
+  const target = placeKey2(to);
+  let change;
+  let before;
+  for await (const { commit: commit2, zone } of zonesAlong(git, tracked, readmes, folder)) {
+    if (zone === void 0 || placeKey2(placeOf(zone)) !== target) {
+      before = zone;
+      break;
+    }
+    change = commit2;
+  }
+  if (change === void 0 || before === void 0 || placeKey2(placeOf(before)) !== placeKey2(from)) return false;
+  return !await moveRecorded(git, tracked, change, readmes, folder, target);
+}
+async function recordsUnmergedMove(git, tracked, linear, current) {
+  const folders = [...current].map(([folder, zone]) => ({ folder, readmes: annotationChain(folder), target: placeKey2(placeOf(zone)), change: void 0, done: false }));
+  if (folders.length === 0) return false;
+  const moves2 = [];
+  for await (const { commit: commit2, texts, unreadable } of readmeHistory(git, tracked, [...new Set(folders.flatMap((entry) => entry.readmes))])) {
+    for (const entry of folders) {
+      if (entry.done) continue;
+      const chain = new Map(entry.readmes.flatMap((path2) => texts.has(path2) ? [[path2, texts.get(path2)]] : []));
+      const zone = entry.readmes.some((path2) => unreadable.has(path2)) ? void 0 : nearestZone(resolveZones(collectAnnotations(chain).annotations).zones, entry.folder);
+      if (zone !== void 0 && placeKey2(placeOf(zone)) === entry.target) {
+        entry.change = commit2;
+        continue;
+      }
+      entry.done = true;
+      if (entry.change !== void 0 && zone !== void 0) moves2.push({ ...entry, change: entry.change });
+    }
+    if (folders.every((entry) => entry.done)) break;
+  }
+  for (const move of moves2) {
+    if (await isAncestor(git, move.change, linear) && !await moveRecorded(git, tracked, move.change, move.readmes, move.folder, move.target)) return true;
+  }
+  return false;
+}
+async function moveRecorded(git, tracked, change, readmes, folder, target) {
+  const subjects = /* @__PURE__ */ new Set([MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, ...INITIAL_RECORD_SUBJECTS]);
+  const records = await git.text(["log", "--ancestry-path", "--format=%H %s", "--fixed-strings", ...[...subjects].map((subject) => `--grep=${subject}`), tracked, "--not", change]);
+  for (const line2 of records.split("\n")) {
+    const space = line2.indexOf(" ");
+    if (space < 0 || !subjects.has(line2.slice(space + 1))) continue;
+    const zones = await zonesAt(git, line2.slice(0, space), readmes);
+    if (zones === void 0) return true;
+    const zone = nearestZone(zones, folder);
+    if (zone !== void 0 && placeKey2(placeOf(zone)) === target) return true;
+  }
+  return false;
+}
+async function* readmeHistory(git, tracked, readmes) {
+  const tip = await blobEntries(git, tracked, readmes);
+  const sizes = new Map(tip.map((entry) => [entry.oid, entry.size]));
+  const state = new Map(tip.map((entry) => [entry.path, entry.oid]));
+  const { stdout } = await git.run(["--literal-pathspecs", "log", "--first-parent", "--diff-merges=first-parent", "--no-renames", "--raw", "-z", "--no-abbrev", "--format=%x01%H", tracked, "--", ...readmes]);
+  const commits = parseRawLog(stdout.toString("utf8"));
+  const earlier = [...new Set(commits.flatMap((entry) => entry.changes.flatMap((change) => change.before === void 0 ? [] : [change.before])))];
+  for (const [oid, size] of await blobSizes(git, earlier.filter((oid2) => !sizes.has(oid2)))) sizes.set(oid, size);
+  const texts = /* @__PURE__ */ new Map();
+  for (let start2 = 0; start2 < commits.length; ) {
+    const needed = /* @__PURE__ */ new Map();
+    let bytes = 0;
+    const take = (oid, path2) => {
+      if (texts.has(oid) || needed.has(oid)) return;
+      needed.set(oid, path2);
+      const entry = { path: path2, mode: "100644", type: "blob", oid, size: sizes.get(oid) ?? null };
+      if (readableBlob(entry)) bytes += entry.size;
+    };
+    for (const [path2, oid] of state) take(oid, path2);
+    let end2 = start2;
+    while (end2 < commits.length) {
+      const fresh = commits[end2].changes.flatMap((change) => change.before === void 0 || texts.has(change.before) || needed.has(change.before) ? [] : [change.before]);
+      const extra = [...new Set(fresh)].reduce((sum, oid) => sum + Math.min(sizes.get(oid) ?? 0, MAPPING_FILE_BYTES + 1), 0);
+      if (end2 > start2 && bytes + extra > HISTORY_BATCH_BYTES) break;
+      for (const change of commits[end2].changes) if (change.before !== void 0) take(change.before, change.path);
+      end2++;
+    }
+    const entries = [...needed].map(([oid, path2]) => ({ path: path2, mode: "100644", type: "blob", oid, size: sizes.get(oid) ?? null }));
+    for (const [oid, blob] of await new MappingBlobBudget().read(git, entries)) texts.set(oid, blob.toString("utf8"));
+    for (const { commit: commit2, changes } of commits.slice(start2, end2)) {
+      const unreadable = new Set([...state].flatMap(([path2, oid]) => texts.has(oid) ? [] : [path2]));
+      yield { commit: commit2, texts: new Map([...state].flatMap(([path2, oid]) => texts.has(oid) ? [[path2, texts.get(oid)]] : [])), unreadable };
+      for (const change of changes) {
+        if (change.before === void 0) state.delete(change.path);
+        else state.set(change.path, change.before);
+      }
+    }
+    start2 = end2;
+    const current = new Set(state.values());
+    for (const oid of texts.keys()) if (!current.has(oid)) texts.delete(oid);
+  }
+}
+async function blobSizes(git, oids) {
+  const sizes = /* @__PURE__ */ new Map();
+  if (oids.length === 0) return sizes;
+  const lines2 = await git.text(["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], { input: `${oids.join("\n")}
+` });
+  for (const line2 of lines2.split("\n")) {
+    const [oid, type, size] = line2.split(" ");
+    if (oid !== void 0) sizes.set(oid, type === "blob" && size !== void 0 ? Number(size) : null);
+  }
+  return sizes;
+}
+var HISTORY_BATCH_BYTES = MAPPING_BUDGET_BYTES / 4;
+function parseRawLog(text6) {
+  const fields = text6.split("\0");
+  const commits = [];
+  for (let index2 = 0; index2 < fields.length; index2++) {
+    const field = fields[index2].replace(/^\n/, "");
+    if (field.startsWith("")) commits.push({ commit: field.slice(1), changes: [] });
+    else if (field.startsWith(":") && commits.length > 0 && index2 + 1 < fields.length) {
+      const [mode, , oid] = field.slice(1).split(" ");
+      commits.at(-1).changes.push({ path: fields[++index2], before: mode !== void 0 && BLOB_MODES.has(mode) ? oid : void 0 });
+    }
+  }
+  return commits;
+}
+var BLOB_MODES = /* @__PURE__ */ new Set(["100644", "100755", "120000"]);
+async function* zonesAlong(git, tracked, readmes, folder) {
+  const log = await git.text(["--literal-pathspecs", "log", "--first-parent", "--format=%H", tracked, "--", ...readmes]);
+  for (const commit2 of log.split("\n")) {
+    if (commit2 === "") continue;
+    const zones = await zonesAt(git, commit2, readmes);
+    yield { commit: commit2, zone: zones === void 0 ? void 0 : nearestZone(zones, folder) };
+  }
+}
+function annotationChain(folder) {
+  const readmes = ["README.md"];
+  const parts = folder === "" ? [] : folder.split("/");
+  for (let depth2 = 1; depth2 <= parts.length; depth2++) readmes.push(`${parts.slice(0, depth2).join("/")}/README.md`);
+  return readmes;
+}
+async function zonesAt(git, commit2, readmes) {
+  const entries = await blobEntries(git, commit2, readmes);
+  if (entries.some((entry) => !readableBlob(entry))) return void 0;
+  const blobs = await new MappingBlobBudget().read(git, entries);
+  const texts = new Map(entries.map((entry) => [entry.path, blobs.get(entry.oid).toString("utf8")]));
+  return resolveZones(collectAnnotations(texts).annotations).zones;
+}
+async function blobEntries(git, commit2, readmes) {
+  const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", commit2, "--", ...readmes], { maxOutputBytes: MAPPING_TREE_BYTES });
+  return parseTreeListing(stdout).filter((entry) => entry.type === "blob");
 }
 
 // src/sync/pull-request.ts
@@ -31169,6 +30235,8 @@ function pullRequestFailure(result) {
     case "state-moved":
     case "github-failed":
       return { kind: "incomplete", code: result.code, message: message("pull-request.not-finished", { code: result.code }) };
+    case "suspended-asset-discovery":
+      return { kind: "incomplete", code: result.code, message: message("pull-request.suspended-asset-discovery", { code: result.code, reason: result.reason ?? "" }) };
     default:
       return null;
   }
@@ -31206,6 +30274,7 @@ async function pullRequestStep(context, options) {
   if (suspended?.status !== void 0) result.status = suspended.status;
   if (suspended?.reason !== void 0) result.reason = suspended.reason;
   if (linear === null || suspended?.normalClosePending === true) return result;
+  if (suspended?.code === "suspended-asset-discovery") return result;
   if (suspended?.code === "merge-misplaced") return result;
   const ids = await readIds(git, options.state.ids);
   const frozen = suspendedPaths(ids);
@@ -31218,8 +30287,11 @@ async function pullRequestStep(context, options) {
   if (wanted === null) return { ...result, needed: true, code: "conflict" };
   result.needed = wanted !== trackedTree;
   const pending = sync !== null && !await isAncestor2(git, sync, tracked);
-  if (!result.needed && !pending) {
-    if (sync !== null || await isAncestor2(git, linear, tracked) || await isInitialRecord(git, linear)) return result;
+  const linearMerged = await isAncestor2(git, linear, tracked);
+  const setAside = fetched.suspended ?? null;
+  const recordMove = !result.needed && !linearMerged && await recordsUnmergedMove(git, tracked, linear, context.mapping.zones) && (setAside === null || await isAncestor2(git, setAside, tracked));
+  if (!result.needed && !pending && !recordMove) {
+    if (sync !== null || linearMerged || await isInitialRecord(git, linear)) return result;
     const needsTrackedTree = frozen.size > 0 || (await unverifiedPaths(git, tracked, linear, context.mapping.zones)).length > 0;
     const next = needsTrackedTree ? await commitTree(git, { base: wanted, changes: /* @__PURE__ */ new Map(), parents: [linear, tracked], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity }) : linear;
     const unverified = await unverifiedPaths(git, tracked, next, context.mapping.zones);
@@ -31242,8 +30314,9 @@ async function pullRequestStep(context, options) {
     };
     const keepCheckedHead = open2 !== null && pending && suspended?.waiting !== true && noted === null && await mergedTree(git, tracked, sync) !== null && !await needsTrackedMerge(git, tracked, sync, noted) && await checkedHeadReady(github, sync, await checkedExpectation());
     let head = sync;
-    if (open2 === null && (!pending || await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options)))) {
-      if (!result.needed) return result;
+    const heldSnapshot = open2 === null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options));
+    if (open2 === null && (!pending || heldSnapshot)) {
+      if (!result.needed && (heldSnapshot || !recordMove)) return result;
       head = await restart(git, sync, linear, wanted, identity, frozen.size > 0);
     } else if (!keepCheckedHead) {
       const advanced = await advance(git, merger, sync, linear, frozen.size > 0);
@@ -31251,7 +30324,7 @@ async function pullRequestStep(context, options) {
       if (advanced.head !== sync) {
         const now = await mergedTree(git, tracked, sync);
         const next = await mergedTree(git, tracked, advanced.head);
-        if (next === null || next !== now) {
+        if (next === null || next !== now || recordMove && !await recordsUnmergedMove(git, tracked, sync, context.mapping.zones)) {
           head = advanced.head;
           addResolution(resolved, advanced);
         }
@@ -31278,9 +30351,23 @@ async function pullRequestStep(context, options) {
         hold = null;
       }
     }
-    if (open2 === null && !result.needed && headTree === trackedTree) return result;
-    if (head === sync && pending && options.state.ids !== null && !(await expectedChecks(github, sync, [], { body: open2?.body, git, base: tracked, pushed: await ownPushed(context, options) })).complete) {
-      head = await commitTree(git, { base: headTree, changes: /* @__PURE__ */ new Map(), parents: [sync], message: CHECKS_AGAIN_MESSAGE, identity, skipIfUnchanged: false });
+    if (open2 === null && !result.needed && !recordMove && headTree === trackedTree) return result;
+    let carried = [];
+    if (head === sync && sync !== null && pending && options.state.ids !== null) {
+      const again = await checksAgain(
+        github,
+        sync,
+        options.requiredChecks ?? [],
+        { body: open2?.body, git, base: tracked, pushed: await ownPushed(context, options) },
+        { ...options, againMessage: CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, sync, context.mapping.zones)).length === 0 }
+      );
+      if (again !== null) {
+        carried = again.carried;
+        const message2 = again.from === void 0 ? CHECKS_AGAIN_MESSAGE : `${CHECKS_AGAIN_MESSAGE}
+
+${checksAgainTrailer(again.from)}`;
+        head = await commitTree(git, { base: await git.text(["rev-parse", `${sync}^{tree}`]), changes: /* @__PURE__ */ new Map(), parents: [sync], message: message2, identity, skipIfUnchanged: false });
+      }
     }
     let pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
     if (head !== sync && hold === null && pushUnverified.length > 0 && headTree !== null && (await unverifiedPaths(git, tracked, headTree, context.mapping.zones)).length === 0) {
@@ -31304,14 +30391,14 @@ async function pullRequestStep(context, options) {
     result.paths = (await git.text(["diff", "--name-only", "--no-renames", trackedTree, headTree])).split("\n").filter(Boolean);
     const earlier = noted !== null && noted.head === head && noted.base === tracked ? noted : null;
     const since = headSince(open2?.body, head, /* @__PURE__ */ new Date());
-    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], base: tracked } : { body: open2?.body, git, base: tracked, pushed: await ownPushed(context, options) });
+    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], carried } : { body: open2?.body, git, base: tracked, pushed: await ownPushed(context, options) });
     const stillHeld = hold === null ? null : { ...hold, head };
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);
     const { pullRequest, opened } = await ensurePullRequest(github, {
       head: config.syncBranch,
       base: config.trackedBranch,
       title: SYNC_PULL_REQUEST_TITLE,
-      body: pullRequestBody2(result.paths, earlier, { head, since, held: stillHeld, checks: expected.observed, unverified, rewriteNotes })
+      body: pullRequestBody(result.paths, earlier, { head, since, held: stillHeld, checks: expected.observed, unverified, rewriteNotes, recordMove })
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
     if (unverified.length > 0) return { ...result, code: "head-unverified", unverified };
@@ -31328,7 +30415,7 @@ async function pullRequestStep(context, options) {
       if (verdict.state === "red") {
         result.redMain = verdict.checks;
         const hold2 = { head, main: tracked, checks: verdict.checks.map(({ name }) => name) };
-        const body2 = pullRequestBody2(result.paths, earlier, { head, since, held: hold2, checks: expected.observed, rewriteNotes });
+        const body2 = pullRequestBody(result.paths, earlier, { head, since, held: hold2, checks: expected.observed, rewriteNotes, recordMove });
         try {
           if (body2 !== pullRequest.body) await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: body2 });
         } catch (error) {
@@ -31376,7 +30463,7 @@ async function pullRequestStep(context, options) {
       if (mergeInProgress(merge)) return { ...refused, code: "merge-refused" };
       if (earlier !== null && earlier.status === refusal.status && earlier.reason === refusal.reason) return { ...refused, code: "merge-blocked" };
       try {
-        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody2(result.paths, refusal, { head, since, held: stillHeld, checks: expected.observed, rewriteNotes }) });
+        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal, { head, since, held: stillHeld, checks: expected.observed, rewriteNotes, recordMove }) });
       } catch (error) {
         if (!(error instanceof PullRequestError)) throw error;
       }
@@ -31485,7 +30572,7 @@ function commitMerge(git, tree, parents, message2, identity) {
     env: { GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email, GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email }
   });
 }
-function pullRequestBody2(paths, refusal, notes) {
+function pullRequestBody(paths, refusal, notes) {
   const lines2 = [
     "Changes made in Linear, on their way to this branch.",
     "",
@@ -31494,6 +30581,7 @@ function pullRequestBody2(paths, refusal, notes) {
     `Files changed: ${paths.length}.`
   ];
   if (paths.length > 0) lines2.push("", ...paths.slice(0, LISTED_PATHS).map((path2) => `- ${oneLine(path2)}`));
+  else if (notes.recordMove === true) lines2.push("", "It records that the sync took in a folder moved to another Linear place, so later syncs read only the new place.");
   if (paths.length > LISTED_PATHS) lines2.push(`- and ${paths.length - LISTED_PATHS} more`);
   if (notes.rewriteNotes?.length) lines2.push("", "Images converted to links or removed:", ...notes.rewriteNotes);
   if (refusal !== null) {
@@ -31553,6 +30641,7 @@ function renderPullRequest(result) {
     if (hold.code === "merge-refused" || hold.code === "merge-blocked") lines2.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, "");
     if (hold.code === "merge-misplaced") lines2.push(`Setup error: ${misplacedSummary("the suspended pull request", link3, hold.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, "");
     if (hold.code === "checks-missing") lines2.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold.missing ?? [])}).`, CHECKS_MISSING_ADVICE, "");
+    if (hold.code === "suspended-asset-discovery") lines2.push(`The batch stays suspended (${hold.code}). ${hold.reason ?? ""}`, "");
     if (hold.normalClosePending === true) lines2.push("The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.", "");
     if (hold.code === "github-failed" && hold.normalClosePending !== true) lines2.push("A GitHub request for the suspended lane failed; the normal lane still runs.", "");
     if (hold.conflicts !== void 0) lines2.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path2) => `\`${path2}\``).join(", ")}.`, "");
@@ -31584,6 +30673,9 @@ function renderPullRequest(result) {
   const explained = result.redMain !== void 0 || result.mainPending !== void 0 || result.waitsForSuspended === true || result.suspended?.normalClosePending === true;
   const code4 = result.code === "head-unverified" && result.unverified === void 0 ? void 0 : result.code;
   switch (code4) {
+    case "suspended-asset-discovery":
+      break;
+    // The suspended section describes the hold.
     case "conflict":
       lines2.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
       break;
@@ -31647,789 +30739,3188 @@ function checkRuns(checks) {
   return checks.map((check2) => `${codeNames([check2.name])}${check2.url === void 0 ? "" : ` ([run](${linkTarget(check2.url)}))`}`).join(", ");
 }
 
-// src/sync/write.ts
-import { createHash as createHash15, randomUUID as randomUUID4 } from "node:crypto";
-import { posix as posix8 } from "node:path";
-
-// src/sync/fix-hooks.ts
-async function nameFixingHooks(git, tracked, files) {
-  if (files.length === 0) return;
-  const config = readHookConfig(await git.text(["show", `${tracked}:${PRE_COMMIT_CONFIG}`]));
-  const configured = new Set(config.hooks.map((hook) => hook.id));
-  await mapLimit(files, 4, async (file) => {
-    const trailers = await git.text(["--literal-pathspecs", "log", "-1", "--format=%(trailers:key=Pre-commit-fix,valueonly)", tracked, "--", file.path]);
-    const hooks = [...new Set(trailers.split("\n").map((id) => id.trim()).filter((id) => configured.has(id)))].sort();
-    if (hooks.length > 0) file.hooks = hooks;
-  });
+// src/initial-sync/provenance.ts
+function provenanceUnknownTrailer(id) {
+  return `Provenance-unknown: ${encodeURIComponent(id)}`;
+}
+async function readPlainLinkProvenance(git, state, tracked, plan) {
+  const entries = [await readIds(git, state.ids)];
+  const before = await idsBeforeProgress(git, state.ids);
+  if (before !== null && before !== state.ids) entries.push(await readIds(git, before));
+  const started = before === null ? /* @__PURE__ */ new Map() : before === state.ids ? entries[0] : entries[1];
+  const byId = /* @__PURE__ */ new Map();
+  const add = (id, targets) => {
+    const set = byId.get(id) ?? /* @__PURE__ */ new Set();
+    for (const target of targets) set.add(target);
+    byId.set(id, set);
+  };
+  const oldPaths = /* @__PURE__ */ new Map();
+  for (const ids of entries) for (const [path2, entry] of ids) {
+    add(entry.id, entry.plainFiles ?? []);
+    oldPaths.set(entry.id, (oldPaths.get(entry.id) ?? /* @__PURE__ */ new Set()).add(path2));
+  }
+  if (state.linear !== null) for (const [id, targets] of await readPlainFileProvenance(git, state.linear)) add(id, targets);
+  for (const [id, targets] of await readPlainFileProvenance(git, tracked, { firstParent: false })) add(id, targets);
+  const plainFiles = /* @__PURE__ */ new Map();
+  const matched = new Map(plan.overwrite.map((entry) => [entry.path, entry.documentId]));
+  const identified = /* @__PURE__ */ new Set();
+  const identify = (entry) => {
+    const identities = new Set(entries.flatMap((ids) => {
+      const old = ids.get(entry.path);
+      return old === void 0 ? [] : [old.id];
+    }));
+    const documentId = matched.get(entry.path);
+    if (documentId !== void 0) identities.add(documentId);
+    for (const id of identities) identified.add(id);
+    return identities;
+  };
+  const planned = [...plan.create, ...plan.overwrite].map((entry) => ({ entry, identities: identify(entry) }));
+  const idsLost = started.size === 0;
+  const orphaned = idsLost ? [...byId].filter(([id]) => !identified.has(id)) : [];
+  for (const { entry, identities } of planned) {
+    const targets = /* @__PURE__ */ new Set();
+    for (const ids of entries) for (const target of ids.get(entry.path)?.plainFiles ?? []) targets.add(target);
+    const sources = [...[...identities].map((id) => [id, byId.get(id)]), ...orphaned];
+    for (const [id, own6] of sources) for (const target of own6 ?? []) {
+      targets.add(target);
+      for (const from of oldPaths.get(id) ?? []) if (from !== entry.path) targets.add(relocate(target, from, entry.path));
+    }
+    if (targets.size > 0) plainFiles.set(entry.path, targets);
+  }
+  const unknown2 = /* @__PURE__ */ new Set();
+  const known = new Set(entries.flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
+  const unproven = plan.overwrite.filter((entry) => !known.has(entry.documentId));
+  if (unproven.length > 0) {
+    const marked = state.linear === null ? /* @__PURE__ */ new Set() : await readProvenanceUnknown(git, state.linear);
+    const lost = state.linear === null && await tookInLinear(git, tracked);
+    for (const entry of unproven) if (lost || marked.has(entry.documentId)) unknown2.add(entry.path);
+  }
+  return { plainFiles, unknown: unknown2 };
+}
+function relocate(target, from, to) {
+  return posix6.normalize(posix6.join(posix6.dirname(to), posix6.relative(posix6.dirname(from), target)));
+}
+async function idsBeforeProgress(git, ids) {
+  if (ids === null) return null;
+  const found = (await git.text(["log", "--first-parent", "-1", "--format=%H", "--invert-grep", "--fixed-strings", `--grep=${INITIAL_SYNC_PROGRESS}`, ids])).trim();
+  return found === "" ? null : found;
+}
+async function readProvenanceUnknown(git, linear) {
+  const log = await git.text(["log", "--first-parent", "--format=%B", "--grep=^Provenance-unknown:", linear]);
+  const result = /* @__PURE__ */ new Set();
+  for (const match of log.matchAll(/^Provenance-unknown: (\S+)$/gm)) {
+    try {
+      result.add(decodeURIComponent(match[1]));
+    } catch {
+    }
+  }
+  return result;
+}
+async function tookInLinear(git, tracked) {
+  const subjects = /* @__PURE__ */ new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, SYNC_PULL_REQUEST_TITLE]);
+  const log = await git.text(["log", "--format=%s", "--fixed-strings", ...[...subjects].map((subject) => `--grep=${subject}`), tracked]);
+  return log.split("\n").some((subject) => subjects.has(subject.replace(/ \(#\d+\)$/, "")));
 }
 
-// src/sync/write.ts
-var MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
-var PARTIAL_RECORD_MESSAGE = "Sync: Linear's state, part of the tracked branch taken in";
-var IDS_MESSAGE = "Sync: document ids";
-var REREAD_BATCH = 50;
-var StopWriting = class extends Error {
-};
+// src/initial-sync/run.ts
+async function readPlanSources(context, options = {}) {
+  const { git, mapping, linear } = context;
+  const files = [...mapping.documents, ...mapping.leftOut];
+  const blobs = await readBlobs(git, files.map((file) => file.oid));
+  const texts = new Map(files.map((file) => [file.path, blobs.get(file.oid).toString("utf8")]));
+  const places = [];
+  const documents = /* @__PURE__ */ new Map();
+  const changed2 = /* @__PURE__ */ new Map();
+  const containers = await readContainerDocuments(context);
+  if (options.withContent) {
+    const listed = [...containers.values()].flat().filter((document4) => !document4.trashed && document4.archivedAt === null);
+    const read = new Map((await linear.getDocuments([...new Set(listed.map((document4) => document4.id))], { withContent: true })).map((document4) => [document4.id, document4]));
+    for (const document4 of listed) {
+      const live = read.get(document4.id);
+      if (live === void 0 || !unchangedSince(live, document4)) changed2.set(document4.id, live ?? null);
+    }
+    for (const [id, live] of read) if (!changed2.has(id)) documents.set(id, live);
+  }
+  for (const { place } of annotatedPlaces(mapping.zones)) {
+    const listed = containers.get(containerKey(context, place));
+    for (const document4 of listed) if (!documents.has(document4.id)) documents.set(document4.id, document4);
+    places.push({ place, documents: listed });
+  }
+  return { input: { mapping, texts, places, facts: linear.facts, changed: changed2 }, documents, containers };
+}
+function unchangedSince(now, before) {
+  return now.id === before.id && now.title === before.title && now.projectId === before.projectId && now.teamId === before.teamId && now.trashed === before.trashed && now.archivedAt === before.archivedAt && now.updatedAt === before.updatedAt;
+}
+async function planFromRepository(context, options) {
+  const sources = await readPlanSources(context);
+  const plan = planInitialSync(sources.input);
+  plan.capacity = assessCapacity(context, sources.containers, plan.create, options.cap);
+  const uploads = await readUploads(context.git, context.fetched.state.uploads, context.pushedKey);
+  const { plainFiles, unknown: unknown2 } = await readPlainLinkProvenance(context.git, context.fetched.state, context.fetched.tracked, plan);
+  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads, { remote: options.remote, plainFiles, unknownProvenance: unknown2 }));
+}
+
+// src/initial-sync/confirm.ts
+var FINAL_IDS_MESSAGE = "Initial sync: document ids";
+var KEPT_ANNOTATION = /^Kept-annotation: (".*")$/gm;
+function keptAnnotationTrailer(path2) {
+  return `Kept-annotation: ${JSON.stringify(path2)}`;
+}
+var KEPT_ANNOTATIONS_RECORDED = "Kept-annotations: recorded";
+function keptAnnotationsTrailers(kept) {
+  return [KEPT_ANNOTATIONS_RECORDED, ...[...kept].sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map(keptAnnotationTrailer)];
+}
+async function readKeptAnnotations(git, ids) {
+  if (ids === null) return /* @__PURE__ */ new Set();
+  const log = await git.text(["log", "--format=%B", "--fixed-strings", `--grep=${FINAL_IDS_MESSAGE}`, `--grep=${KEPT_ANNOTATIONS_RECORDED}`, "-1", ids]);
+  const lines2 = log.split("\n");
+  if (lines2[0] !== FINAL_IDS_MESSAGE && !lines2.includes(KEPT_ANNOTATIONS_RECORDED)) return /* @__PURE__ */ new Set();
+  return new Set([...log.matchAll(KEPT_ANNOTATION)].map((match) => JSON.parse(match[1])));
+}
+var RECORD_MESSAGE = "Initial sync: Linear's state";
+var INITIAL_RECORD_SUBJECTS = /* @__PURE__ */ new Set([RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD]);
+var PROGRESS_BATCH = 25;
 var StateMovedError2 = class extends Error {
+  constructor() {
+    super(message("initial-sync.state-moved"));
+    this.name = "StateMovedError";
+  }
 };
-async function writeTrackedToLinear(context, options) {
+async function confirmInitialSync(context, options) {
   const { git, fetched, targets, linear } = context;
-  const transforms = options.transforms?.() ?? [];
-  const tipTransforms = options.transforms?.() ?? [];
+  const transforms = options.transforms ?? [];
   const identity = options.identity ?? context.identity;
-  const rereadBatch = Math.max(1, options.rereadBatch ?? REREAD_BATCH);
+  const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
   const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
   const checkpoint2 = options.checkpoint ?? ((name) => checkpoint(name));
   const newId = options.newId ?? randomUUID4;
-  const expected = { ...options.state };
-  const tracked = fetched.tracked;
-  const linearTip = expected.linear;
-  if (linearTip === null) throw new Error(message("sync.write-before-record"));
+  const sources = await readPlanSources(context, { withContent: true });
+  const plan = planInitialSync(sources.input);
+  plan.capacity = assessCapacity(context, sources.containers, plan.create, options.documentCap);
+  const texts = sources.input.texts;
+  const expected = { ...fetched.state };
+  const resumed = await readInitialSyncProgress(git, expected.ids) !== null;
+  const previous3 = await readIds(git, expected.ids);
+  const provenance = await readPlainLinkProvenance(git, expected, fetched.tracked, plan);
+  const withPlainFiles = (path2, entry) => {
+    const plain = provenance.plainFiles.get(path2);
+    return plain === void 0 ? entry : { ...entry, plainFiles: [...plain].sort(compare5) };
+  };
+  const writtenBefore = resumed ? await readWrittenHashes(git, expected.ids) : /* @__PURE__ */ new Map();
+  const sentHashes = new Map(writtenBefore);
+  const ids = resumed ? new Map(previous3) : /* @__PURE__ */ new Map();
+  const uploads = await readUploads(git, expected.uploads, context.pushedKey);
+  const uploadsAtStart = uploads.size;
+  const stored = /* @__PURE__ */ new Map();
+  const sent = /* @__PURE__ */ new Map();
   const result = {
     complete: false,
-    changed: false,
-    resumed: await wentOnFromPartial(git, [context.fetched.state.linear, linearTip]),
-    updated: [],
-    relocated: [],
+    resumed,
     created: [],
+    overwritten: [],
+    unchanged: [],
+    skippedCompleted: [],
     trashed: [],
-    adopted: [],
-    restored: [],
-    conflicts: [],
-    decided: [],
-    skipped: [],
-    leftOut: [],
     leftOutAtWrite: [],
     failed: [],
     notAttempted: [],
-    rereadWindowMs: null,
+    progressPushes: 0,
+    progressRecorded: true,
     conflictNotices: noConflictNotices(),
-    record: null,
-    state: { ...expected }
+    record: null
   };
-  const readContainers = async () => {
-    try {
-      return await readContainerDocuments(context);
-    } catch (error) {
-      if (!(error instanceof LinearError)) throw error;
-      result.notAttempted = context.mapping.documents.map((document4) => document4.path).sort();
-      if (error instanceof LinearStoppedError) {
-        result.code = "stopped";
-        result.stopped = error.reason;
-      } else {
-        result.code = "write-failed";
-        result.failed = result.notAttempted.map((path2) => ({ path: path2, operation: error.operation, error: describeLinearError(error) }));
-      }
-      return void 0;
-    }
-  };
-  const cacheLost = await uploadsRebuilding(git, expected.uploads);
-  const ids = await readIds(git, expected.ids);
-  const frozen = suspendedPaths(ids);
-  const plainFiles = new Map([...ids].map(([path2, entry]) => [path2, new Set(entry.plainFiles ?? [])]));
-  const releasing = [...ids.values()].some((entry) => entry.releaseBase !== void 0);
-  for (const [path2, entry] of ids) if (entry.suspended !== void 0) result.skipped.push({ path: path2, reason: "suspended" });
-  const nothingNew = await alreadyMerged(git, linearTip, tracked) || await mergedInitialRecord(git, linearTip, tracked);
-  if (nothingNew && !cacheLost && !releasing) {
-    result.leftOut = await leftOutFiles(git, linearTip, linear.facts);
-    await nameFixingHooks(git, tracked, result.leftOut);
-    const containers2 = options.containers ?? await readContainers();
-    if (containers2 === void 0) return result;
-    result.capacity = assessCapacity(context, containers2, [], options.documentCap);
-    if (capacityBlocked(result.capacity)) {
-      result.code = "container-cap";
-      return result;
-    }
-    result.complete = true;
-    return result;
-  }
-  const reserved = await readReservedIds(git, expected.ids);
-  const supersededBefore = await readSupersededIds(git, expected.ids);
-  const knownId = knownIdLookup(git, expected.ids, ids);
-  const keptAnnotations = await readKeptAnnotations(git, expected.ids);
-  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations });
-  if (nothingNew && !releasing) merge.changes.length = 0;
-  const pendingRepairs2 = /* @__PURE__ */ new Set();
-  for (const [path2, entry] of ids) {
-    if (entry.pullRewrite?.source === void 0 || frozen.has(path2)) continue;
-    if (!await isAncestor(git, entry.pullRewrite.source, tracked) || !await repairMerged(git, entry.pullRewrite.source, tracked, path2, entry.pullRewrite.replacement)) {
-      pendingRepairs2.add(path2);
-      result.skipped.push({ path: path2, reason: "pull-repair-pending" });
-    }
-  }
-  merge.changes = merge.changes.filter((change) => !pathsOf(change).some((path2) => frozen.has(path2) || pendingRepairs2.has(path2)));
-  merge.unchanged = merge.unchanged.filter((change) => !frozen.has(change.from) && !frozen.has(change.to) && !pendingRepairs2.has(change.from) && !pendingRepairs2.has(change.to));
-  result.leftOut = merge.leftOut;
-  await nameFixingHooks(git, tracked, result.leftOut);
-  const containerListing = (await writesNothing() ? options.containers : void 0) ?? await readContainers();
-  if (containerListing === void 0) return result;
-  const containers = containerListing;
-  const inPlaces = new Set([...containers.values()].flat().map((document4) => document4.id));
-  await findGoneRestores();
-  for (const path2 of merge.conflicts) if (merge.result.has(path2) || merge.linear.has(path2) || ids.has(path2)) result.skipped.push({ path: path2, reason: "conflict" });
-  for (const entry of merge.held) result.skipped.push({ path: entry.from, reason: "renamed-to-unwritable" });
-  await checkpoint2("after-local-merge-before-record");
-  const uploads = await readUploads(git, expected.uploads);
-  const resultFiles = await filesOf(git, merge.tree);
-  const linearFiles = await filesOf(git, linearTip);
-  const texts = merge.texts;
-  const textOf = (file) => texts.get(file.oid).toString("utf8");
-  const candidate = await git.text(["commit-tree", "--no-gpg-sign", merge.tree, "-p", linearTip, "-p", tracked, "-m", "merge result"], {
-    env: { GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email, GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email }
-  });
-  const creates = merge.changes.filter((change) => change.kind === "create");
-  const adoptable = await adoptableDocuments(creates.filter((change) => change.restore === void 0));
-  const restoresInPlace = (change) => {
-    if (change.restore === void 0 || change.restore.recreate !== void 0) return false;
-    const destination2 = merge.result.get(change.path);
-    return containers.get(containerKey(context, destination2.place))?.some((document4) => document4.id === change.restore?.id) === true;
-  };
-  const additions = creates.filter((change) => !adoptable.has(change.path) && !restoresInPlace(change)).map((change) => merge.result.get(change.path));
-  for (const change of merge.changes) {
-    if (change.kind !== "keep" || !change.place) continue;
-    const destination2 = merge.result.get(change.to);
-    const present = containers.get(containerKey(context, destination2.place))?.some((document4) => document4.id === change.id);
-    if (!present) additions.push(destination2);
-  }
-  result.capacity = assessCapacity(context, containers, additions, options.documentCap);
-  if (capacityBlocked(result.capacity)) {
+  if (capacityBlocked(plan.capacity)) {
     result.code = "container-cap";
-    result.notAttempted = merge.changes.map(changePath);
-    return result;
+    result.notAttempted = [...plan.create, ...plan.overwrite, ...plan.trash].map((entry) => entry.path).sort();
+    return { plan, result };
+  }
+  const rememberedDocuments = /* @__PURE__ */ new Map();
+  const remember = (path2, document4) => {
+    const before = previous3.get(path2);
+    const saved2 = before?.id === document4.id ? before.saved : void 0;
+    ids.set(path2, withPlainFiles(path2, { id: document4.id, observedDigest: observedDigest(document4), ...saved2 === void 0 ? {} : { saved: saved2 } }));
+    stored.set(path2, document4.content ?? "");
+    rememberedDocuments.set(path2, document4);
+  };
+  let unpushed = 0;
+  let uploadsPushed = uploads.size;
+  const pushProgress = async () => {
+    const updates = [];
+    const idsCommit = await commitIds(git, expected.ids, ids, identity, {
+      message: initialSyncProgressMessage(fetched.tracked),
+      always: true,
+      written: sentHashes
+    });
+    updates.push({ ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit });
+    if (uploads.size !== uploadsAtStart || expected.uploads !== null) {
+      const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey);
+      updates.push({ ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit });
+    }
+    const pushed = await pushAtomic(git, options.config, updates);
+    if (!pushed.ok) throw new StateMovedError2();
+    expected.ids = idsCommit;
+    if (updates.length > 1) expected.uploads = updates[1].next;
+    result.progressPushes += 1;
+    unpushed = 0;
+    uploadsPushed = uploads.size;
+  };
+  const reconcileMark = async (path2, document4, hash, listed = document4) => {
+    const entry = ids.get(path2);
+    if (entry === void 0 || entry.id !== document4.id || document4.content === void 0) return;
+    const shown = entry.saved === void 0 && listed.icon === MARKS.conflict.icon && listed.color === MARKS.conflict.color && detectConflicts(listed.content ?? "").length > 0;
+    const outcome2 = await reconcileDocumentMark({
+      document: document4,
+      entry: shown ? { ...entry, saved: { icon: null, color: null } } : entry,
+      linear,
+      includeUpdatedBody: true,
+      noticeId: (state) => stableId("initial-sync", state, document4.id, hash),
+      onConflictNotice: (change) => result.conflictNotices[change].push(path2),
+      persistEntry: async (next) => {
+        ids.set(path2, next);
+        await pushProgress();
+      }
+    });
+    const updated = outcome2.updatedDocument;
+    if (updated !== void 0 && matchesObservedBody(updated, document4)) {
+      ids.set(path2, { ...outcome2.entry, observedDigest: observedDigest(updated) });
+      rememberedDocuments.set(path2, updated);
+    }
+  };
+  const skippedTitles = /* @__PURE__ */ new Set();
+  const titleKey2 = (place, title) => `${placeKey2(place)}\0${title.normalize("NFC")}`;
+  const work = [
+    ...plan.overwrite.map((entry) => ({ kind: "overwrite", entry })),
+    ...plan.create.map((entry) => ({ kind: "create", entry }))
+  ].sort((a, b) => compare5(a.entry.path, b.entry.path));
+  const documentIds = /* @__PURE__ */ new Map();
+  for (const entry of plan.overwrite) documentIds.set(entry.path, entry.documentId);
+  const reserved = await readReservedIds(git, expected.ids);
+  const saved = /* @__PURE__ */ new Map();
+  for (const entry of plan.create) {
+    const chosen = (resumed ? previous3.get(entry.path)?.id : void 0) ?? reserved.get(entry.path);
+    if (chosen !== void 0 && !sources.documents.has(chosen)) saved.set(entry.path, chosen);
   }
   const taken = /* @__PURE__ */ new Set();
-  const usingReserved = new Set(creates.filter((change) => !adoptable.has(change.path) && reserved.has(change.path)).map((change) => change.path));
-  let unchecked;
+  if (saved.size > 0) for (const document4 of await linear.getDocuments([...new Set(saved.values())])) taken.add(document4.id);
+  for (const entry of plan.create) {
+    const chosen = saved.get(entry.path);
+    documentIds.set(entry.path, chosen !== void 0 && !taken.has(chosen) ? chosen : newId());
+    ids.set(entry.path, withPlainFiles(entry.path, { id: documentIds.get(entry.path) }));
+  }
   try {
-    const saved = [...new Set([...usingReserved].map((path2) => reserved.get(path2)))];
-    for (const id of saved) if (inPlaces.has(id)) taken.add(id);
-    const unlisted = saved.filter((id) => !inPlaces.has(id));
-    if (unlisted.length > 0) for (const document4 of await linear.getDocuments(unlisted, { withContent: false })) taken.add(document4.id);
-  } catch (error) {
-    if (error instanceof LinearStoppedError) {
-      result.stopped = error.reason;
-      result.notAttempted = merge.changes.map(changePath);
-      result.code = "stopped";
-      return result;
+    for (const transform of transforms) {
+      await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads, documentIds, plainFiles: provenance.plainFiles, unknownProvenance: provenance.unknown });
     }
-    if (!(error instanceof LinearError)) throw error;
-    unchecked = error;
-  }
-  const documentIds = /* @__PURE__ */ new Map();
-  for (const [path2, entry] of ids) documentIds.set(path2, entry.id);
-  for (const change of merge.changes) if (change.kind === "keep") documentIds.set(change.to, change.id);
-  for (const change of creates) {
-    const saved = reserved.get(change.path);
-    const restoreId = change.restore?.recreate ?? change.restore?.id;
-    documentIds.set(change.path, restoreId ?? adoptable.get(change.path)?.id ?? (saved !== void 0 && !taken.has(saved) ? saved : newId()));
-  }
-  const stored = /* @__PURE__ */ new Map();
-  for (const change of [...merge.changes, ...merge.unchanged]) if (change.kind === "keep" && change.from !== change.to) {
-    const plain = plainFiles.get(change.from);
-    if (plain !== void 0) {
-      const relocated = [...plain].map((target) => posix8.normalize(posix8.join(posix8.dirname(change.to), posix8.relative(posix8.dirname(change.from), target))));
-      plainFiles.set(change.to, /* @__PURE__ */ new Set([...plain, ...relocated]));
-    }
-  }
-  const nextIds = new Map(ids);
-  for (const change of merge.unchanged) {
-    if (change.from === change.to) continue;
-    const entry = nextIds.get(change.from);
-    const plain = plainFiles.get(change.to);
-    nextIds.set(change.to, plain === void 0 || plain.size === 0 ? entry : { ...entry, plainFiles: [...plain] });
-    nextIds.delete(change.from);
-    documentIds.set(change.to, change.id);
-  }
-  const nextReserved = new Map([...reserved].filter(([path2]) => resultFiles.has(path2)));
-  for (const change of creates) if (!adoptable.has(change.path)) nextReserved.set(change.path, documentIds.get(change.path));
-  const notDone = [];
-  const leftOutNew = [];
-  const leftOutForGood = (change, error) => (error.rule === UPLOAD_TOO_LARGE || error.rule === UPLOAD_UNREADABLE && error.missingLfsObject) && change.kind === "create" && change.restore === void 0 && !adoptable.has(change.path) && change.path !== "README.md" && !change.path.endsWith("/README.md");
-  const tipUploads = cacheLost ? /* @__PURE__ */ new Map() : new Map(uploads);
-  const movedTo = new Map([...merge.unchanged, ...merge.changes].flatMap((change) => change.kind === "keep" && change.from !== change.to ? [[change.from, change.to]] : []));
-  const superseded = new Map(
-    [...supersededBefore].map(([id, path2]) => [id, movedTo.get(path2) ?? path2]).filter(([id, path2]) => resultFiles.has(path2) && documentIds.has(path2) && documentIds.get(path2) !== id)
-  );
-  for (const [path2, id] of reserved) if (documentIds.has(path2) && documentIds.get(path2) !== id) superseded.set(id, path2);
-  const relinks = /* @__PURE__ */ new Map();
-  if (superseded.size > 0 && transforms.length > 0) {
-    const targets2 = new Set(superseded.values());
-    const linked = (path2, text6, from = path2) => {
-      let destinations2;
+    let written = 0;
+    let beforeWriteReached = false;
+    for (let index2 = 0; index2 < work.length; index2 += 1) {
+      const item = work[index2];
+      const { path: path2 } = item.entry;
+      const stop = linear.stopped ?? (stopAfter !== void 0 && written >= stopAfter ? { kind: "test-threshold", documents: stopAfter } : void 0);
+      if (stop !== void 0) {
+        result.stopped = stop;
+        result.notAttempted = work.slice(index2).map((rest) => rest.entry.path);
+        break;
+      }
+      const document4 = item.kind === "overwrite" ? sources.documents.get(item.entry.documentId) : void 0;
+      if (item.kind === "overwrite" && document4 === void 0) throw new Error(message("initial-sync.document-not-listed", { path: path2 }));
       try {
-        destinations2 = linkDestinations(splitFile(text6).body);
-      } catch (error) {
-        if (!(error instanceof MarkdownLimitError)) throw error;
-        relinks.set(path2, new Set(targets2));
-        return;
-      }
-      const found = destinations2.flatMap((destination2) => {
-        const target = resolveRelative(from, destination2.url)?.path;
-        return target !== void 0 && targets2.has(target) ? [target] : [];
-      });
-      if (found.length > 0) relinks.set(path2, /* @__PURE__ */ new Set([...relinks.get(path2) ?? [], ...found]));
-    };
-    const covered = /* @__PURE__ */ new Set();
-    for (const change of [...merge.unchanged, ...merge.changes]) {
-      if (change.kind === "trash") {
-        covered.add(change.path);
-        const tip2 = merge.linear.get(change.path);
-        if (tip2 !== void 0) linked(change.path, textOf(tip2));
-      }
-      if (change.kind !== "keep") continue;
-      covered.add(change.from);
-      linked(change.to, textOf(merge.result.get(change.to)));
-      const tip = merge.linear.get(change.from);
-      if (tip !== void 0) linked(change.to, textOf(tip), change.from);
-    }
-    const rest = [...ids.keys()].flatMap((path2) => {
-      const oid = covered.has(path2) ? void 0 : resultFiles.get(path2) ?? linearFiles.get(path2);
-      return oid === void 0 ? [] : [[path2, oid]];
-    });
-    const blobs = await readBlobs(git, rest.map(([, oid]) => oid));
-    for (const [path2, oid] of rest) linked(path2, blobs.get(oid).toString("utf8"));
-  }
-  const keptSuperseded = /* @__PURE__ */ new Set();
-  const nextSuperseded = () => new Map([...superseded].filter(([id, path2]) => keptSuperseded.has(id) || [...relinks].some(([document4, paths]) => paths.has(path2) && !stored.has(document4) && !result.trashed.includes(document4))));
-  let written = 0;
-  let rereadAt = 0;
-  const timed = async (write) => {
-    const done = await write();
-    const window = Math.round((performance.now() - rereadAt) * 10) / 10;
-    result.rereadWindowMs = Math.max(result.rereadWindowMs ?? 0, window);
-    return done;
-  };
-  try {
-    const plan = transformPlan();
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: candidate, linear, plan, uploads, documentIds, plainFiles });
-    for (const transform of tipTransforms) await transform.prepare?.({ git, tracked: linearTip, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads: tipUploads, documentIds, plainFiles });
-    await findLinkedFileChanges();
-    const changes = merge.changes;
-    const stopAt = (from, reason) => {
-      result.stopped = reason;
-      const rest = changes.slice(from);
-      result.notAttempted = rest.map(changePath);
-      notDone.push(...rest);
-      throw new StopWriting();
-    };
-    if (changes.length > 0) await checkpoint2("before-write");
-    for (let start2 = 0; start2 < changes.length; start2 += rereadBatch) {
-      const batch = changes.slice(start2, start2 + rereadBatch);
-      let current;
-      try {
-        current = await reread(batch);
-        rereadAt = performance.now();
-      } catch (error) {
-        if (error instanceof LinearStoppedError) stopAt(start2, error.reason);
-        if (!(error instanceof LinearError)) throw error;
-        for (const change of batch) result.failed.push({ path: changePath(change), operation: error.operation, error: describeLinearError(error) });
-        notDone.push(...batch);
-        continue;
-      }
-      await checkpoint2("after-reread-before-write");
-      for (let index2 = 0; index2 < batch.length; index2 += 1) {
-        const change = batch[index2];
-        const stop = linear.stopped ?? (stopAfter !== void 0 && written >= stopAfter ? { kind: "test-threshold", documents: stopAfter } : void 0);
-        if (stop !== void 0) stopAt(start2 + index2, stop);
-        const path2 = changePath(change);
-        if (change.kind === "create" && unchecked !== void 0 && usingReserved.has(path2)) {
-          result.failed.push({ path: path2, operation: unchecked.operation, error: describeLinearError(unchecked) });
-          notDone.push(change);
+        if (document4 !== void 0) parse2(document4.content ?? "");
+        const source = splitFile(texts.get(path2)).body;
+        const body2 = await transformBody(transforms, path2, source);
+        const hash = sha2564(body2);
+        sent.set(path2, body2);
+        let held;
+        const holds = () => held ??= document4 !== void 0 && (holdsBody(document4.content ?? "", body2) || sameLinkDestinations(document4.content ?? "", body2) && holdsBody(fixText(restoreBody(transforms, path2, document4.content ?? "", body2, sources.input.mapping.files)), source));
+        const before = previous3.get(path2);
+        if (document4 !== void 0 && resumed && before?.id === document4.id && writtenBefore.get(path2) === hash && (before.observedDigest !== void 0 && observedDigest(document4) === before.observedDigest || holds())) {
+          result.skippedCompleted.push(path2);
+          sentHashes.set(path2, hash);
+          remember(path2, document4);
+          await reconcileMark(path2, document4, hash);
           continue;
         }
+        if (document4 !== void 0 && holds()) {
+          result.unchanged.push(path2);
+          sentHashes.delete(path2);
+          remember(path2, document4);
+          await reconcileMark(path2, document4, hash);
+          continue;
+        }
+        if (!beforeWriteReached) {
+          beforeWriteReached = true;
+          await checkpoint2("before-write");
+        }
+        if (item.kind === "create") {
+          const title = item.entry.title.normalize("NFC");
+          const id = documentIds.get(path2);
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body2 });
+          remember(path2, created);
+          sentHashes.set(path2, hash);
+          result.created.push(path2);
+          await checkpoint2("document-created-before-ids-push");
+          written += 1;
+          unpushed += 1;
+          await reconcileMark(path2, created, hash);
+        } else {
+          const current = await linear.getDocument(item.entry.documentId);
+          if (current === null || !unchangedSince(current, document4)) {
+            result.leftOutAtWrite.push({ path: path2, rule: "changed-during-run" });
+            skippedTitles.add(titleKey2(item.entry.place, item.entry.title));
+            continue;
+          }
+          const updated = await linear.updateDocument(item.entry.documentId, { content: body2 });
+          remember(path2, updated);
+          sentHashes.set(path2, hash);
+          result.overwritten.push(path2);
+          written += 1;
+          unpushed += 1;
+          await reconcileMark(path2, updated, hash, document4);
+        }
+      } catch (error) {
+        if (error instanceof MarkdownLimitError) {
+          result.leftOutAtWrite.push({ path: path2, rule: "markdown-complexity" });
+          continue;
+        }
+        if (error instanceof LeaveOutError) {
+          result.leftOutAtWrite.push(error.files.length > 0 ? { path: path2, rule: error.rule, files: [...error.files] } : { path: path2, rule: error.rule });
+          continue;
+        }
+        if (error instanceof DocumentTooLongError) {
+          result.leftOutAtWrite.push({ path: path2, rule: "content-too-long" });
+          continue;
+        }
+        if (error instanceof LinearStoppedError) {
+          result.stopped = error.reason;
+          result.notAttempted = work.slice(index2).map((rest) => rest.entry.path);
+          break;
+        }
+        if (error instanceof LinearReadBackError) {
+          ids.set(path2, withPlainFiles(path2, { id: error.document.id }));
+          unpushed += 1;
+        }
+        if (error instanceof LinearError) {
+          result.failed.push({ path: path2, operation: error.operation, error: describeLinearError(error) });
+          continue;
+        }
+        throw error;
+      }
+      if (unpushed >= batch) await pushProgress();
+    }
+    const writesDone = result.stopped === void 0 && result.failed.length === 0;
+    if (writesDone) {
+      for (let index2 = 0; index2 < plan.trash.length; index2 += 1) {
+        const entry = plan.trash[index2];
+        if (linear.stopped !== void 0) {
+          result.stopped = linear.stopped;
+          result.notAttempted = plan.trash.slice(index2).map((rest) => rest.path);
+          break;
+        }
         try {
-          const done = await apply(change, current);
-          if (done) written += 1;
-          else notDone.push(change);
+          if (skippedTitles.has(titleKey2(entry.place, entry.title))) continue;
+          const listed = sources.documents.get(entry.documentId);
+          const current = await linear.getDocument(entry.documentId);
+          if (listed === void 0 || current === null || !unchangedSince(current, listed)) {
+            if (!work.some((planned) => planned.entry.path === entry.path)) result.leftOutAtWrite.push({ path: entry.path, rule: "changed-during-run" });
+            continue;
+          }
+          await linear.trashDocument(entry.documentId);
+          result.trashed.push(entry.path);
         } catch (error) {
-          if (error instanceof MarkdownLimitError) {
-            result.leftOutAtWrite.push({ path: path2, rule: "markdown-complexity" });
-            notDone.push(change);
-            continue;
+          if (error instanceof LinearStoppedError) {
+            result.stopped = error.reason;
+            result.notAttempted = plan.trash.slice(index2).map((rest) => rest.path);
+            break;
           }
-          if (error instanceof LeaveOutError) {
-            result.leftOutAtWrite.push(error.files.length > 0 ? { path: path2, rule: error.rule, files: [...error.files] } : { path: path2, rule: error.rule });
-            if (leftOutForGood(change, error)) leftOutNew.push(change);
-            else notDone.push(change);
-            continue;
-          }
-          if (error instanceof LinearStoppedError) stopAt(start2 + index2, error.reason);
           if (error instanceof LinearError) {
-            result.failed.push({ path: path2, operation: error.operation, error: describeLinearError(error) });
-            notDone.push(change);
+            result.failed.push({ path: entry.path, operation: error.operation, error: describeLinearError(error) });
             continue;
           }
           throw error;
         }
       }
     }
+    if (result.stopped !== void 0 || result.failed.length > 0) {
+      if (unpushed > 0 || uploads.size !== uploadsPushed || await readInitialSyncProgress(git, expected.ids) === null) await pushProgress();
+      result.code = result.stopped !== void 0 ? "stopped" : "write-failed";
+      return { plan, result };
+    }
+    await checkpoint2("after-write-before-record");
+    const recorded = await record();
+    if (recorded === null) {
+      result.code = "state-moved";
+      result.progressRecorded = unpushed === 0;
+      return { plan, result };
+    }
+    result.record = recorded;
+    result.complete = true;
+    return { plan, result };
   } catch (error) {
     if (error instanceof StateMovedError2) {
       result.code = "state-moved";
-      return result;
+      result.progressRecorded = unpushed === 0;
+      return { plan, result };
     }
-    if (error instanceof LinearStoppedError) {
-      result.stopped = error.reason;
-      result.notAttempted = merge.changes.map(changePath);
-      notDone.splice(0, notDone.length, ...merge.changes);
-    } else if (!(error instanceof StopWriting)) throw error;
+    if (unpushed > 0 || uploads.size !== uploadsPushed) await pushProgress().catch(() => void 0);
+    throw error;
   }
-  if (written > 0) result.changed = true;
-  const undone = /* @__PURE__ */ new Set([
-    ...notDone.flatMap(pathsOf),
-    ...result.notAttempted,
-    ...result.skipped.map((entry) => entry.path),
-    ...result.failed.map((entry) => entry.path),
-    ...result.leftOutAtWrite.map((entry) => entry.path)
-  ]);
-  result.conflicts = merge.marked.filter((path2) => !undone.has(path2));
-  result.decided = merge.decided.filter((entry) => !undone.has(entry.path));
-  await checkpoint2("after-write-before-record");
-  const allDone = notDone.length === 0 && merge.conflicts.length === 0 && merge.held.length === 0 && pendingRepairs2.size === 0;
-  const recorded = await record(allDone);
-  if (recorded === null) {
-    result.code = "state-moved";
-    return result;
-  }
-  if (result.stopped !== void 0) result.code = "stopped";
-  else if (result.failed.length > 0) result.code = "write-failed";
-  result.complete = allDone;
-  return result;
-  async function findLinkedFileChanges() {
-    if (transforms.length === 0) return;
-    const changedNames = /* @__PURE__ */ new Set();
-    for (const path2 of /* @__PURE__ */ new Set([...linearFiles.keys(), ...resultFiles.keys()])) {
-      if (!path2.endsWith(".md") && linearFiles.get(path2) !== resultFiles.get(path2)) changedNames.add(path2.slice(path2.lastIndexOf("/") + 1));
-    }
-    const keptText = [...merge.unchanged, ...merge.changes.filter((change) => change.kind === "keep" && !change.content)];
-    for (const change of keptText) if (relinks.has(change.to)) markContent(change);
-    const sameText = keptText.filter((change) => !relinks.has(change.to));
-    const relinked = [];
-    if (!cacheLost && changedNames.size === 0 && !sameText.some((change) => change.from !== change.to)) {
-      sortChanges();
-      return;
-    }
-    const comparisonTransforms = options.transforms?.() ?? [];
-    for (const transform of comparisonTransforms) await transform.prepare?.({ git, tracked: candidate, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads, documentIds, plainFiles });
-    for (const change of sameText) {
-      const next = merge.result.get(change.to);
-      const previous3 = merge.linear.get(change.from);
-      const text6 = textOf(next);
-      const moved = change.from !== change.to;
-      if (!moved && !cacheLost && ![...changedNames].some((name) => text6.includes(name) || text6.includes(encodeURI(name)) || text6.includes(encodeURIComponent(name)))) continue;
-      let differs;
-      try {
-        const written2 = await transformBody(comparisonTransforms, change.to, splitFile(text6).body);
-        if (cacheLost && !moved) {
-          const links = await transformBody(tipTransforms, change.from, splitFile(textOf(previous3)).body).then(() => false, (error) => error instanceof UploadRefusedError);
-          if (links) relinked.push({ change, written: written2 });
-          continue;
-        }
-        differs = written2 !== await transformBody(tipTransforms, change.from, splitFile(textOf(previous3)).body);
-      } catch (error) {
-        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
-        differs = true;
-      }
-      if (differs) markContent(change);
-    }
-    if (relinked.length > 0) {
-      let held;
-      try {
-        held = new Map((await linear.getDocuments(relinked.map(({ change }) => change.id), { withContent: true })).map((document4) => [document4.id, document4.content]));
-      } catch (error) {
-        if (!(error instanceof LinearError) || error instanceof LinearStoppedError) throw error;
-      }
-      for (const { change, written: written2 } of relinked) if (held?.get(change.id) !== written2) markContent(change);
-    }
-    sortChanges();
-    function markContent(change) {
-      if (merge.changes.includes(change)) change.content = true;
-      else merge.changes.push({ ...change, content: true });
-    }
-    function sortChanges() {
-      merge.changes.sort((a, b) => compare9(changePath(a), changePath(b)));
-    }
-  }
-  async function adoptableDocuments(changes) {
-    const found = /* @__PURE__ */ new Map();
-    if (changes.length === 0) return found;
-    const mapped = new Set([...ids.values()].map((entry) => entry.id));
-    const byPlace = /* @__PURE__ */ new Map();
-    for (const change of changes) {
-      const file = merge.result.get(change.path);
-      const key = containerKey(context, file.place);
-      const group = byPlace.get(key) ?? { place: file.place, paths: [] };
-      group.paths.push(change.path);
-      byPlace.set(key, group);
-    }
-    for (const { place, paths } of byPlace.values()) {
-      const listed = (containers.get(containerKey(context, place)) ?? []).filter((document4) => !document4.trashed && document4.archivedAt === null);
-      const oldestFirst = [...listed].sort((a, b) => compare9(a.createdAt, b.createdAt) || compare9(a.id, b.id));
-      for (const path2 of paths) {
-        const title = merge.result.get(path2).title.normalize("NFC");
-        const fits = (candidate2) => !mapped.has(candidate2.id) && candidate2.title.normalize("NFC") === title;
-        const document4 = oldestFirst.find((candidate2) => candidate2.id === reserved.get(path2) && fits(candidate2)) ?? oldestFirst.find(fits);
-        if (document4 !== void 0) {
-          mapped.add(document4.id);
-          found.set(path2, document4);
-        }
-      }
-    }
-    return found;
-  }
-  async function reread(batch) {
-    const wanted = batch.flatMap((change) => change.kind === "create" ? [] : [change.id]);
-    for (const change of batch) if (change.kind === "create" && adoptable.has(change.path)) wanted.push(adoptable.get(change.path).id);
-    for (const change of batch) if (change.kind === "create" && change.restore !== void 0) wanted.push(change.restore.recreate ?? change.restore.id);
-    const documents = wanted.length === 0 ? [] : await linear.getDocuments(wanted, { withContent: true });
-    return new Map(documents.map((document4) => [document4.id, document4]));
-  }
-  async function unchangedSinceCapture(held, path2) {
-    if (held.trashed || held.archivedAt !== null) return false;
-    const document4 = withCurrentIds(held);
-    const synchronized = merge.linear.get(path2);
-    if (synchronized !== void 0) return holdsVersion(document4, synchronized, textOf(synchronized), tipTransforms, true);
-    const baseline = await lastSynchronized(git, linearTip, path2, linear.facts);
-    if (baseline === null) return false;
-    const baselineTransforms = options.transforms?.() ?? [];
-    const plan = { create: [], overwrite: [], trash: [], leftOut: [] };
-    for (const transform of baselineTransforms) {
-      await transform.prepare?.({ git, tracked: baseline.commit, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds, plainFiles });
-    }
-    return holdsVersion(document4, baseline.file, baseline.text, baselineTransforms, false);
-  }
-  function withCurrentIds(document4) {
-    if (superseded.size === 0 || document4.content == null) return document4;
-    const held = document4.content;
-    let content4 = "";
-    let at = 0;
-    for (const { from, to, id, path: path2 } of supersededLinks(held)) {
-      content4 += held.slice(at, from) + held.slice(from, to).replace(id, documentIds.get(path2));
-      at = to;
-    }
-    content4 += held.slice(at);
-    return content4 === held ? document4 : { ...document4, content: content4 };
-  }
-  function supersededLinks(text6) {
-    return linkDestinations(text6).flatMap(({ from, to, url }) => {
-      const id = /^https:\/\/linear\.app\/[^/]+\/document\/([^/#?]+)/.exec(url)?.[1];
-      const path2 = id === void 0 ? void 0 : superseded.get(id);
-      return id === void 0 || path2 === void 0 ? [] : [{ from, to, id, path: path2 }];
-    });
-  }
-  async function holdsVersion(document4, file, text6, through, uncheckable) {
-    const folder = file.path.slice(0, -(file.title.length + ".md".length)).replace(/\/$/, "");
-    const occupied = new Set([...linearFiles.keys()].filter((path2) => path2 !== file.path));
-    if (document4.title.normalize("NFC") !== file.title.normalize("NFC") && documentPath(folder, document4.title, document4.id, occupied, file.path) !== file.path) return false;
-    if (resolves(file.place) && !inPlace(document4, file.place)) return false;
-    const repair = ids.get(file.path)?.pullRewrite;
-    if (repair !== void 0 && createHash15("sha256").update(text6).digest("hex") === repair.hash) {
-      return createHash15("sha256").update(document4.content ?? "").digest("hex") === repair.observedHash;
-    }
-    let expected2;
-    try {
-      expected2 = await transformBody(through, file.path, splitFile(text6).body);
-    } catch (error) {
-      if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
-      return uncheckable;
-    }
-    return sameMarkdown(document4.content ?? "", expected2);
-  }
-  function resolves(place) {
-    return place.kind === "project" ? targets.projects.has(projectKey(place.team, place.project)) : targets.teams.has(place.team);
-  }
-  function inPlace(document4, place) {
-    const where = placeId(targets, place);
-    return "projectId" in where ? document4.projectId === where.projectId : document4.projectId === null && document4.teamId === where.teamId;
-  }
-  async function apply(change, current) {
-    if (change.kind === "trash") return trash(change, current);
-    if (change.kind === "keep") return keep(change, current);
-    return create(change, current);
-  }
-  async function trash(change, current) {
-    const document4 = current.get(change.id);
-    if (document4 === void 0 || document4.trashed || document4.archivedAt !== null) {
-      forgetEntry(change.path);
-      result.trashed.push(change.path);
-      return true;
-    }
-    if (!await unchangedSinceCapture(document4, change.path)) return skip(change.path, "edited-in-linear");
-    await timed(() => linear.trashDocument(change.id));
-    forgetEntry(change.path);
-    result.trashed.push(change.path);
-    return true;
-  }
-  async function keep(change, current) {
-    const document4 = current.get(change.id);
-    if (document4 === void 0 || document4.trashed || document4.archivedAt !== null) return skip(change.to, "missing-in-linear");
-    const file = merge.result.get(change.to);
-    const patch = {};
-    let readBack;
-    if (change.content) patch.content = await transformBody(transforms, change.to, splitFile(textOf(file)).body);
-    if (change.title) patch.title = file.title.normalize("NFC");
-    if (change.place) Object.assign(patch, placePatch(file.place));
-    const holds = (patch.content === void 0 || document4.content != null && sameMarkdown(document4.content, patch.content)) && (patch.title === void 0 || document4.title.normalize("NFC") === patch.title) && (!change.place || inPlace(document4, file.place));
-    if (holds) {
-      if (patch.content !== void 0) {
-        stored.set(change.to, { content: document4.content ?? "", sent: patch.content, document: document4 });
-        readBack = document4;
-      }
-    } else {
-      if (!await unchangedSinceCapture(document4, change.from)) return skip(change.to, "edited-in-linear");
-      const updated = await timed(() => linear.updateDocument(change.id, patch));
-      if (patch.content !== void 0) {
-        stored.set(change.to, { content: updated.content ?? "", sent: patch.content, document: updated });
-        readBack = updated;
-      }
-    }
-    if (change.comment !== void 0 && document4.documentContentId !== null) {
-      await linear.ensureDocumentComment(document4.documentContentId, change.comment, stableId("retitled", change.id, merge.base));
-    }
-    const entry = nextIds.get(change.from);
-    nextIds.delete(change.from);
-    const next = entry !== void 0 && entry.id === change.id ? { ...entry } : { id: change.id };
-    if (change.content) delete next.pullRewrite;
-    const plain = plainFiles.get(change.to);
-    if (plain !== void 0 && plain.size > 0) next.plainFiles = [...plain];
-    nextIds.set(change.to, next);
-    if (readBack !== void 0) await reconcileMark(change.to, readBack);
-    if (change.content) result.updated.push(change.to);
-    if (change.from !== change.to || change.title || change.place) result.relocated.push({ from: change.from, to: change.to });
-    return true;
-  }
-  async function create(change, current) {
-    const file = merge.result.get(change.path);
-    const body2 = await transformBody(transforms, change.path, splitFile(textOf(file)).body);
-    const id = documentIds.get(change.path);
-    if (change.restore !== void 0 && change.restore.recreate === void 0) return restore(change, file, body2, current.get(change.restore.id));
-    const recreated = change.restore?.recreate === void 0 ? void 0 : current.get(change.restore.recreate);
-    if (recreated !== void 0 && (recreated.trashed || recreated.archivedAt !== null)) return restore(change, file, body2, recreated);
-    const listed = adoptable.get(change.path);
-    const adopted = recreated ?? (listed === void 0 ? void 0 : current.get(listed.id));
-    if (listed !== void 0 && (adopted === void 0 || adopted.trashed || adopted.archivedAt !== null)) return skip(change.path, "missing-in-linear");
-    let document4;
-    if (adopted !== void 0) {
-      const held = withCurrentIds(adopted);
-      if (!sameMarkdown(held.content ?? "", body2)) {
-        for (const { id: id2 } of supersededLinks(adopted.content ?? "")) keptSuperseded.add(id2);
-        return skip(change.path, "edited-in-linear");
-      }
-      document4 = held === adopted ? adopted : await timed(() => linear.updateDocument(adopted.id, { content: body2 }));
-      if (recreated === void 0) result.adopted.push(change.path);
-    } else {
-      document4 = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize("NFC"), content: body2 });
-      await checkpoint2("document-created-before-ids-push");
-    }
-    stored.set(change.path, { content: document4.content ?? "", sent: body2, document: document4 });
-    nextIds.set(change.path, { id: document4.id });
-    result.created.push(change.path);
-    await reconcileMark(change.path, document4);
-    return true;
-  }
-  async function restore(change, file, body2, removed) {
-    if (removed === void 0) return skip(change.path, "missing-in-linear");
-    const seen = options.captured?.get(removed.id);
-    if (seen === void 0 && !inPlaces.has(removed.id)) return skip(change.path, "missing-in-linear");
-    const changed2 = seen === void 0 ? !removed.trashed && removed.archivedAt === null : seen.updatedAt !== removed.updatedAt || seen.trashed !== removed.trashed || seen.projectId !== removed.projectId || seen.teamId !== removed.teamId;
-    if (changed2) return skip(change.path, "edited-in-linear");
-    const document4 = await timed(async () => {
-      if (removed.trashed || removed.archivedAt !== null) await linear.restoreDocument(removed.id);
-      return linear.updateDocument(removed.id, { content: body2, title: file.title.normalize("NFC"), ...placePatch(file.place) });
-    });
-    result.restored.push(change.path);
-    stored.set(change.path, { content: document4.content ?? "", sent: body2, document: document4 });
-    const previous3 = nextIds.get(change.path);
-    nextIds.set(change.path, previous3?.id === document4.id ? previous3 : { id: document4.id });
-    await reconcileMark(change.path, document4);
-    return true;
-  }
-  async function writesNothing() {
-    if (merge.changes.length > 0 || cacheLost || releasing || supersededBefore.size > 0) return false;
-    if ([...reserved].some(([path2, id]) => ids.has(path2) && ids.get(path2)?.id !== id)) return false;
-    return merge.tree === await git.text(["rev-parse", `${linearTip}^{tree}`]);
-  }
-  async function findGoneRestores() {
-    const restoring = merge.changes.filter((change) => change.kind === "create" && change.restore !== void 0);
-    if (restoring.length === 0) return;
-    let found;
-    try {
-      found = await linear.getDocuments(restoring.map((change) => change.restore.id));
-    } catch (error) {
-      if (!(error instanceof LinearError)) throw error;
-      return;
-    }
-    const present = new Set(found.map((document4) => document4.id));
-    for (const change of restoring) {
-      const restore2 = change.restore;
-      if (present.has(restore2.id)) continue;
-      change.restore = { ...restore2, recreate: stableId("recreated", restore2.id) };
-      const entry = merge.decided.find((decided) => decided.path === change.path);
-      if (entry !== void 0) entry.summary = restore2.gone;
-    }
-  }
-  async function reconcileMark(path2, document4) {
-    const entry = nextIds.get(path2);
-    if (entry === void 0 || entry.id !== document4.id || document4.content === void 0) return;
-    await reconcileDocumentMark({
-      document: document4,
-      entry,
-      linear,
-      onConflictNotice: (change) => result.conflictNotices[change].push(path2),
-      persistEntry: async (next) => {
-        nextIds.set(path2, next);
-        await pushIds();
-      }
-    });
-  }
-  function forgetEntry(path2) {
-    const entry = nextIds.get(path2);
-    if (entry !== void 0 && releasedHold(entry)) return;
-    nextIds.delete(path2);
-  }
-  async function pushIds() {
-    for (const path2 of nextIds.keys()) nextReserved.delete(path2);
-    const next = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved, superseded: nextSuperseded() });
-    const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, "ids"), expected: expected.ids, next }]);
-    if (!pushed.ok) throw new StateMovedError2();
-    expected.ids = next;
-  }
-  function placePatch(place) {
-    const where = placeId(targets, place);
-    return "projectId" in where ? { projectId: where.projectId } : { teamId: where.teamId, projectId: null };
-  }
-  function skip(path2, reason) {
-    result.skipped.push({ path: path2, reason });
-    return false;
-  }
-  function transformPlan() {
-    const plan = { create: [], overwrite: [], trash: [], leftOut: [] };
-    for (const change of merge.changes) {
-      if (change.kind === "trash") continue;
-      const path2 = changePath(change);
-      const file = merge.result.get(path2);
-      if (change.kind === "keep") plan.overwrite.push({ path: path2, title: file.title, place: file.place, documentId: change.id });
-      else plan.create.push({ path: path2, title: file.title, place: file.place });
-    }
-    plan.leftOut = merge.leftOut.map((entry) => ({ path: entry.path, rules: entry.rules, lines: [] }));
-    return plan;
-  }
-  async function record(merged) {
+  async function record() {
+    const synced = /* @__PURE__ */ new Set([...result.created, ...result.overwritten, ...result.unchanged, ...result.skippedCompleted]);
+    const finalIds = new Map([...ids].filter(([path2]) => synced.has(path2)));
     const changes = /* @__PURE__ */ new Map();
-    const fromTip = /* @__PURE__ */ new Set();
-    const keepTip = (path2) => fromTip.add(path2);
-    for (const [path2, { content: content4, sent }] of stored) {
-      const file = merge.result.get(path2);
-      const text6 = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path2, content4, sent));
-      if (resultFiles.get(path2) !== void 0 && text6 === textOf(file)) continue;
-      changes.set(path2, text6);
-    }
-    for (const change of notDone) for (const path2 of pathsOf(change)) keepTip(path2);
-    for (const path2 of merge.conflicts) keepTip(path2);
-    if (!merged) {
-      for (const path2 of /* @__PURE__ */ new Set([...linearFiles.keys(), ...resultFiles.keys()])) {
-        const derived = !path2.endsWith(".md") || path2 === "README.md" || path2.endsWith("/README.md");
-        if (derived && linearFiles.get(path2) !== resultFiles.get(path2)) keepTip(path2);
+    const reformatted = [];
+    for (const path2 of [...synced].sort(compare5)) {
+      const text6 = texts.get(path2);
+      const file = joinFile(splitFile(text6).head, restoreBody(transforms, path2, stored.get(path2) ?? "", sent.get(path2), sources.input.mapping.files));
+      if (file !== text6) {
+        changes.set(path2, file);
+        reformatted.push(path2);
       }
     }
-    for (const entry of merge.held) keepTip(entry.from);
-    for (const path2 of pendingRepairs2) keepTip(path2);
-    if (!merged) for (const path2 of [...merge.leftOut.map((entry) => entry.path), ...leftOutNew.map((change) => change.path)]) keepTip(path2);
-    const tipBlobs = await readBlobs(git, [...fromTip].flatMap((path2) => linearFiles.has(path2) ? [linearFiles.get(path2)] : []));
-    for (const path2 of fromTip) {
-      const oid = linearFiles.get(path2);
-      changes.set(path2, oid === void 0 ? null : tipBlobs.get(oid));
-    }
-    const parents = merged ? [linearTip, tracked] : [linearTip];
-    const previousPlain = new Map([...ids.values()].map((entry) => [entry.id, new Set(entry.plainFiles ?? [])]));
-    const plainTrailers = [...nextIds.values()].flatMap((entry) => (entry.plainFiles ?? []).filter((target) => !previousPlain.get(entry.id)?.has(target)).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
-    const message2 = (merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE) + (plainTrailers.length === 0 ? "" : `
+    const tracked = fetched.tracked;
+    const unproven = result.leftOutAtWrite.flatMap(({ path: path2, rule }) => {
+      const id = documentIds.get(path2);
+      return rule === LINK_PROVENANCE_UNKNOWN && id !== void 0 ? [provenanceUnknownTrailer(id)] : [];
+    });
+    const plainTrailers = [
+      ...[...finalIds.values()].flatMap((entry) => (entry.plainFiles ?? []).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`)),
+      ...unproven
+    ].sort(compare5);
+    const recordMessage = RECORD_MESSAGE + (plainTrailers.length === 0 ? "" : `
 
 ${plainTrailers.join("\n")}`);
-    const commit2 = await commitTree(git, { parents, base: merge.tree, changes, message: message2, identity, skipIfUnchanged: plainTrailers.length === 0 });
-    if (merged) {
-      for (const [path2, entry] of nextIds) if (entry.releaseBase !== void 0) {
-        delete entry.releaseBase;
-        delete entry.releasePaths;
-        if (!resultFiles.has(path2) && !linearFiles.has(path2)) forgetEntry(path2);
-      }
-    }
-    for (const path2 of nextIds.keys()) nextReserved.delete(path2);
-    const asWritten = new Map(
-      [...merged ? stored : []].flatMap(([path2, { document: document4 }]) => {
-        const file = merge.result.get(path2);
-        const held = !fromTip.has(path2) && file !== void 0 && document4.title.normalize("NFC") === file.title.normalize("NFC") && inPlace(document4, file.place);
-        return held ? [[document4.id, document4.updatedAt]] : [];
+    let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
+    if (expected.linear !== null && await sameRecord(expected.linear, linearCommit)) linearCommit = expected.linear;
+    const created = new Set(plan.create.map((entry) => entry.path));
+    const stillReserved = new Map(
+      result.leftOutAtWrite.filter(({ path: path2 }) => created.has(path2)).map(({ path: path2 }) => [path2, documentIds.get(path2)])
+    );
+    const entries = new Map([...plan.create, ...plan.overwrite].map((entry) => [entry.path, entry]));
+    const recorded = new Map(
+      [...result.created, ...result.overwritten, ...result.unchanged].flatMap((path2) => {
+        const document4 = rememberedDocuments.get(path2);
+        const entry = entries.get(path2);
+        if (document4 === void 0 || entry === void 0) return [];
+        const where = placeId(targets, entry.place);
+        const placed = "projectId" in where ? document4.projectId === where.projectId : document4.projectId === null && document4.teamId === where.teamId;
+        return placed && document4.title.normalize("NFC") === entry.title.normalize("NFC") ? [[document4.id, document4.updatedAt]] : [];
       })
     );
-    const keptMoved = merged && merge.keptMoves.size > 0;
-    const kept = [...keptAnnotations].map((path2) => merge.keptMoves.get(path2) ?? path2).filter((path2) => merge.result.has(path2) && !nextIds.has(path2));
-    const trailers = [...recordedTrailers(asWritten), ...keptMoved ? keptAnnotationsTrailers(kept) : []];
-    const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}
-
-${trailers.join("\n")}`;
-    const createBranch = options.createSyncBranch === true && commit2 !== linearTip && (await unverifiedPaths(git, tracked, commit2, context.mapping.zones)).length === 0;
-    const idsOf = (syncPushed) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...syncPushed === void 0 ? {} : { syncPushed } });
-    let recordedIds = await idsOf(createBranch ? context.pushedKey.record(branchRef(options.config.syncBranch), commit2) : void 0);
-    const rebuilt = cacheLost && merged && result.stopped === void 0 ? { message: UPLOADS_REBUILT, always: true } : {};
-    const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, rebuilt);
-    const updates = (ids2) => [
-      { ref: stateRef(options.config, "linear"), expected: linearTip, next: commit2 },
-      { ref: stateRef(options.config, "ids"), expected: expected.ids, next: ids2 },
-      ...uploadsCommit === null ? [] : [{ ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit }]
+    const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
+      reserved: stillReserved,
+      message: withRecorded(FINAL_IDS_MESSAGE, recorded),
+      always: await readInitialSyncProgress(git, expected.ids) !== null
+    });
+    const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey);
+    const updates = [
+      { ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit },
+      { ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit },
+      // Initial sync replaces `linear`: its new record does not descend from an earlier one.
+      { ref: stateRef(options.config, "linear"), expected: expected.linear, next: linearCommit, replace: true }
     ];
-    let pushed = await pushAtomic(git, options.config, createBranch ? [...updates(recordedIds), { ref: branchRef(options.config.syncBranch), expected: null, next: commit2 }] : updates(recordedIds));
-    if (!pushed.ok && pushed.reason === "rejected" && createBranch) {
-      recordedIds = await idsOf();
-      pushed = await pushAtomic(git, options.config, updates(recordedIds));
-    }
+    const pushed = await pushAtomic(git, options.config, updates);
     if (!pushed.ok) return null;
-    if (pushed.updated.length > 0) result.changed = true;
-    result.state = { linear: commit2, ids: recordedIds, uploads: uploadsCommit };
-    const recorded2 = { commit: commit2, kind: merged ? "merge" : "ordinary", parents: commit2 === linearTip ? [] : parents };
-    result.record = commit2 === linearTip ? null : recorded2;
-    return recorded2;
+    const parents = (await git.text(["show", "-s", "--format=%P", linearCommit])).split(" ").filter(Boolean);
+    const hasTrackedParent = parents.length === 1 && parents[0] === tracked;
+    return { linear: linearCommit, moved: linearCommit !== expected.linear, reformatted, parents, hasTrackedParent };
+  }
+  async function sameRecord(a, b) {
+    const describe2 = (oid) => git.text(["show", "-s", "--format=%T %P%n%B", oid]);
+    return await describe2(a) === await describe2(b);
   }
 }
-var UploadRefusedError = class extends LinearError {
+function sha2564(text6) {
+  return createHash14("sha256").update(text6, "utf8").digest("hex");
+}
+function holdsBody(content4, body2) {
+  return sameMarkdown(content4, body2) || content4 === fixText(body2);
+}
+function compare5(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// src/initial-sync/reverse.ts
+import { posix as posix8 } from "node:path";
+
+// src/sync/assets.ts
+import { createHash as createHash15 } from "node:crypto";
+import { posix as posix7 } from "node:path";
+
+// src/sync/image-links.ts
+var IMAGE_REPAIR_INPUT_LIMIT = 4 * CONTENT_LIMIT;
+var IMAGE_REPAIR_TEXT_LIMIT = IMAGE_REPAIR_INPUT_LIMIT;
+var ESCAPE_PASS_LIMIT = 8;
+var ImageRepairBudgetError = class extends Error {
   constructor() {
-    super("FileUpload", message("linear.not-in-upload-cache"));
+    super(message("assets.image-repair-budget"));
+    this.name = "ImageRepairBudgetError";
   }
 };
-function withoutUploads(client) {
-  return new Proxy(client, {
-    get(target, property) {
-      if (property === "uploadFile" || property === "uploadFiles") {
-        return async () => {
-          throw new UploadRefusedError();
-        };
+function checkImageRepairSize(body2) {
+  if (body2.length > IMAGE_REPAIR_INPUT_LIMIT) throw new ImageRepairBudgetError();
+}
+function text5(value) {
+  return toMarkdown({ type: "root", children: [{ type: "paragraph", children: [{ type: "text", value }] }] }).trimEnd();
+}
+function linearLink(label, url) {
+  const link2 = (destination2) => toMarkdown({ type: "root", children: [{ type: "paragraph", children: [{ type: "link", url: destination2, children: [{ type: "text", value: label }] }] }] }, { resourceLink: true }).trimEnd();
+  const labelled = /^(\[[\s\S]*\])\((?:<>)?\)$/.exec(link2(""));
+  return labelled === null ? link2(url) : `${labelled[1]}(${linkDestination(url)})`;
+}
+function destinationOf(link2) {
+  let url = "";
+  visit2(parse2(link2), (node2) => {
+    if (node2.type === "link" && url === "") url = node2.url;
+  });
+  return url;
+}
+function imageLinks(body2, deadUploads = /* @__PURE__ */ new Set(), onlyImages) {
+  checkImageRepairSize(body2);
+  const simple = simpleImageParagraph(body2, onlyImages);
+  if (simple !== void 0) return simple;
+  const tree = parse2(body2);
+  const offset = body2.startsWith("\uFEFF") ? 1 : 0;
+  const definitions = /* @__PURE__ */ new Map();
+  visit2(tree, (node2) => {
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+  });
+  const linkChecks = /* @__PURE__ */ new Map();
+  const permitted = (url) => {
+    const cached = linkChecks.get(url);
+    if (cached !== void 0) return cached;
+    const allowed = allowedLink(url);
+    linkChecks.set(url, allowed);
+    return allowed;
+  };
+  const images = [];
+  const edits = [];
+  const replacements = /* @__PURE__ */ new Map();
+  let replacementSize = 0;
+  let destinationSize = 0;
+  const checkDestination = (url) => {
+    destinationSize += url.length;
+    if (destinationSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
+  };
+  let count4 = 0;
+  visit2(tree, (node2) => {
+    if (node2.type === "image" || node2.type === "imageReference") count4++;
+  });
+  let index2 = 0;
+  visit2(tree, (node2, ancestors) => {
+    const enclosingRemoved = ancestors.some((parent) => parent.type === "link" && !permitted(parent.url) || parent.type === "linkReference" && !permitted(definitions.get(parent.identifier) ?? ""));
+    if (node2.type === "link" || node2.type === "linkReference") {
+      const url2 = node2.type === "link" ? node2.url : definitions.get(node2.identifier) ?? "";
+      checkDestination(url2);
+      if (!permitted(url2) && !enclosingRemoved) edits.push({ from: start(node2) + offset, to: end(node2) + offset, text: "" });
+      return;
+    }
+    if (node2.type !== "image" && node2.type !== "imageReference") return;
+    index2++;
+    const url = node2.type === "image" ? node2.url : definitions.get(node2.identifier);
+    if (url === void 0) return;
+    checkDestination(url);
+    if (onlyImages !== void 0 && !onlyImages.has(index2)) return;
+    let upload = false;
+    try {
+      const parsed = new URL(url);
+      upload = parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.port === "" && parsed.username === "" && parsed.password === "";
+    } catch {
+    }
+    if (upload && !deadUploads.has(url.split("#")[0]) && !deadUploads.has(url) && !ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference")) return;
+    images.push({ image: index2, total: count4, line: line(node2) });
+    if (enclosingRemoved) return;
+    let replacement = { text: "" };
+    if (url !== "" && permitted(url)) {
+      const label = node2.alt || url;
+      const inLink = ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference");
+      const inTable = ancestors.some((parent) => parent.type === "tableCell");
+      const key = JSON.stringify([label, url, inLink, inTable]);
+      const cached = replacements.get(key);
+      if (cached !== void 0) replacement = cached;
+      else {
+        const rendered = inLink ? text5(label) : linearLink(label, url);
+        const value = inTable ? rendered.replace(/\|/g, "&#124;") : rendered;
+        replacement = { text: value, ...value.startsWith("[") ? { url: destinationOf(value) } : {} };
+        replacements.set(key, replacement);
       }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
+    }
+    replacementSize += replacement.text.length;
+    if (replacementSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
+    edits.push({ from: start(node2) + offset, to: end(node2) + offset, ...replacement });
+  });
+  visit2(tree, (node2) => {
+    if (node2.type === "definition" && !permitted(node2.url)) edits.push({ from: start(node2) + offset, to: end(node2) + offset, text: "" });
+  });
+  let repaired;
+  return { images, get body() {
+    return repaired ??= rewrite2(body2, tree, offset, edits);
+  } };
+}
+function simpleImageParagraph(body2, onlyImages) {
+  if (!body2.startsWith("![")) return;
+  const pattern = /!\[([a-z0-9 ]*)\]\(([a-z0-9./-]+)\)(?= |$)( *)/iy;
+  const edits = [];
+  const links = /* @__PURE__ */ new Map();
+  let count4 = 0;
+  const selected = [];
+  while (pattern.lastIndex < body2.length) {
+    const match = pattern.exec(body2);
+    if (match === null) return;
+    count4++;
+    if (onlyImages !== void 0 && !onlyImages.has(count4)) continue;
+    const url = match[2];
+    const label = match[1] || url;
+    const key = `${label}\0${url}`;
+    const replacement = links.get(key) ?? linearLink(label, url);
+    links.set(key, replacement);
+    const to = pattern.lastIndex - match[3].length;
+    edits.push({ from: match.index, to, text: replacement });
+    selected.push(count4);
+  }
+  const images = selected.map((image2) => ({ image: image2, total: count4, line: 1 }));
+  let repaired;
+  return { images, get body() {
+    return repaired ??= spliceEdits(body2, edits, /* @__PURE__ */ new Map()).body;
+  } };
+}
+function destinationsOf(tree, offset) {
+  const definitions = /* @__PURE__ */ new Map();
+  visit2(tree, (node2) => {
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+  });
+  const found = /* @__PURE__ */ new Map();
+  let destinationSize = 0;
+  visit2(tree, (node2) => {
+    const url = node2.type === "link" || node2.type === "image" || node2.type === "definition" ? node2.url : node2.type === "linkReference" || node2.type === "imageReference" ? definitions.get(node2.identifier) : void 0;
+    if (url === void 0) return;
+    destinationSize += url.length;
+    if (destinationSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
+    found.set(start(node2) + offset, url);
+  });
+  return found;
+}
+function spliceEdits(body2, edits, destinations2) {
+  const parts = [];
+  const allowed = /* @__PURE__ */ new Map();
+  const places = [...destinations2].sort(([a], [b]) => a - b);
+  let next = 0;
+  let cursor = 0;
+  let shift = 0;
+  for (const { from, to, text: text6, url } of edits.sort((a, b) => a.from - b.from || b.to - a.to)) {
+    if (from < cursor) continue;
+    while (next < places.length && places[next][0] < from) {
+      const [at, url2] = places[next++];
+      allowed.set(at + shift, url2);
+    }
+    while (next < places.length && places[next][0] < to) next++;
+    if (url !== void 0) allowed.set(from + shift, url);
+    parts.push(body2.slice(cursor, from), text6);
+    shift += text6.length - (to - from);
+    cursor = to;
+  }
+  if (body2.length + shift > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
+  while (next < places.length) {
+    const [at, url] = places[next++];
+    allowed.set(at + shift, url);
+  }
+  parts.push(body2.slice(cursor));
+  return { body: parts.join(""), allowed };
+}
+function rewrite2(body2, tree, offset, edits) {
+  if (edits.length === 0) return body2;
+  let { body: result, allowed } = spliceEdits(body2, edits, destinationsOf(tree, offset));
+  const resultOffset = result.startsWith("\uFEFF") ? 1 : 0;
+  for (let pass = 0; ; pass++) {
+    const added = [...destinationsOf(parse2(result), resultOffset)].filter(([at, url]) => allowed.get(at) !== url && "![<".includes(result[at])).map(([at]) => ({ from: at, to: at, text: "\\" }));
+    if (added.length === 0) return result;
+    if (pass === ESCAPE_PASS_LIMIT) throw new ImageRepairBudgetError();
+    ({ body: result, allowed } = spliceEdits(result, added, allowed));
+  }
+}
+
+// src/sync/assets.ts
+var AttachmentBudgetError = class extends Error {
+  constructor() {
+    super(message("assets.budget"));
+  }
+};
+var ATTACHMENT_LIMITS = Object.freeze({ documentCount: 32, documentBytes: 32 * 1024 * 1024, runCount: 256, runBytes: 256 * 1024 * 1024 });
+var LIMIT = 10 * 1024 * 1024;
+function isUpload(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.username === "" && parsed.password === "" && parsed.port === "";
+  } catch {
+    return false;
+  }
+}
+function withNewUploadUrls(text6, added, cache) {
+  const urls = [...new Set([...added].filter(([hash, url]) => cache.get(hash) !== url).map(([, url]) => url))];
+  return urls.length === 0 ? text6 : `${text6}
+${urls.join("\n")}
+`;
+}
+var ImageBlockedError = class extends Error {
+  findings;
+  constructor(findings) {
+    super(message("assets.not-allowed"));
+    this.findings = findings;
+  }
+};
+function checkTypedFileLinks(path2, body2, previousBody, previousPath = path2, plain = /* @__PURE__ */ new Set()) {
+  const known = /* @__PURE__ */ new Set();
+  const movedTargets = /* @__PURE__ */ new Map();
+  const movedFolders = posix7.dirname(path2) !== posix7.dirname(previousPath);
+  if (previousBody !== void 0) {
+    visit2(parse2(previousBody), (node2) => {
+      if (node2.type !== "link" && node2.type !== "image" && node2.type !== "definition") return;
+      const target = resolveTarget(previousPath, node2.url);
+      if (target === null) return;
+      known.add(target);
+      if (!movedFolders || !plain.has(target)) return;
+      const moved = resolveTarget(path2, node2.url);
+      if (moved === null || moved === target) return;
+      const targets = movedTargets.get(target) ?? /* @__PURE__ */ new Set();
+      targets.add(moved);
+      movedTargets.set(target, targets);
+    });
+  }
+  const imageLabels = /* @__PURE__ */ new Set();
+  const definitions = /* @__PURE__ */ new Map();
+  const candidates2 = [];
+  const relocatedPlain = /* @__PURE__ */ new Set();
+  const continuedDestinations = /* @__PURE__ */ new Set();
+  visit2(parse2(body2), (node2) => {
+    if (node2.type === "imageReference") imageLabels.add(node2.identifier);
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2);
+    if (node2.type === "link" || node2.type === "definition") candidates2.push(node2);
+    if (movedTargets.size === 0 || node2.type !== "link" && node2.type !== "image" && node2.type !== "definition") return;
+    const previousTarget = resolveTarget(previousPath, node2.url);
+    if (previousTarget === null) return;
+    const targets = movedTargets.get(previousTarget);
+    if (targets === void 0) return;
+    const target = resolveTarget(path2, node2.url);
+    if (target === null || !targets.has(target)) return;
+    relocatedPlain.add(target);
+    continuedDestinations.add(node2.url);
+  });
+  const links = candidates2.filter((node2) => {
+    if (node2.type === "definition" && imageLabels.has(node2.identifier) && definitions.get(node2.identifier) === node2) return false;
+    const target = resolveTarget(path2, node2.url);
+    return target !== null && !target.endsWith(MARKDOWN_EXTENSION);
+  });
+  const findings = [];
+  links.forEach((node2, index2) => {
+    if (!continuedDestinations.has(node2.url) && !known.has(resolveTarget(path2, node2.url))) {
+      findings.push({ file: index2 + 1, total: links.length, line: line(node2), reason: "not-uploaded" });
     }
   });
+  return { findings, relocatedPlain };
 }
-async function wentOnFromPartial(git, tips) {
-  for (const tip of new Set(tips)) {
-    if (tip !== null && await git.text(["log", "-1", "--format=%s", tip]) === PARTIAL_RECORD_MESSAGE) return true;
+function encodeSuffix(suffix) {
+  const encodePiece = (piece) => encodeFragment(piece).replace(/[()]/g, (char) => char === "(" ? "%28" : "%29");
+  const encode2 = (part) => part.split("&").map((piece, index2) => (index2 === 0 ? "" : /^#?[A-Za-z0-9]+;/.test(piece) ? "%26" : "&") + encodePiece(piece)).join("");
+  const hashAt = suffix.indexOf("#");
+  const query = hashAt === -1 ? suffix : suffix.slice(0, hashAt);
+  const fragment = hashAt === -1 ? void 0 : suffix.slice(hashAt + 1);
+  return (query === "" ? "" : `?${encode2(query.slice(1))}`) + (fragment === void 0 ? "" : `#${encode2(fragment)}`);
+}
+function imagesOf(body2) {
+  const tree = parse2(body2);
+  const definitions = /* @__PURE__ */ new Map();
+  visit2(tree, (node2) => {
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+  });
+  const images = [];
+  visit2(tree, (node2) => {
+    if (node2.type === "image") images.push({ url: node2.url, line: line(node2) });
+    else if (node2.type === "imageReference") images.push({ url: definitions.get(node2.identifier) ?? "", line: line(node2) });
+  });
+  return images;
+}
+var DownloadRetryError = class extends Error {
+  constructor(cause) {
+    super(message("assets.download-failed"), { cause });
   }
-  return false;
+};
+var DownloadBlockedError = class extends Error {
+  reason;
+  constructor(reason) {
+    super(message("assets.download-failed"));
+    this.reason = reason;
+  }
+};
+async function download(url, fetcher, reads, budget, consume) {
+  if (!isUpload(url)) throw new Error(message("assets.not-allowed"));
+  const key = uploadReadKey(url);
+  const kept = reads?.take(key);
+  if (kept !== void 0) consume(kept.body.length);
+  if (kept !== void 0 && kept.body.length > budget) throw new AttachmentBudgetError();
+  if (kept !== void 0 && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
+  try {
+    const response = await fetcher(url, { redirect: "manual", signal: AbortSignal.timeout(3e4) });
+    if (response.status !== 200) await response.body?.cancel().catch(() => {
+    });
+    if (response.status === 401 || response.status === 403) throw new LinearHttpError("DownloadUpload", response.status);
+    if (response.status === 429 || response.status >= 500) throw new DownloadRetryError();
+    if (response.status === 404 || response.status === 410) throw new DownloadBlockedError("dead");
+    if (response.status !== 200 || response.body === null) throw new DownloadBlockedError("unreadable");
+    if (Number(response.headers.get("content-length") ?? 0) > LIMIT) {
+      await response.body.cancel().catch(() => {
+      });
+      throw new DownloadBlockedError("too-large");
+    }
+    if (Number(response.headers.get("content-length") ?? 0) > budget) {
+      await response.body.cancel().catch(() => {
+      });
+      throw new AttachmentBudgetError();
+    }
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+      consume(chunk.length);
+      size += chunk.length;
+      if (size > LIMIT) throw new DownloadBlockedError("too-large");
+      if (size > budget) throw new AttachmentBudgetError();
+      chunks.push(Buffer.from(chunk));
+    }
+    const asset = { bytes: Buffer.concat(chunks), type: response.headers.get("content-type")?.split(";")[0]?.trim() ?? "" };
+    reads?.keep(key, { status: response.status, type: asset.type, body: asset.bytes });
+    return asset;
+  } catch (error) {
+    if (error instanceof AttachmentBudgetError || error instanceof LinearError || error instanceof DownloadBlockedError || error instanceof DownloadRetryError) throw error;
+    throw new DownloadRetryError(error);
+  }
 }
-function pathsOf(change) {
-  if (change.kind === "keep") return change.from === change.to ? [change.to] : [change.from, change.to];
-  return [change.path];
+function uploadAccessProbe(linear) {
+  return () => linear.transport.queryLive("UploadAccess", "query UploadAccess { viewer { id } }");
+}
+function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = new ContentSpool(), limits = ATTACHMENT_LIMITS, probe) {
+  let access;
+  const accessWorks = async (refusal) => {
+    access ??= probe === void 0 ? Promise.resolve({ works: false, error: refusal }) : probe().then(() => ({ works: true }), (error) => ({ works: false, error }));
+    const answer = await access;
+    if (answer.works) return true;
+    if (answer.error instanceof LinearStoppedError || answer.error instanceof LinearError && isTransientLinearError(answer.error)) throw answer.error;
+    return false;
+  };
+  const hashPaths = /* @__PURE__ */ new Map();
+  const pathHashes = /* @__PURE__ */ new Map();
+  const notFolders = /* @__PURE__ */ new Set();
+  const folders = /* @__PURE__ */ new Set();
+  const placed = /* @__PURE__ */ new Map();
+  let indexed = false;
+  const index2 = async () => {
+    if (indexed) return;
+    const tree = await listTree(git, base);
+    for (const entry of tree) {
+      notFolders.add(entry.path);
+      for (let folder = posix7.dirname(entry.path); folder !== "." && !folders.has(folder); folder = posix7.dirname(folder)) folders.add(folder);
+    }
+    const entries = tree.filter((entry) => entry.type === "blob" && ["100644", "100755"].includes(entry.mode) && !entry.path.toLowerCase().endsWith(".md"));
+    for (let at = 0; at < entries.length; ) {
+      const batch = [];
+      let bytes = 0;
+      while (at < entries.length && (batch.length === 0 || bytes + (entries[at].size ?? 0) <= 32 * 1024 * 1024)) {
+        const entry = entries[at++];
+        bytes += entry.size ?? 0;
+        batch.push(entry);
+      }
+      const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
+      for (const entry of batch) {
+        const blob = blobs.get(entry.oid);
+        const hash = parseLfsPointer(blob)?.oid ?? createHash15("sha256").update(blob).digest("hex");
+        hashPaths.set(hash, [...hashPaths.get(hash) ?? [], entry.path]);
+        pathHashes.set(entry.path, hash);
+      }
+    }
+    indexed = true;
+  };
+  const reuse = /* @__PURE__ */ new Map();
+  const reusable = async (path2) => {
+    if (!reuse.has(path2)) {
+      const read = (await readFiles(git, config, base, [path2])).get(path2);
+      reuse.set(path2, read?.ok !== true ? "unreadable" : admitsCapturedFile(path2, read.content) ? "admitted" : "refused");
+    }
+    return reuse.get(path2);
+  };
+  const downloaded = /* @__PURE__ */ new Map();
+  let runCount = 0;
+  let runBytes = 0;
+  const failed2 = /* @__PURE__ */ new Map();
+  const capture2 = async (path2, body2, uploads, previousBody, previousPath = path2, plain = /* @__PURE__ */ new Set()) => {
+    checkImageRepairSize(body2);
+    const { findings: notUploaded, relocatedPlain } = checkTypedFileLinks(path2, body2, previousBody, previousPath, plain);
+    if (notUploaded.length > 0) throw new ImageBlockedError(notUploaded);
+    const sourceImages = imagesOf(body2);
+    const sourceDestinations = destinations(body2);
+    const ordinaryUrls = new Set(sourceDestinations.filter(({ node: node2 }) => node2.type === "link").map(({ node: node2 }) => node2.url));
+    const definitions = /* @__PURE__ */ new Map();
+    for (const { node: node2 } of sourceDestinations) if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+    visit2(parse2(body2), (node2) => {
+      if (node2.type === "linkReference") {
+        const url = definitions.get(node2.identifier);
+        if (url !== void 0) ordinaryUrls.add(url);
+      }
+    });
+    const deadUploads = /* @__PURE__ */ new Set();
+    const finish = (observedBody, files2, uploads2) => {
+      const source = imageLinks(body2, deadUploads);
+      const rewritten = observedBody === body2 ? source.body : imageLinks(observedBody, deadUploads, new Set(source.images.map((image2) => image2.image))).body;
+      const plainFiles = [...relocatedPlain];
+      for (const image2 of sourceImages) {
+        const target = !isUpload(image2.url) ? resolveTarget(path2, image2.url) : null;
+        if (target !== null) plainFiles.push(target);
+      }
+      return { body: rewritten, plainFiles, ...rewritten === observedBody ? {} : { observedBody, deadUploads: [...deadUploads] }, files: files2, uploads: uploads2 };
+    };
+    const files = /* @__PURE__ */ new Map();
+    const additions = /* @__PURE__ */ new Map();
+    const originalBody = body2;
+    const rejected = /* @__PURE__ */ new Map();
+    let retry;
+    const cachedUrls = [...uploads.values()].sort((a, b) => b.length - a.length);
+    const cachedUrl = (url) => cachedUrls.find((known) => url === known || url.startsWith(`${known}#`) || url.startsWith(`${known}${known.includes("?") ? "&" : "?"}`));
+    const knownUpload = (url) => cachedUrl(url) !== void 0;
+    if (!sourceDestinations.some(({ node: node2 }) => isUpload(node2.url) || knownUpload(node2.url))) return finish(body2, files, additions);
+    await index2();
+    const assetsFolder = posix7.join(posix7.dirname(path2), ASSETS_FOLDER);
+    const assetsUsable = !notFolders.has(assetsFolder);
+    const plainTarget = (target) => plain.has(target) || relocatedPlain.has(target);
+    const captureOf = (hash) => (hashPaths.get(hash) ?? []).find((candidate) => !plainTarget(candidate) && posix7.dirname(candidate) === assetsFolder && isCaptureName(candidate) && posix7.basename(candidate).startsWith(hash));
+    const place = (hash) => preferredPaths.get(hash) ?? captureOf(hash) ?? unreadableLinks.get(hash);
+    const copies = /* @__PURE__ */ new Map();
+    const oldAssetsFolder = posix7.join(posix7.dirname(previousPath), ASSETS_FOLDER);
+    const copyTarget = (source, hash) => {
+      if (!assetsUsable) return void 0;
+      const same = captureOf(hash);
+      if (same !== void 0) return same;
+      const own6 = posix7.basename(source);
+      const names = isCaptureName(own6) && !own6.startsWith(hash) ? [] : [own6];
+      for (const name of [...names, `${hash}${posix7.extname(source)}`]) {
+        const target = posix7.join(assetsFolder, name);
+        if (plainTarget(target)) continue;
+        const existing = pathHashes.get(target) ?? placed.get(target) ?? (notFolders.has(target) || folders.has(target) ? "" : void 0);
+        if (existing === hash) return target;
+        if (existing === void 0) {
+          placed.set(target, hash);
+          return target;
+        }
+      }
+      return void 0;
+    };
+    const preferredPaths = /* @__PURE__ */ new Map();
+    const unreadableLinks = /* @__PURE__ */ new Map();
+    const spellings = /* @__PURE__ */ new Map();
+    if (previousBody !== void 0) {
+      for (const link2 of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
+        if (plainTarget(link2.target)) continue;
+        if (await reusable(link2.target) === "unreadable") {
+          const hash2 = pathHashes.get(link2.target);
+          if (!unreadableLinks.has(hash2)) unreadableLinks.set(hash2, link2.target);
+          continue;
+        }
+        const hash = pathHashes.get(link2.target);
+        const moved = assetsFolder !== oldAssetsFolder && posix7.dirname(link2.target) === oldAssetsFolder;
+        const copy = moved ? preferredPaths.get(hash) ?? copyTarget(link2.target, hash) : void 0;
+        const target = copy ?? link2.target;
+        if (copy !== void 0 && !pathHashes.has(copy) && !copies.has(copy)) copies.set(copy, link2.target);
+        if (!preferredPaths.has(hash)) preferredPaths.set(hash, target);
+        const raw = previousPath === path2 ? link2.written : posix7.relative(posix7.dirname(path2), target).split("/").map(encodeURIComponent).join("/") + link2.suffix;
+        const key = hash + uploadDestinationUrl(link2.suffix);
+        if (!spellings.has(key)) spellings.set(key, []);
+        spellings.get(key).push(previousPath !== path2 && link2.written.startsWith("<") ? `<${raw}>` : raw);
+      }
+    }
+    const occurrences = /* @__PURE__ */ new Map();
+    const spelling = (key, opener) => {
+      const choices = spellings.get(key);
+      if (choices === void 0) return void 0;
+      const index3 = occurrences.get(key) ?? 0;
+      occurrences.set(key, index3 + 1);
+      const written = choices[Math.min(index3, choices.length - 1)];
+      const inner = written.startsWith("<") ? written.slice(1, -1) : written;
+      if (/[<>]/.test(inner)) return written;
+      if (opener === "<" || written.startsWith("<") && /[()]/.test(inner)) return `<${inner}>`;
+      return inner.replace(/\s/g, encodeURIComponent);
+    };
+    const previousLinks = /* @__PURE__ */ new Set();
+    if (previousBody !== void 0) visit2(parse2(previousBody), (node2) => {
+      if (node2.type === "link" && isUpload(node2.url)) previousLinks.add(node2.url);
+    });
+    const externalImages = new Set(sourceImages.filter((image2) => !isUpload(image2.url)).map((image2) => image2.url));
+    const references = sourceDestinations.filter(({ node: node2 }) => (isUpload(node2.url) || knownUpload(node2.url)) && !(node2.type !== "link" && externalImages.has(node2.url)) && !(node2.type === "link" && previousLinks.has(node2.url) && !knownUpload(node2.url)));
+    const canonical = (url) => cachedUrl(url) ?? url.split("#")[0];
+    const unique = new Set(references.map(({ node: node2 }) => canonical(node2.url)));
+    if (unique.size > limits.documentCount) throw new AttachmentBudgetError();
+    let documentBytes = 0;
+    const counted = /* @__PURE__ */ new Set();
+    const replacements = [];
+    for (const { node: node2, range, outer } of references) {
+      const cached = cachedUrl(node2.url);
+      const hashAt = node2.url.indexOf("#");
+      const url = cached ?? (hashAt === -1 ? node2.url : node2.url.slice(0, hashAt));
+      const suffix = (cached === void 0 ? hashAt === -1 ? "" : node2.url.slice(hashAt) : node2.url.slice(cached.length)).replace(/^&/, "?");
+      let hash = [...uploads].find(([, known]) => known === url)?.[0];
+      let assetPath = hash === void 0 ? void 0 : place(hash);
+      if (assetPath !== void 0) {
+        const source = copies.get(assetPath);
+        const state = await reusable(source ?? assetPath);
+        if (state === "refused") {
+          rejected.set(node2.url, "unsupported-type");
+          continue;
+        }
+        if (state === "unreadable") assetPath = void 0;
+        else if (source !== void 0) {
+          const read = (await readFiles(git, config, base, [source])).get(source);
+          if (read?.ok !== true) throw new Error(message("assets.not-allowed"));
+          if (!admitsCapturedFile(assetPath, read.content)) {
+            rejected.set(node2.url, "unsupported-type");
+            continue;
+          }
+          if (!counted.has(assetPath)) {
+            documentBytes += read.content.length;
+            counted.add(assetPath);
+          }
+          if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
+          files.set(assetPath, read.content);
+        }
+      }
+      if (assetPath === void 0) {
+        let asset = downloaded.get(url);
+        if (asset === void 0) {
+          try {
+            if (!isUpload(url)) {
+              rejected.set(node2.url, "unreadable");
+              continue;
+            }
+            const failure = failed2.get(url);
+            if (failure !== void 0) throw failure;
+            if (runCount >= limits.runCount || runBytes >= limits.runBytes || documentBytes >= limits.documentBytes) throw new AttachmentBudgetError();
+            runCount++;
+            const fresh = await download(url, fetcher, reads, Math.min(limits.runBytes - runBytes, limits.documentBytes - documentBytes), (size) => {
+              runBytes += size;
+              documentBytes += size;
+            });
+            counted.add(url);
+            asset = { file: spool.put(fresh.bytes), type: fresh.type };
+          } catch (thrown) {
+            const error = thrown instanceof LinearHttpError && thrown.operation === "DownloadUpload" && await accessWorks(thrown) ? new DownloadBlockedError("unreadable") : thrown;
+            if (error instanceof DownloadBlockedError || error instanceof DownloadRetryError) failed2.set(url, error);
+            if (error instanceof DownloadRetryError) {
+              retry = error;
+              continue;
+            }
+            if (!(error instanceof DownloadBlockedError)) throw error;
+            if (error.reason === "dead" && sourceImages.some((image2) => image2.url === node2.url) && !ordinaryUrls.has(node2.url)) {
+              deadUploads.add(url);
+              deadUploads.add(node2.url);
+              continue;
+            }
+            rejected.set(node2.url, error.reason === "dead" ? "unreadable" : error.reason);
+            continue;
+          }
+          downloaded.set(url, asset);
+        }
+        if (!counted.has(url)) {
+          documentBytes += asset.file.size;
+          counted.add(url);
+        }
+        if (documentBytes > limits.documentBytes) throw new AttachmentBudgetError();
+        hash = asset.file.hash;
+        assetPath = place(hash);
+        if (assetPath !== void 0 && !admitsCapturedFile(assetPath, contentBytes(asset.file))) {
+          rejected.set(node2.url, "unsupported-type");
+          continue;
+        }
+        if (assetPath === void 0) {
+          const extension2 = uploadExtension(contentBytes(asset.file));
+          if (extension2 === null) {
+            rejected.set(node2.url, "unsupported-type");
+            continue;
+          }
+          assetPath = posix7.join(assetsFolder, `${hash}${extension2}`);
+          const chosen = placed.get(assetPath);
+          if (!assetsUsable || plainTarget(assetPath) || notFolders.has(assetPath) || folders.has(assetPath) || chosen !== void 0 && chosen !== hash) throw new Error(message("assets.destination-exists"));
+          placed.set(assetPath, hash);
+        }
+        files.set(assetPath, asset.file);
+      }
+      additions.set(hash, url);
+      const cut = node2.url.search(/[?#]/);
+      const fullSuffix = cut === -1 ? "" : node2.url.slice(cut);
+      const opener = body2[outer.from];
+      const spelled = preferredPaths.get(hash) === assetPath ? spelling(hash + uploadDestinationUrl(fullSuffix), opener) ?? spelling(hash + uploadDestinationUrl(suffix), opener) : void 0;
+      if (spelled !== void 0) {
+        replacements.push({ ...outer, text: spelled });
+        continue;
+      }
+      replacements.push({ ...range, text: posix7.relative(posix7.dirname(path2), assetPath).split("/").map(encodeURIComponent).join("/") + encodeSuffix(suffix) });
+    }
+    if (rejected.size > 0) {
+      const images = imagesOf(originalBody);
+      const findings = images.flatMap((image2, index3) => rejected.has(image2.url) ? [{ image: index3 + 1, total: images.length, line: image2.line, reason: rejected.get(image2.url) }] : []);
+      const tree = parse2(originalBody);
+      const definitions2 = /* @__PURE__ */ new Map();
+      visit2(tree, (node2) => {
+        if (node2.type === "definition" && !definitions2.has(node2.identifier)) definitions2.set(node2.identifier, node2.url);
+      });
+      const files2 = [];
+      visit2(tree, (node2) => {
+        const url = node2.type === "link" ? node2.url : node2.type === "linkReference" ? definitions2.get(node2.identifier) : void 0;
+        if (url !== void 0 && (isUpload(url) || knownUpload(url))) files2.push({ url, line: line(node2) });
+      });
+      files2.forEach((file, index3) => {
+        const reason = rejected.get(file.url);
+        if (reason !== void 0 && reason !== "not-uploaded") findings.push({ file: index3 + 1, total: files2.length, line: file.line, reason });
+      });
+      if (findings.length > 0) throw new ImageBlockedError(findings);
+      throw new Error(message("assets.not-allowed"));
+    }
+    if (retry !== void 0) throw retry;
+    let result = body2;
+    for (const replacement of replacements.sort((a, b) => b.from - a.from)) result = result.slice(0, replacement.from) + replacement.text + result.slice(replacement.to);
+    return finish(result, files, additions);
+  };
+  return Object.assign(capture2, { close: () => spool.close() });
+}
+
+// src/initial-sync/reverse.ts
+var REVERSE_RECORD_MESSAGE = INITIAL_SYNC_FROM_LINEAR_RECORD;
+var PULL_REQUEST_TITLE = "Initial sync from Linear";
+function planLinearToGit(input) {
+  const plan = planInitialSync(input);
+  const annotations = new Set(input.mapping.annotations.map((annotation) => annotation.readme));
+  const result = { overwrite: plan.overwrite.map(entryOf), create: [], remove: [], kept: [], leftOut: [...plan.leftOut] };
+  const folders = new Map(annotatedPlaces(input.mapping.zones).map(({ place, folder }) => [placeKey2(place), folder]));
+  const invalid2 = (place) => (candidate) => !landsInPlace(input.mapping, candidate, place);
+  const folderOfPlace = (place) => folders.get(placeKey2(place)) ?? "";
+  const plainPath = (title, place) => titleFile(folderOfPlace(place), title);
+  const named = /* @__PURE__ */ new Map();
+  const created = new Map(input.places.flatMap(({ documents }) => documents.map((document4) => [document4.id, document4.createdAt])));
+  const oldestFirst = (entries) => entries.sort((a, b) => compare6(created.get(a.documentId) ?? "", created.get(b.documentId) ?? "") || compare6(a.documentId, b.documentId));
+  const touched = touchedTitles(input);
+  const changed2 = [...new Map(input.places.flatMap(({ place, documents }) => documents.filter((document4) => !document4.trashed && document4.archivedAt === null && touched(place, document4.title)).map((document4) => [document4.id, { path: plainPath(document4.title, place), title: document4.title, place, documentId: document4.id }]))).values()];
+  const changedIds = new Set(changed2.map((entry) => entry.documentId));
+  const keepForChanged = (path2, documentId) => {
+    result.leftOut = result.leftOut.filter((other) => other.documentId !== documentId || input.treePaths.has(other.path));
+    result.leftOut.push({ path: path2, rules: ["changed-during-run"], lines: [], documentId });
+    named.set(documentId, path2);
+  };
+  const trash = [...plan.trash];
+  const overwriteByPath = new Map(result.overwrite.map((entry) => [entry.path, entry]));
+  for (const entry of oldestFirst([...plan.trash, ...changed2])) {
+    const plain = plainPath(entry.title, entry.place);
+    const other = overwriteByPath.get(plain);
+    if (other === void 0 || placeKey2(other.place) !== placeKey2(entry.place) || plainPath(other.title, other.place) === plain) continue;
+    result.overwrite = result.overwrite.filter((candidate) => candidate !== other);
+    overwriteByPath.delete(plain);
+    if (changedIds.has(entry.documentId)) keepForChanged(plain, entry.documentId);
+    else {
+      const claimed = { path: plain, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: other.fileTitle };
+      result.overwrite.push(claimed);
+      overwriteByPath.set(plain, claimed);
+      named.set(entry.documentId, plain);
+    }
+    trash.push({ path: plain, title: other.title, place: other.place, documentId: other.documentId });
+  }
+  const gitOnly = new Map(plan.create.map((entry) => [entry.path, entry]));
+  const documentsOldestFirst = oldestFirst([...trash, ...changed2].filter((entry) => !named.has(entry.documentId)));
+  for (const entry of documentsOldestFirst) {
+    const folder = folderOfPlace(entry.place);
+    const plain = plainPath(entry.title, entry.place);
+    for (const [path2, file] of gitOnly) {
+      if (path2 !== plain && !(path2.startsWith(folder === "" ? "" : `${folder}/`) && path2.includes("~"))) continue;
+      if (placeKey2(file.place) !== placeKey2(entry.place)) continue;
+      const others = new Set([...input.treePaths].filter((other) => other !== path2));
+      if (documentPath(folder, entry.title, entry.documentId, others, path2, invalid2(entry.place)) !== path2) continue;
+      gitOnly.delete(path2);
+      if (changedIds.has(entry.documentId)) keepForChanged(path2, entry.documentId);
+      else {
+        result.overwrite.push({ path: path2, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: file.title });
+        named.set(entry.documentId, path2);
+      }
+      break;
+    }
+  }
+  for (const entry of changed2) if (!named.has(entry.documentId)) {
+    const reported = result.leftOut.find((other) => other.documentId === entry.documentId && !input.treePaths.has(other.path));
+    if (reported !== void 0) reported.path = documentPath(folderOfPlace(entry.place), entry.documentId, entry.documentId, input.treePaths);
+  }
+  for (const entry of gitOnly.values()) {
+    if (annotations.has(entry.path)) result.kept.push({ path: entry.path, reason: "annotation" });
+    else result.remove.push(entry.path);
+  }
+  const removed = new Set(result.remove);
+  const occupied = new Set([...input.treePaths].filter((path2) => !removed.has(path2)));
+  for (const entry of documentsOldestFirst) {
+    if (named.has(entry.documentId) || changedIds.has(entry.documentId)) continue;
+    const folder = folderOfPlace(entry.place);
+    const path2 = documentPath(folder, entry.title, entry.documentId, occupied, void 0, invalid2(entry.place));
+    result.create.push({ path: path2, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: posix8.relative(folder, path2).slice(0, -".md".length) });
+    occupied.add(path2);
+  }
+  result.overwrite.sort((a, b) => compare6(a.path, b.path));
+  result.create.sort((a, b) => compare6(a.path, b.path));
+  result.remove.sort(compare6);
+  result.leftOut.sort((a, b) => compare6(a.path, b.path));
+  return result;
+}
+function landsInPlace(mapping, path2, place) {
+  const zone = nearestZone(mapping.zones, folderOf(path2));
+  if (zone === void 0) return false;
+  const zonePlace = zone.project !== void 0 ? { kind: "project", team: zone.team, project: zone.project } : { kind: "team", team: zone.team };
+  return placeKey2(zonePlace) === placeKey2(place);
+}
+async function planLinearToGitFromRepository(context, security) {
+  const { input } = await readPlanSources(context);
+  const treePaths = new Set((await listTree(context.git, context.fetched.tracked)).map((entry) => entry.path));
+  const plan = planLinearToGit({ ...input, treePaths });
+  if (plan.create.length === 0) {
+    await security?.close?.();
+    return plan;
+  }
+  const gate = security ?? await securityGate(context.git, context.fetched.tracked);
+  let held;
+  try {
+    held = await screenNewTitles(context, plan, treePaths, gate);
+  } finally {
+    await gate.close?.();
+  }
+  if (held.length > 0) {
+    plan.leftOut.push(...held.map(({ path: path2, rule, documentId }) => ({ path: path2, rules: [rule], lines: [], documentId })));
+    plan.leftOut.sort((a, b) => compare6(a.path, b.path));
+  }
+  return plan;
+}
+async function screenNewTitles(context, plan, treePaths, gate) {
+  if (!gate.configured) return [];
+  const folders = new Map(annotatedPlaces(context.mapping.zones).map(({ place, folder }) => [placeKey2(place), folder]));
+  const occupied = /* @__PURE__ */ new Set([...treePaths, ...plan.overwrite.map((entry) => entry.path), ...plan.create.map((entry) => entry.path)]);
+  const screened = [];
+  const held = [];
+  for (const entry of plan.create) {
+    const findings = await checkTitle(gate, entry.path, entry.title);
+    if (findings?.length === 0) {
+      screened.push(entry);
+      continue;
+    }
+    const path2 = documentPath(folders.get(placeKey2(entry.place)) ?? "", entry.documentId, entry.documentId, occupied);
+    occupied.add(path2);
+    held.push({ path: path2, rule: findings === null ? "security-unchecked" : "security-hook", documentId: entry.documentId });
+  }
+  plan.create = screened;
+  return held;
+}
+async function confirmLinearToGit(context, options) {
+  const gate = options.security ?? await securityGate(context.git, context.fetched.tracked);
+  try {
+    return await confirmWithGate(context, options, gate);
+  } finally {
+    await gate.close?.();
+  }
+}
+async function confirmWithGate(context, options, gate) {
+  const { git, fetched } = context;
+  const transforms = options.transforms ?? [];
+  const identity = options.identity ?? context.identity;
+  const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
+  const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
+  const { input, documents } = await readPlanSources(context, { withContent: true });
+  const contentOf = (entry) => {
+    const read = documents.get(entry.documentId);
+    if (read?.content === void 0) throw new Error(message("initial-sync.document-not-read", { path: entry.path }));
+    return read.content ?? "";
+  };
+  const treePaths = new Set((await listTree(git, fetched.tracked)).map((entry) => entry.path));
+  const plan = planLinearToGit({ ...input, treePaths });
+  const expected = { ...fetched.state };
+  const resumed = await readInitialSyncProgress(git, expected.ids) !== null;
+  const previous3 = await readIds(git, expected.ids);
+  const ids = resumed ? new Map(previous3) : /* @__PURE__ */ new Map();
+  const result = {
+    complete: false,
+    resumed,
+    overwritten: [],
+    created: [],
+    skippedCompleted: [],
+    removed: [],
+    leftOutAtRecord: [],
+    notAttempted: [],
+    progressPushes: 0,
+    record: null,
+    pullRequest: null
+  };
+  for (const { path: path2, rule } of await screenNewTitles(context, plan, treePaths, gate)) result.leftOutAtRecord.push({ path: path2, rule });
+  let unpushed = 0;
+  const pushProgress = async () => {
+    if (options.stageOnly === true) {
+      unpushed = 0;
+      return true;
+    }
+    const next = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked), always: true });
+    const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, "ids"), expected: expected.ids, next }]);
+    if (!pushed.ok) return false;
+    expected.ids = next;
+    result.progressPushes += 1;
+    unpushed = 0;
+    return true;
+  };
+  if (fetched.sync !== null && !await isOwnRecord(fetched.sync) && !await isAncestor(git, fetched.sync, fetched.tracked)) {
+    result.code = "sync-branch-changed";
+    return { plan, result };
+  }
+  const work = [...plan.overwrite.map((entry) => ({ kind: "overwrite", entry })), ...plan.create.map((entry) => ({ kind: "create", entry }))].sort(
+    (a, b) => compare6(a.entry.path, b.entry.path)
+  );
+  const completed = (entry) => resumed && previous3.get(entry.path)?.id === entry.documentId;
+  let taken = 0;
+  for (let index2 = 0; index2 < work.length; index2 += 1) {
+    const { kind, entry } = work[index2];
+    if (completed(entry)) {
+      result.skippedCompleted.push(entry.path);
+      continue;
+    }
+    if (stopAfter !== void 0 && taken >= stopAfter) {
+      result.stopped = { kind: "test-threshold", documents: stopAfter };
+      result.notAttempted = work.slice(index2).filter((rest) => !completed(rest.entry)).map((rest) => rest.entry.path);
+      break;
+    }
+    const before = previous3.get(entry.path);
+    ids.set(entry.path, before !== void 0 && before.id === entry.documentId && before.saved !== void 0 ? { id: entry.documentId, saved: before.saved } : { id: entry.documentId });
+    (kind === "overwrite" ? result.overwritten : result.created).push(entry.path);
+    taken += 1;
+    if (before?.id !== entry.documentId) unpushed += 1;
+    if (unpushed >= batch && !await pushProgress()) return { plan, result: { ...result, code: "state-moved" } };
+  }
+  if (result.stopped !== void 0) {
+    if (unpushed > 0 && !await pushProgress()) return { plan, result: { ...result, code: "state-moved" } };
+    result.code = "stopped";
+    return { plan, result };
+  }
+  const spool = new ContentSpool();
+  let recorded;
+  try {
+    recorded = await record();
+  } finally {
+    spool.close();
+  }
+  if (recorded === "staged") return { plan, result };
+  if (recorded === "sync-branch-changed") {
+    result.code = "sync-branch-changed";
+    return { plan, result };
+  }
+  if (recorded === null) {
+    result.code = "state-moved";
+    return { plan, result };
+  }
+  result.record = recorded;
+  result.removed = [...plan.remove];
+  try {
+    if (recorded.needsPullRequest) {
+      const { pullRequest, opened, updated } = await ensurePullRequest(options.github, {
+        head: options.config.syncBranch,
+        base: options.config.trackedBranch,
+        title: PULL_REQUEST_TITLE,
+        body: pullRequestBody2(plan, result)
+      });
+      result.pullRequest = { ...pullRequest, opened, updated };
+    } else if (recorded.closesPullRequest) {
+      const open2 = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
+      if (open2 !== null) {
+        await closePullRequest(options.github, open2.number);
+        result.closedPullRequest = open2.number;
+      }
+    }
+  } catch (error) {
+    result.code = "pull-request-failed";
+    if (error instanceof PullRequestError && error.status !== void 0) result.pullRequestStatus = error.status;
+    return { plan, result };
+  }
+  result.complete = true;
+  return { plan, result };
+  async function record() {
+    const bodies = /* @__PURE__ */ new Map();
+    const trackedBodies = /* @__PURE__ */ new Map();
+    let linkBase;
+    const documentOf = new Map([...plan.overwrite, ...plan.create].map((entry) => [entry.path, entry.documentId]));
+    let linkMemo;
+    const linkMap = (base) => {
+      if (linkMemo?.entries !== entries || linkMemo.kept !== keptTracked.size) {
+        const ids2 = new Map([...entries.map((entry) => [entry.path, entry.documentId]), ...[...keptTracked].map((path2) => [path2, documentOf.get(path2)])]);
+        linkMemo = { entries, kept: keptTracked.size, map: { base, ids: ids2 } };
+      }
+      return linkMemo.map;
+    };
+    const restored = (entry, ids2) => {
+      const { body: body2 } = bodies.get(entry.path);
+      if (linkBase === void 0) return body2;
+      const map4 = ids2 === void 0 ? linkMap(linkBase) : { base: linkBase, ids: ids2 };
+      const seen = /* @__PURE__ */ new Map();
+      const tracked = trackedBodies.get(entry.path);
+      if (tracked !== void 0) linksToLinear(tracked, entry.path, map4, seen);
+      return linksFromLinear(body2, entry.path, map4, seen);
+    };
+    const joinedOf = (entry, ids2) => {
+      const body2 = restored(entry, ids2);
+      const tracked = input.texts.get(entry.path);
+      if (tracked === void 0) return body2;
+      return joinFile(splitFile(tracked).head, body2);
+    };
+    const fixedTexts = /* @__PURE__ */ new Map();
+    const textOf = (entry, ids2) => {
+      const joined = joinedOf(entry, ids2);
+      const key = `${entry.path}\0${joined}`;
+      let text6 = fixedTexts.get(key);
+      if (text6 === void 0) {
+        text6 = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)));
+        fixedTexts.set(key, text6);
+      }
+      return text6;
+    };
+    const leaveOut = (paths, rule) => {
+      const out = new Set(paths);
+      if (out.size === 0) return;
+      for (const path2 of out) {
+        result.leftOutAtRecord.push({ path: path2, rule });
+        ids.delete(path2);
+      }
+      entries = entries.filter((entry) => !out.has(entry.path));
+      result.created = result.created.filter((path2) => !out.has(path2));
+      result.overwritten = result.overwritten.filter((path2) => !out.has(path2));
+      result.skippedCompleted = result.skippedCompleted.filter((path2) => !out.has(path2));
+    };
+    let entries = [...plan.overwrite, ...plan.create];
+    const uploads = await readUploads(git, expected.uploads, context.pushedKey);
+    const download2 = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool, void 0, uploadAccessProbe(context.linear));
+    const failed2 = [];
+    const budget = [];
+    const repairBudget = [];
+    const imageBlocked = [];
+    const complexity2 = [];
+    let needsLinkBase = false;
+    for (const entry of entries) {
+      const content4 = contentOf(entry);
+      const tracked = input.texts.get(entry.path);
+      const trackedBody = markdownBaseline(tracked === void 0 ? void 0 : splitFile(tracked).body);
+      if (trackedBody !== void 0) trackedBodies.set(entry.path, trackedBody);
+      try {
+        checkImageRepairSize(content4);
+        if (linksLinearDocuments(content4)) needsLinkBase = true;
+        const captured = await download2(entry.path, restoreBody(transforms, entry.path, content4, content4, input.mapping.files), uploads, trackedBody);
+        if (captured.observedBody !== void 0) {
+          imageBlocked.push(entry.path);
+          continue;
+        }
+        bodies.set(entry.path, captured);
+      } catch (error) {
+        if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
+        if (error instanceof MarkdownLimitError) complexity2.push(entry.path);
+        else if (error instanceof AttachmentBudgetError) budget.push(entry.path);
+        else if (error instanceof ImageRepairBudgetError) repairBudget.push(entry.path);
+        else if (error instanceof ImageBlockedError) imageBlocked.push(entry.path);
+        else failed2.push(entry.path);
+      }
+    }
+    if (needsLinkBase) linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
+    const created = new Set(plan.create.map((entry) => entry.path));
+    const keptTracked = /* @__PURE__ */ new Set();
+    const keepTracked = (paths, rule) => {
+      if (paths.length === 0) return;
+      const kept2 = new Set(paths.filter((path2) => !created.has(path2)));
+      for (const path2 of kept2) {
+        result.leftOutAtRecord.push({ path: path2, rule });
+        keptTracked.add(path2);
+      }
+      entries = entries.filter((entry) => !kept2.has(entry.path));
+      result.overwritten = result.overwritten.filter((path2) => !kept2.has(path2));
+      leaveOut(paths.filter((path2) => created.has(path2)), rule);
+    };
+    keepTracked(budget, "attachment-budget");
+    keepTracked(repairBudget, "image-repair-budget");
+    keepTracked(failed2, "download-failed");
+    keepTracked(imageBlocked, "image-blocked");
+    keepTracked(complexity2, "markdown-complexity");
+    const passed2 = /* @__PURE__ */ new Map();
+    const screen = async () => {
+      for (; ; ) {
+        const before = entries.length;
+        const tooComplex = [];
+        const frontMatter = [];
+        for (const entry of entries) {
+          try {
+            if (splitFile(joinedOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
+          } catch (error) {
+            if (!(error instanceof MarkdownLimitError)) throw error;
+            tooComplex.push(entry.path);
+          }
+        }
+        keepTracked(tooComplex, "markdown-complexity");
+        keepTracked(frontMatter, "front-matter-boundary");
+        if (gate.configured) {
+          const blocked = [];
+          const unchecked = [];
+          for (const entry of entries) {
+            const { files, uploads: added } = bodies.get(entry.path);
+            const text6 = textOf(entry);
+            if (passed2.get(entry.path) === text6) continue;
+            const newUploads = [...added].some(([hash, url]) => uploads.get(hash) !== url);
+            if (files.size === 0 && !newUploads && text6 === input.texts.get(entry.path)) continue;
+            const tracked = input.texts.get(entry.path);
+            const content4 = contentOf(entry);
+            const original = withNewUploadUrls(tracked === void 0 ? content4 : joinFile(splitFile(tracked).head, content4), added, uploads);
+            let findings = [];
+            if (original !== text6 && !passed2.has(entry.path)) findings = await gate.check(new Map([[entry.path, original], ...files]));
+            if (findings?.length === 0) findings = await gate.check(new Map([[entry.path, text6], ...files]));
+            if (findings === null) unchecked.push(entry.path);
+            else if (findings.length > 0) blocked.push(entry.path);
+            else passed2.set(entry.path, text6);
+          }
+          keepTracked(blocked, "security-hook");
+          keepTracked(unchecked, "security-unchecked");
+        }
+        if (entries.length === before) return;
+      }
+    };
+    let lfsObjects = [];
+    const stored = /* @__PURE__ */ new Map();
+    const same = (a, b) => a === null || b === null ? a === b : contentBytes(a).equals(contentBytes(b));
+    let commit2;
+    try {
+      await screen();
+      context.linear.transport.reads?.end();
+      if (options.stageOnly === true) {
+        if (gate.configured && linkBase !== void 0) {
+          const candidates2 = new Map(
+            entries.map((entry) => [entry.path, { entry, path: entry.path, files: new Map([...bodies.get(entry.path).files, [entry.path, textOf(entry)]]) }])
+          );
+          const linkIds = linkMap(linkBase).ids;
+          const reset = (paths, ids2) => {
+            for (const path2 of paths) if (created.has(path2)) ids2.delete(path2);
+          };
+          for (const set of linkVariants(candidates2, (candidate, ids2) => textOf(candidate.entry, ids2), reset, linkIds)) await gate.check(set);
+        }
+        return "staged";
+      }
+      commit2 = await build(entries);
+      for (let attempt = 0; ; attempt += 1) {
+        const misplaced = mismatches(await loadMapping(git, commit2), entries);
+        if (misplaced.length === 0) break;
+        const newPaths = entries.filter((entry) => created.has(entry.path)).map((entry) => entry.path);
+        if (attempt === 0) {
+          const moved = misplaced.some((path2) => !created.has(path2));
+          const newReadmes = moved ? newPaths.filter((path2) => /(^|\/)README\.md$/.test(path2)) : [];
+          leaveOut([...misplaced.filter((path2) => created.has(path2)), ...newReadmes], "title-not-a-path");
+        } else if (attempt === 1 && newPaths.length > 0) {
+          leaveOut(newPaths, "title-not-a-path");
+        } else {
+          throw new Error(message("initial-sync.misplaced", { count: misplaced.length }));
+        }
+        await screen();
+        commit2 = await build(entries);
+      }
+    } finally {
+      await gate.close?.();
+    }
+    async function build(list4) {
+      const changes = /* @__PURE__ */ new Map();
+      for (const entry of list4) {
+        for (const [path2, bytes] of bodies.get(entry.path).files) changes.set(path2, bytes);
+        changes.set(entry.path, textOf(entry));
+      }
+      for (const path2 of plan.remove) changes.set(path2, null);
+      const fresh = new Map([...changes].filter(([path2, content4]) => !same(stored.get(path2)?.input ?? null, content4) || !stored.has(path2)));
+      if (fresh.size > 0) for (const [path2, output] of (await prepareLfs(git, fetched.tracked, fresh)).changes) stored.set(path2, { input: fresh.get(path2), output });
+      const prepared = new Map([...changes.keys()].map((path2) => [path2, stored.get(path2).output]));
+      lfsObjects = [
+        ...new Set(
+          [...changes.keys()].map((path2) => stored.get(path2)).filter(({ input: input2, output }) => output !== null && output !== input2).map(({ output }) => parseLfsPointer(contentBytes(output))?.oid).filter((oid) => oid !== void 0)
+        )
+      ];
+      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
+    }
+    const trees = (await git.text(["show", "-s", "--format=%T", commit2, fetched.tracked])).split("\n");
+    const changesTracked = trees[0] !== trees[1];
+    for (const previousRecord of [expected.linear, fetched.sync]) {
+      if (previousRecord !== null && await sameRecord(previousRecord, commit2)) {
+        commit2 = previousRecord;
+        break;
+      }
+    }
+    const syncOpen = fetched.sync !== null && fetched.sync !== commit2 && !await isAncestor(git, fetched.sync, fetched.tracked);
+    if (syncOpen && !await isOwnRecord(fetched.sync)) return "sync-branch-changed";
+    const moveSync = fetched.sync !== commit2 && changesTracked;
+    if (moveSync) await checkPushScope(git, fetched.tracked, commit2, context.mapping.zones);
+    const synced = /* @__PURE__ */ new Set([...entries.map((entry) => entry.path), ...keptTracked]);
+    const finalIds = new Map([...ids].filter(([path2]) => synced.has(path2)));
+    for (const { path: path2, documentId } of entries) {
+      const document4 = documents.get(documentId);
+      finalIds.set(path2, { ...finalIds.get(path2), observedDigest: observedDigest(document4) });
+    }
+    const through = captureCursor([...keptTracked].map((path2) => documentOf.get(path2)));
+    const kept = plan.kept.map((entry) => entry.path);
+    const trailers = [...through === null ? [] : [captureCursorTrailer(through)], ...kept.map(keptAnnotationTrailer)];
+    const previousKept = await readKeptAnnotations(git, expected.ids);
+    const markersMoved = through !== null && through !== await readCaptureCursor(git, expected.ids) || previousKept.size !== kept.length || kept.some((path2) => !previousKept.has(path2));
+    const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
+      message: trailers.length === 0 ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}
+
+${trailers.join("\n")}`,
+      always: markersMoved || await readInitialSyncProgress(git, expected.ids) !== null,
+      // The sync branch moves to the record with this commit: the ids name it as the sync's own push.
+      ...moveSync ? { syncPushed: context.pushedKey.record(branchRef(options.config.syncBranch), commit2) } : {}
+    });
+    const finalUploads = new Map(uploads);
+    for (const entry of entries) for (const [hash, url] of bodies.get(entry.path).uploads) finalUploads.set(hash, url);
+    const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity, context.pushedKey);
+    if (lfsObjects.length > 0) await git.run(["lfs", "push", "--object-id", options.config.remote, ...lfsObjects]);
+    const updates = [
+      { ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit },
+      { ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit },
+      // Initial sync replaces `linear`: its new record does not descend from an earlier one.
+      { ref: stateRef(options.config, "linear"), expected: expected.linear, next: commit2, replace: true }
+    ];
+    if (moveSync) updates.push({ ref: branchRef(options.config.syncBranch), expected: fetched.sync, next: commit2, replace: true });
+    const pushed = await pushAtomic(git, options.config, updates);
+    if (!pushed.ok) return null;
+    const parents = (await git.text(["show", "-s", "--format=%P", commit2])).split(" ").filter(Boolean);
+    return {
+      linear: commit2,
+      moved: pushed.updated.length > 0,
+      parents,
+      hasTrackedParent: parents.length === 1 && parents[0] === fetched.tracked,
+      changesTracked,
+      needsPullRequest: changesTracked,
+      closesPullRequest: !changesTracked && syncOpen
+    };
+  }
+  function captureCursor(pendingIds) {
+    const listed = new Map(input.places.flatMap(({ documents: placed }) => placed.map((document4) => [document4.id, cursorTime(document4)])));
+    if (pendingIds.length > 0) return pendingIds.map((id) => listed.get(id)).reduce((a, b) => b < a ? b : a);
+    return [...listed.values()].reduce((a, b) => a === null || b > a ? b : a, null);
+  }
+  async function sameRecord(a, b) {
+    const describe2 = (oid) => git.text(["show", "-s", "--format=%T %P%n%B", oid]);
+    return await describe2(a) === await describe2(b);
+  }
+  async function isOwnRecord(oid) {
+    const [subject, email, parents] = (await git.text(["show", "-s", "--format=%s%n%ae%n%P", oid])).split("\n");
+    return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? "").split(" ").filter(Boolean).length === 1;
+  }
+}
+function mismatches(mapping, entries) {
+  const mapped = new Map(mapping.documents.map((document4) => [document4.path, document4]));
+  return entries.filter((entry) => {
+    const file = mapped.get(entry.path);
+    return file === void 0 || placeKey2(file.place) !== placeKey2(entry.place) || file.title.normalize("NFC") !== entry.fileTitle.normalize("NFC");
+  }).map((entry) => entry.path).sort(compare6);
+}
+function pullRequestBody2(plan, result) {
+  const out = new Set(result.leftOutAtRecord.map((entry) => entry.path));
+  const overwritten = plan.overwrite.filter((entry) => !out.has(entry.path)).length;
+  const created = plan.create.filter((entry) => !out.has(entry.path)).length;
+  const lines2 = [
+    "This pull request makes the synchronized folders equal to Linear, as an initial sync from Linear asked.",
+    "",
+    `- ${count(overwritten, "file")} take Linear's text (front matter kept);`,
+    `- ${count(created, "file")} are new, one per document only in Linear;`,
+    `- ${count(plan.remove.length, "file")} are removed: they have no document in Linear.`,
+    "",
+    "Review it and merge it with a merge commit. The sync does not merge it, because it removes files, and it does not run until this pull request is merged. Removed files stay in the history."
+  ];
+  if (plan.remove.length > 0) {
+    lines2.push("", "### Removed files", "");
+    for (const path2 of plan.remove.slice(0, 100)) lines2.push(`- \`${path2.replace(/`/g, "'")}\``);
+    if (plan.remove.length > 100) lines2.push(`- and ${plan.remove.length - 100} more`);
+  }
+  return `${lines2.join("\n")}
+`;
+}
+function entryOf(entry) {
+  return { path: entry.path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: entry.title };
+}
+function count(n, noun) {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+function compare6(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// src/initial-sync/summary.ts
+var DIRECTIONS = ["git-to-linear", "linear-to-git"];
+function toPlanReport(plan, direction, confirm) {
+  const paths = (entries) => entries.map((entry) => entry.path);
+  return {
+    capacity: plan.capacity ?? [],
+    direction,
+    confirm,
+    plan: {
+      create: paths(plan.create),
+      overwrite: paths(plan.overwrite),
+      trash: paths(plan.trash),
+      remove: [],
+      paths: [.../* @__PURE__ */ new Set([...paths(plan.create), ...paths(plan.overwrite), ...paths(plan.trash)])].sort(compare7)
+    },
+    leftOut: paths(plan.leftOut),
+    leftOutFiles: plan.leftOut,
+    collisionPaths: plan.leftOut.filter((entry) => entry.rules.includes("duplicate-title")).map((entry) => entry.path)
+  };
+}
+function renderDryRun(plan) {
+  const lines2 = [
+    "## Initial sync from git to Linear: dry run",
+    "",
+    "Nothing was written. Run again with `confirm` set to `true` to make Linear equal to the tracked branch:",
+    "",
+    `- create ${count2(plan.create.length, "document")};`,
+    `- overwrite ${count2(plan.overwrite.length, "document")} with the file's text (same document, comments kept);`,
+    `- move ${count2(plan.trash.length, "document")} without a file to Linear's trash, from which they can be restored;`,
+    `- leave out ${count2(plan.leftOut.length, "file")}, which stay in git only until they are fixed.`,
+    ""
+  ];
+  pushTable(lines2, "Create", ["Path", "In Linear"], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]), true);
+  pushTable(lines2, "Overwrite", ["Path", "In Linear", "Document"], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines2, "Move to trash", ["Path", "In Linear", "Document"], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines2, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
+  return lines2.join("\n") + renderCapacity(plan.capacity ?? []);
+}
+function renderConfirmed(plan, result) {
+  const outcome2 = result.complete ? "Linear now equals the tracked branch, and the sync state is recorded." : result.code === "container-cap" ? "Nothing was written. Reduce planned additions or increase document-cap after checking the container limit." : result.code === "state-moved" ? "A state ref moved while this run was writing, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done." : "The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already written are skipped.";
+  const lines2 = [
+    "## Initial sync from git to Linear",
+    "",
+    outcome2,
+    "",
+    `- created ${count2(result.created.length, "document")};`,
+    `- overwrote ${count2(result.overwritten.length, "document")} with the file's text (same document, comments kept);`,
+    `- left ${count2(result.unchanged.length, "document")} as they were: they already held the file's text;`,
+    ...result.resumed ? [`- skipped ${count2(result.skippedCompleted.length, "document")} written by the run this one continued;`] : [],
+    `- moved ${count2(result.trashed.length, "document")} without a file to Linear's trash, from which they can be restored;`,
+    `- left out ${count2(plan.leftOut.length + result.leftOutAtWrite.length, "file")}, which stay in git only until they are fixed.`,
+    ""
+  ];
+  if (result.stopped !== void 0) {
+    const why = result.stopped.kind === "test-threshold" ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
+    lines2.push(`Stopped: ${why}. Not written yet: ${count2(result.notAttempted.length, "item")}.`, "");
+  }
+  pushTable(lines2, "Failed", ["Path", "Operation", "Error"], result.failed.map((entry) => [entry.path, entry.operation, entry.error]), false);
+  pushTable(lines2, "Moved to trash", ["Path"], result.trashed.map((path2) => [path2]), false);
+  pushTable(
+    lines2,
+    "Left out",
+    ["Path", "Rules", "Lines", "Collides with, or the files"],
+    [...leftOutRows(plan.leftOut), ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, "", (entry.files ?? []).join(", ")])],
+    false
+  );
+  if (result.record !== null && result.record.reformatted.length > 0) {
+    lines2.push(
+      `Linear stores ${count2(result.record.reformatted.length, "file")} in a different form than the tracked branch; the next sync proposes that form in its pull request.`,
+      ""
+    );
+  }
+  return lines2.join("\n") + renderCapacity(plan.capacity ?? []);
+}
+function toReversePlanReport(plan, confirm) {
+  const paths = (entries) => entries.map((entry) => entry.path);
+  return {
+    direction: "linear-to-git",
+    confirm,
+    plan: {
+      create: paths(plan.create),
+      overwrite: paths(plan.overwrite),
+      trash: [],
+      remove: [...plan.remove],
+      paths: [.../* @__PURE__ */ new Set([...paths(plan.create), ...paths(plan.overwrite), ...plan.remove])].sort(compare7)
+    },
+    leftOut: paths(plan.leftOut),
+    leftOutFiles: plan.leftOut,
+    collisionPaths: plan.leftOut.filter((entry) => entry.rules.includes("duplicate-title")).map((entry) => entry.path),
+    // Nothing is created in Linear, so no container comes closer to its document cap.
+    capacity: []
+  };
+}
+function renderReverseDryRun(plan) {
+  const lines2 = [
+    "## Initial sync from Linear to the tracked branch: dry run",
+    "",
+    "Nothing was written. Run again with `confirm` set to `true` to open one pull request that makes the synchronized folders equal to Linear. A person merges it; the sync never does, because it removes files:",
+    "",
+    `- overwrite ${count2(plan.overwrite.length, "file")} with the document's text (front matter kept);`,
+    `- create ${count2(plan.create.length, "file")}, one per document without a file;`,
+    `- remove ${count2(plan.remove.length, "file")} without a document (they stay in the history);`,
+    `- keep ${count2(plan.kept.length, "file")} without a document that hold a folder's annotation;`,
+    `- leave out ${count2(plan.leftOut.length, "file or document", "files or documents")}.`,
+    ""
+  ];
+  pushTable(lines2, "Overwrite", ["Path", "Document"], plan.overwrite.map((entry) => [entry.path, entry.documentId]), true);
+  pushTable(lines2, "Create", ["Path", "From Linear", "Document"], plan.create.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines2, "Remove", ["Path"], plan.remove.map((path2) => [path2]), true);
+  pushTable(lines2, "Kept", ["Path", "Why"], plan.kept.map((entry) => [entry.path, "holds the annotation of its folder"]), false);
+  pushTable(lines2, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
+  return lines2.join("\n");
+}
+function renderReverseConfirmed(plan, result) {
+  const outcome2 = result.complete ? result.pullRequest === null ? `The tracked branch already equals Linear: no pull request is needed. The sync state is recorded.${result.closedPullRequest === void 0 ? "" : ` Pull request #${result.closedPullRequest} of an earlier run had nothing left to carry and is closed.`}` : `The sync state is recorded and pull request #${result.pullRequest.number} ${result.pullRequest.opened ? "is open" : "was already open"}. A person reviews and merges it; the sync does not run until it is merged.` : result.code === "state-moved" ? "A state ref moved while this run was working, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done." : result.code === "pull-request-failed" ? `The sync state is recorded, but the pull request could not be opened (${result.pullRequestStatus === void 0 ? "GitHub could not be reached" : `GitHub answered HTTP ${result.pullRequestStatus}`}). Run initial sync again with the same inputs to open it.` : result.code === "sync-branch-changed" ? "The sync branch holds commits this sync did not make, so nothing was recorded. Merge or close its pull request and delete the branch, then run initial sync again." : "The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already taken are skipped.";
+  const lines2 = [
+    "## Initial sync from Linear to the tracked branch",
+    "",
+    outcome2,
+    "",
+    `- took ${count2(result.overwritten.length, "document")} into existing files and ${count2(result.created.length, "document")} into new files;`,
+    ...result.resumed ? [`- skipped ${count2(result.skippedCompleted.length, "document")} taken by the run this one continued;`] : [],
+    `- ${result.record === null ? "will remove" : "removes"} ${count2(plan.remove.length, "file")} without a document;`,
+    `- left out ${count2(plan.leftOut.length + result.leftOutAtRecord.length, "file or document", "files or documents")}.`,
+    ""
+  ];
+  if (result.stopped !== void 0) {
+    const why = result.stopped.kind === "test-threshold" ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
+    lines2.push(`Stopped: ${why}. Not taken yet: ${count2(result.notAttempted.length, "document")}.`, "");
+  }
+  pushTable(lines2, "Remove", ["Path"], plan.remove.map((path2) => [path2]), false);
+  pushTable(lines2, "Left out", LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtRecord.map((entry) => [entry.path, entry.rule, "", ""])], false);
+  return lines2.join("\n");
+}
+var LEFT_OUT_HEAD = ["Path", "Rules", "Lines", "Collides with, or the files"];
+function leftOutRows(entries) {
+  return entries.map((entry) => [entry.path, entry.rules.join(", "), entry.lines.join(", "), (entry.collidesWith ?? entry.files ?? []).join(", ")]);
+}
+function pushTable(lines2, title, head, rows, always) {
+  if (rows.length === 0 && !always) return;
+  lines2.push(`### ${title} (${rows.length})`, "");
+  if (rows.length === 0) {
+    lines2.push("None.", "");
+    return;
+  }
+  lines2.push(`| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
+  for (const row of rows) lines2.push(`| ${row.map(cell).join(" | ")} |`);
+  lines2.push("");
+}
+function count2(n, noun, plural = `${noun}s`) {
+  return `${n} ${n === 1 ? noun : plural}`;
+}
+function compare7(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// src/run/inputs.ts
+var InputError = class extends Error {
+  constructor(message2) {
+    super(message2);
+    this.name = "InputError";
+  }
+};
+function environmentName(name) {
+  return `MDBISYNC_${name.toUpperCase().replace(/-/g, "_")}`;
+}
+var APP_SLUG = /^[A-Za-z0-9-]+$/;
+function readInputs(get, env = process.env, options = {}) {
+  const value = (name) => get(name).trim();
+  const required = (name) => {
+    const given = value(name);
+    if (given === "") throw new InputError(message("inputs.required", { name }));
+    return given;
+  };
+  const linear = { clientId: required("linear-client-id"), clientSecret: required("linear-client-secret") };
+  const token = required("github-token");
+  const repository = value("repository") || (env.GITHUB_REPOSITORY ?? "").trim();
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+    throw new InputError(message("inputs.repository"));
+  }
+  const inputs = {
+    linear,
+    github: { token, repository },
+    state: stateConfig(value("tracked-branch"), value("sync-branch"), value("state-ref-prefix"))
+  };
+  const appSlug = value("app-slug");
+  if (appSlug === "" && options.appSlugRequired === true) {
+    throw new InputError(message("inputs.app-slug-required"));
+  }
+  if (appSlug !== "") {
+    if (!APP_SLUG.test(appSlug)) throw new InputError(message("inputs.app-slug"));
+    inputs.github.appSlug = appSlug;
+  }
+  const linearApiUrl = value("linear-api-url");
+  if (linearApiUrl !== "") inputs.linear.apiUrl = linearApiUrl;
+  const githubApiUrl = value("github-api-url") || (env.GITHUB_API_URL ?? "").trim();
+  if (githubApiUrl !== "") inputs.github.apiUrl = githubApiUrl;
+  const reportFile = value("report-file");
+  if (reportFile !== "") inputs.reportFile = reportFile;
+  const cap = value("document-cap");
+  if (cap !== "") {
+    if (!/^[1-9][0-9]*$/.test(cap) || !Number.isSafeInteger(Number(cap))) throw new InputError(message("inputs.document-cap"));
+    inputs.documentCap = Number(cap);
+  }
+  const grace = value("merge-grace-seconds");
+  if (grace !== "") {
+    if (!/^(0|[1-9][0-9]*)$/.test(grace) || Number(grace) > 120) throw new InputError(message("inputs.merge-grace"));
+    inputs.mergeGraceSeconds = Number(grace);
+  }
+  const deadline = value("check-deadline-minutes");
+  if (deadline !== "") {
+    if (!/^[1-9][0-9]*$/.test(deadline) || Number(deadline) < MIN_CHECK_DEADLINE_MINUTES || Number(deadline) > MAX_CHECK_DEADLINE_MINUTES) {
+      throw new InputError(message("inputs.check-deadline"));
+    }
+    inputs.checkDeadlineMinutes = Number(deadline);
+  }
+  const requiredChecks = value("required-checks");
+  if (requiredChecks !== "") inputs.requiredChecks = checkList(requiredChecks);
+  const unchecked = value("merge-without-checks");
+  if (unchecked !== "") {
+    if (unchecked !== "true" && unchecked !== "false") throw new InputError(message("inputs.merge-without-checks"));
+    inputs.mergeWithoutChecks = unchecked === "true";
+  }
+  return inputs;
+}
+function checkList(list4) {
+  const lines2 = [...new Set(list4.split(/\r?\n/).map((line2) => line2.trim()).filter(Boolean))];
+  return lines2.map((line2) => {
+    const check2 = requiredCheck(line2);
+    if (check2 === void 0) throw new InputError(message("inputs.required-checks", { line: line2 }));
+    return check2;
+  });
+}
+function stateConfig(trackedBranch, syncBranch, refPrefix) {
+  try {
+    return resolveStateConfig({ trackedBranch, syncBranch, refPrefix });
+  } catch (error) {
+    if (error instanceof StateConfigError) throw new InputError(error.message);
+    throw error;
+  }
+}
+function readInitialSyncInputs(get) {
+  const direction = get("direction").trim();
+  if (!DIRECTIONS.includes(direction)) {
+    const problem = direction === "" ? message("inputs.direction-missing") : message("inputs.direction-unknown", { directions: DIRECTIONS.join(", "), direction });
+    throw new InputError(message("inputs.direction", { problem }));
+  }
+  return { direction, confirm: get("confirm").trim() === "true" };
+}
+
+// src/run/preflight.ts
+function pushedKey(inputs) {
+  return new PushedKey(inputs.linear.clientSecret, inputs.github.repository);
+}
+async function runPreflight(operation, inputs, options, work) {
+  const { git } = options;
+  const fetched = await fetchState(git, inputs.state);
+  if (operation === "sync") {
+    const unfinished = await readInitialSyncProgress(git, fetched.state.ids) !== null;
+    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, tracked: fetched.tracked });
+    const linear = fetched.state.linear;
+    const untrusted = linear !== null && !await trustedObservation(git, linear, fetched.tracked, pushedKey(inputs));
+    const refusal = checkSyncState(fetched.state, inputs.state, { initialSyncUnfinished: unfinished, linearUntrusted: untrusted, initialPullRequestPending: pending });
+    if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
+  } else if (options.refusePendingInitialPullRequest === true) {
+    let pending = false;
+    if (fetched.sync !== null) {
+      for (const record of await pendingInitialRecords(git, { linear: fetched.state.linear, tracked: fetched.tracked })) {
+        if (await isAncestor(git, record, fetched.sync)) pending = true;
+      }
+    }
+    const refusal = checkSyncState(fetched.state, inputs.state, { initialPullRequestPending: pending });
+    if (refusal?.code === "initial-pull-request-pending") return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
+  }
+  const mapping = await loadMapping(git, fetched.tracked);
+  const hooks = readHookConfig(await readTrackedFile(git, fetched.tracked, PRE_COMMIT_CONFIG));
+  const syncBranches = [inputs.state.syncBranch, suspendedBranch(inputs.state)];
+  const github = await checkGitHub({ ...inputs.github, commit: fetched.tracked, syncBranches, ...options.fetch ? { fetch: options.fetch } : {} });
+  const stats = new RequestStats();
+  const requestHooks = { log: options.log };
+  const tokenOptions = { hooks: requestHooks, baseUrl: inputs.linear.apiUrl, stats, ...options.fetch ? { fetch: options.fetch } : {} };
+  const credentials = { clientId: inputs.linear.clientId, clientSecret: inputs.linear.clientSecret };
+  const onRevokeError = (error) => options.warn(message("run.revoke-failed", { reason: error instanceof Error ? error.message : String(error) }));
+  let minted = false;
+  const reads = options.reads;
+  const runOptions = { ...tokenOptions, onRevokeError, ...options.tokenLifecycle ? { lifecycle: options.tokenLifecycle } : {} };
+  const withToken = (work2) => {
+    const known = reads?.token;
+    if (known != null) return withDeferredRunToken(credentials, known, runOptions, (token) => work2({ ...token, accessToken: () => token.accessToken() }));
+    return withRunToken(credentials, runOptions, (token) => {
+      reads?.tokenMinted(token.scope, token.context);
+      return work2(token);
+    });
+  };
+  try {
+    return await withToken(async (token) => {
+      minted = true;
+      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context, ...reads ? { reads } : {} });
+      let setup;
+      try {
+        const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
+        setup = report;
+        if (report.ok && targets !== void 0 && work !== void 0) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY, pushedKey: pushedKey(inputs) });
+        return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
+      } catch (error) {
+        if (!(error instanceof LinearStoppedError)) throw error;
+        return { ...stoppedOutcome(operation, error.reason, setup), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
+      }
+    });
+  } catch (error) {
+    if (minted || !isCredentialError(error)) throw error;
+    const { report } = await runSetupCheck({ mapping, hooks, github, linear: { error: message("setup.linear-refused-credentials") } });
+    return outcome(operation, report);
+  }
+}
+function stoppedOutcome(operation, stopped, setup) {
+  const summary2 = renderStoppedBeforeWriting(stopped, operation === "sync");
+  return {
+    operation,
+    ok: false,
+    stopped,
+    summary: setup === void 0 ? summary2 : `${renderSetupSummary(setup).trimEnd()}
+
+${summary2}`,
+    ...setup === void 0 ? {} : { setup }
+  };
+}
+function outcome(operation, report) {
+  const result = { operation, ok: report.ok, summary: renderSetupSummary(report), setup: report };
+  if (report.code !== void 0) result.code = report.code;
+  return result;
+}
+async function readTrackedFile(git, commit2, path2) {
+  const result = await git.run(["cat-file", "blob", `${commit2}:${path2}`], { okCodes: [0, 128] });
+  return result.code === 0 ? result.stdout.toString("utf8") : null;
+}
+
+// src/run/capacity.ts
+var DEFAULT_DOCUMENT_CAP = 1e3;
+function containerKey(context, place) {
+  return documentPlaceKey(placeId(context.targets, place));
+}
+function documentPlaceKey(place) {
+  return JSON.stringify("projectId" in place ? { projectId: place.projectId } : { teamId: place.teamId });
+}
+async function readContainerDocuments(context) {
+  const places = [...new Map(annotatedPlaces(context.mapping.zones).map(({ place }) => [containerKey(context, place), placeId(context.targets, place)])).values()];
+  return containersOf(context, await context.linear.listDocumentsInPlaces(places, { includeArchived: true }));
+}
+function containersOf(context, listed) {
+  const documents = /* @__PURE__ */ new Map();
+  for (const { place } of annotatedPlaces(context.mapping.zones)) documents.set(containerKey(context, place), []);
+  for (const document4 of listed) {
+    const place = document4.projectId !== null ? { projectId: document4.projectId } : document4.teamId !== null ? { teamId: document4.teamId } : void 0;
+    if (place !== void 0) documents.get(documentPlaceKey(place))?.push(document4);
+  }
+  return documents;
+}
+function assessCapacity(context, documents, creates, cap = DEFAULT_DOCUMENT_CAP) {
+  const planned = /* @__PURE__ */ new Map();
+  for (const { place } of creates) {
+    const key = containerKey(context, place);
+    planned.set(key, (planned.get(key) ?? 0) + 1);
+  }
+  const result = /* @__PURE__ */ new Map();
+  for (const { place } of annotatedPlaces(context.mapping.zones)) {
+    const key = containerKey(context, place);
+    if (result.has(key)) continue;
+    const listed = documents.get(key);
+    if (listed === void 0) throw new Error(message("run.container-not-read"));
+    const unique = [...new Map(listed.map((document4) => [document4.id, document4])).values()];
+    const trashed = unique.filter((document4) => document4.trashed).length;
+    const archived = unique.filter((document4) => !document4.trashed && document4.archivedAt !== null).length;
+    const count4 = planned.get(key) ?? 0;
+    const total = unique.length + count4;
+    result.set(key, {
+      place,
+      live: unique.length - trashed - archived,
+      trashed,
+      archived,
+      planned: count4,
+      total,
+      cap,
+      status: total > cap ? "over-cap" : total >= cap * 0.9 ? "warning" : "ok"
+    });
+  }
+  return [...result.values()];
+}
+function capacityBlocked(capacity) {
+  return capacity.some((container) => container.status === "over-cap");
+}
+function renderCapacity(capacity) {
+  const reported = capacity.filter((container) => container.status !== "ok");
+  if (reported.length === 0) return "";
+  return [
+    "### Container document capacity",
+    "",
+    capacityBlocked(capacity) ? "Stopped before any write: a container would exceed its document cap." : "Warning: a container is within 10% of its document cap. The run may proceed.",
+    "",
+    "Counts include trashed and archived documents returned by Linear with `includeArchived: true`. Moving a document to trash does not free capacity.",
+    "",
+    "| Container | Live | Trashed | Archived | Planned additions | Total | Cap | Status |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...reported.map((c) => `| ${cell(placeLabel(c.place))} | ${c.live} | ${c.trashed} | ${c.archived} | ${c.planned} | ${c.total} | ${c.cap} | ${c.status} |`),
+    ""
+  ].join("\n");
+}
+
+// src/initial-sync/plan.ts
+function annotatedPlaces(zones) {
+  const places = /* @__PURE__ */ new Map();
+  for (const zone of [...zones.values()].sort((a, b) => compare8(zoneFolder(a), zoneFolder(b)))) {
+    const place = zone.project !== void 0 ? { kind: "project", team: zone.team, project: zone.project } : { kind: "team", team: zone.team };
+    const key = placeKey2(place);
+    if (!places.has(key)) places.set(key, { place, folder: zoneFolder(zone) });
+  }
+  return [...places.values()];
+}
+function placeId(targets, place) {
+  if (place.kind === "project") {
+    const project = targets.projects.get(projectKey(place.team, place.project));
+    if (project === void 0) throw new Error(message("initial-sync.project-not-resolved", { project: place.project, team: place.team }));
+    return { projectId: project.id };
+  }
+  const team = targets.teams.get(place.team);
+  if (team === void 0) throw new Error(message("initial-sync.team-not-resolved", { team: place.team }));
+  return { teamId: team.id };
+}
+function placeKey2(place) {
+  return place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
+}
+function planInitialSync(input) {
+  const facts = input.facts ?? LINEAR_FACTS;
+  const { mapping } = input;
+  const leftOut = /* @__PURE__ */ new Map();
+  const leaveOut = (path2, rules, lines2 = [], collidesWith) => {
+    const entry = leftOut.get(path2) ?? { path: path2, rules: [], lines: [] };
+    entry.rules = [.../* @__PURE__ */ new Set([...entry.rules, ...rules])].sort();
+    entry.lines = [.../* @__PURE__ */ new Set([...entry.lines, ...lines2])].sort((a, b) => a - b);
+    if (collidesWith !== void 0) entry.collidesWith = [...collidesWith].sort(compare8);
+    leftOut.set(path2, entry);
+  };
+  const textOf = (path2) => {
+    const text6 = input.texts.get(path2);
+    if (text6 === void 0) throw new Error(message("initial-sync.text-not-read", { path: path2 }));
+    return text6;
+  };
+  const lint = (path2, title) => {
+    const findings = lintInTree(path2, textOf(path2), mapping.files);
+    if (findings.length > 0) leaveOut(path2, findings.map((f) => f.rule), findings.map((f) => f.line));
+    if (lengthRefusal({ title }, facts) !== void 0) leaveOut(path2, ["title-too-long"]);
+  };
+  const leftOutTitles = /* @__PURE__ */ new Map();
+  for (const file of mapping.leftOut) {
+    leaveOut(file.path, [file.rule], [], file.collidesWith);
+    lint(file.path, file.title);
+    leftOutTitles.set(titleIn(file.place, file.title), file.path);
+  }
+  for (const file of mapping.unsynced) {
+    if (file.place === void 0 || file.title === void 0) continue;
+    leaveOut(file.path, [file.reason]);
+    leftOutTitles.set(titleIn(file.place, file.title), file.path);
+  }
+  const changed2 = input.changed ?? /* @__PURE__ */ new Map();
+  const touched = touchedTitles(input);
+  const live = (document4) => !document4.trashed && document4.archivedAt === null;
+  const synced = [];
+  for (const document4 of mapping.documents) {
+    lint(document4.path, document4.title);
+    if (touched(document4.place, document4.title)) leaveOut(document4.path, ["changed-during-run"]);
+    if (leftOut.has(document4.path)) leftOutTitles.set(titleIn(document4.place, document4.title), document4.path);
+    else synced.push(document4);
+  }
+  const plan = { create: [], overwrite: [], trash: [], leftOut: [] };
+  const filesByTitle = new Map(synced.map((document4) => [titleIn(document4.place, document4.title), document4]));
+  const matched = /* @__PURE__ */ new Set();
+  const folders = new Map(annotatedPlaces(mapping.zones).map(({ place, folder }) => [placeKey2(place), folder]));
+  const occupied = new Set([...mapping.documents, ...mapping.leftOut, ...mapping.unsynced].map((file) => file.path));
+  for (const { place, documents } of input.places) {
+    const folder = folders.get(placeKey2(place)) ?? "";
+    const wouldBeAt = (key, document4) => {
+      const own6 = filesByTitle.get(key)?.path ?? leftOutTitles.get(key);
+      if (own6 !== void 0) return own6;
+      const path2 = documentPath(folder, document4.id, document4.id, occupied);
+      occupied.add(path2);
+      return path2;
+    };
+    const oldestFirst = [...documents].sort((a, b) => compare8(a.createdAt, b.createdAt) || compare8(a.id, b.id));
+    for (const document4 of oldestFirst) {
+      if (!live(document4)) continue;
+      const key = titleIn(place, document4.title);
+      if (touched(place, document4.title)) {
+        const leftOutPath2 = leftOutTitles.get(key);
+        const entry = leftOutPath2 === void 0 ? void 0 : leftOut.get(leftOutPath2);
+        if (entry !== void 0) {
+          entry.documentId ??= document4.id;
+          if (changed2.has(document4.id)) leaveOut(entry.path, ["changed-during-run"]);
+        } else if (changed2.has(document4.id)) {
+          const path2 = wouldBeAt(key, document4);
+          leaveOut(path2, ["changed-during-run"]);
+          leftOut.get(path2).documentId ??= document4.id;
+        }
+        continue;
+      }
+      const file = filesByTitle.get(key);
+      if (file !== void 0 && !matched.has(key)) {
+        matched.add(key);
+        plan.overwrite.push({ path: file.path, title: file.title, place, documentId: document4.id });
+        continue;
+      }
+      const leftOutPath = leftOutTitles.get(key);
+      if (leftOutPath !== void 0) {
+        const entry = leftOut.get(leftOutPath);
+        if (entry.documentId === void 0) {
+          entry.documentId = document4.id;
+          continue;
+        }
+      }
+      plan.trash.push({ path: wouldBeAt(key, document4), title: document4.title, place, documentId: document4.id });
+    }
+  }
+  for (const document4 of synced) {
+    if (!matched.has(titleIn(document4.place, document4.title))) plan.create.push({ path: document4.path, title: document4.title, place: document4.place });
+  }
+  const byPath = (entries) => entries.sort((a, b) => compare8(a.path, b.path));
+  plan.create = byPath(plan.create);
+  plan.overwrite = byPath(plan.overwrite);
+  plan.trash = byPath(plan.trash);
+  plan.leftOut = byPath([...leftOut.values()]);
+  return plan;
+}
+function touchedTitles(input) {
+  const changed2 = input.changed ?? /* @__PURE__ */ new Map();
+  const listed = new Set(input.places.flatMap(({ place, documents }) => documents.filter((document4) => changed2.has(document4.id)).map((document4) => titleIn(place, document4.title))));
+  const anywhere = new Set(input.places.flatMap(({ documents }) => documents.flatMap((document4) => {
+    const current = changed2.get(document4.id);
+    return current && (current.title !== document4.title || current.projectId !== document4.projectId || current.teamId !== document4.teamId) ? [current.title.normalize("NFC")] : [];
+  })));
+  return (place, title) => listed.has(titleIn(place, title)) || anywhere.has(title.normalize("NFC"));
+}
+function leaveOutAtWrite(plan, entries) {
+  if (entries.length === 0) return plan;
+  const byPath = new Map(entries.map((entry) => [entry.path, entry]));
+  const leftOut = [...plan.leftOut];
+  const add = (path2, documentId) => {
+    const found = byPath.get(path2);
+    if (found === void 0) return;
+    leftOut.push({ path: path2, rules: [found.rule], lines: [], files: [...found.files], ...documentId !== void 0 ? { documentId } : {} });
+  };
+  for (const entry of plan.create) add(entry.path);
+  for (const entry of plan.overwrite) add(entry.path, entry.documentId);
+  return {
+    ...plan,
+    create: plan.create.filter((entry) => !byPath.has(entry.path)),
+    overwrite: plan.overwrite.filter((entry) => !byPath.has(entry.path)),
+    leftOut: leftOut.sort((a, b) => compare8(a.path, b.path))
+  };
+}
+function titleIn(place, title) {
+  return `${placeKey2(place)}\0${title.normalize("NFC")}`;
+}
+function zoneFolder(zone) {
+  return zone.projectFolder ?? zone.teamFolder;
+}
+function compare8(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// src/run/stop.ts
+var PARTIAL = message("run.partial");
+function renderStop(stop) {
+  const why = stop.kind === "test-threshold" ? `the test threshold of ${stop.documents} documents` : describeStop(stop);
+  const lines2 = [`Stopped: ${why}.`, ""];
+  const limits = stop.kind === "test-threshold" ? void 0 : stop.limits;
+  if (limits !== void 0) {
+    lines2.push("Linear's rate-limit headers at the stop:", "", "| Header | Value |", "| --- | --- |");
+    for (const name of Object.keys(limits).sort()) lines2.push(`| ${cell(name)} | ${cell(limits[name] ?? "")} |`);
+    lines2.push("");
+  }
+  return lines2;
+}
+function renderStoppedBeforeWriting(stop, partial) {
+  const outcome2 = partial ? `Stopped before any write; ${PARTIAL}: the next run starts again.` : "Stopped before any write: run it again once the limit has reset.";
+  return ["## Linear stopped the run", "", outcome2, "", ...renderStop(stop)].join("\n");
+}
+
+// src/sync/rebuild.ts
+async function rebuildIds({ git, record, linear, facts, targets, allowedPlace, documents, files: treeFiles2, unmapped }) {
+  const keyOf = (place, title) => `${"projectId" in place ? `project:${place.projectId}` : `team:${place.teamId}`}\0${title.normalize("NFC")}`;
+  const files = /* @__PURE__ */ new Map();
+  const places = /* @__PURE__ */ new Map();
+  const byPlace = /* @__PURE__ */ new Map();
+  const add = (path2, title, place) => {
+    if (files.has(keyOf(place, title))) return;
+    places.set(JSON.stringify(place), place);
+    files.set(keyOf(place, title), path2);
+    const folder = path2.slice(0, -(title.length + ".md".length)).replace(/\/$/, "");
+    byPlace.set(JSON.stringify(place), [...byPlace.get(JSON.stringify(place)) ?? [], { folder, path: path2 }]);
+  };
+  let initial;
+  const sides = /* @__PURE__ */ new Map();
+  const leftOut = [...unmapped];
+  for (const document4 of documents) {
+    if (lintInTree(document4.path, document4.text, treeFiles2).length > 0 || lengthRefusal({ title: document4.title }, facts) !== void 0) {
+      leftOut.push(document4.path);
+      continue;
+    }
+    if (!await allowedPlace(document4.path, document4.place)) continue;
+    let place;
+    try {
+      place = placeId(targets, document4.place);
+    } catch {
+      continue;
+    }
+    add(document4.path, document4.title, place);
+  }
+  for (const path2 of leftOut) {
+    initial ??= latestInitialRecord(git, record);
+    const oldest = await lifetimeStart(git, record, path2, await initial);
+    const last = oldest === void 0 ? null : await lastSynchronized(git, record, path2, facts, sides, oldest);
+    if (last === null || !await allowedPlace(path2, last.file.place)) continue;
+    const place = await lastPlace(linear, targets, last.file.place);
+    if (place !== void 0) add(path2, last.file.title, place);
+  }
+  const allPaths = new Set(documents.map((document4) => document4.path));
+  const ids = /* @__PURE__ */ new Map();
+  const listed = await linear.listDocumentsInPlaces([...places.values()], { includeArchived: true });
+  const gone = (document4) => document4.trashed || document4.archivedAt !== null;
+  const order = listed.sort((a, b) => Number(gone(a)) - Number(gone(b)) || compare9(a.createdAt, b.createdAt) || compare9(a.id, b.id));
+  const unmatched = [];
+  for (const document4 of order) {
+    if (document4.projectId === null && document4.teamId === null) continue;
+    const place = document4.projectId !== null ? { projectId: document4.projectId } : { teamId: document4.teamId };
+    const path2 = files.get(keyOf(place, document4.title));
+    if (path2 !== void 0 && !ids.has(path2)) ids.set(path2, { id: document4.id });
+    else unmatched.push({ document: document4, place });
+  }
+  const leftFiles = new Map([...byPlace].map(([place, list4]) => [place, list4.filter(({ path: path2 }) => !ids.has(path2))]));
+  const taken = new Set([...ids.values()].map((entry) => entry.id));
+  for (const { document: document4, place } of unmatched) {
+    const candidates2 = leftFiles.get(JSON.stringify(place)) ?? [];
+    if (taken.has(document4.id) || candidates2.length === 0) continue;
+    const index2 = candidates2.findIndex(({ folder, path: path2 }) => documentPath(folder, document4.title, document4.id, new Set([...allPaths].filter((other) => other !== path2)), path2) === path2);
+    if (index2 < 0) continue;
+    ids.set(candidates2[index2].path, { id: document4.id });
+    taken.add(document4.id);
+    candidates2.splice(index2, 1);
+  }
+  return ids;
+}
+async function latestInitialRecord(git, record) {
+  const log = await git.text(["log", "--first-parent", "--format=%H %s", "--fixed-strings", ...[...INITIAL_RECORD_SUBJECTS].map((subject) => `--grep=${subject}`), record]);
+  for (const line2 of log.split("\n")) {
+    const space = line2.indexOf(" ");
+    if (space > 0 && INITIAL_RECORD_SUBJECTS.has(line2.slice(space + 1))) return line2.slice(0, space);
+  }
+  return void 0;
+}
+async function lifetimeStart(git, record, path2, initial) {
+  if (initial === void 0) return void 0;
+  const added = (await git.text(["--literal-pathspecs", "log", "--first-parent", "--diff-filter=A", "--format=%H", "-1", record, "--", path2])).trim();
+  return added !== "" && added !== initial && await isAncestor(git, initial, added) ? added : initial;
+}
+async function lastPlace(linear, targets, place) {
+  try {
+    return placeId(targets, place);
+  } catch {
+    const lookup = await resolveTargets(linear, [{ team: place.team, teamFolder: "", ...place.kind === "project" ? { project: place.project, projectFolder: "" } : {} }]);
+    return lookup.targets === void 0 ? void 0 : placeId(lookup.targets, place);
+  }
 }
 function compare9(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
-async function repairMerged(git, source, tracked, path2, replacement) {
-  const blob = await git.text(["hash-object", "--stdin"], { input: replacement });
-  const commits = (await git.text(["log", "--format=%H", `--find-object=${blob}`, `${source}..${tracked}`])).split("\n").filter((line2) => line2 !== "");
-  for (const commit2 of commits) {
-    const found = await git.run(["rev-parse", "--verify", "--quiet", `${commit2}:${path2}`], { okCodes: [0, 1, 128] });
-    if (found.code === 0 && found.stdout.toString("utf8").trim() === blob) return true;
+
+// src/sync/capture.ts
+var CAPTURE_MESSAGE = "Capture Linear changes";
+var CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
+function captureCursorTrailer(through) {
+  return `Capture-through: ${through}`;
+}
+function cursorTime(document4) {
+  return recordedTime(document4.updatedAt);
+}
+var HELD = /^Removal-held: (\S+)$/gm;
+async function readHeld(context, state) {
+  if (state.ids === null) return /* @__PURE__ */ new Set();
+  const log = await context.git.text(["log", "--format=%B", "--grep=^Capture document ids", "-1", state.ids]);
+  return new Set([...log.matchAll(HELD)].map((match) => match[1]));
+}
+async function readCaptureCursor(git, ids) {
+  if (ids === null) return null;
+  const log = await git.text(["log", "--format=%B", "--grep=^Capture-through:", "-1", ids]);
+  return CURSOR.exec(log)?.[1] ?? null;
+}
+var NotDownloaded = class extends Error {
+};
+async function capture(context, options) {
+  const { git, linear, fetched } = context;
+  let mapping = context.mapping;
+  let targets = context.targets;
+  const state = { ...options.state };
+  const base = state.linear;
+  if (base === null) throw new Error(message("sync.needs-initial-sync"));
+  const identity = options.identity ?? context.identity;
+  const ids = await readIds(git, state.ids);
+  const uploads = await readUploads(git, state.uploads, context.pushedKey);
+  const reserved = await readReservedIds(git, state.ids);
+  const superseded = await readSupersededIds(git, state.ids);
+  const gate = options.security ?? await securityGate(git, fetched.tracked);
+  const result = { ok: true, state, documents: /* @__PURE__ */ new Map(), blocked: [], changed: [], removed: [], heldRemovals: [], leftOut: [], writeBackWarnings: [], summary: "", conflictNotices: noConflictNotices() };
+  const spool = new ContentSpool();
+  let published = false;
+  try {
+    const blobBudget = new MappingBlobBudget();
+    const entries = await listTree(git, base, MAPPING_TREE_BYTES);
+    const recorded = await mapTree(git, entries, blobBudget);
+    const zones = new Map(mapping.zones);
+    let changedPlace = false;
+    for (const [folder, old] of recorded.zones) {
+      const current2 = zones.get(folder);
+      if (current2 !== void 0 && (old.team !== current2.team || old.project !== current2.project)) {
+        if (!await pendingMove(git, fetched.tracked, folder, placeOf(old), placeOf(current2))) throw new Error(message("sync.recorded-place-unknown", { folder: folder === "" ? "the repository root" : `${folder}/` }));
+        zones.set(folder, old);
+        changedPlace = true;
+      }
+    }
+    if (changedPlace) {
+      mapping = { ...mapping, zones };
+      const resolved = await resolveTargets(linear, zones.values());
+      if (resolved.targets === void 0) throw new Error(message("sync.places-unresolved"));
+      targets = resolved.targets;
+    }
+    const allowedPlace = syncedPlaces(git, fetched.tracked, context.mapping.zones, zones, linear.facts);
+    if (state.ids === null) {
+      const paths2 = new Set(recorded.documents.map((document4) => document4.path));
+      const texts = await blobBudget.read(git, entries.filter((entry) => paths2.has(entry.path)));
+      const documents2 = recorded.documents.map((document4) => ({ ...document4, text: texts.get(document4.oid).toString("utf8") }));
+      const plainProvenance = await readPlainFileProvenance(git, base);
+      for (const [path2, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents: documents2, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) {
+        const plainFiles = plainProvenance.get(entry.id);
+        ids.set(path2, plainFiles === void 0 ? entry : { ...entry, plainFiles: [...plainFiles] });
+      }
+      result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
+    }
+    const cursor = await readCaptureCursor(git, state.ids);
+    const recordedBlobs = entries.filter((entry) => entry.type === "blob" && ids.has(entry.path));
+    const textEntries = recordedBlobs.filter(readableBlob);
+    const unreadIds = new Set(recordedBlobs.filter((entry) => !readableBlob(entry)).map((entry) => ids.get(entry.path).id));
+    for (const id of unreadIds) result.leftOut.push({ id, rule: "blob-too-large" });
+    const blobs = await blobBudget.read(git, textEntries);
+    const previous3 = new Map(textEntries.map((entry) => [entry.path, blobs.get(entry.oid)]));
+    const byId = new Map([...ids].map(([path2, entry]) => [entry.id, { path: path2, entry }]));
+    const reservedById = new Map([...reserved].filter(([path2, id]) => !ids.has(path2) && !byId.has(id) && isMarkdownPath(path2) && mapping.files.has(path2)).map(([path2, id]) => [id, path2]));
+    const occupied = /* @__PURE__ */ new Set([...entries.map((entry) => entry.path), ...ids.keys()]);
+    const annotationHead = (path2) => {
+      if (posix9.basename(path2) !== "README.md" || !mapping.zones.has(folderOf(path2))) return void 0;
+      const prior = previous3.get(path2)?.toString("utf8");
+      if (prior === void 0) return void 0;
+      const read = readAnnotation(path2, prior);
+      return "annotation" in read && read.annotation !== null ? splitFile(prior).head : void 0;
+    };
+    const listed = /* @__PURE__ */ new Map();
+    const folders = /* @__PURE__ */ new Map();
+    const places = annotatedPlaces(mapping.zones).map(({ place, folder }) => {
+      const resolved = placeId(targets, place);
+      folders.set(placeKeyOf(resolved), folder);
+      return resolved;
+    });
+    const recordedPlace = (path2) => {
+      const zone = nearestZone(mapping.zones, folderOf(path2));
+      if (zone === void 0) return void 0;
+      const resolved = placeId(targets, zone.project === void 0 ? { kind: "team", team: zone.team } : { kind: "project", team: zone.team, project: zone.project });
+      return placeKeyOf(resolved);
+    };
+    const inPlaces = await linear.listDocumentsInPlaces(places, { includeArchived: true });
+    for (const document4 of inPlaces) listed.set(document4.id, document4);
+    if (!changedPlace) result.containers = containersOf(context, inPlaces);
+    const missing = [...byId.keys()].filter((id) => !listed.has(id));
+    for (const document4 of await linear.getDocuments(missing)) listed.set(document4.id, document4);
+    const notFound = [];
+    for (const id of missing.filter((id2) => !listed.has(id2))) {
+      const document4 = await linear.getDocument(id);
+      if (document4 === null) notFound.push(id);
+      else listed.set(id, document4);
+    }
+    const answered = new Set(inPlaces.map(placeKeyOf));
+    const heldBefore = await readHeld(context, state);
+    const gone = /* @__PURE__ */ new Set();
+    const held = /* @__PURE__ */ new Set();
+    for (const id of notFound) {
+      if (unreadIds.has(id)) continue;
+      const place = recordedPlace(byId.get(id).path);
+      if (place !== void 0 && answered.has(place) || heldBefore.has(id) && answered.size > 0) gone.add(id);
+      else held.add(id);
+    }
+    const baselines = /* @__PURE__ */ new Map();
+    const sides = /* @__PURE__ */ new Map();
+    const excludedPath = (path2) => {
+      const mapped = recorded.documents.find((document4) => document4.path === path2);
+      const prior = previous3.get(path2);
+      return mapped === void 0 || prior !== void 0 && lintInTree(path2, prior.toString("utf8"), recorded.files).length > 0 || lengthRefusal({ title: mapped.title }, linear.facts) !== void 0;
+    };
+    const retained = /* @__PURE__ */ new Map();
+    const retainedPlace = /* @__PURE__ */ new Map();
+    for (const [id, old] of byId) {
+      if (unreadIds.has(id) || !excludedPath(old.path)) continue;
+      const baseline = await lastSynchronized(git, base, old.path, linear.facts, sides);
+      baselines.set(old.path, baseline);
+      const doc = listed.get(id);
+      if (baseline === null || doc === void 0 || doc.title.normalize("NFC") !== baseline.file.title.normalize("NFC")) continue;
+      if (!await allowedPlace(old.path, baseline.file.place)) continue;
+      let resolved;
+      try {
+        resolved = placeId(targets, baseline.file.place);
+      } catch {
+        const place = baseline.file.place;
+        const lookup = await resolveTargets(linear, [{ team: place.team, teamFolder: "", ...place.kind === "project" ? { project: place.project, projectFolder: "" } : {} }]);
+        if (lookup.targets === void 0) continue;
+        resolved = placeId(lookup.targets, place);
+      }
+      if ("projectId" in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) {
+        retained.set(id, old.path);
+        retainedPlace.set(id, placeKeyOf(doc));
+      }
+    }
+    const folderFor = (doc) => folders.get(placeKeyOf(doc));
+    const placed = (doc) => folderFor(doc) !== void 0 || retained.has(doc.id) && retainedPlace.get(doc.id) === placeKeyOf(doc);
+    const live = (doc) => !doc.trashed && doc.archivedAt === null && placed(doc);
+    const normalizedTime = cursorTime;
+    const recordedTimes = await readRecorded(git, state.ids);
+    const asRecorded = (doc) => recordedTimes.get(doc.id) === normalizedTime(doc);
+    const marked = (doc) => {
+      const entry = byId.get(doc.id)?.entry;
+      return entry?.saved !== void 0 && (entry.suspended === void 0 || entry.saved.notice?.kind === "blocked");
+    };
+    let selected = [...listed.values()].filter((doc) => {
+      const old = byId.get(doc.id);
+      return old === void 0 || marked(doc) || old.entry.observedDigest === void 0 && live(doc) && previous3.has(old.path) && !excludedPath(old.path) || !asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor);
+    });
+    const invalidZone = (doc, path2) => {
+      const zone = nearestZone(mapping.zones, folderOf(path2));
+      if (zone === void 0) return true;
+      const place = zone.project === void 0 ? { kind: "team", team: zone.team } : { kind: "project", team: zone.team, project: zone.project };
+      const target = placeId(targets, place);
+      return "projectId" in target ? target.projectId !== doc.projectId : doc.projectId !== null || target.teamId !== doc.teamId;
+    };
+    const destination2 = (doc, occupied2, allocated2 = /* @__PURE__ */ new Map()) => {
+      if (retained.has(doc.id)) return retained.get(doc.id);
+      const own6 = reservedById.get(doc.id);
+      if (own6 !== void 0 && !occupied2.has(own6) && !allocated2.has(own6) && !invalidZone(doc, own6) && documentPath(folderFor(doc), doc.title, doc.id, occupied2, own6, (path2) => invalidZone(doc, path2)) === own6) return own6;
+      const old = byId.get(doc.id);
+      const available = new Set(occupied2);
+      if (old !== void 0 && (!allocated2.has(old.path) || allocated2.get(old.path) === doc.id)) available.delete(old.path);
+      const prior = old !== void 0 && !mapping.files.has(old.path) && old.path.split("/").some((part) => part.toLowerCase() === ".github") ? void 0 : old?.path;
+      return documentPath(folderFor(doc), doc.title, doc.id, available, prior, (path2) => invalidZone(doc, path2));
+    };
+    if (gone.size > 0 || [...listed.values()].some((doc) => {
+      const old = byId.get(doc.id);
+      return old !== void 0 && !unreadIds.has(doc.id) && (!live(doc) || destination2(doc, occupied) !== old.path);
+    })) selected = [...listed.values()];
+    selected = selected.filter((doc) => !unreadIds.has(doc.id));
+    const documents = new Map([...listed].filter(([, doc]) => placed(doc)));
+    const work = /* @__PURE__ */ new Map();
+    for (const doc of await linear.getDocuments(selected.filter(live).map((doc2) => doc2.id), { withContent: true })) {
+      if (placed(doc)) documents.set(doc.id, doc);
+      else documents.delete(doc.id);
+      work.set(doc.id, doc);
+    }
+    for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
+    result.documents = documents;
+    const changes = /* @__PURE__ */ new Map();
+    const removeBody = (path2) => {
+      const next2 = annotationHead(path2) ?? null;
+      changes.set(path2, next2);
+      return next2 === null ? previous3.has(path2) : previous3.get(path2)?.equals(contentBytes(next2)) !== true;
+    };
+    const documentIds = new Map([...ids].filter(([path2, entry]) => previous3.has(path2) || unreadIds.has(entry.id)).map(([path2, entry]) => [path2, entry.id]));
+    for (const [id, path2] of reservedById) if (!documentIds.has(path2)) documentIds.set(path2, id);
+    for (const id of gone) {
+      const old = byId.get(id);
+      const changedFile = removeBody(old.path);
+      const retained2 = keptForLane(old.entry);
+      if (!retained2) ids.delete(old.path);
+      documentIds.delete(old.path);
+      if (!retained2 || changedFile) result.removed.push(old.path);
+    }
+    for (const id of held) result.heldRemovals.push(byId.get(id).path);
+    const paths = /* @__PURE__ */ new Map();
+    const reservations = new Set(occupied);
+    const allocated = /* @__PURE__ */ new Map();
+    const reservedFirst = (a, b) => Number(reservedById.has(b.id)) - Number(reservedById.has(a.id)) || a.id.localeCompare(b.id);
+    for (const doc of [...work.values()].filter(live).sort(reservedFirst)) {
+      const path2 = destination2(doc, reservations, allocated);
+      allocated.set(path2, doc.id);
+      paths.set(doc.id, path2);
+      reservations.add(path2);
+    }
+    const limited = /* @__PURE__ */ new Set();
+    let needsLinkBase = false;
+    for (const doc of work.values()) {
+      if (!live(doc)) continue;
+      try {
+        checkImageRepairSize(doc.content ?? "");
+        if (linksLinearDocuments(doc.content ?? "")) needsLinkBase = true;
+      } catch (error) {
+        if (!(error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError)) throw error;
+        limited.add(doc.id);
+        result.leftOut.push({ id: doc.id, rule: error instanceof ImageRepairBudgetError ? "image-repair-budget" : "markdown-complexity" });
+      }
+    }
+    const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : void 0;
+    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool, void 0, uploadAccessProbe(linear));
+    const candidates2 = /* @__PURE__ */ new Map();
+    const resetTargets = (rejected, targets2) => {
+      for (const [path2, target] of targets2) if (rejected.has(target)) targets2.delete(path2);
+      for (const id of rejected) {
+        const old = byId.get(id);
+        if (old !== void 0 && previous3.has(old.path)) targets2.set(old.path, id);
+      }
+    };
+    const resetTarget = (id, targets2 = documentIds) => resetTargets(/* @__PURE__ */ new Set([id]), targets2);
+    const recordBlocked = (doc, path2, findings, key = byId.get(doc.id)?.path ?? path2) => {
+      const old = byId.get(doc.id);
+      const saved = old?.entry.saved ?? { icon: doc.icon, color: doc.color };
+      ids.set(key, { ...old?.entry, id: doc.id, saved });
+      result.blocked.push({ id: doc.id, path: key, findings });
+      resetTarget(doc.id);
+    };
+    const restores = [];
+    for (const doc of [...work.values()].sort((a, b) => a.id.localeCompare(b.id))) {
+      const old = byId.get(doc.id);
+      if (!live(doc)) {
+        if (old !== void 0) {
+          const saved = old.entry.saved;
+          if (saved !== void 0 && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) restores.push({ doc, saved, path: old.path, entry: old.entry });
+          const changedFile = removeBody(old.path);
+          const retained2 = keptForLane(old.entry);
+          if (!retained2) ids.delete(old.path);
+          documentIds.delete(old.path);
+          if (!retained2 || changedFile) result.removed.push(old.path);
+        }
+        continue;
+      }
+      const path2 = paths.get(doc.id);
+      if (limited.has(doc.id)) continue;
+      if (gate.configured && !previous3.has(path2)) {
+        const findings = await checkTitle(gate, path2, doc.title);
+        if (findings === null) {
+          result.leftOut.push({ id: doc.id, rule: "security-unchecked" });
+          resetTarget(doc.id);
+          continue;
+        }
+        if (findings.length > 0) {
+          let held2 = old !== void 0 && previous3.has(old.path) ? old.path : void 0;
+          if (held2 === void 0) {
+            const available = new Set(reservations);
+            if (old !== void 0) available.delete(old.path);
+            held2 = documentPath(folderFor(doc), doc.id, doc.id, available, void 0, (candidate) => invalidZone(doc, candidate));
+            reservations.add(held2);
+            if (old !== void 0 && old.path !== held2) ids.delete(old.path);
+          }
+          recordBlocked(doc, held2, findings, held2);
+          continue;
+        }
+      }
+      const prior = splitFile(old === void 0 ? "" : previous3.get(old.path)?.toString("utf8") ?? "");
+      const head = old !== void 0 && path2 !== old.path && annotationHead(old.path) !== void 0 ? relocatedHead(prior.head) : prior.head;
+      try {
+        const previousBody = old === void 0 ? void 0 : markdownBaseline(prior.body);
+        const assets = await downloadAssets(path2, doc.content ?? "", uploads, previousBody, old?.path, new Set(old?.entry.plainFiles));
+        const candidate = { doc, path: path2, head, assets, files: new Map([[path2, joinFile(head, assets.body)], ...assets.files]) };
+        if (old?.path === path2 && previousBody !== void 0) candidate.previousBody = previousBody;
+        candidates2.set(doc.id, candidate);
+        resetTarget(doc.id);
+        if (old !== void 0) documentIds.delete(old.path);
+        documentIds.set(path2, doc.id);
+      } catch (error) {
+        if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
+        if (error instanceof ImageBlockedError) {
+          const security = await gate.check(/* @__PURE__ */ new Map([[path2, head + (doc.content ?? "")]]));
+          if (security === null) {
+            result.leftOut.push({ id: doc.id, rule: "security-unchecked" });
+            resetTarget(doc.id);
+          } else {
+            recordBlocked(doc, path2, [...error.findings, ...security]);
+          }
+          continue;
+        }
+        if (error instanceof MarkdownLimitError) result.leftOut.push({ id: doc.id, rule: "markdown-complexity" });
+        else if (error instanceof AttachmentBudgetError) result.leftOut.push({ id: doc.id, rule: "attachment-budget" });
+        else if (error instanceof ImageRepairBudgetError) result.leftOut.push({ id: doc.id, rule: "image-repair-budget" });
+        else if (error instanceof DownloadRetryError) result.leftOut.push({ id: doc.id, rule: "download-retry" });
+        else result.leftOut.push({ id: doc.id, rule: "capture-translation" });
+      }
+    }
+    const recordedAsIs = (candidate, text6) => {
+      const old = byId.get(candidate.doc.id);
+      const { assets } = candidate;
+      return assets.observedBody === void 0 && old?.path === candidate.path && old.entry.saved === void 0 && previous3.get(candidate.path)?.equals(Buffer.from(text6)) === true && assets.files.size === 0 && assets.uploads.size === 0;
+    };
+    const textOf = (candidate, targets2) => {
+      let body2 = candidate.assets.body;
+      if (linkBase !== void 0) {
+        const aliases = superseded.size === 0 ? void 0 : new Map([...superseded].filter(([id, path2]) => targets2.has(path2) && targets2.get(path2) !== id));
+        const map4 = { base: linkBase, ids: new Map(targets2), aliases };
+        const seen = /* @__PURE__ */ new Map();
+        if (candidate.previousBody !== void 0) linksToLinear(candidate.previousBody, candidate.path, map4, seen);
+        body2 = linksFromLinear(body2, candidate.path, map4, seen);
+      }
+      if (candidate.compared?.body !== body2) {
+        const unchanged = candidate.previousBody !== void 0 && sameMarkdown(candidate.previousBody, body2);
+        const text6 = unchanged ? joinFile(candidate.head, candidate.previousBody) : fixLinearText(joinFile(candidate.head, body2), candidate.doc.content ?? "", linkedFileCheck(candidate.path, (file) => mapping.files.has(file)));
+        candidate.compared = { body: body2, text: text6 };
+      }
+      return candidate.compared.text;
+    };
+    let again = true;
+    while (again) {
+      again = false;
+      for (const [id, candidate] of candidates2) {
+        const { doc, path: path2, head, assets } = candidate;
+        const old = byId.get(id);
+        let text6;
+        let observed;
+        try {
+          text6 = textOf(candidate, documentIds);
+          if (assets.observedBody !== void 0) {
+            const observedCandidate = { ...candidate, assets: { ...assets, body: assets.observedBody } };
+            delete observedCandidate.compared;
+            observed = textOf(observedCandidate, documentIds);
+          }
+        } catch (error) {
+          if (!(error instanceof MarkdownLimitError)) throw error;
+          result.leftOut.push({ id, rule: "markdown-complexity" });
+          candidates2.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
+        if (Buffer.byteLength(text6) > MAPPING_FILE_BYTES || observed !== void 0 && Buffer.byteLength(observed) > MAPPING_FILE_BYTES) {
+          result.leftOut.push({ id, rule: "blob-too-large" });
+          candidates2.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
+        candidate.files.set(path2, text6);
+        if (candidate.checked === text6 && candidate.observed === observed) continue;
+        let findings = [];
+        if (!recordedAsIs(candidate, text6)) {
+          const original = withNewUploadUrls(head + (doc.content ?? ""), assets.uploads, uploads) + ((assets.plainFiles?.length ?? 0) === 0 ? "" : `
+${assets.plainFiles.join("\n")}
+`);
+          if (original !== text6) findings = await gate.check(new Map([[path2, original], ...assets.files]));
+          if (findings?.length === 0) findings = await gate.check(candidate.files);
+          if (findings?.length === 0 && observed !== void 0) {
+            if (observed !== text6 && observed !== original) findings = await gate.check(new Map([[path2, observed], ...assets.files]));
+            if (findings?.length === 0 && candidate.files.size > 1) findings = await gate.check(repairSet(path2, text6));
+          }
+        }
+        if (findings === null) {
+          result.leftOut.push({ id, rule: "security-unchecked" });
+          candidates2.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
+        if (findings.length > 0) {
+          recordBlocked(doc, path2, findings);
+          candidates2.delete(id);
+          again = true;
+          break;
+        }
+        candidate.checked = text6;
+        if (observed !== void 0) candidate.observed = observed;
+      }
+    }
+    linear.transport.reads?.end();
+    if (options.stageOnly === true) {
+      const refused = new Set([...candidates2.keys()].filter((id) => {
+        const saved = byId.get(id)?.entry.saved;
+        return saved !== void 0 && saved.notice?.kind !== "conflict";
+      }));
+      const budget = linkVariantBudget();
+      if (linkBase !== void 0) for (const set of linkVariants(candidates2, textOf, resetTargets, documentIds, { refused, settled: recordedAsIs, budget })) await gate.check(set);
+      result.summary = `Staged ${candidates2.size} changed documents for the security hooks.`;
+      if (budget.short === true) result.summary += ` ${message("sync.link-variant-budget")}`;
+      return result;
+    }
+    const unmarked = /* @__PURE__ */ new Set();
+    const marking = /* @__PURE__ */ new Set([
+      ...result.blocked.map(({ id }) => id),
+      ...[...candidates2].filter(([id, { doc }]) => byId.get(id)?.entry.saved !== void 0 || detectConflicts(doc.content ?? "").length > 0).map(([id]) => id)
+    ]);
+    const writes = (id) => {
+      const blocked = result.blocked.find((item) => item.id === id);
+      const doc = blocked === void 0 ? candidates2.get(id)?.doc : documents.get(id);
+      const entry = blocked === void 0 ? byId.get(id)?.entry ?? { id } : ids.get(blocked.path);
+      return doc === void 0 || entry === void 0 || markWritesLinear(doc, entry, blocked?.findings);
+    };
+    const rereading = /* @__PURE__ */ new Set([...[...marking].filter((id) => linear.transport.reads?.mode === "replay" || writes(id)), ...restores.map(({ doc }) => doc.id)]);
+    const current = rereading.size === 0 ? /* @__PURE__ */ new Map() : new Map((await linear.getDocuments([...rereading])).map((doc) => [doc.id, doc]));
+    const samePlace = (now, then) => now !== void 0 && then !== void 0 && placed(now) && placeKeyOf(now) === placeKeyOf(then);
+    const stillThere = (now, then) => samePlace(now, then) && !now.trashed && now.archivedAt === null;
+    const leaveUnmarked = (id, then) => {
+      const now = current.get(id);
+      unmarked.add(id);
+      result.leftOut.push({ id, rule: "changed-during-run" });
+      if (now !== void 0 && placed(now)) documents.set(id, { ...now, content: then?.content ?? null });
+      else documents.delete(id);
+    };
+    for (const { doc, saved, path: path2, entry } of restores) {
+      const now = current.get(doc.id);
+      if (samePlace(now, doc) && (now.trashed || now.archivedAt !== null)) {
+        if (now.icon !== saved.icon || now.color !== saved.color) await linear.updateDocument(doc.id, { icon: saved.icon, color: saved.color });
+        continue;
+      }
+      result.leftOut.push({ id: doc.id, rule: "changed-during-run" });
+      changes.delete(path2);
+      result.removed = result.removed.filter((removed) => removed !== path2);
+      ids.set(path2, entry);
+    }
+    for (const blocked of [...result.blocked]) {
+      if (!rereading.has(blocked.id)) continue;
+      const now = current.get(blocked.id);
+      const then = documents.get(blocked.id);
+      if (!stillThere(now, then)) {
+        result.blocked.splice(result.blocked.indexOf(blocked), 1);
+        leaveUnmarked(blocked.id, then);
+        for (const [path2, entry2] of ids) if (entry2.id === blocked.id) ids.delete(path2);
+        const old = byId.get(blocked.id);
+        if (old !== void 0) ids.set(old.path, old.entry);
+        continue;
+      }
+      if (now.updatedAt === then.updatedAt) continue;
+      documents.set(blocked.id, { ...now, content: then.content ?? null });
+      const entry = ids.get(blocked.path);
+      if (entry !== void 0 && byId.get(blocked.id)?.entry.saved === void 0) ids.set(blocked.path, { ...entry, saved: { icon: now.icon, color: now.color } });
+    }
+    for (const [id, { doc }] of candidates2) {
+      if (!rereading.has(id)) continue;
+      const now = current.get(id);
+      if (!stillThere(now, doc)) leaveUnmarked(id, doc);
+      else if (now.updatedAt !== doc.updatedAt) unmarked.add(id);
+    }
+    const acceptedAssets = /* @__PURE__ */ new Map();
+    const asLastAccepted = async (candidate) => {
+      const baseline = excludedPath(candidate.path) ? baselines.get(candidate.path) : void 0;
+      if (baseline == null || candidate.assets.files.size === 0) return false;
+      const captureAtBaseline = acceptedAssets.get(baseline.commit) ?? createAssetCapture(git, options.config, baseline.commit, () => Promise.reject(new NotDownloaded()));
+      acceptedAssets.set(baseline.commit, captureAtBaseline);
+      const { head, body: body2 } = splitFile(baseline.text);
+      let assets;
+      try {
+        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? "", uploads, body2, candidate.path, new Set(byId.get(candidate.doc.id)?.entry.plainFiles));
+        return assets.files.size === 0 && textOf({ doc: candidate.doc, path: candidate.path, head, assets, files: /* @__PURE__ */ new Map(), previousBody: body2 }, documentIds) === baseline.text;
+      } catch (error) {
+        if (error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError) return false;
+        if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
+        throw error;
+      }
+    };
+    for (const [id, candidate] of candidates2) {
+      const old = byId.get(id);
+      if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
+      if (old !== void 0 && old.path !== candidate.path) {
+        removeBody(old.path);
+        ids.delete(old.path);
+        result.removed.push(old.path);
+      }
+      const entry = { ...old?.entry, id, observedDigest: observedDigest(candidate.doc) };
+      delete entry.pullRewrite;
+      const plainFiles = [.../* @__PURE__ */ new Set([...old?.entry.plainFiles ?? [], ...candidate.assets.plainFiles ?? []])];
+      if (plainFiles.length > 0) entry.plainFiles = plainFiles;
+      const repaired = candidate.files.get(candidate.path);
+      if (candidate.observed !== void 0) {
+        const observed = candidate.observed;
+        candidate.files.set(candidate.path, observed);
+        const deadUploads = candidate.assets.deadUploads ?? [];
+        entry.pullRewrite = {
+          hash: createHash16("sha256").update(observed).digest("hex"),
+          observedHash: createHash16("sha256").update(candidate.doc.content ?? "").digest("hex"),
+          replacement: String(repaired),
+          images: imageLinks(candidate.doc.content ?? "", new Set(deadUploads)).images
+        };
+        if (old?.entry.pullRewrite?.hash === entry.pullRewrite.hash && old.entry.pullRewrite.source !== void 0) entry.pullRewrite.source = old.entry.pullRewrite.source;
+      }
+      ids.set(candidate.path, entry);
+      for (const [path2, content4] of candidate.files) {
+        const prior = previous3.get(path2);
+        if (path2 === candidate.path && old?.path === path2 && prior !== void 0 && excludedPath(path2)) {
+          const baseline = baselines.get(path2);
+          if (baseline != null && splitFile(baseline.text).body === splitFile(String(content4)).body) continue;
+        }
+        if (previous3.get(path2)?.equals(contentBytes(content4)) !== true) {
+          changes.set(path2, content4);
+          result.changed.push(path2);
+        }
+      }
+      for (const [hash, url] of candidate.assets.uploads) uploads.set(hash, url);
+    }
+    const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
+    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
+    const prepared = await prepareLfs(git, fetched.tracked, changes);
+    const plainTrailers = [...ids.values()].flatMap((entry) => (entry.plainFiles ?? []).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
+    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? "" : `
+
+${plainTrailers.join("\n")}`), identity, sign: signObservation(context.pushedKey) });
+    if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
+    for (const [path2, entry] of ids) if (candidates2.has(entry.id) && entry.pullRewrite !== void 0 && entry.pullRewrite.source === void 0) {
+      ids.set(path2, { ...entry, pullRewrite: { ...entry.pullRewrite, source: linearCommit } });
+    }
+    const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
+    const recordsRemovals = held.size > 0 || heldBefore.size > 0;
+    const trailers = [
+      ...through !== null && (recordsChange || recordsRemovals) ? [captureCursorTrailer(through)] : [],
+      ...[...held].sort().map((id) => `Removal-held: ${id}`)
+    ];
+    const commitMessage = trailers.length === 0 ? "Capture document ids" : `Capture document ids
+
+${trailers.join("\n")}`;
+    const always = recordsRemovals || through !== cursor && recordsChange;
+    const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
+    if (prepared.oids.length > 0) await git.run(["lfs", "push", "--object-id", options.config.remote, ...prepared.oids]);
+    const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
+    const pushed = await pushAtomic(git, options.config, ["linear", "ids", "uploads"].map((store) => ({ ref: stateRef(options.config, store), expected: state[store], next: next[store] })));
+    if (!pushed.ok) {
+      result.ok = false;
+      result.code = "state-moved";
+    } else {
+      result.state = next;
+      published = true;
+      for (const candidate of candidates2.values()) {
+        const refusal = lengthRefusal({ content: candidate.doc.content ?? "" }, linear.facts);
+        if (refusal !== void 0) result.writeBackWarnings.push({ path: candidate.path, code: "linear-content-too-large-to-write-back", length: refusal.length, limit: refusal.limit });
+      }
+      const lostLease = new Error(message("sync.lost-lease"));
+      const marked2 = [
+        ...[...candidates2.values()].filter(({ doc }) => !unmarked.has(doc.id)).map(({ doc, path: path2 }) => ({ doc, path: path2, blocked: [] })),
+        ...result.blocked.map(({ id, path: path2, findings }) => ({ doc: documents.get(id), path: path2, blocked: findings }))
+      ];
+      try {
+        for (const { doc, path: path2, blocked } of marked2) {
+          const before = ids.get(path2);
+          const outcome2 = await reconcileDocumentMark({
+            document: doc,
+            entry: before,
+            linear,
+            blocked,
+            includeUpdatedBody: before.saved !== void 0 && blocked.length === 0 && before.observedDigest !== void 0,
+            onConflictNotice: (change) => result.conflictNotices[change].push(path2),
+            persistEntry: async (entry, cleared) => {
+              if (cleared !== void 0 && matchesObservedBody(cleared, doc)) {
+                entry = { ...entry, observedDigest: observedDigest(cleared) };
+              }
+              ids.set(path2, entry);
+              const tip = await commitIds(git, result.state.ids, ids, identity, { reserved, superseded, message: "Capture document marks" });
+              const updated = { ...next, ids: tip };
+              const saved = await pushAtomic(git, options.config, ["linear", "ids", "uploads"].map((store) => ({ ref: stateRef(options.config, store), expected: result.state[store], next: updated[store] })));
+              if (!saved.ok) {
+                result.ok = false;
+                result.code = "state-moved";
+                throw lostLease;
+              }
+              result.state = updated;
+            }
+          });
+          if (outcome2.updated) {
+            const mark2 = outcome2.state === "clear" ? before.saved : MARKS[outcome2.state];
+            const listed2 = documents.get(doc.id);
+            if (mark2 !== void 0 && listed2 !== void 0) documents.set(doc.id, { ...listed2, icon: mark2.icon, color: mark2.color });
+          }
+        }
+      } catch (error) {
+        if (error !== lostLease) throw error;
+      }
+    }
+    result.summary = renderCapture(result, gate.configured);
+    return result;
+  } catch (error) {
+    if (!(error instanceof LinearStoppedError) && !(error instanceof LinearError && isTransientLinearError(error))) throw error;
+    result.ok = false;
+    if (error instanceof LinearStoppedError) {
+      result.code = "stopped";
+      result.stopped = error.reason;
+    } else {
+      result.code = "linear-failed";
+      result.failure = { operation: error.operation, error: describeLinearError(error) };
+    }
+    if (!published) {
+      result.changed = [];
+      result.removed = [];
+      result.heldRemovals = [];
+    }
+    result.summary = renderCapture(result, gate.configured);
+    return result;
+  } finally {
+    spool.close();
+    await gate.close?.();
   }
-  return false;
+}
+function keptForLane(entry) {
+  return entry.suspended !== void 0 || entry.releaseBase !== void 0 || releasedHold(entry);
+}
+var LINK_VARIANT_TARGETS = 4;
+var LINK_VARIANT_LINKS = 8;
+var linkVariantBudget = () => ({ sets: 256, work: 32 * 1024 * 1024 });
+function* linkVariants(candidates2, textOf, reset, documentIds, options = {}) {
+  const budget = options.budget ?? linkVariantBudget();
+  const refused = [...candidates2.keys()].filter((id) => options.refused?.has(id) === true);
+  const passes = refused.length > 0 ? [{ targets: refused, allOnly: true }, { targets: refused, allOnly: false }, { targets: [.../* @__PURE__ */ new Set([...refused, ...candidates2.keys()])], allOnly: false }] : [{ targets: [...candidates2.keys()], allOnly: false }];
+  const order = [...candidates2].sort(([a], [b]) => Number(options.refused?.has(a) === true) - Number(options.refused?.has(b) === true));
+  const staged = /* @__PURE__ */ new Map();
+  const unlinked = /* @__PURE__ */ new Map();
+  for (const pass of passes) {
+    const passUnlinked = unlinked.get(pass.targets) ?? /* @__PURE__ */ new Set();
+    unlinked.set(pass.targets, passUnlinked);
+    for (const [id, candidate] of order) {
+      if (passUnlinked.has(id)) continue;
+      if (budget.sets <= 0) {
+        budget.short = true;
+        return;
+      }
+      const accepted = candidate.files.get(candidate.path);
+      const without = (rejected, free = false) => {
+        const cost = accepted.length + documentIds.size + rejected.length;
+        if (budget.work < cost) {
+          budget.short = true;
+          return void 0;
+        }
+        const targets = new Map(documentIds);
+        reset(new Set(rejected), targets);
+        const text6 = textOf(candidate, targets);
+        if (!(free && (text6 === accepted || options.settled?.(candidate, text6) === true))) budget.work -= cost + Math.max(0, text6.length - accepted.length);
+        return text6;
+      };
+      const others = pass.targets.filter((other) => other !== id);
+      if (others.length === 0) continue;
+      const all2 = without(others, true);
+      if (all2 === void 0) continue;
+      if (all2 === accepted) {
+        passUnlinked.add(id);
+        continue;
+      }
+      const alone = /* @__PURE__ */ new Map();
+      const find = (group, text6) => {
+        if (alone.size >= LINK_VARIANT_LINKS) return;
+        if (group.length === 1) {
+          alone.set(group[0], text6);
+          return;
+        }
+        const first = group.slice(0, group.length >> 1);
+        const second = group.slice(group.length >> 1);
+        const firstText = without(first);
+        if (firstText === void 0) return;
+        if (firstText === accepted) {
+          find(second, text6);
+          return;
+        }
+        find(first, firstText);
+        if (alone.size >= LINK_VARIANT_LINKS) return;
+        const secondText = without(second);
+        if (secondText !== void 0 && secondText !== accepted) find(second, secondText);
+      };
+      if (!pass.allOnly) find(others, all2);
+      const texts = /* @__PURE__ */ new Set([...alone.values(), all2]);
+      const linked = [...alone.keys()];
+      if (linked.length <= LINK_VARIANT_TARGETS) {
+        for (let mask = 1; mask < 2 ** linked.length - 1; mask += 1) {
+          const rejected = linked.filter((_, bit) => mask >> bit & 1);
+          if (rejected.length < 2) continue;
+          const text6 = without(rejected);
+          if (text6 === void 0) break;
+          texts.add(text6);
+        }
+      }
+      const done = staged.get(id) ?? /* @__PURE__ */ new Set();
+      staged.set(id, done);
+      for (const text6 of texts) {
+        const hash = createHash16("sha256").update(text6).digest("hex");
+        if (text6 === accepted || done.has(hash) || options.settled?.(candidate, text6) === true) continue;
+        if (budget.sets <= 0) {
+          budget.short = true;
+          return;
+        }
+        budget.sets -= 1;
+        done.add(hash);
+        yield new Map([...candidate.files, [candidate.path, text6]]);
+      }
+    }
+  }
+}
+function relocatedHead(head) {
+  const front = findFrontMatter(head);
+  if (front === null) return head;
+  const document4 = (0, import_yaml2.parseDocument)(front.yaml, { logLevel: "error", prettyErrors: false });
+  const metadata = document4.toJS();
+  delete metadata[TEAM_KEY];
+  delete metadata[PROJECT_KEY];
+  document4.delete(TEAM_KEY);
+  document4.delete(PROJECT_KEY);
+  if ((0, import_yaml2.isMap)(document4.contents) && document4.contents.items.length === 0) return "";
+  let yaml;
+  try {
+    yaml = document4.toString();
+  } catch {
+    yaml = (0, import_yaml2.stringify)(metadata);
+  }
+  return `---
+${yaml}---
+
+`;
+}
+function placeKeyOf(place) {
+  return place.projectId != null ? `project:${place.projectId}` : `team:${place.teamId}`;
+}
+function renderCapture(result, configured) {
+  let summary2 = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
+  for (const item of result.leftOut) if (item.rule === "attachment-budget") summary2 += `
+attachment-budget: ${JSON.stringify(item.id)}. Attachment count or bytes exceeded the document or run limit; reduce attachments and retry. The cursor is held.`;
+  for (const item of result.leftOut) if (item.rule === "image-repair-budget") summary2 += `
+image-repair-budget: ${JSON.stringify(item.id)}. Image or link repair exceeded the document limit; simplify or split the document and retry. The cursor is held.`;
+  for (const item of result.leftOut) if (item.rule === "blob-too-large") summary2 += `
+blob-too-large: ${JSON.stringify(item.id)}. The Markdown file exceeds the byte limit. Any previous file stays in place and the cursor is held.`;
+  for (const item of result.leftOut) if (item.rule === "download-retry") summary2 += `
+download-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
+  for (const item of result.leftOut) if (item.rule === "changed-during-run") summary2 += `
+changed-during-run: ${JSON.stringify(item.id)}. The document left the place the run read it in, or was trashed or archived, before the run marked it or gave back its decoration: the run leaves its decoration as it is, and the next run reads it again.`;
+  if (result.heldRemovals.length > 0) {
+    summary2 += `
+Removal held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path2) => JSON.stringify(path2)).join(", ")}.`;
+  }
+  if (result.rebuiltIds !== void 0) {
+    summary2 += `
+The document id map was lost: rebuilt by matching titles to paths, ${result.rebuiltIds.matched} of ${result.rebuiltIds.files} files matched. A document renamed in Linear since the last run comes back as a new file next to its old one.`;
+  }
+  if (result.stopped !== void 0) summary2 += `
+Capture partial, will continue.
+
+${renderStop(result.stopped).join("\n")}`;
+  if (result.failure !== void 0) summary2 += `
+Capture partial, will continue: Linear failed ${result.failure.operation} (${result.failure.error}).`;
+  if (!configured) summary2 += "\nContent is pushed unchecked: no security hooks are configured.";
+  for (const warning2 of result.writeBackWarnings) {
+    summary2 += `
+${warning2.code}: ${JSON.stringify(warning2.path)} (${warning2.length} characters; limit ${warning2.limit}). Preserved in git; Linear will not accept it back if it is changed in git while still over the limit.`;
+  }
+  return summary2;
+}
+async function prepareLfs(git, tracked, changes) {
+  const dir = await mkdtemp5(join10(tmpdir6(), "capture-attributes-"));
+  const env = { GIT_INDEX_FILE: join10(dir, "index") };
+  const result = new Map(changes);
+  const oids = [];
+  try {
+    await git.run(["read-tree", tracked], { env });
+    for (const [path2, content4] of changes) {
+      if (content4 === null) continue;
+      const attributes = await git.run(["check-attr", "--cached", "-z", "--stdin", "filter"], { input: `${path2}\0`, env });
+      if (attributes.stdout.toString("utf8").split("\0")[2] !== "lfs") continue;
+      const bytes = contentBytes(content4);
+      const cleaned = await git.run(["lfs", "clean"], { input: bytes });
+      const pointer = parseLfsPointer(cleaned.stdout);
+      if (!cleaned.stdout.equals(bytes)) {
+        if (pointer === null) throw new Error(message("sync.no-lfs-pointer"));
+        if (pointer.size !== bytes.length || pointer.oid !== createHash16("sha256").update(bytes).digest("hex")) throw new Error(message("sync.lfs-pointer-mismatch"));
+      }
+      if (pointer !== null) oids.push(pointer.oid);
+      result.set(path2, cleaned.stdout);
+    }
+    return { changes: result, oids: [...new Set(oids)] };
+  } finally {
+    await rm5(dir, { recursive: true, force: true });
+  }
 }
 
 // src/sync/cycle.ts
@@ -32442,7 +33933,7 @@ async function runSyncCycle(context, options) {
   if (!captured.ok) return { complete: false, changed: changed2, trackedTip, capture: captured };
   await checkpoint("after-capture-push-before-pr");
   const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks, security: options.security });
-  if (pullRequest.code === "initial-pull-request-pending") return { complete: false, changed: changed2, trackedTip, capture: captured, pullRequest };
+  if (pullRequest.code === "initial-pull-request-pending" || pullRequest.code === "suspended-asset-discovery") return { complete: false, changed: changed2, trackedTip, capture: captured, pullRequest };
   if (pullRequest.code !== "state-moved") {
     const marks = await reconcileHoldMarks(context, { config: options.config, state: captured.state, documents: captured.documents, github: options.github, failure: pullRequest.suspended?.failure, batchFailure: pullRequest.suspended?.batchFailure, linear: context.linear });
     if (holdChanges(marks) > 0 || marks.deferred > 0 || marks.removed.length > 0 || marks.code !== void 0) pullRequest.holdMarks = marks;
@@ -32519,7 +34010,7 @@ function count3(n, noun) {
 import { rm as rm7 } from "node:fs/promises";
 
 // src/sync/staged.ts
-import { createHash as createHash16 } from "node:crypto";
+import { createHash as createHash17 } from "node:crypto";
 import { mkdir as mkdir3, readFile as readFile3, rm as rm6, writeFile as writeFile4 } from "node:fs/promises";
 import { join as join11 } from "node:path";
 var MANIFEST = "manifest.json";
@@ -32527,7 +34018,7 @@ var ANSWERS = "answers.json";
 var READS = "linear-reads";
 var VERSION3 = 1;
 var readsFolder = (folder) => join11(folder, READS);
-var sha2565 = (content4) => createHash16("sha256").update(contentBytes(content4)).digest("hex");
+var sha2565 = (content4) => createHash17("sha256").update(contentBytes(content4)).digest("hex");
 function candidateKey(files) {
   const pairs = [...files].map(([path2, content4]) => [path2, sha2565(content4)]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
   return sha2565(JSON.stringify(pairs));
@@ -32601,7 +34092,7 @@ async function runOperation(operation, inputs, initialSync, options, security) {
   if (operation === "initial-sync" !== (initialSync !== void 0)) {
     throw new Error(message("operation.initial-sync-inputs"));
   }
-  if (security?.step === "stage" && operation === "initial-sync" && !(initialSync?.direction === "linear-to-git" && initialSync.confirm)) {
+  if (security?.step === "stage" && operation === "initial-sync" && initialSync?.direction !== "linear-to-git") {
     await stageNothing(security.folder, null);
     return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 }, writes: noWrites() };
   }
@@ -32630,7 +34121,7 @@ async function runWithSecurity(operation, inputs, initialSync, options, security
   let workSummary = "";
   const pullRequestWrites = /* @__PURE__ */ new Map();
   const refsBefore = movedRefs(options.git);
-  const transforms = () => [uploadsTransform({ config: inputs.state }), documentLinks()];
+  const transforms = () => [uploadsTransform({ config: inputs.state }), documentLinks(), relativeFileBlocks()];
   const gitToLinear = async (context, confirm) => {
     if (confirm) {
       const run = await confirmInitialSync(context, { config: inputs.state, documentCap: inputs.documentCap, transforms: transforms() });
@@ -32661,7 +34152,14 @@ Staging stopped early (${ended}).`);
       reverse = run.result;
       workSummary = renderReverseConfirmed(run.plan, run.result);
     } else {
-      const planned = await planLinearToGitFromRepository(context);
+      if (security?.step === "stage") {
+        const gate = await stagingGate(context.git, context.fetched.tracked, security.folder);
+        if (gate.configured) await planLinearToGitFromRepository(context, gate);
+        staged = { sets: await gate.finish() };
+        workSummary = renderStaged(staged.sets);
+        return;
+      }
+      const planned = await planLinearToGitFromRepository(context, security?.step === "apply" ? await answeringGate(context.git, context.fetched.tracked, security.folder) : void 0);
       plan = toReversePlanReport(planned, false);
       workSummary = renderReverseDryRun(planned);
     }
@@ -32689,7 +34187,7 @@ ${result.summary}`;
       checkDeadlineMinutes: inputs.checkDeadlineMinutes,
       requiredChecks: inputs.requiredChecks,
       mergeWithoutChecks: inputs.mergeWithoutChecks,
-      github: { ...inputs.github, baseBranch: inputs.state.trackedBranch, writes: pullRequestWrites, ...options.fetch ? { fetch: options.fetch } : {}, ...options.checkClock ? { clock: options.checkClock } : {} },
+      github: { ...inputs.github, writes: pullRequestWrites, ...options.fetch ? { fetch: options.fetch } : {}, ...options.checkClock ? { clock: options.checkClock } : {} },
       transforms,
       ...options.fetch ? { fetch: options.fetch } : {}
     });
@@ -33004,8 +34502,8 @@ function reportText(value, limit = 16 * 1024 * 1024) {
 
 // src/init/command.ts
 var import_yaml3 = __toESM(require_dist(), 1);
-import { lstat, mkdir as mkdir5, readFile as readFile4, readdir, realpath, writeFile as writeFile6 } from "node:fs/promises";
-import { dirname as dirname3, isAbsolute as isAbsolute2, join as join12, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
+import { lstat as lstat2, mkdir as mkdir5, readFile as readFile4, readdir, realpath as realpath2, writeFile as writeFile6 } from "node:fs/promises";
+import { dirname as dirname3, isAbsolute as isAbsolute2, join as join12, relative as relative2, resolve as resolve2, sep as sep3 } from "node:path";
 
 // src/init/workflows.json
 var workflows_default = {
@@ -33024,9 +34522,9 @@ var workflows_default = {
 # - linear-to-git: one pull request removes the synchronized files that have
 #   no document; a person reviews and merges it.
 #
-# Needs: the repository variable MDBISYNC_APP_CLIENT_ID and the secrets
-# MDBISYNC_APP_PRIVATE_KEY (the sync's GitHub App), MDBISYNC_LINEAR_CLIENT_ID
-# and MDBISYNC_LINEAR_CLIENT_SECRET (the Linear OAuth app).
+# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.
+# In the mdbisync environment limited to the tracked branch, set
+# MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET.
 name: mdbisync initial sync
 
 on:
@@ -33054,10 +34552,41 @@ concurrency:
 jobs:
   initial-sync:
     runs-on: ubuntu-latest
+    environment: mdbisync
     # The App token lives one hour. A longer initial sync stops here; start
     # the workflow again with the same inputs and it goes on where it stopped.
     timeout-minutes: 55
     steps:
+      # Only main, the tracked branch: its files are the ones reviewed and
+      # merged. A dispatch on another branch would run that branch's files in
+      # a job that holds the App token and the Linear secrets. If the sync
+      # tracks another branch (\`tracked-branch\`), name that branch here. This
+      # step is in the copy of the workflow on the branch a run uses, so it
+      # does not stop someone who removes it on their own branch; to keep the
+      # secrets from such runs, make them secrets of an environment that only
+      # main may deploy to.
+      - name: Refuse a branch other than main
+        shell: bash
+        env:
+          BRANCH: main
+        # Compared in the shell: Git refs are case-sensitive, workflow expressions are not.
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/$BRANCH" ]; then
+            echo "::error::Run this workflow on $BRANCH, not on $GITHUB_REF."
+            exit 1
+          fi
+      - name: Check sync variables
+        shell: bash
+        env:
+          MDBISYNC_APP_CLIENT_ID: \${{ vars.MDBISYNC_APP_CLIENT_ID }}
+          MDBISYNC_LINEAR_CLIENT_ID: \${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
+        run: |
+          for name in MDBISYNC_APP_CLIENT_ID MDBISYNC_LINEAR_CLIENT_ID; do
+            if [[ ! \${!name} =~ [^[:space:]] ]]; then
+              printf '::error::Set the %s GitHub Actions variable.\\n' "$name"
+              exit 1
+            fi
+          done
       - name: Get the GitHub App token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -33074,25 +34603,28 @@ jobs:
       - name: Install pre-commit
         shell: bash
         run: |
+          # Python runs in isolated mode (-I) from the runner's temporary
+          # directory, so no module of the checkout can stand in for venv or pip.
+          cd "$RUNNER_TEMP"
           if ! command -v pre-commit >/dev/null 2>&1; then
             if ! command -v python3 >/dev/null 2>&1; then
               echo '::error::Install Python 3 with venv support, or provide pre-commit on PATH.'
               exit 1
             fi
             # The patched filelock in this list needs Python 3.11; the hashed wheels stop at 3.14.
-            if ! python3 -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
-              echo "Found $(python3 -V 2>&1)."
+            if ! python3 -I -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
+              echo "Found $(python3 -I -V 2>&1)."
               echo '::error::Python 3.11 to 3.14 is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
-            if ! python3 -m venv "$environment"; then
+            if ! python3 -I -m venv "$environment"; then
               echo '::error::Python 3 venv support is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             # Only these files are installed: pip refuses a file whose hash is not
             # listed and builds nothing from source.
-            if ! "$environment/bin/python" -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
+            if ! "$environment/bin/python" -I -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
           cfgv==3.5.0 --hash=sha256:a8dc6b26ad22ff227d2634a65cb388215ce6cc96bbcc5cfde7641ae87e8dacc0
           distlib==0.4.4 --hash=sha256:ca4175b4ac7f71223cc30ed7248c45d2b38c2439d8ee6e498ab67ed63cf3508d --hash=sha256:cf09d55b1e85a89576b036aeb71550bfd68320f3f21761ca329eadadad918638
           filelock==4.2.10 --hash=sha256:9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857
@@ -33142,9 +34674,9 @@ jobs:
             ln -s "$environment/bin/pre-commit" "$environment/commands/pre-commit"
             echo "$environment/commands" >> "$GITHUB_PATH"
           fi
-      # A confirmed run from Linear reads Linear's documents into the
-      # runner's temporary directory for the hooks; any other run has nothing
-      # to stage. It writes nothing. The action revokes its Linear token when
+      # A run from Linear reads Linear's documents (a dry run, the titles of
+      # new documents) into the runner's temporary directory for the hooks; a
+      # run from git has nothing to stage. It writes nothing. The action revokes its Linear token when
       # it ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's documents
         id: stage
@@ -33159,7 +34691,7 @@ jobs:
           confirm: \${{ inputs.confirm }}
           github-token: \${{ steps.app-token.outputs.token }}
           app-slug: \${{ steps.app-token.outputs.app-slug }}
-          linear-client-id: \${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
+          linear-client-id: \${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
           linear-client-secret: \${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
       # The security hooks in a step of their own: it holds no Linear secret
       # or token and no App token. Give it only the keys your hooks need.
@@ -33183,7 +34715,7 @@ jobs:
           confirm: \${{ inputs.confirm }}
           github-token: \${{ steps.app-token.outputs.token }}
           app-slug: \${{ steps.app-token.outputs.app-slug }}
-          linear-client-id: \${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
+          linear-client-id: \${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
           linear-client-secret: \${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
 `,
   "mdbisync.yml": `# Copy to .github/workflows/mdbisync.yml in a synchronized repository, next
@@ -33202,9 +34734,9 @@ jobs:
 # from your own scheduler through workflow_dispatch:
 # https://github.com/mdbisync/mdbisync/blob/main/docs/own-scheduler.md
 #
-# Needs: the repository variable MDBISYNC_APP_CLIENT_ID and the secrets
-# MDBISYNC_APP_PRIVATE_KEY (the sync's GitHub App), MDBISYNC_LINEAR_CLIENT_ID
-# and MDBISYNC_LINEAR_CLIENT_SECRET (the Linear OAuth app).
+# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.
+# In the mdbisync environment limited to the tracked branch, set
+# MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET.
 name: mdbisync
 
 on:
@@ -33228,9 +34760,40 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    environment: mdbisync
     # The App token lives one hour; the next run goes on where this one stopped.
     timeout-minutes: 55
     steps:
+      # Only main, the tracked branch: its files are the ones reviewed and
+      # merged. A dispatch on another branch would run that branch's files in
+      # a job that holds the App token and the Linear secrets. If the sync
+      # tracks another branch (\`tracked-branch\`), name that branch here. This
+      # step is in the copy of the workflow on the branch a run uses, so it
+      # does not stop someone who removes it on their own branch; to keep the
+      # secrets from such runs, make them secrets of an environment that only
+      # main may deploy to.
+      - name: Refuse a branch other than main
+        shell: bash
+        env:
+          BRANCH: main
+        # Compared in the shell: Git refs are case-sensitive, workflow expressions are not.
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/$BRANCH" ]; then
+            echo "::error::Run this workflow on $BRANCH, not on $GITHUB_REF."
+            exit 1
+          fi
+      - name: Check sync variables
+        shell: bash
+        env:
+          MDBISYNC_APP_CLIENT_ID: \${{ vars.MDBISYNC_APP_CLIENT_ID }}
+          MDBISYNC_LINEAR_CLIENT_ID: \${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
+        run: |
+          for name in MDBISYNC_APP_CLIENT_ID MDBISYNC_LINEAR_CLIENT_ID; do
+            if [[ ! \${!name} =~ [^[:space:]] ]]; then
+              printf '::error::Set the %s GitHub Actions variable.\\n' "$name"
+              exit 1
+            fi
+          done
       - name: Get the GitHub App token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -33247,25 +34810,28 @@ jobs:
       - name: Install pre-commit
         shell: bash
         run: |
+          # Python runs in isolated mode (-I) from the runner's temporary
+          # directory, so no module of the checkout can stand in for venv or pip.
+          cd "$RUNNER_TEMP"
           if ! command -v pre-commit >/dev/null 2>&1; then
             if ! command -v python3 >/dev/null 2>&1; then
               echo '::error::Install Python 3 with venv support, or provide pre-commit on PATH.'
               exit 1
             fi
             # The patched filelock in this list needs Python 3.11; the hashed wheels stop at 3.14.
-            if ! python3 -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
-              echo "Found $(python3 -V 2>&1)."
+            if ! python3 -I -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
+              echo "Found $(python3 -I -V 2>&1)."
               echo '::error::Python 3.11 to 3.14 is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
-            if ! python3 -m venv "$environment"; then
+            if ! python3 -I -m venv "$environment"; then
               echo '::error::Python 3 venv support is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             # Only these files are installed: pip refuses a file whose hash is not
             # listed and builds nothing from source.
-            if ! "$environment/bin/python" -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
+            if ! "$environment/bin/python" -I -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
           cfgv==3.5.0 --hash=sha256:a8dc6b26ad22ff227d2634a65cb388215ce6cc96bbcc5cfde7641ae87e8dacc0
           distlib==0.4.4 --hash=sha256:ca4175b4ac7f71223cc30ed7248c45d2b38c2439d8ee6e498ab67ed63cf3508d --hash=sha256:cf09d55b1e85a89576b036aeb71550bfd68320f3f21761ca329eadadad918638
           filelock==4.2.10 --hash=sha256:9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857
@@ -33329,7 +34895,7 @@ jobs:
           cleanup-tokens: false
           github-token: \${{ steps.app-token.outputs.token }}
           app-slug: \${{ steps.app-token.outputs.app-slug }}
-          linear-client-id: \${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
+          linear-client-id: \${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
           linear-client-secret: \${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
       # The security hooks in a step of their own: it holds no Linear secret
       # or token and no App token. Give it only the keys your hooks need.
@@ -33351,7 +34917,7 @@ jobs:
           security-step: apply
           github-token: \${{ steps.app-token.outputs.token }}
           app-slug: \${{ steps.app-token.outputs.app-slug }}
-          linear-client-id: \${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
+          linear-client-id: \${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
           linear-client-secret: \${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
 `,
   "pre-commit.yml": `# Copy to .github/workflows/pre-commit.yml in a synchronized repository.
@@ -33398,25 +34964,28 @@ jobs:
       - name: Install pre-commit
         shell: bash
         run: |
+          # Python runs in isolated mode (-I) from the runner's temporary
+          # directory, so no module of the checkout can stand in for venv or pip.
+          cd "$RUNNER_TEMP"
           if [[ "$(pre-commit --version 2>/dev/null || true)" != "pre-commit 4.7.0" ]]; then
             if ! command -v python3 >/dev/null 2>&1; then
               echo '::error::Install Python 3 with venv support, or provide pre-commit on PATH.'
               exit 1
             fi
             # The patched filelock in this list needs Python 3.11; the hashed wheels stop at 3.14.
-            if ! python3 -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
-              echo "Found $(python3 -V 2>&1)."
+            if ! python3 -I -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
+              echo "Found $(python3 -I -V 2>&1)."
               echo '::error::Python 3.11 to 3.14 is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
-            if ! python3 -m venv "$environment"; then
+            if ! python3 -I -m venv "$environment"; then
               echo '::error::Python 3 venv support is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             # Only these files are installed: pip refuses a file whose hash is not
             # listed and builds nothing from source.
-            if ! "$environment/bin/python" -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
+            if ! "$environment/bin/python" -I -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
           cfgv==3.5.0 --hash=sha256:a8dc6b26ad22ff227d2634a65cb388215ce6cc96bbcc5cfde7641ae87e8dacc0
           distlib==0.4.4 --hash=sha256:ca4175b4ac7f71223cc30ed7248c45d2b38c2439d8ee6e498ab67ed63cf3508d --hash=sha256:cf09d55b1e85a89576b036aeb71550bfd68320f3f21761ca329eadadad918638
           filelock==4.2.10 --hash=sha256:9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857
@@ -33493,7 +35062,8 @@ jobs:
             if [[ "\${python_command[0]##*/}" != python* ]]; then
               python_command=(python3)
             fi
-            "\${python_command[@]}" - <<'PY' || printf 'Apply pre-commit fixes\\n' > "$RUNNER_TEMP/pre-commit-message"
+            # Isolated (-I): the checkout is not on its module path.
+            "\${python_command[@]}" -I - <<'PY' || printf 'Apply pre-commit fixes\\n' > "$RUNNER_TEMP/pre-commit-message"
           import os
           import re
           from pathlib import Path
@@ -33668,8 +35238,7 @@ var APP_PERMISSIONS = {
   pull_requests: "write",
   workflows: "write",
   checks: "read",
-  statuses: "read",
-  actions: "read"
+  statuses: "read"
 };
 var APP_DESCRIPTION = "Two-way sync between Linear documents and Markdown in this repository.";
 function appCreationUrl(organization) {
@@ -33761,12 +35330,12 @@ async function optionalRead(path2) {
 async function safePath(root2, path2) {
   if (isAbsolute2(path2) || path2.split(/[\\/]/).includes("..") || path2.includes("\\")) throw new InitError(message("init.path-outside"));
   const target = resolve2(root2, path2);
-  if (relative2(root2, target).startsWith(`..${sep2}`)) throw new InitError(message("init.path-outside"));
+  if (relative2(root2, target).startsWith(`..${sep3}`)) throw new InitError(message("init.path-outside"));
   let part = root2;
-  for (const component of relative2(root2, target).split(sep2).filter(Boolean)) {
+  for (const component of relative2(root2, target).split(sep3).filter(Boolean)) {
     part = join12(part, component);
     try {
-      if ((await lstat(part)).isSymbolicLink()) throw new InitError(message("init.symlink"));
+      if ((await lstat2(part)).isSymbolicLink()) throw new InitError(message("init.symlink"));
     } catch (error) {
       if (error.code === "ENOTDIR") throw new InitError(message("init.folder-is-file"));
       if (error.code !== "ENOENT") throw error;
@@ -33814,6 +35383,16 @@ function lfsAttributes(text6) {
   return `${before}${lead}${missing.join(eol2)}${eol2}`;
 }
 var SCANNER_IMAGE = "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f";
+var SCANNER_ENTRY = `${SCANNER_IMAGE} dir --redact --no-banner ${IGNORE_INLINE_ALLOW} .`;
+var EARLIER_SCANNER_ENTRIES = [`${SCANNER_IMAGE} dir --redact --no-banner .`];
+var SCANNER_HOOK = { id: "gitleaks", name: "Scan for secrets (Docker required)", alias: SECURITY_ALIAS, language: "docker_image", entry: SCANNER_ENTRY, pass_filenames: false, stages: ["pre-commit", "pre-push"] };
+var SECURITY_HOOK_EXAMPLES = [
+  SCANNER_HOOK,
+  { id: "private-key-pattern", name: "Private key pattern", alias: SECURITY_ALIAS, language: "pygrep", entry: "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----", args: ["--multiline"], stages: ["pre-commit", "pre-push"] }
+];
+function sameHook(hook, example) {
+  return Object.entries(example).every(([key, value]) => JSON.stringify(hook[key]) === JSON.stringify(value));
+}
 function hookConfig(text6, settings) {
   const doc = document3(text6 ?? "default_install_hook_types: [pre-commit, pre-push]\nrepos: []\n");
   const repos = doc.get("repos");
@@ -33828,22 +35407,29 @@ function hookConfig(text6, settings) {
     repos.add(doc.createNode({ repo: PROJECT_URL, rev: settings.sha, hooks: [{ id: LINEAR_FORMAT_HOOK }] }));
     changed2 = true;
   }
+  data.repos.forEach((repo, at) => {
+    if (repo.repo !== "local") return;
+    repo.hooks.forEach((hook, index2) => {
+      if (hook.id !== SCANNER_HOOK.id || !EARLIER_SCANNER_ENTRIES.includes(hook.entry) || !sameHook(hook, { ...SCANNER_HOOK, entry: hook.entry })) return;
+      const entry = doc.getIn(["repos", at, "hooks", index2, "entry"], true);
+      if (!(0, import_yaml3.isMap)(doc.getIn(["repos", at, "hooks", index2], true)) || !(0, import_yaml3.isScalar)(entry) || entry.anchor) throw new InitError(message("init.security-hook-differs", { hook: SCANNER_HOOK.id }));
+      doc.setIn(["repos", at, "hooks", index2, "entry"], SCANNER_ENTRY);
+      hook.entry = SCANNER_ENTRY;
+      changed2 = true;
+    });
+  });
   if (settings.security) {
-    const examples = [
-      { id: "gitleaks", name: "Scan for secrets (Docker required)", alias: SECURITY_ALIAS, language: "docker_image", entry: `${SCANNER_IMAGE} dir --redact --no-banner .`, pass_filenames: false, stages: ["pre-commit", "pre-push"] },
-      { id: "private-key-pattern", name: "Private key pattern", alias: SECURITY_ALIAS, language: "pygrep", entry: "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----", args: ["--multiline"], stages: ["pre-commit", "pre-push"] }
-    ];
     const hooks = data.repos.flatMap((repo) => repo.hooks ?? []);
-    for (const example of examples) {
+    for (const example of SECURITY_HOOK_EXAMPLES) {
       const matches = hooks.filter((hook) => hook.id === example.id);
       for (const hook of matches) {
         const local = data.repos.some((repo) => repo.repo === "local" && repo.hooks?.includes(hook));
-        if (!local || Object.entries(example).some(([key, value]) => JSON.stringify(hook[key]) !== JSON.stringify(value))) {
+        if (!local || !sameHook(hook, example)) {
           throw new InitError(message("init.security-hook-differs", { hook: example.id }));
         }
       }
     }
-    const missing = examples.filter((hook) => !hooks.some((existing2) => existing2.id === hook.id));
+    const missing = SECURITY_HOOK_EXAMPLES.filter((hook) => !hooks.some((existing2) => existing2.id === hook.id));
     if (missing.length) {
       repos.add(doc.createNode({ repo: "local", hooks: missing }));
       changed2 = true;
@@ -33882,8 +35468,8 @@ async function runInit(args, options = {}) {
     }
     checkRelease(settings);
     if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || !folder.team && !folder.project)) throw new InitError(message("init.needs-folder"));
-    const root2 = await realpath(options.cwd ?? process.cwd());
-    if (!await lstat(join12(root2, ".git")).catch(() => void 0)) throw new InitError(message("init.not-at-root"));
+    const root2 = await realpath2(options.cwd ?? process.cwd());
+    if (!await lstat2(join12(root2, ".git")).catch(() => void 0)) throw new InitError(message("init.not-at-root"));
     const changes = /* @__PURE__ */ new Map();
     const queue = async (path2, create) => {
       const target = await safePath(root2, path2);
@@ -33943,15 +35529,17 @@ async function runInit(args, options = {}) {
       await mkdir5(dirname3(path2), { recursive: true });
       await writeFile6(path2, text6);
     }
-    return { exitCode: 0, stderr: "", stdout: `${changes.size ? `Wrote ${changes.size} repository files.` : "Repository files are already initialized."}
+    const stdout = `${changes.size ? `Wrote ${changes.size} repository files.` : "Repository files are already initialized."}
 
 Remaining admin steps:
-1. Create a Linear OAuth app with read,write client credentials; set repository secrets MDBISYNC_LINEAR_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_SECRET.
-2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set variable MDBISYNC_APP_CLIENT_ID and secret MDBISYNC_APP_PRIVATE_KEY.
-3. Allow merge commits; configure required checks for main.
-4. Install Node 24 and pre-commit; run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
-5. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
-` };
+1. Create a Linear OAuth app with read,write client credentials. Set repository variable MDBISYNC_LINEAR_CLIENT_ID. Set it before enabling the workflows. Remove any old repository secret for this client ID once the updated workflows are in place.
+2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID.
+3. In Settings \u2192 Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET. Delete repository secrets of the same names once the workflows and environment are in place. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. For plan requirements and migration of existing workflows, see ${QUICKSTART_URL}#sync-environment.
+4. Allow merge commits and configure required checks for main.
+5. Install Node 24 and pre-commit. Run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
+6. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
+`;
+    return { exitCode: 0, stderr: "", stdout };
   } catch (error) {
     if (!(error instanceof InitError)) throw error;
     return { exitCode: 2, stdout: "", stderr: `init: ${error.message}

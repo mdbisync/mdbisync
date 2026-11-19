@@ -3998,10 +3998,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep, value } = collItem;
+        const { start, key, sep: sep2, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep?.[0],
+          next: key ?? sep2?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4015,7 +4015,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep) {
+          if (!keyProps.anchor && !keyProps.tag && !sep2) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map.comment)
@@ -4039,7 +4039,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep ?? [], {
+        const valueProps = resolveProps.resolveProps(sep2 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4055,7 +4055,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep2, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4146,7 +4146,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep = "";
+        let sep2 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4160,13 +4160,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep + cb;
-              sep = "";
+                comment += sep2 + cb;
+              sep2 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep += source;
+                sep2 += source;
               hasSpace = true;
               break;
             default:
@@ -4209,18 +4209,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep, value } = collItem;
+        const { start, key, sep: sep2, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep?.[0],
+          next: key ?? sep2?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep && !value) {
+          if (!props.anchor && !props.tag && !sep2 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4274,8 +4274,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
+        if (!isMap && !sep2 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep2, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4287,7 +4287,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep ?? [], {
+          const valueProps = resolveProps.resolveProps(sep2 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4298,8 +4298,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep)
-                for (const st of sep) {
+              if (sep2)
+                for (const st of sep2) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4316,7 +4316,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep2, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4496,7 +4496,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep = "";
+      let sep2 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4513,24 +4513,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep + indent.slice(trimIndent) + content;
-          sep = "\n";
+          value += sep2 + indent.slice(trimIndent) + content;
+          sep2 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep === " ")
-            sep = "\n";
-          else if (!prevMoreIndented && sep === "\n")
-            sep = "\n\n";
-          value += sep + indent.slice(trimIndent) + content;
-          sep = "\n";
+          if (sep2 === " ")
+            sep2 = "\n";
+          else if (!prevMoreIndented && sep2 === "\n")
+            sep2 = "\n\n";
+          value += sep2 + indent.slice(trimIndent) + content;
+          sep2 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep === "\n")
+          if (sep2 === "\n")
             value += "\n";
           else
-            sep = "\n";
+            sep2 = "\n";
         } else {
-          value += sep + content;
-          sep = " ";
+          value += sep2 + content;
+          sep2 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4713,25 +4713,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep = " ";
+      let sep2 = " ";
       let pos = line.lastIndex;
       while (match = line.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep === "\n")
-            res += sep;
+          if (sep2 === "\n")
+            res += sep2;
           else
-            sep = "\n";
+            sep2 = "\n";
         } else {
-          res += sep + lm;
-          sep = " ";
+          res += sep2 + lm;
+          sep2 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep + (match?.[1] ?? "");
+      return res + sep2 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5541,14 +5541,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep, value }) {
+    function stringifyItem({ start, key, sep: sep2, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep)
-        for (const st of sep)
+      if (sep2)
+        for (const st of sep2)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6715,18 +6715,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep;
+          let sep2;
           if (scalar.end) {
-            sep = scalar.end;
-            sep.push(this.sourceToken);
+            sep2 = scalar.end;
+            sep2.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep = [this.sourceToken];
+            sep2 = [this.sourceToken];
           const map = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep }]
+            items: [{ start, key: scalar, sep: sep2 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6879,15 +6879,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep = it.sep;
-                  sep.push(this.sourceToken);
+                  const sep2 = it.sep;
+                  sep2.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep }]
+                    items: [{ start: start2, key, sep: sep2 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7081,13 +7081,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep = fc.end.splice(1, fc.end.length);
-            sep.push(this.sourceToken);
+            const sep2 = fc.end.splice(1, fc.end.length);
+            sep2.push(this.sourceToken);
             const map = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep }]
+              items: [{ start, key: fc, sep: sep2 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -7368,6 +7368,7 @@ var require_dist = __commonJS({
 // src/messages.ts
 var MESSAGES = {
   "assets.budget": "attachment budget exceeded; reduce attachments and retry",
+  "assets.image-repair-budget": "Markdown exceeds the image repair budget.",
   "assets.spool-changed": "temporary attachment content changed; retry the run",
   "assets.spool-budget": "temporary attachment storage budget exceeded; reduce attachments and retry",
   // The command line and the action.
@@ -7414,7 +7415,7 @@ var MESSAGES = {
   "inputs.app-slug": "the input app-slug must be a GitHub App slug (letters, digits and hyphens)",
   "inputs.merge-grace": "the input merge-grace-seconds must be an integer from 0 to 120",
   "inputs.check-deadline": "the input check-deadline-minutes must be an integer from 10 to 1440",
-  "inputs.required-checks": "the input required-checks must name each check with the publisher it must come from, one per line, as `<name> @ actions:<workflow file>`, `<name> @ app:<App id>` or `<name> @ status:<account id>`, with names of at most 255 characters; this line is not: {line}",
+  "inputs.required-checks": "the input required-checks must name each check with the publisher it must come from, one per line, as `<name> @ actions` for a GitHub Actions job, `<name> @ app:<App id>` or `<name> @ status:<account id>`, with names of at most 255 characters; this line is not: {line}",
   "inputs.merge-without-checks": "the input merge-without-checks must be true or false",
   "inputs.direction": "the input direction {problem} (initial sync never picks a direction itself)",
   "inputs.direction-missing": "is required",
@@ -7437,6 +7438,7 @@ var MESSAGES = {
   "pull-request.initial-pending": "stopped short ({code}): an initial sync from Linear waits for a person to merge it",
   "pull-request.head-unverified": "waits for a person ({code}): the sync pull request also changes files that are not synchronized documents or their assets ({files}); a person reviews and merges it",
   "pull-request.not-finished": "not finished ({code}); run it again",
+  "pull-request.suspended-asset-discovery": "the batch stays suspended ({code}). {reason}",
   // The setup check.
   "setup.left-out": "{count} files left out, not synced: {files}{more}",
   "setup.left-out-more": ", and {count} more",
@@ -7460,6 +7462,7 @@ var MESSAGES = {
   "setup.sync-branch-rules-open": "{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch",
   "setup.sync-branch-rule-restricted": "{rule} restricted",
   "setup.sync-branch-rule-open": "{rule} not restricted on {branches}",
+  "setup.security-hooks-inline-allow": "security hook {hooks} runs Gitleaks without {flag}, so an inline gitleaks:allow comment in a document from Linear exempts its line; add {flag} (init updates the hook it generated) and keep exceptions in .gitleaks.toml or .gitleaksignore",
   "setup.security-hooks-missing": 'no pre-commit hook marked "alias: {alias}": content is pushed unchecked',
   "setup.hooks-invalid-yaml": "{file} is not valid YAML",
   "setup.hooks-no-repos": '{file} has no "repos" list',
@@ -7472,16 +7475,19 @@ var MESSAGES = {
   "setup.target-not-found": "not found in Linear: {targets}",
   "setup.target-ambiguous": "more than one match in Linear: {targets}",
   "setup.target-shared": "more than one folder maps to {targets}",
+  "setup.linear-untrusted": "{ref} is at a commit the sync did not sign: someone else pushed it, or the sync wrote it before it signed its records or under another linear-client-secret. Its files could reach the sync pull request unchecked. Run initial sync again to record the state anew. The sync wrote nothing.",
   "setup.initial-sync-unfinished": "An initial sync stopped before it finished: run it again with the same inputs first. The sync wrote nothing.",
   "setup.initial-sync-required": "{ref} does not exist: run initial sync first. The sync wrote nothing.",
   "setup.initial-pull-request-pending": "The pull request of the initial sync from Linear is not merged into {tracked} yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch {sync} and run initial sync again to replace the snapshot. The sync wrote nothing.",
   // Annotations and the mapping.
+  "annotations.blob-too-large": "{readme}: cannot check the folder annotation because the blob exceeds {bytes} bytes",
   "annotations.invalid-yaml": "{readme}: the front matter with {teamKey} or {projectKey} is not valid YAML",
   "annotations.empty-name": "{readme}: {key} must be a non-empty name",
   "annotations.nested-team": '{readme}: names a team inside the folder of team "{team}" ({folder})',
   "annotations.nested-project": '{readme}: names a project inside the folder of project "{project}" ({folder})',
   "annotations.project-without-team": "{readme}: names a project, but neither it nor a folder above names a team",
   "mapping.content-not-read": "the content of {path} was not read",
+  "mapping.blob-budget": "mapping-blob-budget: Markdown blob reads exceed the {bytes}-byte budget",
   // State refs and their files.
   "config.invalid-remote": 'remote "{remote}" is not a valid remote name',
   "config.invalid-branch": '{key} "{branch}" is not a valid branch name: {problem}',
@@ -7492,6 +7498,7 @@ var MESSAGES = {
   "config.prefix-outside-refs": 'refPrefix "{prefix}" must start with "refs/" and name a folder under it',
   "config.prefix-reserved": 'refPrefix "{prefix}" must not be under refs/heads, refs/tags or refs/remotes',
   "git.failed": "git {args} failed with exit code {code}: {stderr}",
+  "git.output-limit": "git-output-limit: command output exceeded {bytes} bytes",
   "lfs.needs-git-lfs": "files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync",
   "objects.missing": "git object {oid} is missing",
   "objects.not-blob": "git object {oid} is a {type}, not a blob",
@@ -7538,9 +7545,6 @@ var MESSAGES = {
   "github.updating": "updating a pull request",
   "github.closing": "closing a pull request",
   "github.sending": "sending {method} to the pull request API",
-  "github.reading-workflow-runs": "reading the workflow runs of the sync pull request",
-  "github.reading-workflow-revision": "reading the workflow revision of the sync pull request",
-  "github.reading-workflow-jobs": "reading the workflow jobs of the sync pull request",
   "github.reading-check-runs": "reading the check runs of the sync pull request",
   "github.reading-annotations": "reading the annotations of a failed check run",
   "github.reading-statuses": "reading the commit statuses of the sync pull request",
@@ -7548,6 +7552,7 @@ var MESSAGES = {
   // Initial sync.
   "initial-sync.state-moved": "a state ref moved while the run was writing",
   "initial-sync.document-not-listed": "the planned document for {path} was not listed",
+  "initial-sync.document-not-read": "the planned document for {path} was not read with its text",
   "initial-sync.links-not-prepared": "document-links: apply before prepare",
   "initial-sync.project-not-resolved": 'project "{project}" of team "{team}" was not resolved',
   "initial-sync.team-not-resolved": 'team "{team}" was not resolved',
@@ -7555,12 +7560,13 @@ var MESSAGES = {
   "initial-sync.misplaced": "the recorded tree maps {count} files to other documents",
   "initial-sync.over-upload-limit": "{files}: over the upload limit of {limit} bytes",
   "initial-sync.lfs-extensions": "{files}: stored with LFS extensions, which are not supported",
+  "initial-sync.link-provenance-unknown": "{files}: linked as a plain link from a document Linear holds, and the state that names the links Linear members wrote is lost",
   "initial-sync.upload-unreadable": "{file} cannot be read: {reason}",
   "initial-sync.uploads-not-prepared": "the uploads transform was not prepared",
   // The sync.
   "sync.needs-initial-sync": "run initial sync first",
   "sync.places-unresolved": "the previously recorded document places could not be resolved",
-  "sync.recorded-place-unknown": "the recorded state names a Linear place for {folder} that the tracked branch never named; the state refs were changed outside the sync",
+  "sync.recorded-place-unknown": "the recorded state names a Linear place for {folder} that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync",
   "sync.lost-lease": "state moved while recording document marks",
   "sync.no-lfs-pointer": "LFS did not return a pointer",
   "sync.lfs-pointer-mismatch": "LFS returned a pointer to other content than it was given",
@@ -7572,6 +7578,9 @@ var MESSAGES = {
   "sync.invalid-update-time": "a document has an invalid update time",
   "sync.invalid-security-config": "invalid security hook configuration",
   "sync.needs-pre-commit": "security hooks require pre-commit on PATH; install pre-commit before capture",
+  "sync.security-link-outside": "a tracked symbolic link leads outside the tree the security hooks check",
+  "sync.security-tree-differs": "the tree the security hooks check differs from the tracked tree",
+  "sync.security-scratch-budget": "security-scratch-budget: the tracked files the security hooks need exceed the {bytes}-byte scratch budget",
   "sync.no-runner-temp": "RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job",
   "sync.staged-version": "the staged candidates come from another version of the action",
   "sync.staged-hash": "the staged manifest names a file that is not a content hash",
@@ -7597,6 +7606,8 @@ var DEFAULT_STATE_CONFIG = Object.freeze({
 
 // src/state/git.ts
 import { spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 var GitError = class extends Error {
   args;
   code;
@@ -7607,6 +7618,14 @@ var GitError = class extends Error {
     this.args = args;
     this.code = code;
     this.stderr = stderr;
+  }
+};
+var GitOutputLimitError = class extends Error {
+  bytes;
+  constructor(bytes) {
+    super(message("git.output-limit", { bytes }));
+    this.name = "GitOutputLimitError";
+    this.bytes = bytes;
   }
 };
 var BASE_ENV = {
@@ -7625,22 +7644,44 @@ var Git = class {
     this.dir = dir;
     this.env = env;
   }
-  run(args, options = {}) {
+  environment(options) {
     const env = options.onlyEnv !== void 0 ? { ...BASE_ENV, ...options.onlyEnv } : { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
     for (const key of Object.keys(env)) {
       if (env[key] === void 0) delete env[key];
     }
+    return env;
+  }
+  run(args, options = {}) {
+    const env = this.environment(options);
     const okCodes = options.okCodes ?? [0];
     return new Promise((resolve, reject) => {
       const child = spawn("git", args, { cwd: this.dir, env, stdio: ["pipe", "pipe", "pipe"] });
       const out = [];
       const err = [];
-      child.stdout.on("data", (chunk) => out.push(chunk));
-      child.stderr.on("data", (chunk) => err.push(chunk));
+      let exceededLimit;
+      const collector = (chunks, limit) => {
+        let bytes = 0;
+        return (chunk) => {
+          if (exceededLimit !== void 0) return;
+          bytes += chunk.length;
+          if (limit !== void 0 && bytes > limit) {
+            exceededLimit = limit;
+            child.kill("SIGKILL");
+            return;
+          }
+          chunks.push(chunk);
+        };
+      };
+      child.stdout.on("data", collector(out, options.maxOutputBytes));
+      child.stderr.on("data", collector(err, options.maxOutputBytes === void 0 ? void 0 : 64 * 1024));
       child.on("error", reject);
       child.stdin.on("error", () => {
       });
       child.on("close", (code) => {
+        if (exceededLimit !== void 0) {
+          reject(new GitOutputLimitError(exceededLimit));
+          return;
+        }
         const result = {
           code: code ?? -1,
           stdout: Buffer.concat(out),
@@ -7652,12 +7693,44 @@ var Git = class {
       child.stdin.end(options.input ?? "");
     });
   }
+  /**
+   * Runs git and writes its standard output to a new file at `path` as it
+   * arrives, so output of any size is never held in memory. Standard error
+   * is capped at 64 KiB. A failing exit is a `GitError`.
+   */
+  async runToFile(args, path, fileMode) {
+    const child = spawn("git", args, { cwd: this.dir, env: this.environment({}), stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      if (stderr.length < 64 * 1024) stderr += chunk.toString("utf8");
+    });
+    const exited = new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code2) => resolve(code2 ?? -1));
+    });
+    exited.catch(() => {
+    });
+    try {
+      await pipeline(child.stdout, createWriteStream(path, { flags: "wx", mode: fileMode }));
+    } catch (error) {
+      child.kill("SIGKILL");
+      await exited.catch(() => {
+      });
+      throw error;
+    }
+    const code = await exited;
+    if (code !== 0) throw new GitError(args, code, stderr);
+  }
   /** Runs git and returns standard output as text without the final newline. */
   async text(args, options = {}) {
     const { stdout } = await this.run(args, options);
     return stdout.toString("utf8").replace(/\n$/, "");
   }
 };
+
+// src/state/observation.ts
+var SIGNATURE = "Sync-signature";
+var SIGNED = new RegExp(`^([\\s\\S]*)\\n\\n${SIGNATURE}: ([0-9a-f]{64})\\n$`);
 
 // src/state/lfs.ts
 var POINTER_VERSION = "version https://git-lfs.github.com/spec/v1";
@@ -7707,8 +7780,11 @@ function contentBytes(content) {
 
 // src/state/objects.ts
 var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
-async function listTree(git, treeish) {
-  const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish]);
+async function listTree(git, treeish, maxOutputBytes) {
+  const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
+  return parseTreeListing(stdout);
+}
+function parseTreeListing(stdout) {
   const entries = [];
   for (const record of stdout.toString("utf8").split("\0")) {
     if (record === "") continue;
@@ -7725,11 +7801,11 @@ async function listTree(git, treeish) {
   }
   return entries;
 }
-async function readBlobs(git, oids) {
+async function readBlobs(git, oids, maxOutputBytes) {
   const unique = [...new Set(oids)];
   const result = /* @__PURE__ */ new Map();
   if (unique.length === 0) return result;
-  const { stdout } = await git.run(["cat-file", "--batch"], { input: unique.join("\n") + "\n" });
+  const { stdout } = await git.run(["cat-file", "--batch"], { input: unique.join("\n") + "\n", maxOutputBytes });
   let offset = 0;
   for (const oid of unique) {
     const end = stdout.indexOf(10, offset);
@@ -7767,9 +7843,19 @@ import { join as join2 } from "node:path";
 
 // src/mapping/front-matter.ts
 var import_yaml = __toESM(require_dist(), 1);
+
+// src/format/markdown.ts
+var isAsciiAlphanumeric = (code) => code !== null && (code >= 48 && code <= 57 || code >= 65 && code <= 90 || code >= 97 && code <= 122);
+var WORD_CODES = [43, 45, 46];
+for (let code = 48; code <= 122; code++) if (isAsciiAlphanumeric(code)) WORD_CODES.push(code);
+
+// src/mapping/front-matter.ts
 function parseQuietly(yaml) {
   return (0, import_yaml.parse)(yaml, { logLevel: "error", prettyErrors: false });
 }
+
+// src/format/rules.ts
+var CONTENT_LIMIT = 25e4;
 
 // src/setup/hooks.ts
 var PRE_COMMIT_CONFIG = ".pre-commit-config.yaml";
@@ -7790,7 +7876,8 @@ function readHookConfig(text) {
     const source = typeof repo.repo === "string" ? repo.repo : "";
     for (const hook of repo.hooks) {
       if (!isRecord(hook) || typeof hook.id !== "string") continue;
-      hooks.push(typeof hook.alias === "string" ? { id: hook.id, repo: source, alias: hook.alias } : { id: hook.id, repo: source });
+      const command = [hook.entry, ...Array.isArray(hook.args) ? hook.args : []].filter((part) => typeof part === "string").join(" ");
+      hooks.push({ id: hook.id, repo: source, ...typeof hook.alias === "string" ? { alias: hook.alias } : {}, ...command ? { command } : {} });
     }
   }
   return { hooks };
@@ -7801,15 +7888,21 @@ function isRecord(value) {
 
 // src/sync/security.ts
 import { spawn as spawn2 } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { createHash as createHash2 } from "node:crypto";
 
 // src/mapping/annotations.ts
 var TEAM_KEY = "linear-team";
 var PROJECT_KEY = "linear-project";
 var MENTIONS_KEY = new RegExp(`^[ \\t]*["']?(?:${TEAM_KEY}|${PROJECT_KEY})["']?[ \\t]*:`, "m");
+
+// src/mapping/blobs.ts
+var MAPPING_FILE_BYTES = 4 * CONTENT_LIMIT;
+var MAPPING_TREE_BYTES = 16 * 1024 * 1024;
+var MAPPING_BUDGET_BYTES = 64 * 1024 * 1024;
+var BATCH_BYTES = 4 * 1024 * 1024;
 
 // src/mapping/mapping.ts
 var MARKDOWN_EXTENSION = ".md";
@@ -7839,17 +7932,70 @@ function runHooks(dir, args, env) {
     });
   });
 }
+var LFS_POINTER_BYTES = 1024;
+var SCRATCH_BATCH_BYTES = 16 * 1024 * 1024;
+var SCRATCH_BATCH_FILES = 32;
+var SCRATCH_TREE_BYTES = 4 * 1024 * 1024 * 1024;
+var SecurityScratchBudgetError = class extends Error {
+  code = "security-scratch-budget";
+  constructor(bytes) {
+    super(message("sync.security-scratch-budget", { bytes }));
+    this.name = "SecurityScratchBudgetError";
+  }
+};
+function batchBytes(entry) {
+  return entry.oid.length + String(entry.size).length + 8 + entry.size;
+}
+function blobSize(entry) {
+  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error(message("sync.security-tree-differs"));
+  return entry;
+}
+function checkScratchBudget(entries, budget) {
+  let total = 0;
+  for (const entry of entries) {
+    if (entry.type === "blob") total += blobSize(entry).size;
+  }
+  if (total > budget) throw new SecurityScratchBudgetError(budget);
+}
+async function readInBatches(git, entries, use, alone) {
+  let batch = [];
+  let bytes = 0;
+  const flush = async () => {
+    if (batch.length === 0) return;
+    const blobs = await readBlobs(git, batch.map((entry) => entry.oid), bytes);
+    await use(batch, blobs);
+    batch = [];
+    bytes = 0;
+  };
+  for (const entry of entries) {
+    const size = batchBytes(entry);
+    if (size > SCRATCH_BATCH_BYTES) {
+      await alone(entry);
+      continue;
+    }
+    if (batch.length === SCRATCH_BATCH_FILES || bytes + size > SCRATCH_BATCH_BYTES) await flush();
+    batch.push(entry);
+    bytes += size;
+  }
+  await flush();
+}
 async function securityHookIds(git, tracked) {
   const read = await git.run(["cat-file", "blob", `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
   const config = readHookConfig(read.code === 0 ? read.stdout.toString("utf8") : null);
   if (config.invalid !== void 0) throw new Error(message("sync.invalid-security-config"));
   return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
 }
-async function onlyDocumentsChanged(scratch, dir, files) {
+async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
   const changed = (await scratch.run(["diff", "--name-only", "--no-renames", "-z"])).stdout.toString("utf8").split("\0").filter((path) => path !== "");
   for (const path of changed) {
+    if (linkedSupport.some((target) => path === target || path.startsWith(`${target}/`))) return false;
     if (isMarkdownPath(path)) continue;
-    const pointer = parseLfsPointer((await scratch.run(["cat-file", "blob", `:${path}`])).stdout);
+    const read = await scratch.run(["cat-file", "blob", `:${path}`], { maxOutputBytes: LFS_POINTER_BYTES }).catch((error) => {
+      if (error instanceof GitOutputLimitError) return null;
+      throw error;
+    });
+    if (read === null) return false;
+    const pointer = parseLfsPointer(read.stdout);
     const content = files.get(path);
     if (pointer === null || content === void 0) return false;
     const bytes = contentBytes(content);
@@ -7858,13 +8004,66 @@ async function onlyDocumentsChanged(scratch, dir, files) {
   }
   return true;
 }
+async function throughLink(dir, path) {
+  const parts = path.split("/");
+  for (let at = 1; at <= parts.length; at++) {
+    const found = await lstat(join(dir, ...parts.slice(0, at))).catch(() => null);
+    if (found === null) return false;
+    if (found.isSymbolicLink()) return true;
+  }
+  return false;
+}
+async function reproduceTree(git, tracked, entries, scratch, dir) {
+  for (const entry of entries) checkRepoPath(entry.path);
+  const files = entries.filter((entry) => entry.type === "blob" && ["100644", "100755"].includes(entry.mode));
+  const links = entries.filter((entry) => entry.type === "blob" && entry.mode === "120000");
+  const gitlinks = entries.filter((entry) => entry.type === "commit");
+  const fileMode = (entry) => entry.mode === "100755" ? 493 : 420;
+  await readInBatches(git, files, async (batch, blobs) => {
+    for (const entry of batch) {
+      await mkdir(dirname(join(dir, entry.path)), { recursive: true });
+      await writeFile(join(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
+    }
+  }, async (entry) => {
+    await mkdir(dirname(join(dir, entry.path)), { recursive: true });
+    await git.runToFile(["cat-file", "blob", entry.oid], join(dir, entry.path), fileMode(entry));
+  });
+  for (const entry of gitlinks) await mkdir(join(dir, entry.path), { recursive: true });
+  await readInBatches(git, links, async (batch, targets) => {
+    for (const entry of batch) {
+      await mkdir(dirname(join(dir, entry.path)), { recursive: true });
+      await symlink(targets.get(entry.oid), join(dir, entry.path));
+    }
+  }, async () => {
+    throw new Error(message("sync.security-link-outside"));
+  });
+  const root = await realpath(dir);
+  const linkedSupport = [];
+  for (const entry of links) {
+    const target = await realpath(join(dir, entry.path));
+    const inside = target.slice(root.length + 1).split(sep);
+    if (!target.startsWith(root + sep) || isGitDirectoryName(inside[0])) throw new Error(message("sync.security-link-outside"));
+    if (!isMarkdownPath(entry.path)) linkedSupport.push(inside.join("/"));
+  }
+  await mkdir(join(dir, ".git", "info"), { recursive: true });
+  await writeFile(join(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
+  await scratch.run(["add", "--all", "--force"]);
+  if (gitlinks.length > 0) {
+    await scratch.run(["update-index", "-z", "--index-info"], { input: gitlinks.map((entry) => `160000 ${entry.oid}	${entry.path}\0`).join("") });
+  }
+  const tree = await scratch.text(["write-tree"]);
+  if (tree !== await git.text(["rev-parse", `${tracked}^{tree}`])) throw new Error(message("sync.security-tree-differs"));
+  return { tree, linkedSupport };
+}
 async function securityGate(git, tracked, options = {}) {
   const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C.UTF-8" };
   const hooks = await securityHookIds(git, tracked);
   if (hooks.length > 0 && (await runHooks(git.dir, ["--version"], env)).code !== 0) throw new Error(message("sync.needs-pre-commit"));
+  const budget = options.scratchBytes ?? SCRATCH_TREE_BYTES;
   let dir;
   let scratch;
   let baseline;
+  let linkedSupport = [];
   const close = async () => {
     if (dir !== void 0) await rm(dir, { recursive: true, force: true });
     dir = void 0;
@@ -7876,31 +8075,23 @@ async function securityGate(git, tracked, options = {}) {
       if (hooks.length === 0) return [];
       try {
         if (dir === void 0) {
+          const entries = await listTree(git, tracked);
+          checkScratchBudget(entries, budget);
           dir = await mkdtemp(join(tmpdir(), "capture-security-"));
           scratch = new Git(dir);
-          await scratch.run(["init", "--quiet"]);
-          const entries = (await listTree(git, tracked)).filter((entry) => entry.type === "blob" && ["100644", "100755"].includes(entry.mode));
-          for (let at = 0; at < entries.length; at += 32) {
-            const batch = entries.slice(at, at + 32);
-            const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
-            for (const entry of batch) {
-              checkRepoPath(entry.path);
-              await mkdir(dirname(join(dir, entry.path)), { recursive: true });
-              await writeFile(join(dir, entry.path), blobs.get(entry.oid), { mode: entry.mode === "100755" ? 493 : 420 });
-            }
-          }
-          await scratch.run(["add", "--all"]);
-          baseline = await scratch.text(["write-tree"]);
+          await scratch.run(["init", "--quiet", `--object-format=${await git.text(["rev-parse", "--show-object-format"])}`]);
+          ({ tree: baseline, linkedSupport } = await reproduceTree(git, tracked, entries, scratch, dir));
         }
         await scratch.run(["read-tree", "--reset", "-u", baseline]);
         await scratch.run(["clean", "-fdx", "--quiet"]);
         for (const [path, content] of files) {
           checkRepoPath(path);
           if (path === PRE_COMMIT_CONFIG || path.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
+          if (await throughLink(dir, path)) return [{ hook: SECURITY_ALIAS, line: 1 }];
           await mkdir(dirname(join(dir, path)), { recursive: true });
           await writeFile(join(dir, path), contentBytes(content));
         }
-        if (!await onlyDocumentsChanged(scratch, dir, files)) return [{ hook: SECURITY_ALIAS, line: 1 }];
+        if (!await onlyDocumentsChanged(scratch, dir, files, linkedSupport)) return [{ hook: SECURITY_ALIAS, line: 1 }];
         await scratch.run(["add", "--force", "--", ...files.keys()]);
         const findings = [];
         let ran = false;
@@ -7924,7 +8115,8 @@ async function securityGate(git, tracked, options = {}) {
           if (after === null || !after.equals(contentBytes(content))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         }
         return findings;
-      } catch {
+      } catch (error) {
+        if (error instanceof SecurityScratchBudgetError) throw error;
         return [{ hook: SECURITY_ALIAS, line: 1 }];
       }
     }
