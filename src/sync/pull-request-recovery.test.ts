@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { detectConflicts } from '../merge/index.ts';
 import { SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, fakeFetch, touch } from '../setup/test-helpers.ts';
-import { IDENTITY } from '../state/test-helpers.ts';
+import { IDENTITY, signTip } from '../state/test-helpers.ts';
 import { CHECK_NAME } from '../../test/corpus/check-workflow.ts';
 import { describe, it } from 'node:test';
 import { pullRequestHarness, CANARY, PRE_COMMIT, SYNC_BRANCH } from './pull-request-test-helpers.ts';
@@ -125,12 +125,13 @@ describe('sync: pull request recovery', () => {
 
   it('advances Linear-base when Linear adopts a CI repair without changing the selected tree', async () => {
     const path = 'eng/notes/plan.md';
-    await suspendOne(path, '# Plan\n\nBad content.\n');
-    await editRef(SUSPENDED, path, '# Plan\n\nFixed content.\n');
-    await editInLinear(path, '# Plan\n\nFixed content.\n');
+    // Linear and the CI repair (the format hook's fix) both write no final newline.
+    await suspendOne(path, '# Plan\n\nBad content.');
+    await editRef(SUSPENDED, path, '# Plan\n\nFixed content.');
+    await editInLinear(path, '# Plan\n\nFixed content.');
     await sync();
     checksOn(await rev(SUSPENDED), FAILED);
-    await editInLinear(path, '# Plan\n\nNew content.\n');
+    await editInLinear(path, '# Plan\n\nNew content.');
     await sync();
     const text = await show(`${SUSPENDED}:${path}`);
     assert.equal(detectConflicts(text).length, 0);
@@ -154,6 +155,7 @@ describe('sync: pull request recovery', () => {
     await suspendOne();
     await gitEdit('eng/notes/image.png', 'tracked bytes');
     await editRef('refs/mdbisync/linear', 'eng/notes/image.png', 'captured bytes');
+    await signTip(h.fixture.remote);
     await editInLinear('eng/notes/plan.md', '# Plan\n\nLater held edit.\n');
     const run = await sync();
     assert.equal(run.report.pullRequest?.suspended?.conflicts, undefined);

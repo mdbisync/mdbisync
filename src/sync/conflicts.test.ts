@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { detectConflicts, markerCallout, MARKERS, RETITLED_COMMENT } from '../merge/index.ts';
+import { fixText } from '../format/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
@@ -22,7 +23,7 @@ import { stableId } from './stable-id.ts';
 const CANARY = 'kx-5e1f0a93';
 const NOTES = 'eng/notes';
 const DOC = `${NOTES}/plan.md`;
-const PLAN = `# Plan\n\nAlpha paragraph.\n\nBeta paragraph.\n\nGamma paragraph. ${CANARY}\n`;
+const PLAN = `# Plan\n\nAlpha paragraph.\n\nBeta paragraph.\n\nGamma paragraph. ${CANARY}`;
 
 const PRE_COMMIT = `repos:
   - repo: https://github.com/example/mdbisync
@@ -33,20 +34,20 @@ const PRE_COMMIT = `repos:
 
 const TREE: Record<string, string> = {
   '.pre-commit-config.yaml': PRE_COMMIT,
-  'README.md': `# Repository\n\n${CANARY}\n`,
-  'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
-  'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}\n`,
+  'README.md': `# Repository\n\n${CANARY}`,
+  'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}`,
+  'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}`,
   [DOC]: PLAN,
-  'eng/notes/other.md': `# Other\n\nUntouched. ${CANARY}\n`,
-  'eng/notes/table.md': `# Table\n\n| Name | Value |\n| --- | --- |\n| one | 1 |\n| two | 2 |\n| three | 3 |\n\nAfter. ${CANARY}\n`,
-  'eng/notes/fence.md': `# Fence\n\n\`\`\`ts\nconst a = 1;\nconst b = 2;\nconst c = 3;\n\`\`\`\n\nAfter. ${CANARY}\n`,
-  'eng/notes/mermaid.md': `# Diagram\n\n\`\`\`mermaid\ngraph TD\n  A --> B\n  B --> C\n\`\`\`\n\nAfter. ${CANARY}\n`,
-  'eng/notes/ordered.md': `# Steps\n\n1. First\n2. Second\n3. Third\n\nAfter. ${CANARY}\n`,
-  'eng/notes/nested.md': `# Tree\n\n- Top\n  - Child one\n  - Child two\n- Other\n\nAfter. ${CANARY}\n`,
-  'eng/notes/bullets.md': `# Items\n\n- apples\n- pears\n- plums\n\nAfter. ${CANARY}\n`,
-  'eng/notes/lookalike.md': `# Lookalike\n\nThe markers look like this:\n\n\`\`\`md\n${MARKERS.git}\n\nmine\n\n${MARKERS.linear}\n\ntheirs\n\n${MARKERS.end}\n\`\`\`\n\nAnd inline: \`${MARKERS.git}\`.\n\n> ${MARKERS.end}\n\nPlain text. ${CANARY}\n`,
-  'eng/notes/front.md': `---\nowner: example\n---\n\n# Front\n\nOne paragraph. ${CANARY}\n`,
-  'eng/notes/gallery.md': `# Gallery\n\nIntro.\n\nOutro. ${CANARY}\n`,
+  'eng/notes/other.md': `# Other\n\nUntouched. ${CANARY}`,
+  'eng/notes/table.md': `# Table\n\n| Name | Value |\n| -- | -- |\n| one | 1 |\n| two | 2 |\n| three | 3 |\n\nAfter. ${CANARY}`,
+  'eng/notes/fence.md': `# Fence\n\n\`\`\`ts\nconst a = 1;\nconst b = 2;\nconst c = 3;\n\`\`\`\n\nAfter. ${CANARY}`,
+  'eng/notes/mermaid.md': `# Diagram\n\n\`\`\`mermaid\ngraph TD\n  A --> B\n  B --> C\n\`\`\`\n\nAfter. ${CANARY}`,
+  'eng/notes/ordered.md': `# Steps\n\n1. First\n2. Second\n3. Third\n\nAfter. ${CANARY}`,
+  'eng/notes/nested.md': `# Tree\n\n* Top\n  * Child one\n  * Child two\n* Other\n\nAfter. ${CANARY}`,
+  'eng/notes/bullets.md': `# Items\n\n* apples\n* pears\n* plums\n\nAfter. ${CANARY}`,
+  'eng/notes/lookalike.md': `# Lookalike\n\nThe markers look like this:\n\n\`\`\`md\n${MARKERS.git}\n\nmine\n\n${MARKERS.linear}\n\ntheirs\n\n${MARKERS.end}\n\`\`\`\n\nAnd inline: \`${MARKERS.git}\`.\n\n> ${MARKERS.end}\n\nPlain text. ${CANARY}`,
+  'eng/notes/front.md': `---\nowner: example\n---\n\n# Front\n\nOne paragraph. ${CANARY}`,
+  'eng/notes/gallery.md': `# Gallery\n\nIntro.\n\nOutro. ${CANARY}`,
 };
 
 const SYNC_BRANCH = 'refs/heads/mdbisync/linear';
@@ -244,9 +245,9 @@ describe('sync: conflicts through the cycle (L3)', () => {
 
   it('L3-02: the same paragraph gets the three marker paragraphs on both sides, the conflict mark and one notice; other edits sync in that run', async () => {
     const original = await documentOf(DOC);
-    await editInLinear('eng/notes/other.md', `# Other\n\nEdited in Linear. ${CANARY}\n`);
+    await editInLinear('eng/notes/other.md', `# Other\n\nEdited in Linear. ${CANARY}`);
     await editInLinear(DOC, PLAN.replace('Beta paragraph.', 'Beta paragraph, Linear.'));
-    await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, git.'), 'eng/notes/fence.md': `# Fence\n\nRewritten in git. ${CANARY}\n` });
+    await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, git.'), 'eng/notes/fence.md': `# Fence\n\nRewritten in git. ${CANARY}` });
 
     const first = await sync();
     assert.deepEqual(first.report.sync?.conflicts, [DOC]);
@@ -260,7 +261,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.deepEqual(first.report.writes.linear, { CommentOnDocument: 1, UpdateDocument: 3 });
 
     await settle();
-    const expected = `# Plan\n\nAlpha paragraph.\n\n${markerCallout(MARKERS.git)}\n\nBeta paragraph, git.\n\n${markerCallout(MARKERS.linear)}\n\nBeta paragraph, Linear.\n\n${markerCallout(MARKERS.end)}\n\nGamma paragraph. ${CANARY}\n`;
+    const expected = `# Plan\n\nAlpha paragraph.\n\n${markerCallout(MARKERS.git)}\n\nBeta paragraph, git.\n\n${markerCallout(MARKERS.linear)}\n\nBeta paragraph, Linear.\n\n${markerCallout(MARKERS.end)}\n\nGamma paragraph. ${CANARY}`;
     await assertBothSides(DOC, expected);
     assert.match(await show('refs/heads/main:eng/notes/other.md'), /Edited in Linear/);
     const document = await documentOf(DOC);
@@ -277,7 +278,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.equal(conflicted.report.pullRequest?.code, 'conflict');
     assert.equal(conflicted.report.sync?.record?.kind, 'merge');
 
-    await editInLinear('eng/notes/other.md', `# Other\n\nA later Linear edit. ${CANARY}\n`);
+    await editInLinear('eng/notes/other.md', `# Other\n\nA later Linear edit. ${CANARY}`);
     const next = await sync();
     assert.equal(next.report.pullRequest?.code, undefined, JSON.stringify(next.report.pullRequest));
     assert.deepEqual(next.writes, ['POST /pulls']);
@@ -291,14 +292,15 @@ describe('sync: conflicts through the cycle (L3)', () => {
     ['L3-03: a conflict inside a table takes in the whole table', 'eng/notes/table.md', '| two | 2 |', 'two | 22'],
     ['L3-04: a conflict inside a code fence takes in the whole fence', 'eng/notes/fence.md', 'const b = 2;', 'const b = 22;'],
     ['L3-05: a conflict inside an ordered list takes in the whole list', 'eng/notes/ordered.md', '2. Second', '2. Second step'],
-    ['L3-05: a conflict inside a nested list takes in the whole list', 'eng/notes/nested.md', '  - Child one', '  - Child one, renamed'],
+    ['L3-05: a conflict inside a nested list takes in the whole list', 'eng/notes/nested.md', '  * Child one', '  * Child one, renamed'],
     ['L3-07: a conflict inside a Mermaid fence takes in the whole fence', 'eng/notes/mermaid.md', '  A --> B', '  A --> D'],
   ];
   for (const [name, path, line, edit] of blocks) {
     it(name, async () => {
       const text = TREE[path] as string;
       const gitText = text.replace(line, `${edit} (git)`);
-      const linearText = text.replace(line, `${edit} (Linear)`);
+      // Linear stores the edit in its own form (`fix`'s output): a row without a leading pipe gets one.
+      const linearText = fixText(text.replace(line, `${edit} (Linear)`));
       await editInLinear(path, linearText);
       await commitGit({ [path]: gitText });
       await settle();
@@ -307,21 +309,21 @@ describe('sync: conflicts through the cycle (L3)', () => {
       // Each version is the complete block as that side has it.
       const block = (whole: string) => whole.slice(whole.indexOf('\n\n') + 2, whole.lastIndexOf('\n\nAfter.'));
       assertOneConflict(result, block(gitText), block(linearText));
-      assert.ok(result.startsWith(text.slice(0, text.indexOf('\n\n') + 2)) && result.endsWith(`\n\nAfter. ${CANARY}\n`));
+      assert.ok(result.startsWith(text.slice(0, text.indexOf('\n\n') + 2)) && result.endsWith(`\n\nAfter. ${CANARY}`));
     });
   }
 
   it('L3-06: in a flat bullet list the markers go around the bullet only', async () => {
     const path = 'eng/notes/bullets.md';
     const text = TREE[path] as string;
-    await editInLinear(path, text.replace('- pears', '- green pears'));
-    await commitGit({ [path]: text.replace('- pears', '- ripe pears') });
+    await editInLinear(path, text.replace('* pears', '* green pears'));
+    await commitGit({ [path]: text.replace('* pears', '* ripe pears') });
     await settle();
     const result = await show(`refs/heads/main:${path}`);
     assert.equal((await documentOf(path)).content, result);
-    assertOneConflict(result, '- ripe pears', '- green pears');
-    assert.match(result, /- apples\n/);
-    assert.match(result, /- plums\n/);
+    assertOneConflict(result, '* ripe pears', '* green pears');
+    assert.match(result, /\* apples\n/);
+    assert.match(result, /\* plums\n/);
   });
 
   it('L3-08: edits of neighbouring paragraphs give the result of git\'s line merge', async () => {
@@ -504,7 +506,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
 
   it('a git rename onto a path Linear filled with another document keeps both documents', async () => {
     const other = await documentOf('eng/notes/other.md');
-    world.linear.documents.push({ id: 'linear-new', title: 'summary', projectId: 'project-api', createdAt: '2026-01-03T00:00:00.000Z', content: `# Summary\n\nWritten in Linear. ${CANARY}\n` });
+    world.linear.documents.push({ id: 'linear-new', title: 'summary', projectId: 'project-api', createdAt: '2026-01-03T00:00:00.000Z', content: `# Summary\n\nWritten in Linear. ${CANARY}` });
     await commitGit({}, { from: 'eng/notes/other.md', to: `${NOTES}/summary.md` });
     const first = await sync();
     assert.deepEqual(first.report.sync?.conflicts, []);
@@ -702,7 +704,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
   async function conflictOnFront() {
     const path = 'eng/notes/front.md';
     const text = TREE[path] as string;
-    await editInLinear(path, `# Front\n\nOne paragraph, Linear. ${CANARY}\n`);
+    await editInLinear(path, `# Front\n\nOne paragraph, Linear. ${CANARY}`);
     await commitGit({ [path]: text.replace('owner: example', 'owner: someone-else').replace('One paragraph.', 'One paragraph, git.') });
     await settle();
     const result = await show(`refs/heads/main:${path}`);
@@ -720,9 +722,9 @@ describe('sync: conflicts through the cycle (L3)', () => {
 
   it('L3-21: resolving that conflict in Linear keeps the front matter git changed', async () => {
     const path = await conflictOnFront();
-    await editInLinear(path, `# Front\n\nOne paragraph, agreed. ${CANARY}\n`);
+    await editInLinear(path, `# Front\n\nOne paragraph, agreed. ${CANARY}`);
     await settle();
-    await assertBothSides(path, `---\nowner: someone-else\n---\n\n# Front\n\nOne paragraph, agreed. ${CANARY}\n`);
+    await assertBothSides(path, `---\nowner: someone-else\n---\n\n# Front\n\nOne paragraph, agreed. ${CANARY}`);
     assert.equal((await documentOf(path)).icon ?? null, null);
   });
 
@@ -779,14 +781,14 @@ describe('sync: conflicts through the cycle (L3)', () => {
     const CONFLICTS = 6;
     const CLEAN = 20;
     const files: Record<string, string> = {};
-    for (let i = 0; i < CONFLICTS + CLEAN; i += 1) files[`${NOTES}/batch-${i}.md`] = `# Batch ${i}\n\nOpen. ${CANARY}\n`;
+    for (let i = 0; i < CONFLICTS + CLEAN; i += 1) files[`${NOTES}/batch-${i}.md`] = `# Batch ${i}\n\nOpen. ${CANARY}`;
     await commitGit(files);
     await settle();
     const edits: Record<string, string> = {};
     for (let i = 0; i < CONFLICTS + CLEAN; i += 1) {
       const path = `${NOTES}/batch-${i}.md`;
-      edits[path] = `# Batch ${i}\n\nClosed in git. ${CANARY}\n`;
-      if (i < CONFLICTS) await editInLinear(path, `# Batch ${i}\n\nClosed in Linear. ${CANARY}\n`);
+      edits[path] = `# Batch ${i}\n\nClosed in git. ${CANARY}`;
+      if (i < CONFLICTS) await editInLinear(path, `# Batch ${i}\n\nClosed in Linear. ${CANARY}`);
     }
     await commitGit(edits);
     const first = await sync();

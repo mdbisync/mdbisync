@@ -18,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, PushedKey, fetchState, initialPullRequestPending, isAncestor, pendingInitialRecords, readInitialSyncProgress, suspendedBranch } from '../state/index.ts';
+import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, PushedKey, fetchState, initialPullRequestPending, isAncestor, pendingInitialRecords, readInitialSyncProgress, suspendedBranch, trustedObservation } from '../state/index.ts';
 import { type CheckClock } from '../pull-request/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
@@ -83,6 +83,11 @@ export interface PreflightOptions {
   reads?: LinearReads;
 }
 
+/** The run's signing key: keyed by the Linear app's secret, which only the sync holds. */
+function pushedKey(inputs: RunInputs): PushedKey {
+  return new PushedKey(inputs.linear.clientSecret, inputs.github.repository);
+}
+
 /**
  * Runs the preflight and, when it passes, `work` with the run's context
  * while the Linear token is alive. Nothing is written before `work`.
@@ -98,7 +103,10 @@ export async function runPreflight(
   if (operation === 'sync') {
     const unfinished = (await readInitialSyncProgress(git, fetched.state.ids)) !== null;
     const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, tracked: fetched.tracked });
-    const refusal = checkSyncState(fetched.state, inputs.state, unfinished, pending);
+    // The sync builds only on a `linear` it wrote: a commit someone else pushed there would reach its pull request unchecked.
+    const linear = fetched.state.linear;
+    const untrusted = linear !== null && !(await trustedObservation(git, linear, fetched.tracked, pushedKey(inputs)));
+    const refusal = checkSyncState(fetched.state, inputs.state, { initialSyncUnfinished: unfinished, linearUntrusted: untrusted, initialPullRequestPending: pending });
     if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   } else if (options.refusePendingInitialPullRequest === true) {
     // A new initial sync to Linear may replace an abandoned snapshot once
@@ -109,7 +117,7 @@ export async function runPreflight(
         if (await isAncestor(git, record, fetched.sync)) pending = true;
       }
     }
-    const refusal = checkSyncState(fetched.state, inputs.state, false, pending);
+    const refusal = checkSyncState(fetched.state, inputs.state, { initialPullRequestPending: pending });
     if (refusal?.code === 'initial-pull-request-pending') return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   }
 
@@ -143,7 +151,7 @@ export async function runPreflight(
       try {
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
         setup = report;
-        if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY, pushedKey: new PushedKey(inputs.linear.clientSecret, inputs.github.repository) });
+        if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY, pushedKey: pushedKey(inputs) });
         return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       } catch (error) {
         // Linear stopped the client (a rate limit, a budget running low) outside the steps that record their progress.

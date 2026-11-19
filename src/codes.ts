@@ -45,7 +45,7 @@ export const ANNOTATION_PROBLEM_KINDS = ['invalid-annotation', 'project-without-
 export type AnnotationProblemKind = (typeof ANNOTATION_PROBLEM_KINDS)[number];
 
 /** Why a `.md` file is not synchronized at all. */
-export const UNSYNCED_REASONS = ['outside-annotations', 'not-a-regular-file', 'binary', 'stored-in-lfs'] as const;
+export const UNSYNCED_REASONS = ['outside-annotations', 'not-a-regular-file', 'binary', 'stored-in-lfs', 'blob-too-large'] as const;
 export type UnsyncedReason = (typeof UNSYNCED_REASONS)[number];
 
 /** Why the initial sync's plan or the sync leaves a mapped file out, besides the `lint` rules. */
@@ -53,18 +53,21 @@ export const LEFT_OUT_RULES = ['duplicate-title', 'title-too-long'] as const;
 export type LeftOutRule = (typeof LEFT_OUT_RULES)[number];
 
 /** Why an initial sync to Linear leaves a document out while writing it. */
-export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'markdown-complexity', 'upload-too-large', 'upload-unreadable'] as const;
+export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'markdown-complexity', 'upload-too-large', 'upload-unreadable', 'link-provenance-unknown', 'changed-during-run'] as const;
 export type LeftOutAtWriteRule = (typeof LEFT_OUT_AT_WRITE_RULES)[number];
 
+/** Why a dry run from Linear leaves out a document that would make a new file: the hooks refused its title, or had no answer for it. */
+export type TitleLeftOutRule = Extract<RecordLeftOutRule, 'security-hook' | 'security-unchecked'>;
+
 /** Every rule a synchronized file can be left out by, in a plan or a sync. */
-export type FileLeftOutRule = LintRule | UnsyncedReason | LeftOutRule | LeftOutAtWriteRule;
+export type FileLeftOutRule = LintRule | UnsyncedReason | LeftOutRule | LeftOutAtWriteRule | TitleLeftOutRule;
 
 /** Why an initial sync from Linear leaves a file out of its record, or keeps the tracked one. */
 export const RECORD_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'image-repair-budget', 'download-failed', 'image-blocked', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;
 export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
 
 /** Why the sync's capture leaves a Linear document out. */
-export const CAPTURE_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'image-repair-budget', 'capture-translation', 'download-retry', 'security-unchecked'] as const;
+export const CAPTURE_LEFT_OUT_RULES = ['markdown-complexity', 'attachment-budget', 'image-repair-budget', 'blob-too-large', 'capture-translation', 'download-retry', 'security-unchecked', 'changed-during-run'] as const;
 export type CaptureLeftOutRule = (typeof CAPTURE_LEFT_OUT_RULES)[number];
 
 /** The rule a file name read from Linear follows. */
@@ -96,7 +99,7 @@ export const RECORD_CODES = ['stopped', 'state-moved', 'pull-request-failed', 's
 export type RecordCode = (typeof RECORD_CODES)[number];
 
 /** Why the sync pull request step did not finish. */
-export const PULL_REQUEST_CODES = ['conflict', 'merge-refused', 'merge-blocked', 'checks-missing', 'initial-pull-request-pending', 'state-moved', 'github-failed', 'head-unverified', 'merge-misplaced'] as const;
+export const PULL_REQUEST_CODES = ['conflict', 'merge-refused', 'merge-blocked', 'checks-missing', 'initial-pull-request-pending', 'state-moved', 'github-failed', 'head-unverified', 'merge-misplaced', 'suspended-asset-discovery'] as const;
 export type PullRequestCode = (typeof PULL_REQUEST_CODES)[number];
 
 /** A sync run is partial because it held a removal it could not confirm. */

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { it } from 'node:test';
 import { type Zone } from '../mapping/index.ts';
-import { isSyncedChange, keepsAnnotation, oneLine, unverifiedList } from './head-check.ts';
+import { createFixture } from '../state/test-helpers.ts';
+import { isSyncedChange, keepsAnnotation, keepsRegularMode, oneLine, unverifiedList, unverifiedPaths } from './head-check.ts';
 import { UPLOAD_EXTENSIONS } from './upload-type.ts';
 
 const zones = new Map<string, Zone>([['eng', { team: 'ENG', teamFolder: 'eng' }]]);
@@ -35,6 +37,69 @@ it('keeps actual GitHub folders protected under a root mapping, including remova
     }
     assert.equal(isSyncedChange('%2Egithub/page.md', mode, root), true);
   }
+});
+
+it('merges a regular file added, edited or removed, and leaves any other mode change to a person', () => {
+  for (const [before, after] of [['000000', '100644'], ['100644', '100644'], ['100644', '000000'], ['100755', '100755'], ['000000', '100755'], ['100755', '000000']] as const) {
+    assert.equal(keepsRegularMode(before, after), true, `${before} -> ${after}`);
+  }
+  for (const [before, after] of [
+    ['120000', '000000'], ['120000', '100644'], ['160000', '000000'], ['160000', '100644'], ['100644', '120000'], ['000000', '160000'],
+    ['100644', '100755'], ['100755', '100644'], ['040000', '100644'], ['', '100644'],
+  ] as const) {
+    assert.equal(keepsRegularMode(before, after), false, `${before} -> ${after}`);
+  }
+});
+
+it('lists a removed or replaced symbolic link or submodule and an executable-bit flip between real trees, and no ordinary edit', async () => {
+  const fixture = await createFixture();
+  const git = fixture.remote;
+  const env = { GIT_INDEX_FILE: join(fixture.root, 'head-check.index') };
+  const blob = (text: string) => git.text(['hash-object', '-w', '--stdin'], { input: text });
+  type Entries = Record<string, readonly [mode: string, oid: string]>;
+  /** A tree holding exactly `entries`, written through a scratch index. */
+  const tree = async (entries: Entries) => {
+    await git.run(['read-tree', '--empty'], { env });
+    const info = Object.entries(entries).map(([path, [mode, oid]]) => `${mode} ${oid}\t${path}\n`).join('');
+    await git.run(['update-index', '--add', '--index-info'], { env, input: info });
+    return git.text(['write-tree'], { env });
+  };
+  const readme = (body: string) => blob(`---\nlinear-team: ENG\n---\n\n# Engineering\n\n${body}\n`);
+  const plan = await blob('# Plan\n');
+  const target = await blob('plan.md');
+  const submodule = target; // A gitlink names another repository's commit; git does not look it up, so any id of this format will do.
+  const base: Entries = {
+    'eng/README.md': ['100644', await readme('Notes.')], 'eng/plan.md': ['100644', plan], 'eng/old.md': ['100644', plan],
+    'eng/link.md': ['120000', target], 'eng/gone.md': ['120000', target],
+    'eng/vendor.png': ['160000', submodule], 'eng/module.md': ['160000', submodule], 'eng/run.md': ['100644', plan],
+  };
+  const before = await tree(base);
+
+  const { 'eng/old.md': _old, ...kept } = base;
+  const ordinary = await tree({
+    ...kept,
+    'eng/README.md': ['100644', await readme('Edited in Linear.')],
+    'eng/plan.md': ['100644', await blob('# Plan\n\nEdited.\n')],
+    'eng/new.md': ['100644', plan], 'eng/new.png': ['100644', await blob('png bytes')],
+  });
+  assert.deepEqual(await unverifiedPaths(git, before, ordinary, zones), [], 'documents added, edited and removed, and a README body edit');
+
+  const { 'eng/README.md': _readme, ...unannotated } = base;
+  const readmes = await tree({
+    ...unannotated,
+    'eng/plain/README.md': ['100644', await blob('# Plain\n')],
+    'eng/moved/README.md': ['100644', await blob('---\nlinear-project: Other\n---\n')],
+  });
+  assert.deepEqual(await unverifiedPaths(git, before, readmes, zones), ['eng/README.md', 'eng/moved/README.md'], 'an annotation removed or added, and not a plain README');
+
+  const { 'eng/gone.md': _gone, 'eng/vendor.png': _vendor, ...rest } = base;
+  const changed = await tree({
+    ...rest,
+    'eng/link.md': ['100644', await blob('# Replaced\n')],
+    'eng/module.md': ['100644', plan],
+    'eng/run.md': ['100755', plan],
+  });
+  assert.deepEqual(await unverifiedPaths(git, before, changed, zones), ['eng/gone.md', 'eng/link.md', 'eng/module.md', 'eng/run.md', 'eng/vendor.png']);
 });
 
 it("leaves a change of a folder's Linear annotation to a person, and merges a README's other edits", () => {

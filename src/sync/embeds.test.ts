@@ -161,8 +161,8 @@ describe('sync: link embed cards', () => {
     assert.ok(weekly.startsWith('---\nowner: example\n---\n\n'), 'front matter lost');
     assert.ok(sameMarkdown(weekly.slice(weekly.indexOf('Plans')), PAGE_CARD), weekly);
     assert.ok(sameMarkdown(colors, IMAGE_CARD), colors);
-    assert.ok(weekly.includes(`[Seed catalog](${PAGE_URL})`));
-    assert.ok(colors.includes(`[swatch.png](${IMAGE_URL})`));
+    assert.ok(weekly.includes(`[Seed catalog](<${PAGE_URL}>)`), weekly);
+    assert.ok(colors.includes(`[swatch.png](<${IMAGE_URL}>)`), colors);
     assert.ok(!colors.includes('!['), 'an image card became an image');
   });
 
@@ -182,7 +182,7 @@ describe('sync: link embed cards', () => {
     // mark, not an embed node, so the card becomes a plain link there; the fake keeps no editor state to show it.
     assert.deepEqual(Object.keys(updates[0]!), ['content']);
     const sent = String(updates[0]!.content);
-    assert.ok(sent.includes(`[Seed catalog](${PAGE_URL})`), sent);
+    assert.ok(sent.includes(`[Seed catalog](<${PAGE_URL}>)`), sent);
     assert.ok(sameMarkdown(sent, `${PAGE_CARD}\n\nA second paragraph from git.\n`), sent);
     const stored = (await documentOf('eng/notes/weekly.md')).content ?? '';
     assert.ok(stored.includes(`[Seed catalog](<${PAGE_URL}>)`), stored);
@@ -206,7 +206,7 @@ describe('sync: link embed cards', () => {
     assert.deepEqual(merged.writes, ['PUT /pulls/2/merge']);
     const weekly = await show('refs/heads/main:eng/notes/weekly.md');
     assert.ok(weekly.startsWith('---\nowner: example\n---\n\n'), 'front matter lost');
-    assert.ok(weekly.includes(`[${PAGE_URL}](${PAGE_URL})`), weekly);
+    assert.ok(weekly.includes(`[${PAGE_URL}](<${PAGE_URL}>)`), weekly);
     assert.ok(sameMarkdown(weekly.slice(weekly.indexOf('Plans')), `Plans for the spring beds.\n\n[${PAGE_URL}](${PAGE_URL})`), weekly);
     assert.deepEqual(updates, []);
   });

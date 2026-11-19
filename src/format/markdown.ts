@@ -69,9 +69,22 @@ export function lineCount(text: string): number {
 export const MARKDOWN_MAX_DEPTH = 128;
 export const MARKDOWN_MAX_NODES = 500_000;
 
+/**
+ * The parser's inline step can take time that grows with the square of an
+ * inline run (a paragraph, heading or table cell): from each place where
+ * the run's text can split (inline punctuation, a line break, the start of
+ * a word) some of its steps walk back over the run's tokens so far (a `]`
+ * looking for its opener, an autolink check for an unclosed `[`), and the
+ * text between other constructs is merged with one array splice of the
+ * run's tokens each.
+ * `parse` adds up the run's tokens so far at every such place and refuses
+ * the body over this budget, which ordinary documents stay far below.
+ */
+export const INLINE_WORK_LIMIT = 250_000_000;
+
 export class MarkdownLimitError extends Error {
-  readonly limit: 'depth' | 'nodes';
-  constructor(limit: 'depth' | 'nodes') {
+  readonly limit: 'depth' | 'nodes' | 'inline';
+  constructor(limit: 'depth' | 'nodes' | 'inline') {
     super(`Markdown exceeds the ${limit} limit.`);
     this.name = 'MarkdownLimitError';
     this.limit = limit;
@@ -79,10 +92,60 @@ export class MarkdownLimitError extends Error {
 }
 
 export function parse(body: string, mdastExtensions: Extension[] = []): Root {
-  const tree = fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
+  const tree = fromMarkdown(body, { extensions: [gfm(), inlineBudget()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
   // Validate before returning the tree to any recursive renderer or comparer.
   visit(tree, () => {});
   return tree;
+}
+
+// Parser extension types, from the GFM extension's own.
+type MicromarkExtension = ReturnType<typeof gfm>;
+type Construct = Exclude<NonNullable<MicromarkExtension['text']>[number], unknown[] | undefined | null>;
+type TokenizeContext = ThisParameterType<NonNullable<Construct['previous']>>;
+
+const isAsciiAlphanumeric = (code: number | null): boolean =>
+  code !== null && ((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122));
+// Where a run's text can split: inline punctuation (`! & * < [ \\ ] _ \` ~`) and
+// line breaks (the parser's codes -5 to -3), and the characters an email,
+// www or protocol autolink can start with, at the start of a word.
+const SPLIT_CODES = [33, 38, 42, 60, 91, 92, 93, 95, 96, 126, -5, -4, -3];
+const WORD_CODES = [43, 45, 46];
+for (let code = 48; code <= 122; code++) if (isAsciiAlphanumeric(code)) WORD_CODES.push(code);
+
+/**
+ * A parser extension that counts the inline work of one parse and throws
+ * `MarkdownLimitError` past `INLINE_WORK_LIMIT`. It only watches: its guard
+ * runs before the other constructs at each place a run can split, adds the
+ * run's tokens so far, and declines, so the parse itself is unchanged.
+ */
+function inlineBudget(): MicromarkExtension {
+  let work = 0;
+  // Runs with a `[`: only there can an autolink check walk back further than its previous one.
+  const bracketed = new WeakSet<TokenizeContext>();
+  const count = function (this: TokenizeContext): boolean {
+    work += this.events.length;
+    if (work > INLINE_WORK_LIMIT) throw new MarkdownLimitError('inline');
+    return false;
+  };
+  const split: Construct = { name: 'inlineBudget', tokenize: (_effects, _ok, nok) => nok, previous: count };
+  const bracket: Construct = {
+    ...split,
+    previous(this: TokenizeContext): boolean {
+      bracketed.add(this);
+      return count.call(this);
+    },
+  };
+  const word: Construct = {
+    ...split,
+    previous(this: TokenizeContext, previous: number | null): boolean {
+      return bracketed.has(this) && !isAsciiAlphanumeric(previous) ? count.call(this) : false;
+    },
+  };
+  const text: Record<number, Construct> = {};
+  for (const code of SPLIT_CODES) text[code] = split;
+  for (const code of WORD_CODES) text[code] = word;
+  text[91] = bracket;
+  return { text };
 }
 
 /** An old accepted body can be too complex to use as a comparison baseline. */
@@ -229,4 +292,43 @@ export function allowedLink(url: string): boolean {
   // URL readers ignore ASCII whitespace and control characters in schemes.
   const normalized = url.replace(/[\u0000-\u0020\u007f]/g, '');
   return !/^[a-z][a-z\d+.-]*:/i.test(normalized) || /^(?:https?|mailto):/i.test(normalized);
+}
+
+/**
+ * A destination as Markdown source for a decoded URL: spaces encoded, and
+ * what Markdown would read back differently escaped (a backslash before
+ * punctuation, an `&` that starts a character reference).
+ */
+function destination(url: string): string {
+  return url
+    .replace(/ /g, '%20')
+    .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
+    .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
+}
+
+/**
+ * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded, and a
+ * backslash at its end doubled, so it cannot escape the closing bracket.
+ */
+export function linkDestination(url: string): string {
+  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
+  const trailing = /\\*$/.exec(inner)![0].length;
+  return `<${inner}${trailing % 2 === 1 ? '\\' : ''}>`;
+}
+
+/** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */
+export function imageDestination(url: string): string {
+  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/** The bracketed label that opens at `open` (a `[`) in `source`, as written, without its brackets. */
+export function bracketedLabel(source: string, open: number): string {
+  let depth = 0;
+  for (let at = open; at < source.length; at++) {
+    const char = source[at];
+    if (char === '\\') at++;
+    else if (char === '[') depth++;
+    else if (char === ']' && --depth === 0) return source.slice(open + 1, at);
+  }
+  return '';
 }

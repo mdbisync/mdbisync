@@ -374,14 +374,14 @@ export function pullRequestHarness() {
     world.github.merge = async () => ({ status: 405, message: RULE });
   };
 
-  /** A commit on `base` with one file replaced, made on the bare remote; a merge when `other` is a second parent. */
-  async function commitFile(base: string, path: string, blob: string | null, other?: string, message = 'Edit'): Promise<string> {
+  /** A commit on `base` with one file replaced (in `mode`), made on the bare remote; a merge when `other` is a second parent. */
+  async function commitFile(base: string, path: string, blob: string | null, other?: string, message = 'Edit', mode = '100644'): Promise<string> {
     const index = join(fixture.root, 'scratch.index');
     const env = { GIT_INDEX_FILE: index, GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
     await fixture.remote.run(['read-tree', base], { env });
     // The bare remote has no work tree: a zero mode removes the entry.
     if (blob === null) await fixture.remote.run(['update-index', '--index-info'], { env, input: `0 ${'0'.repeat(40)}\t${path}\n` });
-    else await fixture.remote.run(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], { env });
+    else await fixture.remote.run(['update-index', '--add', '--cacheinfo', `${mode},${blob},${path}`], { env });
     const tree = await fixture.remote.text(['write-tree'], { env });
     return fixture.remote.text(['commit-tree', tree, '-p', base, ...(other === undefined ? [] : ['-p', other]), '-m', message], { env });
   }

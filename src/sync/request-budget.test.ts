@@ -281,7 +281,7 @@ describe('sync: the Linear request budget (I9)', () => {
     world.linear.documents.push({ id: 'created', title: 'guides/new-page', projectId: 'project-notes', content: 'A new page.\n', createdAt: '2026-01-03T00:00:00Z' });
     touch(byTitle('guides/new-page'));
     const runReports = await syncAndSettle();
-    assert.equal(await tracked('eng/notes/guides/new-page.md'), 'A new page.\n');
+    assert.equal(await tracked('eng/notes/guides/new-page.md'), 'A new page.');
     assertBudget(runReports);
   });
 
@@ -359,7 +359,7 @@ describe('sync: the Linear request budget (I9)', () => {
     const text = (await tracked('eng/notes/plan.md')) ?? '';
     assert.match(text, /\| One \| Ana \|/);
     assert.match(text, /```mermaid/);
-    assert.match(text, /- \[x\] Read it/);
+    assert.match(text, /- \[X\] Read it/);
     assertBudget(runReports);
   });
 
@@ -371,9 +371,11 @@ describe('sync: the Linear request budget (I9)', () => {
     assertBudget(runReports);
   });
 
-  it('an icon, a color and a comment changed in Linear move no ref, and a later edit is still captured (L2-30)', async () => {
-    const refs = async () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
+  it('Linear metadata changes refresh only the ids ref and a later edit is still captured (L2-30)', async () => {
+    const refs = async () => (await fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']))
+      .split('\n').filter((ref) => !ref.startsWith('refs/mdbisync/ids '));
     const before = await refs();
+    const oldIds = await rev('refs/mdbisync/ids');
     Object.assign(byTitle('plan'), { icon: 'Fire' });
     touch(byTitle('plan'));
     Object.assign(byTitle('errors'), { color: '#123456' });
@@ -383,7 +385,8 @@ describe('sync: the Linear request budget (I9)', () => {
     touch(byTitle('review'));
     const runReports = await syncAndSettle();
     for (const run of runReports) assert.equal(run.report.changed, false, 'a run changed something');
-    assert.equal(await refs(), before, 'a run moved a ref');
+    assert.deepEqual(await refs(), before, 'a run moved a content ref');
+    assert.notEqual(await rev('refs/mdbisync/ids'), oldIds);
     assertBudget(runReports);
 
     // The documents read again find their edit, though no cursor was recorded for the edits above.
@@ -392,6 +395,6 @@ describe('sync: the Linear request budget (I9)', () => {
     touch(plan);
     await syncAndSettle();
     assert.match((await tracked('eng/notes/plan.md')) ?? '', /Steps one, two and three\./);
-    assert.notEqual(await refs(), before);
+    assert.notDeepEqual(await refs(), before);
   });
 });

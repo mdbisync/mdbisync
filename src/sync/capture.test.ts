@@ -1,22 +1,25 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { beforeEach, afterEach, describe, it } from 'node:test';
-import { type Fixture, createFixture, IDENTITY, remoteRef } from '../state/test-helpers.ts';
+import { type Fixture, createFixture, IDENTITY, mergeOnGitHub, remoteRef } from '../state/test-helpers.ts';
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs, PushedKey } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
-import { LinearClient, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
+import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES } from '../mapping/blobs.ts';
+import { LinearClient, LinearReads, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
-import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
+import { fixText, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
+import { hookRun } from '../format/test-helpers.ts';
 import { LINK_VARIANT_LINKS, type LinkVariantBudget, capture, linkVariants, linkVariantBudget, prepareLfs } from './capture.ts';
-import { type FileContent } from '../state/content.ts';
+import { type FileContent, contentBytes } from '../state/content.ts';
 import { candidateKey } from './staged.ts';
-import { writeTrackedToLinear } from './write.ts';
+import { MERGE_RECORD_MESSAGE, writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
 import { IMAGE_REPAIR_INPUT_LIMIT } from './image-links.ts';
@@ -60,7 +63,7 @@ describe('capture from Linear', () => {
     const initial = {
       linear: await commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: new Map(), message: 'Initial state', identity: IDENTITY }),
       ids: await commitIds(git, null, new Map([['docs/plan.md', { id: 'plan' }]]), IDENTITY),
-      uploads: await commitUploads(git, null, new Map(), IDENTITY),
+      uploads: await commitUploads(git, null, new Map(), IDENTITY, new PushedKey('client-secret', 'owner/repo')),
     };
     assert.equal((await pushAtomic(git, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })))).ok, true);
     context = { git, fetched: await fetchState(git, config), mapping, targets, linear, identity: IDENTITY, pushedKey: new PushedKey('client-secret', 'owner/repo') };
@@ -70,6 +73,68 @@ describe('capture from Linear', () => {
   const commentsOf = (id: string) => [...world.linear.comments.values()].filter((comment) => comment.documentContentId === `content-${id}`).map((comment) => comment.body);
   const refresh = async () => { context.fetched = await fetchState(context.git, config); };
   const text = async (path: string) => (await fixture.remote.run(['show', `${stateRef(config, 'linear')}:${path}`])).stdout.toString('utf8');
+
+  it('leaves an oversized recorded document unread even when it has a known id', async (t) => {
+    const git = context.git;
+    const initial = context.fetched.state.linear!;
+    const path = 'docs/plan.md';
+    const changes = new Map([[path, 'a'.repeat(MAPPING_FILE_BYTES + 1)]]);
+    const commit = await commitTree(git, { parents: [initial], base: initial, changes, message: 'Recorded document', identity: IDENTITY });
+    const oid = await git.text(['rev-parse', `${commit}:${path}`]);
+    const runGit = t.mock.method(git, 'run');
+    Object.assign(world.linear.documents[0]!, { content: 'Updated body.\n', updatedAt: '2026-01-03T00:00:00Z' });
+
+    const result = await capture(context, { config, state: { ...context.fetched.state, linear: commit }, stageOnly: true });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.leftOut, [{ id: 'plan', rule: 'blob-too-large' }]);
+    assert.deepEqual(result.changed, []);
+    assert.deepEqual(result.removed, []);
+    for (const { arguments: [args, options] } of runGit.mock.calls) {
+      assert.ok(!(args[0] === 'cat-file' && args[1] === 'blob' && args[2] === `${commit}:${path}`));
+      if (args[0] === 'cat-file' && args[1] === '--batch') assert.ok(!String(options?.input).includes(oid));
+    }
+  });
+
+  it('fails before reading document bodies when the recorded mapping exceeds its byte budget', async (t) => {
+    const initial = context.fetched.state.linear!;
+    const body = 'a'.repeat(MAPPING_FILE_BYTES);
+    const changes = new Map(Array.from({ length: Math.floor(MAPPING_BUDGET_BYTES / MAPPING_FILE_BYTES) + 1 }, (_, i) => [
+      `docs/note-${i}.md`, body,
+    ]));
+    const git = context.git;
+    const commit = await commitTree(git, { parents: [initial], base: initial, changes, message: 'Recorded documents', identity: IDENTITY });
+    const entries = await listTree(git, commit);
+    const annotationOids = entries.filter(({ path }) => path.endsWith('/README.md')).map(({ oid }) => oid);
+    const runGit = t.mock.method(git, 'run');
+    const listDocuments = t.mock.method(context.linear, 'listDocumentsInPlaces');
+    await assert.rejects(capture(context, { config, state: { ...context.fetched.state, linear: commit } }), { code: 'mapping-blob-budget' });
+
+    const batches = runGit.mock.calls.filter(({ arguments: [args] }) => args.join(' ') === 'cat-file --batch');
+    assert.equal(batches.length, 1);
+    assert.deepEqual(String(batches[0]!.arguments[1]?.input).trim().split('\n'), annotationOids);
+    assert.equal(listDocuments.mock.callCount(), 0);
+    assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), initial);
+  });
+
+  it('keeps the state ref when a captured edit would exceed the mapping budget', async () => {
+    const git = context.git;
+    const state = context.fetched.state;
+    const initial = state.linear!;
+    const existingBytes = Object.values(TREE).reduce((total, body) => total + Buffer.byteLength(body), 0);
+    const availableBytes = MAPPING_BUDGET_BYTES - existingBytes;
+    const body = 'a'.repeat(MAPPING_FILE_BYTES);
+    const changes = new Map(Array.from({ length: Math.floor(availableBytes / MAPPING_FILE_BYTES) }, (_, i) => [
+      `docs/note-${i}.md`, body,
+    ]));
+    changes.set('docs/remaining.md', body.slice(0, availableBytes % MAPPING_FILE_BYTES));
+    const commit = await commitTree(git, { parents: [initial], base: initial, changes, message: 'Recorded documents', identity: IDENTITY });
+    const ref = stateRef(config, 'linear');
+    assert.equal((await pushAtomic(git, config, [{ ref, expected: initial, next: commit }])).ok, true);
+    Object.assign(world.linear.documents[0]!, { content: 'A slightly longer accepted document.\n', updatedAt: '2026-01-03T00:00:00Z' });
+
+    await assert.rejects(capture(context, { config, state: { ...state, linear: commit } }), { code: 'mapping-blob-budget' });
+    assert.equal(await remoteRef(fixture, ref), commit);
+  });
 
   it('leaves deeply nested documents out while capturing an unrelated document on repeated runs', async () => {
     const nested = '> '.repeat(130) + 'nesting-canary';
@@ -83,7 +148,7 @@ describe('capture from Linear', () => {
       assert.equal(result.ok, true);
       assert.deepEqual(result.leftOut.sort((a, b) => a.id.localeCompare(b.id)), [{id: 'deep-new', rule: 'markdown-complexity'}, {id: 'plan', rule: 'markdown-complexity'}]);
       assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
-      assert.equal(await text('docs/ordinary.md'), 'Ordinary update.\n');
+      assert.equal(await text('docs/ordinary.md'), 'Ordinary update.');
       assert.ok(!JSON.stringify(result.leftOut).includes('nesting-canary'));
       assert.equal(world.linear.comments.size, 0);
       await refresh();
@@ -99,7 +164,7 @@ describe('capture from Linear', () => {
     const result = await run();
     assert.equal(result.ok, true);
     assert.deepEqual(result.leftOut, []);
-    assert.equal(await text('docs/plan.md'), 'Corrected.\n');
+    assert.equal(await text('docs/plan.md'), 'Corrected.');
   });
 
   it('captures through the CLI and omits document bodies from its report and summary', async () => {
@@ -115,7 +180,7 @@ describe('capture from Linear', () => {
     const reportText = await readFile(reportFile, 'utf8');
     assert.ok(!reportText.includes('Private body canary'));
     assert.equal(JSON.parse(reportText).capture.ok, true);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nPrivate body canary.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nPrivate body canary.');
   });
 
   it('reports a repaired dead upload and a retry separately through the sync CLI', async () => {
@@ -176,17 +241,62 @@ describe('capture from Linear', () => {
     assert.match(result.summary, /image-repair-budget: "plan"/);
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
     await assert.rejects(text('docs/charts.md'));
-    assert.equal(await text('docs/safe.md'), 'Safe addition.\n');
+    assert.equal(await text('docs/safe.md'), 'Safe addition.');
   });
 
   it('captures edits with previous front matter; repeated capture makes no content commit', async () => {
     world.linear.documents[0]!.content = 'Updated.\n';
     const result = await run();
     assert.equal(result.ok, true);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nUpdated.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nUpdated.');
     const tip = result.state.linear;
     await refresh();
     assert.equal((await run()).state.linear, tip);
+  });
+
+  it('writes Linear\'s text in the form the linear-format hook leaves unchanged', async () => {
+    // Linear can store a table cell with a trailing space (`| a  |`) and other spacing `fix` normalizes.
+    const stored = '# Plan  \n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n|  Padded on both sides  |   x |\n\n'
+      + '* First item\n    continued with extra indentation\n\nA line\n   with an indented continuation.\n\n'
+      // A callout as Linear stores it: its comment directly above the quote.
+      + '<!-- linear:callout color=#f2c94c -->\n> [!WARNING]\n> Kept both versions.';
+    assert.notEqual(fixText(stored), stored);
+    world.linear.documents[0]!.content = stored;
+    world.linear.documents.push({id: 'new', title: 'new', content: stored, projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'});
+    const result = await run();
+    assert.equal(result.ok, true);
+    for (const path of ['docs/plan.md', 'docs/new.md']) {
+      const file = await text(path);
+      assert.ok(sameMarkdown(splitFile(file).body, stored), path);
+      assert.match(file, /^\| Draft the outline \| tbd \|$/m, path);
+      assert.deepEqual(hookRun(path, file), {exitCode: 0, stdout: '', stderr: ''}, path);
+    }
+    // Linear still holds its own spelling of the same document: the next run has nothing to capture.
+    await refresh();
+    assert.equal((await run()).state.linear, result.state.linear);
+    // An edit in git (in the hook's form) merged with Linear's text: the record after the write passes the hook too.
+    const edited = (await text('docs/new.md')).replace('| tbd |', '| done |');
+    const tracked = await commitTree(context.git, {parents: [result.state.linear!], base: result.state.linear, changes: new Map([['docs/new.md', edited]]), message: 'Edit document', identity: IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const written = await writeTrackedToLinear(context, {config, state: result.state});
+    assert.deepEqual(written.updated, ['docs/new.md']);
+    const recorded = await text('docs/new.md');
+    assert.match(recorded, /^\| Draft the outline \| done \|$/m);
+    assert.deepEqual(hookRun('docs/new.md', recorded), {exitCode: 0, stdout: '', stderr: ''});
+  });
+
+  it('writes a Linear body that opens with a rule in the hook\'s form, under the file\'s front matter', async () => {
+    // Read alone, the text between the two rules would look like front matter; the hook reads it as body.
+    const stored = '---\n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n\n---\n\nAfter.';
+    world.linear.documents[0]!.content = stored;
+    const result = await run();
+    assert.equal(result.ok, true);
+    const file = await text('docs/plan.md');
+    assert.equal(splitFile(file).head, '---\ncategory: work\n---\n\n');
+    assert.match(file, /^\| Draft the outline \| tbd \|$/m);
+    assert.deepEqual(hookRun('docs/plan.md', file), {exitCode: 0, stdout: '', stderr: ''});
   });
 
   it('keeps a Linear body that opens with a front matter block as the body, in a folder README too', async () => {
@@ -202,6 +312,8 @@ describe('capture from Linear', () => {
     for (const path of ['docs/notes.md', 'docs/sub/README.md']) {
       const file = await text(path);
       assert.equal(splitFile(file).head, '', path);
+      // Read as a body, the text between the rules is a setext heading, which `fix` would write on one line: that
+      // changes the document, not only its spelling, so the file keeps Linear's text.
       assert.ok(sameMarkdown(splitFile(file).body, blockFirst), path);
     }
     const mapping = await loadMapping(context.git, result.state.linear!);
@@ -233,7 +345,7 @@ describe('capture from Linear', () => {
     const fetched = await fetchState(git, config);
     const linearTip = await commitTree(git, {parents:[fetched.tracked], base:fetched.tracked, changes:new Map([['docs/pixel.png', null]]), message:'Remove the image', identity:IDENTITY});
     const ids = await commitIds(git, fetched.state.ids, new Map([['docs/plan.md', {id:'plan'}]]), IDENTITY);
-    const uploads = await commitUploads(git, fetched.state.uploads, new Map([[hash, url]]), IDENTITY);
+    const uploads = await commitUploads(git, fetched.state.uploads, new Map([[hash, url]]), IDENTITY, context.pushedKey);
     assert.equal((await pushAtomic(git, config, [
       {ref:stateRef(config, 'linear'), expected:fetched.state.linear, next:linearTip},
       {ref:stateRef(config, 'ids'), expected:fetched.state.ids, next:ids},
@@ -251,7 +363,7 @@ describe('capture from Linear', () => {
   for (const [name, content, warns] of [
     ['at the content limit', 'a'.repeat(250_000), false],
     ['emoji below the code-point limit', '\u{1F600}'.repeat(125_001), false],
-    ['emoji above the code-point limit', '\u{1F600}'.repeat(250_001), true],
+    ['emoji text above the code-point limit but within the byte limit', '\u{1F600}'.repeat(150_000) + 'a'.repeat(100_001), true],
   ] as const) {
     it(`captures ${name} and reports write-back limits in code points`, async () => {
       world.linear.documents[0]!.content = content;
@@ -266,6 +378,25 @@ describe('capture from Linear', () => {
     });
   }
 
+  it('leaves a rendered file over the byte limit out and captures a later shorter edit', async () => {
+    const doc = world.linear.documents[0]!;
+    Object.assign(doc, { content: '\u{1F600}'.repeat(250_000), updatedAt: '2026-01-03T00:00:00Z' });
+    const prior = context.fetched.state;
+
+    const excluded = await run();
+    assert.equal(excluded.ok, true);
+    assert.deepEqual(excluded.leftOut, [{ id: 'plan', rule: 'blob-too-large' }]);
+    assert.deepEqual(excluded.state, prior);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+
+    await refresh();
+    Object.assign(doc, { content: 'Shorter edit.\n', updatedAt: '2026-01-04T00:00:00Z' });
+    const captured = await run();
+    assert.equal(captured.ok, true);
+    assert.deepEqual(captured.leftOut, []);
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nShorter edit.');
+  });
+
   it('never captures a place that only an altered state ref names', async () => {
     world.linear.projects.push({ id: 'project-payroll', name: 'Payroll', teamIds: ['team-eng'] });
     world.linear.documents.push({ id: 'payroll', title: 'salaries', content: 'Payroll body.\n', projectId: 'project-payroll', createdAt: '2026-01-01T00:00:00Z' });
@@ -277,7 +408,7 @@ describe('capture from Linear', () => {
     const listedPlaces: unknown[] = [];
     const list = context.linear.listDocumentsInPlaces.bind(context.linear);
     context.linear.listDocumentsInPlaces = (places, options) => { listedPlaces.push(...places); return list(places, options); };
-    await assert.rejects(run(), /for docs\/ that the tracked branch never named/);
+    await assert.rejects(run(), /for docs\/ that is not a move the tracked branch made/);
     assert.ok(!JSON.stringify(listedPlaces).includes('project-payroll'), JSON.stringify(listedPlaces));
     assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), altered);
     assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Payroll body'])).stdout.toString('utf8'), '');
@@ -316,6 +447,49 @@ describe('capture from Linear', () => {
     assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Payroll body'])).stdout.toString('utf8'), '');
   });
 
+  // docs/ held Payroll, then Archive, where salaries.md was last synchronized before an edit left it out, and now
+  // Field notes. Altered state refs give that file a last synchronized version in one of those places.
+  for (const [where, name, lostIds, reads] of [
+    ['a place the folder held before its previous move', 'Payroll', false, false],
+    ['a place the folder held before its previous move, with the ids map lost', 'Payroll', true, false],
+    ['the place the tracked branch last synchronized the file in', 'Archive', false, true],
+    ['the place the tracked branch last synchronized the file in, with the ids map lost', 'Archive', true, true],
+  ] as const) it(`reads an excluded file's recorded place only where the tracked branch synchronized it: ${where}`, async () => {
+    world.linear.projects.push({ id: 'project-payroll', name: 'Payroll', teamIds: ['team-eng'] }, { id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
+    world.linear.documents.push({ id: 'salaries', title: 'salaries', content: `${name} body.\n`, projectId: `project-${name.toLowerCase()}`, createdAt: '2026-01-01T00:00:00Z' });
+    const folder = (project: string) => `---\nlinear-team: ENG\nlinear-project: ${project}\n---\n\n# Notes\n`;
+    await fixture.seed({ 'docs/README.md': folder('Payroll'), 'docs/salaries.md': 'Salaries.\n\n![Image](pixel.png)\n', 'docs/pixel.png': png });
+    await fixture.seed({ 'docs/README.md': folder('Archive') });
+    await fixture.seed({ 'docs/salaries.md': 'Salaries, edited.\n\n![Image](pixel.png)\n' });
+    await fixture.seed({ 'docs/salaries.md': 'Salaries, edited.\n\n![Image](pixel.png)\n\n![Chart](chart.png)\n' });
+    await fixture.seed({ 'docs/README.md': TREE['docs/README.md'] });
+    await context.git.run(['fetch', '--quiet', 'origin']);
+    const {linear: base, ids: idsBase} = context.fetched.state;
+    const synced = await commitTree(context.git, { parents: [base!], base: base!, changes: new Map<string, string | Buffer>([
+      ['docs/README.md', folder(name)],
+      ['docs/salaries.md', 'Salaries.\n\n![Image](pixel.png)\n'],
+      ['docs/pixel.png', png],
+    ]), message: RECORD_MESSAGE, identity: IDENTITY });
+    const altered = await commitTree(context.git, { parents: [synced], base: synced, changes: new Map([['docs/README.md', TREE['docs/README.md']], ['docs/pixel.png', null]]), message: 'Altered state', identity: IDENTITY });
+    const ids = await commitIds(context.git, idsBase, new Map([['docs/plan.md', { id: 'plan' }], ['docs/salaries.md', { id: 'salaries' }]]), IDENTITY);
+    assert.equal((await pushAtomic(context.git, config, [
+      { ref: stateRef(config, 'linear'), expected: base, next: altered },
+      { ref: stateRef(config, 'ids'), expected: idsBase, next: ids },
+    ])).ok, true);
+    if (lostIds) await fixture.remote.run(['update-ref', '-d', stateRef(config, 'ids')]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const listedPlaces: unknown[] = [];
+    const list = context.linear.listDocumentsInPlaces.bind(context.linear);
+    context.linear.listDocumentsInPlaces = (places, options) => { listedPlaces.push(...places); return list(places, options); };
+    const result = await run();
+    assert.equal(result.ok, true);
+    // A known id is looked up wherever its document is; only a rebuilt map lists the file's recorded place.
+    assert.equal(JSON.stringify(listedPlaces).includes(`project-${name.toLowerCase()}`), lostIds && reads, JSON.stringify(listedPlaces));
+    assert.equal(result.documents.has('salaries'), reads);
+    if (!reads) assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', `${name} body`])).stdout.toString('utf8'), '');
+  });
+
   it('keeps capturing the old place of a folder whose annotation the tracked branch changed', async () => {
     world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
     await fixture.seed({ 'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Archive\n---\n\n# Notes\n' });
@@ -329,7 +503,39 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.updatedAt = '2026-02-01T00:00:00Z';
     const result = await run();
     assert.equal(result.ok, true);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nEdited before the move.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nEdited before the move.');
+  });
+
+  it('never reads a place the tracked branch moved a folder away from once a merged sync recorded the move', async () => {
+    // The tracked branch moves docs/ from "Field notes" to Archive, and a sync recording Archive is merged.
+    world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
+    world.linear.documents[0]!.content = 'Removed project body.\n';
+    world.linear.documents[0]!.updatedAt = '2026-02-01T00:00:00Z';
+    await fixture.seed({ 'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Archive\n---\n\n# Notes\n' });
+    await context.git.run(['fetch', '--quiet', 'origin']);
+    await refresh();
+    const before = context.fetched.state.linear!;
+    const moved = context.fetched.tracked;
+    const synced = await commitTree(context.git, { parents: [before, moved], base: moved, changes: new Map(), message: MERGE_RECORD_MESSAGE, identity: IDENTITY });
+    await context.git.run(['push', '--quiet', 'origin', `${synced}:refs/heads/sync`]);
+    assert.ok('sha' in await mergeOnGitHub(fixture, { head: 'sync', base: 'main', number: 1 }, synced));
+    // A writer of the repository moves the state ref back to the record that still names "Field notes".
+    await fixture.remote.run(['update-ref', stateRef(config, 'linear'), before]);
+    await context.git.run(['fetch', '--quiet', 'origin']);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const { targets } = await resolveTargets(context.linear, context.mapping.zones.values());
+    assert.ok(targets);
+    context.targets = targets;
+    const reads: unknown[] = [];
+    const list = context.linear.listDocumentsInPlaces.bind(context.linear);
+    context.linear.listDocumentsInPlaces = (places, options) => { reads.push(...places); return list(places, options); };
+    const get = context.linear.getDocuments.bind(context.linear);
+    context.linear.getDocuments = (ids) => { reads.push(...ids); return get(ids); };
+    await assert.rejects(run(), /for docs\/ that is not a move the tracked branch made and the sync has not recorded yet/);
+    assert.deepEqual(reads, []);
+    assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), before);
+    assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Removed project body'])).stdout.toString('utf8'), '');
   });
 
   it('uses the supplied snapshot between steps without changing the run context', async () => {
@@ -343,7 +549,7 @@ describe('capture from Linear', () => {
     const second = await capture(context, {config, state: first.state});
     assert.equal(second.ok, true);
     assert.notEqual(second.state.linear, first.state.linear);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nNext edit.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nNext edit.');
     assert.deepEqual(context.fetched.state, initial);
   });
 
@@ -400,7 +606,7 @@ describe('capture from Linear', () => {
     assert.equal(partial.stopped?.kind, 'rate-limited');
     assert.notEqual(partial.state.ids, before.ids);
     assert.notEqual(partial.state.linear, before.linear);
-    assert.equal(await text('docs/safe.md'), 'Safe.\n');
+    assert.equal(await text('docs/safe.md'), 'Safe.');
     const pending = (await readIds(context.git, partial.state.ids)).get('docs/plan.md')!.saved!.notice!;
     assert.equal(pending.posted, false);
     delete world.linear.writes.rateLimitAt;
@@ -446,7 +652,7 @@ describe('capture from Linear', () => {
   it('captures a title that names the Git directory by its NTFS short name under an escaped path', async () => {
     world.linear.documents.push({ id: 'hook', title: 'GIT~1/hooks/post-checkout', content: 'Hook.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
     const result = await run();
-    assert.equal(await text('docs/%47IT~1/hooks/post-checkout.md'), 'Hook.\n');
+    assert.equal(await text('docs/%47IT~1/hooks/post-checkout.md'), 'Hook.');
     const ids = await readIds(context.git, result.state.ids);
     assert.equal(ids.get('docs/%47IT~1/hooks/post-checkout.md')?.id, 'hook');
     const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
@@ -469,8 +675,8 @@ describe('capture from Linear', () => {
     }
     const result = await run();
     assert.ok(result.ok);
-    assert.equal(await text(path), 'Shortened.\n');
-    assert.equal(await text('docs/ordinary.md'), 'Ordinary.\n');
+    assert.equal(await text(path), 'Shortened.');
+    assert.equal(await text('docs/ordinary.md'), 'Ordinary.');
     const ids = await readIds(context.git, result.state.ids);
     assert.equal(ids.get(path)?.id, 'shortened');
     const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
@@ -494,7 +700,7 @@ describe('capture from Linear', () => {
     await refresh();
     Object.assign(world.linear.documents[0]!, { title: 'git~2/notes', updatedAt: '2026-01-03T00:00:00Z' });
     const result = await run();
-    assert.equal(await text('docs/%67it~2/notes.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    assert.equal(await text('docs/%67it~2/notes.md'), '---\ncategory: work\n---\n\nOriginal.');
     const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
     assert.ok(!paths.includes(legacy), paths.join(', '));
     assert.equal((await readIds(git, result.state.ids)).get('docs/%67it~2/notes.md')?.id, 'plan');
@@ -517,7 +723,7 @@ describe('capture from Linear', () => {
     await refresh();
     Object.assign(world.linear.documents[0]!, { title: '.GitHub/notes', updatedAt: '2026-01-03T00:00:00Z' });
     const result = await run();
-    assert.equal(await text('docs/%2EGitHub/notes.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    assert.equal(await text('docs/%2EGitHub/notes.md'), '---\ncategory: work\n---\n\nOriginal.');
     const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
     assert.ok(!paths.includes(legacy), paths.join(', '));
     assert.equal((await readIds(git, result.state.ids)).get('docs/%2EGitHub/notes.md')?.id, 'plan');
@@ -526,11 +732,11 @@ describe('capture from Linear', () => {
   it('captures a new path, renames by id and moves across projects', async () => {
     world.linear.documents.push({ id: 'new', title: 'guides/new-page', content: 'New.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
     await run();
-    assert.equal(await text('docs/guides/new-page.md'), 'New.\n');
+    assert.equal(await text('docs/guides/new-page.md'), 'New.');
     await refresh();
     Object.assign(world.linear.documents[0]!, { title: 'guides/renamed', projectId: 'project-handbook', updatedAt: '2026-01-03T00:00:00Z' });
     const result = await run();
-    assert.equal(await text('other/guides/renamed.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    assert.equal(await text('other/guides/renamed.md'), '---\ncategory: work\n---\n\nOriginal.');
     const ids = await readIds(context.git, result.state.ids);
     assert.equal(ids.get('other/guides/renamed.md')?.id, 'plan');
     assert.equal(ids.has('docs/plan.md'), false);
@@ -542,7 +748,7 @@ describe('capture from Linear', () => {
     const ids = await readIds(context.git, first.state.ids);
     const path = [...ids].find(([, entry]) => entry.id === 'new')?.[0];
     assert.ok(path !== undefined && path.startsWith('docs/') && !path.split('/').includes('assets'), path);
-    assert.equal(await text(path), 'New.\n');
+    assert.equal(await text(path), 'New.');
     const tree = new Set((await listTree(context.git, first.state.linear!)).map((entry) => entry.path));
     assert.deepEqual(lintInTree(path, await text(path), tree), []);
     await refresh();
@@ -557,7 +763,7 @@ describe('capture from Linear', () => {
     await refresh();
     Object.assign(world.linear.documents[0]!, { trashed: false, updatedAt: '2026-01-04T00:00:00Z' });
     await run();
-    assert.equal(await text('docs/plan.md'), 'Original.\n');
+    assert.equal(await text('docs/plan.md'), 'Original.');
     await refresh();
     Object.assign(world.linear.documents[0]!, { projectId: 'outside', updatedAt: '2026-01-05T00:00:00Z' });
     await run();
@@ -626,7 +832,7 @@ describe('capture from Linear', () => {
     const accepted = [...ids].find(([,entry]) => entry.id === 'a-earlier');
     assert.ok(accepted);
     assert.notEqual(accepted[0], 'docs/duplicate.md');
-    assert.equal(await text(accepted[0]), 'Accepted body.\n');
+    assert.equal(await text(accepted[0]), 'Accepted body.');
     assert.deepEqual(markOf(world.linear.documents.find((doc) => doc.id === blocked.id)), MARKS.blocked);
     await refresh();
     Object.assign(blocked, {content:'Corrected body.\n',updatedAt:'2026-03-01T00:00:00Z'});
@@ -635,7 +841,7 @@ describe('capture from Linear', () => {
     assert.equal(finalIds.get('docs/duplicate.md')?.id, blocked.id);
     assert.equal(finalIds.get(accepted[0])?.id, 'a-earlier');
     assert.equal(finalIds.get('docs/duplicate.md')?.saved, undefined);
-    assert.equal(await text('docs/duplicate.md'), 'Corrected body.\n');
+    assert.equal(await text('docs/duplicate.md'), 'Corrected body.');
   });
 
   it('never writes a document over a hook script that a forged reserved path names', async () => {
@@ -664,7 +870,7 @@ describe('capture from Linear', () => {
     await refresh();
     // A fixed canary: run as a hook, it writes a marker beside the gate's scratch folder, which this test keeps in its
     // own fixture folder.
-    const payload = "import('node:fs').then((fs) => fs.writeFileSync('../hook-canary', 'ran'));\n";
+    const payload = "import('node:fs').then((fs) => fs.writeFileSync('../hook-canary', 'ran'));";
     world.linear.documents.push(
       {id: 'forged', title: 'scan', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
       {id: 'forged-new', title: 'notes', projectId: 'project-api', content: payload, createdAt: '2026-01-02T00:00:00Z'},
@@ -681,7 +887,7 @@ describe('capture from Linear', () => {
     // The documents still come in, at the paths their titles name.
     assert.equal(await text('docs/scan.md'), payload);
     assert.equal(await text('docs/notes.md'), payload);
-    assert.equal(await text('docs/report.md'), 'A report.\n');
+    assert.equal(await text('docs/report.md'), 'A report.');
     assert.ok(!paths.includes('docs/elsewhere.md'));
   });
 
@@ -705,7 +911,7 @@ describe('capture from Linear', () => {
     assert.equal(rejected.blocked.length, 1);
     assert.ok(!rejected.summary.includes('blocked-value-731'));
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
-    assert.equal(await text('docs/safe.md'), 'Safe addition.\n');
+    assert.equal(await text('docs/safe.md'), 'Safe addition.');
     const ids = await readIds(context.git, rejected.state.ids);
     const decoration = ids.get('docs/plan.md')!.saved!;
     assert.equal(decoration.icon, 'Fire');
@@ -728,29 +934,32 @@ describe('capture from Linear', () => {
     Object.assign(world.linear.documents[0]!, {content: 'Corrected.\n', updatedAt: '2026-01-05T00:00:00Z'});
     const accepted = await run();
     assert.equal(accepted.blocked.length, 0);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nCorrected.\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nCorrected.');
     assert.equal(world.linear.documents[0]!.icon, 'Fire');
     assert.equal(world.linear.documents[0]!.color, '#123456');
     assert.equal((await readIds(context.git, accepted.state.ids)).get('docs/plan.md')?.saved, undefined);
   });
 
-  for (const body of [
-    '![Image](https://example.com/a.png)\n',
-    '![Image](http://example.com/a.png)\n',
-    '![Image](data:image/png;base64,AAAA)\n',
-    '![Image](relative.png)\n',
-    '![Image](/absolute.png)\n',
-    '![Image]()\n',
-    '![Image][picture]\n\n[picture]: https://example.com/a.png\n',
-    '[![Image](https://example.com/a.png)](https://example.com)\n',
-  ]) {
+  // Each body as Linear holds it, and as the file holds it: in the form `fix` writes (a reference
+  // becomes inline), or as it is when lint leaves it to its author (an image inside a link).
+  for (const [body, written] of [
+    ['![Image](https://example.com/a.png)\n', '![Image](https://example.com/a.png)'],
+    ['![Image](http://example.com/a.png)\n', '![Image](http://example.com/a.png)'],
+    ['![Image](data:image/png;base64,AAAA)\n', '![Image](data:image/png;base64,AAAA)'],
+    ['![Image](relative.png)\n', '![Image](relative.png)'],
+    ['![Image](/absolute.png)\n', '![Image](/absolute.png)'],
+    ['![Image]()\n', '![Image]()'],
+    // `fix` would make the reference inline: another document to the sync, so Linear's text stays.
+    ['![Image][picture]\n\n[picture]: https://example.com/a.png\n', '![Image][picture]\n\n[picture]: https://example.com/a.png\n'],
+    ['[![Image](https://example.com/a.png)](https://example.com)\n', '[![Image](https://example.com/a.png)](https://example.com)\n'],
+  ] as const) {
     it(`records the original image while preparing a checked pull repair: ${body.trim()}`, async () => {
       Object.assign(world.linear.documents[0]!, {content:body, icon:'Fire', color:'#123456'});
       const result = await capture(context, {config, state:context.fetched.state, fetch:async () => {throw new Error('Unexpected download');}});
       assert.equal(result.ok, true);
       assert.deepEqual(result.blocked, []);
       assert.deepEqual(result.leftOut, []);
-      assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n' + body);
+      assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n' + written);
       const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
       assert.equal(entry.pullRewrite?.images.length, 1);
       assert.equal(entry.pullRewrite?.images[0]?.line, 1);
@@ -797,7 +1006,7 @@ describe('capture from Linear', () => {
     assert.deepEqual(result.leftOut, []);
     const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
     assert.equal(entry.pullRewrite?.replacement, head + '[Chart](<https://example.com/chart.png>)\n');
-    assert.equal(await text('docs/plan.md'), head + '![Chart](https://example.com/chart.png)\n');
+    assert.equal(await text('docs/plan.md'), head + '![Chart](https://example.com/chart.png)');
   });
 
   it('keeps links to an image-blocked reserved document as Linear URLs', async () => {
@@ -815,7 +1024,7 @@ describe('capture from Linear', () => {
     world.linear.documents.push({id:'future-document', title:'future', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'[File](private.csv)\n'});
     const result = await run();
     assert.equal(result.blocked.length, 1);
-    assert.equal(await text('docs/plan.md'), `---\ncategory: work\n---\n\n[Future](${url})\n`);
+    assert.equal(await text('docs/plan.md'), `---\ncategory: work\n---\n\n[Future](<${url}>)`);
     assert.equal((await fixture.remote.run(['cat-file','-e',`${result.state.linear}:docs/future.md`],{okCodes:[0,128]})).code, 128);
   });
 
@@ -828,7 +1037,7 @@ describe('capture from Linear', () => {
     assert.equal(result.ok, true);
     assert.ok(checked.includes('docs/--config=x.md'));
     assert.ok(!checked.some((path) => path.startsWith('-')));
-    assert.equal(await text('docs/--config=x.md'), 'Dash.\n');
+    assert.equal(await text('docs/--config=x.md'), 'Dash.');
     assert.equal(world.linear.documents.at(-1)!.title, '--config=x');
   });
 
@@ -871,7 +1080,7 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target#intro)\n';
     const result = await run();
     assert.equal(result.ok, true);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<guides/target.md#intro>)\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<guides/target.md#intro>)');
   });
 
   for (const status of [301, 302, 307, 308, 400, 422]) {
@@ -916,7 +1125,8 @@ describe('capture from Linear', () => {
   });
 
   for (const status of [401, 403]) {
-    it(`stops capture on upload HTTP ${status} without marking any document or publishing`, async () => {
+    it(`stops capture on upload HTTP ${status} with a failing access probe, without marking any document or publishing`, async () => {
+      world.linear.uploadAccessStatus = 401;
       world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/file.png)';
       world.linear.documents.push({id:'aaa', title:'blocked', projectId:'project-api', content:'![External](https://example.com/file.png)', createdAt:'2026-01-04T00:00:00Z'});
       const before = context.fetched.state;
@@ -944,7 +1154,7 @@ describe('capture from Linear', () => {
       assert.match(first.summary, /download-retry: "plan"/);
       assert.equal(world.linear.comments.size, 0);
       assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
-      assert.equal(await text('docs/later.md'), 'Later.\n');
+      assert.equal(await text('docs/later.md'), 'Later.');
       await refresh();
       const next = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response(png)});
       assert.equal(next.leftOut.length, 0);
@@ -973,7 +1183,7 @@ describe('capture from Linear', () => {
     const accepted = await run();
     assert.equal(accepted.blocked.length, 0);
     assert.ok((await text('docs/plan.md')).includes('<renamed.md>'));
-    assert.equal(await text('docs/renamed.md'), 'Target.\n');
+    assert.equal(await text('docs/renamed.md'), 'Target.');
   });
 
   it('reconciles conflict, blocked and clear marks with durable notices and one original icon', async () => {
@@ -1073,6 +1283,73 @@ describe('capture from Linear', () => {
     assert.deepEqual(context.linear.stats.writes, wrote, 'the refused mark is not counted');
   });
 
+  describe('a title the security hooks refuse', () => {
+    // Hooks that read file content only, as secret scanners do: a title must reach them as text.
+    const TOKEN = ['title', 'canary', '5307'].join('-');
+    const gate = {configured: true, check: async (files: ReadonlyMap<string, FileContent>) => [...files.values()].some((content) => contentBytes(content).toString('utf8').includes(TOKEN)) ? [{hook: 'secret-check', line: 1}] : []};
+    const captureGated = () => capture(context, {config, state: context.fetched.state, identity: IDENTITY, security: gate});
+    /** Nothing pushed (paths, ids, messages, blobs) and nothing in the run's report holds the token. */
+    const assertNoToken = async (result: Awaited<ReturnType<typeof capture>>) => {
+      assert.ok(!(await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch'])).includes(TOKEN), 'the title reached the remote');
+      const report = JSON.stringify({summary: result.summary, changed: result.changed, removed: result.removed, blocked: result.blocked, leftOut: result.leftOut, warnings: result.writeBackWarnings});
+      assert.ok(!report.includes(TOKEN), report);
+    };
+
+    for (const body of ['clean', 'rejected'] as const) it(`blocks a new document under a name made from its id, with a ${body} body`, async () => {
+      world.linear.documents.push(
+        {id: 'titled', title: `Keys ${TOKEN}`, content: body === 'clean' ? 'Clean.\n' : `Body ${TOKEN}.\n`, projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'},
+        {id: 'ordinary', title: 'ordinary', content: 'Ordinary.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z'},
+      );
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = await captureGated();
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.blocked, [{id: 'titled', path: 'docs/titled.md', findings: [{hook: 'secret-check', line: 0}]}]);
+        const ids = await readIds(context.git, result.state.ids);
+        assert.equal(ids.get('docs/titled.md')?.id, 'titled');
+        assert.equal(ids.get('docs/ordinary.md')?.id, 'ordinary', 'a clean title keeps its path');
+        assert.equal(await text('docs/ordinary.md'), 'Ordinary.');
+        await assertNoToken(result);
+        await refresh();
+      }
+      assert.deepEqual(markOf(world.linear.documents.find(({id}) => id === 'titled')), MARKS.blocked);
+      assert.match(commentsOf('titled').join('\n'), /Hook `secret-check`, in the title\./);
+      // Renamed to a title the hooks pass, it takes the title's path.
+      Object.assign(world.linear.documents.find(({id}) => id === 'titled')!, {title: 'keys', content: 'Clean.\n', updatedAt: '2026-01-05T00:00:00Z'});
+      const accepted = await captureGated();
+      assert.deepEqual(accepted.blocked, []);
+      assert.equal(await text('docs/keys.md'), 'Clean.');
+      const ids = await readIds(context.git, accepted.state.ids);
+      assert.equal(ids.get('docs/keys.md')?.id, 'titled');
+      assert.equal(ids.has('docs/titled.md'), false);
+    });
+
+    it('moves a document an earlier run recorded under its title, without a file, to the name made from its id', async () => {
+      world.linear.documents.push({id: 'titled', title: `Keys ${TOKEN}`, content: 'Clean.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'});
+      // As an earlier release recorded a document whose text the hooks refused: under its title's path, with no file.
+      const state = context.fetched.state;
+      const recorded = await readIds(context.git, state.ids);
+      recorded.set(`docs/Keys ${TOKEN}.md`, {id: 'titled', saved: {icon: null, color: null}});
+      const next = await commitIds(context.git, state.ids, recorded, IDENTITY);
+      assert.equal((await pushAtomic(context.git, config, [{ref: stateRef(config, 'ids'), expected: state.ids, next}])).ok, true);
+      await refresh();
+      const result = await captureGated();
+      assert.deepEqual(result.blocked.map(({id, path}) => ({id, path})), [{id: 'titled', path: 'docs/titled.md'}]);
+      const ids = await readIds(context.git, result.state.ids);
+      assert.equal(ids.get('docs/titled.md')?.id, 'titled');
+      assert.ok(![...ids.keys()].some((path) => path.includes(TOKEN)), [...ids.keys()].join(', '));
+    });
+
+    it('keeps a renamed document at its accepted path', async () => {
+      Object.assign(world.linear.documents[0]!, {title: `plan ${TOKEN}`, content: 'Edited.\n', updatedAt: '2026-01-05T00:00:00Z'});
+      const result = await captureGated();
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.blocked, [{id: 'plan', path: 'docs/plan.md', findings: [{hook: 'secret-check', line: 0}]}]);
+      assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+      assert.equal((await readIds(context.git, result.state.ids)).get('docs/plan.md')?.id, 'plan');
+      await assertNoToken(result);
+    });
+  });
+
   it('counts the first marking of a blocked document and no write while it stays blocked', async () => {
     const gate = {configured: true, check: async () => [{hook:'secret-check', line:5}]};
     world.linear.documents[0]!.content = 'Rejected.\n';
@@ -1087,6 +1364,170 @@ describe('capture from Linear', () => {
     assert.deepEqual(again.blocked.map(({id}) => id), ['plan']);
     assert.deepEqual(movedRefs(context.git), moved, 'no ref moves');
     assert.deepEqual(context.linear.stats.writes, wrote, 'no Linear write');
+  });
+
+  describe('a document moved out of its place before its mark', () => {
+    const unmapped = 'project-private';
+    beforeEach(() => { world.linear.projects.push({id: unmapped, name: 'Private', teamIds: ['team-eng']}); });
+    const moveOut = (doc: (typeof world.linear.documents)[number], touch: boolean) => {
+      doc.projectId = unmapped;
+      if (touch) doc.updatedAt = '2026-02-01T00:00:00Z';
+    };
+
+    const moves = [
+      {name: 'to a project outside the synchronized places', move: (doc: (typeof world.linear.documents)[number]) => moveOut(doc, true), kept: undefined},
+      {name: 'to a project outside the synchronized places with its update time unchanged', move: (doc: (typeof world.linear.documents)[number]) => moveOut(doc, false), kept: undefined},
+      {name: 'to the trash', move: (doc: (typeof world.linear.documents)[number]) => { doc.trashed = true; doc.archivedAt = '2026-02-01T00:00:00Z'; }, kept: 'project-api'},
+      {name: 'to another synchronized project', move: (doc: (typeof world.linear.documents)[number]) => { doc.projectId = 'project-handbook'; }, kept: 'project-handbook'},
+    ];
+    for (const {name, move, kept} of moves) {
+      it(`gets no mark, comment or notice when it is blocked and moved ${name}, while an unmoved one is marked`, async () => {
+        const plan = world.linear.documents[0]!;
+        Object.assign(plan, {content: 'Rejected.\n', icon: 'Fire', color: '#123456'});
+        world.linear.documents.push({id: 'other', title: 'other', projectId: 'project-api', content: 'Rejected too.\n', createdAt: '2026-01-02T00:00:00Z'});
+        // The hooks answer after the run read the text: a member moves the document before the mark.
+        let moved = false;
+        const gate = {configured: true, check: async () => { if (!moved) { moved = true; move(plan); } return [{hook: 'secret-check', line: 1}]; }};
+        const result = await capture(context, {config, state: context.fetched.state, security: gate});
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.blocked.map(({id}) => id), ['other']);
+        assert.deepEqual(result.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+        assert.match(result.summary, /changed-during-run: "plan"/);
+        // Later steps see where the document is now, or nothing.
+        assert.equal(result.documents.get('plan')?.projectId, kept);
+        if (kept !== undefined) assert.equal(result.documents.get('plan')?.trashed, plan.trashed === true);
+        assert.deepEqual(markOf(plan), {icon: 'Fire', color: '#123456'});
+        assert.deepEqual(commentsOf('plan'), []);
+        // The entry stays as the run found it.
+        assert.deepEqual((await readIds(context.git, result.state.ids)).get('docs/plan.md'), {id: 'plan'});
+        assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+        // The unmoved blocked document is marked as before.
+        assert.deepEqual(markOf(world.linear.documents[1]), MARKS.blocked);
+        assert.equal(commentsOf('other').length, 1);
+        assert.deepEqual(Object.fromEntries(context.linear.stats.writes), {CommentOnDocument: 1, UpdateDocument: 1});
+      });
+    }
+
+    it('is not restored when its conflict was resolved and it left the place before a single-step run marked it', async () => {
+      const plan = world.linear.documents[0]!;
+      Object.assign(plan, {icon: 'Fire', color: '#123456', content: `${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`});
+      await run();
+      assert.deepEqual(markOf(plan), MARKS.conflict);
+      await refresh();
+      Object.assign(plan, {content: 'Resolved.\n', updatedAt: '2026-01-05T00:00:00Z'});
+      const wrote = new Map(context.linear.stats.writes);
+      const gate = {configured: true, check: async () => { if (plan.projectId !== unmapped) moveOut(plan, false); return []; }};
+      const result = await capture(context, {config, state: context.fetched.state, security: gate});
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+      assert.deepEqual(markOf(plan), MARKS.conflict, 'no icon change or restore');
+      assert.deepEqual(context.linear.stats.writes, wrote, 'no Linear write');
+      assert.equal(commentsOf('plan').length, 1);
+      const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
+      assert.equal(entry.saved?.notice?.kind, 'conflict');
+      // Its text was read and checked in place: it is captured as read.
+      assert.match(await text('docs/plan.md'), /Resolved\./);
+    });
+
+    for (const touch of [true, false]) {
+      it(`gets no mark, comment or notice in the apply step when it moved after staging${touch ? '' : ' with its update time unchanged'}`, async () => {
+        const dir = await mkdtemp(join(tmpdir(), 'moved-after-staging-'));
+        try {
+          const plan = world.linear.documents[0]!;
+          Object.assign(plan, {content: 'Rejected.\n', icon: 'Fire', color: '#123456'});
+          const gate = {configured: true, check: async () => [{hook: 'secret-check', line: 1}]};
+          const recording = LinearReads.recording();
+          recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+          const stage = new LinearClient({token: 'stage', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: recording});
+          const staged = await capture({...context, linear: stage}, {config, state: context.fetched.state, security: gate, stageOnly: true});
+          assert.equal(staged.ok, true);
+          await recording.save(dir);
+          recording.close();
+          moveOut(plan, touch);
+          const replaying = await LinearReads.replaying(dir);
+          assert.ok(replaying !== null);
+          const apply = new LinearClient({token: 'apply', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: replaying});
+          const applied = await capture({...context, linear: apply}, {config, state: context.fetched.state, security: gate});
+          replaying.close();
+          assert.equal(applied.ok, true);
+          assert.deepEqual(applied.blocked, []);
+          assert.deepEqual(applied.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+          assert.deepEqual(markOf(plan), {icon: 'Fire', color: '#123456'});
+          assert.deepEqual(commentsOf('plan'), []);
+          assert.equal(apply.stats.writes.size, 0, 'no updateDocument or ensureDocumentComment');
+          assert.deepEqual((await readIds(context.git, applied.state.ids)).get('docs/plan.md'), {id: 'plan'});
+        } finally { await rm(dir, {recursive: true, force: true}); }
+      });
+    }
+
+    it('gets its own decoration back from the trash only while it is still in the place the stage step read it in', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'restore-after-staging-'));
+      try {
+        const plan = world.linear.documents[0]!;
+        Object.assign(plan, {icon: 'Fire', color: '#123456', content: `${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`});
+        await run();
+        assert.deepEqual(markOf(plan), MARKS.conflict);
+        await refresh();
+        Object.assign(plan, {trashed: true, archivedAt: '2026-01-05T00:00:00Z', updatedAt: '2026-01-05T00:00:00Z'});
+        const gate = {configured: true, check: async () => []};
+        const recording = LinearReads.recording();
+        recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+        const stage = new LinearClient({token: 'stage', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: recording});
+        assert.equal((await capture({...context, linear: stage}, {config, state: context.fetched.state, security: gate, stageOnly: true})).ok, true);
+        await recording.save(dir);
+        recording.close();
+        moveOut(plan, false);
+        const replaying = await LinearReads.replaying(dir);
+        assert.ok(replaying !== null);
+        const apply = new LinearClient({token: 'apply', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: replaying});
+        const applied = await capture({...context, linear: apply}, {config, state: context.fetched.state, security: gate});
+        replaying.close();
+        assert.equal(applied.ok, true);
+        assert.deepEqual(applied.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+        assert.deepEqual(markOf(plan), MARKS.conflict, 'no restore outside the place');
+        assert.equal(apply.stats.writes.size, 0);
+      } finally { await rm(dir, {recursive: true, force: true}); }
+    });
+
+    it('keeps the file and the saved decoration of a document taken out of the trash between stage and apply, and gives it back later', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'untrashed-after-staging-'));
+      try {
+        const plan = world.linear.documents[0]!;
+        Object.assign(plan, {icon: 'Fire', color: '#123456', content: `${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`});
+        await run();
+        await refresh();
+        const before = (await readIds(context.git, context.fetched.state.ids)).get('docs/plan.md')!;
+        const file = await text('docs/plan.md');
+        assert.equal(before.saved?.icon, 'Fire');
+        Object.assign(plan, {trashed: true, archivedAt: '2026-01-05T00:00:00Z', updatedAt: '2026-01-05T00:00:00Z'});
+        const gate = {configured: true, check: async () => []};
+        const recording = LinearReads.recording();
+        recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+        const stage = new LinearClient({token: 'stage', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: recording});
+        assert.equal((await capture({...context, linear: stage}, {config, state: context.fetched.state, security: gate, stageOnly: true})).ok, true);
+        await recording.save(dir);
+        recording.close();
+        // A member takes it out of the trash, with its text resolved, before the apply step.
+        Object.assign(plan, {trashed: false, archivedAt: undefined, content: 'Resolved.\n', updatedAt: '2026-01-06T00:00:00Z'});
+        const replaying = await LinearReads.replaying(dir);
+        assert.ok(replaying !== null);
+        const apply = new LinearClient({token: 'apply', baseUrl: LINEAR_API, fetch: fakeFetch(world), reads: replaying});
+        const applied = await capture({...context, linear: apply}, {config, state: context.fetched.state, security: gate});
+        replaying.close();
+        assert.equal(applied.ok, true);
+        assert.deepEqual(applied.leftOut, [{id: 'plan', rule: 'changed-during-run'}]);
+        assert.deepEqual(applied.removed, []);
+        assert.equal(apply.stats.writes.size, 0);
+        assert.deepEqual((await readIds(context.git, applied.state.ids)).get('docs/plan.md'), before);
+        assert.equal(await text('docs/plan.md'), file);
+        // The next run finds it in place with its conflict resolved: the mark clears and its own decoration comes back.
+        await refresh();
+        const next = await capture(context, {config, state: context.fetched.state, security: gate});
+        assert.equal(next.ok, true);
+        assert.deepEqual(markOf(plan), {icon: 'Fire', color: '#123456'});
+        assert.equal((await readIds(context.git, next.state.ids)).get('docs/plan.md')?.saved, undefined);
+      } finally { await rm(dir, {recursive: true, force: true}); }
+    });
   });
 
   it('retries a security comment after its post-push delivery fails', async () => {
@@ -1116,7 +1557,7 @@ describe('capture from Linear', () => {
     assert.ok(path);
     assert.ok(path.startsWith('team/'));
     assert.ok(!path.startsWith('team/sub/'));
-    assert.equal(await text(path), 'Team document.\n');
+    assert.equal(await text(path), 'Team document.');
   });
 
   it('preserves prior document-link spellings and leaves URLs to blocked new targets usable', async () => {
@@ -1125,51 +1566,59 @@ describe('capture from Linear', () => {
     world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target)\n';
     await run();
     await refresh();
-    const raw = '---\ncategory: work\n---\n\n[Target](./target.md)\n';
+    const raw = '---\ncategory: work\n---\n\n[Target](<./target.md>)';
     const record = await commitTree(context.git, {parents:[context.fetched.state.linear!], base:context.fetched.state.linear, changes:new Map([['docs/plan.md',raw]]), message:'Keep link spelling', identity:IDENTITY});
     assert.equal((await pushAtomic(context.git,config,[{ref:stateRef(config,'linear'),expected:context.fetched.state.linear,next:record}])).ok,true);
     await refresh();
     Object.assign(world.linear.documents[0]!, {content:'[Target](https://linear.app/example-team/document/target)\n\nEdited.\n', updatedAt:'2026-01-06T00:00:00Z'});
     await run();
-    assert.ok((await text('docs/plan.md')).includes('[Target](./target.md)'));
+    assert.ok((await text('docs/plan.md')).includes('[Target](<./target.md>)'));
     await refresh();
     world.linear.documents.push({id:'blocked-new',title:'blocked-new',projectId:'project-api',content:'Rejected.\n',createdAt:'2026-01-07T00:00:00Z'});
     Object.assign(world.linear.documents[0]!, {content:'[New](https://linear.app/example-team/document/blocked-new)\n',updatedAt:'2026-01-07T00:00:00Z'});
     const result = await capture(context,{config, state: context.fetched.state,security:{configured:true,check:async(files)=>files.has('docs/blocked-new.md')?[{hook:'secret-check',line:1}]:[]}});
     assert.equal(result.blocked.length,1);
-    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[New](https://linear.app/example-team/document/blocked-new)\n');
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[New](<https://linear.app/example-team/document/blocked-new>)');
     assert.equal((await fixture.remote.run(['cat-file','-e',`${stateRef(config,'linear')}:docs/blocked-new.md`],{okCodes:[0,128]})).code,128);
   });
+
+  /** Hooks that refuse the document's text, not the check of its title (the title alone, at the same path). */
+  const refusesBody = (files: ReadonlyMap<string, FileContent>, id: string) => {
+    const content = files.get(`docs/${id}.md`);
+    return content !== undefined && contentBytes(content).toString('utf8') !== `${id}\n`;
+  };
 
   it('stages a bounded number of texts for densely linked documents and records those that link a refused one', async () => {
     const count = 16;
     const ids = Array.from({ length: count }, (_, i) => `dense-${String(i).padStart(2, '0')}`);
     for (const [i, id] of ids.entries()) {
-      const content = ids.filter((other) => other !== id).map((other) => `[${other}](https://linear.app/example-team/document/${other})`).join('\n') + '\n';
+      // In Linear's own form: link destinations in angle brackets, no final newline.
+      const content = ids.filter((other) => other !== id).map((other) => `[${other}](<https://linear.app/example-team/document/${other}>)`).join('\n');
       world.linear.documents.push({ id, title: id, projectId: 'project-api', content, createdAt: `2026-01-02T00:00:${String(i).padStart(2, '0')}Z` });
     }
     const staged = new Set<string>();
     await capture(context, { config, state: context.fetched.state, identity: IDENTITY, stageOnly: true, security: { configured: true, check: async (files) => { staged.add(candidateKey(files)); return []; } } });
-    // A set for each changed document, and at most a bounded number of texts with refused targets for each.
-    assert.ok(staged.size <= count + 1 + count * (LINK_VARIANT_LINKS + 1), `${staged.size} sets staged`);
+    // A title and a set for each new document, and at most a bounded number of texts with refused targets for each.
+    assert.ok(staged.size <= 2 * count + 1 + count * (LINK_VARIANT_LINKS + 1), `${staged.size} sets staged`);
     // The apply step answers only what was staged; the hooks refuse one document that all the others link.
     const refused = ids[0]!;
     const result = await capture(context, {
       config,
       state: context.fetched.state,
       identity: IDENTITY,
-      security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : files.has(`docs/${refused}.md`) ? [{ hook: 'secret-check', line: 1 }] : []) },
+      security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : refusesBody(files, refused) ? [{ hook: 'secret-check', line: 1 }] : []) },
     });
     assert.deepEqual(result.blocked.map(({ id }) => id), [refused]);
     assert.deepEqual(result.leftOut, []);
-    for (const id of ids.slice(1)) assert.ok((await text(`docs/${id}.md`)).includes(`(https://linear.app/example-team/document/${refused})`), id);
+    for (const id of ids.slice(1)) assert.ok((await text(`docs/${id}.md`)).includes(`(<https://linear.app/example-team/document/${refused}>)`), id);
   });
 
   it('records the densely linked documents on the next run when the hooks refuse one past those staged alone', async () => {
     const count = 16;
     const ids = Array.from({ length: count }, (_, i) => `dense-${String(i).padStart(2, '0')}`);
     for (const [i, id] of ids.entries()) {
-      const content = ids.filter((other) => other !== id).map((other) => `[${other}](https://linear.app/example-team/document/${other})`).join('\n') + '\n';
+      // In Linear's own form: link destinations in angle brackets, no final newline.
+      const content = ids.filter((other) => other !== id).map((other) => `[${other}](<https://linear.app/example-team/document/${other}>)`).join('\n');
       world.linear.documents.push({ id, title: id, projectId: 'project-api', content, createdAt: `2026-01-02T00:00:${String(i).padStart(2, '0')}Z` });
     }
     // The last document: past the targets the first documents stage alone.
@@ -1181,7 +1630,7 @@ describe('capture from Linear', () => {
         config,
         state: context.fetched.state,
         identity: IDENTITY,
-        security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : files.has(`docs/${refused}.md`) ? [{ hook: 'secret-check', line: 1 }] : []) },
+        security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : refusesBody(files, refused) ? [{ hook: 'secret-check', line: 1 }] : []) },
       });
       await refresh();
       return result;
@@ -1193,7 +1642,7 @@ describe('capture from Linear', () => {
     const second = await stagedRun();
     assert.deepEqual(second.blocked.map(({ id }) => id), [refused]);
     assert.deepEqual(second.leftOut, []);
-    for (const id of ids.slice(0, -1)) assert.ok((await text(`docs/${id}.md`)).includes(`(https://linear.app/example-team/document/${refused})`), id);
+    for (const id of ids.slice(0, -1)) assert.ok((await text(`docs/${id}.md`)).includes(`(<https://linear.app/example-team/document/${refused}>)`), id);
   });
 
   it('scans original upload URLs before their query can enter the cache ref', async () => {

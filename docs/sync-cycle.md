@@ -98,6 +98,16 @@ no commit.
 3. The run records what Linear returned and opens no pull request: the
    tracked branch already holds the change.
 
+A change to a folder annotation that moves the folder to another
+project or team is the one exception. The next run opens a sync pull
+request that changes no file, and the sync merges it with a merge commit
+once its checks pass, as for Linear's changes, so the tracked branch
+holds the sync's record of the move. Until that pull request is merged,
+the sync still accepts a state ref that names the folder's previous
+place; after it, the sync reads only the new place. If a person
+squash-merges that pull request, the record is still missing from the
+tracked branch, so the next run opens the pull request again.
+
 A file Linear cannot hold as it is, such as Markdown that Linear would
 change or lose ([linear-format.md](linear-format.md)), or an image over
 Linear's upload limit, is left out: it stays in git, and the run summary
@@ -300,6 +310,12 @@ When a repository security hook (a hook marked `alias: security`, see
 
   When the findings change, the same comment is edited to the new list.
 
+The hooks also check a document's title, as text, before the title names
+a new file. A finding there reads `Hook \`gitleaks\`, in the title.`, and
+until the title passes, the document keeps its last synchronized file, or,
+when it has none yet, the run's state and summary name it by its id
+(`<folder>/<document id>.md`), never by its title.
+
 Fix it by editing the document in Linear. The next run checks the new text;
 when the hooks pass, it synchronizes the document and puts its own icon and
 color back. The comment is not resolved: it stays open as the record of what
@@ -381,6 +397,17 @@ necessary. New normal batches and suspended release wait for that close;
 later changes to other documents then use the normal lane.
 Security hooks still run before any push and keep their separate blocked
 mark. Suspension is a successful run, not a setup error.
+
+When restoring a suspended branch or taking later Linear edits into it,
+the sync checks recorded Markdown sizes and reads within a byte budget.
+If it cannot safely collect all linked assets, it reports
+`suspended-asset-discovery` with the reason and stops before publishing
+either batch or writing to Linear. For an oversized blob already in the
+`linear` state ref, shortening the document in Linear cannot replace the
+unreadable record. Restore the affected paths from a trusted state with a
+forward commit on that ref, keeping the other paths and the suspension
+records intact. If the stored state cannot be trusted, see
+[Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync).
 
 Each suspended document shows a red exclamation mark (`Alert`) and one
 comment, for example:
@@ -491,7 +518,7 @@ moved out of the synchronized projects, and the old paths of documents
 renamed or moved in Linear (a rename counts once as captured and once as
 removed); *blocked* documents got the
 [blocked mark](#the-blocked-mark); *left out* documents were not taken this
-run (`markdown-complexity`, `attachment-budget`, `image-repair-budget`, `capture-translation`, `download-retry` or `security-unchecked`,
+run (`markdown-complexity`, `attachment-budget`, `image-repair-budget`, `blob-too-large`, `capture-translation`, `download-retry`, `security-unchecked` or `changed-during-run`,
 [files left out](troubleshooting.md#files-left-out)). Lines that follow
 only when they apply:
 
@@ -499,7 +526,9 @@ only when they apply:
 | --- | --- |
 | `attachment-budget: "<document id>"` | Attachment count or bytes exceeded the document or run limit. The document stays unchanged and the cursor holds; reduce or split attachments and rerun. See [files left out](troubleshooting.md#files-left-out). |
 | `image-repair-budget: "<document id>"` | Image or link repair exceeded the document limit. The document stays unchanged and the cursor holds. Simplify or split the document and rerun. See [files left out](troubleshooting.md#files-left-out). |
+| `blob-too-large: "<document id>"` | The recorded or newly rendered Markdown file exceeds the byte limit. Any previous file and its mapping stay in place and the cursor holds. See [files left out](troubleshooting.md#files-left-out). |
 | `download-retry: "<document id>"` | [Files left out](troubleshooting.md#files-left-out); an upload download failed temporarily and the next run retries it without marking the document. |
+| `changed-during-run: "<document id>"` | [Files left out](troubleshooting.md#files-left-out); the document left the place the run read it in, or was trashed or archived, before the run marked it or gave back its decoration. The run leaves its decoration as it is, and the next run reads it again. |
 | Removal held for N files | [`removal-held`](troubleshooting.md#partial-sync-runs) |
 | The document id map was lost | [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync) |
 | Capture partial, will continue | [`stopped` and `linear-failed`](troubleshooting.md#partial-sync-runs) |

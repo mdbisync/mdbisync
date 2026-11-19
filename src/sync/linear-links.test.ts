@@ -89,7 +89,7 @@ describe('sync: relative links typed in Linear', () => {
     const text = `# Plan\n\nSteps one and two. See [the report](../../private/report.csv) and [the guide](../../combined/guide.md). ${CANARY}\n`;
     await editInLinear(PLAN, text);
     await settle();
-    assert.match(await show(`refs/heads/main:${PLAN}`), /\[the guide\]\(\.\.\/\.\.\/combined\/guide\.md\)/);
+    assert.match(await show(`refs/heads/main:${PLAN}`), /\[the guide\]\(<\.\.\/\.\.\/combined\/guide\.md>\)/);
     assert.deepEqual(commentsOf(await documentOf(PLAN)), []);
   });
 

@@ -7,7 +7,7 @@
 // A transform may make requests of its own (an upload); it must not write the
 // document itself.
 
-import { fixText, relativeLinkUrls, sameMarkdown } from '../format/index.ts';
+import { fixLinearText, fixText, linkedFileCheck, relativeFileBlocksAsLinks, sameMarkdown } from '../format/index.ts';
 import { parse, visit } from '../format/markdown.ts';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { type LinearClient } from '../linear/index.ts';
@@ -87,6 +87,8 @@ export interface TransformContext {
   documentIds: ReadonlyMap<string, string>;
   /** File targets originating in repaired Linear path images, by document path. */
   plainFiles?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Documents whose plain-link provenance is lost: a non-image repository-file link leaves them out (`link-provenance-unknown`). */
+  unknownProvenance?: ReadonlySet<string>;
 }
 
 /** Runs the transforms in order. */
@@ -94,6 +96,29 @@ export async function transformBody(transforms: readonly BodyTransform[], path: 
   let current = body;
   for (const transform of transforms) current = await transform.apply({ path, body: current });
   return current;
+}
+
+/**
+ * The last transform: a file block whose link is still relative names a file
+ * Linear holds no upload of (a plain link), and Linear stores it as the link
+ * on the item's line. It is sent in that form, so later runs find Linear
+ * holding what was sent; its inverse puts back the file's own text.
+ */
+export function relativeFileBlocks(): BodyTransform {
+  const written = new Map<string, { sent: string; file: string }>();
+  return {
+    name: 'relative-file-blocks',
+    async apply({ path, body }) {
+      const sent = relativeFileBlocksAsLinks(body);
+      if (sent === body) written.delete(path);
+      else written.set(path, { sent, file: body });
+      return sent;
+    },
+    restore({ path, body }) {
+      const entry = written.get(path);
+      return entry !== undefined && body === entry.sent ? entry.file : body;
+    },
+  };
 }
 
 /**
@@ -123,15 +148,14 @@ export function sameLinkDestinations(content: string, sent: string): boolean {
  * as it was. When Linear reformatted it into other Markdown, the restored
  * text is put in Linear's form as a whole, so the file's spellings, placed
  * into reformatted text, become Linear's spellings too, and a later run finds
- * the document holding the file.
+ * the document holding the file. `files` holds the regular files of the
+ * repository the file is written to, by path: Linear's link to one of them
+ * comes back in the hook's form.
  */
-export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string, sent: string): string {
+export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string, sent: string, files: ReadonlySet<string>): string {
   const kept = sameMarkdown(content, sent);
   let current = kept ? sent : content;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
   if (kept) return current;
-  // A relative link still in Linear's content was not uploaded, so its file
-  // is not there: Linear keeps such a link as a link, not as a file block.
-  const notUploaded = relativeLinkUrls(content);
-  return fixText(current, { linkedFileExists: (url) => !notUploaded.has(url) });
+  return fixLinearText(current, content, linkedFileCheck(path, (file) => files.has(file)));
 }

@@ -72,6 +72,7 @@ import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.
 import { destinationHolds, mergedHead, type MisplacedMerge, verifyMerge } from './merge-destination.ts';
 import { checkPushScope, UnverifiedHead, oneLine, unverifiedList, unverifiedNote, unverifiedPaths, withUnverifiedNote } from './head-check.ts';
 import { message } from '../messages.ts';
+import { recordsUnmergedMove } from './tracked-places.ts';
 import { type PullRequestCode } from '../codes.ts';
 
 export const DEFAULT_MERGE_GRACE_SECONDS = 60;
@@ -154,6 +155,7 @@ export interface PullRequestResult {
    * - `state-moved`: the sync branch moved while this run worked, or the pull request's base or the tracked branch changed after the sync checked the merge.
    * - `github-failed`: GitHub refused or failed a request, or no answer came; `status` is its HTTP status, absent when no answer came.
    * - `head-unverified`: the merge would change files other than synchronized documents and their assets (`unverified`); the sync leaves the pull request to a person.
+   * - `suspended-asset-discovery`: the sync could not safely collect a suspended batch's assets and leaves the batch in place.
    * - `merge-misplaced`: GitHub merged the pull request somewhere other than on the tracked branch commit the sync checked (`misplaced`): its base or the tracked branch changed between the sync's last read and the merge. A setup error: a person checks the branch that took the merge.
    */
   code?: PullRequestCode;
@@ -163,7 +165,7 @@ export interface PullRequestResult {
   misplaced?: MisplacedMerge;
   /** GitHub's HTTP status for `merge-refused`, `merge-blocked` and `github-failed`. */
   status?: number;
-  /** GitHub's reason for `merge-refused` and `merge-blocked`, on one line; empty when it gave none. */
+  /** The reason for a merge refusal or suspended asset discovery hold, on one line. */
   reason?: string;
 }
 
@@ -200,6 +202,8 @@ export function pullRequestFailure(result: PullRequestResult | undefined): PullR
     case 'state-moved':
     case 'github-failed':
       return { kind: 'incomplete', code: result.code, message: message('pull-request.not-finished', { code: result.code }) };
+    case 'suspended-asset-discovery':
+      return { kind: 'incomplete', code: result.code, message: message('pull-request.suspended-asset-discovery', { code: result.code, reason: result.reason ?? '' }) };
     default:
       return null;
   }
@@ -238,6 +242,8 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
   if (suspended?.status !== undefined) result.status = suspended.status;
   if (suspended?.reason !== undefined) result.reason = suspended.reason;
   if (linear === null || suspended?.normalClosePending === true) return result;
+  // Without the full asset set, the normal lane cannot tell which files belong to the suspended batch.
+  if (suspended?.code === 'suspended-asset-discovery') return result;
   // A suspended merge that landed where the sync did not check it stops this run's pull request step: a person looks
   // first, and the next run checks the sync's changes again.
   if (suspended?.code === 'merge-misplaced') return result;
@@ -256,10 +262,17 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
 
   // A sync branch the tracked branch has not merged is the open pull request's head, or will be.
   const pending = sync !== null && !(await isAncestor(git, sync, tracked));
-  if (!result.needed && !pending) {
+  // A folder's move changes no file, but its record must reach the tracked branch: until it does, a state ref moved
+  // back to before the move may read the folder's previous place. A squash merge leaves it off, so it comes again.
+  const linearMerged = await isAncestor(git, linear, tracked);
+  const setAside = fetched.suspended ?? null;
+  const recordMove = !result.needed && !linearMerged && (await recordsUnmergedMove(git, tracked, linear, context.mapping.zones))
+    // While a suspended batch waits, the record waits too: the lane closes a normal pull request on its set-aside head.
+    && (setAside === null || (await isAncestor(git, setAside, tracked)));
+  if (!result.needed && !pending && !recordMove) {
     // A sync branch is made by the first sync pull request and stays. Once `linear` holds more than initial sync's
     // record and the tracked branch, a missing branch was deleted by a person: it comes back at `linear`.
-    if (sync !== null || (await isAncestor(git, linear, tracked)) || (await isInitialRecord(git, linear))) return result;
+    if (sync !== null || linearMerged || (await isInitialRecord(git, linear))) return result;
     const needsTrackedTree = frozen.size > 0 || (await unverifiedPaths(git, tracked, linear, context.mapping.zones)).length > 0;
     const next = needsTrackedTree ? await commitTree(git, {base: wanted, changes: new Map(), parents: [linear, tracked], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity}) : linear;
     const unverified = await unverifiedPaths(git, tracked, next, context.mapping.zones);
@@ -294,12 +307,15 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
       && !(await needsTrackedMerge(git, tracked, sync as Oid, noted))
       && await checkedHeadReady(github, sync as Oid, await checkedExpectation());
     let head: Oid | null = sync;
-    if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid, tracked, await ownPushed(context, options))))) {
+    /** The pending branch still carries an initial snapshot that changes tracked files, which only a person merges. */
+    const heldSnapshot = open === null && pending && (await holdsInitialRecord(git, sync as Oid, tracked, await ownPushed(context, options)));
+    if (open === null && (!pending || heldSnapshot)) {
       // A merged branch can start again from Linear. An older initial
       // sync record left on this branch is also left out: its destructive
       // snapshot needs a person's approval. Ordinary unmerged changes stay on the branch,
       // including a person's edits and CI fixes after a pull request closes.
-      if (!result.needed) return result;
+      // A move's record never brings that snapshot back with it.
+      if (!result.needed && (heldSnapshot || !recordMove)) return result;
       head = await restart(git, sync, linear, wanted, identity, frozen.size > 0);
     } else if (!keepCheckedHead) {
       const advanced = await advance(git, merger, sync as Oid, linear, frozen.size > 0);
@@ -307,7 +323,8 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
       if (advanced.head !== sync) {
         const now = await mergedTree(git, tracked, sync as Oid);
         const next = await mergedTree(git, tracked, advanced.head);
-        if (next === null || next !== now) {
+        // A head that changes no file still moves when only `linear` carries the move's record.
+        if (next === null || next !== now || (recordMove && !(await recordsUnmergedMove(git, tracked, sync as Oid, context.mapping.zones)))) {
           head = advanced.head;
           addResolution(resolved, advanced);
         }
@@ -348,7 +365,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
         hold = null;
       }
     }
-    if (open === null && !result.needed && headTree === trackedTree) return result;
+    if (open === null && !result.needed && !recordMove && headTree === trackedTree) return result;
     // A head whose earlier checks the branch's history does not show, or one someone else pushed whose expected checks
     // never started, gets a commit of the sync's own on top, with the same files (see `checksAgain`). Its push starts
     // the repository's whole CI and is recorded, so the pull request can merge without waiting for a Linear change.
@@ -403,7 +420,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
       head: config.syncBranch,
       base: config.trackedBranch,
       title: SYNC_PULL_REQUEST_TITLE,
-      body: pullRequestBody(result.paths, earlier, { head, since, held: stillHeld, checks: expected.observed, unverified, rewriteNotes }),
+      body: pullRequestBody(result.paths, earlier, { head, since, held: stillHeld, checks: expected.observed, unverified, rewriteNotes, recordMove }),
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
     if (unverified.length > 0) return { ...result, code: 'head-unverified', unverified };
@@ -422,7 +439,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
       if (verdict.state === 'red') {
         result.redMain = verdict.checks;
         const hold: RedMainHold = { head, main: tracked, checks: verdict.checks.map(({ name }) => name) };
-        const body = pullRequestBody(result.paths, earlier, { head, since, held: hold, checks: expected.observed, rewriteNotes });
+        const body = pullRequestBody(result.paths, earlier, { head, since, held: hold, checks: expected.observed, rewriteNotes, recordMove });
         try {
           if (body !== pullRequest.body) await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body });
         } catch (error) {
@@ -483,7 +500,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
       if (mergeInProgress(merge)) return { ...refused, code: 'merge-refused' };
       if (earlier !== null && earlier.status === refusal.status && earlier.reason === refusal.reason) return { ...refused, code: 'merge-blocked' };
       try {
-        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal, { head, since, held: stillHeld, checks: expected.observed, rewriteNotes }) });
+        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal, { head, since, held: stillHeld, checks: expected.observed, rewriteNotes, recordMove }) });
       } catch (error) {
         // The refusal is what this run reports; an unrecorded note only means a later run notes it again.
         if (!(error instanceof PullRequestError)) throw error;
@@ -684,7 +701,7 @@ function commitMerge(git: Git, tree: string, parents: [Oid, Oid], message: strin
 }
 
 /** Names, counts and GitHub's reason for a refused merge, and the notes on its head; never document content. */
-function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null; checks: readonly ExpectedCheck[]; unverified?: readonly string[]; rewriteNotes?: readonly string[] }): string {
+function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null; checks: readonly ExpectedCheck[]; unverified?: readonly string[]; rewriteNotes?: readonly string[]; recordMove?: boolean }): string {
   const lines = [
     'Changes made in Linear, on their way to this branch.',
     '',
@@ -694,6 +711,7 @@ function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null,
   ];
   // A file name holds no line break here: one could forge the hidden notes a later run reads back.
   if (paths.length > 0) lines.push('', ...paths.slice(0, LISTED_PATHS).map((path) => `- ${oneLine(path)}`));
+  else if (notes.recordMove === true) lines.push('', 'It records that the sync took in a folder moved to another Linear place, so later syncs read only the new place.');
   if (paths.length > LISTED_PATHS) lines.push(`- and ${paths.length - LISTED_PATHS} more`);
   if (notes.rewriteNotes?.length) lines.push('', 'Images converted to links or removed:', ...notes.rewriteNotes);
   if (refusal !== null) {
@@ -770,6 +788,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     if (hold.code === 'merge-refused' || hold.code === 'merge-blocked') lines.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, '');
     if (hold.code === 'merge-misplaced') lines.push(`Setup error: ${misplacedSummary('the suspended pull request', link, hold.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, '');
     if (hold.code === 'checks-missing') lines.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold.missing ?? [])}).`, CHECKS_MISSING_ADVICE, '');
+    if (hold.code === 'suspended-asset-discovery') lines.push(`The batch stays suspended (${hold.code}). ${hold.reason ?? ''}`, '');
     if (hold.normalClosePending === true) lines.push('The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.', '');
     if (hold.code === 'github-failed' && hold.normalClosePending !== true) lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
     if (hold.conflicts !== undefined) lines.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path) => `\`${path}\``).join(', ')}.`, '');
@@ -802,6 +821,8 @@ export function renderPullRequest(result: PullRequestResult): string[] {
   // A suspended head that waits for a person has its own line above; the normal lane's outcome still gets its line.
   const code = result.code === 'head-unverified' && result.unverified === undefined ? undefined : result.code;
   switch (code) {
+    case 'suspended-asset-discovery':
+      break; // The suspended section describes the hold.
     case 'conflict':
       lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
       break;

@@ -17,7 +17,7 @@ const other = Buffer.concat([png, Buffer.from('other')]);
 const url = 'https://uploads.linear.app/workspace/pasted.png';
 const config = resolveStateConfig({});
 
-async function captured(tree: Record<string, string | Buffer>, path: string, body: string, uploads = new Map<string, string>(), previous?: { body: string; path: string }, lfs?: string[]) {
+async function captured(tree: Record<string, string | Buffer>, path: string, body: string, uploads = new Map<string, string>(), previous?: { body: string; path: string }, lfs?: string[], plain?: ReadonlySet<string>) {
   const fixture = await createFixture();
   try {
     await fixture.seed(tree, lfs === undefined ? {} : { lfs });
@@ -26,7 +26,7 @@ async function captured(tree: Record<string, string | Buffer>, path: string, bod
     let downloads = 0;
     const capture = createAssetCapture(git, config, base, async () => { downloads++; return new Response(png); });
     try {
-      const result = await capture(path, body, uploads, previous?.body, previous?.path);
+      const result = await capture(path, body, uploads, previous?.body, previous?.path, plain);
       return { body: result.body, files: new Map([...result.files].map(([file, content]) => [file, contentBytes(content)])), uploads: result.uploads, downloads };
     } finally { capture.close(); }
   } finally { await fixture.cleanup(); }
@@ -81,6 +81,27 @@ describe('the assets folder beside the documents', () => {
     const captureCopy = await captured(tree, 'docs/plan.md', `![Chart](${url})\n`, new Map([[pngHash, url]]));
     assert.equal(captureCopy.downloads, 0);
     assert.equal(captureCopy.body, `![Chart](assets/${pngHash}.png)\n`);
+  });
+
+  it('never reuses a file a Linear member linked, also before its repair is merged, and keeps reusing the files the repository linked', async () => {
+    const otherHash = createHash('sha256').update(other).digest('hex');
+    const plain = new Set(['finance/report.png']);
+    const memberUrl = 'https://uploads.linear.app/workspace/scan.png';
+    const chartUrl = 'https://uploads.linear.app/workspace/chart.png';
+    // The previous text holds the member's link repaired, or, while the repair waits for its merge, the member's image.
+    for (const member of ['[x](<../finance/report.png>)', '![x](../finance/report.png)']) {
+      const tree = { 'docs/plan.md': `${member}\n\n![Chart](images/chart.png)\n`, 'finance/report.png': png, 'docs/images/chart.png': other };
+      const previous = { body: tree['docs/plan.md'], path: 'docs/plan.md' };
+      // An upload with the member's file's bytes is a new file in the document's own assets folder.
+      const scan = await captured(tree, 'docs/plan.md', `${member}\n\n![Scan](${memberUrl})\n`, new Map([[pngHash, memberUrl]]), previous, undefined, plain);
+      assert.equal(scan.downloads, 1, member);
+      assert.deepEqual([...scan.files.keys()], [`docs/assets/${pngHash}.png`], member);
+      assert.match(scan.body, new RegExp(`!\\[Scan\\]\\(assets/${pngHash}\\.png\\)`), member);
+      // The repository's own link beside it keeps its file.
+      const chart = await captured(tree, 'docs/plan.md', `![Chart](${chartUrl})\n`, new Map([[otherHash, chartUrl]]), previous, undefined, plain);
+      assert.equal(chart.downloads, 0, member);
+      assert.equal(chart.body, '![Chart](images/chart.png)\n', member);
+    }
   });
 
   it('copies the files a moved document linked in its old assets folder into the new one', async () => {

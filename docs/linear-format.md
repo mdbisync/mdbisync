@@ -22,6 +22,15 @@ own that reads as the same Markdown (a final newline, a backslash before a
 `-` that opens a table cell, `*` for `_`), the file keeps its text: no
 change is recorded and no sync pull request is opened for it.
 
+Text the sync takes from Linear goes through `fix` before the sync commits
+it, so the `linear-format` hook finds nothing to change in it. Linear's own
+text is not always in that form: it can store a table cell with a trailing
+space (`| a  |`), which `fix` writes as `| a |`. The sync takes only such
+re-spellings: a text that `fix` would change into another document (a
+setext heading's two lines written as one) stays as Linear has it. A file
+whose text Linear only re-spells keeps its own text, and a text with a lint
+finding stays as it is, as with `fix` itself.
+
 Both run as the `linear-format` pre-commit hook, which every synchronized
 repository needs (see [Install the hook](#install-the-hook)).
 
@@ -133,7 +142,11 @@ Blocks:
   starts with `/` or leads outside the repository), the sync cannot upload it and Linear keeps a
   plain link, so `fix` writes `* [Name](<path>)`. `fix` resolves links from
   the folder it runs in, which for the hook is the repository's top
-  folder.
+  folder. A link the sync keeps plain though its file is in the
+  repository (an image typed in Linear with a repository path, which the
+  sync turns into a link and never uploads) also gets the file block form
+  in git, as the hook writes it, and the sync sends it to Linear as the
+  plain link `* [Name](<path>)`, the form Linear stores for it.
 
 Inline text:
 
@@ -280,15 +293,50 @@ Instead, split the file into several documents.
 
 ### `markdown-complexity`
 
-Markdown trees over 128 levels deep or 500,000 nodes are rejected. This
-keeps traversal and formatting bounded independently of the text length.
+Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are
+tables whose short rows, padded to the header width, would add over 250,000
+characters or take the tree over that node limit, reference links whose
+destinations, each written in full, would take the text over 250,000
+characters, and paragraphs whose inline syntax would take too long to
+parse. This keeps traversal and formatting bounded independently of the
+text length. `fix` writes every row of a table with as many cells as its
+header, the form Linear stores, so a wide header over many short rows grows
+far beyond its source. It also writes every reference link (`[text][ref]`)
+inline with its own copy of the destination, so many short references to
+one long definition grow the same way. The
+parser's work on one paragraph, heading or table cell can grow with the
+square of its size: many unresolved brackets, escapes or emphasis
+markers, an unclosed `[` followed by many words, or tens of thousands of
+short lines in one paragraph. The parser counts that work as it reads and
+stops at a fixed budget that ordinary documents stay far below; split
+such a paragraph with blank lines.
 For example, this generates a document that exceeds the nesting limit:
 
 ```javascript
 '> '.repeat(130) + 'Nested note.'
 ```
 
-Reduce the nesting or split the document. `fix` leaves the text unchanged.
+and this one a table whose padding is too large, from 2.4 KB of text:
+
+```javascript
+'|a'.repeat(300) + '|\n' + '|-'.repeat(300) + '|\n' + '|x|\n'.repeat(300)
+```
+
+and this one references whose destinations would be written 2,000 times:
+
+```javascript
+'[a][r] '.repeat(2000) + '\n\n[r]: https://example.com/' + 'x'.repeat(1000)
+```
+
+and this one a paragraph whose unresolved references take too long to parse, from 140 KB of text:
+
+```javascript
+'[a][r] '.repeat(20_000)
+```
+
+Reduce the nesting, fill in or split the table, write fewer references to a
+long destination, split the paragraph, or split the document. `fix` leaves
+the text unchanged.
 Capture and initial import leave the document out of the current run,
 preserve any previously accepted text, and continue with other documents.
 

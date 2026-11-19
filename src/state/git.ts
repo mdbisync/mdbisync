@@ -3,6 +3,8 @@
 // error output, never the data passed on standard input or read back.
 
 import { spawn } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import { message } from '../messages.ts';
 
 export type Oid = string;
@@ -20,6 +22,8 @@ export interface RunOptions {
   onlyEnv?: Record<string, string>;
   /** Exit codes that are not an error (default: only 0). */
   okCodes?: readonly number[];
+  /** Maximum stdout bytes to collect. Bounded calls cap stderr separately. */
+  maxOutputBytes?: number | undefined;
 }
 
 export interface RunResult {
@@ -39,6 +43,16 @@ export class GitError extends Error {
     this.args = args;
     this.code = code;
     this.stderr = stderr;
+  }
+}
+
+export class GitOutputLimitError extends Error {
+  readonly bytes: number;
+
+  constructor(bytes: number) {
+    super(message('git.output-limit', { bytes }));
+    this.name = 'GitOutputLimitError';
+    this.bytes = bytes;
   }
 }
 
@@ -62,24 +76,47 @@ export class Git {
     this.env = env;
   }
 
-  run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
+  private environment(options: RunOptions): Record<string, string | undefined> {
     const env: Record<string, string | undefined> =
       options.onlyEnv !== undefined ? { ...BASE_ENV, ...options.onlyEnv } : { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
     for (const key of Object.keys(env)) {
       if (env[key] === undefined) delete env[key];
     }
+    return env;
+  }
+
+  run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
+    const env = this.environment(options);
     const okCodes = options.okCodes ?? [0];
     return new Promise((resolve, reject) => {
       const child = spawn('git', args, { cwd: this.dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
-      child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
-      child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
+      let exceededLimit: number | undefined;
+      const collector = (chunks: Buffer[], limit?: number) => {
+        let bytes = 0;
+        return (chunk: Buffer) => {
+          if (exceededLimit !== undefined) return;
+          bytes += chunk.length;
+          if (limit !== undefined && bytes > limit) {
+            exceededLimit = limit;
+            child.kill('SIGKILL');
+            return;
+          }
+          chunks.push(chunk);
+        };
+      };
+      child.stdout.on('data', collector(out, options.maxOutputBytes));
+      child.stderr.on('data', collector(err, options.maxOutputBytes === undefined ? undefined : 64 * 1024));
       child.on('error', reject);
       // A command that exits before reading all its input closes the pipe;
       // the exit code tells what happened.
       child.stdin.on('error', () => {});
       child.on('close', (code) => {
+        if (exceededLimit !== undefined) {
+          reject(new GitOutputLimitError(exceededLimit));
+          return;
+        }
         const result: RunResult = {
           code: code ?? -1,
           stdout: Buffer.concat(out),
@@ -90,6 +127,32 @@ export class Git {
       });
       child.stdin.end(options.input ?? '');
     });
+  }
+
+  /**
+   * Runs git and writes its standard output to a new file at `path` as it
+   * arrives, so output of any size is never held in memory. Standard error
+   * is capped at 64 KiB. A failing exit is a `GitError`.
+   */
+  async runToFile(args: readonly string[], path: string, fileMode: number): Promise<void> {
+    const child = spawn('git', args, { cwd: this.dir, env: this.environment({}), stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 64 * 1024) stderr += chunk.toString('utf8'); });
+    const exited = new Promise<number>((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', (code) => resolve(code ?? -1));
+    });
+    // A spawn failure rejects `exited` while the copy below is still running; it is awaited after the copy.
+    exited.catch(() => {});
+    try {
+      await pipeline(child.stdout, createWriteStream(path, { flags: 'wx', mode: fileMode }));
+    } catch (error) {
+      child.kill('SIGKILL');
+      await exited.catch(() => {});
+      throw error;
+    }
+    const code = await exited;
+    if (code !== 0) throw new GitError(args, code, stderr);
   }
 
   /** Runs git and returns standard output as text without the final newline. */

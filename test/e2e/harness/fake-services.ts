@@ -43,8 +43,8 @@ export interface FakeServiceOptions {
   intercept?: (url: string, init: RequestInit | undefined) => Response | undefined;
 }
 
-/** Two documents of two paragraphs each, for specs that need no content of their own. */
-export const DOCUMENTS: Readonly<Record<string, string>> = Object.fromEntries(Array.from({ length: 2 }, (_, i) => [`eng/notes/item-${i}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.\n`]));
+/** Two documents of two paragraphs each, for specs that need no content of their own; in the `linear-format` hook's form, as the tree's configuration requires. */
+export const DOCUMENTS: Readonly<Record<string, string>> = Object.fromEntries(Array.from({ length: 2 }, (_, i) => [`eng/notes/item-${i}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.`]));
 
 /**
  * Seeds `documents` into the project folder `eng/notes` (Linear project
@@ -61,6 +61,8 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
     const tree = { 'eng/notes/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n', ...documents, '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/hooks\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n' };
     await fixture.seed(tree, { branch: names.trackedBranch });
     const world = fakeWorld();
+    // As measured: Linear stores a document's content without a final newline.
+    world.linear.store = (content) => content.replace(/\n+$/, '');
     // No check workflow in the tree: the head has no checks, as in the live specs.
     world.github.checks = new Map();
     options.prepare?.(world);
@@ -122,9 +124,10 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
     const engine = await sandbox.clone(names, join(fixture.root, 'engine'));
     const person = await sandbox.clone(names, join(fixture.root, 'person'));
     if (options.lfsUrl !== undefined) await engine.run(['config', 'lfs.url', options.lfsUrl]);
+    const engineApp = { clientId: 'client-id', clientSecret: 'client-secret' };
     const ctx = {
       scenario, names, runDir: fixture.root, sandbox, live: {
-        sandbox, rest, repository: 'owner/repo', githubToken: 'app-token', githubTokenSource: 'app', app, editors: { 'editor-a': app, 'editor-b': app },
+        sandbox, rest, repository: 'owner/repo', githubToken: 'app-token', githubTokenSource: 'app', app, engineApp, editors: { 'editor-a': app, 'editor-b': app },
         // The run's texts, as a live run reads them from the corpus: Linear-first setups seed them as documents.
         tree: { paths: new Map(['eng/notes/README.md', ...Object.keys(documents)].map((p) => [p, p])), rewritten: new Map([['eng/notes/README.md', tree['eng/notes/README.md']], ...texts]), projects: new Map([['PROJECT_ENG_1', 'Field notes']]), teams: new Set(['ENG']), teamZones: new Map() },
         manifest: { files: texts.map(([path]) => ({ path, synced: true, kind: 'markdown', class: null, canary: null })) },
@@ -140,7 +143,7 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
       const summaryFile = join(fixture.root, 'summary.md');
       await rm(reportFile, { force: true });
       await rm(summaryFile, { force: true });
-      const env = engineInputs({ names, command, cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: 'client-id', linearClientSecret: 'client-secret', githubToken: 'app-token' }, reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: {}, timeoutMs: 30_000, linearUrl: LINEAR_API, mergeGraceSeconds: 0, direction, confirm });
+      const env = engineInputs({ names, command, cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: engineApp.clientId, linearClientSecret: engineApp.clientSecret, githubToken: 'app-token' }, reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: {}, timeoutMs: 30_000, linearUrl: LINEAR_API, mergeGraceSeconds: 0, direction, confirm });
       await watchRun(ctx, { throughProxy: false }, async () => {
         const requests: LogEntry[] = [];
         const result = await runCli([command], { cwd: engine.dir, env: { ...env, PATH: process.env.PATH!, HOME: process.env.HOME!, MDBISYNC_GITHUB_API_URL: GITHUB_API, GITHUB_STEP_SUMMARY: summaryFile }, fetch: serve, log: (entry) => requests.push(entry) });

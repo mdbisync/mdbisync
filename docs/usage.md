@@ -43,6 +43,16 @@ Gitleaks in a Docker image pinned by version and SHA-256 digest, and a
 private-key pattern hook. Docker must be available wherever those hooks
 run. Review these examples for your repository's privacy requirements;
 without security hooks, runs warn that content is pushed unchecked.
+The Gitleaks example runs with `--ignore-gitleaks-allow`: document text
+comes from Linear, so an inline `gitleaks:allow` comment in it does not
+exempt a line. The hook scans the whole tree, so such comments in the
+repository's own files stop exempting their lines too. Record exceptions
+in the repository's own `.gitleaks.toml` or `.gitleaksignore`, which a
+change from Linear cannot edit. `check` and every run warn about a
+Gitleaks security hook without that flag. To update a hook an earlier
+release generated, add `--ignore-gitleaks-allow` before the final ` .`
+of its `entry`; `init` does this itself when the repository's other
+files match the release it is run with.
 
 Use `--lfs` to store embedded files in Git LFS: `init` adds to
 `.gitattributes` a line for each image and document type the sync takes
@@ -310,7 +320,12 @@ remain after release; its presence alone does not mean a batch is on hold.
   history. The state's refs are open to anyone who may push, so the sync
   signs each record with a key derived from `linear-client-secret` and
   bound to the repository and the branch; a record without a valid
-  signature counts as none. Keep that secret where only the sync's
+  signature counts as none. Each commit the sync records in the
+  `linear` state ref is signed the same way, and the sync builds only on
+  one it signed or one that holds exactly the files of a commit on the
+  tracked branch's own history: otherwise it refuses
+  with `initial-sync-required` ([troubleshooting](troubleshooting.md#sync-state)).
+  Keep that secret where only the sync's
   workflow reads it. When that head is more than 50 commits below, no
   longer in the branch's history (the branch was rewritten), or not
   recorded yet (a branch the sync last pushed before it signed its

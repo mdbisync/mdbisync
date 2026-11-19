@@ -1,7 +1,8 @@
 // A checked branch view is derived from an observation without changing the observation ref.
 import { createHash } from 'node:crypto';
-import { type Git, type Oid, type IdMap, type IdEntry, type CommitIdentity, type StateSnapshot, listTree, readBlobs, buildTree, readIds } from '../state/index.ts';
+import { type Git, type Oid, type IdMap, type IdEntry, type CommitIdentity, type StateSnapshot, listTree, buildTree, readIds } from '../state/index.ts';
 import { candidateFiles, mapFiles, type Zone } from '../mapping/index.ts';
+import { MAPPING_TREE_BYTES, MappingBlobBudget } from '../mapping/blobs.ts';
 import { isSyncedChange, oneLine } from './head-check.ts';
 import { type SecurityGate } from './security.ts';
 import { takePaths } from './merge.ts';
@@ -22,9 +23,9 @@ async function pendingRepairs(git: Git, linear: Oid, ids: IdMap, zones: Readonly
   const pending = [...ids].filter(([path, entry]) => entry.pullRewrite !== undefined && counts.get(entry.id) === 1 && (paths === undefined || paths.has(path)));
   const repairs = new Map<string, Repair>();
   if (pending.length === 0) return repairs;
-  const entries = new Map((await listTree(git, linear)).map(entry => [entry.path, entry]));
+  const entries = new Map((await listTree(git, linear, MAPPING_TREE_BYTES)).map(entry => [entry.path, entry]));
   const files = candidateFiles([...entries.values()], zones);
-  const blobs = await readBlobs(git, files.map(file => file.oid));
+  const blobs = await new MappingBlobBudget().read(git, files);
   const documents = new Set(mapFiles([...entries.values()], zones, blobs).documents.map(document => document.path));
   for (const [path, entry] of pending) {
     const file = entries.get(path);
@@ -74,9 +75,13 @@ export async function stagePullRepairs(git: Git, state: StateSnapshot, zones: Re
   for (const [path, repair] of repairs) await gate.check(repairSet(path, repair.replacement));
 }
 
-/** Recover conservative plain-link provenance when the ids ref is rebuilt. */
-export async function readPlainFileProvenance(git: Git, linear: Oid): Promise<Map<string, Set<string>>> {
-  const log = await git.text(['log', '--first-parent', '--format=%B', '--grep=^Plain-link:', linear]);
+/**
+ * Recover conservative plain-link provenance when the ids ref is rebuilt.
+ * `firstParent: false` reads every commit `head` holds, as for a tracked
+ * branch; a trailer only withholds an upload, so it can never grant one.
+ */
+export async function readPlainFileProvenance(git: Git, linear: Oid, options: { firstParent?: boolean } = {}): Promise<Map<string, Set<string>>> {
+  const log = await git.text(['log', ...(options.firstParent === false ? [] : ['--first-parent']), '--format=%B', '--grep=^Plain-link:', linear]);
   const result = new Map<string, Set<string>>();
   for (const match of log.matchAll(/^Plain-link: (\S+) (\S+)$/gm)) {
     try {

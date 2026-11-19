@@ -25,9 +25,9 @@
 import { type FileContent, contentBytes, ContentSpool } from '../state/content.ts';
 import { checkPushScope } from '../sync/head-check.ts';
 import { posix } from 'node:path';
-import { joinFile, splitFile } from '../format/index.ts';
+import { fixLinearText, joinFile, linkedFileCheck, splitFile } from '../format/index.ts';
 import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
-import { type LinearDocument, LinearError } from '../linear/index.ts';
+import { LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
@@ -63,20 +63,22 @@ import {
   readInitialSyncProgress,
   readUploads,
   stateRef,
+  signObservation,
 } from '../state/index.ts';
-import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
+import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
 import { captureCursorTrailer, cursorTime, linkVariants, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
-import { type SecurityFinding, type SecurityGate, securityGate } from '../sync/security.ts';
+import { observedDigest } from '../sync/recorded.ts';
+import { type SecurityFinding, type SecurityGate, checkTitle, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
-import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
+import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync, touchedTitles } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
 import { message } from '../messages.ts';
-import { type RecordCode, type RecordLeftOutRule } from '../codes.ts';
+import { type RecordCode, type RecordLeftOutRule, type TitleLeftOutRule } from '../codes.ts';
 
 /**
  * The subject of a `linear` record made by an initial sync from Linear to
@@ -142,17 +144,37 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
 
   // An encoded name belongs to the title it encodes: `Q3%3A goals.md` is the file of `Q3: goals`, even when
   // another document is titled `Q3%3A goals` (whose own name the rule encodes to `Q3%253A goals.md`).
+  // A document that changed during the run, or shares a title with one, is never imported, and the file its name
+  // gives it stays as it is. It takes part in the naming like any document without a file, in the same
+  // oldest-first order.
+  const created = new Map(input.places.flatMap(({ documents }) => documents.map((document) => [document.id, document.createdAt] as const)));
+  const oldestFirst = <T extends { documentId: string }>(entries: T[]) => entries.sort((a, b) => compare(created.get(a.documentId) ?? '', created.get(b.documentId) ?? '') || compare(a.documentId, b.documentId));
+  const touched = touchedTitles(input);
+  const changed = [...new Map(input.places.flatMap(({ place, documents }) => documents
+    .filter((document) => !document.trashed && document.archivedAt === null && touched(place, document.title))
+    .map((document) => [document.id, { path: plainPath(document.title, place), title: document.title, place, documentId: document.id }] as const))).values()];
+  const changedIds = new Set(changed.map((entry) => entry.documentId));
+  const keepForChanged = (path: string, documentId: string) => {
+    result.leftOut = result.leftOut.filter((other) => other.documentId !== documentId || input.treePaths.has(other.path));
+    result.leftOut.push({ path, rules: ['changed-during-run'], lines: [], documentId });
+    named.set(documentId, path);
+  };
+
   const trash = [...plan.trash];
   const overwriteByPath = new Map(result.overwrite.map((entry) => [entry.path, entry]));
-  for (const entry of plan.trash) {
+  for (const entry of oldestFirst([...plan.trash, ...changed])) {
     const plain = plainPath(entry.title, entry.place);
     const other = overwriteByPath.get(plain);
     if (other === undefined || placeKey(other.place) !== placeKey(entry.place) || plainPath(other.title, other.place) === plain) continue;
     result.overwrite = result.overwrite.filter((candidate) => candidate !== other);
-    const claimed = { path: plain, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: other.fileTitle };
-    result.overwrite.push(claimed);
-    overwriteByPath.set(plain, claimed);
-    named.set(entry.documentId, plain);
+    overwriteByPath.delete(plain);
+    if (changedIds.has(entry.documentId)) keepForChanged(plain, entry.documentId);
+    else {
+      const claimed = { path: plain, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: other.fileTitle };
+      result.overwrite.push(claimed);
+      overwriteByPath.set(plain, claimed);
+      named.set(entry.documentId, plain);
+    }
     // The other document now has no file: it is named like any document without one.
     trash.push({ path: plain, title: other.title, place: other.place, documentId: other.documentId });
   }
@@ -160,10 +182,7 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
   // A file without a document by title can be one by the naming rule: the file an earlier run named for an encoded title.
   const gitOnly = new Map(plan.create.map((entry) => [entry.path, entry]));
   // Oldest first, as in the other direction: the older of two documents keeps the plain name.
-  const created = new Map(input.places.flatMap(({ documents }) => documents.map((document) => [document.id, document.createdAt] as const)));
-  const documentsOldestFirst = trash
-    .filter((entry) => !named.has(entry.documentId))
-    .sort((a, b) => compare(created.get(a.documentId) ?? '', created.get(b.documentId) ?? '') || compare(a.documentId, b.documentId));
+  const documentsOldestFirst = oldestFirst([...trash, ...changed].filter((entry) => !named.has(entry.documentId)));
   for (const entry of documentsOldestFirst) {
     const folder = folderOfPlace(entry.place);
     const plain = plainPath(entry.title, entry.place);
@@ -173,11 +192,20 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
       if (placeKey(file.place) !== placeKey(entry.place)) continue;
       const others = new Set([...input.treePaths].filter((other) => other !== path));
       if (documentPath(folder, entry.title, entry.documentId, others, path, invalid(entry.place)) !== path) continue;
-      result.overwrite.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: file.title });
-      named.set(entry.documentId, path);
       gitOnly.delete(path);
+      if (changedIds.has(entry.documentId)) keepForChanged(path, entry.documentId);
+      else {
+        result.overwrite.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: file.title });
+        named.set(entry.documentId, path);
+      }
       break;
     }
+  }
+  // A changed document without a file is reported under a name made from its id: no security hook has seen its
+  // title, which then reaches neither the job summary nor the report.
+  for (const entry of changed) if (!named.has(entry.documentId)) {
+    const reported = result.leftOut.find((other) => other.documentId === entry.documentId && !input.treePaths.has(other.path));
+    if (reported !== undefined) reported.path = documentPath(folderOfPlace(entry.place), entry.documentId, entry.documentId, input.treePaths);
   }
   for (const entry of gitOnly.values()) {
     if (annotations.has(entry.path)) result.kept.push({ path: entry.path, reason: 'annotation' });
@@ -187,7 +215,7 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
   const removed = new Set(result.remove);
   const occupied = new Set([...input.treePaths].filter((path) => !removed.has(path)));
   for (const entry of documentsOldestFirst) {
-    if (named.has(entry.documentId)) continue;
+    if (named.has(entry.documentId) || changedIds.has(entry.documentId)) continue;
     const folder = folderOfPlace(entry.place);
     const path = documentPath(folder, entry.title, entry.documentId, occupied, undefined, invalid(entry.place));
     result.create.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: posix.relative(folder, path).slice(0, -'.md'.length) });
@@ -208,11 +236,63 @@ function landsInPlace(mapping: RepositoryMapping, path: string, place: Place): b
   return placeKey(zonePlace) === placeKey(place);
 }
 
-/** The dry run's plan: reads the files and lists the documents, without content. */
-export async function planLinearToGitFromRepository(context: RunContext): Promise<ReversePlan> {
+/**
+ * The dry run's plan: reads the files and lists the documents, without content. Each new file's title is screened
+ * as in a confirmed run, so the job summary and the run report never hold a title the hooks refused or had no answer
+ * for: such a document is listed among the left-out ones under the name made from its id. `security` is the gate,
+ * the tracked branch's hooks by default.
+ */
+export async function planLinearToGitFromRepository(context: RunContext, security?: SecurityGate): Promise<ReversePlan> {
   const { input } = await readPlanSources(context);
   const treePaths = new Set((await listTree(context.git, context.fetched.tracked)).map((entry) => entry.path));
-  return planLinearToGit({ ...input, treePaths });
+  const plan = planLinearToGit({ ...input, treePaths });
+  if (plan.create.length === 0) {
+    // No title names a file: the hooks have nothing to read, and a run without pre-commit still gets its plan.
+    await security?.close?.();
+    return plan;
+  }
+  const gate = security ?? (await securityGate(context.git, context.fetched.tracked));
+  let held;
+  try {
+    held = await screenNewTitles(context, plan, treePaths, gate);
+  } finally {
+    await gate.close?.();
+  }
+  if (held.length > 0) {
+    plan.leftOut.push(...held.map(({ path, rule, documentId }) => ({ path, rules: [rule], lines: [], documentId })));
+    plan.leftOut.sort((a, b) => compare(a.path, b.path));
+  }
+  return plan;
+}
+
+/**
+ * Shows the hooks the title of each file the plan creates, at the path it would name. A title they refuse, or have
+ * no answer for, takes its entry out of `plan.create`; the document is held under a name made from its id, which
+ * never lands on a tree path or another planned file.
+ */
+async function screenNewTitles(
+  context: RunContext,
+  plan: ReversePlan,
+  treePaths: ReadonlySet<string>,
+  gate: SecurityGate,
+): Promise<Array<{ path: string; rule: TitleLeftOutRule; documentId: string }>> {
+  if (!gate.configured) return [];
+  const folders = new Map(annotatedPlaces(context.mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
+  const occupied = new Set([...treePaths, ...plan.overwrite.map((entry) => entry.path), ...plan.create.map((entry) => entry.path)]);
+  const screened: ReverseEntry[] = [];
+  const held: Array<{ path: string; rule: TitleLeftOutRule; documentId: string }> = [];
+  for (const entry of plan.create) {
+    const findings = await checkTitle(gate, entry.path, entry.title);
+    if (findings?.length === 0) {
+      screened.push(entry);
+      continue;
+    }
+    const path = documentPath(folders.get(placeKey(entry.place)) ?? '', entry.documentId, entry.documentId, occupied);
+    occupied.add(path);
+    held.push({ path, rule: findings === null ? 'security-unchecked' : 'security-hook', documentId: entry.documentId });
+  }
+  plan.create = screened;
+  return held;
 }
 
 export interface ReverseOptions {
@@ -294,6 +374,16 @@ export interface ReverseRecord {
 }
 
 export async function confirmLinearToGit(context: RunContext, options: ReverseOptions): Promise<{ plan: ReversePlan; result: ReverseResult }> {
+  const gate = options.security ?? (await securityGate(context.git, context.fetched.tracked));
+  try {
+    return await confirmWithGate(context, options, gate);
+  } finally {
+    // Also when the run ends before its record; closing again is harmless.
+    await gate.close?.();
+  }
+}
+
+async function confirmWithGate(context: RunContext, options: ReverseOptions, gate: SecurityGate): Promise<{ plan: ReversePlan; result: ReverseResult }> {
   const { git, fetched } = context;
   const transforms = options.transforms ?? [];
   const identity = options.identity ?? context.identity;
@@ -301,6 +391,12 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
   const stopAfter = 'stopAfterDocuments' in options ? options.stopAfterDocuments : testStopAfterDocuments();
 
   const { input, documents } = await readPlanSources(context, { withContent: true });
+  /** A planned document's text, as read by id; a listing, which holds none, is never a body. */
+  const contentOf = (entry: ReverseEntry): string => {
+    const read = documents.get(entry.documentId);
+    if (read?.content === undefined) throw new Error(message('initial-sync.document-not-read', { path: entry.path }));
+    return read.content ?? '';
+  };
   const treePaths = new Set((await listTree(git, fetched.tracked)).map((entry) => entry.path));
   const plan = planLinearToGit({ ...input, treePaths });
 
@@ -321,6 +417,11 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     record: null,
     pullRequest: null,
   };
+
+  // A new file's name comes from its document's title, and the name reaches the progress commits, the record and
+  // this run's report, also one that stops at the sync branch check below. The first capture after the record
+  // reads a document left out here again.
+  for (const { path, rule } of await screenNewTitles(context, plan, treePaths, gate)) result.leftOutAtRecord.push({ path, rule });
 
   let unpushed = 0;
   const pushProgress = async (): Promise<boolean> => {
@@ -454,11 +555,24 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       if (tracked !== undefined) linksToLinear(tracked, entry.path, map, seen);
       return linksFromLinear(body, entry.path, map, seen);
     };
-    const textOf = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
+    /** The document's body under the tracked file's front matter, before `fix`. */
+    const joinedOf = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
       const body = restored(entry, ids);
       const tracked = input.texts.get(entry.path);
       if (tracked === undefined) return body;
       return joinFile(splitFile(tracked).head, body);
+    };
+    // The file is written in the form the `linear-format` hook leaves as it is; a text is fixed once.
+    const fixedTexts = new Map<string, string>();
+    const textOf = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
+      const joined = joinedOf(entry, ids);
+      const key = `${entry.path}\0${joined}`;
+      let text = fixedTexts.get(key);
+      if (text === undefined) {
+        text = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)));
+        fixedTexts.set(key, text);
+      }
+      return text;
     };
     const leaveOut = (paths: Iterable<string>, rule: RecordLeftOutRule) => {
       const out = new Set(paths);
@@ -474,8 +588,8 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     };
 
     let entries = [...plan.overwrite, ...plan.create];
-    const uploads = await readUploads(git, expected.uploads);
-    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool);
+    const uploads = await readUploads(git, expected.uploads, context.pushedKey);
+    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads, spool, undefined, uploadAccessProbe(context.linear));
     const failed: string[] = [];
     const budget: string[] = [];
     const repairBudget: string[] = [];
@@ -483,7 +597,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     const complexity: string[] = [];
     let needsLinkBase = false;
     for (const entry of entries) {
-      const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
+      const content = contentOf(entry);
       const tracked = input.texts.get(entry.path);
       const trackedBody = markdownBaseline(tracked === undefined ? undefined : splitFile(tracked).body);
       if (trackedBody !== undefined) trackedBodies.set(entry.path, trackedBody);
@@ -492,13 +606,13 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         checkImageRepairSize(content);
         if (linksLinearDocuments(content)) needsLinkBase = true;
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
-        const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, trackedBody);
+        const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content, input.mapping.files), uploads, trackedBody);
         // Initial import records only observations and writes nothing to Linear.
         // Defer a repair to the next ordinary capture, whose PR also records its provenance.
         if (captured.observedBody !== undefined) { imageBlocked.push(entry.path); continue; }
         bodies.set(entry.path, captured);
       } catch (error) {
-        // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload), ends the run, as in the capture.
+        // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload with a failing probe), ends the run, as in the capture.
         if (error instanceof LinearError || error instanceof GitLfsMissingError) throw error;
         // An image that cannot be recorded here (a pending repair or a blocked upload): the
         // document's text does not enter git. This sync writes nothing to Linear, so the first sync
@@ -534,7 +648,6 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     keepTracked(imageBlocked, 'image-blocked');
     keepTracked(complexity, 'markdown-complexity');
     // The repository's security hooks see Linear's text and every downloaded file before any byte is pushed, as in the capture.
-    const gate = options.security ?? (await securityGate(git, fetched.tracked));
     // The text each document last passed the hooks with: a document is checked again only when its bytes change.
     const passed = new Map<string, string>();
     /**
@@ -553,7 +666,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         const frontMatter: string[] = [];
         for (const entry of entries) {
           try {
-            if (splitFile(textOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
+            if (splitFile(joinedOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
           } catch (error) {
             if (!(error instanceof MarkdownLimitError)) throw error;
             tooComplex.push(entry.path);
@@ -574,7 +687,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
             // localization too, so it cannot hide a secret in a URL or its query.
             // That text does not depend on the links: a document checked again passed it already.
             const tracked = input.texts.get(entry.path);
-            const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
+            const content = contentOf(entry);
             const original = withNewUploadUrls(tracked === undefined ? content : joinFile(splitFile(tracked).head, content), added, uploads);
             let findings: SecurityFinding[] | null = [];
             if (original !== text && !passed.has(entry.path)) findings = await gate.check(new Map<string, FileContent>([[entry.path, original], ...files]));
@@ -666,7 +779,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
             .filter((oid): oid is string => oid !== undefined),
         ),
       ];
-      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false });
+      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     }
 
     const trees = (await git.text(['show', '-s', '--format=%T', commit, fetched.tracked])).split('\n');
@@ -688,6 +801,10 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
     const synced = new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
+    for (const {path, documentId} of entries) {
+      const document = documents.get(documentId)!;
+      finalIds.set(path, {...finalIds.get(path)!, observedDigest: observedDigest(document)});
+    }
     // A new document left out has no id: the capture reads every such document on every run, whatever the cursor.
     const through = captureCursor([...keptTracked].map((path) => documentOf.get(path) as string));
     // The READMEs kept without a document are named, so the sync does not take them for new documents.
@@ -706,7 +823,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     // The cache records each downloaded file, so the sync never uploads it again.
     const finalUploads: UploadMap = new Map(uploads);
     for (const entry of entries) for (const [hash, url] of (bodies.get(entry.path) as { uploads: UploadMap }).uploads) finalUploads.set(hash, url);
-    const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity);
+    const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity, context.pushedKey);
     // The objects reach the remote's LFS store before any ref points at their pointers.
     if (lfsObjects.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...lfsObjects]);
     const updates: RefUpdate[] = [
@@ -746,9 +863,9 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     return [...listed.values()].reduce<string | null>((a, b) => (a === null || b > a ? b : a), null);
   }
 
-  /** Whether two commits have the same tree, parents and subject, so the newer one adds nothing. */
+  /** Whether two commits have the same tree, parents and message (its signature included), so the newer one adds nothing. */
   async function sameRecord(a: Oid, b: Oid): Promise<boolean> {
-    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%s', oid]);
+    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%B', oid]);
     return (await describe(a)) === (await describe(b));
   }
 

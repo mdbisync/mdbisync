@@ -8,9 +8,11 @@
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
-import { lintText } from './lint.ts';
+import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, isCallout, isCalloutComment, joinFile, parse, quoteLines, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, bracketedLabel, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+
+export { imageDestination, linkDestination } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -23,12 +25,17 @@ export interface FixOptions {
   linkedFileExists?: (url: string) => boolean;
 }
 
-/** Returns the text in Linear's form, or the text itself when lint finds a construct Linear would lose or alter. */
+/**
+ * Returns the text in Linear's form, or the text itself when lint finds a
+ * construct Linear would lose or alter. Throws `MarkdownLimitError` when a
+ * rewrite takes the text over the Markdown limits, which lint cannot see in
+ * the source: an inline image that leaves its paragraph can expose a table
+ * or reference links.
+ */
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
-  const fixed = fixBody(body.replace(/\r\n?/g, '\n'), options);
-  return joinFile(head, fixed);
+  return joinFile(head, fixBody(body.replace(/\r\n?/g, '\n'), options));
 }
 
 function fixBody(body: string, options: FixOptions): string {
@@ -37,7 +44,10 @@ function fixBody(body: string, options: FixOptions): string {
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    const next = new Writer(current, parse(current), options).root();
+    const tree = parse(current);
+    // Lint checked the source; a rewrite may expose a table or references it did not see.
+    if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, current) !== undefined)) throw new MarkdownLimitError('nodes');
+    const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
   }
@@ -146,20 +156,20 @@ class Writer {
     return parts.map((part) => this.inline(part).trim()).filter((part) => part !== '');
   }
 
-  private list(node: List): string {
+  private list(node: List, interruptsParagraph = false): string {
     return node.children
       .map((item, index) => {
         const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${(node.start ?? 1) + index}.` : '*';
-        return this.listItem(item, marker);
+        return this.listItem(item, marker, interruptsParagraph && index === 0);
       })
       .join('\n');
   }
 
-  private listItem(item: ListItem, marker: string): string {
+  private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
     // Content lines line up after the bullet or number, not after a checkbox.
     const indent = ' '.repeat(marker.split(' ')[0]!.length + 1);
     const [first] = item.children;
-    const attachment = first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
+    const attachment = itemAttachment(item);
     // A link to a file that does not exist is not uploaded: Linear keeps it as a link.
     if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
       const path = attachment.url.split(/[?#]/)[0]!;
@@ -174,18 +184,30 @@ class Writer {
         const label = this.inline(attachment.children);
         const destination = imageDestination(attachment.url);
         if (bullet && VIDEO.test(path)) return `${marker} [${label}](${destination})`;
-        return `${marker} \n${indent}[${label}](${destination})`;
+        // An empty marker cannot interrupt the parent paragraph. A task
+        // marker already has content, so its file block can stay below it.
+        if (!interruptsParagraph || marker.startsWith('- ')) {
+          return `${marker} \n${indent}[${label}](${destination})`;
+        }
       }
     }
     if (first === undefined) return marker;
     this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
     // Blocks of an item are a blank line apart, but a nested list follows
-    // its paragraph on the next line. Lint refuses an item that starts with
-    // another block, so the first block is a paragraph.
+    // its paragraph on the next line when it can interrupt that paragraph.
+    // Ordered lists starting above or below 1, lists starting with an empty
+    // item and existing file blocks need their blank line to stay separate
+    // from the preceding paragraph.
     let content = '';
     item.children.forEach((child, index) => {
-      if (index > 0) content += child.type === 'list' && item.children[index - 1]?.type === 'paragraph' ? '\n' : '\n\n';
-      content += this.block(child).join('\n\n');
+      const previous = item.children[index - 1];
+      const interrupts = child.type === 'list'
+        && previous?.type === 'paragraph'
+        && (!child.ordered || (child.start ?? 1) === 1)
+        && child.children[0]!.children.length > 0
+        && !(child.position!.start.line > previous.position!.end.line + 1 && startsWithFileBlock(child));
+      if (index > 0) content += interrupts ? '\n' : '\n\n';
+      content += child.type === 'list' ? this.list(child, interrupts) : this.block(child).join('\n\n');
     });
     this.containers.pop();
     return `${marker} ${prefixLines(content, indent, '').slice(indent.length)}`;
@@ -311,14 +333,7 @@ class Writer {
 
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
   private label(open: number): string {
-    let depth = 0;
-    for (let at = open; at < this.source.length; at++) {
-      const char = this.source[at];
-      if (char === '\\') at++;
-      else if (char === '[') depth++;
-      else if (char === ']' && --depth === 0) return this.source.slice(open + 1, at);
-    }
-    return '';
+    return bracketedLabel(this.source, open);
   }
 }
 
@@ -383,37 +398,67 @@ function insideLine(source: string, at: number): boolean {
 }
 
 /**
- * A destination as Markdown source for a decoded URL: spaces encoded, and
- * what Markdown would read back differently escaped (a backslash before
- * punctuation, an `&` that starts a character reference).
+ * A text made from a Linear document's `content`, in the form `fix` (and so
+ * the `linear-format` hook) leaves unchanged. Linear's own text is not always
+ * that form: it can store a table cell with a trailing space (`| a  |`).
+ * Pass the whole file, front matter included, as the hook sees it, and
+ * `inRepository`, whether a relative destination names a file of the
+ * repository the file is written to (`linkedFileCheck`), as the hook checks it.
+ *
+ * Only a re-spelling is taken: when `fix` would change the document itself
+ * (it writes a setext heading's two lines as one), the file would no longer
+ * hold what Linear holds, and the text stays as it is.
  */
-function destination(url: string): string {
-  return url
-    .replace(/ /g, '%20')
-    .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
-    .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
+export function fixLinearText(text: string, content: string, inRepository: (url: string) => boolean): string {
+  // A relative link or image still in Linear's content was not uploaded, so
+  // its file is not there: Linear keeps such a link as a link, not as a file
+  // block, and so does a repair that turns such an image into a link.
+  const notUploaded = relativeUrls(content, new Set(['link', 'image']));
+  const linear = { linkedFileExists: (url: string) => !notUploaded.has(url) };
+  const fixed = fixText(text, linear);
+  if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body)) return text;
+  // The hook cannot tell: it writes a list item holding only a link to a file
+  // of the repository as a file block. Linear stores a file block it gets for
+  // a file it holds no upload of as that link again, so the file takes the
+  // hook's form. Only such blocks may differ from Linear's form: written
+  // back in that form, the text must be Linear's form again.
+  if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]!) && inRepository(url))) return fixed;
+  const hooked = fixText(text, { linkedFileExists: (url) => !notUploaded.has(url) || inRepository(url) });
+  return fixText(hooked, linear) === fixed ? hooked : fixed;
 }
 
 /**
- * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded, and a
- * backslash at its end doubled, so it cannot escape the closing bracket.
+ * The body as Linear stores it after a write, for file blocks whose link is
+ * still relative: Linear holds no upload of such a file, and stores the
+ * block as the link on the item's line (`* [Name](<path>)`), so the text sent
+ * reads as the same Markdown as what Linear then holds. Every other text
+ * stays as written.
  */
-export function linkDestination(url: string): string {
-  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
-  const trailing = /\\*$/.exec(inner)![0].length;
-  return `<${inner}${trailing % 2 === 1 ? '\\' : ''}>`;
-}
-
-/** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */
-function imageDestination(url: string): string {
-  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+export function relativeFileBlocksAsLinks(body: string): string {
+  const joins: Array<{ from: number; to: number }> = [];
+  visit(parse(body), (node) => {
+    if (node.type !== 'listItem' || node.children.length !== 1) return;
+    const [paragraph] = node.children;
+    if (paragraph?.type !== 'paragraph' || attachmentLink(paragraph) === undefined) return;
+    // A file block: the marker alone on its line, and the link on the next.
+    const gap = /[ \t]*\r?\n[ \t>]*$/.exec(body.slice(start(node), start(paragraph)));
+    if (gap !== null) joins.push({ from: start(paragraph) - gap[0].length, to: start(paragraph) });
+  });
+  let result = body;
+  for (const { from, to } of joins.reverse()) result = `${result.slice(0, from)} ${result.slice(to)}`;
+  return result;
 }
 
 /** The destinations of relative links in the text (no scheme, not an anchor), as written. */
 export function relativeLinkUrls(text: string): Set<string> {
+  return relativeUrls(text, new Set(['link']));
+}
+
+/** The relative destinations (no scheme, not an anchor) of the given node types in the text, as written. */
+function relativeUrls(text: string, types: ReadonlySet<string>): Set<string> {
   const urls = new Set<string>();
   visit(parse(splitFile(text).body), (node) => {
-    if (node.type === 'link' && !/^[a-z][a-z0-9+.-]*:/i.test(node.url) && !node.url.startsWith('#')) urls.add(node.url);
+    if ((node.type === 'link' || node.type === 'image') && types.has(node.type) && !/^[a-z][a-z0-9+.-]*:/i.test(node.url) && !node.url.startsWith('#')) urls.add(node.url);
   });
   return urls;
 }
@@ -423,6 +468,18 @@ const VIDEO = /\.(?:mp4|mov|webm)$/i;
 
 /** Audio Linear keeps as a link in a bullet item (recorded for MP3; other types are unconfirmed). */
 const AUDIO = /\.mp3$/i;
+
+function startsWithFileBlock(list: List): boolean {
+  const [item] = list.children;
+  if (item === undefined) return false;
+  const link = itemAttachment(item);
+  return link !== undefined && link.position!.start.line > item.position!.start.line;
+}
+
+function itemAttachment(item: ListItem): Link | undefined {
+  const [first] = item.children;
+  return first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
+}
 
 /** A paragraph that holds only a link to a relative file other than Markdown: an attachment. */
 function attachmentLink(paragraph: Paragraph): Link | undefined {

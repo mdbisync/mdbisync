@@ -25,7 +25,7 @@ describe('sync: pull request capture', () => {
     const merged = await sync();
     assert.equal(merged.result.exitCode, 0, merged.result.stderr);
     assert.equal(h.world.github.pullRequests[0]?.merged, true);
-    for (const path of ['%2Egithub/x', '%2EGitHub/workflows/notes', 'nested/%2EGITHUB/page']) assert.equal(await show(`refs/heads/main:eng/notes/${path}.md`), 'New page.\n');
+    for (const path of ['%2Egithub/x', '%2EGitHub/workflows/notes', 'nested/%2EGITHUB/page']) assert.equal(await show(`refs/heads/main:eng/notes/${path}.md`), 'New page.');
     assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Ordinary edit/);
     assert.match(await show('refs/heads/main:combined/%2Egithub/guide.md'), /Renamed page/);
     await h.settle();
@@ -66,7 +66,7 @@ describe('sync: pull request capture', () => {
     assert.equal(pr.merged, true);
     const main = await rev('refs/heads/main');
     assert.equal((await h.fixture.remote.text(['show', '-s', '--format=%P', main])).split(' ').length, 2, 'not a merge commit');
-    assert.equal(await show('refs/heads/main:eng/notes/plan.md'), `---\nowner: example\n---\n\n# Plan\n\nSteps one, two and three. ${CANARY}\n`);
+    assert.equal(await show('refs/heads/main:eng/notes/plan.md'), `---\nowner: example\n---\n\n# Plan\n\nSteps one, two and three. ${CANARY}`);
     assert.match(second.summary, /Merged the sync pull request with a merge commit/);
   });
 

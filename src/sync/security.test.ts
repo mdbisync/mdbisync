@@ -3,7 +3,9 @@ import { it } from 'node:test';
 import { createFixture } from '../state/test-helpers.ts';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { securityGate } from './security.ts';
+import { SCRATCH_BATCH_BYTES, type SecurityGate, SecurityScratchBudgetError, checkTitle, securityGate } from './security.ts';
+import { randomBytes } from 'node:crypto';
+import type { Git } from '../state/index.ts';
 import { answeringGate, checkStaged, stagingGate } from './staged.ts';
 
 it('runs security aliases at both stages and returns no hook output or matched value', async () => {
@@ -186,4 +188,238 @@ it("never lets a candidate replace a script or support file the tracked branch k
     await gate?.close?.();
     await fixture.cleanup();
   }
+});
+
+/** A commit on top of `origin/main` that also tracks `entries`, as `git add --force` or a symbolic link would. */
+async function trackedWith(git: Git, root: string, entries: {path: string; mode: '100644' | '100755' | '120000' | '160000'; content: string}[]): Promise<string> {
+  const env = {GIT_INDEX_FILE: join(root, 'extra.index'), GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com'};
+  await git.run(['read-tree', 'origin/main'], {env});
+  for (const entry of entries) {
+    // A submodule's content is the commit it records.
+    const oid = entry.mode === '160000' ? entry.content : await git.text(['hash-object', '-w', '--stdin'], {input: entry.content});
+    await git.run(['update-index', '--add', '--cacheinfo', `${entry.mode},${oid},${entry.path}`], {env});
+  }
+  const tree = await git.text(['write-tree'], {env});
+  return git.text(['commit-tree', tree, '-p', 'origin/main', '-m', 'Support files'], {env});
+}
+
+// The hook reads the repository's own rule file and refuses a document holding the word it names. It also checks
+// that the index holds the tracked tree with only the candidates added, so the hooks check the tree that is merged.
+const RULE_HOOK = `import {readFileSync} from 'node:fs'; import {execFileSync} from 'node:child_process';
+const files = process.argv.slice(2);
+const changed = execFileSync('git', ['diff-index', '--cached', '--name-only', process.env.TRACKED_TREE], {encoding: 'utf8'}).split('\\n').filter(Boolean);
+if (changed.some((path) => !files.includes(path))) { console.log('tree differs'); process.exit(2); }
+// Like Gitleaks, the hook falls back to its default rules when the repository's rule file is missing.
+const rules = (() => { try { return readFileSync('.gitleaks.toml', 'utf8'); } catch { return 'word = "default-rule"'; } })();
+const word = rules.match(/word = "(.*)"/)[1];
+for (const file of files) if (readFileSync(file, 'utf8').includes(word)) { console.log(file + ':1: custom rule'); process.exitCode = 1; }
+`;
+const RULE_CONFIG = `repos:
+  - repo: local
+    hooks:
+      - id: custom-rule
+        alias: security
+        name: Custom rule
+        entry: node hooks/rule.mjs
+        language: system
+        stages: [pre-commit]
+`;
+
+it('checks the tracked tree with force-tracked ignored support files and hook scripts', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'.gitignore': '.gitleaks.toml\nignored-hooks/\n', '.pre-commit-config.yaml': RULE_CONFIG, 'hooks/rule.mjs': RULE_HOOK, 'docs/plan.md': 'Original.\n'});
+    const git = await fixture.clone('ignored');
+    // Ignored by `.gitignore` and tracked all the same, as `git add --force` leaves them: first the rule file alone,
+    // then the hook script as well.
+    const rules = {path: '.gitleaks.toml', mode: '100644', content: 'word = "house-codename"\n'} as const;
+    const ignoredHook = RULE_CONFIG.replace('node hooks/rule.mjs', 'node ignored-hooks/rule.mjs');
+    for (const extra of [[rules], [rules, {path: 'ignored-hooks/rule.mjs', mode: '100644', content: RULE_HOOK} as const, {path: '.pre-commit-config.yaml', mode: '100644', content: ignoredHook} as const]]) {
+      const tracked = await trackedWith(git, fixture.root, [...extra]);
+      const env = {PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8', TRACKED_TREE: await git.text(['rev-parse', `${tracked}^{tree}`])};
+      const gate = await securityGate(git, tracked, {env});
+      try {
+        assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+        assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'The house-codename.\n']])), [{hook: 'custom-rule', line: 1}]);
+        // The ignored files survive the reset between candidates.
+        assert.deepEqual(await gate.check(new Map([['docs/new.md', 'The house-codename again.\n']])), [{hook: 'custom-rule', line: 1}]);
+        assert.deepEqual(await gate.check(new Map([['docs/new.md', 'Safe.\n']])), []);
+      } finally { await gate.close?.(); }
+    }
+  } finally { await fixture.cleanup(); }
+});
+
+it('reproduces a symbolic link that stays in the tree and refuses every candidate when one leads outside it', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'.pre-commit-config.yaml': RULE_CONFIG, 'hooks/rule.mjs': RULE_HOOK, 'config/rules.toml': 'word = "house-codename"\n', 'docs/plan.md': 'Original.\n'});
+    const git = await fixture.clone('links');
+    const inside = await trackedWith(git, fixture.root, [
+      {path: '.gitleaks.toml', mode: '120000', content: 'config/rules.toml'},
+      {path: 'docs/alias.md', mode: '120000', content: '../config/rules.toml'},
+      // A support file kept as a document, a document alias, and a link to a submodule's folder.
+      {path: 'config/extra.toml', mode: '120000', content: '../docs/extra-rules.md'},
+      {path: 'docs/extra-rules.md', mode: '100644', content: 'Extra rules.\n'},
+      {path: 'README.md', mode: '120000', content: 'docs/plan.md'},
+      {path: 'vendor/tool', mode: '160000', content: await git.text(['rev-parse', 'origin/main'])},
+      {path: 'tool', mode: '120000', content: 'vendor/tool'},
+    ]);
+    const env = (tracked: string) => git.text(['rev-parse', `${tracked}^{tree}`]).then((tree) => ({PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8', TRACKED_TREE: tree}));
+    const gate = await securityGate(git, inside, {env: await env(inside)});
+    try {
+      assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+      assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'The house-codename.\n']])), [{hook: 'custom-rule', line: 1}]);
+      // A candidate at a link's path would be written into its target while the hooks skip the link: refused,
+      // whether the link leads to a support file or to a document.
+      assert.deepEqual(await gate.check(new Map([['docs/alias.md', 'word = "other"\n']])), [{hook: 'security', line: 1}]);
+      assert.deepEqual(await gate.check(new Map([['README.md', 'Safe.\n']])), [{hook: 'security', line: 1}]);
+      assert.deepEqual(await gate.check(new Map([['tool/notes.md', 'Safe.\n']])), [{hook: 'security', line: 1}]);
+      assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'The house-codename.\n']])), [{hook: 'custom-rule', line: 1}]);
+      // The document a support file links to keeps its tracked text; one a document links to is checked as usual.
+      assert.deepEqual(await gate.check(new Map([['docs/extra-rules.md', 'Other rules.\n']])), [{hook: 'security', line: 1}]);
+      assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'The house-codename.\n']])), [{hook: 'custom-rule', line: 1}]);
+    } finally { await gate.close?.(); }
+    for (const target of ['../outside.toml', '/etc/hostname', 'config/missing.toml', '.git/config', 'config/../..']) {
+      const tracked = await trackedWith(git, fixture.root, [{path: '.gitleaks.toml', mode: '120000', content: target}]);
+      const refusing = await securityGate(git, tracked, {env: await env(tracked)});
+      try {
+        for (let round = 0; round < 2; round++) assert.deepEqual(await refusing.check(new Map([['docs/plan.md', 'Safe.\n']])), [{hook: 'security', line: 1}], target);
+      } finally { await refusing.close?.(); }
+    }
+  } finally { await fixture.cleanup(); }
+});
+
+it('keeps a file stored before its LFS pattern as it is stored, with the LFS clean filter on', async () => {
+  const fixture = await createFixture();
+  const saved = {...process.env};
+  let gate: Awaited<ReturnType<typeof securityGate>> | undefined;
+  try {
+    await fixture.seed({'.pre-commit-config.yaml': RULE_CONFIG, 'hooks/rule.mjs': RULE_HOOK, '.gitleaks.toml': 'word = "house-codename"\n', 'docs/old.png': 'Raw bytes.\n'});
+    const git = await fixture.clone('lfs-later');
+    // The pattern comes later; the file keeps its raw blob, as it does on a branch that adds the pattern.
+    const tracked = await trackedWith(git, fixture.root, [{path: '.gitattributes', mode: '100644', content: '*.png filter=lfs diff=lfs merge=lfs -text\n'}]);
+    assert.equal(await git.text(['cat-file', 'blob', `${tracked}:docs/old.png`]), 'Raw bytes.');
+    // As on a runner where git-lfs is installed for the user.
+    Object.assign(process.env, {GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: 'filter.lfs.clean', GIT_CONFIG_VALUE_0: 'git-lfs clean -- %f', GIT_CONFIG_KEY_1: 'filter.lfs.smudge', GIT_CONFIG_VALUE_1: 'git-lfs smudge -- %f', GIT_CONFIG_KEY_2: 'filter.lfs.required', GIT_CONFIG_VALUE_2: 'true'});
+    gate = await securityGate(git, tracked, {env: {PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8', TRACKED_TREE: await git.text(['rev-parse', `${tracked}^{tree}`])}});
+    assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+    assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'The house-codename.\n']])), [{hook: 'custom-rule', line: 1}]);
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    await gate?.close?.();
+    await fixture.cleanup();
+  }
+});
+
+it('gives no answer for a title whose path no gate can take, without naming the path', async () => {
+  const TITLE = ['title', 'canary', '5521'].join('-');
+  const asked: string[] = [];
+  const gate: SecurityGate = {
+    configured: true,
+    async check(files) {
+      asked.push(...files.keys());
+      return [];
+    },
+  };
+  // A tracked folder Git accepts that a repository path may not hold: the gate is never asked, and nothing throws with the path.
+  for (const path of ['odd\\folder/' + TITLE + '.md', 'docs/../' + TITLE + '.md', 'docs/.git/' + TITLE + '.md']) {
+    assert.equal(await checkTitle(gate, path, TITLE), null, path);
+  }
+  assert.deepEqual(asked, []);
+  assert.deepEqual(await checkTitle(gate, 'docs/' + TITLE + '.md', TITLE), []);
+  assert.deepEqual(asked, ['docs/' + TITLE + '.md']);
+});
+
+const BUDGET_HOOK = `repos:
+  - repo: local
+    hooks:
+      - id: support-check
+        alias: security
+        name: Support check
+        entry: node check.mjs
+        language: system
+        stages: [pre-commit]
+`;
+
+/** Records each `cat-file` call the gate makes on `git`: its arguments, its output cap and the files streamed. */
+function spyCatFile(git: Git): { batches: { oids: string[]; maxOutputBytes: number | undefined }[]; streamed: string[] } {
+  const batches: { oids: string[]; maxOutputBytes: number | undefined }[] = [];
+  const streamed: string[] = [];
+  const run = git.run.bind(git);
+  git.run = (args, options = {}) => {
+    if (args[0] === 'cat-file' && args[1] === '--batch') batches.push({oids: String(options.input).trim().split('\n'), maxOutputBytes: options.maxOutputBytes});
+    return run(args, options);
+  };
+  const runToFile = git.runToFile.bind(git);
+  git.runToFile = (args, path, mode) => {
+    streamed.push(String(args.at(-1)));
+    return runToFile(args, path, mode);
+  };
+  return {batches, streamed};
+}
+
+it('reads support files in byte-bounded batches and streams one larger than a batch, so the hooks still run', async () => {
+  const fixture = await createFixture();
+  let gate: SecurityGate | undefined;
+  try {
+    const large: Record<string, Buffer> = {};
+    // 32 support files of 1 MiB each: one count-bounded batch of them would exceed the byte budget.
+    for (let at = 0; at < 32; at++) large[`assets/part-${at}.bin`] = randomBytes(1024 * 1024);
+    const huge = randomBytes(SCRATCH_BATCH_BYTES + 1);
+    await fixture.seed({
+      '.pre-commit-config.yaml': BUDGET_HOOK,
+      // The hook proves the streamed file reached the scratch tree whole.
+      'check.mjs': `import {statSync} from 'node:fs'; if (statSync('assets/huge.bin').size !== ${huge.length}) { console.log('docs/plan.md:1: huge'); process.exitCode = 1; } for (const file of process.argv.slice(2)) { if (statSync(file).size === 0) process.exitCode = 1; }`,
+      'assets/huge.bin': huge,
+      ...large,
+    }, {executable: ['assets/part-0.bin']});
+    const git = await fixture.clone('large-support');
+    const tracked = await git.text(['rev-parse', 'origin/main']);
+    const spy = spyCatFile(git);
+    gate = await securityGate(git, tracked);
+    assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+    const hugeOid = await git.text(['rev-parse', `${tracked}:assets/huge.bin`]);
+    assert.deepEqual(spy.streamed, [hugeOid]);
+    assert.ok(spy.batches.length >= 2);
+    for (const batch of spy.batches) {
+      assert.ok(batch.maxOutputBytes !== undefined && batch.maxOutputBytes <= SCRATCH_BATCH_BYTES);
+      assert.ok(!batch.oids.includes(hugeOid));
+    }
+    // Every support file was read, and the scratch tree equals the tracked one (the gate checks this, or it fails).
+    const read = new Set(spy.batches.flatMap((batch) => batch.oids));
+    for (const path of Object.keys(large)) assert.ok(read.has(await git.text(['rev-parse', `${tracked}:${path}`])));
+  } finally { await gate?.close?.(); await fixture.cleanup(); }
+});
+
+it('stops a check before any read or hook, with a named code, when the tracked files exceed the scratch budget', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({
+      '.pre-commit-config.yaml': BUDGET_HOOK,
+      // The hook would leave a marker in the real repository's folder if it ever ran.
+      'check.mjs': `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fixture.root, 'hook-ran'))}, '');`,
+      'assets/a.bin': randomBytes(64 * 1024),
+      'assets/b.bin': randomBytes(64 * 1024),
+    });
+    const git = await fixture.clone('over-budget');
+    const tracked = await git.text(['rev-parse', 'origin/main']);
+    const spy = spyCatFile(git);
+    // A run with nothing to check is not stopped; the first check is, every time, with the named code.
+    const over = await securityGate(git, tracked, {scratchBytes: 100 * 1024});
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await assert.rejects(over.check(new Map([['docs/plan.md', 'Safe.\n']])), (error: unknown) =>
+          error instanceof SecurityScratchBudgetError && error.code === 'security-scratch-budget' && /security-scratch-budget/.test(error.message));
+      }
+    } finally { await over.close?.(); }
+    // Nothing was read: the budget is checked from the sizes the tree lists.
+    assert.deepEqual(spy.batches, []);
+    assert.deepEqual(spy.streamed, []);
+    await assert.rejects(access(join(fixture.root, 'hook-ran')));
+    // Under the budget the same tree is checked as usual.
+    const gate = await securityGate(git, tracked, {scratchBytes: 1024 * 1024});
+    try {
+      assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+    } finally { await gate.close?.(); }
+  } finally { await fixture.cleanup(); }
 });

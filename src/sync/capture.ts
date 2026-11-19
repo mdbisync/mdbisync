@@ -6,10 +6,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { isMap, parseDocument, stringify } from 'yaml';
-import { isMarkdownPath, loadMapping, placeOf, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
+import { isMarkdownPath, placeOf, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
+import { checkMappingBudget, mapTree } from '../mapping/mapping.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
+import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
+import { fixLinearText, joinFile, linkedFileCheck, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -17,21 +19,24 @@ import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
-import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
-import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
-import { readRecorded, recordedTime } from './recorded.ts';
+import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, signObservation, UPLOADS_REBUILDING } from '../state/index.ts';
+import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
+import { MARKS, type ConflictNotices, markWritesLinear, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
+import { matchesObservedBody, observedDigest, readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
+import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
 import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
 import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
-import { trackedPlaces } from './tracked-places.ts';
+import { pendingMove, syncedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
+
+/** The subject of a capture commit on the `linear` ref: Linear members' text entering git. */
+export const CAPTURE_MESSAGE = 'Capture Linear changes';
 
 export interface CaptureOptions {
   config: StateConfig;
@@ -131,7 +136,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   if (base === null) throw new Error(message('sync.needs-initial-sync'));
   const identity = options.identity ?? context.identity;
   const ids = await readIds(git, state.ids);
-  const uploads = await readUploads(git, state.uploads);
+  const uploads = await readUploads(git, state.uploads, context.pushedKey);
   const reserved = await readReservedIds(git, state.ids);
   // The write step relinks the documents that still name a superseded id; until then a link by it reads back as the
   // link to its path.
@@ -142,15 +147,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   let published = false;
   try {
     // Capture the old place before a git annotation change moves its documents.
-    const recorded = await loadMapping(git, base);
+    const blobBudget = new MappingBlobBudget();
+    const entries = await listTree(git, base, MAPPING_TREE_BYTES);
+    const recorded = await mapTree(git, entries, blobBudget);
     const zones = new Map(mapping.zones);
     let changedPlace = false;
-    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch named it.
-    const allowedPlace = trackedPlaces(git, fetched.tracked, mapping.zones);
     for (const [folder, old] of recorded.zones) {
       const current = zones.get(folder);
       if (current !== undefined && (old.team !== current.team || old.project !== current.project)) {
-        if (!await allowedPlace(folder, placeOf(old))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
+        // An old place is read only to finish the tracked branch's latest move of the folder, never a place it held before.
+        if (!await pendingMove(git, fetched.tracked, folder, placeOf(old), placeOf(current))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
         zones.set(folder, old);
         changedPlace = true;
       }
@@ -161,9 +167,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (resolved.targets === undefined) throw new Error(message('sync.places-unresolved'));
       targets = resolved.targets;
     }
+    // The recorded state comes from refs any writer can move: a file's place only it names is read when the tracked
+    // branch held the file synchronized there.
+    const allowedPlace = syncedPlaces(git, fetched.tracked, context.mapping.zones, zones, linear.facts);
     if (state.ids === null) {
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
-      const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
+      const paths = new Set(recorded.documents.map((document) => document.path));
+      const texts = await blobBudget.read(git, entries.filter((entry) => paths.has(entry.path)));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
       const plainProvenance = await readPlainFileProvenance(git, base);
       for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) {
@@ -174,9 +184,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
     const cursor = await readCaptureCursor(git, state.ids);
-    const entries = await listTree(git, base);
-    const textEntries = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
-    const blobs = await readBlobs(git, textEntries.map((entry) => entry.oid));
+    const recordedBlobs = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
+    const textEntries = recordedBlobs.filter(readableBlob);
+    const unreadIds = new Set(recordedBlobs.filter((entry) => !readableBlob(entry)).map((entry) => ids.get(entry.path)!.id));
+    for (const id of unreadIds) result.leftOut.push({id, rule: 'blob-too-large'});
+    const blobs = await blobBudget.read(git, textEntries);
     const previous = new Map(textEntries.map((entry) => [entry.path, blobs.get(entry.oid)!]));
     const byId = new Map([...ids].map(([path, entry]) => [entry.id, { path, entry }]));
     // A new document's id is reserved for its path until it is mapped. Documents an earlier run wrote may link to it, and
@@ -230,6 +242,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const gone = new Set<string>();
     const held = new Set<string>();
     for (const id of notFound) {
+      if (unreadIds.has(id)) continue;
       const place = recordedPlace(byId.get(id)!.path);
       if ((place !== undefined && answered.has(place)) || (heldBefore.has(id) && answered.size > 0)) gone.add(id);
       else held.add(id);
@@ -246,13 +259,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         || lengthRefusal({title: mapped.title}, linear.facts) !== undefined;
     };
     const retained = new Map<string, string>();
+    // The place each retained document was listed in: it is the sync's only there.
+    const retainedPlace = new Map<string, string>();
     for (const [id, old] of byId) {
-      if (!excludedPath(old.path)) continue;
+      if (unreadIds.has(id) || !excludedPath(old.path)) continue;
       const baseline = await lastSynchronized(git, base, old.path, linear.facts, sides);
       baselines.set(old.path, baseline);
       const doc = listed.get(id);
       if (baseline === null || doc === undefined || doc.title.normalize('NFC') !== baseline.file.title.normalize('NFC')) continue;
-      if (!await allowedPlace(folderOf(old.path), baseline.file.place)) continue;
+      if (!await allowedPlace(old.path, baseline.file.place)) continue;
       let resolved;
       try { resolved = placeId(targets, baseline.file.place); }
       catch {
@@ -261,12 +276,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (lookup.targets === undefined) continue;
         resolved = placeId(lookup.targets, place);
       }
-      if ('projectId' in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) retained.set(id, old.path);
+      if ('projectId' in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) {
+        retained.set(id, old.path);
+        retainedPlace.set(id, placeKeyOf(doc));
+      }
     }
     const folderFor = (doc: LinearDocument) => folders.get(placeKeyOf(doc));
     // Linear's own answer for where a document is, never the ids state, decides whether the sync may change it: a
     // known id is only a path's claim, and anyone who can push the state refs can make that claim.
-    const placed = (doc: LinearDocument) => folderFor(doc) !== undefined || retained.has(doc.id);
+    const placed = (doc: LinearDocument) => folderFor(doc) !== undefined || (retained.has(doc.id) && retainedPlace.get(doc.id) === placeKeyOf(doc));
     const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && placed(doc);
     const normalizedTime = cursorTime;
     // A document still at the update time a run recorded it with is in the record as Linear holds it.
@@ -279,7 +297,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const entry = byId.get(doc.id)?.entry;
       return entry?.saved !== undefined && (entry.suspended === undefined || entry.saved.notice?.kind === 'blocked');
     };
-    let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || marked(doc) || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor)));
+    // Older ids entries have no digest. Read those bodies once so a later write can still verify them if the
+    // attachment cache is unavailable.
+    let selected = [...listed.values()].filter((doc) => {
+      const old = byId.get(doc.id);
+      return old === undefined || marked(doc) || (old.entry.observedDigest === undefined && live(doc) && previous.has(old.path) && !excludedPath(old.path))
+        || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor));
+    });
     const invalidZone = (doc: LinearDocument, path: string) => {
       const zone = nearestZone(mapping.zones, folderOf(path));
       if (zone === undefined) return true;
@@ -305,8 +329,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Re-read bodies when a path changes so those inbound links are translated too.
     if (gone.size > 0 || [...listed.values()].some((doc) => {
       const old = byId.get(doc.id);
-      return old !== undefined && (!live(doc) || destination(doc, occupied) !== old.path);
+      return old !== undefined && !unreadIds.has(doc.id) && (!live(doc) || destination(doc, occupied) !== old.path);
     })) selected = [...listed.values()];
+    selected = selected.filter((doc) => !unreadIds.has(doc.id));
     const documents = new Map<string, LinearDocument>([...listed].filter(([, doc]) => placed(doc)));
     const work = new Map<string, LinearDocument>();
     // A document moved out of the places between the listing and this read is not taken into the map.
@@ -326,7 +351,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     // Only files already present in the branch are link targets until their
     // candidates pass. A blocked rename continues to point at its old file.
-    const documentIds = new Map([...ids].filter(([path]) => previous.has(path)).map(([path, entry]) => [path, entry.id]));
+    const documentIds = new Map([...ids].filter(([path, entry]) => previous.has(path) || unreadIds.has(entry.id)).map(([path, entry]) => [path, entry.id]));
     // A reserved id names its path too: a link written to a new document that is not created yet stays relative.
     for (const [id, path] of reservedById) if (!documentIds.has(path)) documentIds.set(path, id);
     for (const id of gone) {
@@ -363,8 +388,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
-    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool);
-    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; same: boolean } };
+    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool, undefined, uploadAccessProbe(linear));
+    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; observed?: string; compared?: { body: string; text: string } };
     const candidates = new Map<string, Candidate>();
     // A rejected target links to its accepted file, if it has one.
     const resetTargets = (rejected: ReadonlySet<string>, targets: Map<string, string>) => {
@@ -375,21 +400,24 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
     };
     const resetTarget = (id: string, targets: Map<string, string> = documentIds) => resetTargets(new Set([id]), targets);
-    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[]) => {
+    // Keyed by the document's recorded path by default.
+    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[], key = byId.get(doc.id)?.path ?? path) => {
       const old = byId.get(doc.id);
       const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-      ids.set(old?.path ?? path, {...old?.entry, id: doc.id, saved});
-      result.blocked.push({id: doc.id, path: old?.path ?? path, findings});
+      ids.set(key, {...old?.entry, id: doc.id, saved});
+      result.blocked.push({id: doc.id, path: key, findings});
       resetTarget(doc.id);
     };
+    const restores: Array<{doc: LinearDocument; saved: {icon: string | null; color: string | null}; path: string; entry: IdEntry}> = [];
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
           // A retained entry (a suspended tombstone) keeps its saved decoration: give it back only once, and only to a
           // document in the trash or archive of a configured place. One outside them is not the sync's to decorate.
+          // It is given back with the marks, after the run reads the document again.
           const saved = old.entry.saved;
-          if (saved !== undefined && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
+          if (saved !== undefined && options.stageOnly !== true && placed(doc) && (doc.icon !== saved.icon || doc.color !== saved.color)) restores.push({doc, saved, path: old.path, entry: old.entry});
           const changedFile = removeBody(old.path);
           const retained = keptForLane(old.entry);
           if (!retained) ids.delete(old.path);
@@ -400,12 +428,35 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const path = paths.get(doc.id)!;
       if (limited.has(doc.id)) continue;
+      // The title names the file, its `ids` key and the report's line: a name the record does not hold yet is
+      // shown to the hooks first. Until they pass it, the document keeps its accepted path or, when it has none,
+      // a name made from its id, also in place of a path an earlier run recorded for it without a file.
+      if (gate.configured && !previous.has(path)) {
+        const findings = await checkTitle(gate, path, doc.title);
+        if (findings === null) {
+          result.leftOut.push({id: doc.id, rule: 'security-unchecked'});
+          resetTarget(doc.id);
+          continue;
+        }
+        if (findings.length > 0) {
+          let held = old !== undefined && previous.has(old.path) ? old.path : undefined;
+          if (held === undefined) {
+            const available = new Set(reservations);
+            if (old !== undefined) available.delete(old.path);
+            held = documentPath(folderFor(doc)!, doc.id, doc.id, available, undefined, (candidate) => invalidZone(doc, candidate));
+            reservations.add(held);
+            if (old !== undefined && old.path !== held) ids.delete(old.path);
+          }
+          recordBlocked(doc, held, findings, held);
+          continue;
+        }
+      }
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
         // An over-limit legacy body is not evidence for links or equality.
         const previousBody = old === undefined ? undefined : markdownBaseline(prior.body);
-        const assets = await downloadAssets(path, doc.content ?? '', uploads, previousBody, old?.path);
+        const assets = await downloadAssets(path, doc.content ?? '', uploads, previousBody, old?.path, new Set(old?.entry.plainFiles));
         const candidate: Candidate = {doc, path, head, assets, files: new Map<string, FileContent>([[path, joinFile(head, assets.body)], ...assets.files])};
         if (old?.path === path && previousBody !== undefined) candidate.previousBody = previousBody;
         candidates.set(doc.id, candidate);
@@ -451,14 +502,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, candidate.path, map, seen);
         body = linksFromLinear(body, candidate.path, map, seen);
       }
-      // Linear's own spelling of the same document is no change: keep the file's text.
+      // Linear's own spelling of the same document is no change: keep the file's text, also when its files are
+      // downloaded again (the same Markdown links the same paths). A change of spelling alone would read as an edit
+      // in Linear. A changed document is written in the form the `linear-format` hook leaves as it is.
       // Compared again only when other link targets change the body.
       if (candidate.compared?.body !== body) {
-        const {assets} = candidate;
-        const newAssets = assets.files.size > 0 || [...assets.uploads].some(([hash, url]) => uploads.get(hash) !== url);
-        candidate.compared = {body, same: candidate.previousBody !== undefined && !newAssets && sameMarkdown(candidate.previousBody, body)};
+        const unchanged = candidate.previousBody !== undefined && sameMarkdown(candidate.previousBody, body);
+        const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), candidate.doc.content ?? '', linkedFileCheck(candidate.path, (file) => mapping.files.has(file)));
+        candidate.compared = {body, text};
       }
-      return joinFile(candidate.head, candidate.compared.same ? candidate.previousBody! : body);
+      return candidate.compared.text;
     };
     let again = true;
     while (again) {
@@ -467,8 +520,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const {doc, path, head, assets} = candidate;
         const old = byId.get(id);
         let text: string;
+        let observed: string | undefined;
         try {
           text = textOf(candidate, documentIds);
+          if (assets.observedBody !== undefined) {
+            const observedCandidate = {...candidate, assets: {...assets, body: assets.observedBody}};
+            delete observedCandidate.compared;
+            observed = textOf(observedCandidate, documentIds);
+          }
         } catch (error) {
           if (!(error instanceof MarkdownLimitError)) throw error;
           result.leftOut.push({id, rule: 'markdown-complexity'});
@@ -477,8 +536,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           again = true;
           break;
         }
+        if (Buffer.byteLength(text) > MAPPING_FILE_BYTES || (observed !== undefined && Buffer.byteLength(observed) > MAPPING_FILE_BYTES)) {
+          result.leftOut.push({id, rule: 'blob-too-large'});
+          candidates.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
         candidate.files.set(path, text);
-        if (candidate.checked === text) continue;
+        if (candidate.checked === text && candidate.observed === observed) continue;
         let findings: SecurityFinding[] | null = [];
         if (!recordedAsIs(candidate, text)) {
           // Upload URLs also enter the cache ref. Scan the original text so
@@ -486,10 +552,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           const original = withNewUploadUrls(head + (doc.content ?? ''), assets.uploads, uploads) + ((assets.plainFiles?.length ?? 0) === 0 ? '' : `\n${assets.plainFiles!.join('\n')}\n`);
           if (original !== text) findings = await gate.check(new Map<string, FileContent>([[path, original], ...assets.files]));
           if (findings?.length === 0) findings = await gate.check(candidate.files);
-          if (findings?.length === 0 && assets.observedBody !== undefined) {
-            const observedCandidate = {...candidate, assets: {...assets, body: assets.observedBody}};
-            delete observedCandidate.compared;
-            const observed = textOf(observedCandidate, documentIds);
+          if (findings?.length === 0 && observed !== undefined) {
             if (observed !== text && observed !== original) findings = await gate.check(new Map([[path, observed], ...assets.files]));
             // The pull request step asks about the repaired text alone (`repairSet`): with the downloaded files
             // beside it, this run's check is another set, which the staged steps would not answer.
@@ -513,6 +576,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           break;
         }
         candidate.checked = text;
+        if (observed !== undefined) candidate.observed = observed;
       }
     }
     // The stage step stops here: the reads it kept end, and the rest of the run reads Linear itself.
@@ -530,27 +594,82 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (budget.short === true) result.summary += ` ${message('sync.link-variant-budget')}`;
       return result;
     }
-    // The apply step's documents are the stage step's snapshot, and a mark
-    // saves and restores a document's icon and color. The documents whose
-    // mark may change are read again: a blocked one is marked over its
-    // current decoration, and any other that changed since then keeps its
-    // mark until the next run captures it.
+    // A mark saves and restores a document's icon and color and comments on
+    // it, by id, wherever the document is. Its copy here was read earlier in
+    // the run (in the apply step, by the stage step), and a Linear member may
+    // have moved, trashed or archived it since. The documents whose mark may
+    // change, and those in the trash or archive whose own decoration is due
+    // back, are read again. Only one still in the place it was read in (and,
+    // to be marked, still live) is changed. Any other is reported, and the
+    // held cursor lets the next run read it again: a blocked one keeps its
+    // entry as the run found it. A blocked one is marked over its current
+    // decoration; any other that changed since keeps its mark until the next
+    // run captures it.
     const unmarked = new Set<string>();
-    if (linear.transport.reads?.mode === 'replay') {
-      const marking = [
-        ...result.blocked.map(({id}) => id),
-        ...[...candidates].filter(([id, {doc}]) => byId.get(id)?.entry.saved !== undefined || detectConflicts(doc.content ?? '').length > 0).map(([id]) => id),
-      ];
-      const current = marking.length === 0 ? new Map<string, LinearDocument>() : new Map((await linear.getDocuments(marking, {withContent: true})).map((doc) => [doc.id, doc]));
-      for (const blocked of result.blocked) {
-        const now = current.get(blocked.id);
-        const then = documents.get(blocked.id);
-        if (now === undefined || then === undefined || now.updatedAt === then.updatedAt) continue;
-        documents.set(blocked.id, {...now, content: then.content ?? null});
-        const entry = ids.get(blocked.path);
-        if (entry !== undefined && byId.get(blocked.id)?.entry.saved === undefined) ids.set(blocked.path, {...entry, saved: {icon: now.icon, color: now.color}});
+    const marking = new Set([
+      ...result.blocked.map(({id}) => id),
+      ...[...candidates].filter(([id, {doc}]) => byId.get(id)?.entry.saved !== undefined || detectConflicts(doc.content ?? '').length > 0).map(([id]) => id),
+    ]);
+    // The apply step reads every one of them, as its copies are the stage step's. A single-step run read them
+    // itself a moment ago: it reads again only those whose mark would change something in Linear.
+    const writes = (id: string) => {
+      const blocked = result.blocked.find((item) => item.id === id);
+      const doc = blocked === undefined ? candidates.get(id)?.doc : documents.get(id);
+      const entry = blocked === undefined ? byId.get(id)?.entry ?? {id} : ids.get(blocked.path);
+      return doc === undefined || entry === undefined || markWritesLinear(doc, entry, blocked?.findings);
+    };
+    const rereading = new Set([...[...marking].filter((id) => linear.transport.reads?.mode === 'replay' || writes(id)), ...restores.map(({doc}) => doc.id)]);
+    const current = rereading.size === 0 ? new Map<string, LinearDocument>() : new Map((await linear.getDocuments([...rereading])).map((doc) => [doc.id, doc]));
+    const samePlace = (now: LinearDocument | undefined, then: LinearDocument | undefined): now is LinearDocument =>
+      now !== undefined && then !== undefined && placed(now) && placeKeyOf(now) === placeKeyOf(then);
+    const stillThere = (now: LinearDocument | undefined, then: LinearDocument | undefined): now is LinearDocument =>
+      samePlace(now, then) && !now.trashed && now.archivedAt === null;
+    const leaveUnmarked = (id: string, then: LinearDocument | undefined) => {
+      const now = current.get(id);
+      unmarked.add(id);
+      result.leftOut.push({id, rule: 'changed-during-run'});
+      // Later steps (the hold marks, the write step's restore) read where the document is from this map.
+      if (now !== undefined && placed(now)) documents.set(id, {...now, content: then?.content ?? null});
+      else documents.delete(id);
+    };
+    for (const {doc, saved, path, entry} of restores) {
+      const now = current.get(doc.id);
+      if (samePlace(now, doc) && (now.trashed || now.archivedAt !== null)) {
+        if (now.icon !== saved.icon || now.color !== saved.color) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
+        continue;
       }
-      for (const [id, {doc}] of candidates) if (marking.includes(id) && current.get(id)?.updatedAt !== doc.updatedAt) unmarked.add(id);
+      // Not the run's to give back now: its file and entry, with the saved decoration, stay as the run found them, so a
+      // later run that finds it in place again still has the decoration to give back.
+      result.leftOut.push({id: doc.id, rule: 'changed-during-run'});
+      changes.delete(path);
+      result.removed = result.removed.filter((removed) => removed !== path);
+      ids.set(path, entry);
+    }
+    for (const blocked of [...result.blocked]) {
+      if (!rereading.has(blocked.id)) continue;
+      const now = current.get(blocked.id);
+      const then = documents.get(blocked.id);
+      if (!stillThere(now, then)) {
+        result.blocked.splice(result.blocked.indexOf(blocked), 1);
+        leaveUnmarked(blocked.id, then);
+        // The entry stays as the run found it: no saved decoration without a mark behind it.
+        for (const [path, entry] of ids) if (entry.id === blocked.id) ids.delete(path);
+        const old = byId.get(blocked.id);
+        if (old !== undefined) ids.set(old.path, old.entry);
+        continue;
+      }
+      if (now.updatedAt === then!.updatedAt) continue;
+      documents.set(blocked.id, {...now, content: then!.content ?? null});
+      const entry = ids.get(blocked.path);
+      if (entry !== undefined && byId.get(blocked.id)?.entry.saved === undefined) ids.set(blocked.path, {...entry, saved: {icon: now.icon, color: now.color}});
+    }
+    // A candidate's text was read and checked while it was in place, and other texts of this run link it where it
+    // was: it is captured as read. Only its mark waits.
+    for (const [id, {doc}] of candidates) {
+      if (!rereading.has(id)) continue;
+      const now = current.get(id);
+      if (!stillThere(now, doc)) leaveUnmarked(id, doc);
+      else if (now.updatedAt !== doc.updatedAt) unmarked.add(id);
     }
     // An excluded file's document that Linear still holds as last accepted has nothing to capture, the images it
     // downloaded included: they are read in the commit of that version, since git may have removed one since (the
@@ -564,7 +683,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const {head, body} = splitFile(baseline.text);
       let assets: CapturedAssets;
       try {
-        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body);
+        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body, candidate.path, new Set(byId.get(candidate.doc.id)?.entry.plainFiles));
         // Linear's spelling of that version reads back as its text.
         return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
       } catch (error) {
@@ -582,15 +701,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      const entry = {...old?.entry, id};
+      const entry = {...old?.entry, id, observedDigest: observedDigest(candidate.doc)};
       delete entry.pullRewrite;
       const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
       const repaired = candidate.files.get(candidate.path)!;
-      if (candidate.assets.observedBody !== undefined) {
-        const observedCandidate = {...candidate, assets: {...candidate.assets, body: candidate.assets.observedBody}};
-        delete observedCandidate.compared;
-        const observed = textOf(observedCandidate, documentIds);
+      if (candidate.observed !== undefined) {
+        const observed = candidate.observed;
         candidate.files.set(candidate.path, observed);
         const deadUploads = candidate.assets.deadUploads ?? [];
         entry.pullRewrite = {hash: createHash('sha256').update(observed).digest('hex'), observedHash: createHash('sha256').update(candidate.doc.content ?? '').digest('hex'), replacement: String(repaired),
@@ -618,23 +735,26 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // so documents sharing a timestamp or edited during pagination are not lost.
     // A place that listed nothing may have left out changes too: the cursor holds while a removal is held.
     const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
-    const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
-    const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
-    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
+    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
-    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes' + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity });
+    const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity, sign: signObservation(context.pushedKey) });
+    if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
     for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
       ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});
     }
     // Record a held removal, and a cleared one, so the next capture reads what this one held.
-    // The cursor alone moves no ref: an edit that changes nothing in git (an icon, a color,
-    // a comment) leaves every ref where it was, and the next capture reads those documents
-    // again. The cursor moves with the next capture that records a change; until then it
-    // only holds back, which rereads more and loses nothing.
+    // The cursor alone moves no ref. It moves when capture records a change to the
+    // content or uploads. Until then it can only cause another read.
     const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
-    const always = held.size > 0 || heldBefore.size > 0 || (through !== cursor && recordsChange);
+    const recordsRemovals = held.size > 0 || heldBefore.size > 0;
+    const trailers = [
+      ...(through !== null && (recordsChange || recordsRemovals) ? [captureCursorTrailer(through)] : []),
+      ...[...held].sort().map((id) => `Removal-held: ${id}`),
+    ];
+    const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
+    const always = recordsRemovals || (through !== cursor && recordsChange);
     const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
@@ -657,8 +777,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         for (const {doc, path, blocked} of marked) {
           const before = ids.get(path)!;
           const outcome = await reconcileDocumentMark({document: doc, entry: before, linear, blocked,
+            includeUpdatedBody: before.saved !== undefined && blocked.length === 0 && before.observedDigest !== undefined,
             onConflictNotice: (change) => result.conflictNotices[change].push(path),
-            persistEntry: async (entry) => {
+            persistEntry: async (entry, cleared) => {
+              // Clearing a mark can advance updatedAt. Refresh the digest only from a response holding the
+              // same accepted body, because a Linear edit may have arrived while the mark was cleared.
+              if (cleared !== undefined && matchesObservedBody(cleared, doc)) {
+                entry = {...entry, observedDigest: observedDigest(cleared)};
+              }
               ids.set(path, entry);
               const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, superseded, message:'Capture document marks'});
               const updated = {...next, ids:tip};
@@ -856,7 +982,9 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
   for (const item of result.leftOut) if (item.rule === 'attachment-budget') summary += `\nattachment-budget: ${JSON.stringify(item.id)}. Attachment count or bytes exceeded the document or run limit; reduce attachments and retry. The cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'image-repair-budget') summary += `\nimage-repair-budget: ${JSON.stringify(item.id)}. Image or link repair exceeded the document limit; simplify or split the document and retry. The cursor is held.`;
+  for (const item of result.leftOut) if (item.rule === 'blob-too-large') summary += `\nblob-too-large: ${JSON.stringify(item.id)}. The Markdown file exceeds the byte limit. Any previous file stays in place and the cursor is held.`;
   for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
+  for (const item of result.leftOut) if (item.rule === 'changed-during-run') summary += `\nchanged-during-run: ${JSON.stringify(item.id)}. The document left the place the run read it in, or was trashed or archived, before the run marked it or gave back its decoration: the run leaves its decoration as it is, and the next run reads it again.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;
   }

@@ -58,6 +58,7 @@ step with the bare message, without `error:`.
 | `<command>: setup error (checks-missing): the sync pull request waited past the check deadline for checks that never started (<checks>)` | See [`checks-missing`](#the-sync-pull-request). |
 | `<command>: waits for a person (head-unverified): the sync pull request also changes files that are not synchronized documents or their assets (<files>); a person reviews and merges it` | See [`head-unverified`](#the-sync-pull-request). |
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
+| `<command>: the batch stays suspended (suspended-asset-discovery). <reason>` | See [`suspended-asset-discovery`](#the-sync-pull-request). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
 | `Run this workflow on <branch>, not on <ref>.` | The sync or initial sync workflow ran on a branch other than the tracked branch (main), for example a dispatch on a feature branch, and stopped before any step got a token or a secret. Run it on the tracked branch. If the sync tracks a branch other than main, name it in the workflow's first step (`BRANCH`). |
@@ -140,6 +141,11 @@ The warnings say:
   nothing checks what comes from Linear before it is pushed. Add hooks marked
   `alias: security` if you want that (`mdbisync init --security-hooks` adds
   two examples).
+- `security hook {hooks} runs Gitleaks without {flag}, so an inline gitleaks:allow comment in a document from Linear exempts its line; add {flag} (init updates the hook it generated) and keep exceptions in .gitleaks.toml or .gitleaksignore`:
+  a document from Linear can carry that comment, so a credential on its line
+  would pass the hook. Add `--ignore-gitleaks-allow` to the hook's command
+  (for the example `init` generated, before the final ` .` of its `entry`)
+  and record exceptions in `.gitleaks.toml` or `.gitleaksignore`.
 
 ## Sync state
 
@@ -149,6 +155,7 @@ writes nothing and ends with exit code 4:
 | Code | Message | What to do |
 | --- | --- | --- |
 | `initial-sync-required` | `refs/mdbisync/linear does not exist: run initial sync first. The sync wrote nothing.` | No initial sync has run, or its state is lost. Run an initial sync (see [Recovery with initial sync](#recovery-with-initial-sync)). |
+| `initial-sync-required` | `refs/mdbisync/linear is at a commit the sync did not sign: someone else pushed it, or the sync wrote it before it signed its records or under another linear-client-secret. Its files could reach the sync pull request unchecked. Run initial sync again to record the state anew. The sync wrote nothing.` | The sync signs each commit it records in `refs/mdbisync/linear` with a key derived from `linear-client-secret`. It builds only on a commit it signed, or on one whose files are exactly those of a commit on the tracked branch's own history (not a commit merged in from another branch). After an upgrade from a release that did not sign, or after a new `linear-client-secret`, a state that still holds Linear changes the tracked branch has no commit for is refused too. If nobody pushed to the ref, recover with an initial sync (see [Recovery with initial sync](#recovery-with-initial-sync)); otherwise find out who did first. |
 | `initial-sync-required` | `An initial sync stopped before it finished: run it again with the same inputs first. The sync wrote nothing.` | Run the initial sync again with the same direction and `confirm: true`. |
 | `initial-pull-request-pending` | `The pull request of the initial sync from Linear is not merged into <tracked branch> yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch <sync branch> and run initial sync again to replace the snapshot. The sync wrote nothing.` | Review and merge that pull request with a merge commit. Closing it or deleting its branch alone leaves the snapshot pending. To start over, close it, delete the sync branch and run the initial sync again to replace the snapshot. |
 
@@ -248,6 +255,7 @@ Its step reports:
 | `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request (<reason>); a later run tries again.` When GitHub refused because of merge conflicts (`Pull Request has merge conflicts`), the next run first merges the tracked branch into the sync branch, unless the head already holds the tracked branch's latest commit. When GitHub answers `Merge already in progress` (HTTP 405), usually after it answered an earlier merge with a server error, the run reads the pull request again for up to a minute and counts a merge that lands meanwhile; otherwise a later run looks again. That answer never becomes `merge-blocked`. | Nothing; a later run tries again. |
 | `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). A refusal for merge conflicts repeats only on a head that already holds the tracked branch's latest commit. | When GitHub names a required check that is expected, make that check run on the sync pull request: check workflow filters and the required check's name. Otherwise let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
 | `merge-misplaced` | GitHub merged the sync pull request (or the suspended one) somewhere other than on the tracked branch commit the sync had checked (exit code 3): its base branch, or the tracked branch, changed in the moment between the sync's last read and the merge. The run names the branch that took the merge and the merge commit; a suspended batch stays suspended. | Check what reached that branch and revert it if it should not be there. Keep the App's bypass to the ruleset of the tracked branch, in the **For pull requests only** mode ([keep the App's bypass to `main`](quickstart.md#keep-the-apps-bypass-to-main)). The next run checks the sync's changes again. |
+| `suspended-asset-discovery` | The sync could not safely collect all linked assets for a suspended batch (exit code 5). The batch stays suspended and the run names the reason. | See [Suspension and release](sync-cycle.md#suspension-and-release) for recovery steps. |
 | `checks-missing` | Past the check deadline, the head still lacks a check the sync expects, or has no checks at all (exit code 3). The sync expects the checks registered on the pull request's earlier heads, each from the App or account that published it there, and the checks in `required-checks`, each from its configured publisher. Nothing is suspended or marked in Linear. A head someone else pushed, on which nothing was pending and an expected check had not registered five minutes after the sync first saw it, first gets a commit of the sync's own with the same files, whose push starts the repository's CI and a new deadline; that commit still expects every check the head below it waited for. For such a head, this code means those checks did not start on that commit either. | Make the missing checks run on the pull request's head, published as before or as `required-checks` configures them: a commit status under the name of an expected check run, or a check from another App or account, does not count. A commit a workflow pushed with its own token starts no other workflow: for the pre-commit example, list your CI workflows in `MDBISYNC_CI_WORKFLOWS` ([In CI](linear-format.md#in-ci)). Remove a check that no longer exists from `required-checks`. A check that ran on an earlier head and no longer runs (a renamed job, a workflow that runs only when a pull request opens) stays expected for at most one more push of the sync to the branch, with a Linear change or the tracked branch merged in. For a repository without CI, set `merge-without-checks: true`. A later run merges. |
 | `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. For documents the sync merges with conflict markers: this run into Linear's state, a later run into the sync branch. | Resolve the markers on either side ([conflicts.md](conflicts.md#resolving-a-conflict)). A conflicting file that is not a document waits: merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve it there; the sync keeps those commits. |
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
@@ -313,16 +321,19 @@ the reason is fixed. The summaries list each with its rules:
 | `duplicate-title` | Two files map to one document title (their names differ only in letter case or Unicode normalization). | Rename one of them. |
 | `title-too-long` | The title made from the file's path is longer than Linear accepts. | Use a shorter file name or folder path. |
 | `content-too-long` | The text is longer than the 250,000 characters Linear accepts. Its other rules are not checked until it is shorter. | Split the file, then lint the parts. |
-| `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes. | Reduce nesting or split the file. |
+| `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes, padding a table's short rows to its header width would add over 250,000 characters or take it past that node limit, writing each reference link's destination in full would take the text over 250,000 characters, or a paragraph's inline syntax would take too long to parse. | Reduce nesting, fill in or split the table, write fewer references to a long destination, split long paragraphs with blank lines, or split the file. |
+| `changed-during-run` | An initial sync found the document changed in Linear while it ran: moved to another team or project, renamed, trashed, archived, edited or gone. The document and the file its title names are neither written, trashed nor imported. A document without a file is listed as `<folder>/<document id>.md`: find it by that id. In a sync, a document the run was about to mark, or to give its own icon and color back, was moved out of the place the run read it in (or trashed, archived or removed) first: the run does not mark, comment on or restore it, a blocked document's record stays as it was, and the capture cursor holds. | Run the initial sync again. After a sync, nothing: the next run reads the document again. |
 | `outside-annotations` | The file is above every annotated folder. | Move it into an annotated folder, or annotate a folder above it. |
 | `not-a-regular-file` | The path is a symbolic link or another kind of file. | Replace it with a regular file. |
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |
 | `stored-in-lfs` | The Markdown file itself is stored in Git LFS. | Store Markdown files in git directly. |
+| `blob-too-large` | The Markdown blob exceeds 1,000,000 bytes and is skipped before reading. If the file is a `README.md`, setup also reports that its folder annotation could not be checked. | Make the file smaller or split it. |
 | `upload-too-large` | The document links a file over Linear's 10 MB upload limit. | Make the file smaller, or link it from somewhere else. |
 | `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. For a new document left out after a confirmed missing object (404/410), also commit an edit to the document or linked file to retry it. |
+| `link-provenance-unknown` | An initial sync from git found a plain link to a repository file in a document Linear already holds, while the `linear` and `ids` state refs that record which links Linear members wrote are lost. The run cannot tell your link from one a Linear member wrote, so it uploads nothing for that document and leaves it out. | Write the link as an image if the file is meant to be shared, or remove it, then run the initial sync again. Until then each initial sync leaves the document out again. A repository with its state refs keeps uploading the links written in git. |
 | `image-blocked` | From Linear: an uploaded file cannot be read, is over 10 MB, redirects or has unsupported bytes; or a new ordinary link names a repository file other than a Markdown document by its relative path. The file keeps the tracked branch's text. | Upload the files in Linear instead of linking them. The first sync after the initial sync (once its pull request, if any, is merged) marks the document and comments which images to fix. After the fix the mark clears; the comment stays open as a record, and you can resolve it. |
 | `download-failed` | From Linear: a file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed in its `assets/` folder. The file keeps the tracked branch's text. | Nothing; the next sync reads the document again. If it repeats, check the run's log for the asset error. |
-| `security-hook` | From Linear: a hook marked `alias: security` flagged the document's text or a file it embeds. In an initial sync, that text can hold the Linear URL of a linked document that was left out. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear, or bring in the linked document. |
+| `security-hook` | From Linear: a hook marked `alias: security` flagged the document's title, its text or a file it embeds. In an initial sync, that text can hold the Linear URL of a linked document that was left out. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear, or bring in the linked document. |
 | `security-unchecked` | From Linear: the security hooks did not see this text, because their step did not run or the tracked branch moved after it. | Nothing; the next run checks it. If it repeats, check that the hooks step runs. |
 | `title-not-a-path` | From Linear: the file the document's title names would map to a different document, for example because it lands in a folder another annotation owns. | Rename the document in Linear. |
 | `front-matter-boundary` | From Linear: the document's text starts with something that reads as front matter, so it would not stay the file's body. | Change the start of the document in Linear. |
@@ -360,7 +371,10 @@ The initial sync also lists:
 
 - `<files>: over the upload limit of <n> bytes` for `upload-too-large`;
 - `<files>: stored with LFS extensions, which are not supported` and
-  `<file> cannot be read: <reason>` for `upload-unreadable`.
+  `<file> cannot be read: <reason>` for `upload-unreadable`;
+- `<files>: linked as a plain link from a document Linear holds, and the
+  state that names the links Linear members wrote is lost` for
+  `link-provenance-unknown`.
 
 ## Other summary lines
 
@@ -394,6 +408,7 @@ The `invalid-annotation` check names the `README.md` and the problem:
 | --- | --- | --- |
 | `invalid-annotation` | `<readme>: the front matter with linear-team or linear-project is not valid YAML` | Fix the YAML. |
 | `invalid-annotation` | `<readme>: <key> must be a non-empty name` | Give the key a team or project name. |
+| `invalid-annotation` | `<readme>: cannot check the folder annotation because the blob exceeds <bytes> bytes` | Reduce the README to 1,000,000 bytes or fewer. |
 | `project-without-team` | `<readme>: names a project, but neither it nor a folder above names a team` | Add `linear-team` to this folder or a folder above. |
 | `nested-team` | `<readme>: names a team inside the folder of team "<team>" (<folder>)` | Map one team per folder tree; remove the inner `linear-team`. |
 | `nested-project` | `<readme>: names a project inside the folder of project "<project>" (<folder>)` | Map one project per folder tree; remove the inner `linear-project`. |
@@ -430,6 +445,9 @@ the message. Most come from the workflow's configuration:
 
 | Message | What to do |
 | --- | --- |
+| `mapping-blob-budget: Markdown blob reads exceed the <bytes>-byte budget` | Reduce the amount of Markdown in the tree being mapped to fit the 64 MiB read budget. |
+| `security-scratch-budget: the tracked files the security hooks need exceed the <bytes>-byte scratch budget` | Before the security hooks check a document, the tracked branch's files are copied into a temporary repository, up to 4 GiB of regular files and link targets. Move large assets to Git LFS (only their small pointers count) or out of the repository. |
+| `git-output-limit: command output exceeded <bytes> bytes` | Mapping can read up to 16 MiB of Git tree metadata. Check the size and integrity of the tree being read. |
 | `the direction and confirm inputs belong to an initial sync, and only to it` | Remove `direction` and `confirm` from the sync and check steps. |
 | `unknown operation: <name> (expected one of: <operations>)` | Set the action's `operation` to `sync` or `initial-sync`. |
 | `unknown security-step: <name> (expected one of: <steps>, or empty)` | Set `security-step` to `stage` or `apply`, or leave it empty. |
@@ -439,6 +457,8 @@ the message. Most come from the workflow's configuration:
 | `the staged candidates come from another version of the action`, `the staged manifest names a file that is not a content hash` | Pin the `stage` and `apply` steps to the same release, and let nothing else write to the runner's temporary folder between them. |
 | `invalid security hook configuration` | Fix the hooks marked `alias: security` in `.pre-commit-config.yaml`. |
 | `security hooks require pre-commit on PATH; install pre-commit before capture` | Install `pre-commit` before the mdbisync step (the example workflows do). |
+| `a tracked symbolic link leads outside the tree the security hooks check` | The security hooks hold back every document from Linear (a `security` finding on line 1) while a tracked symbolic link resolves outside the repository, into its `.git` folder, or to no file. Point the link at a tracked file, or remove it. |
+| `the tree the security hooks check differs from the tracked tree` | The security hooks hold back every document from Linear (a `security` finding on line 1) because the copy of the tracked branch they run in could not be made equal to it. Check that the tracked branch's files are all regular files, symbolic links or submodules. |
 | `files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync` | Install `git-lfs` on the runner, or repair it so `git lfs version` runs. GitHub's hosted runners have it. |
 | `the tracked branch "<branch>" does not exist on remote "<remote>"` | Set `tracked-branch` to a branch that exists. |
 
@@ -476,7 +496,7 @@ document named.
 | Message | Meaning |
 | --- | --- |
 | `<operation>: Linear client stopped (<why>)` | Linear's rate limit or a low budget stopped the run; see `stopped` in [Partial sync runs](#partial-sync-runs). |
-| `<operation>: Linear error <code> (HTTP <status>, request <id>): <message>` | Linear rejected the request. `INPUT_ERROR` usually names a document Linear no longer has or does not accept; `AUTHENTICATION_ERROR` means the app lost access. |
+| `<operation>: Linear error <code> (HTTP <status>, request <id>): <message>` | Linear rejected the request. `INPUT_ERROR` usually names a document Linear no longer has or does not accept; `cursor not found` on `ListDocuments` means Linear forgot a page cursor mid-listing; the run starts the listing again on its own, up to three listings, unless Linear's budget already stopped it, so run again; `AUTHENTICATION_ERROR` means the app lost access. |
 | `<operation>: Linear answered HTTP <status> (request <id>)` | Linear failed the request. |
 | `<operation>: request to Linear failed (<cause>)` | The connection broke or timed out. |
 | `<operation>: <field> is <n> characters, Linear accepts at most <limit>` | A title or text is too long for Linear; see `title-too-long` and `content-too-long`. |
@@ -492,7 +512,7 @@ document named.
 | `GitHub answered HTTP <status> while <what>`, `GitHub did not answer while <what>` | A GitHub request failed. `<what>` is one of: listing open pull requests, reading a pull request, opening a pull request, updating a pull request, closing a pull request, sending a request to the pull request API, reading the check runs of the sync pull request, reading the commit statuses of the sync pull request, reading the annotations of a failed check run, merging the sync pull request. A failed read of a check run's annotations does not stop the run: the suspended documents' comments name that check without them, and the run summary says so. |
 | `git <arguments> failed with exit code <n>: <output>` | A git command failed; its own output follows. Often a network problem or missing rights to push. |
 | `refusing to move <ref> to a commit that does not descend from its current value` | A state ref or the sync branch was changed by hand. Undo that change, or recover with an initial sync. |
-| `the recorded state names a Linear place for <folder> that the tracked branch never named; the state refs were changed outside the sync` | The state ref `linear` names a team or project for that folder (`<folder>` is the folder, or the repository root) that no commit of the tracked branch ever gave it. Capture reads such a place only when the tracked branch named it, so it stopped before reading any document. Find out who pushed to the state refs, then recover with an initial sync. |
+| `the recorded state names a Linear place for <folder> that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync` | The state ref `linear` names a team or project for that folder (`<folder>` is the folder, or the repository root) other than its current one. Capture reads an old place only to finish a move: it must be the folder's place just before the tracked branch last changed its annotation, and no sync merged into the tracked branch since may have recorded the new place. Otherwise capture stops before reading any document. A folder the tracked branch moved twice before a sync recorded the first move stops here too: set its annotation back to the place the sync recorded, let a sync run, then move the folder to its new place in one change. Otherwise find out who pushed to the state refs, then recover with an initial sync. |
 
 ## Errors that point to a bug
 
@@ -504,6 +524,7 @@ content).
 - `a state ref moved while the run was writing`
 - `state moved while recording document marks`
 - `the planned document for <path> was not listed`
+- `the planned document for <path> was not read with its text`
 - `document-links: apply before prepare`
 - `the uploads transform was not prepared`
 - `project "<project>" of team "<team>" was not resolved`, `team "<team>" was not resolved`

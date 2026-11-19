@@ -83,6 +83,7 @@ export const MESSAGES = {
   'pull-request.initial-pending': 'stopped short ({code}): an initial sync from Linear waits for a person to merge it',
   'pull-request.head-unverified': 'waits for a person ({code}): the sync pull request also changes files that are not synchronized documents or their assets ({files}); a person reviews and merges it',
   'pull-request.not-finished': 'not finished ({code}); run it again',
+  'pull-request.suspended-asset-discovery': 'the batch stays suspended ({code}). {reason}',
 
   // The setup check.
   'setup.left-out': '{count} files left out, not synced: {files}{more}',
@@ -107,6 +108,7 @@ export const MESSAGES = {
   'setup.sync-branch-rules-open': '{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch',
   'setup.sync-branch-rule-restricted': '{rule} restricted',
   'setup.sync-branch-rule-open': '{rule} not restricted on {branches}',
+  'setup.security-hooks-inline-allow': 'security hook {hooks} runs Gitleaks without {flag}, so an inline gitleaks:allow comment in a document from Linear exempts its line; add {flag} (init updates the hook it generated) and keep exceptions in .gitleaks.toml or .gitleaksignore',
   'setup.security-hooks-missing': 'no pre-commit hook marked "alias: {alias}": content is pushed unchecked',
   'setup.hooks-invalid-yaml': '{file} is not valid YAML',
   'setup.hooks-no-repos': '{file} has no "repos" list',
@@ -119,17 +121,20 @@ export const MESSAGES = {
   'setup.target-not-found': 'not found in Linear: {targets}',
   'setup.target-ambiguous': 'more than one match in Linear: {targets}',
   'setup.target-shared': 'more than one folder maps to {targets}',
+  'setup.linear-untrusted': '{ref} is at a commit the sync did not sign: someone else pushed it, or the sync wrote it before it signed its records or under another linear-client-secret. Its files could reach the sync pull request unchecked. Run initial sync again to record the state anew. The sync wrote nothing.',
   'setup.initial-sync-unfinished': 'An initial sync stopped before it finished: run it again with the same inputs first. The sync wrote nothing.',
   'setup.initial-sync-required': '{ref} does not exist: run initial sync first. The sync wrote nothing.',
   'setup.initial-pull-request-pending': 'The pull request of the initial sync from Linear is not merged into {tracked} yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch {sync} and run initial sync again to replace the snapshot. The sync wrote nothing.',
 
   // Annotations and the mapping.
+  'annotations.blob-too-large': '{readme}: cannot check the folder annotation because the blob exceeds {bytes} bytes',
   'annotations.invalid-yaml': '{readme}: the front matter with {teamKey} or {projectKey} is not valid YAML',
   'annotations.empty-name': '{readme}: {key} must be a non-empty name',
   'annotations.nested-team': '{readme}: names a team inside the folder of team "{team}" ({folder})',
   'annotations.nested-project': '{readme}: names a project inside the folder of project "{project}" ({folder})',
   'annotations.project-without-team': '{readme}: names a project, but neither it nor a folder above names a team',
   'mapping.content-not-read': 'the content of {path} was not read',
+  'mapping.blob-budget': 'mapping-blob-budget: Markdown blob reads exceed the {bytes}-byte budget',
 
   // State refs and their files.
   'config.invalid-remote': 'remote "{remote}" is not a valid remote name',
@@ -141,6 +146,7 @@ export const MESSAGES = {
   'config.prefix-outside-refs': 'refPrefix "{prefix}" must start with "refs/" and name a folder under it',
   'config.prefix-reserved': 'refPrefix "{prefix}" must not be under refs/heads, refs/tags or refs/remotes',
   'git.failed': 'git {args} failed with exit code {code}: {stderr}',
+  'git.output-limit': 'git-output-limit: command output exceeded {bytes} bytes',
   'lfs.needs-git-lfs': 'files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync',
   'objects.missing': 'git object {oid} is missing',
   'objects.not-blob': 'git object {oid} is a {type}, not a blob',
@@ -197,6 +203,7 @@ export const MESSAGES = {
   // Initial sync.
   'initial-sync.state-moved': 'a state ref moved while the run was writing',
   'initial-sync.document-not-listed': 'the planned document for {path} was not listed',
+  'initial-sync.document-not-read': 'the planned document for {path} was not read with its text',
   'initial-sync.links-not-prepared': 'document-links: apply before prepare',
   'initial-sync.project-not-resolved': 'project "{project}" of team "{team}" was not resolved',
   'initial-sync.team-not-resolved': 'team "{team}" was not resolved',
@@ -204,13 +211,14 @@ export const MESSAGES = {
   'initial-sync.misplaced': 'the recorded tree maps {count} files to other documents',
   'initial-sync.over-upload-limit': '{files}: over the upload limit of {limit} bytes',
   'initial-sync.lfs-extensions': '{files}: stored with LFS extensions, which are not supported',
+  'initial-sync.link-provenance-unknown': '{files}: linked as a plain link from a document Linear holds, and the state that names the links Linear members wrote is lost',
   'initial-sync.upload-unreadable': '{file} cannot be read: {reason}',
   'initial-sync.uploads-not-prepared': 'the uploads transform was not prepared',
 
   // The sync.
   'sync.needs-initial-sync': 'run initial sync first',
   'sync.places-unresolved': 'the previously recorded document places could not be resolved',
-  'sync.recorded-place-unknown': 'the recorded state names a Linear place for {folder} that the tracked branch never named; the state refs were changed outside the sync',
+  'sync.recorded-place-unknown': 'the recorded state names a Linear place for {folder} that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync',
   'sync.lost-lease': 'state moved while recording document marks',
   'sync.no-lfs-pointer': 'LFS did not return a pointer',
   'sync.lfs-pointer-mismatch': 'LFS returned a pointer to other content than it was given',
@@ -222,6 +230,9 @@ export const MESSAGES = {
   'sync.invalid-update-time': 'a document has an invalid update time',
   'sync.invalid-security-config': 'invalid security hook configuration',
   'sync.needs-pre-commit': 'security hooks require pre-commit on PATH; install pre-commit before capture',
+  'sync.security-link-outside': 'a tracked symbolic link leads outside the tree the security hooks check',
+  'sync.security-tree-differs': 'the tree the security hooks check differs from the tracked tree',
+  'sync.security-scratch-budget': 'security-scratch-budget: the tracked files the security hooks need exceed the {bytes}-byte scratch budget',
   'sync.no-runner-temp': 'RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job',
   'sync.staged-version': 'the staged candidates come from another version of the action',
   'sync.staged-hash': 'the staged manifest names a file that is not a content hash',

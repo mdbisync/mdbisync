@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type LinearDocument } from '../linear/index.ts';
-import { type Place, type RepositoryMapping, collectAnnotations, mapFiles, resolveZones } from '../mapping/index.ts';
+import { type Place } from '../mapping/index.ts';
 import { MARKUP_TEXTS, tableRows } from '../run/summary-test-helpers.ts';
 import { noConflictNotices } from '../sync/marks.ts';
 import { type ConfirmedResult, type FailedWrite } from './confirm.ts';
-import { planInitialSync } from './plan.ts';
+import { type InitialSyncPlan } from './plan.ts';
 import { renderConfirmed, renderDryRun } from './summary.ts';
 
-// Linear titles are free text a workspace member chooses. The summaries show
-// them in the paths of table cells, so each must render as its own text.
+// A path in a table cell may hold Markdown or HTML: a file's title is free
+// text too, and a newer Linear duplicate of it is listed at that file's path.
+// Each must render as its own text.
 
 const ENG: Place = { kind: 'team', team: 'ENG' };
 
@@ -30,12 +31,13 @@ function document(title: string, index: number): LinearDocument {
   };
 }
 
-/** A plan with one Linear document per title and no files in the team folder `eng`: every document goes to trash. */
-function planOfTitles() {
-  const { annotations } = collectAnnotations(new Map([['eng/README.md', '---\nlinear-team: ENG\n---\n\n# Engineering\n']]));
-  const { zones } = resolveZones(annotations);
-  const mapping: RepositoryMapping = { annotations, zones, problems: [], ...mapFiles([], zones, new Map()) };
-  return planInitialSync({ mapping, texts: new Map(), places: [{ place: ENG, documents: MARKUP_TEXTS.map(document) }] });
+/**
+ * A plan with one document per title in the team folder `eng`, each going to trash at its title's path: the newer
+ * duplicate of a file is listed at the path of the file's title (a document from Linear alone is named by its id).
+ */
+function planOfTitles(): InitialSyncPlan {
+  const trash = MARKUP_TEXTS.map((title, index) => ({ path: `eng/${title}.md`, title, place: ENG, documentId: `doc-${index}` }));
+  return { create: [], overwrite: [], leftOut: [], trash: trash.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) };
 }
 
 function confirmedResult(trashed: string[], failed: FailedWrite[]): ConfirmedResult {
@@ -57,9 +59,8 @@ function confirmedResult(trashed: string[], failed: FailedWrite[]): ConfirmedRes
   };
 }
 
-describe('initial-sync summaries show Linear titles as their own text', () => {
+describe('initial-sync summaries show paths that hold markup as their own text', () => {
   const plan = planOfTitles();
-  // A file's title is its path below the folder without `.md`, so a document without a file is named that way.
   const paths = MARKUP_TEXTS.map((title) => `eng/${title}.md`).sort();
 
   it('dry run: one row per trashed document, with its path and id as written', () => {

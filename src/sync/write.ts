@@ -59,6 +59,7 @@ import {
   uploadsRebuilding,
   stateRef,
   branchRef,
+  signObservation,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { nameFixingHooks } from './fix-hooks.ts';
@@ -66,7 +67,7 @@ import { type CreateChange, type Decided, type DocumentChange, type KeepChange, 
 import { type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold } from './marks.ts';
 import { stableId } from './stable-id.ts';
 import { suspendedPaths } from './suspended.ts';
-import { recordedTrailers } from './recorded.ts';
+import { matchesObservedBody, observedDigest, recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
 import { type FileLeftOutRule, type SkipReason, type WriteCode } from '../codes.ts';
 
@@ -291,7 +292,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   for (const entry of merge.held) result.skipped.push({ path: entry.from, reason: 'renamed-to-unwritable' });
   await checkpoint('after-local-merge-before-record');
 
-  const uploads = await readUploads(git, expected.uploads);
+  const uploads = await readUploads(git, expected.uploads, context.pushedKey);
   const resultFiles = await filesOf(git, merge.tree);
   const linearFiles = await filesOf(git, linearTip);
   const texts = merge.texts;
@@ -408,8 +409,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
   // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
   // what Linear held.
-  // While the cache is filled again, the URLs it held are unknown: a document that links a file cannot be checked
-  // against the tip, and its write goes ahead (see `holdsVersion`).
+  // While the cache is filled again, the URLs it held are unknown. A write that needs those URLs for comparison
+  // requires an exact match with the recorded Linear body and update time.
   const tipUploads = cacheLost ? new Map<string, string>() : new Map(uploads);
   // A new document whose reserved id Linear already gives another one is created under a new id, but the documents an
   // earlier run wrote link the reserved one. By superseded id, the path it named; kept from earlier runs until every
@@ -718,9 +719,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    */
   async function unchangedSinceCapture(held: LinearDocument, path: string): Promise<boolean> {
     if (held.trashed || held.archivedAt !== null) return false;
-    const document = withCurrentIds(held);
     const synchronized = merge.linear.get(path);
-    if (synchronized !== undefined) return holdsVersion(document, synchronized, textOf(synchronized), tipTransforms, true);
+    if (synchronized !== undefined) {
+      const entry = ids.get(path);
+      return holdsVersion(held, synchronized, textOf(synchronized), tipTransforms, entry?.id === held.id ? entry.observedDigest : undefined);
+    }
     // The tip does not synchronize the file (a lint finding, a collision, not text): it records the git text, and
     // Linear holds the version it was last given. Without one there is nothing to compare with, and the document is
     // not written.
@@ -732,7 +735,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     for (const transform of baselineTransforms) {
       await transform.prepare?.({ git, tracked: baseline.commit, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds, plainFiles });
     }
-    return holdsVersion(document, baseline.file, baseline.text, baselineTransforms, false);
+    return holdsVersion(held, baseline.file, baseline.text, baselineTransforms);
   }
 
   /**
@@ -766,11 +769,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   /**
    * Whether a document holds a version of its file: title, project or team,
    * and text in Linear's form. When the text cannot be put in Linear's form
-   * (a file it links to is gone or not in the upload cache), `uncheckable`
-   * is the answer: the tip's own file lets the write go ahead, an older
-   * version that cannot be checked does not.
+   * (a file it links to is gone or not in the upload cache), the exact
+   * observation can verify the current tip's version.
    */
-  async function holdsVersion(document: LinearDocument, file: SideFile, text: string, through: readonly BodyTransform[], uncheckable: boolean): Promise<boolean> {
+  async function holdsVersion(held: LinearDocument, file: SideFile, text: string, through: readonly BodyTransform[], digest?: string): Promise<boolean> {
+    const document = withCurrentIds(held);
     // Capture can encode a title or assign a stable collision suffix.
     const folder = file.path.slice(0, -(file.title.length + '.md'.length)).replace(/\/$/, '');
     const occupied = new Set([...linearFiles.keys()].filter((path) => path !== file.path));
@@ -788,7 +791,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       expected = await transformBody(through, file.path, splitFile(text).body);
     } catch (error) {
       if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
-      return uncheckable;
+      return digest !== undefined && digest === observedDigest(held);
     }
     return sameMarkdown(document.content ?? '', expected);
   }
@@ -865,7 +868,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const entry = nextIds.get(change.from);
     nextIds.delete(change.from);
     const next = entry !== undefined && entry.id === change.id ? {...entry} : {id: change.id};
-    if (change.content) delete next.pullRewrite;
+    if (change.content) {
+      delete next.pullRewrite;
+      delete next.observedDigest;
+    }
     const plain = plainFiles.get(change.to);
     if (plain !== undefined && plain.size > 0) next.plainFiles = [...plain];
     nextIds.set(change.to, next);
@@ -938,7 +944,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     result.restored.push(change.path);
     stored.set(change.path, { content: document.content ?? '', sent: body, document });
     const previous = nextIds.get(change.path);
-    nextIds.set(change.path, previous?.id === document.id ? previous : { id: document.id });
+    const entry = previous?.id === document.id ? {...previous} : {id: document.id};
+    delete entry.observedDigest;
+    nextIds.set(change.path, entry);
     await reconcileMark(change.path, document);
     return true;
   }
@@ -990,16 +998,20 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   async function reconcileMark(path: string, document: LinearDocument): Promise<void> {
     const entry = nextIds.get(path);
     if (entry === undefined || entry.id !== document.id || document.content === undefined) return;
-    await reconcileDocumentMark({
+    const outcome = await reconcileDocumentMark({
       document,
       entry,
       linear,
+      includeUpdatedBody: true,
       onConflictNotice: (change) => result.conflictNotices[change].push(path),
       persistEntry: async (next) => {
         nextIds.set(path, next);
         await pushIds();
       },
     });
+    const updated = outcome.updatedDocument;
+    const written = stored.get(path);
+    if (written !== undefined && updated !== undefined && matchesObservedBody(updated, document)) written.document = updated;
   }
 
   /**
@@ -1056,7 +1068,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Written documents: the merge result's front matter and what Linear stored.
     for (const [path, { content, sent }] of stored) {
       const file = merge.result.get(path) as SideFile;
-      const text = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path, content, sent));
+      const text = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path, content, sent, context.mapping.files));
       if (resultFiles.get(path) !== undefined && text === textOf(file)) continue;
       changes.set(path, text);
     }
@@ -1094,7 +1106,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       .map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
     const message = (merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE)
       + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
-    const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: plainTrailers.length === 0 });
+    const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: plainTrailers.length === 0, sign: signObservation(context.pushedKey) });
     if (merged) {
       for (const [path, entry] of nextIds) if (entry.releaseBase !== undefined) {
         delete entry.releaseBase;
@@ -1104,16 +1116,17 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
     }
     for (const path of nextIds.keys()) nextReserved.delete(path);
-    // A written document the record holds as Linear returned it (its text, title and place; not the tip's old
-    // file) is named with its update time: the next capture need not read it again. A partial record keeps files
-    // from the tip that written documents depend on (an image's old bytes), so it names none: the capture reads them.
-    const asWritten = new Map(
-      [...(merged ? stored : [])].flatMap(([path, { document }]) => {
-        const file = merge.result.get(path);
-        const held = !fromTip.has(path) && file !== undefined && document.title.normalize('NFC') === file.title.normalize('NFC') && inPlace(document, file.place);
-        return held ? [[document.id, document.updatedAt] as const] : [];
-      }),
-    );
+    // Keep the digest for each written document the record holds as Linear returned it. Only a full record adds
+    // update-time trailers that let capture skip reading those documents. A partial record can retain dependencies
+    // from the tip, such as an image's old bytes, so capture still reads them.
+    const asWritten = new Map<string, string>();
+    for (const [path, {document}] of stored) {
+      const file = merge.result.get(path);
+      if (fromTip.has(path) || file === undefined || document.title.normalize('NFC') !== file.title.normalize('NFC') || !inPlace(document, file.place)) continue;
+      const entry = nextIds.get(path)!;
+      nextIds.set(path, {...entry, observedDigest: observedDigest(document)});
+      if (merged) asWritten.set(document.id, document.updatedAt);
+    }
     // A kept README the merge record holds at a new path (its folder renamed) stays kept there: the set is recorded
     // anew. A partial record keeps the tip's README where it was, and the next run follows the rename again.
     // Only READMEs the record still holds without a document stay in the recorded set.
@@ -1129,7 +1142,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
     // documents to relink, before they are changes) leaves the rest to the next run.
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};
-    const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, rebuilt);
+    const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey, rebuilt);
 
     const updates = (ids: Oid): RefUpdate[] => [
       { ref: stateRef(options.config, 'linear'), expected: linearTip, next: commit },

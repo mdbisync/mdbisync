@@ -24,7 +24,7 @@ import { parse } from 'yaml';
 import { loadMapping } from '../../src/mapping/index.ts';
 import { validateAction } from '../../src/release/package.ts';
 import { FAKE_APP_SLUG, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../../src/setup/test-helpers.ts';
-import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
+import { Git, PushedKey, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-helpers.ts';
 
 const EXAMPLES = new URL('../../examples/', import.meta.url);
@@ -175,7 +175,7 @@ async function prepareJob(synced: boolean, canary = false): Promise<Job> {
       const initial = {
         linear: await commitTree(setup, { parents: [fetched.tracked], base: fetched.tracked, changes: new Map(), message: 'Initial state', identity: IDENTITY }),
         ids: await commitIds(setup, null, new Map([['docs/plan.md', { id: 'plan' }]]), IDENTITY),
-        uploads: await commitUploads(setup, null, new Map(), IDENTITY),
+        uploads: await commitUploads(setup, null, new Map(), IDENTITY, new PushedKey('client-secret', 'owner/repo')),
       };
       const pushed = await pushAtomic(setup, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })));
       assert.equal(pushed.ok, true);
@@ -297,17 +297,17 @@ export async function smokeStagedFlow(directory: string): Promise<void> {
   const scenarios: Array<[string, (job: Job) => Promise<void>, boolean]> = [
     ['the sync takes a change from Linear through the hooks', async (job) => {
       const plan = job.world.linear.documents[0]!;
-      plan.content = 'Edited in Linear.\n';
+      plan.content = 'Edited in Linear.';
       touch(plan);
       assert.match(await runTemplate(release, 'mdbisync.yml', {}, job), checked(1));
-      assert.equal(await trackedText(job, 'docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.\n');
+      assert.equal(await trackedText(job, 'docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.');
     }, true],
     ['the initial sync from Linear stages, checks and records', async (job) => {
       const plan = job.world.linear.documents[0]!;
-      plan.content = 'Taken from Linear.\n';
+      plan.content = 'Taken from Linear.';
       touch(plan);
       assert.match(await runTemplate(release, 'mdbisync-initial-sync.yml', { direction: 'linear-to-git', confirm: 'true' }, job), checked(1));
-      assert.equal(await trackedText(job, 'docs/plan.md'), '---\ncategory: work\n---\n\nTaken from Linear.\n');
+      assert.equal(await trackedText(job, 'docs/plan.md'), '---\ncategory: work\n---\n\nTaken from Linear.');
     }, true],
     // Nothing comes from Linear, yet the stage step still names the hooks script and the hooks step runs it.
     ['the initial sync to Linear stages nothing, in a dry run and a confirmed run', async (job) => {

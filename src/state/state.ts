@@ -9,7 +9,7 @@ import { type Git, GitError, type Oid, mapLimit } from './git.ts';
 import { type LfsPointer, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
 import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
 import { message } from '../messages.ts';
-import { PUSHED_MAC, type PushedRecord } from './pushed.ts';
+import { PUSHED_MAC, type PushedKey, type PushedRecord } from './pushed.ts';
 
 /** The state refs as last fetched from the remote; null when a ref does not exist. */
 export type StateSnapshot = Record<Store, Oid | null>;
@@ -312,6 +312,7 @@ function parsePorcelain(output: string): PorcelainLine[] {
 
 export const IDS_FILE = 'ids.json';
 export const UPLOADS_FILE = 'uploads.json';
+const UPLOAD_MACS_FILE = 'upload-macs.json';
 
 export interface MarkNotice {
   /** The id of the single comment for this marked episode. */
@@ -345,6 +346,8 @@ export interface SuspensionEpisode {
 export interface IdEntry {
   /** The Linear document id. */
   id: string;
+  /** SHA-256 of the raw Linear content and update time of the recorded version. */
+  observedDigest?: string | undefined;
   /** Targets introduced as path images in Linear; ordinary links to them must never upload files. */
   plainFiles?: string[];
   /** A checked pull repair, bound to the exact recorded file; Linear still holds the source. */
@@ -396,11 +399,17 @@ function checkUniqueDocumentIds(ids: IdMap): void {
   }
 }
 
-export async function readUploads(git: Git, commit: Oid | null): Promise<UploadMap> {
-  const data = await readJsonFile(git, commit, UPLOADS_FILE);
+export async function readUploads(git: Git, commit: Oid | null, key: PushedKey): Promise<UploadMap> {
+  // A cache written before signing has no MACs. Re-upload its files when needed.
+  const [data, macs] = await Promise.all([
+    readJsonFile(git, commit, UPLOADS_FILE),
+    readJsonFile(git, commit, UPLOAD_MACS_FILE, { optional: true }),
+  ]);
   const map: UploadMap = new Map();
   for (const [hash, url] of Object.entries(data)) {
     if (!/^[0-9a-f]{64}$/.test(hash) || typeof url !== 'string') throw new Error(message('state.invalid-entry', { file: UPLOADS_FILE }));
+    if (!/^https:\/\/uploads\.linear\.app\//i.test(url) || /[<>\\\s\x00-\x1f\x7f]/u.test(url)) continue;
+    if (!key.verifiesUpload(hash, url, macs[hash])) continue;
     map.set(hash, url);
   }
   return map;
@@ -641,9 +650,13 @@ export async function uploadsRebuilding(git: Git, commit: Oid | null): Promise<b
 }
 
 /** Commits the upload cache on top of `parent`. Returns `parent` when nothing changed, unless `always`. */
-export function commitUploads(git: Git, parent: Oid | null, uploads: UploadMap, identity: CommitIdentity, options: CommitStateOptions = {}): Promise<Oid> {
-  const data = Object.fromEntries([...uploads.entries()].sort(([a], [b]) => compareStrings(a, b)));
-  return commitJsonFiles(git, parent, new Map([[UPLOADS_FILE, data]]), options.message ?? 'Update upload cache', identity, options.always === true);
+export function commitUploads(git: Git, parent: Oid | null, uploads: UploadMap, identity: CommitIdentity, key: PushedKey, options: CommitStateOptions = {}): Promise<Oid> {
+  const entries = [...uploads.entries()].sort(([a], [b]) => compareStrings(a, b));
+  const data = Object.fromEntries(entries);
+  const macs = Object.fromEntries(entries.map(([hash, url]) => [hash, key.uploadMac(hash, url)]));
+  const files = new Map([[UPLOADS_FILE, data]]);
+  if (entries.length > 0) files.set(UPLOAD_MACS_FILE, macs);
+  return commitJsonFiles(git, parent, files, options.message ?? 'Update upload cache', identity, options.always === true);
 }
 
 function compareStrings(a: string, b: string): number {
@@ -654,6 +667,7 @@ function isIdEntry(value: unknown): value is IdEntry {
   if (typeof value !== 'object' || value === null) return false;
   const entry = value as Record<string, unknown>;
   if (typeof entry.id !== 'string' || entry.id === '') return false;
+  if (entry.observedDigest !== undefined && (typeof entry.observedDigest !== 'string' || !/^[0-9a-f]{64}$/.test(entry.observedDigest))) return false;
   if (entry.plainFiles !== undefined && (!Array.isArray(entry.plainFiles) || !entry.plainFiles.every(path => typeof path === 'string'))) return false;
   if (entry.releasePaths !== undefined && (!Array.isArray(entry.releasePaths) || !entry.releasePaths.every((path) => typeof path === 'string'))) return false;
   if (entry.releaseBase !== undefined && (typeof entry.releaseBase !== 'string' || !/^[0-9a-f]{40,64}$/.test(entry.releaseBase))) return false;
@@ -705,20 +719,27 @@ function isMarkNotice(value: unknown): value is MarkNotice {
     && typeof notice.posted === 'boolean';
 }
 
-async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise<Record<string, unknown>> {
+async function readJsonFile(git: Git, commit: Oid | null, file: string, options: { optional?: boolean } = {}): Promise<Record<string, unknown>> {
   if (commit === null) return {};
   // A state commit without its file is damaged state, not an empty map:
   // reading it as empty would make the sync forget every id.
   const read = await git.run(['cat-file', 'blob', `${commit}:${file}`], { okCodes: [0, 128] });
-  if (read.code !== 0) throw new Error(message('state.file-missing', { file, commit }));
+  if (read.code !== 0) {
+    if (options.optional) return {};
+    throw new Error(message('state.file-missing', { file, commit }));
+  }
   const blob = read.stdout;
   let data: unknown;
   try {
     data = JSON.parse(blob.toString('utf8'));
   } catch {
+    if (options.optional) return {};
     throw new Error(message('state.invalid-json', { file, commit }));
   }
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error(message('state.not-object', { file, commit }));
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    if (options.optional) return {};
+    throw new Error(message('state.not-object', { file, commit }));
+  }
   return data as Record<string, unknown>;
 }
 

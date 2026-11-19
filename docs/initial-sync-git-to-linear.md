@@ -110,7 +110,7 @@ and lists it by path, never with document content:
 | --- | --- |
 | Create | A file without a document. It will get a new document in the team or project in the **In Linear** column. |
 | Overwrite | A file with a document. The document, named in the **Document** column by id, will get the file's text. A document that already holds it is not written. |
-| Move to trash | A document without a file. The **Path** column is where its file would be. It will go to Linear's trash. |
+| Move to trash | A document without a file. It will go to Linear's trash. The **Path** column names it by its id, `<folder>/<document id>.md`: its title comes from Linear alone, and the security hooks never read it, so the summary and the report do not show it. A newer document with the title of a file in the same place is listed at that file's path. |
 | Left out | A file the run will not take, with the rules that stop it, the lines of `linear-format` findings, and the files it collides with or links. |
 | Container document capacity | A team or project near or over its document cap. Shown only when there is one. |
 
@@ -135,18 +135,32 @@ reasons:
   long for Linear (`title-too-long`);
 - a `.md` file git does not store as text (`binary`, `stored-in-lfs`,
   `not-a-regular-file`);
+- a Markdown blob larger than 1,000,000 bytes (`blob-too-large`);
 - a linked file over Linear's 10 MB upload limit (`upload-too-large`) or one
   the run cannot read (`upload-unreadable`), such as an LFS object the
   remote's LFS server does not have. The dry run judges a file in Git LFS by
   its pointer and asks the LFS server only whether it holds the object; it
   downloads nothing.
+- a plain link to a repository file in a document Linear already holds, when
+  the `linear` and `ids` state refs are lost (`link-provenance-unknown`):
+  the run cannot tell it from a link a Linear member wrote.
+
+A plain link that came from Linear (a Linear member's image of a repository
+path, which the sync turned into a link) never uploads the file. A recovery
+reads which links those are from the state refs and the tracked branch's
+history, and keeps them in the state it records.
 
 The confirmed run can leave out a few more: a file whose text grows past
 Linear's length limit when its links are rewritten (`content-too-long`), or
 whose Markdown exceeds the traversal limits (`markdown-complexity`), or
 whose LFS object still cannot be read (`upload-unreadable`), for example
 because the LFS server could not be reached during the dry run or answered
-with an error other than not having the object. Each rule and
+with an error other than not having the object. A document that changes in
+Linear while the run reads it, or before the run overwrites or trashes it
+(moved to another team or project, renamed, trashed, archived or edited), is
+left out with the file its title names (`changed-during-run`), or under its
+id as in **Move to trash** when no file has its title: it is neither
+written nor trashed, and the next run plans it again. Each rule and
 what to do about it is in
 [troubleshooting.md](troubleshooting.md#files-left-out).
 

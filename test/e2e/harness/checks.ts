@@ -8,10 +8,11 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
+import { fixText } from '../../../src/format/fix.ts';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
 import { readKeptAnnotations } from '../../../src/initial-sync/confirm.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
-import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
+import { PushedKey, readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
@@ -254,9 +255,14 @@ export function gitLinks(content: string, documentPath: string, targets: Require
   });
 }
 
-/** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
+/**
+ * Whether a document holds exactly its file's text in Linear's terms (I1 for one file). The sync writes text it
+ * takes from Linear in the form the `linear-format` hook leaves unchanged, and does not write a re-spelling of the
+ * same Markdown back to Linear: the file holds the document or that form of it.
+ */
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
-  return expectedDocumentText(text, path, sides) === content;
+  const expected = expectedDocumentText(text, path, sides);
+  return expected === content || expected === fixText(content);
 }
 
 /** The text a file's document must hold: the file's body, its links in Linear's form. */
@@ -354,6 +360,7 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
     expected = other.value;
   }
   let actualValue = actual.value;
+  if (assertion.operator === 'same-as') [actualValue, expected] = asHookForm(assertion.subject, actualValue, String(assertion.expected), expected);
   if (comparesTypedText(assertion) && typeof actualValue === 'string' && typeof expected === 'string') {
     actualValue = withoutFinalLineBreaks(actualValue);
     expected = withoutFinalLineBreaks(expected);
@@ -449,6 +456,34 @@ export function differingPaths(actual: unknown, expected: unknown, shown = 5): s
   if (differing.length === 0) return undefined;
   const more = differing.length - shown;
   return `differs at ${differing.slice(0, shown).join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
+}
+
+const FILE_BODIES: ReadonlySet<string> = new Set(['tracked.body']);
+// Texts a Linear document holds: its body, or the resolution a person typed in Linear.
+const DOCUMENT_BODIES: ReadonlySet<string> = new Set(['linear.body', 'documents.body', 'resolved.body']);
+
+/**
+ * A comparison of files with their documents, with each document's text taken as its file's where the file holds
+ * it in the form the `linear-format` hook leaves unchanged: the sync writes text from Linear in that form and does
+ * not write a re-spelling of the same Markdown back (as in I1).
+ */
+function asHookForm(subject: string, actual: unknown, other: string, expected: unknown): [unknown, unknown] {
+  const pair = FILE_BODIES.has(subject) && DOCUMENT_BODIES.has(other) ? 'file-first' : DOCUMENT_BODIES.has(subject) && FILE_BODIES.has(other) ? 'document-first' : null;
+  if (pair === null) return [actual, expected];
+  // One target document: the two texts themselves.
+  if (typeof actual === 'string' && typeof expected === 'string') {
+    const [file, text] = pair === 'file-first' ? [actual, expected] : [expected, actual];
+    const document = file !== text && file === fixText(text) ? file : text;
+    return pair === 'file-first' ? [actual, document] : [document, expected];
+  }
+  if (!(actual instanceof Map) || !(expected instanceof Map)) return [actual, expected];
+  const files = (pair === 'file-first' ? actual : expected) as Map<string, unknown>;
+  const documents = new Map(pair === 'file-first' ? expected : actual) as Map<string, unknown>;
+  for (const [path, text] of documents) {
+    const file = files.get(path);
+    if (typeof text === 'string' && typeof file === 'string' && file !== text && file === fixText(text)) documents.set(path, file);
+  }
+  return pair === 'file-first' ? [actual, documents] : [documents, expected];
 }
 
 export function compare(operator: Assertion['operator'], actual: unknown, expected: unknown): boolean {
@@ -661,7 +696,7 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   // No ids ref: the engine recorded nothing (a refusal, a check, a dry run). The mapping is empty, not an error.
   void options;
   const ids: IdMap = idsCommit === null ? new Map() : await readIds(git, idsCommit);
-  const uploadsByHash = await readUploads(git, uploadsCommit);
+  const uploadsByHash = await readUploads(git, uploadsCommit, new PushedKey(world.engineApp.clientSecret, world.repository));
 
   const tracked = (await git.text(['ls-files', '-z'])).split('\0').filter(Boolean);
   const readmes = new Map<string, string>();
@@ -815,8 +850,9 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
         differing.push({ name: `${path} (no document)`, detail: `${path}: no document` });
         continue;
       }
-      const expected = expectedDocumentText(text, path, s);
-      if (expected !== (document.content ?? '')) differing.push({ name: path, detail: `${path}: ${firstDifference(expected, document.content ?? '')}` });
+      const actual = document.content ?? '';
+      // Linear stores a text it is sent without its final newline.
+      if (!sameAsFile(text, actual, path, s) && withoutFinalLineBreaks(expectedDocumentText(text, path, s)) !== actual) differing.push({ name: path, detail: `${path}: ${firstDifference(expectedDocumentText(text, path, s), actual)}` });
     }
     if (differing.length === 0) return ok('I1');
     // Every difference, kept in the run folder: the documents are archived at cleanup. A file that cannot be

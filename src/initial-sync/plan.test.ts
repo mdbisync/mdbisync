@@ -8,6 +8,8 @@ import { type PlaceDocuments, annotatedPlaces, planInitialSync } from './plan.ts
 import { renderDryRun, toPlanReport } from './summary.ts';
 
 const CANARY = 'kx-0d1e2a3b';
+/** Stands for a secret a Linear member put into a document title. */
+const TITLE_TOKEN = 'tk-5f7c9e1a';
 
 /** Maps an in-memory tree and keeps every mapped file's text, as `planFromRepository` reads them. */
 function mapTree(files: Record<string, string>): { mapping: RepositoryMapping; texts: Map<string, string> } {
@@ -108,11 +110,35 @@ describe('planInitialSync', () => {
     assert.deepEqual(
       plan.trash.map((entry) => [entry.path, entry.documentId]),
       [
-        ['eng/Backend/Notes.md', caseOnly.id],
         ['eng/backend/notes.md', backendNotesLater.id],
-        ['eng/backend/retired.md', onlyInLinear.id],
+        [`eng/${caseOnly.id}.md`, caseOnly.id],
+        [`eng/${onlyInLinear.id}.md`, onlyInLinear.id],
       ],
     );
+  });
+
+  it('names a document without a file by its id, never by a title from Linear alone', () => {
+    const secret = doc(`backend/${TITLE_TOKEN}`, { id: 'linear-only', teamId: 'team-eng' });
+    const moved = doc(`backend/${TITLE_TOKEN}-renamed`, { id: 'renamed-during-run', teamId: 'team-eng' });
+    const notes = doc('backend/notes', { teamId: 'team-eng' });
+    const planned = planInitialSync({
+      mapping,
+      texts,
+      places: [{ place: ENG, documents: [notes, secret, moved] }],
+      changed: new Map([[moved.id, { ...moved, title: `${TITLE_TOKEN}-now` }]]),
+    });
+    assert.deepEqual(planned.trash.map((entry) => entry.path), [`eng/${secret.id}.md`]);
+    assert.ok(planned.leftOut.some((entry) => entry.path === `eng/${moved.id}.md` && entry.rules.includes('changed-during-run')));
+    const report = JSON.stringify(toPlanReport(planned, 'git-to-linear', false));
+    for (const text of [renderDryRun(planned), report]) assert.ok(!text.includes(TITLE_TOKEN), 'a Linear title reached the summary or the report');
+    // A file's own title keeps its path: the newer duplicate of a file is named after the file.
+    const duplicate = doc('backend/notes', { teamId: 'team-eng' });
+    const withDuplicate = planInitialSync({ mapping, texts, places: [{ place: ENG, documents: [notes, duplicate] }] });
+    assert.deepEqual(withDuplicate.trash.map((entry) => entry.path), ['eng/backend/notes.md']);
+    // An id that names a file of the tree takes another path, so the reports never mix the document with the file.
+    const named = doc('elsewhere', { id: 'backend/old', teamId: 'team-eng' });
+    const [entry] = planInitialSync({ mapping, texts, places: [{ place: ENG, documents: [named] }] }).trash;
+    assert.ok(entry !== undefined && entry.path !== 'eng/backend/old.md' && entry.path.startsWith('eng/backend%2Fold~'), entry?.path);
   });
 
   it('creates every synchronized file without a document, annotation README bodies included; archived documents are ignored', () => {
@@ -169,6 +195,20 @@ describe('planInitialSync: images', () => {
     const plan = planInitialSync({ mapping, texts, places: [{ place: ENG, documents: [] }] });
     assert.deepEqual(plan.leftOut, [{ path: 'eng/gone.md', rules: ['image-file-missing'], lines: [5] }]);
     assert.deepEqual(plan.create.map((entry) => entry.path), ['eng/README.md', 'eng/figure.md', 'eng/shared.md']);
+  });
+});
+
+describe('planInitialSync: a table too large to pad', () => {
+  it('leaves out a file whose ragged table fix would pad past the limits, and plans its neighbor', () => {
+    const ragged = `${'|a'.repeat(30_000)}|\n${'|-'.repeat(30_000)}|\n${'|x|\n'.repeat(30_000)}`;
+    const { mapping, texts } = mapTree({
+      'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
+      'eng/table.md': `# Table\n\n${ragged}`,
+      'eng/small.md': `# Small\n\n| A | B |\n| -- | -- |\n| 1 |\n`,
+    });
+    const plan = planInitialSync({ mapping, texts, places: [{ place: ENG, documents: [] }] });
+    assert.deepEqual(plan.leftOut, [{ path: 'eng/table.md', rules: ['markdown-complexity'], lines: [3] }]);
+    assert.deepEqual(plan.create.map((entry) => entry.path), ['eng/README.md', 'eng/small.md']);
   });
 });
 

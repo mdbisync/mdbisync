@@ -198,6 +198,14 @@ describe('check helpers', () => {
     assert.equal(sameAsFile(file, '\n# Runbook\n\nRestart the worker.\n', 'eng/runbook.md', sides), false);
   });
 
+  it('a file in the hook\'s form of its document holds the document (I1)', () => {
+    const sides = { hashes: new Map(), uploadsByHash: new Map() };
+    // Linear can store a cell with a trailing space; the sync writes it as the hook does and leaves Linear's spelling.
+    const stored = '| Step | State |\n| -- | -- |\n| Draft  | tbd |';
+    assert.equal(sameAsFile('| Step | State |\n| -- | -- |\n| Draft | tbd |', stored, 'eng/plan.md', sides), true);
+    assert.equal(sameAsFile('| Step | State |\n| -- | -- |\n| Drafted | tbd |', stored, 'eng/plan.md', sides), false, 'a real body difference still fails I1');
+  });
+
   it('find canaries without quoting the text around them', () => {
     const hits = scanCanaries(new Map([['run 0 stdout', 'wrote kx-4f1a9c2e'], ['summary', 'clean']]), ['kx-4f1a9c2e', 'kx-00000000']);
     assert.deepEqual(hits, [{ source: 'run 0 stdout', canary: 'kx-4f1a9c2e' }]);

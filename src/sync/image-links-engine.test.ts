@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { fakeFetch } from '../setup/test-helpers.ts';
+import { fakeFetch, touch } from '../setup/test-helpers.ts';
+import { sameMarkdown, splitFile } from '../format/index.ts';
+import { hookRun } from '../format/test-helpers.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
 
 describe('image repairs through the sync pull request', () => {
@@ -9,7 +12,7 @@ describe('image repairs through the sync pull request', () => {
     const path = 'eng/notes/plan.md';
     const url = status === undefined ? 'https://example.com/chart.png' : 'https://uploads.linear.app/chart.png';
     const body = `# Plan\n\n![Chart](${url})\n`;
-    const expected = `# Plan\n\n[Chart](<${url}>)\n`;
+    const expected = `# Plan\n\n[Chart](<${url}>)`;
     const network = fakeFetch(h.world);
     let downloads = 0;
     h.fetchOverride = async (input, init) => {
@@ -56,7 +59,7 @@ describe('image repairs through the sync pull request', () => {
     assert.match(branch, /!\[Kept\]\(assets\/[a-f0-9]+\.png\)/);
     assert.match(branch, /\[Relative\]\(<missing.png>\)/);
     assert.match(branch, /\[Absolute\]\(<\/missing.png>\)/);
-    assert.match(branch, /\[Nested\]\(https:\/\/example.com\/guide\)/);
+    assert.match(branch, /\[Nested\]\(<https:\/\/example.com\/guide>\)/);
     assert.doesNotMatch(branch, /data:|javascript:|!\[\]\(\)/);
     assert.equal((h.world.github.pullRequests[0]!.body!.match(/image \d of 7 \(line/g) ?? []).length, 6);
     await h.settle();
@@ -102,6 +105,117 @@ describe('image repairs through the sync pull request', () => {
     await h.gitEdit(renamed, '# Plan\n\n![Repository image](../../../records.csv)\n');
     await h.settle();
     assert.equal(h.world.linear.uploads.length, before + 1, 'a repository-authored image should still upload');
+  });
+
+  it('records the plain targets of repaired links when Linear moves a document', async () => {
+    const path = 'eng/notes/plan.md';
+    const moved = 'eng/plan.md';
+    await h.editRef('refs/heads/main', 'eng/outline.txt', 'Draft outline.\n');
+    await h.editRef('refs/heads/main', 'outline.txt', 'Published outline.\n');
+    await h.editInLinear(path, '# Plan\n\n![Outline](../outline.txt)\n\n![Schedule](../schedule.txt)\n');
+    await h.settle();
+    const document = await h.documentOf(path);
+    assert.match(document.content!, /\[Outline\]\(<?\.\.\/outline\.txt>?\)/);
+    assert.doesNotMatch(document.content!, /!\[Outline\]/);
+
+    delete document.projectId;
+    document.teamId = 'team-eng';
+    document.content = document.content!.split('\n\n')
+      .filter(paragraph => !paragraph.includes('schedule.txt')).join('\n\n')
+      .replace('../outline.txt', '../%6Futline.txt#overview');
+    touch(document);
+    const uploads = h.world.linear.uploads.length;
+    const run = await h.sync();
+    assert.deepEqual(run.report.capture?.blocked, []);
+    const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
+    assert.equal(ids[moved]?.id, document.id);
+    assert.deepEqual(new Set(ids[moved].plainFiles), new Set(['eng/outline.txt', 'outline.txt', 'eng/schedule.txt']));
+    await h.settle();
+    const body = splitFile(await h.show(`refs/heads/main:${moved}`)).body;
+    assert.ok(sameMarkdown(body, document.content!), body);
+    assert.equal(h.world.linear.uploads.length, uploads);
+  });
+
+  for (const merged of [true, false]) it(`never binds an upload with equal bytes to a repository file a Linear member linked (repair merged first: ${merged})`, async () => {
+    const path = 'eng/notes/plan.md';
+    const report = '%PDF-1.4\nQuarterly figures.\n';
+    const upload = 'https://uploads.linear.app/workspace/scan.pdf';
+    await h.editRef('refs/heads/main', 'finance/report.pdf', report);
+    const network = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => String(input) === upload ? new Response(report) : network(input, init);
+    const before = h.world.linear.uploads.length;
+    await h.editInLinear(path, '# Plan\n\n![x](../../finance/report.pdf)\n');
+    if (merged) await h.settle();
+    else await h.sync();
+    const held = (await h.documentOf(path)).content!;
+    if (merged) assert.doesNotMatch(held, /!\[x\]/);
+
+    // The member then uploads the same bytes: the upload is a new file beside the document, not the repository file.
+    await h.editInLinear(path, `${held}\n\n![Scan](${upload})\n`);
+    await h.sync();
+    const branch = await h.show(`${SYNC_BRANCH}:${path}`);
+    const hash = createHash('sha256').update(report).digest('hex');
+    assert.match(branch, new RegExp(`!\\[Scan\\]\\(assets/${hash}\\.pdf\\)`));
+    assert.doesNotMatch(branch, /!\[Scan\]\([^)]*finance/);
+    await h.settle();
+
+    // A contributor's new version of the file uploads nothing and adds no URL to the member's document.
+    const linked = (await h.documentOf(path)).content!;
+    assert.match(linked, /\[x\]\(<?\.\.\/\.\.\/finance\/report\.pdf>?\)/);
+    await h.gitEdit('finance/report.pdf', '%PDF-1.4\nRevised figures.\n');
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before);
+    assert.equal((await h.documentOf(path)).content, linked);
+  });
+
+  it('writes a list item linking a plain repository file in the form the linear-format hook leaves unchanged', async () => {
+    const path = 'eng/notes/plan.md';
+    const csv = 'name,value\nExample,42\n';
+    await h.editRef('refs/heads/main', 'records.csv', csv);
+    const before = h.world.linear.uploads.length;
+    // Linear's form of a list item holding only a link it was sent unresolved: the link mark on the item's line,
+    // which it also stores for a file block whose file was not uploaded (the recorded list-item probe).
+    const linked = '# Plan\n\n* [Report](<../../records.csv>)';
+    const sent: string[] = [];
+    h.world.linear.store = (content) => {
+      sent.push(content);
+      return content.replace(/^\* \n {2}\[Report\]\(\.\.\/\.\.\/records\.csv\)$/m, '* [Report](<../../records.csv>)');
+    };
+    await h.editInLinear(path, '# Plan\n\n* ![Report](../../records.csv)\n');
+    await h.sync();
+    // The hook in CI finds the file in the repository, so it writes the item as a file block.
+    const branch = await h.show(`${SYNC_BRANCH}:${path}`);
+    assert.equal(splitFile(branch).body, '# Plan\n\n* \n  [Report](../../records.csv)');
+    assert.deepEqual(hookRun(path, branch, {'records.csv': csv}), {exitCode: 0, stdout: '', stderr: ''});
+    await h.settle();
+    // The file stays a plain link: Linear holds the link it stores for one, and nothing is uploaded.
+    assert.equal(h.world.linear.uploads.length, before);
+    const document = await h.documentOf(path);
+    assert.ok(sameMarkdown(document.content!, linked), document.content);
+    // What the sync records for Linear's link is the file as git holds it: no later pull request changes the file.
+    assert.equal(h.world.github.pullRequests.length, 1);
+    assert.equal(await h.show(`refs/heads/main:${path}`), branch);
+    assert.equal(await h.show(`refs/mdbisync/linear:${path}`), branch);
+    // The text sent keeps the link as Linear stores it, so Linear holds what was sent.
+    assert.ok(sent.length > 0 && sent.every((content) => content.includes('* [Report](../../records.csv)') && !content.includes('* \n')), JSON.stringify(sent));
+    // A later edit in Linear, written as Linear stores the item, is captured in the hook's form too.
+    await h.editInLinear(path, `${linked}\n\nAnother paragraph.\n`);
+    await h.sync();
+    const edited = await h.show(`${SYNC_BRANCH}:${path}`);
+    assert.equal(splitFile(edited).body, '# Plan\n\n* \n  [Report](../../records.csv)\n\nAnother paragraph.');
+    assert.deepEqual(hookRun(path, edited, {'records.csv': csv}), {exitCode: 0, stdout: '', stderr: ''});
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before);
+    assert.ok(sameMarkdown((await h.documentOf(path)).content!, `${linked}\n\nAnother paragraph.`));
+    assert.equal(h.world.github.pullRequests.length, 2);
+    assert.equal(await h.show(`refs/heads/main:${path}`), edited);
+    assert.equal(await h.show(`refs/mdbisync/linear:${path}`), edited);
+    // An edit in git reaches Linear: Linear's link is not taken for an edit made there.
+    await h.gitEdit(path, `${edited}\n\nA repository edit.`);
+    await h.settle();
+    assert.ok(sameMarkdown((await h.documentOf(path)).content!, `${linked}\n\nAnother paragraph.\n\nA repository edit.`), (await h.documentOf(path)).content);
+    assert.equal(h.world.github.pullRequests.length, 2);
+    assert.equal(h.world.linear.uploads.length, before);
   });
 
   // The fake keeps Linear text as written; the recorded format probe shows Linear itself splits the bang

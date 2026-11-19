@@ -2,10 +2,12 @@
 // test (test/format/bank.test.ts) checks the same rules against Linear's
 // recorded forms.
 
+import type { List } from 'mdast';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { fixText } from './fix.ts';
+import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { linkedFileCheck } from './lint.ts';
+import { parse } from './markdown.ts';
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],
@@ -41,6 +43,12 @@ const cases: Array<[string, string, string]> = [
   ['reference images are written inline', '![a][i]\n\n[i]: x.png', '![a](x.png)'],
   ['an image leaves a paragraph with text', 'Before ![a](x.png) after.', 'Before\n\n![a](x.png)\n\nafter.'],
   ['a list item with only a file link becomes a file block', '* [Report](report.pdf)', '* \n  [Report](report.pdf)'],
+  ['a nested bullet after its parent’s text keeps the file link on the marker line', '* Parent\n  * [Report](report.csv)', '* Parent\n  * [Report](<report.csv>)'],
+  ['a nested numbered item after its parent’s text keeps the file link on the marker line', '* Parent\n  1. [Report](report.csv)', '* Parent\n  1. [Report](<report.csv>)'],
+  ['a nested numbered list starting above one keeps its blank line and file block', '* Parent\n\n  3. [Report](report.csv)', '* Parent\n\n  3. \n     [Report](report.csv)'],
+  ['a nested attachment after a sibling still becomes a file block', '* Parent\n  * First\n  * [Report](report.csv)', '* Parent\n  * First\n  * \n    [Report](report.csv)'],
+  ['a nested list starting with an empty item keeps its blank line after the parent', '* Parent\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next', '* Parent\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next'],
+  ['a nested file block keeps its existing blank line after the parent', '* Parent\n\n  * \n    [Report](report.csv)', '* Parent\n\n  * \n    [Report](report.csv)'],
   ['a task or numbered item with only a video link keeps the file block (the video form is recorded for bullets)', '- [ ] [Demo](demo.mp4)\n\n1. [Demo](demo.mp4)', '- [ ] \n  [Demo](demo.mp4)\n\n1. \n   [Demo](demo.mp4)'],
   ['a bullet item with only an MP3 link keeps the link on its line, in angle brackets', '* \n  [Voice note](media/note.mp3)\n* [Call](<call one.MP3>)\n* [Memo](memo.mp3?v=2)', '* [Voice note](<media/note.mp3>)\n* [Call](<call%20one.MP3>)\n* [Memo](<memo.mp3?v=2>)'],
   ['a task or numbered item with only an MP3 link keeps the file block (the MP3 form is recorded for bullets)', '- [ ] [Note](note.mp3)\n\n1. [Note](note.mp3)', '- [ ] \n  [Note](note.mp3)\n\n1. \n   [Note](note.mp3)'],
@@ -70,6 +78,23 @@ describe('fix rules', () => {
   }
 });
 
+describe('an empty first nested item after its parent’s text', () => {
+  for (const input of ['- Parent\n\n  -\n  - Next\n', '1. Parent\n\n   1.\n   2. Next\n']) {
+    it(`stays a list item with its following sibling, and a second run changes nothing: ${JSON.stringify(input)}`, () => {
+      const once = fixText(input);
+      assert.equal(fixText(once), once, 'the result is a fixed point');
+      const [list] = parse(once).children;
+      assert.equal(list?.type, 'list');
+      const [parent] = (list as List).children;
+      assert.deepEqual(parent!.children.map((child) => child.type), ['paragraph', 'list']);
+      const nested = (parent!.children[1] as List).children;
+      assert.equal(nested.length, 2);
+      assert.deepEqual(nested[0]!.children, []);
+      assert.equal(nested[1]!.children[0]?.type, 'paragraph');
+    });
+  }
+});
+
 describe('links to files that are not there', () => {
   const missing = { linkedFileExists: (url: string) => !url.includes('missing') };
   it('a list item with only a link to a missing file stays a link, as Linear keeps it', () => {
@@ -95,6 +120,44 @@ describe('links to files that are not there', () => {
 
   it('without the check every linked file is taken to exist', () => {
     assert.equal(fixText('* [Report](<missing/report.pdf>)'), '* \n  [Report](missing/report.pdf)');
+  });
+
+  it('text from Linear keeps a relative link or image Linear holds as one: its file was not uploaded', () => {
+    const content = '* [Report](report.pdf)\n* ![Chart](chart.png)\n* \n  [Spec](https://uploads.linear.app/a/b/spec.pdf)';
+    // The sync writes the upload as a file beside the document, and a repair turns the image into a link.
+    const text = '* [Report](report.pdf)\n* [Chart](chart.png)\n* \n  [Spec](assets/spec.pdf)';
+    assert.equal(fixLinearText(text, content, () => false), '* [Report](<report.pdf>)\n* [Chart](<chart.png>)\n* \n  [Spec](assets/spec.pdf)');
+  });
+
+  it('text from Linear writes a link Linear holds to a file of the repository in the hook\'s form', () => {
+    const content = '* [Report](<report.pdf>)\n* [Missing](<missing.pdf>)';
+    const inRepository = linkedFileCheck('docs/plan.md', (path) => path === 'docs/report.pdf');
+    // The hook finds `report.pdf` in the repository and writes a file block; Linear stores that block as its link again.
+    assert.equal(fixLinearText(content, content, inRepository), '* \n  [Report](report.pdf)\n* [Missing](<missing.pdf>)');
+    assert.equal(fixText(fixLinearText(content, content, inRepository), { linkedFileExists: inRepository }), '* \n  [Report](report.pdf)\n* [Missing](<missing.pdf>)');
+    // A rewrite that would change the document still leaves the text as it is.
+    const setext = 'Two\nlines\n---\n\n* [Report](<report.pdf>)';
+    assert.equal(fixLinearText(setext, setext, inRepository), setext);
+    // The hook also keeps the link on the marker line right after the parent's text.
+    const nested = '* Parent\n  * [Report](<report.pdf>)';
+    assert.equal(fixLinearText(nested, nested, inRepository), nested);
+  });
+
+  it('a file block whose link is still relative is sent as Linear stores it, everything else as written', () => {
+    const body = '# Plan\n\n* \n  [Report](report.pdf)\n\n1. \n   [Data](data.csv)\n\n> * \n>   [Quoted](q.csv)\n\n'
+      + '* \n  [Spec](https://uploads.linear.app/a/spec.pdf)\n* \n  [Guide](guide.md)\n\n- [ ] \n      [Task](task.csv)';
+    assert.equal(relativeFileBlocksAsLinks(body), '# Plan\n\n* [Report](report.pdf)\n\n1. [Data](data.csv)\n\n> * [Quoted](q.csv)\n\n'
+      + '* \n  [Spec](https://uploads.linear.app/a/spec.pdf)\n* \n  [Guide](guide.md)\n\n- [ ] \n      [Task](task.csv)');
+    assert.equal(relativeFileBlocksAsLinks('* [Report](<report.pdf>)'), '* [Report](<report.pdf>)');
+  });
+
+  it('text from Linear is only re-spelled: a rewrite that would change the document leaves the text as it is', () => {
+    const padded = '| Step | State |\n| -- | -- |\n| Draft  | tbd |';
+    assert.equal(fixLinearText(padded, padded, () => false), '| Step | State |\n| -- | -- |\n| Draft | tbd |');
+    // `fix` writes a setext heading on one line, joining its lines with a space: another text.
+    const setext = 'Two\nlines\n---\n\nText.';
+    assert.notEqual(fixText(setext), setext);
+    assert.equal(fixLinearText(setext, setext, () => false), setext);
   });
 });
 

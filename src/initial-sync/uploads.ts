@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
 import type { Handle } from 'mdast-util-from-markdown';
+import { imageDestination, linkDestination } from '../format/fix.ts';
 import { parse, resolveTarget, splitFile, visit } from '../format/markdown.ts';
 import { LinearError, LinearStoppedError } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
@@ -48,18 +49,20 @@ export const DEFAULT_UPLOAD_LIMIT = 10 * 1024 * 1024;
 export const UPLOAD_TOO_LARGE = 'upload-too-large' satisfies LeftOutAtWriteRule;
 /** Rule of a document left out because a file it links cannot be read (an LFS object that is missing). */
 export const UPLOAD_UNREADABLE = 'upload-unreadable' satisfies LeftOutAtWriteRule;
+/** Rule of a document Linear holds, left out because it plainly links a repository file and the state that says who wrote the link is lost. */
+export const LINK_PROVENANCE_UNKNOWN = 'link-provenance-unknown' satisfies LeftOutAtWriteRule;
 
 /** Bytes of blobs read per git process while hashing linked files. */
 const HASH_BATCH_BYTES = 64 * 1024 * 1024;
 /** An LFS pointer file is smaller than this (Git LFS spec v1). */
 const MAX_POINTER_SIZE = 1024;
-/** Files uploaded with one API request before the first write, and their largest total size. */
+/** Maximum count and total bytes of files in one upload request. */
 const UPLOAD_BATCH_FILES = 20;
 const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
 
 export interface UploadsOptions {
   config: StateConfig;
-  /** Largest file uploaded, in bytes. */
+  /** Largest file uploaded, in bytes, up to the upload batch byte limit. */
   limit?: number;
 }
 
@@ -74,6 +77,7 @@ export interface FileLink {
   target: string;
   /** The destination's query and fragment (`#page=3`), kept after the upload URL. */
   suffix: string;
+  inTable: boolean;
 }
 
 /** What a document's link to a file was before the upload: restored in place of `url + suffix`. */
@@ -126,11 +130,25 @@ export async function predictUploadLeaveOuts(
   plan: InitialSyncPlan,
   texts: ReadonlyMap<string, string>,
   uploads: UploadMap,
+  options: { remote: string; limit?: number; plainFiles?: ReadonlyMap<string, ReadonlySet<string>>; unknownProvenance?: ReadonlySet<string> },
+): Promise<UploadLeaveOut[]> {
+  const { files } = await treeFiles(git, tracked);
+  const { planned, unproven } = plannedLinks(plan, files, texts, options.plainFiles, options.unknownProvenance);
+  const judged = await predictPlanned(git, files, planned, uploads, options);
+  // The write judges provenance before any file, so its rule comes first.
+  const result = [...unproven].map(([path, unprovenFiles]): UploadLeaveOut => ({ path, rule: LINK_PROVENANCE_UNKNOWN, files: unprovenFiles }));
+  return [...result, ...judged].sort((a, b) => compare(a.path, b.path));
+}
+
+/** `predictUploadLeaveOuts` for the documents whose links the run would upload. */
+async function predictPlanned(
+  git: Git,
+  files: ReadonlyMap<string, TreeEntry>,
+  planned: ReadonlyMap<string, string[]>,
+  uploads: UploadMap,
   options: { remote: string; limit?: number },
 ): Promise<UploadLeaveOut[]> {
-  const limit = options.limit ?? DEFAULT_UPLOAD_LIMIT;
-  const { files } = await treeFiles(git, tracked);
-  const planned = plannedLinks(plan, files, texts);
+  const limit = Math.min(options.limit ?? DEFAULT_UPLOAD_LIMIT, UPLOAD_BATCH_BYTES);
   // Each file once: several documents may link it.
   const targets = [...new Set([...planned.values()].flat())];
   const linked = new Map<string, LinkedFile>();
@@ -160,19 +178,20 @@ export async function predictUploadLeaveOuts(
       result.push({ path, rule: leaveOut.rule, files: leaveOut.files });
       continue;
     }
-    // The upload reads the document's files in order and stops at the first it cannot read.
-    const toRead = filesToRead(own, linked, uploaded);
-    const unread = [...toRead.values()].find(unreadable);
-    if (unread !== undefined) {
-      result.push({ path, rule: UPLOAD_UNREADABLE, files: [unread] });
-      continue;
+    const batches = uploadBatches(filesToRead(own, linked, uploaded), linked);
+    for (const [index, batch] of batches.entries()) {
+      const unread = [...batch.pending.values()].find(unreadable);
+      if (unread !== undefined) {
+        result.push({ path, rule: UPLOAD_UNREADABLE, files: [unread] });
+        break;
+      }
+      const taken = { hashes: new Set(batch.pending.keys()), bytes: batch.bytes };
+      if (index === batches.length - 1) {
+        const later = order.slice(position + 1).map((next) => planned.get(next) as string[]);
+        await fillBatch(taken, later, linked, limit, uploaded, async () => {}, async (pending) => ![...pending.values()].some(unreadable));
+      }
+      for (const hash of taken.hashes) uploaded.add(hash);
     }
-    if (toRead.size === 0) continue;
-    // The same upload request carries files of the documents written next, as the run sends it.
-    const batch = { hashes: new Set(toRead.keys()), bytes: [...toRead.values()].reduce((sum, target) => sum + file(target).size, 0) };
-    const later = order.slice(position + 1).map((next) => planned.get(next) as string[]);
-    await fillBatch(batch, later, linked, limit, uploaded, async () => {}, async (pending) => ![...pending.values()].some(unreadable));
-    for (const hash of batch.hashes) uploaded.add(hash);
   }
   return result;
 }
@@ -215,7 +234,7 @@ async function fillBatch(
     if (targets.some((target) => file(target).size > limit)) continue;
     const pending = new Map([...filesToRead(targets, linked, uploaded)].filter(([hash]) => !batch.hashes.has(hash)));
     if (pending.size === 0) continue;
-    const pendingBytes = [...pending.values()].reduce((sum, target) => sum + file(target).size, 0);
+    const pendingBytes = [...pending.values()].reduce((sum, target) => sum + uploadBytes(file(target)), 0);
     if (batch.hashes.size + pending.size > UPLOAD_BATCH_FILES || batch.bytes + pendingBytes > UPLOAD_BATCH_BYTES) break;
     if (!(await read(pending))) continue;
     for (const hash of pending.keys()) batch.hashes.add(hash);
@@ -263,6 +282,28 @@ function filesToRead(targets: Iterable<string>, linked: ReadonlyMap<string, Link
   return byHash;
 }
 
+/** Account for both the Git blob read and the file sent to storage. */
+function uploadBytes(file: LinkedFile): number {
+  return file.lfs ? Math.max(file.size, MAX_POINTER_SIZE) : file.size;
+}
+
+/** Partitions a document's uncached files in link order, after checking each file's limit. */
+function uploadBatches(files: ReadonlyMap<string, string>, linked: ReadonlyMap<string, LinkedFile>) {
+  const batches: { pending: Map<string, string>; bytes: number }[] = [];
+  let batch = { pending: new Map<string, string>(), bytes: 0 };
+  for (const [hash, target] of files) {
+    const bytes = uploadBytes(linked.get(target) as LinkedFile);
+    if (batch.pending.size === UPLOAD_BATCH_FILES || batch.bytes + bytes > UPLOAD_BATCH_BYTES) {
+      batches.push(batch);
+      batch = { pending: new Map(), bytes: 0 };
+    }
+    batch.pending.set(hash, target);
+    batch.bytes += bytes;
+  }
+  if (batch.pending.size > 0) batches.push(batch);
+  return batches;
+}
+
 /** The tracked tree's regular files, by path: Markdown files, and the others, which documents may link. */
 async function treeFiles(git: Git, tracked: Oid): Promise<{ files: Map<string, TreeEntry>; markdown: Map<string, TreeEntry> }> {
   const files = new Map<string, TreeEntry>();
@@ -275,17 +316,34 @@ async function treeFiles(git: Git, tracked: Oid): Promise<{ files: Map<string, T
   return { files, markdown };
 }
 
-/** The files each document the plan creates or overwrites links (each once, in link order), from its text; documents without text or links are absent. */
-function plannedLinks(plan: InitialSyncPlan, files: ReadonlyMap<string, TreeEntry>, texts: ReadonlyMap<string, string>, plainFiles?: ReadonlyMap<string, ReadonlySet<string>>): Map<string, string[]> {
+/**
+ * The files each document the plan creates or overwrites links (each once, in
+ * link order), from its text; documents without text or links are absent. A
+ * document the write leaves out for unknown provenance is in `unproven`
+ * instead, with the files that cause it, so no batch uploads its files.
+ */
+function plannedLinks(
+  plan: InitialSyncPlan,
+  files: ReadonlyMap<string, TreeEntry>,
+  texts: ReadonlyMap<string, string>,
+  plainFiles?: ReadonlyMap<string, ReadonlySet<string>>,
+  unknownProvenance?: ReadonlySet<string>,
+): { planned: Map<string, string[]>; unproven: Map<string, string[]> } {
   const isFile = (path: string) => files.has(path);
   const planned = new Map<string, string[]>();
+  const unproven = new Map<string, string[]>();
   for (const { path } of [...plan.create, ...plan.overwrite]) {
     const text = texts.get(path);
     if (text === undefined) continue;
-    const targets = [...new Set(uploadableLinks(path, splitFile(text).body, isFile, plainFiles?.get(path)).map((link) => link.target))];
+    const links = uploadableLinks(path, splitFile(text).body, isFile, plainFiles?.get(path), unknownProvenance?.has(path) === true);
+    if (links.unproven.length > 0) {
+      unproven.set(path, links.unproven);
+      continue;
+    }
+    const targets = [...new Set(links.links.map((link) => link.target))];
     if (targets.length > 0) planned.set(path, targets);
   }
-  return planned;
+  return { planned, unproven };
 }
 
 /**
@@ -328,7 +386,7 @@ async function hashLinkedFiles(git: Git, files: ReadonlyMap<string, TreeEntry>, 
 
 /** The transform that uploads linked files and writes their URLs into the document. */
 export function uploadsTransform(options: UploadsOptions): BodyTransform {
-  const limit = options.limit ?? DEFAULT_UPLOAD_LIMIT;
+  const limit = Math.min(options.limit ?? DEFAULT_UPLOAD_LIMIT, UPLOAD_BATCH_BYTES);
   let context: TransformContext | undefined;
   /** The tracked tree's regular files that are not Markdown, by path. */
   const files = new Map<string, TreeEntry>();
@@ -370,8 +428,9 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
     const inputs = items.map(({ target, content }) => ({
       filename: posix.basename(target),
       contentType: contentTypeOf(target),
-      // A copy, so the bytes sent are a whole ArrayBuffer of their own, as the client's type requires.
-      bytes: new Uint8Array(content),
+      bytes: content.buffer instanceof ArrayBuffer
+        ? new Uint8Array(content.buffer, content.byteOffset, content.byteLength)
+        : new Uint8Array(content),
     }));
     const results = await linear.uploadFiles(inputs);
     items.forEach(({ hash }, index) => uploads.set(hash, (results[index] as { assetUrl: string }).assetUrl));
@@ -393,33 +452,38 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
   };
 
   /**
-   * Uploads a document's files not in the cache, with one API request that
-   * also carries the missing files of the documents written next (up to
-   * UPLOAD_BATCH_FILES files and UPLOAD_BATCH_BYTES), so the run spends far
-   * fewer requests than one per file: the budget is 1.5 requests per written
-   * document. The uploads land between writes, so the run's progress pushes
-   * record them as it goes. A later document joins the batch as `fillBatch`
+   * Reads and uploads one bounded batch at a time, caching each response.
+   * The last batch also carries missing files of the documents written
+   * next, saving requests. A later document joins the batch as `fillBatch`
    * says: only when it is within the limit and all its files can be read,
    * which the dry run predicts the same way. When the batch fails for
    * a reason other than a stop, the document's own files are sent alone, so
    * another document's file never fails this one.
    */
   const uploadMissing = async (path: string, targets: readonly string[]) => {
-    const { git, uploads } = context as TransformContext;
-    const own = await readFiles(filesToRead(targets, linked, uploads));
-    if (!Array.isArray(own)) {
-      // A failed read alone can be transient. Only the batch API's 404/410 confirms that the remote lacks it.
-      const entry = files.get(own.target) as TreeEntry;
-      const file = linked.get(own.target) as LinkedFile;
-      if (!file.absent) file.absent = (await missingLfsObjects(git, options.config.remote, [entry.oid])).has(file.hash);
-      throw new LeaveOutError(UPLOAD_UNREADABLE, message('initial-sync.upload-unreadable', { file: own.target, reason: own.unreadable }), [own.target], { missingLfsObject: file.absent });
+    const { git, linear, uploads } = context as TransformContext;
+    const batches = uploadBatches(filesToRead(targets, linked, uploads), linked);
+    for (const [index, batch] of batches.entries()) {
+      if (linear.stopped !== undefined) throw new LinearStoppedError('FileUploads', linear.stopped);
+      const own = await readFiles(batch.pending);
+      if (!Array.isArray(own)) {
+        // A failed read alone can be transient. Only the batch API's 404/410 confirms that the remote lacks it.
+        const entry = files.get(own.target) as TreeEntry;
+        const file = linked.get(own.target) as LinkedFile;
+        if (!file.absent) file.absent = (await missingLfsObjects(git, options.config.remote, [entry.oid])).has(file.hash);
+        throw new LeaveOutError(UPLOAD_UNREADABLE, message('initial-sync.upload-unreadable', { file: own.target, reason: own.unreadable }), [own.target], { missingLfsObject: file.absent });
+      }
+      if (index === batches.length - 1) await uploadLastBatch(path, own, batch.bytes);
+      else await uploadAll(own);
     }
-    if (own.length === 0) return;
+  };
 
+  const uploadLastBatch = async (path: string, own: Upload[], bytes: number) => {
+    const { git, uploads } = context as TransformContext;
     const batch = [...own];
     const position = order.indexOf(path);
     const later = (position === -1 ? [] : order.slice(position + 1)).map((next) => planned.get(next) as string[]);
-    const taken = { hashes: new Set(batch.map((item) => item.hash)), bytes: batch.reduce((sum, item) => sum + item.content.length, 0) };
+    const taken = { hashes: new Set(own.map((item) => item.hash)), bytes };
     await fillBatch(taken, later, linked, limit, uploads, (next) => hashFiles(git, next), async (pending) => {
       const files = await readFiles(pending);
       if (!Array.isArray(files)) return false;
@@ -451,25 +515,38 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
         if (parseLfsPointer(blob) === null) texts.set(path, blob.toString('utf8'));
       }
       // The files each document to be written links, in the run's write order (by path), for the look-ahead batches.
-      for (const [path, targets] of plannedLinks(ctx.plan, files, texts, ctx.plainFiles)) planned.set(path, targets);
+      for (const [path, targets] of plannedLinks(ctx.plan, files, texts, ctx.plainFiles, ctx.unknownProvenance).planned) planned.set(path, targets);
       order.push(...[...planned.keys()].sort(compare));
     },
 
     async apply({ path, body }) {
       if (context === undefined) throw new Error(message('initial-sync.uploads-not-prepared'));
-      const fileLinks = uploadableLinks(path, body, isFile, context.plainFiles?.get(path));
+      const uploadable = uploadableLinks(path, body, isFile, context.plainFiles?.get(path), context.unknownProvenance?.has(path) === true);
+      if (uploadable.unproven.length > 0) {
+        throw new LeaveOutError(LINK_PROVENANCE_UNKNOWN, message('initial-sync.link-provenance-unknown', { files: uploadable.unproven.join(', ') }), uploadable.unproven);
+      }
+      const fileLinks = uploadable.links;
       if (fileLinks.length === 0) return body;
       const targets = [...new Set(fileLinks.map((link) => link.target))];
       await hashFiles(context.git, targets);
 
-      // Check every file first, so a document left out uploads nothing.
+      // Check every file for size and LFS extensions before uploading.
       const leaveOut = judgeLinkedFiles(targets, linked, limit, context.uploads);
       if (leaveOut !== null) throw new LeaveOutError(leaveOut.rule, leaveOut.message, leaveOut.files);
       await uploadMissing(path, targets);
       const { uploads } = context;
       const urls = fileLinks.map((link) => uploads.get((linked.get(link.target) as LinkedFile).hash) as string);
       links.set(path, fileLinks.map((link) => ({ written: link.written, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
-      return replaceRanges(body, fileLinks.map((link, index) => ({ from: link.from, to: link.to, text: (urls[index] as string) + link.suffix })));
+      return replaceRanges(body, fileLinks.map((link, index) => {
+        const url = withUploadSuffix(urls[index] as string, link.suffix);
+        const bracketed = link.written.startsWith('<');
+        const text = bracketed || /[()\\]/.test(url) ? linkDestination(url) : imageDestination(url);
+        return {
+          from: link.from - Number(bracketed),
+          to: link.to + Number(bracketed),
+          text: link.inTable ? text.replaceAll('|', '&#124;') : text,
+        };
+      }));
     },
 
     restore({ path, body }) {
@@ -478,6 +555,24 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       return restoreFileLinks(body, fileLinks, context.uploads);
     },
   };
+}
+
+/** Encode URL characters that a Markdown parser might strip or treat as delimiters. */
+export function uploadDestinationUrl(url: string): string {
+  return url.replace(/[\s<>\x00-\x1f\x7f]/gu, (character) => encodeURIComponent(character));
+}
+
+/** Preserve the query on a captured upload when the repository link carries the same query. */
+export function withUploadSuffix(url: string, suffix: string): string {
+  const destination = uploadDestinationUrl(url);
+  if (suffix === '') return destination;
+  const base = destination.split('#')[0]!;
+  const trailing = uploadDestinationUrl(suffix);
+  const searchAt = base.indexOf('?');
+  if (!trailing.startsWith('?') || searchAt === -1) return base + trailing;
+  const search = trailing.split('#')[0]!;
+  if (base.slice(searchAt) === search) return base + trailing.slice(search.length);
+  return base + '&' + trailing.slice(1);
 }
 
 /**
@@ -494,7 +589,7 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
   for (const link of written) {
     const url = uploads.get(link.hash);
     if (url === undefined) continue;
-    const key = url + link.suffix;
+    const key = withUploadSuffix(url, link.suffix);
     raws.set(key, [...(raws.get(key) ?? []), link.written]);
   }
   if (raws.size === 0) return body;
@@ -510,10 +605,15 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
   return replaceRanges(body, replacements);
 }
 
-/** A repaired path is a plain link. Only a repository-authored image can authorize its upload. */
-function uploadableLinks(path: string, body: string, isFile: (path: string) => boolean, plain?: ReadonlySet<string>): FileLink[] {
+/**
+ * The repository-file links of a document the run may upload. A repaired
+ * path is a plain link: only a repository-authored image can authorize its
+ * upload. When the document's provenance is unknown, every other non-image
+ * link is `unproven` (each target once): it may be a Linear member's.
+ */
+function uploadableLinks(path: string, body: string, isFile: (path: string) => boolean, plain?: ReadonlySet<string>, unknown = false): { links: FileLink[]; unproven: string[] } {
   const links = findFileLinks(path, body, isFile);
-  if (plain === undefined || plain.size === 0) return links;
+  if (links.length === 0 || ((plain === undefined || plain.size === 0) && !unknown)) return { links, unproven: [] };
   const imageUrls = new Set<string>();
   const labels = new Set<string>();
   const definitions = new Map<string, string>();
@@ -524,17 +624,18 @@ function uploadableLinks(path: string, body: string, isFile: (path: string) => b
   });
   for (const label of labels) { const url = definitions.get(label); if (url !== undefined) imageUrls.add(url); }
   const images = new Set([...imageUrls].flatMap(url => { const target = resolveTarget(path, url); return target === null ? [] : [target]; }));
-  return links.filter(link => !plain.has(link.target) || images.has(link.target));
+  const kept = links.filter(link => plain?.has(link.target) !== true || images.has(link.target));
+  return { links: kept, unproven: unknown ? [...new Set(kept.filter(link => !images.has(link.target)).map(link => link.target))] : [] };
 }
 
 /** Links, images and link definitions in `body` whose destination is a file of the repository. */
 export function findFileLinks(documentPath: string, body: string, isFile: (path: string) => boolean): FileLink[] {
   const result: FileLink[] = [];
-  for (const { node, range, outer } of destinations(body)) {
+  for (const { node, range, outer, inTable } of destinations(body)) {
     const target = resolveTarget(documentPath, node.url);
     if (target === null || !isFile(target)) continue;
     const cut = node.url.search(/[?#]/);
-    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
+    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut), inTable });
   }
   return result;
 }
@@ -548,8 +649,8 @@ type Range = { from: number; to: number };
  * with (`outer`) their angle brackets, in document order. Reference uses,
  * autolinks and empty destinations without brackets have no range of their own.
  */
-export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range }> {
-  const result: Array<{ node: DestinationNode; range: Range; outer: Range }> = [];
+export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range; inTable: boolean }> {
+  const result: Array<{ node: DestinationNode; range: Range; outer: Range; inTable: boolean }> = [];
   const ranges = new Map<DestinationNode, { range: Range; outer: Range }>();
   // The parser skips one leading BOM before counting source offsets.
   const offset = body.startsWith('\uFEFF') ? 1 : 0;
@@ -564,10 +665,10 @@ export function destinations(body: string): Array<{ node: DestinationNode; range
     ranges.set(node, { range: { from: from + Number(angle), to: to - Number(angle) }, outer: { from, to } });
   };
   const tree = parse(body, [{ enter: { resourceDestination: destination, definitionDestination: destination } }]);
-  visit(tree, (node) => {
+  visit(tree, (node, ancestors) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
     const found = ranges.get(node);
-    if (found !== undefined) result.push({ node, ...found });
+    if (found !== undefined) result.push({ node, ...found, inTable: ancestors.some(parent => parent.type === 'tableCell') });
   });
   return result.sort((a, b) => a.range.from - b.range.from);
 }

@@ -8,6 +8,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fixText } from '../format/index.ts';
+import { hookRun } from '../format/test-helpers.ts';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
@@ -26,7 +28,9 @@ import { LINK_VARIANT_LINKS, capture } from '../sync/capture.ts';
 import { SYNC_BRANCH_MERGE_MESSAGE } from '../sync/pull-request.ts';
 import { candidateKey } from '../sync/staged.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
-import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
+import { planInitialSync } from './plan.ts';
+import { type ReversePlan, type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit, pullRequestBody } from './reverse.ts';
+import { renderReverseConfirmed } from './summary.ts';
 import { MARKS } from '../sync/marks.ts';
 
 const CANARY = 'kx-7d20b4e1';
@@ -152,6 +156,38 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(await show('refs/heads/mdbisync/linear:eng/notes/plan.md'), TREE['eng/notes/plan.md']);
     assert.match(await show('refs/heads/mdbisync/linear:eng/notes/faq.md'), /FAQ/);
     assert.ok(!(await files('refs/heads/mdbisync/linear')).includes('eng/notes/deep.md'));
+    assert.deepEqual(linearMutations(world), []);
+  });
+
+  for (const [label, change] of [
+    ['moved to another project or deleted', (world: FakeWorld) => {
+      world.linear.documents.find((d) => d.id === 'doc-plan')!.projectId = 'project-handbook';
+      world.linear.documents = world.linear.documents.filter((d) => d.id !== 'doc-faq');
+    }],
+    ['renamed or archived', (world: FakeWorld) => {
+      world.linear.documents.find((d) => d.id === 'doc-plan')!.title = 'other';
+      world.linear.documents.find((d) => d.id === 'doc-faq')!.archivedAt = '2026-01-02T00:00:00Z';
+    }],
+  ] as const) it(`imports no document ${label} between the listing and the read of its text, and writes no empty file`, async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    world.linear.beforeQuery = (operation) => {
+      if (operation !== 'GetDocuments') return;
+      delete world.linear.beforeQuery;
+      change(world);
+    };
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.leftOutRules?.includes('changed-during-run'));
+    assert.ok(report.summary?.leftOut.includes('eng/notes/plan.md') && report.summary.leftOut.includes('eng/notes/doc-faq.md'), JSON.stringify(report.summary?.leftOut));
+    // The tracked file stays as it is, and the document gone from its place gets no file, empty or not.
+    assert.equal(await show('refs/heads/mdbisync/linear:eng/notes/plan.md'), TREE['eng/notes/plan.md']);
+    assert.ok(!(await files('refs/heads/mdbisync/linear')).includes('eng/notes/faq.md'));
+    const ids = await readIds();
+    assert.equal(ids['eng/notes/plan.md'], undefined);
+    assert.equal(ids['eng/notes/faq.md'], undefined);
+    // The other documents are imported as usual.
+    assert.match(await show('refs/heads/mdbisync/linear:eng/ops/runbook.md'), /Restart it/);
     assert.deepEqual(linearMutations(world), []);
   });
 
@@ -465,7 +501,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.deepEqual(report.linearToGit?.leftOutAtRecord, []);
     const head = 'refs/mdbisync/linear';
     // Next to the document, named by content hash, linked relatively; a file the tracked text links is linked, not copied.
-    assert.equal(await show(`${head}:eng/ops/runbook.md`), `# Runbook\n\n![Shot](assets/${sha(shot)}.png)\n\nRead [the spec](assets/${sha(spec)}.pdf#page=2).`);
+    assert.equal(await show(`${head}:eng/ops/runbook.md`), `# Runbook\n\n![Shot](assets/${sha(shot)}.png)\n\nRead [the spec](<assets/${sha(spec)}.pdf#page=2>).`);
     assert.equal(await show(`${head}:eng/notes/plan.md`), `---\nowner: platform\n---\n\n# Plan\n\n![Diagram](diagram.png)`);
     const tree = await files(head);
     assert.deepEqual(tree.filter((path) => /\.(png|pdf)$/.test(path)), [`eng/notes/diagram.png`, `eng/ops/assets/${sha(shot)}.png`, `eng/ops/assets/${sha(spec)}.pdf`].sort());
@@ -566,7 +602,7 @@ describe('initial sync from Linear to the tracked branch', () => {
 
   it('maps links to synchronized documents back to relative links, keeping the tracked spelling', async () => {
     // The tracked plan already links the README in its own spelling; Linear holds the document URL.
-    await fixture.seed({ 'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](./README.md#top). ${CANARY}` });
+    await fixture.seed({ 'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](<./README.md#top>). ${CANARY}` });
     const world = fakeWorld();
     const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
     const contents: Record<string, string> = {
@@ -576,10 +612,10 @@ describe('initial sync from Linear to the tracked branch', () => {
     world.linear.documents = linearDocuments().map((d) => (contents[d.id] === undefined ? d : { ...d, content: contents[d.id] as string }));
     const { result } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](./README.md#top). ${CANARY}`);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](<./README.md#top>). ${CANARY}`);
     assert.equal(
       await show('refs/mdbisync/linear:eng/notes/faq.md'),
-      `# FAQ\n\nRead [the plan](<plan.md#steps>) and [the runbook](<../ops/runbook.md>). Elsewhere: [a stranger](${url('doc-unknown')}).`,
+      `# FAQ\n\nRead [the plan](<plan.md#steps>) and [the runbook](<../ops/runbook.md>). Elsewhere: [a stranger](<${url('doc-unknown')}>).`,
     );
   });
 
@@ -594,7 +630,44 @@ describe('initial sync from Linear to the tracked branch', () => {
     const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'front-matter-boundary' }]);
-    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](<${url('doc-faq')}>).`);
+  });
+
+  it('writes each document in the form the linear-format hook leaves unchanged', async () => {
+    // Linear can store a table cell with a trailing space (`| a  |`) and other spacing `fix` normalizes.
+    const stored = `# Plan  \n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n\n* First item\n    continued with extra indentation\n\n<!-- linear:callout color=#f2c94c -->\n> [!WARNING]\n> Kept both versions.\n\n${CANARY}`;
+    assert.notEqual(fixText(stored), stored);
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' || d.id === 'doc-faq' ? { ...d, content: stored } : d));
+    const { result } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    for (const path of ['eng/notes/plan.md', 'eng/notes/faq.md']) {
+      const file = await show(`refs/mdbisync/linear:${path}`);
+      assert.match(file, /^\| Draft the outline \| tbd \|$/m, path);
+      assert.deepEqual(hookRun(path, file), { exitCode: 0, stdout: '', stderr: '' }, path);
+    }
+  });
+
+  it('writes a list item linking a repository file Linear holds as a plain link in the hook\'s form', async () => {
+    // The tracked file already links the picture, so the link is not new from Linear; Linear holds no upload of it.
+    const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+    const tracked = await commitTree(fixture.remote, {
+      parents: [main],
+      base: main,
+      changes: new Map([['eng/notes/plan.md', `---\nowner: platform\n---\n\n# Plan\n\n* [Diagram](<diagram.png>)\n\n${CANARY}`]]),
+      message: 'Link the diagram',
+      identity: { name: 'A person', email: 'person@example.com' },
+    });
+    await fixture.remote.run(['update-ref', 'refs/heads/main', tracked]);
+    const world = fakeWorld();
+    const stored = `# Plan\n\n* [Diagram](<diagram.png>)\n\nNew steps. ${CANARY}`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: stored } : d));
+    const { result } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    const file = await show('refs/mdbisync/linear:eng/notes/plan.md');
+    assert.equal(file, `---\nowner: platform\n---\n\n# Plan\n\n* \n  [Diagram](diagram.png)\n\nNew steps. ${CANARY}`);
+    assert.deepEqual(hookRun('eng/notes/plan.md', file, { 'eng/notes/diagram.png': TREE['eng/notes/diagram.png']! }), { exitCode: 0, stdout: '', stderr: '' });
+    assert.equal(world.linear.uploads.length, 0);
   });
 
   it('leaves an initial attachment budget overrun out without partial files or Linear writes', async () => {
@@ -648,7 +721,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.ok(report.linearToGit?.leftOutAtRecord.some((entry) => entry.path === 'eng/notes/faq.md'), JSON.stringify(report.linearToGit?.leftOutAtRecord));
     assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/notes/faq.md'));
     // A later build rewrote the runbook's link; the record holds that text, not the first build's.
-    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](<${url('doc-faq')}>).`);
   });
 
   it('a dead upload keeps the tracked file, which stays its document', async () => {
@@ -743,8 +816,20 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.linear.uploads.length, 0);
   });
 
-  it('stops when Linear refuses the run access to an upload, instead of leaving the document out', async () => {
+  it('keeps the tracked text of a document whose upload Linear refuses while the run access works, and records the rest', async () => {
     const world = fakeWorld();
+    const refused = `${UPLOADS_HOST}/0/refused.png`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Chart](${refused}) ${CANARY}\n` } : d));
+    world.linear.uploads.push({ filename: 'refused.png', contentType: 'image/png', size: 0, assetUrl: refused, status: 403 });
+    const report = await run(world);
+    assert.equal(report.result.exitCode, 0, report.result.stderr);
+    assert.deepEqual(report.report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/plan.md', rule: 'image-blocked' }]);
+    assert.doesNotMatch(await show('refs/mdbisync/linear:eng/notes/plan.md'), /refused\.png/);
+  });
+
+  it('stops when Linear refuses the run access to an upload and the access probe fails, instead of leaving the document out', async () => {
+    const world = fakeWorld();
+    world.linear.uploadAccessStatus = 401;
     const refused = `${UPLOADS_HOST}/0/refused.png`;
     world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Chart](${refused}) ${CANARY}\n` } : d));
     const base = fakeFetch(world);
@@ -1015,8 +1100,8 @@ describe('initial sync from Linear to the tracked branch', () => {
 
   it('records its own marker even when an earlier record from the other direction has the same tree', async () => {
     const world = fakeWorld();
-    // Linear stores the text in its own form, so the record differs from the tracked branch.
-    world.linear.store = (content) => content.replace('# ', '#  ');
+    // Linear stores the text in a spelling of its own that `fix` keeps, so the record differs from the tracked branch.
+    world.linear.store = (content) => content.replace('kx-', 'kx\\-');
     world.github.pullRequests = [];
     const gitToLinear = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
     assert.equal(gitToLinear.result.exitCode, 0, gitToLinear.result.stderr);
@@ -1105,9 +1190,10 @@ describe('initial sync from Linear to the tracked branch', () => {
 
       const refused = await run(world, {}, 'sync');
       assert.equal(refused.result.exitCode, NO_STATE_EXIT_CODE, refused.result.stderr);
-      assert.equal(refused.report.code, 'initial-pull-request-pending');
-      // The preflight refuses, before the run captures or writes anything.
-      assert.match(refused.summary, /Closing the pull request or deleting its branch does not cancel/);
+      // The preflight refuses, before the run captures or writes anything: the sync did not sign the appended commit,
+      // so the history it would read a pending record from is not its own.
+      assert.equal(refused.report.code, 'initial-sync-required');
+      assert.match(refused.summary, /is at a commit the sync did not sign/);
       assert.deepEqual(await refs(), before, 'a remote ref moved');
       assert.equal(world.writes.length, writes, 'the run wrote to an API');
       assert.equal(mergeCalls, 0);
@@ -1323,6 +1409,69 @@ describe('planning an initial sync from Linear', () => {
     assert.deepEqual([plan.create, plan.remove], [[], []]);
   });
 
+  describe('a document that changed during the run', () => {
+    const changedOut = (plan: ReversePlan) => plan.leftOut.filter((entry) => entry.rules.includes('changed-during-run')).map((entry) => [entry.documentId, entry.path]).sort();
+    const gone = (...ids: string[]) => new Map(ids.map((id) => [id, null]));
+
+    it('is not imported, and the file its title names stays as it is', () => {
+      const plan = planLinearToGit({ ...input([listed('plan', 'plan', '2026-01-01T00:00:00Z'), listed('faq', 'faq', '2026-01-02T00:00:00Z')], { 'notes/plan.md': '# Plan\n' }), changed: gone('plan', 'faq') });
+      // `faq` has no file: its name is made from its id, here the same as its title.
+      assert.deepEqual(changedOut(plan), [['faq', 'notes/faq.md'], ['plan', 'notes/plan.md']]);
+      assert.deepEqual([plan.overwrite, plan.create, plan.remove], [[], [], []]);
+    });
+
+    it('keeps the file the naming rule gives it, by its plain encoded name or after another title took it', () => {
+      const alone = planLinearToGit({ ...input([listed('colon', 'Q3: goals', '2026-01-01T00:00:00Z')], { 'notes/Q3%3A goals.md': '# Goals\n' }), changed: gone('colon') });
+      assert.deepEqual(changedOut(alone), [['colon', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([alone.overwrite, alone.create, alone.remove], [[], [], []]);
+
+      const files = { 'notes/Q3%3A goals.md': '# Goals\n', 'notes/Q3%253A goals.md': '# Literal\n' };
+      const plan = planLinearToGit({ ...input([listed('literal', 'Q3%3A goals', '2026-01-01T00:00:00Z'), listed('colon', 'Q3: goals', '2026-01-02T00:00:00Z')], files), changed: gone('colon') });
+      assert.deepEqual(plan.overwrite.map((entry) => [entry.documentId, entry.path]), [['literal', 'notes/Q3%253A goals.md']]);
+      assert.deepEqual(changedOut(plan), [['colon', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([plan.create, plan.remove], [[], []]);
+    });
+
+    it('is reported without a file under a name made from its id, since no hook has seen its title', () => {
+      const plan = planLinearToGit({ ...input([listed('colon', 'Q3: goals', '2026-01-01T00:00:00Z')]), changed: gone('colon') });
+      assert.deepEqual(changedOut(plan), [['colon', 'notes/colon.md']]);
+    });
+
+    it('adds its rule to a file left out by another rule', () => {
+      const base = input([listed('plan', 'plan', '2026-01-01T00:00:00Z')]);
+      const mapping = { ...base.mapping, unsynced: [{ path: 'notes/plan.md', reason: 'stored-in-lfs', place, title: 'plan' }] } as never;
+      const plan = planInitialSync({ ...base, mapping, changed: gone('plan') });
+      assert.deepEqual(plan.leftOut.map((entry) => [entry.path, entry.rules, entry.documentId]), [['notes/plan.md', ['changed-during-run', 'stored-in-lfs'], 'plan']]);
+    });
+
+    it('keeps its title from every other document: an older changed one keeps its file, a newer one is neither imported nor trashed', () => {
+      const encoded = planLinearToGit({ ...input([listed('older', 'Q3: goals', '2026-01-01T00:00:00Z'), listed('newer', 'Q3: goals', '2026-01-02T00:00:00Z')], { 'notes/Q3%3A goals.md': '# Goals\n' }), changed: gone('older') });
+      assert.deepEqual(changedOut(encoded), [['older', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([encoded.overwrite, encoded.create, encoded.remove], [[], [], []]);
+
+      // The newer one's own file, named with its id, stays too.
+      const both = { 'notes/Q3%3A goals.md': '# Goals\n', [`notes/Q3%3A goals~${suffix('newer')}.md`]: '# Newer\n' };
+      const kept = planLinearToGit({ ...input([listed('older', 'Q3: goals', '2026-01-01T00:00:00Z'), listed('newer', 'Q3: goals', '2026-01-02T00:00:00Z')], both), changed: gone('older') });
+      assert.deepEqual(changedOut(kept), [['newer', `notes/Q3%3A goals~${suffix('newer')}.md`], ['older', 'notes/Q3%3A goals.md']]);
+      assert.deepEqual([kept.overwrite, kept.create, kept.remove], [[], [], []]);
+
+      const input2 = { ...input([listed('older', 'plan', '2026-01-01T00:00:00Z'), listed('newer', 'plan', '2026-01-02T00:00:00Z')], { 'notes/plan.md': '# Plan\n' }), changed: gone('older') };
+      const forward = planInitialSync(input2);
+      assert.deepEqual([forward.overwrite, forward.create, forward.trash], [[], [], []]);
+      assert.deepEqual(forward.leftOut.map((entry) => [entry.path, entry.rules, entry.documentId]), [['notes/plan.md', ['changed-during-run'], 'older']]);
+      const plan = planLinearToGit(input2);
+      assert.deepEqual([plan.overwrite, plan.create, plan.remove], [[], [], []]);
+    });
+
+    it('renamed or moved, also keeps the file its current title names', () => {
+      const renamed = { ...listed('plan', 'other', '2026-01-01T00:00:00Z'), updatedAt: '2026-01-03T00:00:00Z' };
+      const files = { 'notes/plan.md': '# Plan\n', 'notes/other.md': '# Other\n' };
+      const forward = planInitialSync({ ...input([listed('plan', 'plan', '2026-01-01T00:00:00Z')], files), changed: new Map([['plan', renamed]]) });
+      assert.deepEqual([forward.overwrite, forward.create, forward.trash], [[], [], []]);
+      assert.deepEqual(forward.leftOut.map((entry) => [entry.path, entry.rules]), [['notes/other.md', ['changed-during-run']], ['notes/plan.md', ['changed-during-run']]]);
+    });
+  });
+
   it('removes a file without a document but keeps the folder annotation', () => {
     const plan = planLinearToGit(input([], { 'notes/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n', 'notes/old.md': '# Old\n' }));
     assert.deepEqual(plan.remove, ['notes/old.md']);
@@ -1418,7 +1567,7 @@ describe('the security gate of an initial sync from Linear', () => {
    * the two steps (stage every set, run the hooks on them, apply from their
    * answers), and checks that the record holds only bytes the hooks passed.
    */
-  const gated = async (fixture: Fixture, world: FakeWorld, refused: (text: string) => boolean, steps: 1 | 2, stagedCount?: { sets: number }) => {
+  const gated = async (fixture: Fixture, world: FakeWorld, refused: (text: string) => boolean, steps: 1 | 2, stagedCount?: { sets: number }, progressBatch?: number) => {
     const config = resolveStateConfig({});
     const git = await fixture.clone('gate');
     const fetched = await fetchState(git, config);
@@ -1464,7 +1613,8 @@ describe('the security gate of an initial sync from Linear', () => {
         },
       };
     }
-    const { result } = await confirmLinearToGit(context, { config, github, security, stopAfterDocuments: undefined });
+    const { plan, result } = await confirmLinearToGit(context, { config, github, security, stopAfterDocuments: undefined, ...(progressBatch === undefined ? {} : { progressBatch }) });
+    lastPlan = plan;
     assert.equal(result.complete, true, result.code);
     const changed = (await fixture.remote.text(['diff', '--name-only', 'refs/heads/main', 'refs/mdbisync/linear'])).split('\n').filter((path) => path.endsWith('.md'));
     for (const path of changed) {
@@ -1475,8 +1625,33 @@ describe('the security gate of an initial sync from Linear', () => {
     return result;
   };
 
+  let lastPlan: ReversePlan | undefined;
+
   for (const steps of [1, 2] as const) {
     const mode = steps === 1 ? 'in one step' : 'with staged hooks';
+
+    it(`leaves out a new document whose title a hook refuses, under a name made from its id (${mode})`, async () => {
+      const fixture = await createFixture();
+      try {
+        await fixture.seed(TREE);
+        const world = fakeWorld();
+        const TOKEN = ['title', 'canary', '6114'].join('-');
+        world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-faq' ? { ...d, title: `faq ${TOKEN}` } : d));
+        // A progress commit after every document: the ids reach the remote before the record.
+        const result = await gated(fixture, world, (text) => text.includes(TOKEN), steps, undefined, 1);
+        assert.deepEqual(result.leftOutAtRecord, [{ path: 'eng/notes/doc-faq.md', rule: 'security-hook' }]);
+        assert.ok(result.progressPushes > 0);
+        assert.ok(!result.created.some((path) => path.includes('faq')), result.created.join(', '));
+        // A clean title keeps its path.
+        assert.ok(result.created.includes('eng/ops/runbook.md'));
+        const objects = await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch']);
+        assert.ok(!objects.includes(TOKEN), 'the title reached the remote');
+        const texts = [renderReverseConfirmed(lastPlan!, result), pullRequestBody(lastPlan!, result), ...[...world.github.pullRequests.values()].map((pr) => `${pr.title}\n${pr.body}`)];
+        for (const text of texts) assert.ok(!text.includes(TOKEN), text);
+      } finally {
+        await fixture.cleanup();
+      }
+    });
 
     it(`checks a document again when a document it links is left out by a hook, and keeps the refused link out (${mode})`, async () => {
       const fixture = await createFixture();
@@ -1516,7 +1691,7 @@ describe('the security gate of an initial sync from Linear', () => {
         const result = await gated(fixture, world, (text) => text.includes(SECRET), steps);
         // The runbook's text with the FAQ's URL was staged too: it has an answer, and is not left waiting for one.
         assert.deepEqual(result.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'security-hook' }]);
-        assert.equal(await fixture.remote.text(['show', 'refs/mdbisync/linear:eng/ops/runbook.md']), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+        assert.equal(await fixture.remote.text(['show', 'refs/mdbisync/linear:eng/ops/runbook.md']), `# Runbook\n\nSee [the FAQ](<${url('doc-faq')}>).`);
       } finally {
         await fixture.cleanup();
       }
@@ -1550,7 +1725,8 @@ describe('the security gate of an initial sync from Linear', () => {
       const SECRET = ['blocked', 'value', '906'].join('-');
       const count = 16;
       const ids = Array.from({ length: count }, (_, i) => `doc-dense-${String(i).padStart(2, '0')}`);
-      const dense = ids.map((id, i) => doc(id, `dense-${String(i).padStart(2, '0')}`, { projectId: 'project-api' }, `${i === 0 ? `${SECRET}\n\n` : ''}${ids.filter((other) => other !== id).map((other) => `[${other}](${url(other)})`).join('\n')}\n`));
+      // In Linear's own form (links in angle brackets, no final newline), so the written text is Linear's.
+      const dense = ids.map((id, i) => doc(id, `dense-${String(i).padStart(2, '0')}`, { projectId: 'project-api' }, `${i === 0 ? `${SECRET}\n\n` : ''}${ids.filter((other) => other !== id).map((other) => `[${other}](<${url(other)}>)`).join('\n')}`));
       world.linear.documents = [...linearDocuments(), ...dense];
       const staged = { sets: 0 };
       const result = await gated(fixture, world, (text) => text.includes(SECRET), 2, staged);

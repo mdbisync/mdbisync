@@ -241,7 +241,9 @@ removed. Which hooks those are is your choice:
   scanner, run in a Docker image pinned by version and digest, and a hook
   that refuses private keys. Docker must be available wherever the hooks
   run: on your machine, and on the runner (GitHub's `ubuntu-latest` has
-  it). Review them for your repository's needs.
+  it). Review them for your repository's needs. Gitleaks ignores inline
+  `gitleaks:allow` comments, which Linear's content could carry; put
+  exceptions in your tracked `.gitleaks.toml` or `.gitleaksignore`.
 - **Your own:** run `init --no-security-hooks` (or `--security-hooks` to
   keep the examples too); after `init` has written the files, add any
   pre-commit hook to `.pre-commit-config.yaml` and give it
