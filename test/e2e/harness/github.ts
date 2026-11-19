@@ -294,6 +294,28 @@ export class SandboxRest {
     return data.workflows.find((workflow) => workflow.path === `.github/workflows/${file}`)?.id;
   }
 
+  /** The paths of every workflow in the repository's Actions registry, on any branch. */
+  async workflowPaths(): Promise<string[]> {
+    const paths: string[] = [];
+    for (let page = 1; ; page += 1) {
+      const data = await this.request<{ total_count: number; workflows: Array<{ path: string }> }>('GET', `/actions/workflows?per_page=100&page=${page}`);
+      paths.push(...data.workflows.map((workflow) => workflow.path));
+      if (data.workflows.length === 0 || paths.length >= data.total_count) return paths;
+    }
+  }
+
+  /** The names of the entries of a directory on the default branch, or undefined when it is not there. */
+  async directory(path: string): Promise<string[] | undefined> {
+    try {
+      const entries = await this.request<Array<{ name: string }> | { type: string }>('GET', `/contents/${encodePath(path)}`);
+      if (!Array.isArray(entries)) throw new Error(`${path} is not a directory`);
+      return entries.map((entry) => entry.name);
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return undefined;
+      throw error;
+    }
+  }
+
   /** Dispatches a registered workflow, by its registry id (workflowId) or its file name, on `ref`. */
   async dispatchWorkflow(workflowId: number | string, ref: string, inputs: Record<string, string>): Promise<void> {
     await this.request('POST', `/actions/workflows/${encodeURIComponent(String(workflowId))}/dispatches`, { ref, inputs });
