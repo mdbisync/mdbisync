@@ -109,8 +109,8 @@ describe('configuration reference', () => {
     assert.deepEqual([...byName(table(PAGE, 'Action outputs')).keys()].sort(), Object.keys(ACTION.outputs).sort());
   });
 
-  it('lists exactly the secrets and the variable the workflows read', () => {
-    const listed = table(PAGE, 'Repository secrets and variable').map(([kind, name]) => `${kind} ${name?.replace(/`/g, '')}`);
+  it('lists exactly the secrets and variables the workflows read', () => {
+    const listed = table(PAGE, 'Environment secrets and repository variables').map(([kind, name]) => `${kind} ${name?.replace(/`/g, '')}`);
     assert.deepEqual(listed.sort(), [...workflowSettings()].sort());
   });
 

@@ -21,7 +21,7 @@ const SHA = 'a'.repeat(40);
 const OUT = (name: string) => `\${{ needs.request.outputs.${name} }}`;
 
 type Step = { name?: string; run?: string; uses?: string; with?: Record<string, unknown> };
-type Job = { name?: string; needs?: string; if?: string; concurrency?: Record<string, unknown>; permissions?: unknown; 'runs-on': unknown; steps: Step[] };
+type Job = { name?: string; needs?: string; if?: string; concurrency?: Record<string, unknown>; permissions?: unknown; environment?: string; 'runs-on': unknown; steps: Step[] };
 const scheduler = (actionSha?: string) =>
   parse(renderScheduler(readTemplate(WORKFLOW_FILES.sync), actionSha)) as { name: string; on: Record<string, unknown>; concurrency: Record<string, unknown>; jobs: Record<string, Job> };
 
@@ -41,8 +41,10 @@ describe('the scheduled sync on the sandbox\'s default branch', () => {
     const request = parsed.jobs['request']!;
     assert.deepEqual(request['runs-on'], SANDBOX_RUNNER);
     assert.deepEqual(request.permissions, { contents: 'write' });
+    assert.equal(request.environment, undefined);
     assert.equal(request.steps[0]?.run, requestScript());
     const sync = parsed.jobs['sync']!;
+    assert.equal(sync.environment, undefined);
     assert.equal(sync.name, scheduledJobName('sync', OUT('run')));
     assert.equal(sync.needs, 'request');
     assert.equal(sync.if, "needs.request.outputs.run != ''");
@@ -59,6 +61,7 @@ describe('the scheduled sync on the sandbox\'s default branch', () => {
       assert.equal(step.with?.['tracked-branch'], OUT('tracked-branch'));
       assert.equal(step.with?.['sync-branch'], OUT('sync-branch'));
       assert.equal(step.with?.['state-ref-prefix'], OUT('state-ref-prefix'));
+      assert.equal(step.with?.['linear-client-id'], '${{ vars.LINEAR_TEST_APP_CLIENT_ID }}');
     }
     assert.ok(sync.steps.some((step) => step.with?.['name'] === REPORT_ARTIFACT));
   });

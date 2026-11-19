@@ -189,6 +189,11 @@ test('the bundled CLI initializes a repository with no dependency installation',
   assert.equal(result.status, 0, result.stderr);
   assert.match(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), new RegExp(sha));
   assert.match(result.stdout, /Remaining admin steps/);
+  assert.match(result.stdout, /create mdbisync.*only the tracked branch.*Leave required reviewers off/);
+  assert.match(result.stdout, /Set repository variable MDBISYNC_LINEAR_CLIENT_ID/);
+  assert.match(result.stdout, /Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET/);
+  assert.match(result.stdout, /Delete repository secrets of the same names/);
+  assert.match(result.stdout, /jobs still read repository secrets.*branch rule does not protect those secrets/);
 });
 
 test('complete flags do not prompt even when a terminal prompt is available', async (t) => {

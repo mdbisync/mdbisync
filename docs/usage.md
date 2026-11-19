@@ -157,13 +157,15 @@ mdbisync steps:
 This keeps the secrets out of what a hook can read. It does not contain a
 hook that attacks the runner: the hooks step shares the runner's disk with
 the other steps, and a hook that rewrites files there can reach a later
-step that holds the secrets. Use only hooks you trust. Each workflow first refuses a run on any branch
-but main, the tracked branch, so a dispatch on another branch never runs
-that branch's files with the secrets (if the sync tracks another branch,
-name it in that step's `BRANCH`). The step is part of the workflow file on the branch
-a run uses, so someone who can push a branch can remove it there: to keep
-the secrets from such runs, make them secrets of an environment that only
-main may deploy to. Each workflow then mints the GitHub App's installation token with
+step that holds the secrets. Use only hooks you trust. Each workflow first
+checks that the run is on the tracked branch (`main` by default). If the
+sync tracks another branch, update the workflow's trigger and branch
+guard, the action's `tracked-branch` input and the `mdbisync` environment's
+deployment branch rule. The branch's own copy of
+the workflow controls the check. GitHub enforces credential access through
+the [restricted environment](quickstart.md#sync-environment) once the
+repository secret copies are removed.
+Each workflow then mints the GitHub App's installation token with
 `actions/create-github-app-token`, checks out without stored credentials,
 and gives the App token and the Linear secrets to the mdbisync steps only.
 The mdbisync steps also take the token step's output `app-slug`: the sync's
@@ -174,8 +176,9 @@ child process of the mdbisync step whose environment holds only `PATH`,
 `HOME` and `LANG`.
 The action revokes the run's Linear token when it ends, and its post step
 revokes it again after a failed or cancelled run. A repository needs the
-variable `MDBISYNC_APP_CLIENT_ID` and the secrets `MDBISYNC_APP_PRIVATE_KEY`,
-`MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_SECRET`.
+variables `MDBISYNC_APP_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_ID` and the
+environment secrets `MDBISYNC_APP_PRIVATE_KEY` and
+`MDBISYNC_LINEAR_CLIENT_SECRET`.
 
 ## Initial sync from git to Linear
 

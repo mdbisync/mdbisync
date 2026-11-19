@@ -13,9 +13,9 @@
 # - linear-to-git: one pull request removes the synchronized files that have
 #   no document; a person reviews and merges it.
 #
-# Needs: the repository variable MDBISYNC_APP_CLIENT_ID and the secrets
-# MDBISYNC_APP_PRIVATE_KEY (the sync's GitHub App), MDBISYNC_LINEAR_CLIENT_ID
-# and MDBISYNC_LINEAR_CLIENT_SECRET (the Linear OAuth app).
+# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.
+# In the mdbisync environment limited to the tracked branch, set
+# MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET.
 name: mdbisync initial sync
 
 on:
@@ -43,6 +43,7 @@ concurrency:
 jobs:
   initial-sync:
     runs-on: ubuntu-latest
+    environment: mdbisync
     # The App token lives one hour. A longer initial sync stops here; start
     # the workflow again with the same inputs and it goes on where it stopped.
     timeout-minutes: 55
@@ -169,7 +170,7 @@ jobs:
           confirm: ${{ inputs.confirm }}
           github-token: ${{ steps.app-token.outputs.token }}
           app-slug: ${{ steps.app-token.outputs.app-slug }}
-          linear-client-id: ${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
+          linear-client-id: ${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
           linear-client-secret: ${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
       # The security hooks in a step of their own: it holds no Linear secret
       # or token and no App token. Give it only the keys your hooks need.
@@ -193,5 +194,5 @@ jobs:
           confirm: ${{ inputs.confirm }}
           github-token: ${{ steps.app-token.outputs.token }}
           app-slug: ${{ steps.app-token.outputs.app-slug }}
-          linear-client-id: ${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
+          linear-client-id: ${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}
           linear-client-secret: ${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}

@@ -16,7 +16,7 @@ const RUN = {
 const SHA = 'a'.repeat(40);
 
 type Step = { name?: string; run?: string; env?: Record<string, string>; uses?: string; with?: Record<string, unknown>; if?: string };
-const jobsOf = (text: string) => Object.values((parse(text) as { jobs: Record<string, { 'runs-on': unknown; steps: Step[] }> }).jobs);
+const jobsOf = (text: string) => Object.values((parse(text) as { jobs: Record<string, { 'runs-on': unknown; environment?: string; steps: Step[] }> }).jobs);
 
 describe('workflow templates rendered for a run', () => {
   it('keeps a timed soak sync on scheduler ticks while push events only register it', () => {
@@ -59,6 +59,7 @@ describe('workflow templates rendered for a run', () => {
     assert.equal(stage.with?.['cleanup-tokens'], false);
     assert.equal(stage.uses, `${ACTION_REPOSITORY}@${SHA}`);
     assert.equal(stage.with?.['tracked-branch'], RUN.trackedBranch);
+    assert.equal(stage.with?.['linear-client-id'], '${{ vars.LINEAR_TEST_APP_CLIENT_ID }}');
     assert.equal(stage.with?.['report-file'], undefined);
     const index = job!.steps.findLastIndex((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`));
     const action = job!.steps[index]!;
@@ -82,10 +83,11 @@ describe('workflow templates rendered for a run', () => {
     assert.ok(renderForRun(template, RUN).includes(`${ACTION_REPOSITORY}@${pin}`));
   });
 
-  it('guards the sync jobs to the run\'s tracked branch, its main', () => {
+  it('uses sandbox repository secrets and guards sync jobs to the run\'s tracked branch', () => {
     for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['initial-sync']]) {
       assert.deepEqual(jobsOf(readTemplate(file))[0]?.steps[0]?.env, { BRANCH: 'main' }, file);
       const [job] = jobsOf(renderForRun(readTemplate(file), RUN));
+      assert.equal(job?.environment, undefined, file);
       assert.equal(job?.steps[0]?.name, BRANCH_GUARD_STEP, file);
       assert.deepEqual(job?.steps[0]?.env, { BRANCH: RUN.trackedBranch }, file);
     }

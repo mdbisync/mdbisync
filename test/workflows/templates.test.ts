@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { parse } from 'yaml';
+import initWorkflows from '../../src/init/workflows.json' with { type: 'json' };
 
 const EXAMPLES = new URL('../../examples/', import.meta.url);
 const read = (file: string) => readFileSync(new URL(file, EXAMPLES), 'utf8');
@@ -31,7 +32,7 @@ interface Workflow {
   on: Record<string, unknown>;
   permissions?: unknown;
   concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
-  jobs: Record<string, { steps: Step[]; permissions?: unknown }>;
+  jobs: Record<string, { steps: Step[]; permissions?: unknown; environment?: unknown }>;
 }
 
 const workflow = (file: string) => parse(read(file)) as Workflow;
@@ -50,6 +51,28 @@ const hooksStep = (file: string) => {
 };
 
 describe('workflow templates', () => {
+  it('declares the mdbisync environment on every job that references a sync secret', () => {
+    const examples = readdirSync(EXAMPLES).filter((file) => /\.ya?ml$/.test(file));
+    const copies = [
+      ['examples', Object.fromEntries(examples.map((file) => [file, read(file)]))],
+      ['src/init/workflows.json', initWorkflows],
+    ] as const;
+    const syncSecret = /\bsecrets\s*(?:\.\s*|\[\s*['"])(?:MDBISYNC_APP_PRIVATE_KEY|MDBISYNC_LINEAR_CLIENT_ID|MDBISYNC_LINEAR_CLIENT_SECRET)\b/i;
+    for (const [source, workflows] of copies) {
+      for (const file of SYNC_TEMPLATES) assert.ok(Object.hasOwn(workflows, file), `${source}: ${file} is missing`);
+      for (const [file, text] of Object.entries(workflows)) {
+        const jobs = Object.entries((parse(text) as Workflow).jobs);
+        const secretJobs = jobs.filter(([, job]) => syncSecret.test(JSON.stringify(job).replaceAll('\\"', '"')));
+        if (SYNC_TEMPLATES.includes(file)) {
+          assert.ok(secretJobs.length > 0, `${source}: ${file} has no sync secret references`);
+        }
+        for (const [name, job] of secretJobs) {
+          assert.equal(job.environment, 'mdbisync', `${source}: ${file} job ${name} must use the mdbisync environment`);
+        }
+      }
+    }
+  });
+
   it('every template in examples/ pins each action to a full commit with its version beside it', () => {
     const files = readdirSync(EXAMPLES).filter((file) => file.endsWith('.yml'));
     for (const name of SYNC_TEMPLATES) assert.ok(files.includes(name), `${name} is missing`);
@@ -127,7 +150,7 @@ describe('workflow templates', () => {
         }
       });
 
-      it('gives the App token to checkout and mdbisync, and the Linear secrets to mdbisync only', () => {
+      it('gives the App token to checkout and mdbisync, and the Linear credentials to mdbisync only', () => {
         const actions = actionSteps(file);
         assert.equal(actions[0].with?.['cleanup-tokens'], false);
         assert.equal(actions[1].with?.['cleanup-tokens'], undefined);
@@ -135,7 +158,7 @@ describe('workflow templates', () => {
           assert.equal(action.with?.['github-token'], '${{ steps.app-token.outputs.token }}');
           // The App's slug from the step that minted its token, so the sync's commits name the App.
           assert.equal(action.with?.['app-slug'], '${{ steps.app-token.outputs.app-slug }}');
-          assert.equal(action.with?.['linear-client-id'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}');
+          assert.equal(action.with?.['linear-client-id'], '${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}');
           assert.equal(action.with?.['linear-client-secret'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}');
           // The same inputs in both steps, so the apply step runs the operation the stage step staged.
           const { 'security-step': _stage, 'cleanup-tokens': _cleanup, ...same } = actions[0].with ?? {};
@@ -146,7 +169,7 @@ describe('workflow templates', () => {
           if (step.uses?.startsWith(ACTION)) continue;
           const text = JSON.stringify(step);
           const label = step.name ?? step.uses ?? 'a step';
-          assert.ok(!/secrets\.MDBISYNC_LINEAR/.test(text), `${file}: ${label} sees the Linear secrets`);
+          assert.ok(!/(?:secrets|vars)\.MDBISYNC_LINEAR/.test(text), `${file}: ${label} sees the Linear credentials`);
           if (step.uses !== CHECKOUT) assert.ok(!/steps\.app-token/.test(text), `${file}: ${label} sees the App token`);
         }
       });

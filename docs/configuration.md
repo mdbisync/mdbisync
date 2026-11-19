@@ -46,20 +46,35 @@ only" has no command-line form.
 | `hooks` | `security-step: stage` only: the script of the hooks step. |
 | `code` | Why the run stopped before writing, did not finish or is partial; empty when it finished. Every code is in [troubleshooting](troubleshooting.md). |
 
-## Repository secrets and variable
+## Environment secrets and repository variables
 
-The workflows `init` writes read these; set them in the repository under
-Settings → Secrets and variables → Actions.
+The workflows `init` writes use the `mdbisync` environment. In Settings →
+Environments, set its deployment branches to **Selected branches and
+tags** with a single **Branch** rule for the tracked branch (`main` by
+default) and no required reviewers. Add the secrets below there. Set
+repository variables under Settings → Secrets and variables → Actions.
+See the [sync environment setup](quickstart.md#sync-environment) for
+GitHub plan requirements and migration order.
+
+When migrating, add the environment secrets and update both installed
+workflows to declare `environment: mdbisync`, then delete the repository
+secrets of the same names. Until the move, the jobs still read repository
+secrets and keep working. The branch rule protects only the environment
+secrets, so delete the repository copies to enforce it.
 
 | Kind | Name | Holds | Set in |
 | --- | --- | --- | --- |
-| Secret | `MDBISYNC_LINEAR_CLIENT_ID` | The Linear OAuth app's client ID | [Linear OAuth app](quickstart.md#linear-oauth-app) |
+| Variable | `MDBISYNC_LINEAR_CLIENT_ID` | The Linear OAuth app's client ID | [Linear OAuth app](quickstart.md#linear-oauth-app) |
 | Secret | `MDBISYNC_LINEAR_CLIENT_SECRET` | The Linear OAuth app's client secret | [Linear OAuth app](quickstart.md#linear-oauth-app) |
 | Variable | `MDBISYNC_APP_CLIENT_ID` | The GitHub App's client ID | [GitHub App](quickstart.md#github-app) |
 | Secret | `MDBISYNC_APP_PRIVATE_KEY` | The GitHub App's private key, the whole `.pem` file | [GitHub App](quickstart.md#github-app) |
 | Variable | `MDBISYNC_CI_WORKFLOWS` | The file names of the repository's other CI workflows, which the pre-commit workflow starts on the commits it pushes; optional | [In CI](linear-format.md#in-ci) |
 
-A security hook that needs a key of its own gets it from a secret you add,
+Set the `MDBISYNC_LINEAR_CLIENT_ID` repository variable before updating
+both sync workflows. Delete any old client-ID repository secret after the
+workflows use the variable.
+
+A security hook that needs a key of its own gets it from an environment secret you add,
 in the **Run the security hooks** step's `env:`.
 
 ## Folder annotations

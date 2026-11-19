@@ -215,11 +215,11 @@ async function runTemplate(release: string, template: string, inputs: Record<str
   const context: Record<string, string> = {
     'runner.temp': runnerTemp,
     'github.workspace': workspace,
-    'secrets.MDBISYNC_LINEAR_CLIENT_ID': 'client',
+    'vars.MDBISYNC_LINEAR_CLIENT_ID': 'client',
     'secrets.MDBISYNC_LINEAR_CLIENT_SECRET': 'client-secret',
     'steps.app-token.outputs.token': 'app-token',
     'steps.app-token.outputs.app-slug': FAKE_APP_SLUG,
-    'secrets.LINEAR_TEST_APP_CLIENT_ID': 'client',
+    'vars.LINEAR_TEST_APP_CLIENT_ID': 'client',
     'secrets.LINEAR_TEST_APP_CLIENT_SECRET': 'client-secret',
     'secrets.CANARY_HOOK_KEY': 'offline-hook-key',
     ...Object.fromEntries(Object.entries(inputs).map(([name, value]) => [`inputs.${name}`, value])),

@@ -49,6 +49,37 @@ between `refs/tags/` and `^{}` is the version, for example `v0.1.0`
 `<release-sha>` and `<version>`. More on pins:
 [release builds and pins](usage.md#release-builds-and-pins).
 
+## Sync environment
+
+GitHub supports environment secrets and branch rules in public
+repositories and in private repositories on Pro, Team or Enterprise.
+If your repository's plan lacks this support, keep its repository secrets
+until you can migrate. Those secrets remain accessible outside the
+tracked branch. [GitHub environment availability](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
+
+In your docs repository, go to Settings → Environments and create
+`mdbisync`. Under **Deployment branches and tags**, choose **Selected
+branches and tags** and add one **Branch** rule for the tracked branch
+(`main` by default). Leave required reviewers off so scheduled and push
+runs can start automatically. Set the branch rule before adding any secrets
+or pushing the workflows. GitHub records jobs that use the environment in
+the repository's deployment history.
+
+For an existing installation, add the environment secrets below using
+their current values. The Linear client secret also signs sync state. If
+you must rotate it and the sync reports `initial-sync-required`, follow
+[Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync).
+Set the Linear client-ID repository variable before updating both sync
+workflows as described in
+[Repository files](#repository-files). Then delete the repository
+secrets of the same names under Settings → Secrets and
+variables → Actions. Until you move the secrets, the jobs can still read
+the repository secrets, so sync keeps working, but the branch restriction
+doesn't protect those repository secrets. If an organization secret of
+the same name is visible to this repository, also remove that access.
+Protection takes effect once the credentials exist only in the restricted
+environment.
+
 ## Linear OAuth app
 
 The sync gets a short-lived Linear token for each run and revokes it at the
@@ -70,20 +101,24 @@ Linear → Settings → Administration → API → OAuth applications → New
 Create it. Each run asks this app for a token with the scopes `read` and
 `write`; the form has no scope setting of its own.
 
-In your docs repository: Settings → Secrets and variables → Actions → New
-repository secret
+In your docs repository, add the client ID under Settings → Secrets
+and variables → Actions → Variables. Add the client secret under
+Settings → Environments → `mdbisync` → Environment secrets.
 
 | Kind | Name | Value |
 | --- | --- | --- |
-| Secret | `MDBISYNC_LINEAR_CLIENT_ID` | OAuth app page → Client ID |
+| Variable | `MDBISYNC_LINEAR_CLIENT_ID` | OAuth app page → Client ID |
 | Secret | `MDBISYNC_LINEAR_CLIENT_SECRET` | OAuth app page → Client secret |
 
-Keep the client secret only in the repository secret and, if you want a
+Set the client-ID variable before updating or enabling the workflows.
+After updating both workflows, delete any old client-ID repository secret.
+
+Keep the client secret only in the environment secret and, if you want a
 copy, your password manager: don't leave it in a file, a note or a chat.
 
 The run stops here when Linear refuses the credentials, when the token
 lacks the `read` or `write` scope, or when the app sees no team at all.
-Check that both secrets hold the app's current values (a regenerated secret
+Check that both settings hold the app's current values (a regenerated secret
 replaces the old one), and that the app can reach the teams your folders
 name.
 
@@ -127,9 +162,9 @@ you find it under Settings → Developer settings → GitHub Apps → Edit
 organization that owns your docs repository → Install → Only select
 repositories → your docs repository → Install.
 
-In your docs repository: Settings → Secrets and variables → Actions. The
-client ID is a variable (Variables tab → New repository variable), the
-key a secret (Secrets tab → New repository secret).
+In your docs repository, add the client ID under Settings → Secrets and
+variables → Actions → Variables → New repository variable. Add the key
+under Settings → Environments → `mdbisync` → Environment secrets.
 
 | Kind | Name | Value |
 | --- | --- | --- |
@@ -137,7 +172,7 @@ key a secret (Secrets tab → New repository secret).
 | Secret | `MDBISYNC_APP_PRIVATE_KEY` | App page → Generate a private key; paste the whole `.pem` file |
 
 Then move the downloaded `.pem` file into your password manager, or
-delete it: the repository secret is the copy the sync uses.
+delete it. The environment secret is the copy the sync uses.
 
 The run stops here when the App's token cannot see the repository (the App
 is not installed on it, or the variable or key belongs to another App), or
@@ -248,7 +283,8 @@ removed. Which hooks those are is your choice:
   keep the examples too); after `init` has written the files, add any
   pre-commit hook to `.pre-commit-config.yaml` and give it
   `alias: security`, with `stages: [pre-commit, pre-push]`. A hook
-  that needs a key gets it from a repository secret you add: in both
+  that needs a key gets it from a secret you add to the `mdbisync`
+  environment. In both
   `mdbisync.yml` and `mdbisync-initial-sync.yml`, under the `env:` of the
   step **Run the security hooks**, add `NAME: ${{ secrets.NAME }}` (the
   step holds a commented example). That step holds none of the sync's
@@ -294,6 +330,13 @@ It writes:
 | `.pre-commit-config.yaml` | The `linear-format` hook, and the security hook examples if you asked for them |
 | `<folder>/README.md` | Each folder's annotation, in its front matter |
 | `.gitattributes` | With `--lfs` only: Git LFS lines for the image and document types, and `**/assets/**` for the `assets/` folders where the sync puts files from Linear |
+
+Check that the `sync` job in `mdbisync.yml` and the `initial-sync` job in
+`mdbisync-initial-sync.yml` each declare `environment: mdbisync`. For
+older releases, add that line under each job, at the same indentation as
+`runs-on`. In both workflows, update every `linear-client-id` input to
+`${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}`
+before committing the files or starting a sync.
 
 When the repository has other CI (tests, linters), the pre-commit
 workflow starts it on the commits it pushes, which a push with the

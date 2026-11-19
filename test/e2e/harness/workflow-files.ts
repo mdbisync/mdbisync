@@ -1,7 +1,7 @@
 // The workflow templates of `examples/`, as a deployer copies them, made
 // fit for one run in the shared sandbox (actions mode). Only what a run's
 // isolation needs changes: the run's branches, state refs and concurrency
-// group, the sandbox's runner, its secret and variable names, the release
+// group, the sandbox's runner and repository settings, the release
 // under test, and an artifact that carries the engine's report back to the
 // harness. A template with no trigger on the run's branch also gets the push
 // trigger that registers it, with its jobs guarded to run only on a dispatch
@@ -42,6 +42,7 @@ export const ACTION_REPOSITORY = 'mdbisync/mdbisync';
 export const SANDBOX_NAMES: Readonly<Record<string, string>> = {
   'vars.MDBISYNC_APP_CLIENT_ID': 'vars.SYNC_APP_CLIENT_ID',
   'vars.MDBISYNC_CI_WORKFLOWS': 'vars.SYNC_CI_WORKFLOWS',
+  'vars.MDBISYNC_LINEAR_CLIENT_ID': 'vars.LINEAR_TEST_APP_CLIENT_ID',
   'secrets.MDBISYNC_APP_PRIVATE_KEY': 'secrets.SYNC_APP_PRIVATE_KEY',
   'secrets.MDBISYNC_LINEAR_CLIENT_ID': 'secrets.LINEAR_TEST_APP_CLIENT_ID',
   'secrets.MDBISYNC_LINEAR_CLIENT_SECRET': 'secrets.LINEAR_TEST_APP_CLIENT_SECRET',
@@ -140,6 +141,9 @@ export function renderForRun(template: string, options: RunWorkflowOptions): str
   if (!isMap(jobs)) throw new Error('the template has no jobs');
   for (const pair of jobs.items) {
     const job = pair.value as YAMLMap;
+    // The sandbox uses repository secrets on per-run branches and
+    // the scheduler's default branch.
+    if (job.get('environment') === 'mdbisync') job.delete('environment');
     job.set('runs-on', doc.createNode(SANDBOX_RUNNER));
     if (register) job.set('if', dispatchOnly(job.get('if')));
     patchSteps(doc, job, options);
