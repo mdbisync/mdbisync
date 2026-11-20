@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -504,6 +504,79 @@ describe('lint and fix commands', () => {
       rmSync(join(dir, 'docs', 'link'));
       rmSync(join(dir, 'docs', 'loop'));
       rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a path whose folder is a symbolic link and leaves the file it leads to unchanged', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'format-outside-'));
+    const linked = join(dir, 'linked');
+    try {
+      writeFileSync(join(outside, 'guide.md'), '- outside\n');
+      symlinkSync(outside, linked);
+      const refused = { exitCode: 2, stdout: '', stderr: 'path passes through a symbolic link or differs in case: linked/guide.md\n' };
+      assert.deepEqual(runFix(['linked/guide.md'], dir), refused);
+      assert.deepEqual(runLint(['linked/guide.md'], dir), refused);
+      assert.deepEqual(runFix([join(linked, 'guide.md')], dir).exitCode, 2);
+      assert.deepEqual(runLint(['linked'], dir), { exitCode: 2, stdout: '', stderr: 'path passes through a symbolic link or differs in case: linked\n' }, 'a path that is itself a link is refused, not skipped');
+      assert.equal(readFileSync(join(outside, 'guide.md'), 'utf8'), '- outside\n');
+      assert.deepEqual(runLint(['docs/kept.md'], dir), { exitCode: 0, stdout: '', stderr: '' }, 'a path through real folders passes');
+    } finally {
+      rmSync(linked);
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('prints file names and paths with their control characters escaped, one line per finding', () => {
+    const folder = join(dir, 'names');
+    mkdirSync(folder);
+    const forged = 'a\n::error file=x::forged\u001b[2J\u009b.md';
+    const shown = 'names/a\\u000a::error file=x::forged\\u001b[2J\\u009b.md';
+    try {
+      writeFileSync(join(folder, forged), '- a\n- b\n');
+      writeFileSync(join(folder, 'loss\r.md'), 'H~2~O\n');
+      const lint = runLint(['names'], dir);
+      assert.equal(lint.stdout, `names/loss\\u000d.md:1: subscript: ${LINT_RULES.subscript}\n${shown}: not in Linear's form; run fix\n`);
+      assert.equal(lint.stdout.split('\n').length, 3);
+      const fix = runFix(['names'], dir);
+      assert.equal(fix.stdout, `${shown}: fixed\nnames/loss\\u000d.md:1: subscript: ${LINT_RULES.subscript}\n`);
+      assert.equal(readFileSync(join(folder, forged), 'utf8'), '* a\n* b');
+      assert.deepEqual(runLint([`names/b\u001b]0;x\u0007.md`], dir), { exitCode: 2, stdout: '', stderr: 'no such file or folder: names/b\\u001b]0;x\\u0007.md\n' });
+      assert.deepEqual(runFix(['-\nx'], dir), { exitCode: 2, stdout: '', stderr: 'unknown option: -\\u000ax\n' });
+      writeFileSync(join(folder, 'text\\u000a.md'), '- a\n');
+      assert.match(runLint(['names'], dir).stdout, /^names\/text\\u005cu000a\.md: not in Linear's form; run fix$/m, 'a literal backslash prints apart from an escape');
+      if (process.getuid?.() !== 0) {
+        chmodSync(join(folder, forged), 0o000);
+        assert.throws(() => runLint(['names'], dir), (error: Error) => error.message.includes(shown.slice('names/'.length)) && !/[\u0000-\u001f]/.test(error.message));
+      }
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('fix only reads a read-only file that needs no change', () => {
+    const folder = join(dir, 'read-only');
+    mkdirSync(folder);
+    try {
+      writeFileSync(join(folder, 'done.md'), '* a\n* b');
+      chmodSync(join(folder, 'done.md'), 0o444);
+      assert.deepEqual(runFix(['read-only'], dir), { exitCode: 0, stdout: '', stderr: '' });
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('escapes control characters in the names a duplicate title lists', () => {
+    const folder = join(dir, 'twins');
+    mkdirSync(folder);
+    try {
+      // Names a case-insensitive volume keeps apart: the ligature only matches once upper-cased.
+      writeFileSync(join(folder, '\ufb01le\u0085.md'), 'Text.\n');
+      writeFileSync(join(folder, 'file\u0085.md'), 'Text.\n');
+      const lint = runLint(['twins'], dir);
+      assert.equal(lint.stdout.split('\n').length, 3);
+      assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(lint.stdout.replaceAll('\n', '')), lint.stdout);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
     }
   });
 

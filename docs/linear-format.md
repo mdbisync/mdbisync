@@ -46,14 +46,16 @@ mdbisync fix [path ...]
 ```
 
 A path is a file or a folder; a folder is searched for `.md` files, skipping
-`.git` and `node_modules` and not following symbolic links. Without a path,
-the current folder is searched.
+`.git` and `node_modules` and not following symbolic links. A path that is a
+symbolic link, or whose folders pass through one or differ in case from the
+names on disk, is refused, so `fix` never rewrites a file outside the given
+tree. Without a path, the current folder is searched.
 
 | Exit code | `lint` | `fix` |
 | --- | --- | --- |
 | 0 | every file is in Linear's form and has no finding | nothing changed and nothing was found |
 | 1 | a finding, or a file `fix` would change | a file changed, or a finding `fix` leaves to you |
-| 2 | an unknown option or a path that does not exist | the same |
+| 2 | an unknown option, a path that does not exist, or a path refused for a symbolic link or its case | the same |
 
 Each finding is one line, `file:line: rule: message`, with the line counted
 from the top of the file, front matter included:
@@ -62,6 +64,12 @@ from the top of the file, front matter included:
 notes/plan.md:12: footnote: Footnotes are dropped.
 notes/setup.md: not in Linear's form; run fix
 ```
+
+Control characters in a printed file name, line breaks and tabs included, and
+backslashes are written as `\uXXXX` escapes, so every finding stays on one
+line. When a file
+is replaced or turned into a symbolic link while `fix` runs, `fix` leaves it
+alone and prints `file: moved while fix ran; left unchanged`.
 
 What both commands leave alone:
 
