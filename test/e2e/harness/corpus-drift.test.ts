@@ -37,13 +37,23 @@ test('stale corpus is env-blocked before any setup write; current slices are adm
 
   const root = mkdtempSync(join(tmpdir(), 'corpus-drift-'));
   try {
+    // Commit, push (in the receiving repository) and fetch each start a detached
+    // `git maintenance run --auto` that outlives the command. The last one could
+    // still write under the root while the cleanup below removes it, so every
+    // repository here turns automatic maintenance off before Git runs one of
+    // those commands in it (the sandbox cache is created by `clone`, which starts none).
+    const noAutoMaintenance = (git: Git) => git.run(['config', 'maintenance.auto', 'false']);
     const remote = join(root, 'sandbox.git');
     await new Git(root).run(['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+    await noAutoMaintenance(new Git(remote));
+    // Older Git has receive-pack run `gc --auto` itself, which only this turns off.
+    await new Git(remote).run(['config', 'receive.autoGc', 'false']);
     const seed = new Git(join(root, 'seed'), {
       GIT_AUTHOR_NAME: 'Test Editor', GIT_AUTHOR_EMAIL: 'editor@example.com',
       GIT_COMMITTER_NAME: 'Test Editor', GIT_COMMITTER_EMAIL: 'editor@example.com',
     });
     await new Git(root).run(['init', '--quiet', '--initial-branch=main', seed.dir]);
+    await noAutoMaintenance(seed);
     const missing = corpus.slices.bank.find((path) => path.endsWith('tables/table-header-hash.md'))!;
     const changed = corpus.slices.bank.find((path) => path.endsWith('images/remote.md'))!;
     assert.ok(missing && changed);
@@ -65,6 +75,7 @@ test('stale corpus is env-blocked before any setup write; current slices are adm
     await seed.run(['push', '--quiet', '--no-verify', remote, 'main']);
     const sandbox = new Sandbox({ url: remote, token: 'unused', stateDir: join(root, 'state'), runId: 'abcdef' });
     await sandbox.refreshCache();
+    await noAutoMaintenance(sandbox.cache);
     const before = await new Git(remote).text(['show-ref']);
     const published = await sandbox.manifest();
     await assert.rejects(sandbox.createTrackedBranch('bank', runNames('abcdef'), {
