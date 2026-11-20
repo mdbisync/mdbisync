@@ -248,4 +248,3 @@ describe("LFS transfers follow the tracked branch's .lfsconfig, not the checkout
     assert.deepEqual(named.requests, []);
   });
 });
-
