@@ -627,6 +627,14 @@ known_constructs:
     class: fixable
   - construct: audio-in-item-relative
     class: unchanged
+  - construct: audio-in-task-item
+    class: fixable
+  - construct: audio-in-numbered-item
+    class: fixable
+  - construct: audio-in-item-wav
+    class: fixable
+  - construct: audio-in-item-ogg
+    class: fixable
 assets:
   - file: "assets/pixel.png"
     kind: png
@@ -2504,39 +2512,36 @@ fixtures:
   - file: "list-items/audio-mp3-task.md"
     group: list-items
     construct: audio-in-task-item
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
+    git_form: captured
     canary: kx-15b4d7c0
     corpus: false
-    probe_pending: true
-    note: "a task item holding only an uploaded MP3, in the current file-block form"
+    note: "an MP3 task keeps the continuation and existing unwrapped Git destination; Linear records a hard break and wraps the destination"
   - file: "list-items/audio-mp3-numbered.md"
     group: list-items
     construct: audio-in-numbered-item
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-8b1c5d2a
     corpus: false
-    probe_pending: true
-    note: "a numbered item holding only an uploaded MP3, in the current file-block form"
+    note: "a numbered item holding only an uploaded MP3 link"
   - file: "list-items/audio-wav.md"
     group: list-items
     construct: audio-in-item-wav
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-d2a693b5
     corpus: false
-    probe_pending: true
-    note: "a bullet item holding only an uploaded WAV, in the current file-block form"
+    note: "a bullet item holding only an uploaded WAV link"
   - file: "list-items/audio-ogg.md"
     group: list-items
     construct: audio-in-item-ogg
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-0de67ab1
     corpus: false
-    probe_pending: true
-    note: "a bullet item holding only an uploaded Ogg clip, in the current file-block form"
+    note: "a bullet item holding only an uploaded Ogg link"
   - file: "list-items/nested-attachment-csv-one-line.md"
     group: list-items
     construct: nested-attachment-one-line

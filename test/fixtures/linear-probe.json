@@ -697,11 +697,27 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/audio-mp3-numbered.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/audio-mp3-task.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/audio-mp3.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
     "list-items/audio-not-uploaded.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/audio-ogg.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/audio-wav.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

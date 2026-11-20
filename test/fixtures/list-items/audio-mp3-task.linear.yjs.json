@@ -1,0 +1,26 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"type":"hard_break"},
+                {"text":"Site visit recording","marks":{"attribution":"user","link":{"href":"../assets/clip.mp3","noEmbed":null}}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-15b4d7c0","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -329,16 +329,22 @@ export function visit(node: Nodes, enter: (node: Nodes, ancestors: readonly Node
   }
 }
 
+/** The path in a Markdown destination, decoded as a repository file name. */
+export function decodedDestinationPath(url: string): string {
+  const cut = url.search(/[?#]/);
+  const path = cut === -1 ? url : url.slice(0, cut);
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    // Not percent-encoded: the destination names the file as it is.
+    return path;
+  }
+}
+
 /** The repository path a relative destination points to, or null for anything else. */
 export function resolveTarget(documentPath: string, url: string): string | null {
   if (url === '' || url.startsWith('#') || url.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
-  const cut = url.search(/[?#]/);
-  let path = cut === -1 ? url : url.slice(0, cut);
-  try {
-    path = decodeURIComponent(path);
-  } catch {
-    // Not percent-encoded: the destination names the file as it is.
-  }
+  const path = decodedDestinationPath(url);
   if (path === '') return null;
   const joined = posix.normalize(posix.join(posix.dirname(documentPath), path));
   if (joined === '.' || joined === '..' || joined.startsWith('../') || joined.endsWith('/')) return null;

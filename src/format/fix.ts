@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { MarkdownLimitError, bracketedLabel, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, bracketedLabel, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -172,18 +172,16 @@ class Writer {
     const attachment = itemAttachment(item);
     // A link to a file that does not exist is not uploaded: Linear keeps it as a link.
     if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
-      const path = attachment.url.split(/[?#]/)[0]!;
-      // Linear turns a list item holding only a link to an uploaded file into
-      // a block: a video player for a video, which it writes on the item's
-      // line, and a file block for any other file, which it writes below.
-      // An MP3 file it keeps as a plain link, written like the link to a
-      // missing file below. The video and MP3 forms are recorded for bullet
-      // items only.
+      const path = decodedDestinationPath(attachment.url);
       const bullet = marker === '*';
-      if (!(bullet && AUDIO.test(path))) {
+      const task = item.checked != null;
+      // Linear puts MP3 links on the bullet or number line and below a
+      // task checkbox. The WAV and Ogg inline forms are recorded for bullets.
+      const inlineAudio = (!task && MP3.test(path)) || (bullet && WAV_OR_OGG.test(path));
+      if (!inlineAudio) {
         const label = this.inline(attachment.children);
         const destination = imageDestination(attachment.url);
-        if (bullet && VIDEO.test(path)) return `${marker} [${label}](${destination})`;
+        if (bullet && VIDEO.test(attachment.url.split(/[?#]/)[0]!)) return `${marker} [${label}](${destination})`;
         // An empty marker cannot interrupt the parent paragraph. A task
         // marker already has content, so its file block can stay below it.
         if (!interruptsParagraph || marker.startsWith('- ')) {
@@ -420,11 +418,10 @@ export function fixLinearText(linearText: string, content: string, inRepository:
   const linear = { linkedFileExists: (url: string) => !notUploaded.has(url) };
   const fixed = fixText(text, linear);
   if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body)) return text;
-  // The hook cannot tell: it writes a list item holding only a link to a file
-  // of the repository as a file block. Linear stores a file block it gets for
-  // a file it holds no upload of as that link again, so the file takes the
-  // hook's form. Only such blocks may differ from Linear's form: written
-  // back in that form, the text must be Linear's form again.
+  // The hook cannot tell which files were uploaded. It can write a list item
+  // holding only a link to a repository file as a file block. Linear stores
+  // such a block as a link if it holds no upload for the file. Take the
+  // hook's form only if sending it back still yields Linear's form.
   if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]!) && inRepository(url))) return fixed;
   const hooked = fixText(text, { linkedFileExists: (url) => !notUploaded.has(url) || inRepository(url) });
   return fixText(hooked, linear) === fixed ? hooked : fixed;
@@ -469,8 +466,8 @@ function relativeUrls(text: string, types: ReadonlySet<string>): Set<string> {
 /** Video files Linear stores as a video block (recorded for these three; other types are unconfirmed). */
 const VIDEO = /\.(?:mp4|mov|webm)$/i;
 
-/** Audio Linear keeps as a link in a bullet item (recorded for MP3; other types are unconfirmed). */
-const AUDIO = /\.mp3$/i;
+const MP3 = /\.mp3$/i;
+const WAV_OR_OGG = /\.(?:wav|ogg)$/i;
 
 function startsWithFileBlock(list: List): boolean {
   const [item] = list.children;

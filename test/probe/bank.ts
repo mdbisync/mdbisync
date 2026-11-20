@@ -84,9 +84,8 @@ export function engineForm(bank: Bank, fixture: BankFixture, text: string): stri
 /**
  * The form `fix` gives a fixture, where it is known: Linear's form (`engineForm`),
  * or, for a fixture whose `git_form` is `captured`, what the sync captures for
- * Linear's recorded form. Linear stores such a fixture in a spelling Markdown
- * reads as another document (a nested file block right after its parent's
- * text), and the sync reads it as fix's form.
+ * Linear's recorded form. The sync treats Linear's spelling as equivalent
+ * to fix's form and captures the same bytes fix writes.
  */
 export function fixForm(bank: Bank, fixture: BankFixture, text: string): string | undefined {
   const form = engineForm(bank, fixture, text);

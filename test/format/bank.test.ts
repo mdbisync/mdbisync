@@ -30,13 +30,11 @@ describe('fix on the fixture bank', () => {
         assert.ok(form !== undefined, 'a fixable fixture has its recorded Linear form');
         const { head } = splitFile(source);
         if (fixture.git_form === 'captured') {
-          // Linear's form is not one fix writes: Markdown reads it differently
-          // (a nested file block right after its parent's text reads as that
-          // text). The sync takes it as no change from fix's form, and
-          // captures it as fix's form.
+          // The sync treats Linear's spelling as equivalent to fix's form
+          // and captures the same bytes fix writes.
           assert.notEqual(fixed, head + form, 'git_form captured: fix does not reach the recorded form');
           assert.ok(sameMarkdown(splitFile(fixed).body, form), "L0-02: Linear's recorded form is no change from fix's");
-          const uploaded = form.replace(/\]\(\.\.\/assets\//g, '](https://uploads.example/');
+          const uploaded = form.replaceAll('../assets/', 'https://uploads.example/');
           assert.equal(fixLinearText(head + form, uploaded, options.linkedFileExists), fixed, "L0-02: capture writes Linear's form as fix's");
         } else {
           assert.equal(fixed, head + form, "L0-02: fix reaches Linear's recorded form");

@@ -1,0 +1,19 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Site visit recording","marks":{"attribution":"user","link":{"href":"../assets/clip.ogg","noEmbed":null}}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-0de67ab1","marks":{"attribution":"user"}}]}
+  ]
+}

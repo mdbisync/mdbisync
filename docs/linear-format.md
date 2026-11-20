@@ -131,22 +131,22 @@ Blocks:
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph.
 - A list item holding only a link to a relative file other than Markdown
-  becomes the block Linear makes of the uploaded file. For a video
-  (`.mp4`, `.mov`, `.webm`) the link stays on the marker's line, with no
-  angle brackets. An MP3 file (`.mp3`) Linear keeps as a plain link, so
-  the link stays on the marker's line in angle brackets:
-  `* [Name](<path>)`. For any other file the marker stands on its own
-  line and the link goes below it. A video or MP3 file in a task or
-  numbered item keeps the file block form. When the link does not name a
-  file in the repository (the file is missing, the path is a folder,
-  starts with `/` or leads outside the repository), the sync cannot upload it and Linear keeps a
-  plain link, so `fix` writes `* [Name](<path>)`. `fix` resolves links from
+  takes the form Linear uses for the uploaded file. A video (`.mp4`,
+  `.mov`, `.webm`) in a bullet item stays on the marker's line without
+  angle brackets. MP3 links in bullet and numbered items and WAV and Ogg
+  links in bullet items stay on the marker's line with angle brackets,
+  as in `* [Name](<path>)`. An MP3 link in a task item goes on the
+  continuation line after the checkbox. The WAV and Ogg forms for numbered
+  and task items are unconfirmed. Where the formatter uses a file block,
+  the marker stands on its own line and the link goes below it. When the link
+  does not name a file in the repository (the file is missing, the path is
+  a folder, starts with `/` or leads outside the repository), the sync
+  cannot upload it and Linear keeps a plain link, so `fix` writes
+  `* [Name](<path>)`. `fix` resolves links from
   the folder it runs in, which for the hook is the repository's top
-  folder. A link the sync keeps plain though its file is in the
-  repository (an image typed in Linear with a repository path, which the
-  sync turns into a link and never uploads) also gets the file block form
-  in git, as the hook writes it, and the sync sends it to Linear as the
-  plain link `* [Name](<path>)`, the form Linear stores for it.
+  folder. If `fix` uses a file block for a repository file that the sync
+  did not upload, Git keeps the hook's file block and the sync sends
+  Linear the plain link `* [Name](<path>)`.
 
 Inline text:
 
