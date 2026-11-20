@@ -6,7 +6,7 @@ Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## Set up and run the tests
 
-You need Node 24, Git and [pre-commit](https://pre-commit.com/): it runs
+You need Node.js 24.2 or later, Git and [pre-commit](https://pre-commit.com/): it runs
 the same hooks as CI, and the scenario harness tests commit through
 pre-commit hooks of a local hook repository.
 

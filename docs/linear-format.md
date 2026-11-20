@@ -574,7 +574,7 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-The hooks use Node 24 and npm already on your machine
+The hooks use Node.js 24.2 or later and npm already on your machine
 (`language_version: system`; npm 11.16.0 or newer) and download no
 toolchain or packages when they install or run.
 
