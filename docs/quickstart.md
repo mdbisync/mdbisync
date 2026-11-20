@@ -20,8 +20,8 @@ You need:
   GitHub Actions must be enabled for the repository, and if its Actions
   settings (Settings → Actions → General → Actions permissions, or the
   organization's) limit which actions may run, they must allow `mdbisync/mdbisync`, `actions/create-github-app-token`,
-  `actions/checkout` and `actions/setup-node`, the only actions the
-  workflows use.
+  `actions/checkout`, `actions/setup-node`, `actions/upload-artifact` and
+  `actions/download-artifact`, the only actions the workflows use.
 - **On your machine:** a clone of the docs repository, Git 2.40 or later,
   Node.js 24.2 or later with npm 11.16.0 or later (`npm install --global
   npm@11.21.2` updates it), and Python 3.11 or later with
@@ -332,10 +332,11 @@ It writes:
 | `.gitattributes` | With `--lfs` only: Git LFS lines for the image and document types, and `**/assets/**` for the `assets/` folders where the sync puts files from Linear |
 
 Check that the `sync` job in `mdbisync.yml` and the `initial-sync` job in
-`mdbisync-initial-sync.yml` each declare `environment: mdbisync`. For
-older releases, add that line under each job, at the same indentation as
-`runs-on`. In both workflows, update every `linear-client-id` input to
-`${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}`
+`mdbisync-initial-sync.yml` each declare `environment: mdbisync`, and
+that every `linear-client-id` input reads
+`${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}`. Workflows written by `init` of
+`v0.1.0-rc.17` or earlier have neither: add `environment: mdbisync` under each job, at the
+same indentation as `runs-on`, and change each `linear-client-id` input,
 before committing the files or starting a sync.
 
 When the repository has other CI (tests, linters), the pre-commit
@@ -571,7 +572,7 @@ A required check that never registers is invisible to this deadline:
 GitHub may refuse the merge instead; check workflow filters and required
 check names. The sync never reruns a check: configure flaky-check retries
 in your own CI. The App's permissions above stay as they are; it needs no
-Actions permission. Versions up to `v0.1.0-rc.17` also need **Actions:
+Actions permission. Releases `v0.1.0-rc.14` to `v0.1.0-rc.17` also need **Actions:
 Read-only**: keep it while your workflow pins such a version. Once the pin
 is later, an installation that granted it may remove it.
 

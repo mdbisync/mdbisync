@@ -235,8 +235,8 @@ by one rule, the same in the initial sync and in the sync:
 - an empty part (a leading `/` or `//`) becomes `%00`; `.`, `..`, `.git`, `.github` (case-insensitive) and
   names Windows reserves (`CON`, `NUL`, `COM1`, …) get their first character
   encoded (`%2E%2E`, `%43ON`); spaces at the start of a part are kept;
-- in a folder at the repository root, a `-` at the start of the title is
-  encoded (`-draft` becomes `%2Ddraft.md`), so no file path reads as a
+- when the team or project folder is the repository root itself, a `-` at
+  the start of the title is encoded (`-draft` becomes `%2Ddraft.md`), so no file path reads as a
   command-line option; a file already there under such a name moves to the
   encoded one. The security check refuses any other path that starts with
   `-`, such as one in a mapped folder whose own name starts with `-`;
@@ -486,7 +486,9 @@ to the branch `main`, require the repository owner's review, turn off
 "Prevent self-review", and set no wait timer. Store the token only as an
 environment secret. Remove any repository secret of the same name. Only
 the gate job uses this environment; without the token the gate refuses.
-Pre-release builds do not run the gate.
+Pre-release builds do not run the gate. The source SHA of a final version
+must be `main`'s head when the workflow is dispatched, because its build
+provenance names the dispatched commit.
 
 The `security-gate` status comes from a GitHub App installed on this
 repository alone with one repository permission, **Commit statuses: read and
@@ -517,7 +519,7 @@ repos:
 ```
 
 The action runs its checked-in JavaScript bundles without installation.
-The hooks use Node 24.2 or newer and npm already installed on your machine
+The hooks use Node.js 24.2 or later and npm already installed on your machine
 (`language_version: system`); no Node toolchain or registry dependencies are
 downloaded when installing or running them. Use npm 11.16.0 or newer: npm
 11.12.1 rejects pre-commit's local Git package installation. The release

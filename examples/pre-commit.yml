@@ -1,6 +1,6 @@
 # Copy to .github/workflows/pre-commit.yml in a synchronized repository.
-# Install Node 24.2 or newer and pre-commit locally too. Hook revs must pin
-# release commits containing dist/cli.js and a dependency-free package.json.
+# Install Node.js 24.2 or later and pre-commit locally too. Hook revs must pin release
+# commits containing dist/cli.js and a dependency-free package.json.
 name: Pre-commit
 
 on:

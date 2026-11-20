@@ -578,9 +578,10 @@ and “still runs on the tracked branch's tip” means the sync waits for that
 result before suspending anything. A normal head waiting for the suspended
 head says “it merges after the suspended pull request, whose checks still run.”
 
-Any other line names a code (`conflict`, `merge-refused`,
-`merge-blocked`, `initial-pull-request-pending`, `state-moved`,
-`github-failed`, `head-unverified`), explained in
+Any other line stands for one of the codes (`conflict`, `merge-refused`,
+`merge-blocked`, `merge-misplaced`, `checks-missing`,
+`initial-pull-request-pending`, `state-moved`, `github-failed`,
+`head-unverified`), explained in
 [the sync pull request](troubleshooting.md#the-sync-pull-request). The
 section also counts the files the pull request changes, and names the
 documents where pending edits on the sync branch met later edits

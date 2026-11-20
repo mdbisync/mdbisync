@@ -56,8 +56,8 @@ action. Every input of the action, and what it means for this run:
 | `operation` | `sync` | `initial-sync`; the template sets it. |
 | `direction` | empty | `git-to-linear`. Required, though the action has no default: the initial sync never picks a direction itself. |
 | `confirm` | empty | Only the exact value `true` writes; anything else is a dry run. |
-| `linear-client-id` | none | The Linear OAuth app's client ID, from a secret. |
-| `linear-client-secret` | none | Its client secret. The run mints a token from both and revokes it when it ends. |
+| `linear-client-id` | none | The Linear OAuth app's client ID, from the repository variable `MDBISYNC_LINEAR_CLIENT_ID`. |
+| `linear-client-secret` | none | Its client secret, from the secret `MDBISYNC_LINEAR_CLIENT_SECRET`. The run mints a token from both and revokes it when it ends. |
 | `linear-api-url` | empty | Linear's API origin; leave it empty. |
 | `cleanup-tokens` | `false` | `true` revokes tokens that killed runs left behind, only when no other repository uses this Linear app ([tokens left by interrupted jobs](configuration.md#tokens-left-by-interrupted-jobs)). |
 | `github-token` | none | The GitHub App's installation token; the run pushes the state refs with it. |

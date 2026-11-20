@@ -27,7 +27,7 @@ L6 checks in the Linear UI.
 
 ## Prerequisites
 
-Node 24.2 or newer, Git and [pre-commit](https://pre-commit.com/), then from the
+Node.js 24.2 or later, Git and [pre-commit](https://pre-commit.com/), then from the
 repository root:
 
 ```sh
