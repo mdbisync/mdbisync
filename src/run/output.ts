@@ -1,10 +1,13 @@
 // Validation at report and tooling output boundaries. Text may contain
 // Unicode Markdown and normal whitespace, but not binary control characters.
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { type Stats, constants } from 'node:fs';
+import { lstat, mkdir, open, readlink, realpath, rename, unlink } from 'node:fs/promises';
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { message } from '../messages.ts';
 
 export function outputText(value: unknown, limit = 16 * 1024 * 1024): string {
-  if (typeof value !== 'string' || value.length > limit || !/^[\t\n\r\x20-\x7e\u00a0-\u{10ffff}]*$/u.test(value)) {
+  if (typeof value !== 'string' || value.length > limit || !/^[\t\n\r\x20-\x7e -\u{10ffff}]*$/u.test(value)) {
     throw new Error(message('output.invalid-text', { limit }));
   }
   return value;
@@ -26,7 +29,91 @@ export function outputCount(value: unknown): number {
 export function outputFile(directory: string, name: string): string {
   const base = resolve(directory);
   const file = resolve(base, name);
-  const path = relative(base, file);
-  if (path === '' || path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path)) throw new Error(message('output.outside-directory'));
+  if (file === base || !inside(base, file)) throw new Error(message('output.outside-directory'));
   return file;
+}
+
+/** The most symbolic links one report path may pass through, as on Linux. */
+const MAX_LINKS = 40;
+
+/**
+ * Write a report file without following a symbolic link the checkout holds.
+ * A repository can commit a link where the operator's report path points, so
+ * the path is resolved here one name at a time, following each link by hand:
+ * a link inside the checkout is refused wherever the path meets it, also
+ * behind a link outside the checkout (links outside it, such as a system's
+ * `/tmp`, are the runner's own), and `..` goes up from where the path really
+ * is. Missing directories are made one at a time. The text goes to a new
+ * temporary file opened with `O_EXCL | O_NOFOLLOW` and is renamed onto the
+ * name: a link already there is replaced, never written through, and a
+ * regular file there keeps its mode.
+ *
+ * Only what the checkout holds when the run writes is in scope: a process
+ * that swaps a directory for a link while this runs is not.
+ *
+ * @param path relative to the working directory, as the file system takes it
+ * @param checkout the repository's working tree
+ */
+export async function writeReportFile(path: string, text: string, checkout: string): Promise<void> {
+  const names = (isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`).split(sep).filter((name) => name !== '');
+  const name = names.pop();
+  if (name === undefined || name === '.' || name === '..') throw new Error(message('output.not-a-file', { path }));
+  const file = join(await reportDirectory(names, await realpath(checkout), path), name);
+  const existing = await lstat(file).catch(ifMissing);
+  if (existing !== undefined && !existing.isFile() && !existing.isSymbolicLink()) throw new Error(message('output.not-a-file', { path }));
+  const kept = existing?.isFile() === true ? existing.mode & 0o7777 : undefined;
+  const temporary = join(dirname(file), `.mdbisync-${randomUUID()}.tmp`);
+  const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, kept === undefined ? 0o666 : 0o600);
+  try {
+    await handle.writeFile(text);
+    if (kept !== undefined) await handle.chmod(kept);
+    await handle.close();
+    await rename(temporary, file);
+  } catch (error) {
+    await handle.close().catch(() => {});
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
+}
+
+/** The real directory that `names`, read from the root, lead to; missing ones are made. */
+async function reportDirectory(names: readonly string[], checkout: string, path: string): Promise<string> {
+  const pending = [...names];
+  // `current` never holds a link: each link met is replaced by its target's names.
+  let current = parse(checkout).root;
+  let links = 0;
+  while (pending.length > 0) {
+    const name = pending.shift() as string;
+    if (name === '.') continue;
+    if (name === '..') {
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, name);
+    let entry: Stats | undefined = await lstat(next).catch(ifMissing);
+    if (entry === undefined) {
+      await mkdir(next).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+      entry = await lstat(next);
+    }
+    if (!entry.isSymbolicLink()) {
+      current = next;
+      continue;
+    }
+    if (inside(checkout, current)) throw new Error(message('output.linked-directory', { path: next }));
+    if (++links > MAX_LINKS) throw new Error(message('output.link-loop', { path }));
+    const target = await readlink(next);
+    if (isAbsolute(target)) current = parse(target).root;
+    pending.unshift(...target.split(sep).filter((part) => part !== ''));
+  }
+  return current;
+}
+
+function inside(base: string, path: string): boolean {
+  const rest = relative(base, path);
+  return rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
+}
+
+function ifMissing(error: NodeJS.ErrnoException): undefined {
+  if (error.code === 'ENOENT') return undefined;
+  throw error;
 }

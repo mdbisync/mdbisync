@@ -9,13 +9,12 @@
 // Linear token stays in the step's state until this run revokes it; the
 // `post` step revokes it when a killed or failed run left it behind.
 
-import { writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
 import { runEnding } from "../run/exit.ts";
 import { writeRunReport } from "../run/finish.ts";
-import { outputFile, reportText } from "../run/output.ts";
+import { reportText, writeReportFile } from "../run/output.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { type OperationOutcome, runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
@@ -110,8 +109,9 @@ export async function run(options: RunOptions = {}): Promise<void> {
       });
       core.info("token cleanup: replaced stale app tokens and restored read/write scopes");
     }
+    const checkout = process.env["GITHUB_WORKSPACE"] || process.cwd();
     const outcome = await runOperation(operation, inputs, initialSync, {
-      git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd(), auth),
+      git: new Git(checkout, auth),
       warn: (message) => core.warning(message),
       log: (entry) => core.info(JSON.stringify(entry)),
       tokenLifecycle,
@@ -120,16 +120,17 @@ export async function run(options: RunOptions = {}): Promise<void> {
     const summary = reportText(outcome.summary);
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(summary).write();
     else core.info(summary);
-    if (inputs.reportFile !== undefined) {
-      await writeRunReport(inputs.reportFile, outcome);
-      await writeFile(outputFile(dirname(inputs.reportFile), SUMMARY_FILE), summary);
-    }
     if (outcome.ok && outcome.staged !== undefined) {
       // The hooks step runs this script with the runner's Node.js.
       core.setOutput("node", process.execPath);
       core.setOutput("hooks", hooksScript());
     }
     reportEnding(outcome, core);
+    // Written last: a report that cannot be written fails the step, but keeps the run's ending and outputs.
+    if (inputs.reportFile !== undefined) {
+      await writeRunReport(inputs.reportFile, outcome, checkout);
+      await writeReportFile(`${dirname(inputs.reportFile)}${sep}${SUMMARY_FILE}`, summary, checkout);
+    }
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   }

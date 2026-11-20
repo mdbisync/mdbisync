@@ -2,14 +2,13 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { type ContainerCapacity } from './capacity.ts';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
 import { PATH_RULE } from '../sync/paths.ts';
 import { type ExitStatus, runEnding } from './exit.ts';
 import { cell } from './summary.ts';
+import { writeReportFile } from './output.ts';
 import { type OperationOutcome, type RunWrites } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 import { type RecordLeftOutRule } from '../codes.ts';
@@ -407,9 +406,9 @@ function toConfirmedReport(result: ConfirmedResult): ConfirmedReport {
   };
 }
 
-export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(toRunReport(outcome), null, 2)}\n`);
+/** Write the run's report as JSON to `path`; `checkout` is the repository the run worked in. */
+export async function writeRunReport(path: string, outcome: OperationOutcome, checkout: string): Promise<void> {
+  await writeReportFile(path, `${JSON.stringify(toRunReport(outcome), null, 2)}\n`, checkout);
 }
 
 function captureReport(captured: CaptureResult | undefined): RunReport['capture'] {

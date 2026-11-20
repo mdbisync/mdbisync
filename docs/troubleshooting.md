@@ -606,6 +606,9 @@ default) and start again from step 2.
 | `cannot write report text: expected printable Unicode text of at most <limit> characters` | A report exceeds its output limit or an output field has an unexpected type. Normal Unicode Markdown is preserved, and control characters in display text are shown as Unicode escapes. Reduce the report size; if the message repeats for a small report, report the error with its operation and code. |
 | `cannot write report metadata: expected a non-negative safe integer` | A workflow identifier or count has an invalid type or value. Check the upstream response before retrying; an invalid workflow identifier is never used as an evidence directory. |
 | `report destination must stay inside the configured output directory` | A derived output path would leave its selected directory. Check the output configuration and file name. |
+| `report destination <path> is a symbolic link inside the checkout` | A directory on the `report-file` path is a symbolic link in the checked-out repository, also when the path reaches it through a link outside the checkout, so the run did not write the report or `summary.md` through it. Point `report-file` outside the checkout, for example under `${{ runner.temp }}`, or remove the link. |
+| `report destination <path> passes through too many symbolic links` | The `report-file` path, or the `summary.md` beside it, meets more than 40 symbolic links, usually a loop. Point `report-file` at a plain directory. |
+| `report destination <path> is not a regular file` | The `report-file` path, or the `summary.md` beside it, names a directory, a device or another special file, or ends in `.` or `..`. Point `report-file` at a file name. |
 
 | Attachment storage error | What to do |
 | --- | --- |

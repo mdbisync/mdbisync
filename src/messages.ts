@@ -25,6 +25,9 @@ export const MESSAGES = {
   'output.invalid-text': 'cannot write report text: expected printable Unicode text of at most {limit} characters',
   'output.invalid-count': 'cannot write report metadata: expected a non-negative safe integer',
   'output.outside-directory': 'report destination must stay inside the configured output directory',
+  'output.linked-directory': 'report destination {path} is a symbolic link inside the checkout',
+  'output.link-loop': 'report destination {path} passes through too many symbolic links',
+  'output.not-a-file': 'report destination {path} is not a regular file',
 
   // `init`.
   'init.security-twice': 'choose security hooks once',

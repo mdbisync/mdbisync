@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
@@ -157,6 +157,31 @@ describe('the action entry points', () => {
     assert.equal(world.minted, 3);
     assert.equal(world.revoked, 3);
     assert.deepEqual(await tokenStates(), ['fake-token', '']);
+  });
+
+  it('writes the report and summary.md in place of links in the checkout and refuses a linked report directory', async () => {
+    const outside = file('outside');
+    await mkdir(outside);
+    await writeFile(join(outside, 'canary'), 'canary\n');
+    await mkdir(join(workspace, 'reports'));
+    for (const name of ['report.json', 'summary.md']) await symlink(join(outside, 'canary'), join(workspace, 'reports', name));
+    const dryRun = (report: string) => step({ operation: 'initial-sync', direction: 'git-to-linear', confirm: 'false', 'report-file': report });
+    dryRun(join(workspace, 'reports', 'report.json'));
+    await quietly(() => runMain({ fetch: fakeFetch(fakeWorld()) }));
+    assert.equal(process.exitCode ?? 0, 0);
+    assert.equal(await readFile(join(outside, 'canary'), 'utf8'), 'canary\n');
+    for (const name of ['report.json', 'summary.md']) assert.ok((await lstat(join(workspace, 'reports', name))).isFile(), name);
+    assert.ok(JSON.parse(await readFile(join(workspace, 'reports', 'report.json'), 'utf8')));
+
+    await symlink(outside, join(workspace, 'linked'));
+    for (const name of ['state', 'output']) await writeFile(file(name), '');
+    dryRun(join(workspace, 'linked', 'report.json'));
+    const printed = await quietly(() => runMain({ fetch: fakeFetch(fakeWorld()) }));
+    assert.equal(process.exitCode, 1);
+    assert.match(printed, /is a symbolic link inside the checkout/);
+    assert.deepEqual(await readdir(outside), ['canary']);
+    // The run's ending is still reported: the report is written after it.
+    assert.ok((await fileCommands(file('output'))).some(([name]) => name === 'code'), 'no code output');
   });
 
   it('cleans unknown stale tokens before staging and saves cleanup tokens for post', async () => {

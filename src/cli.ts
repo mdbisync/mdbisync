@@ -101,8 +101,9 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
     throw error;
   }
   const warnings: string[] = [];
+  const git = new Git(options.cwd ?? process.cwd());
   const outcome = await runOperation(command, inputs, initialSync, {
-    git: new Git(options.cwd ?? process.cwd()),
+    git,
     warn: (message) => {
       if (options.warn) options.warn(message);
       else warnings.push(`warning: ${message}\n`);
@@ -111,7 +112,11 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.checkClock ? { checkClock: options.checkClock } : {}),
   });
-  if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
+  if (inputs.reportFile !== undefined) {
+    // A run from a subdirectory still works on the whole repository, so its links all count as the checkout's.
+    const checkout = await git.text(["rev-parse", "--show-toplevel"]).catch(() => git.dir);
+    await writeRunReport(inputs.reportFile, outcome, checkout);
+  }
   // Inside a workflow step the summary also goes to the job summary.
   const summaryFile = env["GITHUB_STEP_SUMMARY"];
   if (summaryFile) await appendFile(summaryFile, reportText(outcome.summary));
