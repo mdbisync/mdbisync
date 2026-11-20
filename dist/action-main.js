@@ -5789,7 +5789,7 @@ var require_client_h1 = __commonJS({
       kResume,
       kHTTPContext
     } = require_symbols();
-    var constants3 = require_constants2();
+    var constants4 = require_constants2();
     var EMPTY_BUF = Buffer.alloc(0);
     var FastBuffer = Buffer[Symbol.species];
     var addListener = util.addListener;
@@ -5864,7 +5864,7 @@ var require_client_h1 = __commonJS({
       constructor(client, socket, { exports: exports2 }) {
         assert(Number.isFinite(client[kMaxHeadersSize]) && client[kMaxHeadersSize] > 0);
         this.llhttp = exports2;
-        this.ptr = this.llhttp.llhttp_alloc(constants3.TYPE.RESPONSE);
+        this.ptr = this.llhttp.llhttp_alloc(constants4.TYPE.RESPONSE);
         this.client = client;
         this.socket = socket;
         this.timeout = null;
@@ -5959,11 +5959,11 @@ var require_client_h1 = __commonJS({
             currentBufferRef = null;
           }
           const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
-          if (ret !== constants3.ERROR.OK) {
+          if (ret !== constants4.ERROR.OK) {
             const body2 = data.subarray(offset);
-            if (ret === constants3.ERROR.PAUSED_UPGRADE) {
+            if (ret === constants4.ERROR.PAUSED_UPGRADE) {
               this.onUpgrade(body2);
-            } else if (ret === constants3.ERROR.PAUSED) {
+            } else if (ret === constants4.ERROR.PAUSED) {
               this.paused = true;
               socket.unshift(body2);
             } else {
@@ -5986,10 +5986,10 @@ var require_client_h1 = __commonJS({
         } finally {
           currentParser = null;
         }
-        if (ret === constants3.ERROR.OK) {
+        if (ret === constants4.ERROR.OK) {
           return null;
         }
-        if (ret === constants3.ERROR.PAUSED || ret === constants3.ERROR.PAUSED_UPGRADE) {
+        if (ret === constants4.ERROR.PAUSED || ret === constants4.ERROR.PAUSED_UPGRADE) {
           this.paused = true;
           return null;
         }
@@ -6006,7 +6006,7 @@ var require_client_h1 = __commonJS({
           const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
           message2 = "Response does not match the HTTP/1.1 protocol (" + Buffer.from(llhttp.memory.buffer, ptr, len).toString() + ")";
         }
-        return new HTTPParserError(message2, constants3.ERROR[ret], data);
+        return new HTTPParserError(message2, constants4.ERROR[ret], data);
       }
       destroy() {
         assert(this.ptr != null);
@@ -6186,7 +6186,7 @@ var require_client_h1 = __commonJS({
           socket[kBlocking] = false;
           client[kResume]();
         }
-        return pause ? constants3.ERROR.PAUSED : 0;
+        return pause ? constants4.ERROR.PAUSED : 0;
       }
       onBody(buf) {
         const { client, socket, statusCode, maxResponseSize } = this;
@@ -6208,7 +6208,7 @@ var require_client_h1 = __commonJS({
         }
         this.bytesRead += buf.length;
         if (request2.onData(buf) === false) {
-          return constants3.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         }
       }
       onMessageComplete() {
@@ -6244,13 +6244,13 @@ var require_client_h1 = __commonJS({
         if (socket[kWriting]) {
           assert(client[kRunning] === 0);
           util.destroy(socket, new InformationalError("reset"));
-          return constants3.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (!shouldKeepAlive) {
           util.destroy(socket, new InformationalError("reset"));
-          return constants3.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (socket[kReset] && client[kRunning] === 0) {
           util.destroy(socket, new InformationalError("reset"));
-          return constants3.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (client[kPipelining] == null || client[kPipelining] === 1) {
           setImmediate(() => client[kResume]());
         } else {
@@ -23116,10 +23116,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start: start2, key, sep: sep5, value } = collItem;
+        const { start: start2, key, sep: sep6, value } = collItem;
         const keyProps = resolveProps.resolveProps(start2, {
           indicator: "explicit-key-ind",
-          next: key ?? sep5?.[0],
+          next: key ?? sep6?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -23133,7 +23133,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep5) {
+          if (!keyProps.anchor && !keyProps.tag && !sep6) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map4.comment)
@@ -23157,7 +23157,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map4.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep5 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep6 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -23173,7 +23173,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep5, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep6, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -23264,7 +23264,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end2) {
         let hasSpace = false;
-        let sep5 = "";
+        let sep6 = "";
         for (const token of end2) {
           const { source, type } = token;
           switch (type) {
@@ -23278,13 +23278,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep5 + cb;
-              sep5 = "";
+                comment += sep6 + cb;
+              sep6 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep5 += source;
+                sep6 += source;
               hasSpace = true;
               break;
             default:
@@ -23327,18 +23327,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start: start2, key, sep: sep5, value } = collItem;
+        const { start: start2, key, sep: sep6, value } = collItem;
         const props = resolveProps.resolveProps(start2, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep5?.[0],
+          next: key ?? sep6?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep5 && !value) {
+          if (!props.anchor && !props.tag && !sep6 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -23392,8 +23392,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap2 && !sep5 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep5, null, props, onError);
+        if (!isMap2 && !sep6 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep6, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -23405,7 +23405,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep5 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep6 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -23416,8 +23416,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap2 && !props.found && ctx.options.strict) {
-              if (sep5)
-                for (const st of sep5) {
+              if (sep6)
+                for (const st of sep6) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -23434,7 +23434,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep5, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep6, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -23614,7 +23614,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep5 = "";
+      let sep6 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines2[i][0].slice(trimIndent) + "\n";
@@ -23631,24 +23631,24 @@ var require_resolve_block_scalar = __commonJS({
           indent2 = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep5 + indent2.slice(trimIndent) + content4;
-          sep5 = "\n";
+          value += sep6 + indent2.slice(trimIndent) + content4;
+          sep6 = "\n";
         } else if (indent2.length > trimIndent || content4[0] === "	") {
-          if (sep5 === " ")
-            sep5 = "\n";
-          else if (!prevMoreIndented && sep5 === "\n")
-            sep5 = "\n\n";
-          value += sep5 + indent2.slice(trimIndent) + content4;
-          sep5 = "\n";
+          if (sep6 === " ")
+            sep6 = "\n";
+          else if (!prevMoreIndented && sep6 === "\n")
+            sep6 = "\n\n";
+          value += sep6 + indent2.slice(trimIndent) + content4;
+          sep6 = "\n";
           prevMoreIndented = true;
         } else if (content4 === "") {
-          if (sep5 === "\n")
+          if (sep6 === "\n")
             value += "\n";
           else
-            sep5 = "\n";
+            sep6 = "\n";
         } else {
-          value += sep5 + content4;
-          sep5 = " ";
+          value += sep6 + content4;
+          sep6 = " ";
           prevMoreIndented = false;
         }
       }
@@ -23831,25 +23831,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep5 = " ";
+      let sep6 = " ";
       let pos = line2.lastIndex;
       while (match = line2.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep5 === "\n")
-            res += sep5;
+          if (sep6 === "\n")
+            res += sep6;
           else
-            sep5 = "\n";
+            sep6 = "\n";
         } else {
-          res += sep5 + lm;
-          sep5 = " ";
+          res += sep6 + lm;
+          sep6 = " ";
         }
         pos = line2.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep5 + (match?.[1] ?? "");
+      return res + sep6 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -24659,14 +24659,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start: start2, key, sep: sep5, value }) {
+    function stringifyItem({ start: start2, key, sep: sep6, value }) {
       let res = "";
       for (const st of start2)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep5)
-        for (const st of sep5)
+      if (sep6)
+        for (const st of sep6)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -25833,18 +25833,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start2 = getFirstKeyStartProps(prev);
-          let sep5;
+          let sep6;
           if (scalar.end) {
-            sep5 = scalar.end;
-            sep5.push(this.sourceToken);
+            sep6 = scalar.end;
+            sep6.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep5 = [this.sourceToken];
+            sep6 = [this.sourceToken];
           const map4 = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start: start2, key: scalar, sep: sep5 }]
+            items: [{ start: start2, key: scalar, sep: sep6 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map4;
@@ -25997,15 +25997,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start3 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep5 = it.sep;
-                  sep5.push(this.sourceToken);
+                  const sep6 = it.sep;
+                  sep6.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start3, key, sep: sep5 }]
+                    items: [{ start: start3, key, sep: sep6 }]
                   });
                 } else if (start2.length > 0) {
                   it.sep = it.sep.concat(start2, this.sourceToken);
@@ -26199,13 +26199,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start2 = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep5 = fc.end.splice(1, fc.end.length);
-            sep5.push(this.sourceToken);
+            const sep6 = fc.end.splice(1, fc.end.length);
+            sep6.push(this.sourceToken);
             const map4 = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start: start2, key: fc, sep: sep5 }]
+              items: [{ start: start2, key: fc, sep: sep6 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map4;
@@ -26383,7 +26383,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse4(src, reviver, options) {
+    function parse5(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -26424,7 +26424,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse4;
+    exports.parse = parse5;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument2;
     exports.stringify = stringify2;
@@ -26484,8 +26484,7 @@ var require_dist = __commonJS({
 });
 
 // src/action/main.ts
-import { writeFile as writeFile7 } from "node:fs/promises";
-import { dirname as dirname5 } from "node:path";
+import { dirname as dirname5, sep as sep5 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/@actions/core/lib/core.js
@@ -28770,7 +28769,7 @@ var MESSAGES = {
   // The command line and the action.
   "cli.missing-command": "missing command",
   "cli.unknown-command": "unknown command: {command}",
-  "cli.node-too-old": "mdbisync requires Node 24 or newer; install it before running the hook.",
+  "cli.node-too-old": "mdbisync requires Node.js 24.2 or later; install it and try again.",
   "cli.not-implemented": "{command}: not implemented",
   "action.unknown-operation": "unknown operation: {operation} (expected one of: {operations})",
   "action.unknown-security-step": "unknown security-step: {step} (expected one of: {steps}, or empty)",
@@ -28779,6 +28778,9 @@ var MESSAGES = {
   "output.invalid-text": "cannot write report text: expected printable Unicode text of at most {limit} characters",
   "output.invalid-count": "cannot write report metadata: expected a non-negative safe integer",
   "output.outside-directory": "report destination must stay inside the configured output directory",
+  "output.linked-directory": "report destination {path} is a symbolic link inside the checkout",
+  "output.link-loop": "report destination {path} passes through too many symbolic links",
+  "output.not-a-file": "report destination {path} is not a regular file",
   // `init`.
   "init.security-twice": "choose security hooks once",
   "init.lfs-twice": "choose Git LFS once",
@@ -29010,7 +29012,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "0.1.0-rc.18" : packageJson.version;
+var VERSION = true ? "0.1.0-rc.19" : packageJson.version;
 
 // src/format/rules.ts
 var LINT_RULES = {
@@ -29121,9 +29123,9 @@ var ContentSpool = class {
 // src/sync/capture.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { createHash as createHash16 } from "node:crypto";
-import { mkdtemp as mkdtemp5, rm as rm6 } from "node:fs/promises";
-import { tmpdir as tmpdir6 } from "node:os";
-import { join as join11, posix as posix9 } from "node:path";
+import { mkdtemp as mkdtemp6, rm as rm7 } from "node:fs/promises";
+import { tmpdir as tmpdir7 } from "node:os";
+import { join as join13, posix as posix9 } from "node:path";
 
 // src/mapping/front-matter.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -31893,16 +31895,16 @@ function resolveAllAttention(events2, context) {
   let nextEvents;
   while (++index2 < events2.length) {
     if (events2[index2][0] === "enter" && events2[index2][1].type === "attentionSequence" && events2[index2][1]._close) {
-      let open3 = index2;
-      while (open3--) {
-        if (events2[open3][0] === "exit" && events2[open3][1].type === "attentionSequence" && events2[open3][1]._open && // If the markers are the same:
-        context.sliceSerialize(events2[open3][1]).charCodeAt(0) === context.sliceSerialize(events2[index2][1]).charCodeAt(0)) {
-          if ((events2[open3][1]._close || events2[index2][1]._open) && (events2[index2][1].end.offset - events2[index2][1].start.offset) % 3 && !((events2[open3][1].end.offset - events2[open3][1].start.offset + events2[index2][1].end.offset - events2[index2][1].start.offset) % 3)) {
+      let open4 = index2;
+      while (open4--) {
+        if (events2[open4][0] === "exit" && events2[open4][1].type === "attentionSequence" && events2[open4][1]._open && // If the markers are the same:
+        context.sliceSerialize(events2[open4][1]).charCodeAt(0) === context.sliceSerialize(events2[index2][1]).charCodeAt(0)) {
+          if ((events2[open4][1]._close || events2[index2][1]._open) && (events2[index2][1].end.offset - events2[index2][1].start.offset) % 3 && !((events2[open4][1].end.offset - events2[open4][1].start.offset + events2[index2][1].end.offset - events2[index2][1].start.offset) % 3)) {
             continue;
           }
-          const use = events2[open3][1].end.offset - events2[open3][1].start.offset > 1 && events2[index2][1].end.offset - events2[index2][1].start.offset > 1 ? 2 : 1;
+          const use = events2[open4][1].end.offset - events2[open4][1].start.offset > 1 && events2[index2][1].end.offset - events2[index2][1].start.offset > 1 ? 2 : 1;
           const start2 = {
-            ...events2[open3][1].end
+            ...events2[open4][1].end
           };
           const end2 = {
             ...events2[index2][1].start
@@ -31913,7 +31915,7 @@ function resolveAllAttention(events2, context) {
             type: use > 1 ? "strongSequence" : "emphasisSequence",
             start: start2,
             end: {
-              ...events2[open3][1].end
+              ...events2[open4][1].end
             }
           };
           const closingSequence = {
@@ -31926,7 +31928,7 @@ function resolveAllAttention(events2, context) {
           const text6 = {
             type: use > 1 ? "strongText" : "emphasisText",
             start: {
-              ...events2[open3][1].end
+              ...events2[open4][1].end
             },
             end: {
               ...events2[index2][1].start
@@ -31941,26 +31943,26 @@ function resolveAllAttention(events2, context) {
               ...closingSequence.end
             }
           };
-          events2[open3][1].end = {
+          events2[open4][1].end = {
             ...openingSequence.start
           };
           events2[index2][1].start = {
             ...closingSequence.end
           };
           nextEvents = [];
-          if (events2[open3][1].end.offset - events2[open3][1].start.offset) {
-            nextEvents = push(nextEvents, [["enter", events2[open3][1], context], ["exit", events2[open3][1], context]]);
+          if (events2[open4][1].end.offset - events2[open4][1].start.offset) {
+            nextEvents = push(nextEvents, [["enter", events2[open4][1], context], ["exit", events2[open4][1], context]]);
           }
           nextEvents = push(nextEvents, [["enter", group2, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text6, context]]);
-          nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events2.slice(open3 + 1, index2), context));
+          nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events2.slice(open4 + 1, index2), context));
           nextEvents = push(nextEvents, [["exit", text6, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group2, context]]);
           let offset = 0;
           if (events2[index2][1].end.offset - events2[index2][1].start.offset) {
             offset = 2;
             nextEvents = push(nextEvents, [["enter", events2[index2][1], context], ["exit", events2[index2][1], context]]);
           }
-          splice(events2, open3 - 1, index2 - open3 + 3, nextEvents);
-          index2 = open3 + nextEvents.length - offset - 2;
+          splice(events2, open4 - 1, index2 - open4 + 3, nextEvents);
+          index2 = open4 + nextEvents.length - offset - 2;
           break;
         }
       }
@@ -31983,19 +31985,19 @@ function tokenizeAttention(effects, ok3) {
   function start2(code4) {
     marker = code4;
     effects.enter("attentionSequence");
-    return inside(code4);
+    return inside2(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (code4 === marker) {
       effects.consume(code4);
-      return inside;
+      return inside2;
     }
     const token = effects.exit("attentionSequence");
     const after = classifyCharacter(code4);
-    const open3 = !after || after === 2 && before || attentionMarkers2.includes(code4) && code4 !== 42 && code4 !== 95;
+    const open4 = !after || after === 2 && before || attentionMarkers2.includes(code4) && code4 !== 42 && code4 !== 95;
     const close = !before || before === 2 && after || attentionMarkers2.includes(previous3) && previous3 !== 42 && previous3 !== 95;
-    token._open = Boolean(marker === 42 ? open3 : open3 && (before || !close));
-    token._close = Boolean(marker === 42 ? close : close && (after || !open3));
+    token._open = Boolean(marker === 42 ? open4 : open4 && (before || !close));
+    token._close = Boolean(marker === 42 ? close : close && (after || !open4));
     return ok3(code4);
   }
 }
@@ -32019,9 +32021,9 @@ function tokenizeAutolink(effects, ok3, nok) {
     effects.consume(code4);
     effects.exit("autolinkMarker");
     effects.enter("autolinkProtocol");
-    return open3;
+    return open4;
   }
-  function open3(code4) {
+  function open4(code4) {
     if (asciiAlpha(code4)) {
       effects.consume(code4);
       return schemeOrEmailAtext;
@@ -32191,9 +32193,9 @@ function tokenizeCharacterEscape(effects, ok3, nok) {
     effects.enter("escapeMarker");
     effects.consume(code4);
     effects.exit("escapeMarker");
-    return inside;
+    return inside2;
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (asciiPunctuation(code4)) {
       effects.enter("characterEscapeValue");
       effects.consume(code4);
@@ -32221,9 +32223,9 @@ function tokenizeCharacterReference(effects, ok3, nok) {
     effects.enter("characterReferenceMarker");
     effects.consume(code4);
     effects.exit("characterReferenceMarker");
-    return open3;
+    return open4;
   }
-  function open3(code4) {
+  function open4(code4) {
     if (code4 === 35) {
       effects.enter("characterReferenceMarkerNumeric");
       effects.consume(code4);
@@ -32478,15 +32480,15 @@ function tokenizeCodeIndented(effects, ok3, nok) {
       return effects.attempt(furtherStart, atBreak, after)(code4);
     }
     effects.enter("codeFlowValue");
-    return inside(code4);
+    return inside2(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (code4 === null || markdownLineEnding(code4)) {
       effects.exit("codeFlowValue");
       return atBreak(code4);
     }
     effects.consume(code4);
-    return inside;
+    return inside2;
   }
   function after(code4) {
     effects.exit("codeIndented");
@@ -33241,22 +33243,22 @@ function factoryTitle(effects, ok3, nok, type, markerType, stringType) {
     effects.enter("chunkString", {
       contentType: "string"
     });
-    return inside(code4);
+    return inside2(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (code4 === marker || code4 === null || markdownLineEnding(code4)) {
       effects.exit("chunkString");
       return atBreak(code4);
     }
     effects.consume(code4);
-    return code4 === 92 ? escape2 : inside;
+    return code4 === 92 ? escape2 : inside2;
   }
   function escape2(code4) {
     if (code4 === marker || code4 === 92) {
       effects.consume(code4);
-      return inside;
+      return inside2;
     }
-    return inside(code4);
+    return inside2(code4);
   }
 }
 
@@ -33582,9 +33584,9 @@ function tokenizeHtmlFlow(effects, ok3, nok) {
     effects.enter("htmlFlow");
     effects.enter("htmlFlowData");
     effects.consume(code4);
-    return open3;
+    return open4;
   }
-  function open3(code4) {
+  function open4(code4) {
     if (code4 === 33) {
       effects.consume(code4);
       return declarationOpen;
@@ -33916,9 +33918,9 @@ function tokenizeHtmlText(effects, ok3, nok) {
     effects.enter("htmlText");
     effects.enter("htmlTextData");
     effects.consume(code4);
-    return open3;
+    return open4;
   }
-  function open3(code4) {
+  function open4(code4) {
     if (code4 === 33) {
       effects.consume(code4);
       return declarationOpen;
@@ -34243,12 +34245,12 @@ function resolveAllLabelEnd(events2) {
 function resolveToLabelEnd(events2, context) {
   let index2 = events2.length;
   let offset = 0;
-  let open3;
+  let open4;
   let close;
   let media;
   while (index2--) {
     const token = events2[index2][1];
-    if (open3) {
+    if (open4) {
       if (token.type === "link" || token.type === "labelLink" && token._inactive) {
         break;
       }
@@ -34257,7 +34259,7 @@ function resolveToLabelEnd(events2, context) {
       }
     } else if (close) {
       if (events2[index2][0] === "enter" && (token.type === "labelImage" || token.type === "labelLink") && !token._balanced) {
-        open3 = index2;
+        open4 = index2;
         if (token.type !== "labelLink") {
           offset = 2;
           break;
@@ -34268,9 +34270,9 @@ function resolveToLabelEnd(events2, context) {
     }
   }
   const group2 = {
-    type: events2[open3][1].type === "labelLink" ? "link" : "image",
+    type: events2[open4][1].type === "labelLink" ? "link" : "image",
     start: {
-      ...events2[open3][1].start
+      ...events2[open4][1].start
     },
     end: {
       ...events2[events2.length - 1][1].end
@@ -34279,7 +34281,7 @@ function resolveToLabelEnd(events2, context) {
   const label = {
     type: "label",
     start: {
-      ...events2[open3][1].start
+      ...events2[open4][1].start
     },
     end: {
       ...events2[close][1].end
@@ -34288,20 +34290,20 @@ function resolveToLabelEnd(events2, context) {
   const text6 = {
     type: "labelText",
     start: {
-      ...events2[open3 + offset + 2][1].end
+      ...events2[open4 + offset + 2][1].end
     },
     end: {
       ...events2[close - 2][1].start
     }
   };
   media = [["enter", group2, context], ["enter", label, context]];
-  media = push(media, events2.slice(open3 + 1, open3 + offset + 3));
+  media = push(media, events2.slice(open4 + 1, open4 + offset + 3));
   media = push(media, [["enter", text6, context]]);
-  media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events2.slice(open3 + offset + 4, close - 3), context));
+  media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events2.slice(open4 + offset + 4, close - 3), context));
   media = push(media, [["exit", text6, context], events2[close - 2], events2[close - 1], ["exit", label, context]]);
   media = push(media, events2.slice(close + 1));
   media = push(media, [["exit", group2, context]]);
-  splice(events2, open3, events2.length, media);
+  splice(events2, open4, events2.length, media);
   return events2;
 }
 function tokenizeLabelEnd(effects, ok3, nok) {
@@ -34448,9 +34450,9 @@ function tokenizeLabelStartImage(effects, ok3, nok) {
     effects.enter("labelImageMarker");
     effects.consume(code4);
     effects.exit("labelImageMarker");
-    return open3;
+    return open4;
   }
-  function open3(code4) {
+  function open4(code4) {
     if (code4 === 91) {
       effects.enter("labelMarker");
       effects.consume(code4);
@@ -34591,15 +34593,15 @@ function tokenizeListStart(effects, ok3, nok) {
       if (!self.interrupt || code4 === 49) {
         effects.enter("listItemPrefix");
         effects.enter("listItemValue");
-        return inside(code4);
+        return inside2(code4);
       }
     }
     return nok(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (asciiDigit(code4) && ++size < 10) {
       effects.consume(code4);
-      return inside;
+      return inside2;
     }
     if ((!self.interrupt || size < 2) && (self.containerState.marker ? code4 === self.containerState.marker : code4 === 41 || code4 === 46)) {
       effects.exit("listItemValue");
@@ -34757,12 +34759,12 @@ function tokenizeSetextUnderline(effects, ok3, nok) {
   }
   function before(code4) {
     effects.enter("setextHeadingLineSequence");
-    return inside(code4);
+    return inside2(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (code4 === marker) {
       effects.consume(code4);
-      return inside;
+      return inside2;
     }
     effects.exit("setextHeadingLineSequence");
     return markdownSpace(code4) ? factorySpace(effects, after, "lineSuffix")(code4) : after(code4);
@@ -35811,8 +35813,8 @@ function compiler(options) {
     events2[start2][1]._spread = listSpread;
   }
   function opener(create, and) {
-    return open3;
-    function open3(token) {
+    return open4;
+    function open4(token) {
       enter.call(this, create(token), token);
       if (and) and.call(this, token);
     }
@@ -35844,19 +35846,19 @@ function compiler(options) {
   }
   function exit3(token, onExitError) {
     const node2 = this.stack.pop();
-    const open3 = this.tokenStack.pop();
-    if (!open3) {
+    const open4 = this.tokenStack.pop();
+    if (!open4) {
       throw new Error("Cannot close `" + token.type + "` (" + stringifyPosition({
         start: token.start,
         end: token.end
       }) + "): it\u2019s not open");
     }
-    if (open3[0].type !== token.type) {
+    if (open4[0].type !== token.type) {
       if (onExitError) {
-        onExitError.call(this, token, open3[0]);
+        onExitError.call(this, token, open4[0]);
       } else {
-        const handler = open3[1] || defaultOnError;
-        handler.call(this, token, open3[0]);
+        const handler = open4[1] || defaultOnError;
+        handler.call(this, token, open4[0]);
       }
     }
     node2.position.end = point2(token.end);
@@ -37205,9 +37207,9 @@ function encodeCharacterReference(code4) {
 }
 
 // node_modules/mdast-util-to-markdown/lib/util/encode-info.js
-function encodeInfo(outside, inside, marker) {
+function encodeInfo(outside, inside2, marker) {
   const outsideKind = classifyCharacter(outside);
-  const insideKind = classifyCharacter(inside);
+  const insideKind = classifyCharacter(inside2);
   if (outsideKind === void 0) {
     return insideKind === void 0 ? (
       // Letter inside:
@@ -37318,7 +37320,7 @@ function check(tokens, before, after) {
     const next = classifyCharacter(
       (end2 < tokens.length ? tokens[end2].value : after).charCodeAt(0)
     );
-    const open3 = !next || next === 2 && Boolean(previous3);
+    const open4 = !next || next === 2 && Boolean(previous3);
     const close = !previous3 || previous3 === 2 && Boolean(next);
     const run2 = {
       tokens: tokens.slice(index2, end2),
@@ -37326,8 +37328,8 @@ function check(tokens, before, after) {
       start: 0,
       end: 0,
       // Underscores are strict, they cannot open or close inside words.
-      open: strict ? open3 && (Boolean(previous3) || !close) : open3,
-      close: strict ? close && (Boolean(next) || !open3) : close,
+      open: strict ? open4 && (Boolean(previous3) || !close) : open4,
+      close: strict ? close && (Boolean(next) || !open4) : close,
       // All builtins can split runs.
       split: strict !== void 0
     };
@@ -37395,9 +37397,9 @@ function pair(runs, wrong) {
       openers = [];
       openersByMarker.set(marker, openers);
     }
-    let open3 = closer.close ? openers.length : 0;
-    while (open3-- && closer.start < closer.end) {
-      const opener = openers[open3];
+    let open4 = closer.close ? openers.length : 0;
+    while (open4-- && closer.start < closer.end) {
+      const opener = openers[open4];
       const openerSize = opener.end - opener.start;
       const closerSize = closer.end - closer.start;
       if (closer.split ? (
@@ -37433,8 +37435,8 @@ function pair(runs, wrong) {
       }
       opener.end -= size;
       closer.start += size;
-      if (opener.start === opener.end) openers.splice(open3, 1);
-      open3 = openers.length;
+      if (opener.start === opener.end) openers.splice(open4, 1);
+      open4 = openers.length;
     }
     if (closer.open && closer.start < closer.end) openers.push(closer);
   }
@@ -37573,26 +37575,26 @@ function render(items, chosen, before, after) {
     const outsideAfter = firstCharacter(
       next === void 0 ? after : typeof next === "string" ? next : chosen.get(next) || next.sequences[0]
     );
-    const inside = render(item.children, chosen, sequence, sequence);
-    const head = inside.length > 0 ? inside[0].value : "";
-    const open3 = encodeInfo(
+    const inside2 = render(item.children, chosen, sequence, sequence);
+    const head = inside2.length > 0 ? inside2[0].value : "";
+    const open4 = encodeInfo(
       outsideBefore.charCodeAt(outsideBefore.length - 1),
       head.charCodeAt(0),
       marker
     );
-    if (open3.inside) encode(inside, true);
-    const tail = inside.length > 0 ? lastCharacter(inside[inside.length - 1].value) : "";
+    if (open4.inside) encode(inside2, true);
+    const tail = inside2.length > 0 ? lastCharacter(inside2[inside2.length - 1].value) : "";
     const close = encodeInfo(
       outsideAfter.charCodeAt(0),
       tail.charCodeAt(tail.length - 1),
       marker
     );
-    if (close.inside) encode(inside, false);
-    if (open3.outside && outsideBefore !== "\n" && outsideBefore !== "\r") {
+    if (close.inside) encode(inside2, false);
+    if (open4.outside && outsideBefore !== "\n" && outsideBefore !== "\r") {
       encode(tokens, false);
     }
     if (close.outside) encodeAfter = outsideAfter;
-    tokens.push({ value: sequence, attention: item }, ...inside, {
+    tokens.push({ value: sequence, attention: item }, ...inside2, {
       value: sequence,
       attention: item
     });
@@ -39521,30 +39523,30 @@ function gfmStrikethrough(options) {
     let index2 = -1;
     while (++index2 < events2.length) {
       if (events2[index2][0] === "enter" && events2[index2][1].type === "strikethroughSequenceTemporary" && events2[index2][1]._close) {
-        let open3 = index2;
-        while (open3--) {
-          if (events2[open3][0] === "exit" && events2[open3][1].type === "strikethroughSequenceTemporary" && events2[open3][1]._open && // If the sizes are the same:
-          events2[index2][1].end.offset - events2[index2][1].start.offset === events2[open3][1].end.offset - events2[open3][1].start.offset) {
+        let open4 = index2;
+        while (open4--) {
+          if (events2[open4][0] === "exit" && events2[open4][1].type === "strikethroughSequenceTemporary" && events2[open4][1]._open && // If the sizes are the same:
+          events2[index2][1].end.offset - events2[index2][1].start.offset === events2[open4][1].end.offset - events2[open4][1].start.offset) {
             events2[index2][1].type = "strikethroughSequence";
-            events2[open3][1].type = "strikethroughSequence";
+            events2[open4][1].type = "strikethroughSequence";
             const strikethrough = {
               type: "strikethrough",
-              start: Object.assign({}, events2[open3][1].start),
+              start: Object.assign({}, events2[open4][1].start),
               end: Object.assign({}, events2[index2][1].end)
             };
             const text6 = {
               type: "strikethroughText",
-              start: Object.assign({}, events2[open3][1].end),
+              start: Object.assign({}, events2[open4][1].end),
               end: Object.assign({}, events2[index2][1].start)
             };
-            const nextEvents = [["enter", strikethrough, context], ["enter", events2[open3][1], context], ["exit", events2[open3][1], context], ["enter", text6, context]];
+            const nextEvents = [["enter", strikethrough, context], ["enter", events2[open4][1], context], ["exit", events2[open4][1], context], ["enter", text6, context]];
             const insideSpan2 = context.parser.constructs.insideSpan.null;
             if (insideSpan2) {
-              splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events2.slice(open3 + 1, index2), context));
+              splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events2.slice(open4 + 1, index2), context));
             }
             splice(nextEvents, nextEvents.length, 0, [["exit", text6, context], ["enter", events2[index2][1], context], ["exit", events2[index2][1], context], ["exit", strikethrough, context]]);
-            splice(events2, open3 - 1, index2 - open3 + 3, nextEvents);
-            index2 = open3 + nextEvents.length - 2;
+            splice(events2, open4 - 1, index2 - open4 + 3, nextEvents);
+            index2 = open4 + nextEvents.length - 2;
             break;
           }
         }
@@ -40106,8 +40108,8 @@ function gfmTaskListItem() {
 }
 function tokenizeTasklistCheck(effects, ok3, nok) {
   const self = this;
-  return open3;
-  function open3(code4) {
+  return open4;
+  function open4(code4) {
     if (
       // Exit if there’s stuff before.
       self.previous !== null || // Exit if not in the first content that is the first child of a list
@@ -40120,9 +40122,9 @@ function tokenizeTasklistCheck(effects, ok3, nok) {
     effects.enter("taskListCheckMarker");
     effects.consume(code4);
     effects.exit("taskListCheckMarker");
-    return inside;
+    return inside2;
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (markdownLineEndingOrSpace(code4)) {
       effects.enter("taskListCheckValueUnchecked");
       effects.consume(code4);
@@ -40282,7 +40284,7 @@ function comparable(body2) {
   return strip(tree);
 }
 var BARE_MARKER = /^((?: {0,3}>[ ]?)*)( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
-var MAYBE_NESTED_BLOCK = /\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
+var MAYBE_NESTED_BLOCK = /(?:^|\n)[^\S\n]*\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
 function nestedFileBlocksOnItemLine(body2) {
   if (!MAYBE_NESTED_BLOCK.test(body2)) return body2;
   const lines2 = body2.split("\n");
@@ -40372,14 +40374,18 @@ function visit2(node2, enter, ancestors = []) {
     if (stack.length === 0) return;
   }
 }
+function decodedDestinationPath(url) {
+  const cut = url.search(/[?#]/);
+  const path7 = cut === -1 ? url : url.slice(0, cut);
+  try {
+    return decodeURIComponent(path7);
+  } catch {
+    return path7;
+  }
+}
 function resolveTarget(documentPath2, url) {
   if (url === "" || url.startsWith("#") || url.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
-  const cut = url.search(/[?#]/);
-  let path7 = cut === -1 ? url : url.slice(0, cut);
-  try {
-    path7 = decodeURIComponent(path7);
-  } catch {
-  }
+  const path7 = decodedDestinationPath(url);
   if (path7 === "") return null;
   const joined = posix.normalize(posix.join(posix.dirname(documentPath2), path7));
   if (joined === "." || joined === ".." || joined.startsWith("../") || joined.endsWith("/")) return null;
@@ -40400,13 +40406,13 @@ function linkDestination(url) {
 function imageDestination(url) {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
-function bracketedLabel(source, open3) {
+function bracketedLabel(source, open4) {
   let depth2 = 0;
-  for (let at = open3; at < source.length; at++) {
+  for (let at = open4; at < source.length; at++) {
     const char = source[at];
     if (char === "\\") at++;
     else if (char === "[") depth2++;
-    else if (char === "]" && --depth2 === 0) return source.slice(open3 + 1, at);
+    else if (char === "]" && --depth2 === 0) return source.slice(open4 + 1, at);
   }
   return "";
 }
@@ -40648,6 +40654,90 @@ async function mapLimit(items, limit, fn) {
 
 // src/state/lfs.ts
 import { createHash as createHash2 } from "node:crypto";
+import { mkdtemp, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
+import { tmpdir as tmpdir2 } from "node:os";
+import { join as join5 } from "node:path";
+
+// src/state/config.ts
+var STORES = ["linear", "ids", "uploads"];
+var DEFAULT_STATE_CONFIG = Object.freeze({
+  remote: "origin",
+  trackedBranch: "main",
+  syncBranch: "mdbisync/linear",
+  refPrefix: "refs/mdbisync"
+});
+var StateConfigError = class extends Error {
+  constructor(message2) {
+    super(message2);
+    this.name = "StateConfigError";
+  }
+};
+function resolveStateConfig(input = {}) {
+  const pick = (key) => {
+    const value = input[key];
+    return value === void 0 || value.trim() === "" ? DEFAULT_STATE_CONFIG[key] : value.trim();
+  };
+  const config = {
+    remote: pick("remote"),
+    trackedBranch: pick("trackedBranch"),
+    syncBranch: pick("syncBranch"),
+    refPrefix: pick("refPrefix").replace(/\/+$/, "")
+  };
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.remote)) {
+    throw new StateConfigError(message("config.invalid-remote", { remote: config.remote }));
+  }
+  for (const key of ["trackedBranch", "syncBranch"]) {
+    const problem = refNameProblem(`refs/heads/${config[key]}`) ?? (config[key].startsWith("-") ? message("config.starts-with-dash") : null);
+    if (problem !== null) throw new StateConfigError(message("config.invalid-branch", { key, branch: config[key], problem }));
+  }
+  const suspended = suspendedBranch(config);
+  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended) {
+    throw new StateConfigError(message("config.same-branches"));
+  }
+  if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
+    throw new StateConfigError(message("config.nested-branches"));
+  }
+  if (suspended.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${suspended}/`)) throw new StateConfigError(message("config.nested-branches"));
+  const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
+  if (prefixProblem !== null) {
+    throw new StateConfigError(message("config.invalid-prefix", { prefix: config.refPrefix, problem: prefixProblem }));
+  }
+  if (!/^refs\/[^/]/.test(config.refPrefix)) {
+    throw new StateConfigError(message("config.prefix-outside-refs", { prefix: config.refPrefix }));
+  }
+  if (/^refs\/(heads|tags|remotes)(\/|$)/.test(config.refPrefix)) {
+    throw new StateConfigError(message("config.prefix-reserved", { prefix: config.refPrefix }));
+  }
+  return config;
+}
+function stateRef(config, store) {
+  return `${config.refPrefix}/${store}`;
+}
+function branchRef(branch) {
+  return `refs/heads/${branch}`;
+}
+function localRef(config, remoteRef) {
+  return remoteRef.startsWith("refs/heads/") ? `refs/remotes/${config.remote}/${remoteRef.slice("refs/heads/".length)}` : remoteRef;
+}
+function refNameProblem(name) {
+  if (!name.startsWith("refs/")) return 'does not start with "refs/"';
+  if (name.endsWith("/")) return 'ends with "/"';
+  if (name.endsWith(".")) return 'ends with "."';
+  if (name.includes("//")) return 'contains "//"';
+  if (name.includes("..")) return 'contains ".."';
+  if (name.includes("@{")) return 'contains "@{"';
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(name)) return "contains a character git does not allow";
+  for (const part of name.split("/")) {
+    if (part.startsWith(".")) return 'has a part starting with "."';
+    if (part.endsWith(".lock")) return 'has a part ending with ".lock"';
+  }
+  return null;
+}
+function suspendedBranch(config) {
+  return !config.syncBranch.includes("/") || config.syncBranch.endsWith("/suspended") ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, "suspended");
+}
+
+// src/state/lfs.ts
 var POINTER_VERSION = "version https://git-lfs.github.com/spec/v1";
 var MAX_POINTER_SIZE = 1024;
 function parseLfsPointer(blob) {
@@ -40681,13 +40771,35 @@ function parseLfsPointer(blob) {
   }
   return oid !== null && size !== null ? { oid, size, extensions } : null;
 }
-async function lfsReader(git, remote) {
-  const remoteArgs = ["-c", `remote.lfsdefault=${remote}`];
+async function lfsReader(git, from) {
+  const remoteArgs = ["-c", `remote.lfsdefault=${from.remote}`, "-c", "lfs.fetchinclude=", "-c", "lfs.fetchexclude="];
   const branch = await git.run(["symbolic-ref", "--quiet", "--short", "HEAD"], { okCodes: [0, 1, 128] });
-  if (branch.code === 0) remoteArgs.push("-c", `branch.${branch.stdout.toString("utf8").trim()}.remote=${remote}`);
+  if (branch.code === 0) remoteArgs.push("-c", `branch.${branch.stdout.toString("utf8").trim()}.remote=${from.remote}`);
+  let setting;
   let installed;
   const runs = () => installed ??= gitLfsRuns(git);
-  return (pointer, path7) => readLfsObject(git, remoteArgs, pointer, path7, runs);
+  return async (pointer, path7) => withLfsconfig(await (setting ??= lfsSetting(git, from)), (env) => readLfsObject(git, remoteArgs, env, pointer, path7, runs));
+}
+function lfsRemote(config) {
+  return { remote: config.remote, tracked: localRef(config, branchRef(config.trackedBranch)) };
+}
+async function lfsPush(git, to, oids) {
+  if (oids.length === 0) return;
+  await withLfsconfig(await lfsSetting(git, to), (env) => git.run(["lfs", "push", "--object-id", to.remote, ...oids], { env }));
+}
+var LFSCONFIG_LIMIT = 64 * 1024;
+async function lfsSetting(git, from) {
+  const found = await git.run(["cat-file", "blob", `${from.tracked}:.lfsconfig`], { okCodes: [0, 128], maxOutputBytes: LFSCONFIG_LIMIT });
+  return { gitDir: await git.text(["rev-parse", "--absolute-git-dir"]), lfsconfig: found.code === 0 ? found.stdout : Buffer.alloc(0) };
+}
+async function withLfsconfig(setting, work) {
+  const tree = await mkdtemp(join5(tmpdir2(), "mdbisync-lfs-"));
+  try {
+    await writeFile2(join5(tree, ".lfsconfig"), setting.lfsconfig);
+    return await work({ GIT_DIR: setting.gitDir, GIT_WORK_TREE: tree });
+  } finally {
+    await rm2(tree, { recursive: true, force: true });
+  }
 }
 var GitLfsMissingError = class extends Error {
   constructor() {
@@ -40707,16 +40819,17 @@ async function gitLfsRuns(git) {
 async function requireGitLfs(git) {
   if (!await gitLfsRuns(git)) throw new GitLfsMissingError();
 }
-async function missingLfsObjects(git, remote, blobs) {
+async function missingLfsObjects(git, from, blobs) {
   const missing = /* @__PURE__ */ new Set();
   if (blobs.length === 0) return missing;
   const entries = [...new Set(blobs)].map((blob, index2) => `100644 blob ${blob}	${index2}
 `).join("");
   const tree = await git.text(["mktree"], { input: entries });
   const settings = ["-c", "lfs.fetchinclude=", "-c", "lfs.fetchexclude=", "-c", "lfs.fetchrecentalways=false"];
+  const setting = await lfsSetting(git, from);
   let stderr;
   try {
-    stderr = (await git.run([...settings, "lfs", "fetch", "--dry-run", remote, tree], { okCodes: [0, 2] })).stderr;
+    stderr = (await withLfsconfig(setting, (env) => git.run([...settings, "lfs", "fetch", "--dry-run", from.remote, tree], { okCodes: [0, 2], env }))).stderr;
   } catch (error2) {
     if (!(error2 instanceof GitError)) throw error2;
     await requireGitLfs(git);
@@ -40725,7 +40838,7 @@ async function missingLfsObjects(git, remote, blobs) {
   for (const match of stderr.matchAll(/^\[([0-9a-f]{64})\] [^\n]*\[(404|410)\]/gm)) missing.add(match[1]);
   return missing;
 }
-async function readLfsObject(git, remoteArgs, pointer, path7, runs) {
+async function readLfsObject(git, remoteArgs, env, pointer, path7, runs) {
   if (pointer.extensions) {
     return { ok: false, reason: `LFS object ${pointer.oid} uses LFS extensions, which are not supported` };
   }
@@ -40737,7 +40850,7 @@ size ${pointer.size}
   try {
     const result = await git.run([...remoteArgs, "lfs", "smudge", "--", path7], {
       input: pointerText,
-      env: { GIT_LFS_SKIP_SMUDGE: void 0 },
+      env: { ...env, GIT_LFS_SKIP_SMUDGE: void 0 },
       // A failed smudge may return the pointer itself.
       maxOutputBytes: Math.max(pointer.size, MAX_POINTER_SIZE)
     });
@@ -40757,9 +40870,9 @@ size ${pointer.size}
 }
 
 // src/state/objects.ts
-import { mkdtemp, rm as rm2 } from "node:fs/promises";
-import { tmpdir as tmpdir2 } from "node:os";
-import { join as join5 } from "node:path";
+import { mkdtemp as mkdtemp2, rm as rm3 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join6 } from "node:path";
 var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
 async function listTree(git, treeish, maxOutputBytes) {
   const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
@@ -40843,8 +40956,8 @@ async function commitTree(git, spec) {
   });
 }
 async function buildTree(git, base, changes) {
-  const dir = await mkdtemp(join5(tmpdir2(), "state-index-"));
-  const env = { GIT_INDEX_FILE: join5(dir, "index") };
+  const dir = await mkdtemp2(join6(tmpdir3(), "state-index-"));
+  const env = { GIT_INDEX_FILE: join6(dir, "index") };
   try {
     if (base === null) await git.run(["read-tree", "--empty"], { env });
     else await git.run(["read-tree", `${base}^{tree}`], { env });
@@ -40859,7 +40972,7 @@ async function buildTree(git, base, changes) {
     if (lines2.length > 0) await git.run(["update-index", "-z", "--index-info"], { input: lines2.join(""), env });
     return await git.text(["write-tree"], { env });
   } finally {
-    await rm2(dir, { recursive: true, force: true });
+    await rm3(dir, { recursive: true, force: true });
   }
 }
 async function listModes(git, treeish) {
@@ -41339,8 +41452,8 @@ var RequestStats = class {
 
 // src/linear/reads.ts
 import { createHash as createHash3 } from "node:crypto";
-import { mkdir as mkdir2, open as open2, readFile, writeFile as writeFile2 } from "node:fs/promises";
-import { join as join6 } from "node:path";
+import { mkdir as mkdir2, open as open2, readFile, writeFile as writeFile3 } from "node:fs/promises";
+import { join as join7 } from "node:path";
 var VERSION2 = 2;
 var INDEX = "index.json";
 var BODIES = "bodies";
@@ -41371,7 +41484,7 @@ var LinearReads = class _LinearReads {
    */
   static async replaying(folder) {
     try {
-      const index2 = JSON.parse(await readFile(join6(folder, INDEX), "utf8"));
+      const index2 = JSON.parse(await readFile(join7(folder, INDEX), "utf8"));
       if (index2.version !== VERSION2 || index2.token === null || !Array.isArray(index2.answers)) return null;
       const reads = new _LinearReads("replay");
       reads.#token = index2.token;
@@ -41379,7 +41492,7 @@ var LinearReads = class _LinearReads {
       let total = 0;
       for (const { key, status, type, body: body2 } of index2.answers) {
         if (!/^[0-9a-f]{64}$/.test(body2)) return null;
-        const file = join6(folder, BODIES, body2);
+        const file = join7(folder, BODIES, body2);
         const handle2 = await open2(file, "r");
         try {
           const info2 = await handle2.stat();
@@ -41442,17 +41555,17 @@ var LinearReads = class _LinearReads {
   }
   /** Writes the record into `folder`, which only the job's own steps share. */
   async save(folder) {
-    await mkdir2(join6(folder, BODIES), { recursive: true, mode: 448 });
+    await mkdir2(join7(folder, BODIES), { recursive: true, mode: 448 });
     const index2 = { version: VERSION2, token: this.#token, answers: [] };
     const queues = new Map([...this.#answers].map(([key, answers]) => [key, [...answers]]));
     for (const key of this.#order) {
       const answer = queues.get(key)?.shift();
       if (answer === void 0) continue;
       const body2 = answer.body.hash;
-      await writeFile2(join6(folder, BODIES, body2), contentBytes(answer.body), { mode: 384 });
+      await writeFile3(join7(folder, BODIES, body2), contentBytes(answer.body), { mode: 384 });
       index2.answers.push({ key, status: answer.status, type: answer.type, body: body2 });
     }
-    await writeFile2(join6(folder, INDEX), JSON.stringify(index2), { mode: 384 });
+    await writeFile3(join7(folder, INDEX), JSON.stringify(index2), { mode: 384 });
   }
   close() {
     this.#spool.close();
@@ -45971,12 +46084,14 @@ ${math[1]}
     const [first] = item.children;
     const attachment = itemAttachment(item);
     if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
-      const path7 = attachment.url.split(/[?#]/)[0];
+      const path7 = decodedDestinationPath(attachment.url);
       const bullet = marker === "*";
-      if (!(bullet && AUDIO.test(path7))) {
+      const task = item.checked != null;
+      const inlineAudio = !task && MP3.test(path7) || bullet && WAV_OR_OGG.test(path7);
+      if (!inlineAudio) {
         const label = this.inline(attachment.children);
         const destination2 = imageDestination(attachment.url);
-        if (bullet && VIDEO.test(path7)) return `${marker} [${label}](${destination2})`;
+        if (bullet && VIDEO.test(attachment.url.split(/[?#]/)[0])) return `${marker} [${label}](${destination2})`;
         if (!interruptsParagraph || marker.startsWith("- ")) {
           return `${marker} 
 ${indent2}[${label}](${destination2})`;
@@ -46105,8 +46220,8 @@ ${indent2}[${label}](${destination2})`;
     return `[${this.inline(children)}](${linkDestination(url)})`;
   }
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
-  label(open3) {
-    return bracketedLabel(this.source, open3);
+  label(open4) {
+    return bracketedLabel(this.source, open4);
   }
 };
 function textEdits(source, from, to, keepAt) {
@@ -46183,7 +46298,8 @@ function relativeUrls(text6, types) {
   return urls;
 }
 var VIDEO = /\.(?:mp4|mov|webm)$/i;
-var AUDIO = /\.mp3$/i;
+var MP3 = /\.mp3$/i;
+var WAV_OR_OGG = /\.(?:wav|ogg)$/i;
 function startsWithFileBlock(list4) {
   const [item] = list4.children;
   if (item === void 0) return false;
@@ -46203,6 +46319,97 @@ function attachmentLink(paragraph2) {
 }
 function prefixLines(text6, prefix, empty2) {
   return text6.split("\n").map((line2) => line2 === "" ? empty2 : prefix + line2).join("\n");
+}
+
+// src/run/output.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { constants as constants3 } from "node:fs";
+import { lstat as lstat2, mkdir as mkdir3, open as open3, readlink as readlink2, realpath, rename as rename2, unlink as unlink2 } from "node:fs/promises";
+import { dirname as dirname3, isAbsolute, join as join8, parse as parse4, relative as relative2, resolve as resolve2, sep as sep3 } from "node:path";
+function outputText(value, limit = 16 * 1024 * 1024) {
+  if (typeof value !== "string" || value.length > limit || !/^[\t\n\r\x20-\x7e -\u{10ffff}]*$/u.test(value)) {
+    throw new Error(message("output.invalid-text", { limit }));
+  }
+  return value;
+}
+function escapedControl(character) {
+  return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
+}
+function reportText(value, limit = 16 * 1024 * 1024) {
+  return outputText(value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, escapedControl), limit);
+}
+var MAX_LINKS = 40;
+async function writeReportFile(path7, text6, checkout) {
+  const [root2, names] = rootAndNames(isAbsolute(path7) ? path7 : `${process.cwd()}${sep3}${path7}`);
+  const name = names.pop();
+  if (name === void 0 || name === "." || name === "..") throw new Error(message("output.not-a-file", { path: path7 }));
+  const file = join8(await reportDirectory(root2, names, await realpath(checkout), path7), name);
+  const existing = await lstat2(file).catch(ifMissing);
+  if (existing !== void 0 && !existing.isFile() && !existing.isSymbolicLink()) throw new Error(message("output.not-a-file", { path: path7 }));
+  const kept = existing?.isFile() === true ? existing.mode & 4095 : void 0;
+  const temporary = join8(dirname3(file), `.mdbisync-${randomUUID2()}.tmp`);
+  const handle2 = await open3(temporary, constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | constants3.O_NOFOLLOW, kept === void 0 ? 438 : 384);
+  try {
+    await handle2.writeFile(text6);
+    if (kept !== void 0) await handle2.chmod(kept);
+    await handle2.close();
+    await rename2(temporary, file);
+  } catch (error2) {
+    await handle2.close().catch(() => {
+    });
+    await unlink2(temporary).catch(() => {
+    });
+    throw error2;
+  }
+}
+var SEPARATORS = sep3 === "\\" ? /[\\/]/ : /\//;
+function rootAndNames(path7) {
+  const { root: root2 } = parse4(path7);
+  return [root2, path7.slice(root2.length).split(SEPARATORS).filter((name) => name !== "")];
+}
+async function reportDirectory(root2, names, checkout, path7) {
+  const pending = [...names];
+  let current = root2;
+  let links = 0;
+  while (pending.length > 0) {
+    const name = pending.shift();
+    if (name === ".") continue;
+    if (name === "..") {
+      current = dirname3(current);
+      continue;
+    }
+    const next = join8(current, name);
+    let entry = await lstat2(next).catch(ifMissing);
+    if (entry === void 0) {
+      await mkdir3(next).catch((error2) => {
+        if (error2.code !== "EEXIST") throw error2;
+      });
+      entry = await lstat2(next);
+    }
+    if (!entry.isSymbolicLink()) {
+      current = next;
+      continue;
+    }
+    if (inside(checkout, current)) throw new Error(message("output.linked-directory", { path: next }));
+    if (++links > MAX_LINKS) throw new Error(message("output.link-loop", { path: path7 }));
+    const target = await readlink2(next);
+    if (isAbsolute(target)) {
+      const [targetRoot, targetNames] = rootAndNames(target);
+      current = targetRoot;
+      pending.unshift(...targetNames);
+    } else {
+      pending.unshift(...rootAndNames(target)[1]);
+    }
+  }
+  return current;
+}
+function inside(base, path7) {
+  const rest = relative2(base, path7);
+  return rest !== ".." && !rest.startsWith(`..${sep3}`) && !isAbsolute(rest);
+}
+function ifMissing(error2) {
+  if (error2.code === "ENOENT") return void 0;
+  throw error2;
 }
 
 // src/run/summary.ts
@@ -46240,85 +46447,6 @@ function linkedPart(url) {
 
 // src/setup/github.ts
 import { setTimeout as setTimeout4 } from "node:timers/promises";
-
-// src/state/config.ts
-var STORES = ["linear", "ids", "uploads"];
-var DEFAULT_STATE_CONFIG = Object.freeze({
-  remote: "origin",
-  trackedBranch: "main",
-  syncBranch: "mdbisync/linear",
-  refPrefix: "refs/mdbisync"
-});
-var StateConfigError = class extends Error {
-  constructor(message2) {
-    super(message2);
-    this.name = "StateConfigError";
-  }
-};
-function resolveStateConfig(input = {}) {
-  const pick = (key) => {
-    const value = input[key];
-    return value === void 0 || value.trim() === "" ? DEFAULT_STATE_CONFIG[key] : value.trim();
-  };
-  const config = {
-    remote: pick("remote"),
-    trackedBranch: pick("trackedBranch"),
-    syncBranch: pick("syncBranch"),
-    refPrefix: pick("refPrefix").replace(/\/+$/, "")
-  };
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.remote)) {
-    throw new StateConfigError(message("config.invalid-remote", { remote: config.remote }));
-  }
-  for (const key of ["trackedBranch", "syncBranch"]) {
-    const problem = refNameProblem(`refs/heads/${config[key]}`) ?? (config[key].startsWith("-") ? message("config.starts-with-dash") : null);
-    if (problem !== null) throw new StateConfigError(message("config.invalid-branch", { key, branch: config[key], problem }));
-  }
-  const suspended = suspendedBranch(config);
-  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended) {
-    throw new StateConfigError(message("config.same-branches"));
-  }
-  if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
-    throw new StateConfigError(message("config.nested-branches"));
-  }
-  if (suspended.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${suspended}/`)) throw new StateConfigError(message("config.nested-branches"));
-  const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
-  if (prefixProblem !== null) {
-    throw new StateConfigError(message("config.invalid-prefix", { prefix: config.refPrefix, problem: prefixProblem }));
-  }
-  if (!/^refs\/[^/]/.test(config.refPrefix)) {
-    throw new StateConfigError(message("config.prefix-outside-refs", { prefix: config.refPrefix }));
-  }
-  if (/^refs\/(heads|tags|remotes)(\/|$)/.test(config.refPrefix)) {
-    throw new StateConfigError(message("config.prefix-reserved", { prefix: config.refPrefix }));
-  }
-  return config;
-}
-function stateRef(config, store) {
-  return `${config.refPrefix}/${store}`;
-}
-function branchRef(branch) {
-  return `refs/heads/${branch}`;
-}
-function localRef(config, remoteRef) {
-  return remoteRef.startsWith("refs/heads/") ? `refs/remotes/${config.remote}/${remoteRef.slice("refs/heads/".length)}` : remoteRef;
-}
-function refNameProblem(name) {
-  if (!name.startsWith("refs/")) return 'does not start with "refs/"';
-  if (name.endsWith("/")) return 'ends with "/"';
-  if (name.endsWith(".")) return 'ends with "."';
-  if (name.includes("//")) return 'contains "//"';
-  if (name.includes("..")) return 'contains ".."';
-  if (name.includes("@{")) return 'contains "@{"';
-  if (/[\x00-\x20\x7f~^:?*[\\]/.test(name)) return "contains a character git does not allow";
-  for (const part of name.split("/")) {
-    if (part.startsWith(".")) return 'has a part starting with "."';
-    if (part.endsWith(".lock")) return 'has a part ending with ".lock"';
-  }
-  return null;
-}
-function suspendedBranch(config) {
-  return !config.syncBranch.includes("/") || config.syncBranch.endsWith("/suspended") ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, "suspended");
-}
 
 // src/state/pushed.ts
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -46787,7 +46915,7 @@ async function readFiles(git, config, commit2, paths) {
   }
   const lfs = /* @__PURE__ */ new Map();
   if (pointers.size > 0) {
-    const read = await lfsReader(git, config.remote);
+    const read = await lfsReader(git, lfsRemote(config));
     const items = [...pointers.entries()];
     const results = await mapLimit(items, 4, ([, item]) => read(item.pointer, item.path));
     items.forEach(([pointerBlob], index2) => lfs.set(pointerBlob, results[index2]));
@@ -46878,8 +47006,8 @@ async function checkSyncBranchRules(target) {
   }
   const openOn = (type) => target.syncBranches.filter((branch) => !rulesOf.get(branch)?.has(type));
   const rules = BRANCH_RULES.map((rule) => {
-    const open3 = openOn(rule.type);
-    return open3.length === 0 ? message("setup.sync-branch-rule-restricted", { rule: rule.words }) : message("setup.sync-branch-rule-open", { rule: rule.words, branches: open3.join(" and ") });
+    const open4 = openOn(rule.type);
+    return open4.length === 0 ? message("setup.sync-branch-rule-restricted", { rule: rule.words }) : message("setup.sync-branch-rule-open", { rule: rule.words, branches: open4.join(" and ") });
   }).join("; ");
   const branches = target.syncBranches.join(" and ");
   return openOn("creation").length === 0 && openOn("deletion").length === 0 ? passed("sync-branch-rules", message("setup.sync-branch-rules", { branches, rules })) : warning2("sync-branch-rules", message("setup.sync-branch-rules-open", { branches, rules }));
@@ -47161,8 +47289,8 @@ async function closePullRequestAtHead(target, number, head) {
   return true;
 }
 async function ensurePullRequest(target, spec) {
-  const open3 = await findOpenPullRequest(target, spec.head, spec.base);
-  if (open3 !== null) return useOpen(target, open3, spec);
+  const open4 = await findOpenPullRequest(target, spec.head, spec.base);
+  if (open4 !== null) return useOpen(target, open4, spec);
   try {
     return { pullRequest: await openPullRequest(target, spec), opened: true, updated: false };
   } catch (error2) {
@@ -47175,9 +47303,9 @@ async function ensurePullRequest(target, spec) {
     return useOpen(target, opened, spec);
   }
 }
-async function useOpen(target, open3, spec) {
-  if (open3.title === spec.title && open3.body === spec.body) return { pullRequest: open3, opened: false, updated: false };
-  return { pullRequest: await updatePullRequest(target, open3.number, spec), opened: false, updated: true };
+async function useOpen(target, open4, spec) {
+  if (open4.title === spec.title && open4.body === spec.body) return { pullRequest: open4, opened: false, updated: false };
+  return { pullRequest: await updatePullRequest(target, open4.number, spec), opened: false, updated: true };
 }
 async function readPullRequest(target, number) {
   const answer = await request(target, "GET", `/pulls/${number}`);
@@ -47441,11 +47569,11 @@ function refusalReason(message2) {
 }
 
 // src/initial-sync/confirm.ts
-import { createHash as createHash14, randomUUID as randomUUID5 } from "node:crypto";
+import { createHash as createHash14, randomUUID as randomUUID6 } from "node:crypto";
 
 // src/test-hooks.ts
 import { existsSync as existsSync2, mkdirSync, renameSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { isAbsolute, join as join7 } from "node:path";
+import { isAbsolute as isAbsolute2, join as join9 } from "node:path";
 import { setTimeout as sleep2 } from "node:timers/promises";
 var HOOKS_ENV = "MDBISYNC_TEST_HOOKS";
 var HOOKS_DIR_ENV = "MDBISYNC_TEST_HOOKS_DIR";
@@ -47463,7 +47591,7 @@ function hooksEnabled(env = process.env) {
 function hooksDir(env = process.env) {
   if (!hooksEnabled(env)) return null;
   const dir = env[HOOKS_DIR_ENV] ?? "";
-  if (!isAbsolute(dir)) throw new TestHookError(`${HOOKS_ENV}=1 needs an absolute ${HOOKS_DIR_ENV}`);
+  if (!isAbsolute2(dir)) throw new TestHookError(`${HOOKS_ENV}=1 needs an absolute ${HOOKS_DIR_ENV}`);
   return dir;
 }
 function testStopAfterDocuments(env = process.env) {
@@ -47481,12 +47609,12 @@ async function checkpoint(name, env = process.env) {
   const count4 = (counts.get(name) ?? 0) + 1;
   counts.set(name, count4);
   mark(dir, "reached", name, count4);
-  while (existsSync2(join7(dir, "pause", name))) await sleep2(POLL_MS);
+  while (existsSync2(join9(dir, "pause", name))) await sleep2(POLL_MS);
   mark(dir, "passed", name, count4);
 }
 function mark(dir, kind, name, count4) {
-  mkdirSync(join7(dir, kind), { recursive: true });
-  const file = join7(dir, kind, name);
+  mkdirSync(join9(dir, kind), { recursive: true });
+  const file = join9(dir, kind, name);
   const partial = `${file}.${process.pid}.tmp`;
   writeFileSync2(partial, `${JSON.stringify({ pid: process.pid, count: count4, at: (/* @__PURE__ */ new Date()).toISOString() })}
 `);
@@ -47565,7 +47693,7 @@ var UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
 async function predictUploadLeaveOuts(git, tracked, plan, texts, uploads, options) {
   const { files } = await treeFiles(git, tracked);
   const { planned, unproven } = plannedLinks(plan, files, texts, options.plainFiles, options.unknownProvenance);
-  const judged = await predictPlanned(git, files, planned, uploads, options);
+  const judged = await predictPlanned(git, files, planned, uploads, { ...options, tracked });
   const result = [...unproven].map(([path7, unprovenFiles]) => ({ path: path7, rule: LINK_PROVENANCE_UNKNOWN, files: unprovenFiles }));
   return [...result, ...judged].sort((a, b) => compare2(a.path, b.path));
 }
@@ -47577,7 +47705,7 @@ async function predictPlanned(git, files, planned, uploads, options) {
   const uploaded = new Set(uploads.keys());
   const file = (target) => linked.get(target);
   const asked = targets.filter((target) => file(target).lfs && !file(target).extensions && file(target).size <= limit && !uploaded.has(file(target).hash));
-  const absent = await missingLfsObjects(git, options.remote, asked.map((target) => files.get(target).oid));
+  const absent = await missingLfsObjects(git, { remote: options.remote, tracked: options.tracked }, asked.map((target) => files.get(target).oid));
   for (const target of asked) if (absent.has(file(target).hash)) file(target).absent = true;
   const unreadable = (target) => file(target).extensions || file(target).absent;
   if (!targets.some((target) => unreadable(target) && !uploaded.has(file(target).hash))) {
@@ -47752,7 +47880,7 @@ function uploadsTransform(options) {
         contents.set(hash, blob);
         continue;
       }
-      lfs ??= await lfsReader(git, options.config.remote);
+      lfs ??= await lfsReader(git, lfsRemote(options.config));
       const read = await lfs(pointer, target);
       contents.set(hash, read.ok ? read.content : { unreadable: read.reason });
     }
@@ -47788,7 +47916,7 @@ function uploadsTransform(options) {
       if (!Array.isArray(own6)) {
         const entry = files.get(own6.target);
         const file = linked.get(own6.target);
-        if (!file.absent) file.absent = (await missingLfsObjects(git, options.config.remote, [entry.oid])).has(file.hash);
+        if (!file.absent) file.absent = (await missingLfsObjects(git, lfsRemote(options.config), [entry.oid])).has(file.hash);
         throw new LeaveOutError(UPLOAD_UNREADABLE, message("initial-sync.upload-unreadable", { file: own6.target, reason: own6.unreadable }), [own6.target], { missingLfsObject: file.absent });
       }
       if (index2 === batches.length - 1) await uploadLastBatch(path7, own6, batch.bytes);
@@ -48080,9 +48208,9 @@ async function checkPushScope(git, tracked, next, zones) {
 
 // src/sync/security.ts
 import { spawn as spawn3 } from "node:child_process";
-import { lstat as lstat2, mkdtemp as mkdtemp2, mkdir as mkdir3, writeFile as writeFile3, readFile as readFile2, realpath, rm as rm3, symlink as symlink2 } from "node:fs/promises";
-import { tmpdir as tmpdir3 } from "node:os";
-import { dirname as dirname3, join as join8, sep as sep3 } from "node:path";
+import { lstat as lstat3, mkdtemp as mkdtemp3, mkdir as mkdir4, writeFile as writeFile4, readFile as readFile2, realpath as realpath2, rm as rm4, symlink as symlink2 } from "node:fs/promises";
+import { tmpdir as tmpdir4 } from "node:os";
+import { dirname as dirname4, join as join10, sep as sep4 } from "node:path";
 import { createHash as createHash5 } from "node:crypto";
 function runHooks(dir, args, env) {
   return new Promise((resolve3) => {
@@ -48172,14 +48300,14 @@ async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
     if (pointer === null || content4 === void 0) return false;
     const bytes = contentBytes(content4);
     if (pointer.size !== bytes.length || pointer.oid !== createHash5("sha256").update(bytes).digest("hex")) return false;
-    if (!(await readFile2(join8(dir, path7))).equals(bytes)) return false;
+    if (!(await readFile2(join10(dir, path7))).equals(bytes)) return false;
   }
   return true;
 }
 async function throughLink(dir, path7) {
   const parts = path7.split("/");
   for (let at = 1; at <= parts.length; at++) {
-    const found = await lstat2(join8(dir, ...parts.slice(0, at))).catch(() => null);
+    const found = await lstat3(join10(dir, ...parts.slice(0, at))).catch(() => null);
     if (found === null) return false;
     if (found.isSymbolicLink()) return true;
   }
@@ -48193,32 +48321,32 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
   const fileMode = (entry) => entry.mode === "100755" ? 493 : 420;
   await readInBatches(git, files, async (batch, blobs) => {
     for (const entry of batch) {
-      await mkdir3(dirname3(join8(dir, entry.path)), { recursive: true });
-      await writeFile3(join8(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
+      await mkdir4(dirname4(join10(dir, entry.path)), { recursive: true });
+      await writeFile4(join10(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
     }
   }, async (entry) => {
-    await mkdir3(dirname3(join8(dir, entry.path)), { recursive: true });
-    await git.runToFile(["cat-file", "blob", entry.oid], join8(dir, entry.path), fileMode(entry));
+    await mkdir4(dirname4(join10(dir, entry.path)), { recursive: true });
+    await git.runToFile(["cat-file", "blob", entry.oid], join10(dir, entry.path), fileMode(entry));
   });
-  for (const entry of gitlinks) await mkdir3(join8(dir, entry.path), { recursive: true });
+  for (const entry of gitlinks) await mkdir4(join10(dir, entry.path), { recursive: true });
   await readInBatches(git, links, async (batch, targets) => {
     for (const entry of batch) {
-      await mkdir3(dirname3(join8(dir, entry.path)), { recursive: true });
-      await symlink2(targets.get(entry.oid), join8(dir, entry.path));
+      await mkdir4(dirname4(join10(dir, entry.path)), { recursive: true });
+      await symlink2(targets.get(entry.oid), join10(dir, entry.path));
     }
   }, async () => {
     throw new Error(message("sync.security-link-outside"));
   });
-  const root2 = await realpath(dir);
+  const root2 = await realpath2(dir);
   const linkedSupport = [];
   for (const entry of links) {
-    const target = await realpath(join8(dir, entry.path));
-    const inside = target.slice(root2.length + 1).split(sep3);
-    if (!target.startsWith(root2 + sep3) || isGitDirectoryName(inside[0])) throw new Error(message("sync.security-link-outside"));
-    if (!isMarkdownPath(entry.path)) linkedSupport.push(inside.join("/"));
+    const target = await realpath2(join10(dir, entry.path));
+    const inside2 = target.slice(root2.length + 1).split(sep4);
+    if (!target.startsWith(root2 + sep4) || isGitDirectoryName(inside2[0])) throw new Error(message("sync.security-link-outside"));
+    if (!isMarkdownPath(entry.path)) linkedSupport.push(inside2.join("/"));
   }
-  await mkdir3(join8(dir, ".git", "info"), { recursive: true });
-  await writeFile3(join8(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
+  await mkdir4(join10(dir, ".git", "info"), { recursive: true });
+  await writeFile4(join10(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
   await scratch.run(["add", "--all", "--force"]);
   if (gitlinks.length > 0) {
     await scratch.run(["update-index", "-z", "--index-info"], { input: gitlinks.map((entry) => `160000 ${entry.oid}	${entry.path}\0`).join("") });
@@ -48237,7 +48365,7 @@ async function securityGate(git, tracked, options = {}) {
   let baseline;
   let linkedSupport = [];
   const close = async () => {
-    if (dir !== void 0) await rm3(dir, { recursive: true, force: true });
+    if (dir !== void 0) await rm4(dir, { recursive: true, force: true });
     dir = void 0;
   };
   return {
@@ -48249,7 +48377,7 @@ async function securityGate(git, tracked, options = {}) {
         if (dir === void 0) {
           const entries = await listTree(git, tracked);
           checkScratchBudget(entries, budget);
-          dir = await mkdtemp2(join8(tmpdir3(), "capture-security-"));
+          dir = await mkdtemp3(join10(tmpdir4(), "capture-security-"));
           scratch = new Git(dir);
           await scratch.run(["init", "--quiet", `--object-format=${await git.text(["rev-parse", "--show-object-format"])}`]);
           ({ tree: baseline, linkedSupport } = await reproduceTree(git, tracked, entries, scratch, dir));
@@ -48260,8 +48388,8 @@ async function securityGate(git, tracked, options = {}) {
           checkRepoPath(path7);
           if (path7 === PRE_COMMIT_CONFIG || path7.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (await throughLink(dir, path7)) return [{ hook: SECURITY_ALIAS, line: 1 }];
-          await mkdir3(dirname3(join8(dir, path7)), { recursive: true });
-          await writeFile3(join8(dir, path7), contentBytes(content4));
+          await mkdir4(dirname4(join10(dir, path7)), { recursive: true });
+          await writeFile4(join10(dir, path7), contentBytes(content4));
         }
         if (!await onlyDocumentsChanged(scratch, dir, files, linkedSupport)) return [{ hook: SECURITY_ALIAS, line: 1 }];
         await scratch.run(["add", "--force", "--", ...files.keys()]);
@@ -48283,7 +48411,7 @@ async function securityGate(git, tracked, options = {}) {
         }
         if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         for (const [path7, content4] of files) {
-          const after = await readFile2(join8(dir, path7)).catch(() => null);
+          const after = await readFile2(join10(dir, path7)).catch(() => null);
           if (after === null || !after.equals(contentBytes(content4))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         }
         return findings;
@@ -48307,14 +48435,14 @@ async function checkTitle(gate, path7, title) {
 
 // src/sync/merge.ts
 import { createHash as createHash6 } from "node:crypto";
-import { mkdtemp as mkdtemp4, rm as rm5 } from "node:fs/promises";
-import { tmpdir as tmpdir5 } from "node:os";
-import { join as join10 } from "node:path";
+import { mkdtemp as mkdtemp5, rm as rm6 } from "node:fs/promises";
+import { tmpdir as tmpdir6 } from "node:os";
+import { join as join12 } from "node:path";
 
 // src/merge/merge.ts
-import { mkdtemp as mkdtemp3, writeFile as writeFile4, rm as rm4 } from "node:fs/promises";
-import { tmpdir as tmpdir4 } from "node:os";
-import { join as join9 } from "node:path";
+import { mkdtemp as mkdtemp4, writeFile as writeFile5, rm as rm5 } from "node:fs/promises";
+import { tmpdir as tmpdir5 } from "node:os";
+import { join as join11 } from "node:path";
 
 // src/merge/markers.ts
 var MARKERS = {
@@ -48331,7 +48459,7 @@ function markerCallout(marker) {
 function lines(text6) {
   return text6.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 }
-function lineText(text6) {
+function lineText2(text6) {
   return text6.replace(/\r?\n$/, "");
 }
 function unquote(text6) {
@@ -48362,7 +48490,7 @@ function findMarkerLines(text6) {
     const line2 = i + 1;
     if (excluded.some(([a, b]) => line2 >= a && line2 <= b)) return;
     const quote = quotes.find(([a, b]) => line2 >= a && line2 <= b);
-    const value = quote ? unquote(lineText(text7)) : lineText(text7);
+    const value = quote ? unquote(lineText2(text7)) : lineText2(text7);
     if (!values.includes(value)) return;
     found.set(line2 + offset, quote ? { value, startLine: quote[2] + offset, endLine: quote[1] + offset, calloutLine: quote[0] + offset } : { value, startLine: line2 + offset, endLine: line2 + offset });
   });
@@ -48377,8 +48505,8 @@ function findMarkerLines(text6) {
 }
 function arm(source, after, before) {
   const content4 = source.slice(after, before - 1);
-  while (content4[0] !== void 0 && lineText(content4[0]) === "") content4.shift();
-  while (content4.at(-1) !== void 0 && lineText(content4.at(-1)) === "") content4.pop();
+  while (content4[0] !== void 0 && lineText2(content4[0]) === "") content4.shift();
+  while (content4.at(-1) !== void 0 && lineText2(content4.at(-1)) === "") content4.pop();
   return content4.join("").replace(/\r?\n$/, "");
 }
 function detectConflicts(text6) {
@@ -48411,14 +48539,14 @@ function tokenize(text6, size) {
   const tokens = [];
   for (let i = 0; i < source.length; i++) {
     const text7 = source[i];
-    if (lineText(text7) !== `${"<".repeat(size)} git`) {
+    if (lineText2(text7) !== `${"<".repeat(size)} git`) {
       tokens.push({ kind: "line", text: text7 });
       continue;
     }
     const ours = [];
     const theirs = [];
-    while (++i < source.length && lineText(source[i]) !== "=".repeat(size)) ours.push(source[i]);
-    while (++i < source.length && lineText(source[i]) !== `${">".repeat(size)} linear`) theirs.push(source[i]);
+    while (++i < source.length && lineText2(source[i]) !== "=".repeat(size)) ours.push(source[i]);
+    while (++i < source.length && lineText2(source[i]) !== `${">".repeat(size)} linear`) theirs.push(source[i]);
     if (i === source.length) throw new Error(message("sync.merge-conflict-output"));
     tokens.push({ kind: "conflict", ours, theirs });
   }
@@ -48488,7 +48616,7 @@ function conflictRanges(tokens) {
 function withoutMarkers(tokens, side) {
   const projection = tokens.flatMap((token) => content3(token, side)).join("");
   const source = lines(projection);
-  const blank = (line3) => source[line3 - 1] !== void 0 && lineText(source[line3 - 1]) === "";
+  const blank = (line3) => source[line3 - 1] !== void 0 && lineText2(source[line3 - 1]) === "";
   const drop = /* @__PURE__ */ new Set();
   for (const [line3, marker] of findMarkerLines(projection)) {
     drop.add(line3);
@@ -48509,7 +48637,7 @@ function completeBlocks(text6) {
       const opener = /^(?: {0,3})(`{3,}|~{3,})/.exec(raw)?.[1];
       if (!opener) return;
       const source = lines(raw);
-      const last = lineText(source.at(-1) ?? "");
+      const last = lineText2(source.at(-1) ?? "");
       const fence = /^[ >\t]*(`{3,}|~{3,})[ \t]*$/.exec(last)?.[1];
       const closing = fence !== void 0 && fence[0] === opener[0] && fence.length >= opener.length;
       const valueLines = node2.value === "" ? 0 : node2.value.split("\n").length;
@@ -48556,7 +48684,7 @@ ${arms("theirs")}
 
 ${markerCallout(MARKERS.end)}${last && !finalNewline ? "" : "\n"}`;
     const next = tokens[cursor];
-    if (next?.kind === "line" && lineText(next.text) !== "") text6 += "\n";
+    if (next?.kind === "line" && lineText2(next.text) !== "") text6 += "\n";
   }
   return text6 + tokens.slice(cursor).map((token) => content3(token, "ours").join("")).join("");
 }
@@ -48565,7 +48693,7 @@ async function mergeHeads(dir, withBom) {
   const heads = Object.fromEntries(Object.entries(withBom).map(([name, text6]) => [name, text6.replace(/^﻿/, "")]));
   if (heads.theirs === heads.base || heads.ours === heads.theirs) return bom + heads.ours;
   if (heads.ours === heads.base) return bom + heads.theirs;
-  await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile4(join9(dir, `head-${name}`), text6, { mode: 384 })));
+  await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile5(join11(dir, `head-${name}`), text6, { mode: 384 })));
   const merged = await new Git(dir).run(["merge-file", "--stdout", "head-ours", "head-base", "head-theirs"], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
   return bom + (merged.code === 0 ? merged.stdout.toString("utf8") : heads.ours);
 }
@@ -48576,10 +48704,10 @@ async function mergeMarkdown(base, ours, theirs) {
   base = splitFile(base).body.replaceAll("\r\n", "\n");
   ours = gitFile.body.replaceAll("\r\n", "\n");
   theirs = splitFile(theirs).body.replaceAll("\r\n", "\n");
-  const dir = await mkdtemp3(join9(tmpdir4(), "markdown-merge-"));
+  const dir = await mkdtemp4(join11(tmpdir5(), "markdown-merge-"));
   try {
     const head = await mergeHeads(dir, heads);
-    await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile4(join9(dir, name), text7, { mode: 384 })));
+    await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile5(join11(dir, name), text7, { mode: 384 })));
     let size = 7;
     for (const text7 of [base, ours, theirs]) {
       for (const run2 of text7.matchAll(/<+|=+|>+/g)) size = Math.max(size, run2[0].length + 1);
@@ -48607,7 +48735,7 @@ async function mergeMarkdown(base, ours, theirs) {
     const text6 = head + (result.code === 0 ? raw : render2(tokens, conflictRanges(tokens), finalNewline)).replaceAll("\n", eol2);
     return { text: text6, conflicts: detectConflicts(text6) };
   } finally {
-    await rm4(dir, { recursive: true, force: true });
+    await rm5(dir, { recursive: true, force: true });
   }
 }
 
@@ -49069,8 +49197,8 @@ function compare3(a, b) {
 async function takePaths(git, into, from, paths) {
   const entries = new Map((await listTree(git, from)).map((entry) => [entry.path, entry]));
   for (const path7 of paths) checkRepoPath(path7, { removal: !entries.has(path7) });
-  const dir = await mkdtemp4(join10(tmpdir5(), "lane-index-"));
-  const env = { GIT_INDEX_FILE: join10(dir, "index") };
+  const dir = await mkdtemp5(join12(tmpdir6(), "lane-index-"));
+  const env = { GIT_INDEX_FILE: join12(dir, "index") };
   try {
     await git.run(["read-tree", `${into}^{tree}`], { env });
     const zero = "0".repeat(await git.text(["rev-parse", "--show-object-format"]) === "sha256" ? 64 : 40);
@@ -49081,7 +49209,7 @@ async function takePaths(git, into, from, paths) {
     if (input) await git.run(["update-index", "-z", "--index-info"], { env, input });
     return await git.text(["write-tree"], { env });
   } finally {
-    await rm5(dir, { recursive: true, force: true });
+    await rm6(dir, { recursive: true, force: true });
   }
 }
 function treeCommit(git, tree, parent) {
@@ -49163,7 +49291,7 @@ async function readPlainFileProvenance(git, linear, options = {}) {
 }
 
 // src/sync/write.ts
-import { createHash as createHash12, randomUUID as randomUUID4 } from "node:crypto";
+import { createHash as createHash12, randomUUID as randomUUID5 } from "node:crypto";
 import { posix as posix5 } from "node:path";
 
 // src/sync/paths.ts
@@ -49342,9 +49470,9 @@ function destinationSpan(body2, node2) {
     if (body2[end2 - 1] !== ")") return void 0;
     const last = node2.children.at(-1);
     const textEnd = last?.position?.end.offset ?? start2 + 1;
-    const open3 = body2.indexOf("](", textEnd);
-    if (open3 === -1 || open3 >= end2) return void 0;
-    at = open3 + 2;
+    const open4 = body2.indexOf("](", textEnd);
+    if (open4 === -1 || open4 >= end2) return void 0;
+    at = open4 + 2;
   } else {
     let close = start2 + 1;
     while (close < end2 && body2[close] !== "]") close += body2[close] === "\\" ? 2 : 1;
@@ -49438,7 +49566,7 @@ async function nameFixingHooks(git, tracked, files) {
 }
 
 // src/sync/marks.ts
-import { createHash as createHash9, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash9, randomUUID as randomUUID3 } from "node:crypto";
 var MARKS = {
   conflict: { icon: "Alert", color: "#F2994A" },
   blocked: { icon: "Alert", color: "#EB5757" },
@@ -49542,7 +49670,7 @@ async function reconcileDocumentMark(options) {
   if (!document3.documentContentId) throw new Error(message("sync.needs-comment-target"));
   const saved = entry.saved ?? { icon: document3.icon, color: document3.color };
   const previous3 = saved.notice;
-  const notice2 = previous3?.kind === state ? { ...previous3, bodyHash, posted: previous3.posted && previous3.bodyHash === bodyHash } : { id: options.noticeId?.(state) ?? randomUUID2(), kind: state, bodyHash, posted: false };
+  const notice2 = previous3?.kind === state ? { ...previous3, bodyHash, posted: previous3.posted && previous3.bodyHash === bodyHash } : { id: options.noticeId?.(state) ?? randomUUID3(), kind: state, bodyHash, posted: false };
   if (entry.saved === void 0 || previous3?.kind !== state || previous3.bodyHash !== bodyHash) {
     entry = { ...entry, saved: { ...saved, notice: notice2 } };
     await persistEntry(entry);
@@ -49572,7 +49700,7 @@ function stableId(...parts) {
 }
 
 // src/sync/suspended.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 
 // src/sync/merge-destination.ts
 import { setTimeout as sleep3 } from "node:timers/promises";
@@ -49905,7 +50033,7 @@ async function addEpisodes(context, options, ids, paths, checks, timedOut = []) 
     if (id !== void 0 && ![...ids.values()].some((entry) => entry.id === id)) ids.set(path7, { id });
   }
   for (const [path7, entry] of ids) if (paths.has(path7) && entry.suspended === void 0) {
-    entry.suspended = { noticeId: randomUUID3(), paths: [path7], checks: [...checks], ...timedOut.length > 0 ? { timedOut: [...timedOut] } : {} };
+    entry.suspended = { noticeId: randomUUID4(), paths: [path7], checks: [...checks], ...timedOut.length > 0 ? { timedOut: [...timedOut] } : {} };
     delete entry.releaseBase;
     delete entry.releasePaths;
   }
@@ -49995,17 +50123,17 @@ async function maintainSuspended(context, options) {
   if (anchor?.suspended !== void 0) anchor.suspended.paths = [...paths].sort();
   const pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
   if (pushUnverified.length > 0) {
-    const open4 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
-    const pr = previous3 === null ? void 0 : (await ensurePullRequest(options.github, { head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body: withUnverifiedNote(open4?.body ?? "", pushUnverified) })).pullRequest;
+    const open5 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+    const pr = previous3 === null ? void 0 : (await ensurePullRequest(options.github, { head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body: withUnverifiedNote(open5?.body ?? "", pushUnverified) })).pullRequest;
     return { paths: [...paths].sort(), checks: [], code: "head-unverified", unverified: pushUnverified, ...pr === void 0 ? {} : { pullRequest: { number: pr.number, url: pr.url } } };
   }
   const changed2 = await push2(context, options, ids, head, previous3);
   const result = { paths: [...paths].sort(), checks: [], changed: changed2 };
-  const open3 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
-  const old = /^<!-- suspended merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m.exec(open3?.body ?? "");
+  const open4 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+  const old = /^<!-- suspended merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m.exec(open4?.body ?? "");
   const earlier = old?.[1] === head && old?.[2] === tracked ? old : null;
-  const since = headSince(open3?.body, head, /* @__PURE__ */ new Date());
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous3 ? { pushedFrom: previous3 === null ? [] : [previous3], carried } : { body: open3?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
+  const since = headSince(open4?.body, head, /* @__PURE__ */ new Date());
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous3 ? { pushedFrom: previous3 === null ? [] : [previous3], carried } : { body: open4?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
   const held = unverified.length === 0 ? "" : `
 ${unverifiedNote(unverified)}
@@ -50203,7 +50331,7 @@ async function writeTrackedToLinear(context, options) {
   const identity = options.identity ?? context.identity;
   const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
   const checkpoint2 = options.checkpoint ?? ((name) => checkpoint(name));
-  const newId = options.newId ?? randomUUID4;
+  const newId = options.newId ?? randomUUID5;
   const expected = { ...options.state };
   const tracked = fetched.tracked;
   const linearTip = expected.linear;
@@ -51568,21 +51696,21 @@ async function pullRequestStep(context, options) {
     return pushed.reason === "stale" ? { ...result, code: "state-moved" } : result;
   }
   try {
-    const open3 = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
-    if (open3 !== null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options))) return { ...result, code: "initial-pull-request-pending" };
+    const open4 = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
+    if (open4 !== null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options))) return { ...result, code: "initial-pull-request-pending" };
     const identity = options.identity ?? context.identity;
-    const noted = open3 === null ? null : readRefusal(open3.body);
-    const held = open3 === null ? null : readRedMainNote(open3.body);
+    const noted = open4 === null ? null : readRefusal(open4.body);
+    const held = open4 === null ? null : readRedMainNote(open4.body);
     const merger = markedMerger(git, options.state.ids, identity, frozen);
     const resolved = { marked: [], decided: [] };
     const checkedExpectation = async () => {
-      const known = await expectedChecks(github, sync, options.requiredChecks ?? [], { body: open3?.body, git, base: tracked, pushed: await ownPushed(context, options) });
+      const known = await expectedChecks(github, sync, options.requiredChecks ?? [], { body: open4?.body, git, base: tracked, pushed: await ownPushed(context, options) });
       return known.complete ? checkExpectation(options, known.checks) : null;
     };
-    const keepCheckedHead = open3 !== null && pending && suspended?.waiting !== true && noted === null && await mergedTree(git, tracked, sync) !== null && !await needsTrackedMerge(git, tracked, sync, noted) && await checkedHeadReady(github, sync, await checkedExpectation());
+    const keepCheckedHead = open4 !== null && pending && suspended?.waiting !== true && noted === null && await mergedTree(git, tracked, sync) !== null && !await needsTrackedMerge(git, tracked, sync, noted) && await checkedHeadReady(github, sync, await checkedExpectation());
     let head = sync;
-    const heldSnapshot = open3 === null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options));
-    if (open3 === null && (!pending || heldSnapshot)) {
+    const heldSnapshot = open4 === null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options));
+    if (open4 === null && (!pending || heldSnapshot)) {
       if (!result.needed && (heldSnapshot || !recordMove)) return result;
       head = await restart(git, sync, linear, wanted, identity, frozen.size > 0);
     } else if (!keepCheckedHead) {
@@ -51618,14 +51746,14 @@ async function pullRequestStep(context, options) {
         hold = null;
       }
     }
-    if (open3 === null && !result.needed && !recordMove && headTree === trackedTree) return result;
+    if (open4 === null && !result.needed && !recordMove && headTree === trackedTree) return result;
     let carried = [];
     if (head === sync && sync !== null && pending && options.state.ids !== null) {
       const again = await checksAgain(
         github,
         sync,
         options.requiredChecks ?? [],
-        { body: open3?.body, git, base: tracked, pushed: await ownPushed(context, options) },
+        { body: open4?.body, git, base: tracked, pushed: await ownPushed(context, options) },
         { ...options, againMessage: CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, sync, context.mapping.zones)).length === 0 }
       );
       if (again !== null) {
@@ -51643,7 +51771,7 @@ ${checksAgainTrailer(again.from)}`;
     }
     if (head !== sync && pushUnverified.length > 0) {
       if (sync !== null) {
-        const { pullRequest: pullRequest2, opened: opened2 } = await ensurePullRequest(github, { head: config.syncBranch, base: config.trackedBranch, title: SYNC_PULL_REQUEST_TITLE, body: withUnverifiedNote(open3?.body ?? "", pushUnverified) });
+        const { pullRequest: pullRequest2, opened: opened2 } = await ensurePullRequest(github, { head: config.syncBranch, base: config.trackedBranch, title: SYNC_PULL_REQUEST_TITLE, body: withUnverifiedNote(open4?.body ?? "", pushUnverified) });
         result.pullRequest = { number: pullRequest2.number, url: pullRequest2.url, opened: opened2 };
       }
       return { ...result, code: "head-unverified", unverified: pushUnverified };
@@ -51657,8 +51785,8 @@ ${checksAgainTrailer(again.from)}`;
     }
     result.paths = (await git.text(["diff", "--name-only", "--no-renames", trackedTree, headTree])).split("\n").filter(Boolean);
     const earlier = noted !== null && noted.head === head && noted.base === tracked ? noted : null;
-    const since = headSince(open3?.body, head, /* @__PURE__ */ new Date());
-    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], carried } : { body: open3?.body, git, base: tracked, pushed: await ownPushed(context, options) });
+    const since = headSince(open4?.body, head, /* @__PURE__ */ new Date());
+    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], carried } : { body: open4?.body, git, base: tracked, pushed: await ownPushed(context, options) });
     const stillHeld = hold === null ? null : { ...hold, head };
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);
     const { pullRequest, opened } = await ensurePullRequest(github, {
@@ -52160,7 +52288,7 @@ async function confirmInitialSync(context, options) {
   const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
   const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
   const checkpoint2 = options.checkpoint ?? ((name) => checkpoint(name));
-  const newId = options.newId ?? randomUUID5;
+  const newId = options.newId ?? randomUUID6;
   const sources = await readPlanSources(context, { withContent: true });
   const plan = planInitialSync(sources.input);
   plan.capacity = assessCapacity(context, sources.containers, plan.create, options.documentCap);
@@ -53393,10 +53521,10 @@ async function confirmWithGate(context, options, gate) {
       });
       result.pullRequest = { ...pullRequest, opened, updated };
     } else if (recorded.closesPullRequest) {
-      const open3 = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
-      if (open3 !== null) {
-        await closePullRequest(options.github, open3.number);
-        result.closedPullRequest = open3.number;
+      const open4 = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
+      if (open4 !== null) {
+        await closePullRequest(options.github, open4.number);
+        result.closedPullRequest = open4.number;
       }
     }
   } catch (error2) {
@@ -53640,7 +53768,7 @@ ${trailers.join("\n")}`,
     const finalUploads = new Map(uploads);
     for (const entry of entries) for (const [hash, url] of bodies.get(entry.path).uploads) finalUploads.set(hash, url);
     const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity, context.pushedKey);
-    if (lfsObjects.length > 0) await git.run(["lfs", "push", "--object-id", options.config.remote, ...lfsObjects]);
+    await lfsPush(git, lfsRemote(options.config), lfsObjects);
     const updates = [
       { ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit },
       { ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit },
@@ -54934,7 +55062,7 @@ ${plainTrailers.join("\n")}`), identity, sign: signObservation(context.pushedKey
 ${trailers.join("\n")}`;
     const always = recordsRemovals || through !== cursor && recordsChange;
     const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
-    if (prepared.oids.length > 0) await git.run(["lfs", "push", "--object-id", options.config.remote, ...prepared.oids]);
+    await lfsPush(git, lfsRemote(options.config), prepared.oids);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
     const pushed = await pushAtomic(git, options.config, ["linear", "ids", "uploads"].map((store) => ({ ref: stateRef(options.config, store), expected: state[store], next: next[store] })));
     if (!pushed.ok) {
@@ -55161,8 +55289,8 @@ ${warning3.code}: ${JSON.stringify(warning3.path)} (${warning3.length} character
   return summary3;
 }
 async function prepareLfs(git, tracked, changes) {
-  const dir = await mkdtemp5(join11(tmpdir6(), "capture-attributes-"));
-  const env = { GIT_INDEX_FILE: join11(dir, "index") };
+  const dir = await mkdtemp6(join13(tmpdir7(), "capture-attributes-"));
+  const env = { GIT_INDEX_FILE: join13(dir, "index") };
   const result = new Map(changes);
   const oids = [];
   try {
@@ -55183,7 +55311,7 @@ async function prepareLfs(git, tracked, changes) {
     }
     return { changes: result, oids: [...new Set(oids)] };
   } finally {
-    await rm6(dir, { recursive: true, force: true });
+    await rm7(dir, { recursive: true, force: true });
   }
 }
 
@@ -55271,12 +55399,12 @@ function count3(n, noun) {
 }
 
 // src/run/operation.ts
-import { rm as rm8 } from "node:fs/promises";
+import { rm as rm9 } from "node:fs/promises";
 
 // src/sync/staged.ts
 import { createHash as createHash17 } from "node:crypto";
-import { mkdir as mkdir4, readFile as readFile3, rm as rm7, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join12 } from "node:path";
+import { mkdir as mkdir5, readFile as readFile3, rm as rm8, writeFile as writeFile6 } from "node:fs/promises";
+import { join as join14 } from "node:path";
 var SECURITY_STEPS = ["stage", "apply"];
 var STAGE_FOLDER = "mdbisync-candidates";
 var MANIFEST = "manifest.json";
@@ -55286,9 +55414,9 @@ var VERSION3 = 1;
 function stageFolder(env = process.env) {
   const base = env["RUNNER_TEMP"];
   if (base === void 0 || base === "") throw new Error(message("sync.no-runner-temp"));
-  return join12(base, STAGE_FOLDER);
+  return join14(base, STAGE_FOLDER);
 }
-var readsFolder = (folder) => join12(folder, READS);
+var readsFolder = (folder) => join14(folder, READS);
 var sha2565 = (content4) => createHash17("sha256").update(contentBytes(content4)).digest("hex");
 function candidateKey(files) {
   const pairs = [...files].map(([path7, content4]) => [path7, sha2565(content4)]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
@@ -55296,8 +55424,8 @@ function candidateKey(files) {
 }
 async function stagingGate(git, tracked, folder) {
   const configured = (await securityHookIds(git, tracked)).length > 0;
-  await rm7(folder, { recursive: true, force: true });
-  await mkdir4(join12(folder, "files"), { recursive: true, mode: 448 });
+  await rm8(folder, { recursive: true, force: true });
+  await mkdir5(join14(folder, "files"), { recursive: true, mode: 448 });
   const sets = /* @__PURE__ */ new Map();
   return {
     configured,
@@ -55309,7 +55437,7 @@ async function stagingGate(git, tracked, folder) {
         for (const [path7, content4] of files) {
           checkRepoPath(path7);
           const hash = sha2565(content4);
-          await writeFile5(join12(folder, "files", hash), contentBytes(content4), { mode: 384 });
+          await writeFile6(join14(folder, "files", hash), contentBytes(content4), { mode: 384 });
           entries.push({ path: path7, sha256: hash });
         }
         sets.set(key, { key, files: entries });
@@ -55318,22 +55446,22 @@ async function stagingGate(git, tracked, folder) {
     },
     async finish() {
       const manifest = { version: VERSION3, tracked, sets: [...sets.values()] };
-      await writeFile5(join12(folder, MANIFEST), JSON.stringify(manifest), { mode: 384 });
+      await writeFile6(join14(folder, MANIFEST), JSON.stringify(manifest), { mode: 384 });
       return sets.size;
     }
   };
 }
 async function stageNothing(folder, tracked) {
-  await rm7(folder, { recursive: true, force: true });
-  await mkdir4(folder, { recursive: true, mode: 448 });
-  await writeFile5(join12(folder, MANIFEST), JSON.stringify({ version: VERSION3, tracked: tracked ?? "", sets: [] }), { mode: 384 });
+  await rm8(folder, { recursive: true, force: true });
+  await mkdir5(folder, { recursive: true, mode: 448 });
+  await writeFile6(join14(folder, MANIFEST), JSON.stringify({ version: VERSION3, tracked: tracked ?? "", sets: [] }), { mode: 384 });
 }
 async function answeringGate(git, tracked, folder) {
   const hooks = new Set(await securityHookIds(git, tracked));
   const configured = hooks.size > 0;
   let answers = {};
   if (configured) {
-    const text6 = await readFile3(join12(folder, ANSWERS), "utf8").catch(() => null);
+    const text6 = await readFile3(join14(folder, ANSWERS), "utf8").catch(() => null);
     const read = text6 === null ? null : JSON.parse(text6);
     if (read !== null && read.version === VERSION3 && read.tracked === tracked) answers = read.answers;
   }
@@ -55380,7 +55508,7 @@ ${renderStaged(0)}` } : outcome2;
     return staged;
   } finally {
     reads?.close();
-    if (security?.step === "apply") await rm8(security.folder, { recursive: true, force: true });
+    if (security?.step === "apply") await rm9(security.folder, { recursive: true, force: true });
   }
 }
 async function runWithSecurity(operation, inputs, initialSync, options, security) {
@@ -55569,8 +55697,6 @@ function linearPartialCode(outcome2) {
 }
 
 // src/run/finish.ts
-import { mkdir as mkdir5, writeFile as writeFile6 } from "node:fs/promises";
-import { dirname as dirname4 } from "node:path";
 function toRunReport(outcome2) {
   if (outcome2.sync?.write !== void 0) return toSyncRunReport(outcome2, outcome2.sync.write);
   const confirmed = outcome2.confirmed;
@@ -55747,36 +55873,12 @@ function toConfirmedReport(result) {
     reformatted: result.record?.reformatted ?? []
   };
 }
-async function writeRunReport(path7, outcome2) {
-  await mkdir5(dirname4(path7), { recursive: true });
-  await writeFile6(path7, `${JSON.stringify(toRunReport(outcome2), null, 2)}
-`);
+async function writeRunReport(path7, outcome2, checkout) {
+  await writeReportFile(path7, `${JSON.stringify(toRunReport(outcome2), null, 2)}
+`, checkout);
 }
 function captureReport(captured) {
   return captured === void 0 ? null : { ok: captured.ok, changed: captured.changed, removed: captured.removed, heldRemovals: captured.heldRemovals, blocked: captured.blocked, leftOut: captured.leftOut, writeBackWarnings: captured.writeBackWarnings, ...captured.stopped ? { stopped: captured.stopped } : {}, ...captured.rebuiltIds ? { rebuiltIds: captured.rebuiltIds } : {} };
-}
-
-// src/run/output.ts
-import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2, sep as sep4 } from "node:path";
-function outputText(value, limit = 16 * 1024 * 1024) {
-  if (typeof value !== "string" || value.length > limit || !/^[\t\n\r\x20-\x7e\u00a0-\u{10ffff}]*$/u.test(value)) {
-    throw new Error(message("output.invalid-text", { limit }));
-  }
-  return value;
-}
-function reportText(value, limit = 16 * 1024 * 1024) {
-  const escaped = value.replace(
-    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g,
-    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
-  );
-  return outputText(escaped, limit);
-}
-function outputFile(directory, name) {
-  const base = resolve2(directory);
-  const file = resolve2(base, name);
-  const path7 = relative2(base, file);
-  if (path7 === "" || path7 === ".." || path7.startsWith(`..${sep4}`) || isAbsolute2(path7)) throw new Error(message("output.outside-directory"));
-  return file;
 }
 
 // src/linear/cleanup.ts
@@ -55857,8 +55959,9 @@ async function run(options = {}) {
       });
       info("token cleanup: replaced stale app tokens and restored read/write scopes");
     }
+    const checkout = process.env["GITHUB_WORKSPACE"] || process.cwd();
     const outcome2 = await runOperation(operation, inputs, initialSync, {
-      git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd(), auth),
+      git: new Git(checkout, auth),
       warn: (message2) => warning(message2),
       log: (entry) => info(JSON.stringify(entry)),
       tokenLifecycle,
@@ -55867,15 +55970,15 @@ async function run(options = {}) {
     const summary3 = reportText(outcome2.summary);
     if (process.env["GITHUB_STEP_SUMMARY"]) await summary.addRaw(summary3).write();
     else info(summary3);
-    if (inputs.reportFile !== void 0) {
-      await writeRunReport(inputs.reportFile, outcome2);
-      await writeFile7(outputFile(dirname5(inputs.reportFile), SUMMARY_FILE), summary3);
-    }
     if (outcome2.ok && outcome2.staged !== void 0) {
       setOutput("node", process.execPath);
       setOutput("hooks", hooksScript());
     }
     reportEnding(outcome2, core_exports);
+    if (inputs.reportFile !== void 0) {
+      await writeRunReport(inputs.reportFile, outcome2, checkout);
+      await writeReportFile(`${dirname5(inputs.reportFile)}${sep5}${SUMMARY_FILE}`, summary3, checkout);
+    }
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   }

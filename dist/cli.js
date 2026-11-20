@@ -4003,10 +4003,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start: start2, key, sep: sep4, value } = collItem;
+        const { start: start2, key, sep: sep5, value } = collItem;
         const keyProps = resolveProps.resolveProps(start2, {
           indicator: "explicit-key-ind",
-          next: key ?? sep4?.[0],
+          next: key ?? sep5?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4020,7 +4020,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep4) {
+          if (!keyProps.anchor && !keyProps.tag && !sep5) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map4.comment)
@@ -4044,7 +4044,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map4.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep4 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep5 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4060,7 +4060,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep4, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep5, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4151,7 +4151,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end2) {
         let hasSpace = false;
-        let sep4 = "";
+        let sep5 = "";
         for (const token of end2) {
           const { source, type } = token;
           switch (type) {
@@ -4165,13 +4165,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep4 + cb;
-              sep4 = "";
+                comment += sep5 + cb;
+              sep5 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep4 += source;
+                sep5 += source;
               hasSpace = true;
               break;
             default:
@@ -4214,18 +4214,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start: start2, key, sep: sep4, value } = collItem;
+        const { start: start2, key, sep: sep5, value } = collItem;
         const props = resolveProps.resolveProps(start2, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep4?.[0],
+          next: key ?? sep5?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep4 && !value) {
+          if (!props.anchor && !props.tag && !sep5 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4279,8 +4279,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap3 && !sep4 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep4, null, props, onError);
+        if (!isMap3 && !sep5 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep5, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4292,7 +4292,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep4 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep5 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4303,8 +4303,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap3 && !props.found && ctx.options.strict) {
-              if (sep4)
-                for (const st of sep4) {
+              if (sep5)
+                for (const st of sep5) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4321,7 +4321,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep4, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep5, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4501,7 +4501,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep4 = "";
+      let sep5 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines2[i][0].slice(trimIndent) + "\n";
@@ -4518,24 +4518,24 @@ var require_resolve_block_scalar = __commonJS({
           indent2 = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep4 + indent2.slice(trimIndent) + content4;
-          sep4 = "\n";
+          value += sep5 + indent2.slice(trimIndent) + content4;
+          sep5 = "\n";
         } else if (indent2.length > trimIndent || content4[0] === "	") {
-          if (sep4 === " ")
-            sep4 = "\n";
-          else if (!prevMoreIndented && sep4 === "\n")
-            sep4 = "\n\n";
-          value += sep4 + indent2.slice(trimIndent) + content4;
-          sep4 = "\n";
+          if (sep5 === " ")
+            sep5 = "\n";
+          else if (!prevMoreIndented && sep5 === "\n")
+            sep5 = "\n\n";
+          value += sep5 + indent2.slice(trimIndent) + content4;
+          sep5 = "\n";
           prevMoreIndented = true;
         } else if (content4 === "") {
-          if (sep4 === "\n")
+          if (sep5 === "\n")
             value += "\n";
           else
-            sep4 = "\n";
+            sep5 = "\n";
         } else {
-          value += sep4 + content4;
-          sep4 = " ";
+          value += sep5 + content4;
+          sep5 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4718,25 +4718,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep4 = " ";
+      let sep5 = " ";
       let pos = line2.lastIndex;
       while (match = line2.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep4 === "\n")
-            res += sep4;
+          if (sep5 === "\n")
+            res += sep5;
           else
-            sep4 = "\n";
+            sep5 = "\n";
         } else {
-          res += sep4 + lm;
-          sep4 = " ";
+          res += sep5 + lm;
+          sep5 = " ";
         }
         pos = line2.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep4 + (match?.[1] ?? "");
+      return res + sep5 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5546,14 +5546,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start: start2, key, sep: sep4, value }) {
+    function stringifyItem({ start: start2, key, sep: sep5, value }) {
       let res = "";
       for (const st of start2)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep4)
-        for (const st of sep4)
+      if (sep5)
+        for (const st of sep5)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6720,18 +6720,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start2 = getFirstKeyStartProps(prev);
-          let sep4;
+          let sep5;
           if (scalar.end) {
-            sep4 = scalar.end;
-            sep4.push(this.sourceToken);
+            sep5 = scalar.end;
+            sep5.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep4 = [this.sourceToken];
+            sep5 = [this.sourceToken];
           const map4 = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start: start2, key: scalar, sep: sep4 }]
+            items: [{ start: start2, key: scalar, sep: sep5 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map4;
@@ -6884,15 +6884,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start3 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep4 = it.sep;
-                  sep4.push(this.sourceToken);
+                  const sep5 = it.sep;
+                  sep5.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start3, key, sep: sep4 }]
+                    items: [{ start: start3, key, sep: sep5 }]
                   });
                 } else if (start2.length > 0) {
                   it.sep = it.sep.concat(start2, this.sourceToken);
@@ -7086,13 +7086,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start2 = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep4 = fc.end.splice(1, fc.end.length);
-            sep4.push(this.sourceToken);
+            const sep5 = fc.end.splice(1, fc.end.length);
+            sep5.push(this.sourceToken);
             const map4 = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start: start2, key: fc, sep: sep4 }]
+              items: [{ start: start2, key: fc, sep: sep5 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map4;
@@ -7270,7 +7270,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse4(src, reviver, options) {
+    function parse5(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -7311,7 +7311,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse4;
+    exports.parse = parse5;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument3;
     exports.stringify = stringify2;
@@ -7383,7 +7383,7 @@ var MESSAGES = {
   // The command line and the action.
   "cli.missing-command": "missing command",
   "cli.unknown-command": "unknown command: {command}",
-  "cli.node-too-old": "mdbisync requires Node 24 or newer; install it before running the hook.",
+  "cli.node-too-old": "mdbisync requires Node.js 24.2 or later; install it and try again.",
   "cli.not-implemented": "{command}: not implemented",
   "action.unknown-operation": "unknown operation: {operation} (expected one of: {operations})",
   "action.unknown-security-step": "unknown security-step: {step} (expected one of: {steps}, or empty)",
@@ -7392,6 +7392,9 @@ var MESSAGES = {
   "output.invalid-text": "cannot write report text: expected printable Unicode text of at most {limit} characters",
   "output.invalid-count": "cannot write report metadata: expected a non-negative safe integer",
   "output.outside-directory": "report destination must stay inside the configured output directory",
+  "output.linked-directory": "report destination {path} is a symbolic link inside the checkout",
+  "output.link-loop": "report destination {path} passes through too many symbolic links",
+  "output.not-a-file": "report destination {path} is not a regular file",
   // `init`.
   "init.security-twice": "choose security hooks once",
   "init.lfs-twice": "choose Git LFS once",
@@ -8077,7 +8080,7 @@ var GraphQLTransport = class {
     this.#hooks = options.hooks ?? {};
     this.stats = options.stats ?? new RequestStats();
     this.fetch = options.fetch ?? defaultFetch;
-    this.#sleep = options.sleep ?? ((ms) => new Promise((resolve3) => setTimeout(resolve3, ms)));
+    this.#sleep = options.sleep ?? ((ms) => new Promise((resolve4) => setTimeout(resolve4, ms)));
   }
   /** Authenticated storage GET, restricted to Linear's documented upload host. */
   async fetchUpload(url, init = {}) {
@@ -9008,7 +9011,7 @@ var Git = class {
   run(args, options = {}) {
     const env = this.environment(options);
     const okCodes = options.okCodes ?? [0];
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       const child = spawn("git", args, { cwd: this.dir, env, stdio: ["pipe", "pipe", "pipe"] });
       const out = [];
       const err = [];
@@ -9041,7 +9044,7 @@ var Git = class {
           stdout: Buffer.concat(out),
           stderr: Buffer.concat(err).toString("utf8")
         };
-        if (okCodes.includes(result.code)) resolve3(result);
+        if (okCodes.includes(result.code)) resolve4(result);
         else reject(new GitError(args, result.code, result.stderr));
       });
       child.stdin.end(options.input ?? "");
@@ -9058,9 +9061,9 @@ var Git = class {
     child.stderr.on("data", (chunk) => {
       if (stderr.length < 64 * 1024) stderr += chunk.toString("utf8");
     });
-    const exited = new Promise((resolve3, reject) => {
+    const exited = new Promise((resolve4, reject) => {
       child.on("error", reject);
-      child.on("close", (code5) => resolve3(code5 ?? -1));
+      child.on("close", (code5) => resolve4(code5 ?? -1));
     });
     exited.catch(() => {
     });
@@ -9172,6 +9175,9 @@ async function trustedObservation(git, linear, tracked, key) {
 
 // src/state/lfs.ts
 import { createHash as createHash3 } from "node:crypto";
+import { mkdtemp, rm, writeFile as writeFile2 } from "node:fs/promises";
+import { tmpdir as tmpdir2 } from "node:os";
+import { join as join3 } from "node:path";
 var POINTER_VERSION = "version https://git-lfs.github.com/spec/v1";
 var MAX_POINTER_SIZE = 1024;
 function parseLfsPointer(blob) {
@@ -9205,13 +9211,35 @@ function parseLfsPointer(blob) {
   }
   return oid !== null && size !== null ? { oid, size, extensions } : null;
 }
-async function lfsReader(git, remote) {
-  const remoteArgs = ["-c", `remote.lfsdefault=${remote}`];
+async function lfsReader(git, from) {
+  const remoteArgs = ["-c", `remote.lfsdefault=${from.remote}`, "-c", "lfs.fetchinclude=", "-c", "lfs.fetchexclude="];
   const branch = await git.run(["symbolic-ref", "--quiet", "--short", "HEAD"], { okCodes: [0, 1, 128] });
-  if (branch.code === 0) remoteArgs.push("-c", `branch.${branch.stdout.toString("utf8").trim()}.remote=${remote}`);
+  if (branch.code === 0) remoteArgs.push("-c", `branch.${branch.stdout.toString("utf8").trim()}.remote=${from.remote}`);
+  let setting;
   let installed;
   const runs = () => installed ??= gitLfsRuns(git);
-  return (pointer, path2) => readLfsObject(git, remoteArgs, pointer, path2, runs);
+  return async (pointer, path2) => withLfsconfig(await (setting ??= lfsSetting(git, from)), (env) => readLfsObject(git, remoteArgs, env, pointer, path2, runs));
+}
+function lfsRemote(config) {
+  return { remote: config.remote, tracked: localRef(config, branchRef(config.trackedBranch)) };
+}
+async function lfsPush(git, to, oids) {
+  if (oids.length === 0) return;
+  await withLfsconfig(await lfsSetting(git, to), (env) => git.run(["lfs", "push", "--object-id", to.remote, ...oids], { env }));
+}
+var LFSCONFIG_LIMIT = 64 * 1024;
+async function lfsSetting(git, from) {
+  const found = await git.run(["cat-file", "blob", `${from.tracked}:.lfsconfig`], { okCodes: [0, 128], maxOutputBytes: LFSCONFIG_LIMIT });
+  return { gitDir: await git.text(["rev-parse", "--absolute-git-dir"]), lfsconfig: found.code === 0 ? found.stdout : Buffer.alloc(0) };
+}
+async function withLfsconfig(setting, work) {
+  const tree = await mkdtemp(join3(tmpdir2(), "mdbisync-lfs-"));
+  try {
+    await writeFile2(join3(tree, ".lfsconfig"), setting.lfsconfig);
+    return await work({ GIT_DIR: setting.gitDir, GIT_WORK_TREE: tree });
+  } finally {
+    await rm(tree, { recursive: true, force: true });
+  }
 }
 var GitLfsMissingError = class extends Error {
   constructor() {
@@ -9231,16 +9259,17 @@ async function gitLfsRuns(git) {
 async function requireGitLfs(git) {
   if (!await gitLfsRuns(git)) throw new GitLfsMissingError();
 }
-async function missingLfsObjects(git, remote, blobs) {
+async function missingLfsObjects(git, from, blobs) {
   const missing = /* @__PURE__ */ new Set();
   if (blobs.length === 0) return missing;
   const entries = [...new Set(blobs)].map((blob, index2) => `100644 blob ${blob}	${index2}
 `).join("");
   const tree = await git.text(["mktree"], { input: entries });
   const settings = ["-c", "lfs.fetchinclude=", "-c", "lfs.fetchexclude=", "-c", "lfs.fetchrecentalways=false"];
+  const setting = await lfsSetting(git, from);
   let stderr;
   try {
-    stderr = (await git.run([...settings, "lfs", "fetch", "--dry-run", remote, tree], { okCodes: [0, 2] })).stderr;
+    stderr = (await withLfsconfig(setting, (env) => git.run([...settings, "lfs", "fetch", "--dry-run", from.remote, tree], { okCodes: [0, 2], env }))).stderr;
   } catch (error) {
     if (!(error instanceof GitError)) throw error;
     await requireGitLfs(git);
@@ -9249,7 +9278,7 @@ async function missingLfsObjects(git, remote, blobs) {
   for (const match of stderr.matchAll(/^\[([0-9a-f]{64})\] [^\n]*\[(404|410)\]/gm)) missing.add(match[1]);
   return missing;
 }
-async function readLfsObject(git, remoteArgs, pointer, path2, runs) {
+async function readLfsObject(git, remoteArgs, env, pointer, path2, runs) {
   if (pointer.extensions) {
     return { ok: false, reason: `LFS object ${pointer.oid} uses LFS extensions, which are not supported` };
   }
@@ -9261,7 +9290,7 @@ size ${pointer.size}
   try {
     const result = await git.run([...remoteArgs, "lfs", "smudge", "--", path2], {
       input: pointerText,
-      env: { GIT_LFS_SKIP_SMUDGE: void 0 },
+      env: { ...env, GIT_LFS_SKIP_SMUDGE: void 0 },
       // A failed smudge may return the pointer itself.
       maxOutputBytes: Math.max(pointer.size, MAX_POINTER_SIZE)
     });
@@ -9281,9 +9310,9 @@ size ${pointer.size}
 }
 
 // src/state/objects.ts
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir as tmpdir2 } from "node:os";
-import { join as join3 } from "node:path";
+import { mkdtemp as mkdtemp2, rm as rm2 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join4 } from "node:path";
 var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
 async function listTree(git, treeish, maxOutputBytes) {
   const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
@@ -9367,8 +9396,8 @@ async function commitTree(git, spec) {
   });
 }
 async function buildTree(git, base, changes) {
-  const dir = await mkdtemp(join3(tmpdir2(), "state-index-"));
-  const env = { GIT_INDEX_FILE: join3(dir, "index") };
+  const dir = await mkdtemp2(join4(tmpdir3(), "state-index-"));
+  const env = { GIT_INDEX_FILE: join4(dir, "index") };
   try {
     if (base === null) await git.run(["read-tree", "--empty"], { env });
     else await git.run(["read-tree", `${base}^{tree}`], { env });
@@ -9383,7 +9412,7 @@ async function buildTree(git, base, changes) {
     if (lines2.length > 0) await git.run(["update-index", "-z", "--index-info"], { input: lines2.join(""), env });
     return await git.text(["write-tree"], { env });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm2(dir, { recursive: true, force: true });
   }
 }
 async function listModes(git, treeish) {
@@ -9787,7 +9816,7 @@ async function readFiles(git, config, commit2, paths) {
   }
   const lfs = /* @__PURE__ */ new Map();
   if (pointers.size > 0) {
-    const read = await lfsReader(git, config.remote);
+    const read = await lfsReader(git, lfsRemote(config));
     const items = [...pointers.entries()];
     const results = await mapLimit(items, 4, ([, item]) => read(item.pointer, item.path));
     items.forEach(([pointerBlob], index2) => lfs.set(pointerBlob, results[index2]));
@@ -9923,8 +9952,8 @@ async function checkSyncBranchRules(target) {
   }
   const openOn = (type) => target.syncBranches.filter((branch) => !rulesOf.get(branch)?.has(type));
   const rules = BRANCH_RULES.map((rule) => {
-    const open2 = openOn(rule.type);
-    return open2.length === 0 ? message("setup.sync-branch-rule-restricted", { rule: rule.words }) : message("setup.sync-branch-rule-open", { rule: rule.words, branches: open2.join(" and ") });
+    const open3 = openOn(rule.type);
+    return open3.length === 0 ? message("setup.sync-branch-rule-restricted", { rule: rule.words }) : message("setup.sync-branch-rule-open", { rule: rule.words, branches: open3.join(" and ") });
   }).join("; ");
   const branches = target.syncBranches.join(" and ");
   return openOn("creation").length === 0 && openOn("deletion").length === 0 ? passed("sync-branch-rules", message("setup.sync-branch-rules", { branches, rules })) : warning("sync-branch-rules", message("setup.sync-branch-rules-open", { branches, rules }));
@@ -10056,8 +10085,8 @@ async function closePullRequestAtHead(target, number, head) {
   return true;
 }
 async function ensurePullRequest(target, spec) {
-  const open2 = await findOpenPullRequest(target, spec.head, spec.base);
-  if (open2 !== null) return useOpen(target, open2, spec);
+  const open3 = await findOpenPullRequest(target, spec.head, spec.base);
+  if (open3 !== null) return useOpen(target, open3, spec);
   try {
     return { pullRequest: await openPullRequest(target, spec), opened: true, updated: false };
   } catch (error) {
@@ -10070,9 +10099,9 @@ async function ensurePullRequest(target, spec) {
     return useOpen(target, opened, spec);
   }
 }
-async function useOpen(target, open2, spec) {
-  if (open2.title === spec.title && open2.body === spec.body) return { pullRequest: open2, opened: false, updated: false };
-  return { pullRequest: await updatePullRequest(target, open2.number, spec), opened: false, updated: true };
+async function useOpen(target, open3, spec) {
+  if (open3.title === spec.title && open3.body === spec.body) return { pullRequest: open3, opened: false, updated: false };
+  return { pullRequest: await updatePullRequest(target, open3.number, spec), opened: false, updated: true };
 }
 async function readPullRequest(target, number) {
   const answer = await request(target, "GET", `/pulls/${number}`);
@@ -10336,8 +10365,8 @@ function refusalReason(message2) {
 }
 
 // src/format/command.ts
-import { existsSync, lstatSync, readdirSync, readFileSync as readFileSync2, realpathSync, statSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { basename, join as join5, relative, resolve, sep } from "node:path";
+import { closeSync, constants as constants2, existsSync, fstatSync, ftruncateSync, lstatSync, openSync, readdirSync, readFileSync as readFileSync2, readlinkSync, realpathSync, statSync, writeSync } from "node:fs";
+import { basename, join as join7, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
 
 // node_modules/character-entities/index.js
 var characterEntities = {
@@ -16280,10 +16309,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve3 = constructs2[index2].resolveAll;
-    if (resolve3 && !called.includes(resolve3)) {
-      events = resolve3(events, context);
-      called.push(resolve3);
+    const resolve4 = constructs2[index2].resolveAll;
+    if (resolve4 && !called.includes(resolve4)) {
+      events = resolve4(events, context);
+      called.push(resolve4);
     }
   }
   return events;
@@ -16300,16 +16329,16 @@ function resolveAllAttention(events, context) {
   let nextEvents;
   while (++index2 < events.length) {
     if (events[index2][0] === "enter" && events[index2][1].type === "attentionSequence" && events[index2][1]._close) {
-      let open2 = index2;
-      while (open2--) {
-        if (events[open2][0] === "exit" && events[open2][1].type === "attentionSequence" && events[open2][1]._open && // If the markers are the same:
-        context.sliceSerialize(events[open2][1]).charCodeAt(0) === context.sliceSerialize(events[index2][1]).charCodeAt(0)) {
-          if ((events[open2][1]._close || events[index2][1]._open) && (events[index2][1].end.offset - events[index2][1].start.offset) % 3 && !((events[open2][1].end.offset - events[open2][1].start.offset + events[index2][1].end.offset - events[index2][1].start.offset) % 3)) {
+      let open3 = index2;
+      while (open3--) {
+        if (events[open3][0] === "exit" && events[open3][1].type === "attentionSequence" && events[open3][1]._open && // If the markers are the same:
+        context.sliceSerialize(events[open3][1]).charCodeAt(0) === context.sliceSerialize(events[index2][1]).charCodeAt(0)) {
+          if ((events[open3][1]._close || events[index2][1]._open) && (events[index2][1].end.offset - events[index2][1].start.offset) % 3 && !((events[open3][1].end.offset - events[open3][1].start.offset + events[index2][1].end.offset - events[index2][1].start.offset) % 3)) {
             continue;
           }
-          const use = events[open2][1].end.offset - events[open2][1].start.offset > 1 && events[index2][1].end.offset - events[index2][1].start.offset > 1 ? 2 : 1;
+          const use = events[open3][1].end.offset - events[open3][1].start.offset > 1 && events[index2][1].end.offset - events[index2][1].start.offset > 1 ? 2 : 1;
           const start2 = {
-            ...events[open2][1].end
+            ...events[open3][1].end
           };
           const end2 = {
             ...events[index2][1].start
@@ -16320,7 +16349,7 @@ function resolveAllAttention(events, context) {
             type: use > 1 ? "strongSequence" : "emphasisSequence",
             start: start2,
             end: {
-              ...events[open2][1].end
+              ...events[open3][1].end
             }
           };
           const closingSequence = {
@@ -16333,7 +16362,7 @@ function resolveAllAttention(events, context) {
           const text6 = {
             type: use > 1 ? "strongText" : "emphasisText",
             start: {
-              ...events[open2][1].end
+              ...events[open3][1].end
             },
             end: {
               ...events[index2][1].start
@@ -16348,26 +16377,26 @@ function resolveAllAttention(events, context) {
               ...closingSequence.end
             }
           };
-          events[open2][1].end = {
+          events[open3][1].end = {
             ...openingSequence.start
           };
           events[index2][1].start = {
             ...closingSequence.end
           };
           nextEvents = [];
-          if (events[open2][1].end.offset - events[open2][1].start.offset) {
-            nextEvents = push(nextEvents, [["enter", events[open2][1], context], ["exit", events[open2][1], context]]);
+          if (events[open3][1].end.offset - events[open3][1].start.offset) {
+            nextEvents = push(nextEvents, [["enter", events[open3][1], context], ["exit", events[open3][1], context]]);
           }
           nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text6, context]]);
-          nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + 1, index2), context));
+          nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open3 + 1, index2), context));
           nextEvents = push(nextEvents, [["exit", text6, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
           let offset = 0;
           if (events[index2][1].end.offset - events[index2][1].start.offset) {
             offset = 2;
             nextEvents = push(nextEvents, [["enter", events[index2][1], context], ["exit", events[index2][1], context]]);
           }
-          splice(events, open2 - 1, index2 - open2 + 3, nextEvents);
-          index2 = open2 + nextEvents.length - offset - 2;
+          splice(events, open3 - 1, index2 - open3 + 3, nextEvents);
+          index2 = open3 + nextEvents.length - offset - 2;
           break;
         }
       }
@@ -16390,19 +16419,19 @@ function tokenizeAttention(effects, ok3) {
   function start2(code4) {
     marker = code4;
     effects.enter("attentionSequence");
-    return inside(code4);
+    return inside2(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (code4 === marker) {
       effects.consume(code4);
-      return inside;
+      return inside2;
     }
     const token = effects.exit("attentionSequence");
     const after = classifyCharacter(code4);
-    const open2 = !after || after === 2 && before || attentionMarkers2.includes(code4) && code4 !== 42 && code4 !== 95;
+    const open3 = !after || after === 2 && before || attentionMarkers2.includes(code4) && code4 !== 42 && code4 !== 95;
     const close = !before || before === 2 && after || attentionMarkers2.includes(previous3) && previous3 !== 42 && previous3 !== 95;
-    token._open = Boolean(marker === 42 ? open2 : open2 && (before || !close));
-    token._close = Boolean(marker === 42 ? close : close && (after || !open2));
+    token._open = Boolean(marker === 42 ? open3 : open3 && (before || !close));
+    token._close = Boolean(marker === 42 ? close : close && (after || !open3));
     return ok3(code4);
   }
 }
@@ -16426,9 +16455,9 @@ function tokenizeAutolink(effects, ok3, nok) {
     effects.consume(code4);
     effects.exit("autolinkMarker");
     effects.enter("autolinkProtocol");
-    return open2;
+    return open3;
   }
-  function open2(code4) {
+  function open3(code4) {
     if (asciiAlpha(code4)) {
       effects.consume(code4);
       return schemeOrEmailAtext;
@@ -16598,9 +16627,9 @@ function tokenizeCharacterEscape(effects, ok3, nok) {
     effects.enter("escapeMarker");
     effects.consume(code4);
     effects.exit("escapeMarker");
-    return inside;
+    return inside2;
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (asciiPunctuation(code4)) {
       effects.enter("characterEscapeValue");
       effects.consume(code4);
@@ -16628,9 +16657,9 @@ function tokenizeCharacterReference(effects, ok3, nok) {
     effects.enter("characterReferenceMarker");
     effects.consume(code4);
     effects.exit("characterReferenceMarker");
-    return open2;
+    return open3;
   }
-  function open2(code4) {
+  function open3(code4) {
     if (code4 === 35) {
       effects.enter("characterReferenceMarkerNumeric");
       effects.consume(code4);
@@ -16885,15 +16914,15 @@ function tokenizeCodeIndented(effects, ok3, nok) {
       return effects.attempt(furtherStart, atBreak, after)(code4);
     }
     effects.enter("codeFlowValue");
-    return inside(code4);
+    return inside2(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (code4 === null || markdownLineEnding(code4)) {
       effects.exit("codeFlowValue");
       return atBreak(code4);
     }
     effects.consume(code4);
-    return inside;
+    return inside2;
   }
   function after(code4) {
     effects.exit("codeIndented");
@@ -17648,22 +17677,22 @@ function factoryTitle(effects, ok3, nok, type, markerType, stringType) {
     effects.enter("chunkString", {
       contentType: "string"
     });
-    return inside(code4);
+    return inside2(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (code4 === marker || code4 === null || markdownLineEnding(code4)) {
       effects.exit("chunkString");
       return atBreak(code4);
     }
     effects.consume(code4);
-    return code4 === 92 ? escape2 : inside;
+    return code4 === 92 ? escape2 : inside2;
   }
   function escape2(code4) {
     if (code4 === marker || code4 === 92) {
       effects.consume(code4);
-      return inside;
+      return inside2;
     }
-    return inside(code4);
+    return inside2(code4);
   }
 }
 
@@ -17989,9 +18018,9 @@ function tokenizeHtmlFlow(effects, ok3, nok) {
     effects.enter("htmlFlow");
     effects.enter("htmlFlowData");
     effects.consume(code4);
-    return open2;
+    return open3;
   }
-  function open2(code4) {
+  function open3(code4) {
     if (code4 === 33) {
       effects.consume(code4);
       return declarationOpen;
@@ -18323,9 +18352,9 @@ function tokenizeHtmlText(effects, ok3, nok) {
     effects.enter("htmlText");
     effects.enter("htmlTextData");
     effects.consume(code4);
-    return open2;
+    return open3;
   }
-  function open2(code4) {
+  function open3(code4) {
     if (code4 === 33) {
       effects.consume(code4);
       return declarationOpen;
@@ -18650,12 +18679,12 @@ function resolveAllLabelEnd(events) {
 function resolveToLabelEnd(events, context) {
   let index2 = events.length;
   let offset = 0;
-  let open2;
+  let open3;
   let close;
   let media;
   while (index2--) {
     const token = events[index2][1];
-    if (open2) {
+    if (open3) {
       if (token.type === "link" || token.type === "labelLink" && token._inactive) {
         break;
       }
@@ -18664,7 +18693,7 @@ function resolveToLabelEnd(events, context) {
       }
     } else if (close) {
       if (events[index2][0] === "enter" && (token.type === "labelImage" || token.type === "labelLink") && !token._balanced) {
-        open2 = index2;
+        open3 = index2;
         if (token.type !== "labelLink") {
           offset = 2;
           break;
@@ -18675,9 +18704,9 @@ function resolveToLabelEnd(events, context) {
     }
   }
   const group = {
-    type: events[open2][1].type === "labelLink" ? "link" : "image",
+    type: events[open3][1].type === "labelLink" ? "link" : "image",
     start: {
-      ...events[open2][1].start
+      ...events[open3][1].start
     },
     end: {
       ...events[events.length - 1][1].end
@@ -18686,7 +18715,7 @@ function resolveToLabelEnd(events, context) {
   const label = {
     type: "label",
     start: {
-      ...events[open2][1].start
+      ...events[open3][1].start
     },
     end: {
       ...events[close][1].end
@@ -18695,20 +18724,20 @@ function resolveToLabelEnd(events, context) {
   const text6 = {
     type: "labelText",
     start: {
-      ...events[open2 + offset + 2][1].end
+      ...events[open3 + offset + 2][1].end
     },
     end: {
       ...events[close - 2][1].start
     }
   };
   media = [["enter", group, context], ["enter", label, context]];
-  media = push(media, events.slice(open2 + 1, open2 + offset + 3));
+  media = push(media, events.slice(open3 + 1, open3 + offset + 3));
   media = push(media, [["enter", text6, context]]);
-  media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + offset + 4, close - 3), context));
+  media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open3 + offset + 4, close - 3), context));
   media = push(media, [["exit", text6, context], events[close - 2], events[close - 1], ["exit", label, context]]);
   media = push(media, events.slice(close + 1));
   media = push(media, [["exit", group, context]]);
-  splice(events, open2, events.length, media);
+  splice(events, open3, events.length, media);
   return events;
 }
 function tokenizeLabelEnd(effects, ok3, nok) {
@@ -18855,9 +18884,9 @@ function tokenizeLabelStartImage(effects, ok3, nok) {
     effects.enter("labelImageMarker");
     effects.consume(code4);
     effects.exit("labelImageMarker");
-    return open2;
+    return open3;
   }
-  function open2(code4) {
+  function open3(code4) {
     if (code4 === 91) {
       effects.enter("labelMarker");
       effects.consume(code4);
@@ -18998,15 +19027,15 @@ function tokenizeListStart(effects, ok3, nok) {
       if (!self.interrupt || code4 === 49) {
         effects.enter("listItemPrefix");
         effects.enter("listItemValue");
-        return inside(code4);
+        return inside2(code4);
       }
     }
     return nok(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (asciiDigit(code4) && ++size < 10) {
       effects.consume(code4);
-      return inside;
+      return inside2;
     }
     if ((!self.interrupt || size < 2) && (self.containerState.marker ? code4 === self.containerState.marker : code4 === 41 || code4 === 46)) {
       effects.exit("listItemValue");
@@ -19164,12 +19193,12 @@ function tokenizeSetextUnderline(effects, ok3, nok) {
   }
   function before(code4) {
     effects.enter("setextHeadingLineSequence");
-    return inside(code4);
+    return inside2(code4);
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (code4 === marker) {
       effects.consume(code4);
-      return inside;
+      return inside2;
     }
     effects.exit("setextHeadingLineSequence");
     return markdownSpace(code4) ? factorySpace(effects, after, "lineSuffix")(code4) : after(code4);
@@ -20218,8 +20247,8 @@ function compiler(options) {
     events[start2][1]._spread = listSpread;
   }
   function opener(create, and) {
-    return open2;
-    function open2(token) {
+    return open3;
+    function open3(token) {
       enter.call(this, create(token), token);
       if (and) and.call(this, token);
     }
@@ -20251,19 +20280,19 @@ function compiler(options) {
   }
   function exit3(token, onExitError) {
     const node2 = this.stack.pop();
-    const open2 = this.tokenStack.pop();
-    if (!open2) {
+    const open3 = this.tokenStack.pop();
+    if (!open3) {
       throw new Error("Cannot close `" + token.type + "` (" + stringifyPosition({
         start: token.start,
         end: token.end
       }) + "): it\u2019s not open");
     }
-    if (open2[0].type !== token.type) {
+    if (open3[0].type !== token.type) {
       if (onExitError) {
-        onExitError.call(this, token, open2[0]);
+        onExitError.call(this, token, open3[0]);
       } else {
-        const handler = open2[1] || defaultOnError;
-        handler.call(this, token, open2[0]);
+        const handler = open3[1] || defaultOnError;
+        handler.call(this, token, open3[0]);
       }
     }
     node2.position.end = point2(token.end);
@@ -21612,9 +21641,9 @@ function encodeCharacterReference(code4) {
 }
 
 // node_modules/mdast-util-to-markdown/lib/util/encode-info.js
-function encodeInfo(outside, inside, marker) {
+function encodeInfo(outside, inside2, marker) {
   const outsideKind = classifyCharacter(outside);
-  const insideKind = classifyCharacter(inside);
+  const insideKind = classifyCharacter(inside2);
   if (outsideKind === void 0) {
     return insideKind === void 0 ? (
       // Letter inside:
@@ -21725,7 +21754,7 @@ function check(tokens, before, after) {
     const next = classifyCharacter(
       (end2 < tokens.length ? tokens[end2].value : after).charCodeAt(0)
     );
-    const open2 = !next || next === 2 && Boolean(previous3);
+    const open3 = !next || next === 2 && Boolean(previous3);
     const close = !previous3 || previous3 === 2 && Boolean(next);
     const run = {
       tokens: tokens.slice(index2, end2),
@@ -21733,8 +21762,8 @@ function check(tokens, before, after) {
       start: 0,
       end: 0,
       // Underscores are strict, they cannot open or close inside words.
-      open: strict ? open2 && (Boolean(previous3) || !close) : open2,
-      close: strict ? close && (Boolean(next) || !open2) : close,
+      open: strict ? open3 && (Boolean(previous3) || !close) : open3,
+      close: strict ? close && (Boolean(next) || !open3) : close,
       // All builtins can split runs.
       split: strict !== void 0
     };
@@ -21802,9 +21831,9 @@ function pair(runs, wrong) {
       openers = [];
       openersByMarker.set(marker, openers);
     }
-    let open2 = closer.close ? openers.length : 0;
-    while (open2-- && closer.start < closer.end) {
-      const opener = openers[open2];
+    let open3 = closer.close ? openers.length : 0;
+    while (open3-- && closer.start < closer.end) {
+      const opener = openers[open3];
       const openerSize = opener.end - opener.start;
       const closerSize = closer.end - closer.start;
       if (closer.split ? (
@@ -21840,8 +21869,8 @@ function pair(runs, wrong) {
       }
       opener.end -= size;
       closer.start += size;
-      if (opener.start === opener.end) openers.splice(open2, 1);
-      open2 = openers.length;
+      if (opener.start === opener.end) openers.splice(open3, 1);
+      open3 = openers.length;
     }
     if (closer.open && closer.start < closer.end) openers.push(closer);
   }
@@ -21980,26 +22009,26 @@ function render(items, chosen, before, after) {
     const outsideAfter = firstCharacter(
       next === void 0 ? after : typeof next === "string" ? next : chosen.get(next) || next.sequences[0]
     );
-    const inside = render(item.children, chosen, sequence, sequence);
-    const head = inside.length > 0 ? inside[0].value : "";
-    const open2 = encodeInfo(
+    const inside2 = render(item.children, chosen, sequence, sequence);
+    const head = inside2.length > 0 ? inside2[0].value : "";
+    const open3 = encodeInfo(
       outsideBefore.charCodeAt(outsideBefore.length - 1),
       head.charCodeAt(0),
       marker
     );
-    if (open2.inside) encode(inside, true);
-    const tail = inside.length > 0 ? lastCharacter(inside[inside.length - 1].value) : "";
+    if (open3.inside) encode(inside2, true);
+    const tail = inside2.length > 0 ? lastCharacter(inside2[inside2.length - 1].value) : "";
     const close = encodeInfo(
       outsideAfter.charCodeAt(0),
       tail.charCodeAt(tail.length - 1),
       marker
     );
-    if (close.inside) encode(inside, false);
-    if (open2.outside && outsideBefore !== "\n" && outsideBefore !== "\r") {
+    if (close.inside) encode(inside2, false);
+    if (open3.outside && outsideBefore !== "\n" && outsideBefore !== "\r") {
       encode(tokens, false);
     }
     if (close.outside) encodeAfter = outsideAfter;
-    tokens.push({ value: sequence, attention: item }, ...inside, {
+    tokens.push({ value: sequence, attention: item }, ...inside2, {
       value: sequence,
       attention: item
     });
@@ -22665,7 +22694,7 @@ var handle = {
 };
 
 // node_modules/mdast-util-to-markdown/lib/join.js
-var join4 = [joinDefaults];
+var join5 = [joinDefaults];
 function joinDefaults(left, right, parent, state) {
   if (right.type === "code" && formatCodeAsIndented(right, state) && (left.type === "list" || left.type === right.type && formatCodeAsIndented(left, state))) {
     return false;
@@ -23108,7 +23137,7 @@ function toMarkdown(tree, options) {
     handle: void 0,
     indentLines,
     indexStack: [],
-    join: [...join4],
+    join: [...join5],
     options: {},
     safe: safeBound,
     stack: [],
@@ -23928,30 +23957,30 @@ function gfmStrikethrough(options) {
     let index2 = -1;
     while (++index2 < events.length) {
       if (events[index2][0] === "enter" && events[index2][1].type === "strikethroughSequenceTemporary" && events[index2][1]._close) {
-        let open2 = index2;
-        while (open2--) {
-          if (events[open2][0] === "exit" && events[open2][1].type === "strikethroughSequenceTemporary" && events[open2][1]._open && // If the sizes are the same:
-          events[index2][1].end.offset - events[index2][1].start.offset === events[open2][1].end.offset - events[open2][1].start.offset) {
+        let open3 = index2;
+        while (open3--) {
+          if (events[open3][0] === "exit" && events[open3][1].type === "strikethroughSequenceTemporary" && events[open3][1]._open && // If the sizes are the same:
+          events[index2][1].end.offset - events[index2][1].start.offset === events[open3][1].end.offset - events[open3][1].start.offset) {
             events[index2][1].type = "strikethroughSequence";
-            events[open2][1].type = "strikethroughSequence";
+            events[open3][1].type = "strikethroughSequence";
             const strikethrough = {
               type: "strikethrough",
-              start: Object.assign({}, events[open2][1].start),
+              start: Object.assign({}, events[open3][1].start),
               end: Object.assign({}, events[index2][1].end)
             };
             const text6 = {
               type: "strikethroughText",
-              start: Object.assign({}, events[open2][1].end),
+              start: Object.assign({}, events[open3][1].end),
               end: Object.assign({}, events[index2][1].start)
             };
-            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text6, context]];
+            const nextEvents = [["enter", strikethrough, context], ["enter", events[open3][1], context], ["exit", events[open3][1], context], ["enter", text6, context]];
             const insideSpan2 = context.parser.constructs.insideSpan.null;
             if (insideSpan2) {
-              splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events.slice(open2 + 1, index2), context));
+              splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events.slice(open3 + 1, index2), context));
             }
             splice(nextEvents, nextEvents.length, 0, [["exit", text6, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
-            splice(events, open2 - 1, index2 - open2 + 3, nextEvents);
-            index2 = open2 + nextEvents.length - 2;
+            splice(events, open3 - 1, index2 - open3 + 3, nextEvents);
+            index2 = open3 + nextEvents.length - 2;
             break;
           }
         }
@@ -24513,8 +24542,8 @@ function gfmTaskListItem() {
 }
 function tokenizeTasklistCheck(effects, ok3, nok) {
   const self = this;
-  return open2;
-  function open2(code4) {
+  return open3;
+  function open3(code4) {
     if (
       // Exit if there’s stuff before.
       self.previous !== null || // Exit if not in the first content that is the first child of a list
@@ -24527,9 +24556,9 @@ function tokenizeTasklistCheck(effects, ok3, nok) {
     effects.enter("taskListCheckMarker");
     effects.consume(code4);
     effects.exit("taskListCheckMarker");
-    return inside;
+    return inside2;
   }
-  function inside(code4) {
+  function inside2(code4) {
     if (markdownLineEndingOrSpace(code4)) {
       effects.enter("taskListCheckValueUnchecked");
       effects.consume(code4);
@@ -24689,7 +24718,7 @@ function comparable(body2) {
   return strip(tree);
 }
 var BARE_MARKER = /^((?: {0,3}>[ ]?)*)( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
-var MAYBE_NESTED_BLOCK = /\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
+var MAYBE_NESTED_BLOCK = /(?:^|\n)[^\S\n]*\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
 function nestedFileBlocksOnItemLine(body2) {
   if (!MAYBE_NESTED_BLOCK.test(body2)) return body2;
   const lines2 = body2.split("\n");
@@ -24779,14 +24808,18 @@ function visit2(node2, enter, ancestors = []) {
     if (stack.length === 0) return;
   }
 }
+function decodedDestinationPath(url) {
+  const cut = url.search(/[?#]/);
+  const path2 = cut === -1 ? url : url.slice(0, cut);
+  try {
+    return decodeURIComponent(path2);
+  } catch {
+    return path2;
+  }
+}
 function resolveTarget(documentPath2, url) {
   if (url === "" || url.startsWith("#") || url.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
-  const cut = url.search(/[?#]/);
-  let path2 = cut === -1 ? url : url.slice(0, cut);
-  try {
-    path2 = decodeURIComponent(path2);
-  } catch {
-  }
+  const path2 = decodedDestinationPath(url);
   if (path2 === "") return null;
   const joined = posix.normalize(posix.join(posix.dirname(documentPath2), path2));
   if (joined === "." || joined === ".." || joined.startsWith("../") || joined.endsWith("/")) return null;
@@ -24807,13 +24840,13 @@ function linkDestination(url) {
 function imageDestination(url) {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
-function bracketedLabel(source, open2) {
+function bracketedLabel(source, open3) {
   let depth2 = 0;
-  for (let at = open2; at < source.length; at++) {
+  for (let at = open3; at < source.length; at++) {
     const char = source[at];
     if (char === "\\") at++;
     else if (char === "[") depth2++;
-    else if (char === "]" && --depth2 === 0) return source.slice(open2 + 1, at);
+    else if (char === "]" && --depth2 === 0) return source.slice(open3 + 1, at);
   }
   return "";
 }
@@ -25177,12 +25210,14 @@ ${math[1]}
     const [first] = item.children;
     const attachment = itemAttachment(item);
     if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
-      const path2 = attachment.url.split(/[?#]/)[0];
+      const path2 = decodedDestinationPath(attachment.url);
       const bullet = marker === "*";
-      if (!(bullet && AUDIO.test(path2))) {
+      const task = item.checked != null;
+      const inlineAudio = !task && MP3.test(path2) || bullet && WAV_OR_OGG.test(path2);
+      if (!inlineAudio) {
         const label = this.inline(attachment.children);
         const destination2 = imageDestination(attachment.url);
-        if (bullet && VIDEO.test(path2)) return `${marker} [${label}](${destination2})`;
+        if (bullet && VIDEO.test(attachment.url.split(/[?#]/)[0])) return `${marker} [${label}](${destination2})`;
         if (!interruptsParagraph || marker.startsWith("- ")) {
           return `${marker} 
 ${indent2}[${label}](${destination2})`;
@@ -25311,8 +25346,8 @@ ${indent2}[${label}](${destination2})`;
     return `[${this.inline(children)}](${linkDestination(url)})`;
   }
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
-  label(open2) {
-    return bracketedLabel(this.source, open2);
+  label(open3) {
+    return bracketedLabel(this.source, open3);
   }
 };
 function textEdits(source, from, to, keepAt) {
@@ -25389,7 +25424,8 @@ function relativeUrls(text6, types) {
   return urls;
 }
 var VIDEO = /\.(?:mp4|mov|webm)$/i;
-var AUDIO = /\.mp3$/i;
+var MP3 = /\.mp3$/i;
+var WAV_OR_OGG = /\.(?:wav|ogg)$/i;
 function startsWithFileBlock(list4) {
   const [item] = list4.children;
   if (item === void 0) return false;
@@ -25411,6 +25447,100 @@ function prefixLines(text6, prefix, empty2) {
   return text6.split("\n").map((line2) => line2 === "" ? empty2 : prefix + line2).join("\n");
 }
 
+// src/run/output.ts
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat, mkdir as mkdir2, open as open2, readlink, realpath, rename, unlink } from "node:fs/promises";
+import { dirname, isAbsolute, join as join6, parse as parse3, relative, resolve, sep } from "node:path";
+function outputText(value, limit = 16 * 1024 * 1024) {
+  if (typeof value !== "string" || value.length > limit || !/^[\t\n\r\x20-\x7e -\u{10ffff}]*$/u.test(value)) {
+    throw new Error(message("output.invalid-text", { limit }));
+  }
+  return value;
+}
+function escapedControl(character) {
+  return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
+}
+function reportText(value, limit = 16 * 1024 * 1024) {
+  return outputText(value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, escapedControl), limit);
+}
+function lineText(value) {
+  return value.replace(/[\u0000-\u001f\u005c\u007f-\u009f]/g, escapedControl);
+}
+var MAX_LINKS = 40;
+async function writeReportFile(path2, text6, checkout) {
+  const [root2, names] = rootAndNames(isAbsolute(path2) ? path2 : `${process.cwd()}${sep}${path2}`);
+  const name = names.pop();
+  if (name === void 0 || name === "." || name === "..") throw new Error(message("output.not-a-file", { path: path2 }));
+  const file = join6(await reportDirectory(root2, names, await realpath(checkout), path2), name);
+  const existing = await lstat(file).catch(ifMissing);
+  if (existing !== void 0 && !existing.isFile() && !existing.isSymbolicLink()) throw new Error(message("output.not-a-file", { path: path2 }));
+  const kept = existing?.isFile() === true ? existing.mode & 4095 : void 0;
+  const temporary = join6(dirname(file), `.mdbisync-${randomUUID()}.tmp`);
+  const handle2 = await open2(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, kept === void 0 ? 438 : 384);
+  try {
+    await handle2.writeFile(text6);
+    if (kept !== void 0) await handle2.chmod(kept);
+    await handle2.close();
+    await rename(temporary, file);
+  } catch (error) {
+    await handle2.close().catch(() => {
+    });
+    await unlink(temporary).catch(() => {
+    });
+    throw error;
+  }
+}
+var SEPARATORS = sep === "\\" ? /[\\/]/ : /\//;
+function rootAndNames(path2) {
+  const { root: root2 } = parse3(path2);
+  return [root2, path2.slice(root2.length).split(SEPARATORS).filter((name) => name !== "")];
+}
+async function reportDirectory(root2, names, checkout, path2) {
+  const pending = [...names];
+  let current = root2;
+  let links = 0;
+  while (pending.length > 0) {
+    const name = pending.shift();
+    if (name === ".") continue;
+    if (name === "..") {
+      current = dirname(current);
+      continue;
+    }
+    const next = join6(current, name);
+    let entry = await lstat(next).catch(ifMissing);
+    if (entry === void 0) {
+      await mkdir2(next).catch((error) => {
+        if (error.code !== "EEXIST") throw error;
+      });
+      entry = await lstat(next);
+    }
+    if (!entry.isSymbolicLink()) {
+      current = next;
+      continue;
+    }
+    if (inside(checkout, current)) throw new Error(message("output.linked-directory", { path: next }));
+    if (++links > MAX_LINKS) throw new Error(message("output.link-loop", { path: path2 }));
+    const target = await readlink(next);
+    if (isAbsolute(target)) {
+      const [targetRoot, targetNames] = rootAndNames(target);
+      current = targetRoot;
+      pending.unshift(...targetNames);
+    } else {
+      pending.unshift(...rootAndNames(target)[1]);
+    }
+  }
+  return current;
+}
+function inside(base, path2) {
+  const rest = relative(base, path2);
+  return rest !== ".." && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
+}
+function ifMissing(error) {
+  if (error.code === "ENOENT") return void 0;
+  throw error;
+}
+
 // src/format/command.ts
 var SKIPPED_FOLDERS = /* @__PURE__ */ new Set([".git", "node_modules"]);
 var USAGE_ERROR = 2;
@@ -25423,43 +25553,53 @@ function filesUnder(paths, cwd, accept) {
     const stat = lstatSync(absolute);
     if (stat.isDirectory()) {
       for (const name of readdirSync(absolute).sort()) {
-        if (!SKIPPED_FOLDERS.has(name)) walk(join5(absolute, name));
+        if (!SKIPPED_FOLDERS.has(name)) walk(join7(absolute, name));
       }
     } else if (stat.isFile() && accept(basename(absolute))) {
-      found.add(relative(cwd, absolute).split(sep).join("/"));
+      found.add(relative2(cwd, absolute).split(sep2).join("/"));
     }
   };
-  for (const path2 of paths.length > 0 ? paths : ["."]) walk(resolve(cwd, path2));
+  for (const path2 of paths.length > 0 ? paths : ["."]) walk(resolve2(cwd, path2));
   return [...found].sort();
 }
 function refusedUploads(paths, cwd) {
   return filesUnder(paths, cwd, isCaptureName).filter((file) => {
-    const bytes = readFileSync2(join5(cwd, file));
+    const bytes = readFileSync2(join7(cwd, file));
     return parseLfsPointer(bytes) === null && !admitsCapturedFile(file, bytes);
   }).map((file) => ({ file, line: 1, rule: "upload-file-refused", message: LINT_RULES["upload-file-refused"] }));
 }
 function badPaths(paths, cwd) {
   const option = paths.find((path2) => path2.startsWith("-"));
-  if (option !== void 0) return `unknown option: ${option}`;
-  const missing = paths.find((path2) => !existsSync(resolve(cwd, path2)));
-  return missing === void 0 ? void 0 : `no such file or folder: ${missing}`;
+  if (option !== void 0) return `unknown option: ${lineText(option)}`;
+  const missing = paths.find((path2) => !existsSync(resolve2(cwd, path2)));
+  if (missing !== void 0) return `no such file or folder: ${lineText(missing)}`;
+  const linked = paths.find((path2) => {
+    const absolute = resolve2(cwd, path2);
+    return lstatSync(absolute).isSymbolicLink() || !isOwnPath(cwd, relative2(cwd, absolute));
+  });
+  return linked === void 0 ? void 0 : `path passes through a symbolic link or differs in case: ${lineText(linked)}`;
 }
 function lintAll(files, cwd) {
-  const findings = files.flatMap((file) => lintText(file, readFileSync2(join5(cwd, file), "utf8"), { linkedFileExists: linkedFileResolver(file, cwd) }));
+  const findings = files.flatMap((file) => lintText(file, readFileSync2(join7(cwd, file), "utf8"), { linkedFileExists: linkedFileResolver(file, cwd) }));
   return [...findings, ...duplicateTitles(files)];
 }
 function describe(findings) {
-  return findings.map((finding) => `${finding.file}:${finding.line}: ${finding.rule}: ${finding.message}
+  return findings.map((finding) => `${lineText(finding.file)}:${finding.line}: ${finding.rule}: ${lineText(finding.message)}
 `).join("");
 }
 function linkedFileResolver(file, root2) {
-  return linkedFileCheck(file.split(sep).join("/"), (path2) => isFileAt(root2, path2));
+  return linkedFileCheck(file.split(sep2).join("/"), (path2) => isFileAt(root2, path2));
 }
 function isFileAt(root2, path2) {
-  const absolute = join5(root2, path2);
   try {
-    if (statSync(absolute, { throwIfNoEntry: false })?.isFile() !== true) return false;
-    return realpathSync.native(absolute) === join5(realpathSync.native(root2), path2);
+    return statSync(join7(root2, path2), { throwIfNoEntry: false })?.isFile() === true && isOwnPath(root2, path2);
+  } catch {
+    return false;
+  }
+}
+function isOwnPath(root2, path2) {
+  try {
+    return realpathSync.native(join7(root2, path2)) === join7(realpathSync.native(root2), path2);
   } catch {
     return false;
   }
@@ -25476,6 +25616,9 @@ function complexity(file) {
   return { file, line: 1, rule: "markdown-complexity", message: LINT_RULES["markdown-complexity"] };
 }
 function runLint(paths, cwd = process.cwd()) {
+  return withEscapedErrors(() => lint(paths, cwd));
+}
+function lint(paths, cwd) {
   const problem = badPaths(paths, cwd);
   if (problem !== void 0) return { exitCode: USAGE_ERROR, stdout: "", stderr: `${problem}
 ` };
@@ -25484,16 +25627,19 @@ function runLint(paths, cwd = process.cwd()) {
   const failing = new Set(findings.map((finding) => finding.file));
   const unfixed = files.filter((file) => {
     if (failing.has(file)) return false;
-    const text6 = readFileSync2(join5(cwd, file), "utf8");
+    const text6 = readFileSync2(join7(cwd, file), "utf8");
     const fixed = fixedText(file, text6, cwd);
     if (fixed === void 0) findings.push(complexity(file));
     return fixed !== void 0 && fixed !== text6;
   });
-  const stdout = describe(findings) + unfixed.map((file) => `${file}: not in Linear's form; run fix
+  const stdout = describe(findings) + unfixed.map((file) => `${lineText(file)}: not in Linear's form; run fix
 `).join("");
   return { exitCode: stdout === "" ? 0 : 1, stdout, stderr: "" };
 }
 function runFix(paths, cwd = process.cwd()) {
+  return withEscapedErrors(() => fix(paths, cwd));
+}
+function fix(paths, cwd) {
   const problem = badPaths(paths, cwd);
   if (problem !== void 0) return { exitCode: USAGE_ERROR, stdout: "", stderr: `${problem}
 ` };
@@ -25501,26 +25647,82 @@ function runFix(paths, cwd = process.cwd()) {
   const before = [...lintAll(files, cwd), ...refusedUploads(paths, cwd)];
   const failing = new Set(before.map((finding) => finding.file));
   const changed2 = [];
+  const moved = [];
   for (const file of files) {
     if (failing.has(file)) continue;
-    const path2 = join5(cwd, file);
-    const text6 = readFileSync2(path2, "utf8");
-    const fixed = fixedText(file, text6, cwd);
-    if (fixed === void 0) before.push(complexity(file));
-    else if (fixed !== text6) {
-      writeFileSync2(path2, fixed);
-      changed2.push(file);
-    }
+    const outcome2 = fixFile(file, cwd);
+    if (outcome2 === "complex") before.push(complexity(file));
+    else if (outcome2 === "moved") moved.push(file);
+    else if (outcome2 === "fixed") changed2.push(file);
   }
   const findings = [...before, ...lintAll(changed2, cwd)];
-  const stdout = changed2.map((file) => `${file}: fixed
+  const stdout = changed2.map((file) => `${lineText(file)}: fixed
+`).join("") + moved.map((file) => `${lineText(file)}: moved while fix ran; left unchanged
 `).join("") + describe(findings);
   return { exitCode: stdout === "" ? 0 : 1, stdout, stderr: "" };
+}
+function withEscapedErrors(command) {
+  try {
+    return command();
+  } catch (error) {
+    if (error instanceof Error) throw new Error(lineText(error.message), { cause: error });
+    throw error;
+  }
+}
+function fixFile(file, cwd) {
+  const path2 = join7(cwd, file);
+  const reader = openOwnFile(path2, constants2.O_RDONLY);
+  if (reader === void 0) return "moved";
+  let opened;
+  let text6;
+  try {
+    opened = fstatSync(reader);
+    const named = statSync(path2, { throwIfNoEntry: false });
+    if (!opened.isFile() || !sameFile(named, opened) || !isOwnPath(cwd, file) || !holdsOwnPath(reader, cwd, file)) return "moved";
+    text6 = readFileSync2(reader, "utf8");
+  } finally {
+    closeSync(reader);
+  }
+  const fixed = fixedText(file, text6, cwd);
+  if (fixed === void 0) return "complex";
+  if (fixed === text6) return "unchanged";
+  const writer = openOwnFile(path2, constants2.O_WRONLY);
+  if (writer === void 0) return "moved";
+  try {
+    if (!sameFile(fstatSync(writer), opened)) return "moved";
+    const bytes = Buffer.from(fixed, "utf8");
+    ftruncateSync(writer, 0);
+    for (let written = 0; written < bytes.length; ) written += writeSync(writer, bytes, written, bytes.length - written, written);
+    return "fixed";
+  } finally {
+    closeSync(writer);
+  }
+}
+function openOwnFile(path2, flags) {
+  try {
+    return openSync(path2, flags | constants2.O_NOFOLLOW);
+  } catch (error) {
+    const code4 = error.code;
+    if (code4 === "ENOENT" || code4 === "ELOOP" || code4 === "ENOTDIR") return void 0;
+    throw error;
+  }
+}
+function holdsOwnPath(fd, cwd, file) {
+  let held;
+  try {
+    held = readlinkSync(`/proc/self/fd/${fd}`);
+  } catch {
+    return true;
+  }
+  return held === join7(realpathSync.native(cwd), file);
+}
+function sameFile(a, b) {
+  return a !== void 0 && a.dev === b.dev && a.ino === b.ino;
 }
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "0.1.0-rc.18" : packageJson.version;
+var VERSION2 = true ? "0.1.0-rc.19" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -25549,9 +25751,9 @@ function fixUrl(code4) {
 // src/sync/capture.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { createHash as createHash16 } from "node:crypto";
-import { mkdtemp as mkdtemp5, rm as rm5 } from "node:fs/promises";
-import { tmpdir as tmpdir6 } from "node:os";
-import { join as join10, posix as posix9 } from "node:path";
+import { mkdtemp as mkdtemp6, rm as rm6 } from "node:fs/promises";
+import { tmpdir as tmpdir7 } from "node:os";
+import { join as join12, posix as posix9 } from "node:path";
 
 // src/mapping/front-matter.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -25828,8 +26030,8 @@ function separateCollisions(mapped) {
 }
 function titleOf(path2, zone) {
   const base = zone.projectFolder ?? zone.teamFolder;
-  const relative3 = base === "" ? path2 : path2.slice(base.length + 1);
-  return relative3.slice(0, -MARKDOWN_EXTENSION.length);
+  const relative4 = base === "" ? path2 : path2.slice(base.length + 1);
+  return relative4.slice(0, -MARKDOWN_EXTENSION.length);
 }
 function placeOf(zone) {
   return zone.project !== void 0 ? { kind: "project", team: zone.team, project: zone.project } : { kind: "team", team: zone.team };
@@ -26153,11 +26355,11 @@ function checkSyncState(state, config, findings = {}) {
 // src/setup/summary.ts
 var MARK = { passed: "passed", failed: "FAILED", warning: "warning", "not-checked": "not checked" };
 function renderSetupSummary(report) {
-  const fix = fixUrl(report.code);
+  const fix2 = fixUrl(report.code);
   const lines2 = [
     "## Setup check",
     "",
-    report.ok ? "Every required item passed." : `Stopped before any write: \`${report.code}\`.${fix === void 0 ? "" : ` How to fix it: ${fix}`}`,
+    report.ok ? "Every required item passed." : `Stopped before any write: \`${report.code}\`.${fix2 === void 0 ? "" : ` How to fix it: ${fix2}`}`,
     "",
     "| Item | State | Detail |",
     "| --- | --- | --- |",
@@ -26174,11 +26376,11 @@ function renderStateRefusal(refusal) {
 }
 
 // src/initial-sync/confirm.ts
-import { createHash as createHash14, randomUUID as randomUUID4 } from "node:crypto";
+import { createHash as createHash14, randomUUID as randomUUID5 } from "node:crypto";
 
 // src/test-hooks.ts
-import { existsSync as existsSync2, mkdirSync, renameSync, writeFileSync as writeFileSync3 } from "node:fs";
-import { isAbsolute, join as join6 } from "node:path";
+import { existsSync as existsSync2, mkdirSync, renameSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { isAbsolute as isAbsolute2, join as join8 } from "node:path";
 import { setTimeout as sleep2 } from "node:timers/promises";
 var HOOKS_ENV = "MDBISYNC_TEST_HOOKS";
 var HOOKS_DIR_ENV = "MDBISYNC_TEST_HOOKS_DIR";
@@ -26196,7 +26398,7 @@ function hooksEnabled(env = process.env) {
 function hooksDir(env = process.env) {
   if (!hooksEnabled(env)) return null;
   const dir = env[HOOKS_DIR_ENV] ?? "";
-  if (!isAbsolute(dir)) throw new TestHookError(`${HOOKS_ENV}=1 needs an absolute ${HOOKS_DIR_ENV}`);
+  if (!isAbsolute2(dir)) throw new TestHookError(`${HOOKS_ENV}=1 needs an absolute ${HOOKS_DIR_ENV}`);
   return dir;
 }
 function testStopAfterDocuments(env = process.env) {
@@ -26214,14 +26416,14 @@ async function checkpoint(name, env = process.env) {
   const count4 = (counts.get(name) ?? 0) + 1;
   counts.set(name, count4);
   mark(dir, "reached", name, count4);
-  while (existsSync2(join6(dir, "pause", name))) await sleep2(POLL_MS);
+  while (existsSync2(join8(dir, "pause", name))) await sleep2(POLL_MS);
   mark(dir, "passed", name, count4);
 }
 function mark(dir, kind, name, count4) {
-  mkdirSync(join6(dir, kind), { recursive: true });
-  const file = join6(dir, kind, name);
+  mkdirSync(join8(dir, kind), { recursive: true });
+  const file = join8(dir, kind, name);
   const partial = `${file}.${process.pid}.tmp`;
-  writeFileSync3(partial, `${JSON.stringify({ pid: process.pid, count: count4, at: (/* @__PURE__ */ new Date()).toISOString() })}
+  writeFileSync2(partial, `${JSON.stringify({ pid: process.pid, count: count4, at: (/* @__PURE__ */ new Date()).toISOString() })}
 `);
   renameSync(partial, file);
 }
@@ -26298,7 +26500,7 @@ var UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
 async function predictUploadLeaveOuts(git, tracked, plan, texts, uploads, options) {
   const { files } = await treeFiles(git, tracked);
   const { planned, unproven } = plannedLinks(plan, files, texts, options.plainFiles, options.unknownProvenance);
-  const judged = await predictPlanned(git, files, planned, uploads, options);
+  const judged = await predictPlanned(git, files, planned, uploads, { ...options, tracked });
   const result = [...unproven].map(([path2, unprovenFiles]) => ({ path: path2, rule: LINK_PROVENANCE_UNKNOWN, files: unprovenFiles }));
   return [...result, ...judged].sort((a, b) => compare2(a.path, b.path));
 }
@@ -26310,7 +26512,7 @@ async function predictPlanned(git, files, planned, uploads, options) {
   const uploaded = new Set(uploads.keys());
   const file = (target) => linked.get(target);
   const asked = targets.filter((target) => file(target).lfs && !file(target).extensions && file(target).size <= limit && !uploaded.has(file(target).hash));
-  const absent = await missingLfsObjects(git, options.remote, asked.map((target) => files.get(target).oid));
+  const absent = await missingLfsObjects(git, { remote: options.remote, tracked: options.tracked }, asked.map((target) => files.get(target).oid));
   for (const target of asked) if (absent.has(file(target).hash)) file(target).absent = true;
   const unreadable = (target) => file(target).extensions || file(target).absent;
   if (!targets.some((target) => unreadable(target) && !uploaded.has(file(target).hash))) {
@@ -26485,7 +26687,7 @@ function uploadsTransform(options) {
         contents.set(hash, blob);
         continue;
       }
-      lfs ??= await lfsReader(git, options.config.remote);
+      lfs ??= await lfsReader(git, lfsRemote(options.config));
       const read = await lfs(pointer, target);
       contents.set(hash, read.ok ? read.content : { unreadable: read.reason });
     }
@@ -26521,7 +26723,7 @@ function uploadsTransform(options) {
       if (!Array.isArray(own6)) {
         const entry = files.get(own6.target);
         const file = linked.get(own6.target);
-        if (!file.absent) file.absent = (await missingLfsObjects(git, options.config.remote, [entry.oid])).has(file.hash);
+        if (!file.absent) file.absent = (await missingLfsObjects(git, lfsRemote(options.config), [entry.oid])).has(file.hash);
         throw new LeaveOutError(UPLOAD_UNREADABLE, message("initial-sync.upload-unreadable", { file: own6.target, reason: own6.unreadable }), [own6.target], { missingLfsObject: file.absent });
       }
       if (index2 === batches.length - 1) await uploadLastBatch(path2, own6, batch.bytes);
@@ -26813,12 +27015,12 @@ async function checkPushScope(git, tracked, next, zones) {
 
 // src/sync/security.ts
 import { spawn as spawn2 } from "node:child_process";
-import { lstat, mkdtemp as mkdtemp2, mkdir as mkdir2, writeFile as writeFile2, readFile as readFile2, realpath, rm as rm2, symlink } from "node:fs/promises";
-import { tmpdir as tmpdir3 } from "node:os";
-import { dirname, join as join7, sep as sep2 } from "node:path";
+import { lstat as lstat2, mkdtemp as mkdtemp3, mkdir as mkdir3, writeFile as writeFile3, readFile as readFile2, realpath as realpath2, rm as rm3, symlink } from "node:fs/promises";
+import { tmpdir as tmpdir4 } from "node:os";
+import { dirname as dirname2, join as join9, sep as sep3 } from "node:path";
 import { createHash as createHash5 } from "node:crypto";
 function runHooks(dir, args, env) {
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     const child = spawn2("pre-commit", args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: "never", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const collect = (chunk) => {
@@ -26829,11 +27031,11 @@ function runHooks(dir, args, env) {
     const timer = setTimeout(() => child.kill("SIGKILL"), 12e4);
     child.on("error", () => {
       clearTimeout(timer);
-      resolve3({ code: -1, output: "" });
+      resolve4({ code: -1, output: "" });
     });
     child.on("close", (code4) => {
       clearTimeout(timer);
-      resolve3({ code: code4 ?? -1, output });
+      resolve4({ code: code4 ?? -1, output });
     });
   });
 }
@@ -26905,14 +27107,14 @@ async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
     if (pointer === null || content4 === void 0) return false;
     const bytes = contentBytes(content4);
     if (pointer.size !== bytes.length || pointer.oid !== createHash5("sha256").update(bytes).digest("hex")) return false;
-    if (!(await readFile2(join7(dir, path2))).equals(bytes)) return false;
+    if (!(await readFile2(join9(dir, path2))).equals(bytes)) return false;
   }
   return true;
 }
 async function throughLink(dir, path2) {
   const parts = path2.split("/");
   for (let at = 1; at <= parts.length; at++) {
-    const found = await lstat(join7(dir, ...parts.slice(0, at))).catch(() => null);
+    const found = await lstat2(join9(dir, ...parts.slice(0, at))).catch(() => null);
     if (found === null) return false;
     if (found.isSymbolicLink()) return true;
   }
@@ -26926,32 +27128,32 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
   const fileMode = (entry) => entry.mode === "100755" ? 493 : 420;
   await readInBatches(git, files, async (batch, blobs) => {
     for (const entry of batch) {
-      await mkdir2(dirname(join7(dir, entry.path)), { recursive: true });
-      await writeFile2(join7(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
+      await mkdir3(dirname2(join9(dir, entry.path)), { recursive: true });
+      await writeFile3(join9(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
     }
   }, async (entry) => {
-    await mkdir2(dirname(join7(dir, entry.path)), { recursive: true });
-    await git.runToFile(["cat-file", "blob", entry.oid], join7(dir, entry.path), fileMode(entry));
+    await mkdir3(dirname2(join9(dir, entry.path)), { recursive: true });
+    await git.runToFile(["cat-file", "blob", entry.oid], join9(dir, entry.path), fileMode(entry));
   });
-  for (const entry of gitlinks) await mkdir2(join7(dir, entry.path), { recursive: true });
+  for (const entry of gitlinks) await mkdir3(join9(dir, entry.path), { recursive: true });
   await readInBatches(git, links, async (batch, targets) => {
     for (const entry of batch) {
-      await mkdir2(dirname(join7(dir, entry.path)), { recursive: true });
-      await symlink(targets.get(entry.oid), join7(dir, entry.path));
+      await mkdir3(dirname2(join9(dir, entry.path)), { recursive: true });
+      await symlink(targets.get(entry.oid), join9(dir, entry.path));
     }
   }, async () => {
     throw new Error(message("sync.security-link-outside"));
   });
-  const root2 = await realpath(dir);
+  const root2 = await realpath2(dir);
   const linkedSupport = [];
   for (const entry of links) {
-    const target = await realpath(join7(dir, entry.path));
-    const inside = target.slice(root2.length + 1).split(sep2);
-    if (!target.startsWith(root2 + sep2) || isGitDirectoryName(inside[0])) throw new Error(message("sync.security-link-outside"));
-    if (!isMarkdownPath(entry.path)) linkedSupport.push(inside.join("/"));
+    const target = await realpath2(join9(dir, entry.path));
+    const inside2 = target.slice(root2.length + 1).split(sep3);
+    if (!target.startsWith(root2 + sep3) || isGitDirectoryName(inside2[0])) throw new Error(message("sync.security-link-outside"));
+    if (!isMarkdownPath(entry.path)) linkedSupport.push(inside2.join("/"));
   }
-  await mkdir2(join7(dir, ".git", "info"), { recursive: true });
-  await writeFile2(join7(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
+  await mkdir3(join9(dir, ".git", "info"), { recursive: true });
+  await writeFile3(join9(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
   await scratch.run(["add", "--all", "--force"]);
   if (gitlinks.length > 0) {
     await scratch.run(["update-index", "-z", "--index-info"], { input: gitlinks.map((entry) => `160000 ${entry.oid}	${entry.path}\0`).join("") });
@@ -26970,7 +27172,7 @@ async function securityGate(git, tracked, options = {}) {
   let baseline;
   let linkedSupport = [];
   const close = async () => {
-    if (dir !== void 0) await rm2(dir, { recursive: true, force: true });
+    if (dir !== void 0) await rm3(dir, { recursive: true, force: true });
     dir = void 0;
   };
   return {
@@ -26982,7 +27184,7 @@ async function securityGate(git, tracked, options = {}) {
         if (dir === void 0) {
           const entries = await listTree(git, tracked);
           checkScratchBudget(entries, budget);
-          dir = await mkdtemp2(join7(tmpdir3(), "capture-security-"));
+          dir = await mkdtemp3(join9(tmpdir4(), "capture-security-"));
           scratch = new Git(dir);
           await scratch.run(["init", "--quiet", `--object-format=${await git.text(["rev-parse", "--show-object-format"])}`]);
           ({ tree: baseline, linkedSupport } = await reproduceTree(git, tracked, entries, scratch, dir));
@@ -26993,8 +27195,8 @@ async function securityGate(git, tracked, options = {}) {
           checkRepoPath(path2);
           if (path2 === PRE_COMMIT_CONFIG || path2.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (await throughLink(dir, path2)) return [{ hook: SECURITY_ALIAS, line: 1 }];
-          await mkdir2(dirname(join7(dir, path2)), { recursive: true });
-          await writeFile2(join7(dir, path2), contentBytes(content4));
+          await mkdir3(dirname2(join9(dir, path2)), { recursive: true });
+          await writeFile3(join9(dir, path2), contentBytes(content4));
         }
         if (!await onlyDocumentsChanged(scratch, dir, files, linkedSupport)) return [{ hook: SECURITY_ALIAS, line: 1 }];
         await scratch.run(["add", "--force", "--", ...files.keys()]);
@@ -27016,7 +27218,7 @@ async function securityGate(git, tracked, options = {}) {
         }
         if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         for (const [path2, content4] of files) {
-          const after = await readFile2(join7(dir, path2)).catch(() => null);
+          const after = await readFile2(join9(dir, path2)).catch(() => null);
           if (after === null || !after.equals(contentBytes(content4))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         }
         return findings;
@@ -27040,14 +27242,14 @@ async function checkTitle(gate, path2, title) {
 
 // src/sync/merge.ts
 import { createHash as createHash6 } from "node:crypto";
-import { mkdtemp as mkdtemp4, rm as rm4 } from "node:fs/promises";
-import { tmpdir as tmpdir5 } from "node:os";
-import { join as join9 } from "node:path";
+import { mkdtemp as mkdtemp5, rm as rm5 } from "node:fs/promises";
+import { tmpdir as tmpdir6 } from "node:os";
+import { join as join11 } from "node:path";
 
 // src/merge/merge.ts
-import { mkdtemp as mkdtemp3, writeFile as writeFile3, rm as rm3 } from "node:fs/promises";
-import { tmpdir as tmpdir4 } from "node:os";
-import { join as join8 } from "node:path";
+import { mkdtemp as mkdtemp4, writeFile as writeFile4, rm as rm4 } from "node:fs/promises";
+import { tmpdir as tmpdir5 } from "node:os";
+import { join as join10 } from "node:path";
 
 // src/merge/markers.ts
 var MARKERS = {
@@ -27064,7 +27266,7 @@ function markerCallout(marker) {
 function lines(text6) {
   return text6.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 }
-function lineText(text6) {
+function lineText2(text6) {
   return text6.replace(/\r?\n$/, "");
 }
 function unquote(text6) {
@@ -27095,7 +27297,7 @@ function findMarkerLines(text6) {
     const line2 = i + 1;
     if (excluded.some(([a, b]) => line2 >= a && line2 <= b)) return;
     const quote = quotes.find(([a, b]) => line2 >= a && line2 <= b);
-    const value = quote ? unquote(lineText(text7)) : lineText(text7);
+    const value = quote ? unquote(lineText2(text7)) : lineText2(text7);
     if (!values.includes(value)) return;
     found.set(line2 + offset, quote ? { value, startLine: quote[2] + offset, endLine: quote[1] + offset, calloutLine: quote[0] + offset } : { value, startLine: line2 + offset, endLine: line2 + offset });
   });
@@ -27110,8 +27312,8 @@ function findMarkerLines(text6) {
 }
 function arm(source, after, before) {
   const content4 = source.slice(after, before - 1);
-  while (content4[0] !== void 0 && lineText(content4[0]) === "") content4.shift();
-  while (content4.at(-1) !== void 0 && lineText(content4.at(-1)) === "") content4.pop();
+  while (content4[0] !== void 0 && lineText2(content4[0]) === "") content4.shift();
+  while (content4.at(-1) !== void 0 && lineText2(content4.at(-1)) === "") content4.pop();
   return content4.join("").replace(/\r?\n$/, "");
 }
 function detectConflicts(text6) {
@@ -27144,14 +27346,14 @@ function tokenize(text6, size) {
   const tokens = [];
   for (let i = 0; i < source.length; i++) {
     const text7 = source[i];
-    if (lineText(text7) !== `${"<".repeat(size)} git`) {
+    if (lineText2(text7) !== `${"<".repeat(size)} git`) {
       tokens.push({ kind: "line", text: text7 });
       continue;
     }
     const ours = [];
     const theirs = [];
-    while (++i < source.length && lineText(source[i]) !== "=".repeat(size)) ours.push(source[i]);
-    while (++i < source.length && lineText(source[i]) !== `${">".repeat(size)} linear`) theirs.push(source[i]);
+    while (++i < source.length && lineText2(source[i]) !== "=".repeat(size)) ours.push(source[i]);
+    while (++i < source.length && lineText2(source[i]) !== `${">".repeat(size)} linear`) theirs.push(source[i]);
     if (i === source.length) throw new Error(message("sync.merge-conflict-output"));
     tokens.push({ kind: "conflict", ours, theirs });
   }
@@ -27221,7 +27423,7 @@ function conflictRanges(tokens) {
 function withoutMarkers(tokens, side) {
   const projection = tokens.flatMap((token) => content3(token, side)).join("");
   const source = lines(projection);
-  const blank = (line3) => source[line3 - 1] !== void 0 && lineText(source[line3 - 1]) === "";
+  const blank = (line3) => source[line3 - 1] !== void 0 && lineText2(source[line3 - 1]) === "";
   const drop = /* @__PURE__ */ new Set();
   for (const [line3, marker] of findMarkerLines(projection)) {
     drop.add(line3);
@@ -27242,7 +27444,7 @@ function completeBlocks(text6) {
       const opener = /^(?: {0,3})(`{3,}|~{3,})/.exec(raw)?.[1];
       if (!opener) return;
       const source = lines(raw);
-      const last = lineText(source.at(-1) ?? "");
+      const last = lineText2(source.at(-1) ?? "");
       const fence = /^[ >\t]*(`{3,}|~{3,})[ \t]*$/.exec(last)?.[1];
       const closing = fence !== void 0 && fence[0] === opener[0] && fence.length >= opener.length;
       const valueLines = node2.value === "" ? 0 : node2.value.split("\n").length;
@@ -27289,7 +27491,7 @@ ${arms("theirs")}
 
 ${markerCallout(MARKERS.end)}${last && !finalNewline ? "" : "\n"}`;
     const next = tokens[cursor];
-    if (next?.kind === "line" && lineText(next.text) !== "") text6 += "\n";
+    if (next?.kind === "line" && lineText2(next.text) !== "") text6 += "\n";
   }
   return text6 + tokens.slice(cursor).map((token) => content3(token, "ours").join("")).join("");
 }
@@ -27298,7 +27500,7 @@ async function mergeHeads(dir, withBom) {
   const heads = Object.fromEntries(Object.entries(withBom).map(([name, text6]) => [name, text6.replace(/^﻿/, "")]));
   if (heads.theirs === heads.base || heads.ours === heads.theirs) return bom + heads.ours;
   if (heads.ours === heads.base) return bom + heads.theirs;
-  await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile3(join8(dir, `head-${name}`), text6, { mode: 384 })));
+  await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile4(join10(dir, `head-${name}`), text6, { mode: 384 })));
   const merged = await new Git(dir).run(["merge-file", "--stdout", "head-ours", "head-base", "head-theirs"], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
   return bom + (merged.code === 0 ? merged.stdout.toString("utf8") : heads.ours);
 }
@@ -27309,10 +27511,10 @@ async function mergeMarkdown(base, ours, theirs) {
   base = splitFile(base).body.replaceAll("\r\n", "\n");
   ours = gitFile.body.replaceAll("\r\n", "\n");
   theirs = splitFile(theirs).body.replaceAll("\r\n", "\n");
-  const dir = await mkdtemp3(join8(tmpdir4(), "markdown-merge-"));
+  const dir = await mkdtemp4(join10(tmpdir5(), "markdown-merge-"));
   try {
     const head = await mergeHeads(dir, heads);
-    await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile3(join8(dir, name), text7, { mode: 384 })));
+    await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile4(join10(dir, name), text7, { mode: 384 })));
     let size = 7;
     for (const text7 of [base, ours, theirs]) {
       for (const run of text7.matchAll(/<+|=+|>+/g)) size = Math.max(size, run[0].length + 1);
@@ -27340,7 +27542,7 @@ async function mergeMarkdown(base, ours, theirs) {
     const text6 = head + (result.code === 0 ? raw : render2(tokens, conflictRanges(tokens), finalNewline)).replaceAll("\n", eol2);
     return { text: text6, conflicts: detectConflicts(text6) };
   } finally {
-    await rm3(dir, { recursive: true, force: true });
+    await rm4(dir, { recursive: true, force: true });
   }
 }
 
@@ -27802,8 +28004,8 @@ function compare3(a, b) {
 async function takePaths(git, into, from, paths) {
   const entries = new Map((await listTree(git, from)).map((entry) => [entry.path, entry]));
   for (const path2 of paths) checkRepoPath(path2, { removal: !entries.has(path2) });
-  const dir = await mkdtemp4(join9(tmpdir5(), "lane-index-"));
-  const env = { GIT_INDEX_FILE: join9(dir, "index") };
+  const dir = await mkdtemp5(join11(tmpdir6(), "lane-index-"));
+  const env = { GIT_INDEX_FILE: join11(dir, "index") };
   try {
     await git.run(["read-tree", `${into}^{tree}`], { env });
     const zero = "0".repeat(await git.text(["rev-parse", "--show-object-format"]) === "sha256" ? 64 : 40);
@@ -27814,7 +28016,7 @@ async function takePaths(git, into, from, paths) {
     if (input) await git.run(["update-index", "-z", "--index-info"], { env, input });
     return await git.text(["write-tree"], { env });
   } finally {
-    await rm4(dir, { recursive: true, force: true });
+    await rm5(dir, { recursive: true, force: true });
   }
 }
 function treeCommit(git, tree, parent) {
@@ -27896,7 +28098,7 @@ async function readPlainFileProvenance(git, linear, options = {}) {
 }
 
 // src/sync/write.ts
-import { createHash as createHash12, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash12, randomUUID as randomUUID4 } from "node:crypto";
 import { posix as posix5 } from "node:path";
 
 // src/sync/paths.ts
@@ -27972,8 +28174,8 @@ function resolveRelative(fromPath, url) {
   return { path: path2, fragment };
 }
 function relativeLink(fromPath, toPath) {
-  const relative3 = posix4.relative(posix4.dirname(fromPath), toPath);
-  return relative3.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+  const relative4 = posix4.relative(posix4.dirname(fromPath), toPath);
+  return relative4.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
 function linkDestinations(body2) {
   const tree = parse2(body2);
@@ -28075,9 +28277,9 @@ function destinationSpan(body2, node2) {
     if (body2[end2 - 1] !== ")") return void 0;
     const last = node2.children.at(-1);
     const textEnd = last?.position?.end.offset ?? start2 + 1;
-    const open2 = body2.indexOf("](", textEnd);
-    if (open2 === -1 || open2 >= end2) return void 0;
-    at = open2 + 2;
+    const open3 = body2.indexOf("](", textEnd);
+    if (open3 === -1 || open3 >= end2) return void 0;
+    at = open3 + 2;
   } else {
     let close = start2 + 1;
     while (close < end2 && body2[close] !== "]") close += body2[close] === "\\" ? 2 : 1;
@@ -28171,7 +28373,7 @@ async function nameFixingHooks(git, tracked, files) {
 }
 
 // src/sync/marks.ts
-import { createHash as createHash9, randomUUID } from "node:crypto";
+import { createHash as createHash9, randomUUID as randomUUID2 } from "node:crypto";
 var MARKS = {
   conflict: { icon: "Alert", color: "#F2994A" },
   blocked: { icon: "Alert", color: "#EB5757" },
@@ -28275,7 +28477,7 @@ async function reconcileDocumentMark(options) {
   if (!document4.documentContentId) throw new Error(message("sync.needs-comment-target"));
   const saved = entry.saved ?? { icon: document4.icon, color: document4.color };
   const previous3 = saved.notice;
-  const notice = previous3?.kind === state ? { ...previous3, bodyHash, posted: previous3.posted && previous3.bodyHash === bodyHash } : { id: options.noticeId?.(state) ?? randomUUID(), kind: state, bodyHash, posted: false };
+  const notice = previous3?.kind === state ? { ...previous3, bodyHash, posted: previous3.posted && previous3.bodyHash === bodyHash } : { id: options.noticeId?.(state) ?? randomUUID2(), kind: state, bodyHash, posted: false };
   if (entry.saved === void 0 || previous3?.kind !== state || previous3.bodyHash !== bodyHash) {
     entry = { ...entry, saved: { ...saved, notice } };
     await persistEntry(entry);
@@ -28305,7 +28507,7 @@ function stableId(...parts) {
 }
 
 // src/sync/suspended.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 
 // src/sync/merge-destination.ts
 import { setTimeout as sleep3 } from "node:timers/promises";
@@ -28638,7 +28840,7 @@ async function addEpisodes(context, options, ids, paths, checks, timedOut = []) 
     if (id !== void 0 && ![...ids.values()].some((entry) => entry.id === id)) ids.set(path2, { id });
   }
   for (const [path2, entry] of ids) if (paths.has(path2) && entry.suspended === void 0) {
-    entry.suspended = { noticeId: randomUUID2(), paths: [path2], checks: [...checks], ...timedOut.length > 0 ? { timedOut: [...timedOut] } : {} };
+    entry.suspended = { noticeId: randomUUID3(), paths: [path2], checks: [...checks], ...timedOut.length > 0 ? { timedOut: [...timedOut] } : {} };
     delete entry.releaseBase;
     delete entry.releasePaths;
   }
@@ -28728,17 +28930,17 @@ async function maintainSuspended(context, options) {
   if (anchor?.suspended !== void 0) anchor.suspended.paths = [...paths].sort();
   const pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
   if (pushUnverified.length > 0) {
-    const open3 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
-    const pr = previous3 === null ? void 0 : (await ensurePullRequest(options.github, { head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body: withUnverifiedNote(open3?.body ?? "", pushUnverified) })).pullRequest;
+    const open4 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+    const pr = previous3 === null ? void 0 : (await ensurePullRequest(options.github, { head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body: withUnverifiedNote(open4?.body ?? "", pushUnverified) })).pullRequest;
     return { paths: [...paths].sort(), checks: [], code: "head-unverified", unverified: pushUnverified, ...pr === void 0 ? {} : { pullRequest: { number: pr.number, url: pr.url } } };
   }
   const changed2 = await push2(context, options, ids, head, previous3);
   const result = { paths: [...paths].sort(), checks: [], changed: changed2 };
-  const open2 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
-  const old = /^<!-- suspended merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m.exec(open2?.body ?? "");
+  const open3 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+  const old = /^<!-- suspended merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m.exec(open3?.body ?? "");
   const earlier = old?.[1] === head && old?.[2] === tracked ? old : null;
-  const since = headSince(open2?.body, head, /* @__PURE__ */ new Date());
-  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous3 ? { pushedFrom: previous3 === null ? [] : [previous3], carried } : { body: open2?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
+  const since = headSince(open3?.body, head, /* @__PURE__ */ new Date());
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous3 ? { pushedFrom: previous3 === null ? [] : [previous3], carried } : { body: open3?.body, git, base: tracked, pushed: lastPushed(context, options, ids) });
   const unverified = await isAncestor(git, tracked, head) ? await unverifiedPaths(git, tracked, head, context.mapping.zones) : [];
   const held = unverified.length === 0 ? "" : `
 ${unverifiedNote(unverified)}
@@ -28936,7 +29138,7 @@ async function writeTrackedToLinear(context, options) {
   const identity = options.identity ?? context.identity;
   const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
   const checkpoint2 = options.checkpoint ?? ((name) => checkpoint(name));
-  const newId = options.newId ?? randomUUID3;
+  const newId = options.newId ?? randomUUID4;
   const expected = { ...options.state };
   const tracked = fetched.tracked;
   const linearTip = expected.linear;
@@ -30301,21 +30503,21 @@ async function pullRequestStep(context, options) {
     return pushed.reason === "stale" ? { ...result, code: "state-moved" } : result;
   }
   try {
-    const open2 = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
-    if (open2 !== null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options))) return { ...result, code: "initial-pull-request-pending" };
+    const open3 = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
+    if (open3 !== null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options))) return { ...result, code: "initial-pull-request-pending" };
     const identity = options.identity ?? context.identity;
-    const noted = open2 === null ? null : readRefusal(open2.body);
-    const held = open2 === null ? null : readRedMainNote(open2.body);
+    const noted = open3 === null ? null : readRefusal(open3.body);
+    const held = open3 === null ? null : readRedMainNote(open3.body);
     const merger = markedMerger(git, options.state.ids, identity, frozen);
     const resolved = { marked: [], decided: [] };
     const checkedExpectation = async () => {
-      const known = await expectedChecks(github, sync, options.requiredChecks ?? [], { body: open2?.body, git, base: tracked, pushed: await ownPushed(context, options) });
+      const known = await expectedChecks(github, sync, options.requiredChecks ?? [], { body: open3?.body, git, base: tracked, pushed: await ownPushed(context, options) });
       return known.complete ? checkExpectation(options, known.checks) : null;
     };
-    const keepCheckedHead = open2 !== null && pending && suspended?.waiting !== true && noted === null && await mergedTree(git, tracked, sync) !== null && !await needsTrackedMerge(git, tracked, sync, noted) && await checkedHeadReady(github, sync, await checkedExpectation());
+    const keepCheckedHead = open3 !== null && pending && suspended?.waiting !== true && noted === null && await mergedTree(git, tracked, sync) !== null && !await needsTrackedMerge(git, tracked, sync, noted) && await checkedHeadReady(github, sync, await checkedExpectation());
     let head = sync;
-    const heldSnapshot = open2 === null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options));
-    if (open2 === null && (!pending || heldSnapshot)) {
+    const heldSnapshot = open3 === null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options));
+    if (open3 === null && (!pending || heldSnapshot)) {
       if (!result.needed && (heldSnapshot || !recordMove)) return result;
       head = await restart(git, sync, linear, wanted, identity, frozen.size > 0);
     } else if (!keepCheckedHead) {
@@ -30351,14 +30553,14 @@ async function pullRequestStep(context, options) {
         hold = null;
       }
     }
-    if (open2 === null && !result.needed && !recordMove && headTree === trackedTree) return result;
+    if (open3 === null && !result.needed && !recordMove && headTree === trackedTree) return result;
     let carried = [];
     if (head === sync && sync !== null && pending && options.state.ids !== null) {
       const again = await checksAgain(
         github,
         sync,
         options.requiredChecks ?? [],
-        { body: open2?.body, git, base: tracked, pushed: await ownPushed(context, options) },
+        { body: open3?.body, git, base: tracked, pushed: await ownPushed(context, options) },
         { ...options, againMessage: CHECKS_AGAIN_MESSAGE, verified: async () => (await unverifiedPaths(git, tracked, sync, context.mapping.zones)).length === 0 }
       );
       if (again !== null) {
@@ -30376,7 +30578,7 @@ ${checksAgainTrailer(again.from)}`;
     }
     if (head !== sync && pushUnverified.length > 0) {
       if (sync !== null) {
-        const { pullRequest: pullRequest2, opened: opened2 } = await ensurePullRequest(github, { head: config.syncBranch, base: config.trackedBranch, title: SYNC_PULL_REQUEST_TITLE, body: withUnverifiedNote(open2?.body ?? "", pushUnverified) });
+        const { pullRequest: pullRequest2, opened: opened2 } = await ensurePullRequest(github, { head: config.syncBranch, base: config.trackedBranch, title: SYNC_PULL_REQUEST_TITLE, body: withUnverifiedNote(open3?.body ?? "", pushUnverified) });
         result.pullRequest = { number: pullRequest2.number, url: pullRequest2.url, opened: opened2 };
       }
       return { ...result, code: "head-unverified", unverified: pushUnverified };
@@ -30390,8 +30592,8 @@ ${checksAgainTrailer(again.from)}`;
     }
     result.paths = (await git.text(["diff", "--name-only", "--no-renames", trackedTree, headTree])).split("\n").filter(Boolean);
     const earlier = noted !== null && noted.head === head && noted.base === tracked ? noted : null;
-    const since = headSince(open2?.body, head, /* @__PURE__ */ new Date());
-    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], carried } : { body: open2?.body, git, base: tracked, pushed: await ownPushed(context, options) });
+    const since = headSince(open3?.body, head, /* @__PURE__ */ new Date());
+    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], carried } : { body: open3?.body, git, base: tracked, pushed: await ownPushed(context, options) });
     const stillHeld = hold === null ? null : { ...hold, head };
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);
     const { pullRequest, opened } = await ensurePullRequest(github, {
@@ -30893,7 +31095,7 @@ async function confirmInitialSync(context, options) {
   const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
   const stopAfter = "stopAfterDocuments" in options ? options.stopAfterDocuments : testStopAfterDocuments();
   const checkpoint2 = options.checkpoint ?? ((name) => checkpoint(name));
-  const newId = options.newId ?? randomUUID4;
+  const newId = options.newId ?? randomUUID5;
   const sources = await readPlanSources(context, { withContent: true });
   const plan = planInitialSync(sources.input);
   plan.capacity = assessCapacity(context, sources.containers, plan.create, options.documentCap);
@@ -32126,10 +32328,10 @@ async function confirmWithGate(context, options, gate) {
       });
       result.pullRequest = { ...pullRequest, opened, updated };
     } else if (recorded.closesPullRequest) {
-      const open2 = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
-      if (open2 !== null) {
-        await closePullRequest(options.github, open2.number);
-        result.closedPullRequest = open2.number;
+      const open3 = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
+      if (open3 !== null) {
+        await closePullRequest(options.github, open3.number);
+        result.closedPullRequest = open3.number;
       }
     }
   } catch (error) {
@@ -32373,7 +32575,7 @@ ${trailers.join("\n")}`,
     const finalUploads = new Map(uploads);
     for (const entry of entries) for (const [hash, url] of bodies.get(entry.path).uploads) finalUploads.set(hash, url);
     const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity, context.pushedKey);
-    if (lfsObjects.length > 0) await git.run(["lfs", "push", "--object-id", options.config.remote, ...lfsObjects]);
+    await lfsPush(git, lfsRemote(options.config), lfsObjects);
     const updates = [
       { ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit },
       { ref: stateRef(options.config, "uploads"), expected: expected.uploads, next: uploadsCommit },
@@ -32893,7 +33095,7 @@ function planInitialSync(input) {
     if (text6 === void 0) throw new Error(message("initial-sync.text-not-read", { path: path2 }));
     return text6;
   };
-  const lint = (path2, title) => {
+  const lint2 = (path2, title) => {
     const findings = lintInTree(path2, textOf(path2), mapping.files);
     if (findings.length > 0) leaveOut(path2, findings.map((f) => f.rule), findings.map((f) => f.line));
     if (lengthRefusal({ title }, facts) !== void 0) leaveOut(path2, ["title-too-long"]);
@@ -32901,7 +33103,7 @@ function planInitialSync(input) {
   const leftOutTitles = /* @__PURE__ */ new Map();
   for (const file of mapping.leftOut) {
     leaveOut(file.path, [file.rule], [], file.collidesWith);
-    lint(file.path, file.title);
+    lint2(file.path, file.title);
     leftOutTitles.set(titleIn(file.place, file.title), file.path);
   }
   for (const file of mapping.unsynced) {
@@ -32914,7 +33116,7 @@ function planInitialSync(input) {
   const live = (document4) => !document4.trashed && document4.archivedAt === null;
   const synced = [];
   for (const document4 of mapping.documents) {
-    lint(document4.path, document4.title);
+    lint2(document4.path, document4.title);
     if (touched(document4.place, document4.title)) leaveOut(document4.path, ["changed-during-run"]);
     if (leftOut.has(document4.path)) leftOutTitles.set(titleIn(document4.place, document4.title), document4.path);
     else synced.push(document4);
@@ -33670,7 +33872,7 @@ ${plainTrailers.join("\n")}`), identity, sign: signObservation(context.pushedKey
 ${trailers.join("\n")}`;
     const always = recordsRemovals || through !== cursor && recordsChange;
     const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
-    if (prepared.oids.length > 0) await git.run(["lfs", "push", "--object-id", options.config.remote, ...prepared.oids]);
+    await lfsPush(git, lfsRemote(options.config), prepared.oids);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
     const pushed = await pushAtomic(git, options.config, ["linear", "ids", "uploads"].map((store) => ({ ref: stateRef(options.config, store), expected: state[store], next: next[store] })));
     if (!pushed.ok) {
@@ -33897,8 +34099,8 @@ ${warning2.code}: ${JSON.stringify(warning2.path)} (${warning2.length} character
   return summary2;
 }
 async function prepareLfs(git, tracked, changes) {
-  const dir = await mkdtemp5(join10(tmpdir6(), "capture-attributes-"));
-  const env = { GIT_INDEX_FILE: join10(dir, "index") };
+  const dir = await mkdtemp6(join12(tmpdir7(), "capture-attributes-"));
+  const env = { GIT_INDEX_FILE: join12(dir, "index") };
   const result = new Map(changes);
   const oids = [];
   try {
@@ -33919,7 +34121,7 @@ async function prepareLfs(git, tracked, changes) {
     }
     return { changes: result, oids: [...new Set(oids)] };
   } finally {
-    await rm5(dir, { recursive: true, force: true });
+    await rm6(dir, { recursive: true, force: true });
   }
 }
 
@@ -34007,17 +34209,17 @@ function count3(n, noun) {
 }
 
 // src/run/operation.ts
-import { rm as rm7 } from "node:fs/promises";
+import { rm as rm8 } from "node:fs/promises";
 
 // src/sync/staged.ts
 import { createHash as createHash17 } from "node:crypto";
-import { mkdir as mkdir3, readFile as readFile3, rm as rm6, writeFile as writeFile4 } from "node:fs/promises";
-import { join as join11 } from "node:path";
+import { mkdir as mkdir4, readFile as readFile3, rm as rm7, writeFile as writeFile5 } from "node:fs/promises";
+import { join as join13 } from "node:path";
 var MANIFEST = "manifest.json";
 var ANSWERS = "answers.json";
 var READS = "linear-reads";
 var VERSION3 = 1;
-var readsFolder = (folder) => join11(folder, READS);
+var readsFolder = (folder) => join13(folder, READS);
 var sha2565 = (content4) => createHash17("sha256").update(contentBytes(content4)).digest("hex");
 function candidateKey(files) {
   const pairs = [...files].map(([path2, content4]) => [path2, sha2565(content4)]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
@@ -34025,8 +34227,8 @@ function candidateKey(files) {
 }
 async function stagingGate(git, tracked, folder) {
   const configured = (await securityHookIds(git, tracked)).length > 0;
-  await rm6(folder, { recursive: true, force: true });
-  await mkdir3(join11(folder, "files"), { recursive: true, mode: 448 });
+  await rm7(folder, { recursive: true, force: true });
+  await mkdir4(join13(folder, "files"), { recursive: true, mode: 448 });
   const sets = /* @__PURE__ */ new Map();
   return {
     configured,
@@ -34038,7 +34240,7 @@ async function stagingGate(git, tracked, folder) {
         for (const [path2, content4] of files) {
           checkRepoPath(path2);
           const hash = sha2565(content4);
-          await writeFile4(join11(folder, "files", hash), contentBytes(content4), { mode: 384 });
+          await writeFile5(join13(folder, "files", hash), contentBytes(content4), { mode: 384 });
           entries.push({ path: path2, sha256: hash });
         }
         sets.set(key, { key, files: entries });
@@ -34047,22 +34249,22 @@ async function stagingGate(git, tracked, folder) {
     },
     async finish() {
       const manifest = { version: VERSION3, tracked, sets: [...sets.values()] };
-      await writeFile4(join11(folder, MANIFEST), JSON.stringify(manifest), { mode: 384 });
+      await writeFile5(join13(folder, MANIFEST), JSON.stringify(manifest), { mode: 384 });
       return sets.size;
     }
   };
 }
 async function stageNothing(folder, tracked) {
-  await rm6(folder, { recursive: true, force: true });
-  await mkdir3(folder, { recursive: true, mode: 448 });
-  await writeFile4(join11(folder, MANIFEST), JSON.stringify({ version: VERSION3, tracked: tracked ?? "", sets: [] }), { mode: 384 });
+  await rm7(folder, { recursive: true, force: true });
+  await mkdir4(folder, { recursive: true, mode: 448 });
+  await writeFile5(join13(folder, MANIFEST), JSON.stringify({ version: VERSION3, tracked: tracked ?? "", sets: [] }), { mode: 384 });
 }
 async function answeringGate(git, tracked, folder) {
   const hooks = new Set(await securityHookIds(git, tracked));
   const configured = hooks.size > 0;
   let answers = {};
   if (configured) {
-    const text6 = await readFile3(join11(folder, ANSWERS), "utf8").catch(() => null);
+    const text6 = await readFile3(join13(folder, ANSWERS), "utf8").catch(() => null);
     const read = text6 === null ? null : JSON.parse(text6);
     if (read !== null && read.version === VERSION3 && read.tracked === tracked) answers = read.answers;
   }
@@ -34109,7 +34311,7 @@ ${renderStaged(0)}` } : outcome2;
     return staged;
   } finally {
     reads?.close();
-    if (security?.step === "apply") await rm7(security.folder, { recursive: true, force: true });
+    if (security?.step === "apply") await rm8(security.folder, { recursive: true, force: true });
   }
 }
 async function runWithSecurity(operation, inputs, initialSync, options, security) {
@@ -34270,9 +34472,9 @@ function runEnding(outcome2) {
 }
 function stoppedBeforeWritingMessage(command, outcome2) {
   const detail = outcome2.setup?.detail ?? outcome2.refusal?.message;
-  const fix = fixUrl(outcome2.code);
+  const fix2 = fixUrl(outcome2.code);
   const explained = message("run.stopped-before-write", { command, code: String(outcome2.code), detail: detail === void 0 ? "" : message("run.stopped-detail", { detail: detail.replace(/\s*[\r\n]+\s*/g, " ") }) });
-  return fix === void 0 ? explained : message("run.how-to-fix", { message: explained.replace(/\.$/, ""), url: fix });
+  return fix2 === void 0 ? explained : message("run.how-to-fix", { message: explained.replace(/\.$/, ""), url: fix2 });
 }
 function stoppedMessage(command) {
   return message("run.stopped-by-linear", { command });
@@ -34298,8 +34500,6 @@ function linearPartialCode(outcome2) {
 }
 
 // src/run/finish.ts
-import { mkdir as mkdir4, writeFile as writeFile5 } from "node:fs/promises";
-import { dirname as dirname2 } from "node:path";
 function toRunReport(outcome2) {
   if (outcome2.sync?.write !== void 0) return toSyncRunReport(outcome2, outcome2.sync.write);
   const confirmed = outcome2.confirmed;
@@ -34476,34 +34676,18 @@ function toConfirmedReport(result) {
     reformatted: result.record?.reformatted ?? []
   };
 }
-async function writeRunReport(path2, outcome2) {
-  await mkdir4(dirname2(path2), { recursive: true });
-  await writeFile5(path2, `${JSON.stringify(toRunReport(outcome2), null, 2)}
-`);
+async function writeRunReport(path2, outcome2, checkout) {
+  await writeReportFile(path2, `${JSON.stringify(toRunReport(outcome2), null, 2)}
+`, checkout);
 }
 function captureReport(captured) {
   return captured === void 0 ? null : { ok: captured.ok, changed: captured.changed, removed: captured.removed, heldRemovals: captured.heldRemovals, blocked: captured.blocked, leftOut: captured.leftOut, writeBackWarnings: captured.writeBackWarnings, ...captured.stopped ? { stopped: captured.stopped } : {}, ...captured.rebuiltIds ? { rebuiltIds: captured.rebuiltIds } : {} };
 }
 
-// src/run/output.ts
-function outputText(value, limit = 16 * 1024 * 1024) {
-  if (typeof value !== "string" || value.length > limit || !/^[\t\n\r\x20-\x7e\u00a0-\u{10ffff}]*$/u.test(value)) {
-    throw new Error(message("output.invalid-text", { limit }));
-  }
-  return value;
-}
-function reportText(value, limit = 16 * 1024 * 1024) {
-  const escaped = value.replace(
-    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g,
-    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
-  );
-  return outputText(escaped, limit);
-}
-
 // src/init/command.ts
 var import_yaml3 = __toESM(require_dist(), 1);
-import { lstat as lstat2, mkdir as mkdir5, readFile as readFile4, readdir, realpath as realpath2, writeFile as writeFile6 } from "node:fs/promises";
-import { dirname as dirname3, isAbsolute as isAbsolute2, join as join12, relative as relative2, resolve as resolve2, sep as sep3 } from "node:path";
+import { lstat as lstat3, mkdir as mkdir5, readFile as readFile4, readdir, realpath as realpath3, writeFile as writeFile6 } from "node:fs/promises";
+import { dirname as dirname3, isAbsolute as isAbsolute3, join as join14, relative as relative3, resolve as resolve3, sep as sep4 } from "node:path";
 
 // src/init/workflows.json
 var workflows_default = {
@@ -34921,7 +35105,7 @@ jobs:
           linear-client-secret: \${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
 `,
   "pre-commit.yml": `# Copy to .github/workflows/pre-commit.yml in a synchronized repository.
-# Install Node 24 and pre-commit locally too. Hook revs must pin release
+# Install Node.js 24.2 or later and pre-commit locally too. Hook revs must pin release
 # commits containing dist/cli.js and a dependency-free package.json.
 name: Pre-commit
 
@@ -35328,14 +35512,14 @@ async function optionalRead(path2) {
   }
 }
 async function safePath(root2, path2) {
-  if (isAbsolute2(path2) || path2.split(/[\\/]/).includes("..") || path2.includes("\\")) throw new InitError(message("init.path-outside"));
-  const target = resolve2(root2, path2);
-  if (relative2(root2, target).startsWith(`..${sep3}`)) throw new InitError(message("init.path-outside"));
+  if (isAbsolute3(path2) || path2.split(/[\\/]/).includes("..") || path2.includes("\\")) throw new InitError(message("init.path-outside"));
+  const target = resolve3(root2, path2);
+  if (relative3(root2, target).startsWith(`..${sep4}`)) throw new InitError(message("init.path-outside"));
   let part = root2;
-  for (const component of relative2(root2, target).split(sep3).filter(Boolean)) {
-    part = join12(part, component);
+  for (const component of relative3(root2, target).split(sep4).filter(Boolean)) {
+    part = join14(part, component);
     try {
-      if ((await lstat2(part)).isSymbolicLink()) throw new InitError(message("init.symlink"));
+      if ((await lstat3(part)).isSymbolicLink()) throw new InitError(message("init.symlink"));
     } catch (error) {
       if (error.code === "ENOTDIR") throw new InitError(message("init.folder-is-file"));
       if (error.code !== "ENOENT") throw error;
@@ -35468,8 +35652,8 @@ async function runInit(args, options = {}) {
     }
     checkRelease(settings);
     if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || !folder.team && !folder.project)) throw new InitError(message("init.needs-folder"));
-    const root2 = await realpath2(options.cwd ?? process.cwd());
-    if (!await lstat2(join12(root2, ".git")).catch(() => void 0)) throw new InitError(message("init.not-at-root"));
+    const root2 = await realpath3(options.cwd ?? process.cwd());
+    if (!await lstat3(join14(root2, ".git")).catch(() => void 0)) throw new InitError(message("init.not-at-root"));
     const changes = /* @__PURE__ */ new Map();
     const queue = async (path2, create) => {
       const target = await safePath(root2, path2);
@@ -35487,13 +35671,13 @@ async function runInit(args, options = {}) {
     }
     await queue(PRE_COMMIT_CONFIG, (before) => hookConfig(before, settings));
     if (settings.lfs) await queue(GITATTRIBUTES, lfsAttributes);
-    for (const folder of settings.folders) await queue(join12(folder.path, ANNOTATION_FILE), (before) => annotate(before ?? "", folder));
+    for (const folder of settings.folders) await queue(join14(folder.path, ANNOTATION_FILE), (before) => annotate(before ?? "", folder));
     const contents = /* @__PURE__ */ new Map();
     const readmes = /* @__PURE__ */ new Set();
     for (const folder of settings.folders) {
-      let path2 = resolve2(root2, folder.path);
+      let path2 = resolve3(root2, folder.path);
       for (; ; ) {
-        readmes.add(join12(path2, ANNOTATION_FILE));
+        readmes.add(join14(path2, ANNOTATION_FILE));
         if (path2 === root2) break;
         path2 = dirname3(path2);
       }
@@ -35502,7 +35686,7 @@ async function runInit(args, options = {}) {
     const descendants = async (folder) => {
       if (visited.has(folder)) return;
       visited.add(folder);
-      readmes.add(join12(folder, ANNOTATION_FILE));
+      readmes.add(join14(folder, ANNOTATION_FILE));
       let entries;
       try {
         entries = await readdir(folder, { withFileTypes: true });
@@ -35511,15 +35695,15 @@ async function runInit(args, options = {}) {
         throw error;
       }
       for (const entry of entries) {
-        if (entry.isDirectory() && ![".git", "node_modules"].includes(entry.name)) await descendants(join12(folder, entry.name));
+        if (entry.isDirectory() && ![".git", "node_modules"].includes(entry.name)) await descendants(join14(folder, entry.name));
       }
     };
-    for (const folder of settings.folders) await descendants(resolve2(root2, folder.path));
+    for (const folder of settings.folders) await descendants(resolve3(root2, folder.path));
     for (const path2 of readmes) {
-      await safePath(root2, relative2(root2, path2));
+      await safePath(root2, relative3(root2, path2));
       const text6 = changes.get(path2) ?? await optionalRead(path2);
       if (text6 === void 0) continue;
-      contents.set(relative2(root2, path2), text6);
+      contents.set(relative3(root2, path2), text6);
     }
     const { annotations, problems } = collectAnnotations(contents);
     if (problems.length) throw new InitError(problems[0].message);
@@ -35536,7 +35720,7 @@ Remaining admin steps:
 2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID.
 3. In Settings \u2192 Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET. Delete repository secrets of the same names once the workflows and environment are in place. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. For plan requirements and migration of existing workflows, see ${QUICKSTART_URL}#sync-environment.
 4. Allow merge commits and configure required checks for main.
-5. Install Node 24 and pre-commit. Run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
+5. Install Node.js 24.2 or later and pre-commit. Run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
 6. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
 `;
     return { exitCode: 0, stderr: "", stdout };
@@ -35608,8 +35792,9 @@ async function runPreflightCommand(command, options) {
     throw error;
   }
   const warnings = [];
+  const git = new Git(options.cwd ?? process.cwd());
   const outcome2 = await runOperation(command, inputs, initialSync, {
-    git: new Git(options.cwd ?? process.cwd()),
+    git,
     warn: (message2) => {
       if (options.warn) options.warn(message2);
       else warnings.push(`warning: ${message2}
@@ -35620,7 +35805,10 @@ async function runPreflightCommand(command, options) {
     ...options.fetch ? { fetch: options.fetch } : {},
     ...options.checkClock ? { checkClock: options.checkClock } : {}
   });
-  if (inputs.reportFile !== void 0) await writeRunReport(inputs.reportFile, outcome2);
+  if (inputs.reportFile !== void 0) {
+    const checkout = await git.text(["rev-parse", "--show-toplevel"]).catch(() => git.dir);
+    await writeRunReport(inputs.reportFile, outcome2, checkout);
+  }
   const summaryFile = env["GITHUB_STEP_SUMMARY"];
   if (summaryFile) await appendFile(summaryFile, reportText(outcome2.summary));
   return endedRun(outcome2, warnings.join(""));
@@ -35660,7 +35848,11 @@ async function main() {
     terminal?.close();
   }
 }
-if (Number(process.versions.node.split(".")[0]) < 24) {
+function nodeVersionSupported(version) {
+  const [major = 0, minor = 0] = version.split(".").map(Number);
+  return major > 24 || major === 24 && minor >= 2;
+}
+if (!nodeVersionSupported(process.versions.node)) {
   process.stderr.write(`${message("cli.node-too-old")}
 `);
   process.exitCode = USAGE_EXIT_CODE;
@@ -35669,6 +35861,7 @@ if (Number(process.versions.node.split(".")[0]) < 24) {
 }
 export {
   endedRun,
+  nodeVersionSupported,
   runCli,
   usage
 };

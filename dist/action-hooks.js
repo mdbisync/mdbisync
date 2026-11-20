@@ -7374,7 +7374,7 @@ var MESSAGES = {
   // The command line and the action.
   "cli.missing-command": "missing command",
   "cli.unknown-command": "unknown command: {command}",
-  "cli.node-too-old": "mdbisync requires Node 24 or newer; install it before running the hook.",
+  "cli.node-too-old": "mdbisync requires Node.js 24.2 or later; install it and try again.",
   "cli.not-implemented": "{command}: not implemented",
   "action.unknown-operation": "unknown operation: {operation} (expected one of: {operations})",
   "action.unknown-security-step": "unknown security-step: {step} (expected one of: {steps}, or empty)",
@@ -7383,6 +7383,9 @@ var MESSAGES = {
   "output.invalid-text": "cannot write report text: expected printable Unicode text of at most {limit} characters",
   "output.invalid-count": "cannot write report metadata: expected a non-negative safe integer",
   "output.outside-directory": "report destination must stay inside the configured output directory",
+  "output.linked-directory": "report destination {path} is a symbolic link inside the checkout",
+  "output.link-loop": "report destination {path} passes through too many symbolic links",
+  "output.not-a-file": "report destination {path} is not a regular file",
   // `init`.
   "init.security-twice": "choose security hooks once",
   "init.lfs-twice": "choose Git LFS once",
@@ -7766,6 +7769,7 @@ function parseLfsPointer(blob) {
   }
   return oid !== null && size !== null ? { oid, size, extensions } : null;
 }
+var LFSCONFIG_LIMIT = 64 * 1024;
 
 // src/state/content.ts
 import { createHash } from "node:crypto";
