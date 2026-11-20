@@ -159,28 +159,3 @@ export function placeholdCopies(text: string, copies: Copies = new Map()): strin
     return `linear-copy-${copies.get(url)}`;
   });
 }
-
-const CONTENT_TYPES: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  ico: 'image/x-icon',
-  svg: 'image/svg+xml',
-  pdf: 'application/pdf',
-  zip: 'application/zip',
-  csv: 'text/csv',
-  txt: 'text/plain',
-  json: 'application/json',
-  mp4: 'video/mp4',
-  mov: 'video/quicktime',
-  webm: 'video/webm',
-  mp3: 'audio/mpeg',
-};
-
-export function contentTypeOf(file: string): string {
-  const extension = file.split('.').pop()?.toLowerCase() ?? '';
-  return CONTENT_TYPES[extension] ?? 'application/octet-stream';
-}

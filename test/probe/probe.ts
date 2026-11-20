@@ -16,8 +16,8 @@ import {
 } from '../../src/linear/index.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { contentTypeOf } from '../../src/initial-sync/uploads.ts';
 import {
-  contentTypeOf,
   type Copies,
   fromLinear,
   linkedAssets,

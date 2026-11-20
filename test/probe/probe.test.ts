@@ -184,6 +184,36 @@ describe('format probe against a fake Linear', () => {
     assert.deepEqual(findDrift(loadBank(bankDir), await probe()), [], 'a second run matches the record');
   });
 
+  for (const [name, filename, contentType, item] of [
+    ['audio-mp3-task', 'clip.mp3', 'audio/mpeg', '- [ ] \n  '],
+    ['audio-mp3-numbered', 'clip.mp3', 'audio/mpeg', '1. \n   '],
+    ['audio-wav', 'clip.wav', 'audio/wav', '* \n  '],
+    ['audio-ogg', 'clip.ogg', 'audio/ogg', '* \n  '],
+  ] as const) {
+    it(`uploads the asset for the ${name} list item before sending it to Linear`, async () => {
+      const file = `list-items/${name}.md`;
+      const from = fake.received.length;
+      const run = await runProbe({
+        client: new LinearClient({ token: 'fake', baseUrl: fake.url }, PROBE_FACTS),
+        bank: loadBank(),
+        runId: 'test-run',
+        only: file,
+        facts: false,
+      });
+      assert.deepEqual(run.uploads, [{ file: `assets/${filename}`, outcome: 'uploaded' }]);
+      assert.deepEqual(run.fixtures.map((fixture) => fixture.file), [file]);
+
+      const requests = fake.received.slice(from);
+      const upload = requests.find((request) => request.operation === 'FileUpload');
+      assert.equal(upload?.variables?.filename, filename);
+      assert.equal(upload?.variables?.contentType, contentType);
+      const create = requests.find((request) => request.operation === 'CreateDocument');
+      const input = create?.variables?.input as { content: string } | undefined;
+      assert.ok(input?.content.startsWith(`${item}[Site visit recording](${ASSET_URL})\n\n`));
+      assert.ok(run.fixtures[0]?.first?.includes(`(../assets/${filename})`), 'the readback restores the bank path');
+    });
+  }
+
   it('records the client\'s own refusal of an over-limit content as that fixture\'s refusal, matching Linear\'s recorded one', async () => {
     // As the test harness's app client: it knows Linear's limit and refuses before sending.
     const client = new LinearClient({ token: 'fake', baseUrl: fake.url }, { ...LINEAR_FACTS, mutationsReturnStoredContent: true, maxContentLength: 1000 });
