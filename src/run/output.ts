@@ -13,11 +13,25 @@ export function outputText(value: unknown, limit = 16 * 1024 * 1024): string {
   return value;
 }
 
+/** A character written out as its `\uXXXX` escape. */
+function escapedControl(character: string): string {
+  return `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`;
+}
+
 /** Display controls explicitly without losing the result of a completed run. */
 export function reportText(value: string, limit = 16 * 1024 * 1024): string {
-  const escaped = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g,
-    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
-  return outputText(escaped, limit);
+  return outputText(value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, escapedControl), limit);
+}
+
+/**
+ * A value printed inside one line of output, such as a file name: every C0
+ * and C1 control and DEL escaped, tabs and line breaks included, so the value
+ * cannot start a new line or drive the terminal. A backslash is escaped too,
+ * so a name holding the text of an escape prints apart from one holding the
+ * character.
+ */
+export function lineText(value: string): string {
+  return value.replace(/[\u0000-\u001f\u005c\u007f-\u009f]/g, escapedControl);
 }
 
 export function outputCount(value: unknown): number {

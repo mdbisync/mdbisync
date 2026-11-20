@@ -1,13 +1,14 @@
 // The `lint` and `fix` commands: Markdown files given as paths (folders are
 // searched for `.md` files), checked or rewritten into Linear's form.
 
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, ftruncateSync, lstatSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, writeSync, type Stats } from 'node:fs';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import { fixText } from './fix.ts';
 import { duplicateTitles, linkedFileCheck, lintText } from './lint.ts';
 import { MarkdownLimitError } from './markdown.ts';
 import { LINT_RULES, type Finding } from './rules.ts';
 import { parseLfsPointer } from '../state/lfs.ts';
+import { lineText } from '../run/output.ts';
 import { admitsCapturedFile, isCaptureName } from '../sync/upload-type.ts';
 
 export interface CommandResult {
@@ -25,7 +26,8 @@ export const USAGE_ERROR = 2;
 /**
  * `.md` files under the paths, written relative to the working folder and
  * sorted. Symbolic links are not followed, so a link cannot lead `fix` out
- * of the given tree or into a loop.
+ * of the given tree or into a loop; `runLint` and `runFix` also refuse a path
+ * whose folders pass through one (`badPaths`).
  */
 export function markdownFiles(paths: readonly string[], cwd: string = process.cwd()): string[] {
   return filesUnder(paths, cwd, (path) => path.endsWith('.md'));
@@ -63,12 +65,23 @@ function refusedUploads(paths: readonly string[], cwd: string): Finding[] {
     .map((file) => ({ file, line: 1, rule: 'upload-file-refused' as const, message: LINT_RULES['upload-file-refused'] }));
 }
 
-/** A usage problem in the paths, or undefined: options are not supported, every path must exist. */
+/**
+ * A usage problem in the paths, or undefined: options are not supported,
+ * every path must exist, must not be a symbolic link, and must be reached
+ * through no symbolic link and spelled with its exact case, as `isFileAt`
+ * requires of a linked file. A folder linked elsewhere
+ * would otherwise lead `fix` to rewrite a file outside the given tree.
+ */
 function badPaths(paths: readonly string[], cwd: string): string | undefined {
   const option = paths.find((path) => path.startsWith('-'));
-  if (option !== undefined) return `unknown option: ${option}`;
+  if (option !== undefined) return `unknown option: ${lineText(option)}`;
   const missing = paths.find((path) => !existsSync(resolve(cwd, path)));
-  return missing === undefined ? undefined : `no such file or folder: ${missing}`;
+  if (missing !== undefined) return `no such file or folder: ${lineText(missing)}`;
+  const linked = paths.find((path) => {
+    const absolute = resolve(cwd, path);
+    return lstatSync(absolute).isSymbolicLink() || !isOwnPath(cwd, relative(cwd, absolute));
+  });
+  return linked === undefined ? undefined : `path passes through a symbolic link or differs in case: ${lineText(linked)}`;
 }
 
 function lintAll(files: readonly string[], cwd: string): Finding[] {
@@ -77,7 +90,7 @@ function lintAll(files: readonly string[], cwd: string): Finding[] {
 }
 
 function describe(findings: readonly Finding[]): string {
-  return findings.map((finding) => `${finding.file}:${finding.line}: ${finding.rule}: ${finding.message}\n`).join('');
+  return findings.map((finding) => `${lineText(finding.file)}:${finding.line}: ${finding.rule}: ${lineText(finding.message)}\n`).join('');
 }
 
 /**
@@ -95,10 +108,17 @@ export function linkedFileResolver(file: string, root: string): (url: string) =>
  * of its name. A path the file system cannot hold (a NUL byte) names none.
  */
 function isFileAt(root: string, path: string): boolean {
-  const absolute = join(root, path);
   try {
-    if (statSync(absolute, { throwIfNoEntry: false })?.isFile() !== true) return false;
-    return realpathSync.native(absolute) === join(realpathSync.native(root), path);
+    return statSync(join(root, path), { throwIfNoEntry: false })?.isFile() === true && isOwnPath(root, path);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `path` under `root` is reached through no symbolic link and spelled with the exact case of its names. */
+function isOwnPath(root: string, path: string): boolean {
+  try {
+    return realpathSync.native(join(root, path)) === join(realpathSync.native(root), path);
   } catch {
     return false;
   }
@@ -121,6 +141,10 @@ function complexity(file: string): Finding {
 
 /** `lint`: exit 1 and one line per finding when Linear would lose or alter something, or a file is not in Linear's form. */
 export function runLint(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
+  return withEscapedErrors(() => lint(paths, cwd));
+}
+
+function lint(paths: readonly string[], cwd: string): CommandResult {
   const problem = badPaths(paths, cwd);
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
@@ -133,12 +157,16 @@ export function runLint(paths: readonly string[], cwd: string = process.cwd()): 
     if (fixed === undefined) findings.push(complexity(file));
     return fixed !== undefined && fixed !== text;
   });
-  const stdout = describe(findings) + unfixed.map((file) => `${file}: not in Linear's form; run fix\n`).join('');
+  const stdout = describe(findings) + unfixed.map((file) => `${lineText(file)}: not in Linear's form; run fix\n`).join('');
   return { exitCode: stdout === '' ? 0 : 1, stdout, stderr: '' };
 }
 
 /** `fix`: rewrites files into Linear's form; exit 1 when a file changed or lint found a problem `fix` leaves to the author. */
 export function runFix(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
+  return withEscapedErrors(() => fix(paths, cwd));
+}
+
+function fix(paths: readonly string[], cwd: string): CommandResult {
   const problem = badPaths(paths, cwd);
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
@@ -146,19 +174,102 @@ export function runFix(paths: readonly string[], cwd: string = process.cwd()): C
   const before = [...lintAll(files, cwd), ...refusedUploads(paths, cwd)];
   const failing = new Set(before.map((finding) => finding.file));
   const changed: string[] = [];
+  const moved: string[] = [];
   for (const file of files) {
     if (failing.has(file)) continue;
-    const path = join(cwd, file);
-    const text = readFileSync(path, 'utf8');
-    const fixed = fixedText(file, text, cwd);
-    if (fixed === undefined) before.push(complexity(file));
-    else if (fixed !== text) {
-      writeFileSync(path, fixed);
-      changed.push(file);
-    }
+    const outcome = fixFile(file, cwd);
+    if (outcome === 'complex') before.push(complexity(file));
+    else if (outcome === 'moved') moved.push(file);
+    else if (outcome === 'fixed') changed.push(file);
   }
   // Only the rewritten files, which had no finding, are linted again.
   const findings = [...before, ...lintAll(changed, cwd)];
-  const stdout = changed.map((file) => `${file}: fixed\n`).join('') + describe(findings);
+  const stdout = changed.map((file) => `${lineText(file)}: fixed\n`).join('')
+    + moved.map((file) => `${lineText(file)}: moved while fix ran; left unchanged\n`).join('')
+    + describe(findings);
   return { exitCode: stdout === '' ? 0 : 1, stdout, stderr: '' };
+}
+
+/**
+ * Runs a command, rethrowing an error with its message escaped as `lineText`
+ * does: a file system error names the file, whose name may hold controls.
+ */
+function withEscapedErrors(command: () => CommandResult): CommandResult {
+  try {
+    return command();
+  } catch (error) {
+    if (error instanceof Error) throw new Error(lineText(error.message), { cause: error });
+    throw error;
+  }
+}
+
+/**
+ * Rewrites `file` into Linear's form. It is read through a descriptor opened
+ * without following a link in the last name, used only while it still holds
+ * the regular file at `file`'s own path under `cwd` (the same device and
+ * inode, reached through no link, and where the system names the
+ * descriptor's own path, that path), and written through a second such
+ * descriptor that must hold the same file. A folder or file swapped for a
+ * link after the search cannot redirect the write; such a file is 'moved'.
+ * A file that needs no change is only read, so it may be read-only.
+ */
+function fixFile(file: string, cwd: string): 'fixed' | 'unchanged' | 'complex' | 'moved' {
+  const path = join(cwd, file);
+  const reader = openOwnFile(path, constants.O_RDONLY);
+  if (reader === undefined) return 'moved';
+  let opened: Stats;
+  let text: string;
+  try {
+    opened = fstatSync(reader);
+    const named = statSync(path, { throwIfNoEntry: false });
+    if (!opened.isFile() || !sameFile(named, opened) || !isOwnPath(cwd, file) || !holdsOwnPath(reader, cwd, file)) return 'moved';
+    text = readFileSync(reader, 'utf8');
+  } finally {
+    closeSync(reader);
+  }
+  const fixed = fixedText(file, text, cwd);
+  if (fixed === undefined) return 'complex';
+  if (fixed === text) return 'unchanged';
+  const writer = openOwnFile(path, constants.O_WRONLY);
+  if (writer === undefined) return 'moved';
+  try {
+    if (!sameFile(fstatSync(writer), opened)) return 'moved';
+    const bytes = Buffer.from(fixed, 'utf8');
+    ftruncateSync(writer, 0);
+    for (let written = 0; written < bytes.length;) written += writeSync(writer, bytes, written, bytes.length - written, written);
+    return 'fixed';
+  } finally {
+    closeSync(writer);
+  }
+}
+
+/** A descriptor for `path` opened with `flags` and without following a link in its last name, or undefined when no file is there any more or a link is. */
+function openOwnFile(path: string, flags: number): number | undefined {
+  try {
+    return openSync(path, flags | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ELOOP' || code === 'ENOTDIR') return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Whether the descriptor holds `file` under `cwd`, by the path the system
+ * keeps for it (`/proc/self/fd` on Linux). Unlike a check by name, this
+ * cannot be passed by a folder swapped between the open and the check.
+ * Without such a path the name checks in `fixFile` stand alone.
+ */
+function holdsOwnPath(fd: number, cwd: string, file: string): boolean {
+  let held: string;
+  try {
+    held = readlinkSync(`/proc/self/fd/${fd}`);
+  } catch {
+    return true;
+  }
+  return held === join(realpathSync.native(cwd), file);
+}
+
+function sameFile(a: Stats | undefined, b: Stats): boolean {
+  return a !== undefined && a.dev === b.dev && a.ino === b.ino;
 }
