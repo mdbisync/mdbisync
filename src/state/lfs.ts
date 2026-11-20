@@ -4,7 +4,11 @@
 // store are not downloaded again.
 
 import { createHash } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { message } from '../messages.ts';
+import { type StateConfig, branchRef, localRef } from './config.ts';
 import { type Git, GitError, GitOutputLimitError, type Oid } from './git.ts';
 
 export interface LfsPointer {
@@ -63,16 +67,77 @@ export type LfsRead = (pointer: LfsPointer, path: string) => Promise<LfsReadResu
  * `GitLfsMissingError` when a read fails because git-lfs does not run on
  * this host.
  */
-export async function lfsReader(git: Git, remote: string): Promise<LfsRead> {
+export async function lfsReader(git: Git, from: LfsRemote): Promise<LfsRead> {
   // git-lfs prefers the current branch's remote to `remote.lfsdefault`, so
-  // both are set to the remote the state is read from.
-  const remoteArgs = ['-c', `remote.lfsdefault=${remote}`];
+  // both are set to the remote the state is read from. A `.lfsconfig` cannot
+  // make smudge skip the object: the tracked one's fetch filters are cleared.
+  const remoteArgs = ['-c', `remote.lfsdefault=${from.remote}`, '-c', 'lfs.fetchinclude=', '-c', 'lfs.fetchexclude='];
   const branch = await git.run(['symbolic-ref', '--quiet', '--short', 'HEAD'], { okCodes: [0, 1, 128] });
-  if (branch.code === 0) remoteArgs.push('-c', `branch.${branch.stdout.toString('utf8').trim()}.remote=${remote}`);
+  if (branch.code === 0) remoteArgs.push('-c', `branch.${branch.stdout.toString('utf8').trim()}.remote=${from.remote}`);
+  // Read once, at the first read: most runs read no LFS object.
+  let setting: Promise<LfsSetting> | undefined;
   // Asked only after a read failed, and once per reader.
   let installed: Promise<boolean> | undefined;
   const runs = () => (installed ??= gitLfsRuns(git));
-  return (pointer, path) => readLfsObject(git, remoteArgs, pointer, path, runs);
+  return async (pointer, path) =>
+    withLfsconfig(await (setting ??= lfsSetting(git, from)), (env) => readLfsObject(git, remoteArgs, env, pointer, path, runs));
+}
+
+/**
+ * Where the sync's LFS transfers go: the remote, and the commit (or ref)
+ * whose `.lfsconfig` names its LFS endpoint, the tracked branch's.
+ */
+export interface LfsRemote {
+  remote: string;
+  tracked: string;
+}
+
+/** The sync's LFS remote: the configured remote and its tracked branch as last fetched. */
+export function lfsRemote(config: StateConfig): LfsRemote {
+  return { remote: config.remote, tracked: localRef(config, branchRef(config.trackedBranch)) };
+}
+
+/** Upload the LFS objects `oids` from the local store to the remote's LFS endpoint. */
+export async function lfsPush(git: Git, to: LfsRemote, oids: readonly string[]): Promise<void> {
+  if (oids.length === 0) return;
+  await withLfsconfig(await lfsSetting(git, to), (env) => git.run(['lfs', 'push', '--object-id', to.remote, ...oids], { env }));
+}
+
+/** The most bytes of `.lfsconfig` read; git-lfs's own settings file is a few lines. */
+const LFSCONFIG_LIMIT = 64 * 1024;
+
+/** What a git-lfs call needs to read the tracked branch's `.lfsconfig`: the repository, and that file (empty when it has none). */
+interface LfsSetting {
+  gitDir: string;
+  lfsconfig: Buffer;
+}
+
+async function lfsSetting(git: Git, from: LfsRemote): Promise<LfsSetting> {
+  const found = await git.run(['cat-file', 'blob', `${from.tracked}:.lfsconfig`], { okCodes: [0, 128], maxOutputBytes: LFSCONFIG_LIMIT });
+  return { gitDir: await git.text(['rev-parse', '--absolute-git-dir']), lfsconfig: found.code === 0 ? found.stdout : Buffer.alloc(0) };
+}
+
+/**
+ * Runs `work`, a git-lfs call, so that git-lfs reads `lfsconfig` (the
+ * tracked branch's `.lfsconfig`) instead of the checkout's. The checkout
+ * holds the branch the run was started on, and an `lfs.url` or
+ * `lfs.pushurl` in its `.lfsconfig` would take the objects the sync
+ * uploads, and its reads, to a server that branch names. git-lfs reads
+ * `.lfsconfig` from the root of the working tree, so the call gets a
+ * scratch working tree (`GIT_WORK_TREE`) that holds only that file; git-lfs
+ * reads it there and not from the index or HEAD; `GIT_DIR` keeps the
+ * repository found from there. Everything else (git's own configuration
+ * first, then the file, then the remote's URL) stays git-lfs's own choice.
+ * An LFS transfer needs no working tree.
+ */
+async function withLfsconfig<T>(setting: LfsSetting, work: (env: Record<string, string>) => Promise<T>): Promise<T> {
+  const tree = await mkdtemp(join(tmpdir(), 'mdbisync-lfs-'));
+  try {
+    await writeFile(join(tree, '.lfsconfig'), setting.lfsconfig);
+    return await work({ GIT_DIR: setting.gitDir, GIT_WORK_TREE: tree });
+  } finally {
+    await rm(tree, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -127,15 +192,16 @@ export async function requireGitLfs(git: Git): Promise<void> {
  *
  * @param blobs git blob ids of LFS pointer files
  */
-export async function missingLfsObjects(git: Git, remote: string, blobs: readonly Oid[]): Promise<Set<string>> {
+export async function missingLfsObjects(git: Git, from: LfsRemote, blobs: readonly Oid[]): Promise<Set<string>> {
   const missing = new Set<string>();
   if (blobs.length === 0) return missing;
   const entries = [...new Set(blobs)].map((blob, index) => `100644 blob ${blob}\t${index}\n`).join('');
   const tree = await git.text(['mktree'], { input: entries });
   const settings = ['-c', 'lfs.fetchinclude=', '-c', 'lfs.fetchexclude=', '-c', 'lfs.fetchrecentalways=false'];
+  const setting = await lfsSetting(git, from);
   let stderr: string;
   try {
-    stderr = (await git.run([...settings, 'lfs', 'fetch', '--dry-run', remote, tree], { okCodes: [0, 2] })).stderr;
+    stderr = (await withLfsconfig(setting, (env) => git.run([...settings, 'lfs', 'fetch', '--dry-run', from.remote, tree], { okCodes: [0, 2], env }))).stderr;
   } catch (error) {
     if (!(error instanceof GitError)) throw error;
     await requireGitLfs(git);
@@ -150,7 +216,14 @@ export async function missingLfsObjects(git: Git, remote: string, blobs: readonl
  * @param path the file's path, used only in git-lfs's own messages
  * @param runs whether git-lfs runs on this host, asked after a failed read
  */
-async function readLfsObject(git: Git, remoteArgs: readonly string[], pointer: LfsPointer, path: string, runs: () => Promise<boolean>): Promise<LfsReadResult> {
+async function readLfsObject(
+  git: Git,
+  remoteArgs: readonly string[],
+  env: Record<string, string>,
+  pointer: LfsPointer,
+  path: string,
+  runs: () => Promise<boolean>,
+): Promise<LfsReadResult> {
   if (pointer.extensions) {
     return { ok: false, reason: `LFS object ${pointer.oid} uses LFS extensions, which are not supported` };
   }
@@ -159,7 +232,7 @@ async function readLfsObject(git: Git, remoteArgs: readonly string[], pointer: L
   try {
     const result = await git.run([...remoteArgs, 'lfs', 'smudge', '--', path], {
       input: pointerText,
-      env: { GIT_LFS_SKIP_SMUDGE: undefined },
+      env: { ...env, GIT_LFS_SKIP_SMUDGE: undefined },
       // A failed smudge may return the pointer itself.
       maxOutputBytes: Math.max(pointer.size, MAX_POINTER_SIZE),
     });

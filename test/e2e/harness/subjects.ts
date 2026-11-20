@@ -40,7 +40,7 @@ import type { LinearDocument } from '../../../src/linear/index.ts';
 import { relativeLinkUrls } from '../../../src/format/index.ts';
 import { resolveTarget } from '../../../src/format/markdown.ts';
 import { imageRepairComparison } from './comparison-evidence.ts';
-import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
+import { DEFAULT_STATE_CONFIG, listTree, readBlobs, readIds, readUploads, lfsReader, lfsRemote, parseLfsPointer, type Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
@@ -2479,7 +2479,7 @@ async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string
   const assets = reverseAssets(env.ctx);
   const paths = new Set(assets.flatMap((asset) => [asset.path, asset.documentPath]));
   const files = await treeFiles(head.git, head.commit, (path) => paths.has(path));
-  const readLfs = await lfsReader(head.git, 'origin');
+  const readLfs = await lfsReader(head.git, lfsRemote({ ...DEFAULT_STATE_CONFIG }));
   const links: string[] = [];
   const hashes = new Map<string, string>();
   for (const asset of assets) {

@@ -6,8 +6,9 @@ import { contentBytes, type FileContent } from '../state/content.ts';
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fixText } from '../format/index.ts';
 import { hookRun } from '../format/test-helpers.ts';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -473,7 +474,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal((await readIds())['handbook/README.md'], handbook()[0]?.id);
   });
 
-  it('L1R-04: downloads the files documents embed into the assets folder beside them, stored as .gitattributes decides, linked relatively and cached', async () => {
+  it('L1R-04: downloads the files documents embed into the assets folder beside them, stored as .gitattributes decides, linked relatively and cached', async (t) => {
     // The tracked plan links the diagram the branch already holds (committed before the LFS pattern).
     await fixture.seed({ '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n', 'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\n![Diagram](diagram.png)\n` });
     const world = fakeWorld();
@@ -495,6 +496,11 @@ describe('initial sync from Linear to the tracked branch', () => {
     };
     world.linear.documents = linearDocuments().map((d) => (contents[d.id] === undefined ? d : { ...d, content: contents[d.id] as string }));
     const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+    // The checkout's `.lfsconfig` names another LFS store; the objects still go to the remote's.
+    const named = await createFixture();
+    t.after(() => named.cleanup());
+    const namedUrl = pathToFileURL(named.remote.dir).href;
+    await writeFile(join(cwd, '.lfsconfig'), `[lfs]\n\turl = ${namedUrl}\n\tpushurl = ${namedUrl}\n[remote "origin"]\n\tlfsurl = ${namedUrl}\n`);
 
     const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
@@ -510,6 +516,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(pointer, `version https://git-lfs.github.com/spec/v1\noid sha256:${sha(shot)}\nsize ${shot.length}`);
     const remoteDir = await fixture.remote.text(['rev-parse', '--absolute-git-dir']);
     assert.deepEqual(await readFile(join(remoteDir, 'lfs', 'objects', sha(shot).slice(0, 2), sha(shot).slice(2, 4), sha(shot))), shot);
+    await assert.rejects(readdir(join(await named.remote.text(['rev-parse', '--absolute-git-dir']), 'lfs')), { code: 'ENOENT' });
     assert.deepEqual((await fixture.remote.run(['show', `${head}:eng/ops/assets/${sha(spec)}.pdf`])).stdout, spec);
     // The upload cache maps each file's hash to its Linear URL.
     const uploads = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;

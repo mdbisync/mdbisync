@@ -64,6 +64,13 @@ if one must stay out of LFS, write your own lines instead. Lines already
 there are kept. Without `--lfs`, your own `.gitattributes`
 decides, as for any commit.
 
+The sync uploads and reads LFS objects where git-lfs would for the tracked
+branch: git's own configuration (`lfs.url`, `lfs.pushurl`,
+`remote.<remote>.lfsurl`, `remote.<remote>.lfspushurl`) first, then the
+tracked branch's `.lfsconfig`, then the remote's URL. The `.lfsconfig` of
+the branch a run happens to check out is not read, so another branch
+cannot send the attachments to a server of its choosing.
+
 Flags work without a terminal. With a terminal attached, `init` asks for
 missing setup choices. It changes local files only and prints the remaining
 admin steps: apps, secrets, merge commits, local hook installation and the

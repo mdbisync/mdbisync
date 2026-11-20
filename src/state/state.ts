@@ -6,7 +6,7 @@
 
 import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef, suspendedBranch } from './config.ts';
 import { type Git, GitError, type Oid, mapLimit } from './git.ts';
-import { type LfsPointer, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
+import { type LfsPointer, type LfsReadResult, lfsReader, lfsRemote, parseLfsPointer } from './lfs.ts';
 import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
 import { message } from '../messages.ts';
 import { PUSHED_MAC, type PushedKey, type PushedRecord } from './pushed.ts';
@@ -808,7 +808,7 @@ export async function readFiles(git: Git, config: StateConfig, commit: Oid, path
   // its own. Objects already downloaded are read from the local LFS store.
   const lfs = new Map<Oid, LfsReadResult>();
   if (pointers.size > 0) {
-    const read = await lfsReader(git, config.remote);
+    const read = await lfsReader(git, lfsRemote(config));
     const items = [...pointers.entries()];
     const results = await mapLimit(items, 4, ([, item]) => read(item.pointer, item.path));
     items.forEach(([pointerBlob], index) => lfs.set(pointerBlob, results[index] as LfsReadResult));

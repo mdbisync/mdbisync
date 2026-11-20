@@ -10,9 +10,10 @@ import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { GITHUB_API } from '../setup/test-helpers.ts';
 import { fixText, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { hookRun } from '../format/test-helpers.ts';
@@ -1086,9 +1087,14 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
   });
 
-  it('downloads a pasted image, records an LFS pointer and populates the upload cache', async () => {
+  it('downloads a pasted image, records an LFS pointer and populates the upload cache', async (t) => {
     await fixture.seed({'.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n'});
     await refresh();
+    // The checkout's `.lfsconfig` names another LFS store; the object still goes to the remote's.
+    const named = await createFixture();
+    t.after(() => named.cleanup());
+    const namedUrl = pathToFileURL(named.remote.dir).href;
+    await writeFile(join(context.git.dir, '.lfsconfig'), `[lfs]\n\turl = ${namedUrl}\n\tpushurl = ${namedUrl}\n[remote "origin"]\n\tlfsurl = ${namedUrl}\n`);
     const url = 'https://uploads.linear.app/workspace/pasted.png';
     Object.assign(world.linear.documents[0]!, {content: `![Image](${url})\n`, updatedAt: '2026-01-05T00:00:00Z'});
     const result = await capture(context, { config, state: context.fetched.state, identity: IDENTITY, fetch: async () => new Response(png) });
@@ -1103,6 +1109,10 @@ describe('capture from Linear', () => {
     const read = (await (await import('../state/index.ts')).readFiles(context.git, config, result.state.linear!, [image])).get(image)!;
     assert.equal(read.ok, true);
     if(read.ok) assert.deepEqual(read.content, png);
+    const oid = createHash('sha256').update(png).digest('hex');
+    const remoteDir = await fixture.remote.text(['rev-parse', '--absolute-git-dir']);
+    assert.deepEqual(await readFile(join(remoteDir, 'lfs', 'objects', oid.slice(0, 2), oid.slice(2, 4), oid)), png);
+    await assert.rejects(readdir(join(await named.remote.text(['rev-parse', '--absolute-git-dir']), 'lfs')), { code: 'ENOENT' });
   });
 
   it('restores links between documents using the shared inverse', async () => {

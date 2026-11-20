@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { message } from '../messages.ts';
-import { Git, GitLfsMissingError, lfsReader, missingLfsObjects, parseLfsPointer, requireGitLfs } from './index.ts';
+import { DEFAULT_STATE_CONFIG, Git, GitLfsMissingError, lfsPush, lfsReader, lfsRemote, missingLfsObjects, parseLfsPointer, requireGitLfs } from './index.ts';
 import { type FakeLfsServer, type Fixture, countLocalLfsObjects, createFixture, fakeLfsServer, pathWithoutGitLfs } from './test-helpers.ts';
 
 const OID = 'a'.repeat(64);
+const ORIGIN = lfsRemote({ ...DEFAULT_STATE_CONFIG });
 const pointer = (body: string): Buffer => Buffer.from(`version https://git-lfs.github.com/spec/v1\n${body}`);
 
 describe('LFS pointer', () => {
@@ -68,7 +70,7 @@ describe('LFS objects missing from the remote', () => {
     await fixture.cleanup();
   });
 
-  const ask = (paths: string[]) => missingLfsObjects(clone, 'origin', paths.map((path) => blobs.get(path) as string));
+  const ask = (paths: string[]) => missingLfsObjects(clone, ORIGIN, paths.map((path) => blobs.get(path) as string));
 
   it('names the objects the server does not have, asking only about the given pointers and downloading nothing', async () => {
     server.requests.length = 0;
@@ -125,7 +127,7 @@ describe('LFS objects missing from the remote', () => {
 
   it('names no object for a remote without a batch API (a local path)', async () => {
     const plain = await fixture.clone('plain');
-    assert.deepEqual(await missingLfsObjects(plain, 'origin', [blobs.get('gone.bin') as string]), new Set());
+    assert.deepEqual(await missingLfsObjects(plain, ORIGIN, [blobs.get('gone.bin') as string]), new Set());
     assert.equal(await countLocalLfsObjects(plain), 0);
   });
 });
@@ -146,14 +148,14 @@ describe('LFS reads on a host without git-lfs', () => {
   it('stops the read instead of finding the object unreadable', async () => {
     const clone = await fixture.clone('without-lfs');
     const withoutLfs = new Git(clone.dir, { PATH: noLfs.path });
-    const read = await lfsReader(withoutLfs, 'origin');
+    const read = await lfsReader(withoutLfs, ORIGIN);
     await assert.rejects(read({ oid: OID, size: 3, extensions: false }, 'image.png'), (error) => error instanceof GitLfsMissingError && error.message === message('lfs.needs-git-lfs'));
     await assert.rejects(requireGitLfs(withoutLfs), GitLfsMissingError);
     // A pointer with LFS extensions is refused without git-lfs, as before.
     assert.deepEqual(await read({ oid: OID, size: 3, extensions: true }, 'image.png'), { ok: false, reason: `LFS object ${OID} uses LFS extensions, which are not supported` });
     // The same repository with git-lfs: a missing object is unreadable, as before.
     await requireGitLfs(clone);
-    const found = await (await lfsReader(clone, 'origin'))({ oid: OID, size: 3, extensions: false }, 'image.png');
+    const found = await (await lfsReader(clone, ORIGIN))({ oid: OID, size: 3, extensions: false }, 'image.png');
     assert.equal(found.ok, false);
   });
 
@@ -161,6 +163,89 @@ describe('LFS reads on a host without git-lfs', () => {
     const clone = await fixture.clone('without-lfs-dry-run');
     const withoutLfs = new Git(clone.dir, { PATH: noLfs.path });
     const blob = await clone.text(['rev-parse', 'origin/main:image.png']);
-    await assert.rejects(missingLfsObjects(withoutLfs, 'origin', [blob]), GitLfsMissingError);
+    await assert.rejects(missingLfsObjects(withoutLfs, ORIGIN, [blob]), GitLfsMissingError);
   });
 });
+
+describe("LFS transfers follow the tracked branch's .lfsconfig, not the checkout's", () => {
+  const CONTENT = Buffer.from('an attachment\n');
+  const sha = (content: Buffer) => createHash('sha256').update(content).digest('hex');
+  const POINTER = `version https://git-lfs.github.com/spec/v1\noid sha256:${sha(CONTENT)}\nsize ${CONTENT.length}\n`;
+  const fixtures: Fixture[] = [];
+  const servers: FakeLfsServer[] = [];
+  after(async () => {
+    for (const server of servers) await server.close();
+    for (const fixture of fixtures) await fixture.cleanup();
+  });
+  const fixtureWith = async (tree: Record<string, string>) => {
+    const fixture = await createFixture();
+    fixtures.push(fixture);
+    await fixture.seed(tree);
+    return fixture;
+  };
+  const server = async () => {
+    const created = await fakeLfsServer([CONTENT]);
+    servers.push(created);
+    return created;
+  };
+  /** A `.lfsconfig` that names `url` for every endpoint key git-lfs reads from it. */
+  const lfsconfig = (url: string) => `[lfs]\n\turl = ${url}\n\tpushurl = ${url}\n[remote "origin"]\n\tlfsurl = ${url}\n\tlfspushurl = ${url}\n`;
+  const fileUrl = async (fixture: Fixture) => pathToFileURL(await fixture.remote.text(['rev-parse', '--absolute-git-dir'])).href;
+  /** The pushed object in the LFS store of `fixture`'s remote, or undefined. */
+  const stored = async (fixture: Fixture) => {
+    const dir = await fixture.remote.text(['rev-parse', '--absolute-git-dir']);
+    return readFile(join(dir, 'lfs', 'objects', sha(CONTENT).slice(0, 2), sha(CONTENT).slice(2, 4), sha(CONTENT))).catch(() => undefined);
+  };
+  /** Pushes CONTENT's object from a clone of `fixture` whose working tree holds `checkout` as its `.lfsconfig`. */
+  const pushFrom = async (fixture: Fixture, checkout: string) => {
+    const clone = await fixture.clone(`push-${fixtures.length}`);
+    const local = join(clone.dir, '.git', 'lfs', 'objects', sha(CONTENT).slice(0, 2), sha(CONTENT).slice(2, 4));
+    await mkdir(local, { recursive: true });
+    await writeFile(join(local, sha(CONTENT)), CONTENT);
+    await writeFile(join(clone.dir, '.lfsconfig'), checkout);
+    await lfsPush(clone, ORIGIN, [sha(CONTENT)]);
+  };
+
+  it("uploads to the remote's LFS store when the tracked branch names none", async () => {
+    const fixture = await fixtureWith({ 'image.png': POINTER });
+    const other = await fixtureWith({});
+    await pushFrom(fixture, lfsconfig(await fileUrl(other)));
+    assert.deepEqual(await stored(fixture), CONTENT);
+    assert.equal(await stored(other), undefined);
+  });
+
+  it('uploads to the LFS store the tracked branch names', async () => {
+    const named = await fixtureWith({});
+    const elsewhere = await fixtureWith({});
+    const fixture = await fixtureWith({ 'image.png': POINTER, '.lfsconfig': lfsconfig(await fileUrl(named)) });
+    await pushFrom(fixture, lfsconfig(await fileUrl(elsewhere)));
+    assert.deepEqual(await stored(named), CONTENT);
+    assert.equal(await stored(elsewhere), undefined);
+    assert.equal(await stored(fixture), undefined);
+  });
+
+  it('reads and asks about objects where git config or the tracked branch says, whatever the checkout says', async () => {
+    const configured = await server();
+    const tracked = await server();
+    const named = await server();
+    const fixture = await fixtureWith({ 'image.png': POINTER, '.lfsconfig': lfsconfig(tracked.url) });
+    const clone = await fixture.clone('read');
+    // The checkout's file names another server, rewrites URLs to it and excludes every object from fetches.
+    await writeFile(
+      join(clone.dir, '.lfsconfig'),
+      `${lfsconfig(named.url)}[url "${named.url}"]\n\tinsteadOf = ${tracked.url}\n\tinsteadOf = ${configured.url}\n[lfs]\n\tfetchexclude = *\n`,
+    );
+    const blob = await clone.text(['rev-parse', 'origin/main:image.png']);
+    const read = async () => (await lfsReader(clone, ORIGIN))({ oid: sha(CONTENT), size: CONTENT.length, extensions: false }, 'image.png');
+    assert.deepEqual(await missingLfsObjects(clone, ORIGIN, [blob]), new Set());
+    assert.equal((await read()).ok, true);
+    assert.ok(tracked.requests.length > 0);
+    // git's own configuration comes before the tracked branch's file.
+    await rm(join(clone.dir, '.git', 'lfs', 'objects'), { recursive: true, force: true });
+    await clone.run(['config', 'lfs.url', configured.url]);
+    assert.equal((await read()).ok, true);
+    assert.ok(configured.requests.length > 0);
+    assert.deepEqual(named.requests, []);
+  });
+});
+

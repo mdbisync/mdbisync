@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError, LinearTokenError, type LinearDocument } from '../../../src/linear/index.ts';
-import { Git, GitError, PushedKey, commitUploads, lfsReader, parseLfsPointer } from '../../../src/state/index.ts';
+import { DEFAULT_STATE_CONFIG, Git, GitError, PushedKey, commitUploads, lfsReader, lfsRemote, parseLfsPointer } from '../../../src/state/index.ts';
 import { fakeLfsServer } from '../../../src/state/test-helpers.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
@@ -2655,7 +2655,7 @@ describe('git executors', () => {
       assert.ok(existsSync(join(remoteGit.dir, 'lfs', 'objects', oid.slice(0, 2), oid.slice(2, 4), oid)));
 
       // The engine's clone, with the engine's extra environment: that one object is missing, others download.
-      const read = await lfsReader(new Git(engineDir, { ...IDENTITY, ...ctx.engine.env }), 'origin');
+      const read = await lfsReader(new Git(engineDir, { ...IDENTITY, ...ctx.engine.env }), lfsRemote({ ...DEFAULT_STATE_CONFIG }));
       const missing = await read(pointer!, image);
       assert.equal(missing.ok, false);
       const keptPointer = parseLfsPointer(Buffer.from(`version https://git-lfs.github.com/spec/v1\noid sha256:${createHash('sha256').update(kept).digest('hex')}\nsize ${kept.length}\n`));

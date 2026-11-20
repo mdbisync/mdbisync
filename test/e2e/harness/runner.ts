@@ -10,7 +10,7 @@ import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts'
 import { parse, visit } from '../../../src/format/markdown.ts';
 import { contentTypeOf, destinations, resolveTarget } from '../../../src/initial-sync/uploads.ts';
 import { isRegularFile, MARKDOWN_EXTENSION } from '../../../src/mapping/index.ts';
-import { Git, GitLfsMissingError, lfsReader, listTree, parseLfsPointer, readBlobs, readIds, requireGitLfs, type LfsRead } from '../../../src/state/index.ts';
+import { DEFAULT_STATE_CONFIG, Git, GitLfsMissingError, lfsReader, lfsRemote, listTree, parseLfsPointer, readBlobs, readIds, requireGitLfs, type LfsRead } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { REF_MOVES, runChecks, snapshotRefs, recordRefs, startRefHistory, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
@@ -506,7 +506,7 @@ function trackedImageUploads(ctx: RunContext, live: LiveWorld): ImageUploads {
     const pointer = parseLfsPointer(blob);
     let bytes = blob;
     if (pointer !== null) {
-      readLfs ??= await lfsReader(git, 'origin');
+      readLfs ??= await lfsReader(git, lfsRemote({ ...DEFAULT_STATE_CONFIG }));
       const lfs = await readLfs(pointer, path);
       if (!lfs.ok) throw new EnvBlockedError(`the seeded image ${path} cannot be read from LFS: ${lfs.reason}`);
       bytes = lfs.content;

@@ -34,6 +34,7 @@ import {
   readBlobs,
   type LfsRead,
   lfsReader,
+  lfsRemote,
 } from '../state/index.ts';
 import { type InitialSyncPlan } from './plan.ts';
 import { type BodyTransform, LeaveOutError, type TransformContext } from './transform.ts';
@@ -134,7 +135,7 @@ export async function predictUploadLeaveOuts(
 ): Promise<UploadLeaveOut[]> {
   const { files } = await treeFiles(git, tracked);
   const { planned, unproven } = plannedLinks(plan, files, texts, options.plainFiles, options.unknownProvenance);
-  const judged = await predictPlanned(git, files, planned, uploads, options);
+  const judged = await predictPlanned(git, files, planned, uploads, { ...options, tracked });
   // The write judges provenance before any file, so its rule comes first.
   const result = [...unproven].map(([path, unprovenFiles]): UploadLeaveOut => ({ path, rule: LINK_PROVENANCE_UNKNOWN, files: unprovenFiles }));
   return [...result, ...judged].sort((a, b) => compare(a.path, b.path));
@@ -146,7 +147,7 @@ async function predictPlanned(
   files: ReadonlyMap<string, TreeEntry>,
   planned: ReadonlyMap<string, string[]>,
   uploads: UploadMap,
-  options: { remote: string; limit?: number },
+  options: { remote: string; tracked: Oid; limit?: number },
 ): Promise<UploadLeaveOut[]> {
   const limit = Math.min(options.limit ?? DEFAULT_UPLOAD_LIMIT, UPLOAD_BATCH_BYTES);
   // Each file once: several documents may link it.
@@ -158,7 +159,7 @@ async function predictPlanned(
   const file = (target: string) => linked.get(target) as LinkedFile;
   // The LFS objects the upload may read: within the limit, without extensions, and not in the cache.
   const asked = targets.filter((target) => file(target).lfs && !file(target).extensions && file(target).size <= limit && !uploaded.has(file(target).hash));
-  const absent = await missingLfsObjects(git, options.remote, asked.map((target) => (files.get(target) as TreeEntry).oid));
+  const absent = await missingLfsObjects(git, { remote: options.remote, tracked: options.tracked }, asked.map((target) => (files.get(target) as TreeEntry).oid));
   for (const target of asked) if (absent.has(file(target).hash)) file(target).absent = true;
   const unreadable = (target: string) => file(target).extensions || file(target).absent;
   if (!targets.some((target) => unreadable(target) && !uploaded.has(file(target).hash))) {
@@ -415,7 +416,7 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
         contents.set(hash, blob);
         continue;
       }
-      lfs ??= await lfsReader(git, options.config.remote);
+      lfs ??= await lfsReader(git, lfsRemote(options.config));
       const read = await lfs(pointer, target);
       contents.set(hash, read.ok ? read.content : { unreadable: read.reason });
     }
@@ -470,7 +471,7 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
         // A failed read alone can be transient. Only the batch API's 404/410 confirms that the remote lacks it.
         const entry = files.get(own.target) as TreeEntry;
         const file = linked.get(own.target) as LinkedFile;
-        if (!file.absent) file.absent = (await missingLfsObjects(git, options.config.remote, [entry.oid])).has(file.hash);
+        if (!file.absent) file.absent = (await missingLfsObjects(git, lfsRemote(options.config), [entry.oid])).has(file.hash);
         throw new LeaveOutError(UPLOAD_UNREADABLE, message('initial-sync.upload-unreadable', { file: own.target, reason: own.unreadable }), [own.target], { missingLfsObject: file.absent });
       }
       if (index === batches.length - 1) await uploadLastBatch(path, own, batch.bytes);

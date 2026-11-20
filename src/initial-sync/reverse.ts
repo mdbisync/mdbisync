@@ -57,6 +57,8 @@ import {
   commitTree,
   commitUploads,
   initialSyncProgressMessage,
+  lfsPush,
+  lfsRemote,
   listTree,
   pushAtomic,
   readIds,
@@ -825,7 +827,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     for (const entry of entries) for (const [hash, url] of (bodies.get(entry.path) as { uploads: UploadMap }).uploads) finalUploads.set(hash, url);
     const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity, context.pushedKey);
     // The objects reach the remote's LFS store before any ref points at their pointers.
-    if (lfsObjects.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...lfsObjects]);
+    await lfsPush(git, lfsRemote(options.config), lfsObjects);
     const updates: RefUpdate[] = [
       { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit },
       { ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit },
