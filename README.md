@@ -205,7 +205,10 @@ new-App form already filled in: [GitHub App](docs/quickstart.md#github-app).
 
 ### 3. Run a one-time initial sync
 
-First prepare the repository. `mdbisync init` writes the files for it
+First prepare the repository. `mdbisync init` writes the workflows, the
+folder annotations and the `linear-format` hook, and with
+`--security-hooks` two example security hooks; marking hooks of your own
+`alias: security` and the repository setting are yours
 ([repository files](docs/quickstart.md#repository-files)):
 
 - map a folder to Linear: `linear-team` and `linear-project` in the front
@@ -215,11 +218,18 @@ First prepare the repository. `mdbisync init` writes the files for it
   security hooks `alias: security`;
 - in the repository settings, turn on **Allow merge commits**.
 
-Then copy [`examples/mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml)
-to `.github/workflows/` and run it by hand from the Actions tab, with a
-direction: `git-to-linear` makes Linear equal to git, `linear-to-git` opens a
-pull request that makes git equal to Linear. The first run is a dry run that
-lists what would change; run it again with `confirm` to write.
+Commit what `init` wrote and push it to `main`
+([commit the files](docs/quickstart.md#commit-the-files)). Then run the
+initial sync workflow, `.github/workflows/mdbisync-initial-sync.yml`,
+by hand from the Actions tab, with a direction: `git-to-linear` makes Linear
+equal to git, `linear-to-git` opens a pull request that makes git equal to
+Linear. The first run is a dry run that lists what would change; run it
+again with `confirm` to write. Without `init`, copy the workflow from
+[`examples/mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml)
+and replace each `mdbisync/mdbisync@…` pin with your release. Before the
+first run, disable the sync workflow (Actions → **mdbisync** → `⋯` →
+**Disable workflow**): it shares one queue with the initial sync, and a
+queued sync run can replace a waiting initial sync.
 Before you take documents from Linear, read
 [initial sync from Linear to git](docs/initial-sync-linear-to-git.md): its
 pull request can remove files, and a person merges it. Before you take
@@ -229,10 +239,12 @@ overwrites documents and moves those without a file to Linear's trash.
 
 ### 4. Start ongoing sync
 
-Once the initial sync is done (for `linear-to-git`, once its pull request is
-merged), copy [`examples/mdbisync.yml`](examples/mdbisync.yml)
-to `.github/workflows/`. It runs on every push to `main`, on GitHub's
-schedule and by hand, in both directions.
+The sync workflow, `.github/workflows/mdbisync.yml`, is one of the files
+`init` writes (without `init`, copy
+[`examples/mdbisync.yml`](examples/mdbisync.yml) and replace its pins).
+Once the initial sync is done (for `linear-to-git`, once its pull request
+is merged), enable it again. It runs on every push to
+`main`, on GitHub's schedule and by hand, in both directions.
 
 Do not rely on GitHub's schedule to bring Linear edits to git: it can run
 hours late. Start the workflow every few minutes from a timer of your own

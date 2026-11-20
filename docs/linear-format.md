@@ -31,8 +31,9 @@ setext heading's two lines written as one) stays as Linear has it. A file
 whose text Linear only re-spells keeps its own text, and a text with a lint
 finding stays as it is, as with `fix` itself.
 
-Both run as the `linear-format` pre-commit hook, which every synchronized
-repository needs (see [Install the hook](#install-the-hook)).
+`fix` runs as the `linear-format` pre-commit hook, which every
+synchronized repository needs, and `lint` as the optional
+`linear-format-check` hook (see [Install the hook](#install-the-hook)).
 
 The rules come from experiment, not documentation: every fixture of the test
 bank (`test/fixtures/`) was written to Linear and read back, and the

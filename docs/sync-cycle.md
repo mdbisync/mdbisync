@@ -537,7 +537,8 @@ only when they apply:
 
 ### Linear to the tracked branch
 
-What step 2 did with the sync pull request. An ordinary run says one of:
+What step 2 did with the sync pull request. An ordinary run says one of
+these (the first words of each line):
 
 | Line | What it means |
 | --- | --- |
@@ -545,7 +546,7 @@ What step 2 did with the sync pull request. An ordinary run says one of:
 | The tracked branch already holds every change from Linear | No pull request is needed. |
 | Opened the sync pull request | Opened this run. It names the checks still running at the end of the grace period; a later run merges it. |
 | Added new Linear changes to the sync pull request | New captures joined the open pull request. |
-| The sync pull request waits for its checks | Its checks are still running, and a later run merges it. |
+| The sync pull request `<link>` waits for `<check names>`; a later run merges it. | Its checks are still running, and a later run merges it. |
 
 An existing head with passing registered checks gets a merge attempt before
 fresh captures join the branch. Captures remain on Linear's state ref for
@@ -632,9 +633,16 @@ A finished run succeeds. A partial run ends with a warning,
 `sync: partial, will continue (<code>)`: Linear stopped it, a request to
 Linear or a write failed, a state ref moved while it captured or wrote, or
 a removal is held. It kept what it could record, and the next run goes on
-from there. A run fails when it needs a person (the setup check,
-a merge GitHub refuses again, an initial
-sync from Linear not merged yet, a full container), and also when only the sync
+from there. A run fails when it needs a person: the setup check failed, GitHub refuses
+a merge again (`merge-blocked`), expected checks never started on the sync
+pull request (`checks-missing`), the sync pull request changes files that
+are not synchronized documents (`head-unverified`), GitHub merged a sync
+pull request where the sync had not checked it (`merge-misplaced`), an
+initial sync from Linear is not merged yet, the sync has no state yet
+(`initial-sync-required`), a container is full (`container-cap`), or the
+assets of a suspended batch cannot be collected safely
+(`suspended-asset-discovery`; in a run that is also partial on Linear's
+side, it yields to the partial ending). It also fails when only the sync
 pull request step did not finish (`sync: not finished (<code>); run it
 again`, for `state-moved` or `github-failed` there): the next run tries
 again. An initial sync from Linear stays pending until a person merges its

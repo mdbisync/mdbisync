@@ -121,7 +121,7 @@ describe('the sync cycle page', () => {
     ]);
     // "The sync pull request <link> waits for <checks>": the link sits between the words.
     assert.ok(read('src/sync/pull-request.ts').includes('`The sync pull request ${link} waits for'));
-    assert.ok(flat.includes('| The sync pull request waits for its checks |'));
+    assert.ok(flat.includes('| The sync pull request `<link>` waits for `<check names>`; a later run merges it. |'));
     for (const code of PULL_REQUEST_CODES) assert.ok(flat.includes(`\`${code}\``), code);
   });
 

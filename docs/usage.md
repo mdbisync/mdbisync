@@ -18,8 +18,10 @@ The engine requires Node.js 24.2 or later and [Git 2.40 or later](https://github
 
 ## Generate repository files
 
-Run the released CLI at your repository root. Supply the full release commit
-SHA used by the action and hook, plus the folders to synchronize:
+Run the released CLI at your repository root, through `npm exec` as the
+[quickstart](quickstart.md#repository-files) shows (the commands below
+write `mdbisync` for short). Supply the full release commit SHA used by the
+action and hook, plus the folders to synchronize:
 
 ```sh
 mdbisync init --release-sha <release-sha> --release-version vX.Y.Z \
@@ -110,15 +112,16 @@ job summary as names and states, never document content. A failure names
 what is missing and links the [quickstart](quickstart.md) section that fixes
 it. `check` runs it alone.
 
-The command line reads the action's inputs (see `action.yml`) from
-environment variables: `MDBISYNC_LINEAR_CLIENT_ID` for `linear-client-id`,
-and so on.
+The command line reads every input of the action except `operation` (the
+command names it), `cleanup-tokens` and `security-step` from environment
+variables: `MDBISYNC_LINEAR_CLIENT_ID` for `linear-client-id`, and so on
+([configuration reference](configuration.md#action-inputs)).
 
 ## Workflows
 
-Copy the workflow templates from
-[examples/](../examples/)
-into `.github/workflows/`:
+`init` writes the workflow templates of [examples/](../examples/) into
+`.github/workflows/`, pinned to your release. To copy them by hand instead,
+replace each `mdbisync/mdbisync@…` pin with your release SHA:
 
 - `mdbisync-initial-sync.yml` runs the initial sync by hand from the Actions
   tab, with a `direction` and a `confirm` box (unchecked: a dry run).
@@ -250,7 +253,8 @@ by one rule, the same in the initial sync and in the sync:
 - a part longer than 180 bytes is cut to 40 characters plus `~` and 16
   characters of its SHA-256 hash;
 - a name that would land on another file (also one differing only in letter
-  case), or in a folder another annotation owns, becomes one file in the
+  case), in a folder another annotation owns, or inside an `assets/` folder
+  (where the sync keeps embedded files), becomes one file in the
   folder of the document's team or project: the encoded title with `/` as
   `%2F`, then `~` and 12
   characters of the SHA-256 hash of the document's id
@@ -483,9 +487,13 @@ bot user whose id the workflow sets in `SECURITY_GATE_CREATOR_ID` (only the
 newest status of that context counts: a later one from anyone else refuses
 the release until the scan posts again), `main` has no open code
 scanning alert of medium or higher severity (or of severity error), no open
-Dependabot alert of medium or higher, and no open secret scanning alert, and
-CodeQL's latest analysis of each category on `main` succeeded and includes
-the source commit. It names every reason it refuses. The workflow token cannot read
+Dependabot alert of medium or higher outside npm, and no open secret
+scanning alert, the source commit's npm lock files have no known advisory
+of moderate or higher severity (a dependency scan run just before the gate,
+less the exceptions in
+[`security/dependency-exceptions.json`](../security/dependency-exceptions.json)),
+and CodeQL's latest analysis of each category on `main` succeeded and
+includes the source commit. It names every reason it refuses. The workflow token cannot read
 secret scanning alerts, so the gate reads them with `SECRET_SCANNING_READ_TOKEN`
 in the `release` environment, a fine-grained token with read-only access to
 secret scanning alerts. Limit that environment's deployment branches and tags
@@ -561,7 +569,7 @@ every release commit ships their license texts and notices in
 
 Before a final version is tagged, the release workflow runs:
 - the security gate above: the release scans of its source commit, CodeQL,
-  Dependabot and secret scanning;
+  Dependabot, the npm dependency scan and secret scanning;
 - the full test suite;
 - after the build, an offline install of the built CLI.
 

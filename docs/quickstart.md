@@ -52,10 +52,16 @@ between `refs/tags/` and `^{}` is the version, for example `v0.1.0`
 ## Sync environment
 
 GitHub supports environment secrets and branch rules in public
-repositories and in private repositories on Pro, Team or Enterprise.
-If your repository's plan lacks this support, keep its repository secrets
-until you can migrate. Those secrets remain accessible outside the
-tracked branch. [GitHub environment availability](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
+repositories and in private repositories on Pro, Team or Enterprise
+([GitHub environment availability](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)).
+If your repository's plan lacks this support, skip this section: add the
+two secrets of the sections below (`MDBISYNC_LINEAR_CLIENT_SECRET` and
+`MDBISYNC_APP_PRIVATE_KEY`) as repository secrets instead, under Settings
+→ Secrets and variables → Actions → Secrets, and remove the line
+`environment: mdbisync` from the jobs of both sync workflows that `init`
+writes. Repository secrets are readable from a workflow run on any branch,
+not only the tracked one; move them to the environment once your plan
+supports it.
 
 In your docs repository, go to Settings → Environments and create
 `mdbisync`. Under **Deployment branches and tags**, choose **Selected
@@ -65,20 +71,10 @@ runs can start automatically. Set the branch rule before adding any secrets
 or pushing the workflows. GitHub records jobs that use the environment in
 the repository's deployment history.
 
-For an existing installation, add the environment secrets below using
-their current values. The Linear client secret also signs sync state. If
-you must rotate it and the sync reports `initial-sync-required`, follow
-[Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync).
-Set the Linear client-ID repository variable before updating both sync
-workflows as described in
-[Repository files](#repository-files). Then delete the repository
-secrets of the same names under Settings → Secrets and
-variables → Actions. Until you move the secrets, the jobs can still read
-the repository secrets, so sync keeps working, but the branch restriction
-doesn't protect those repository secrets. If an organization secret of
-the same name is visible to this repository, also remove that access.
-Protection takes effect once the credentials exist only in the restricted
-environment.
+An installation that keeps its secrets as repository secrets, or reads
+the Linear client ID from a secret, moves them as
+[Moving an existing installation to the environment](configuration.md#moving-an-existing-installation-to-the-environment)
+describes.
 
 ## Linear OAuth app
 
@@ -103,15 +99,14 @@ Create it. Each run asks this app for a token with the scopes `read` and
 
 In your docs repository, add the client ID under Settings → Secrets
 and variables → Actions → Variables. Add the client secret under
-Settings → Environments → `mdbisync` → Environment secrets.
+Settings → Environments → `mdbisync` → Environment secrets (a
+repository secret on a plan without environments, see
+[Sync environment](#sync-environment)).
 
 | Kind | Name | Value |
 | --- | --- | --- |
 | Variable | `MDBISYNC_LINEAR_CLIENT_ID` | OAuth app page → Client ID |
 | Secret | `MDBISYNC_LINEAR_CLIENT_SECRET` | OAuth app page → Client secret |
-
-Set the client-ID variable before updating or enabling the workflows.
-After updating both workflows, delete any old client-ID repository secret.
 
 Keep the client secret only in the environment secret and, if you want a
 copy, your password manager: don't leave it in a file, a note or a chat.
@@ -164,7 +159,9 @@ repositories → your docs repository → Install.
 
 In your docs repository, add the client ID under Settings → Secrets and
 variables → Actions → Variables → New repository variable. Add the key
-under Settings → Environments → `mdbisync` → Environment secrets.
+under Settings → Environments → `mdbisync` → Environment secrets (a
+repository secret on a plan without environments, see
+[Sync environment](#sync-environment)).
 
 | Kind | Name | Value |
 | --- | --- | --- |
@@ -335,9 +332,9 @@ Check that the `sync` job in `mdbisync.yml` and the `initial-sync` job in
 `mdbisync-initial-sync.yml` each declare `environment: mdbisync`, and
 that every `linear-client-id` input reads
 `${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}`. Workflows written by `init` of
-`v0.1.0-rc.17` or earlier have neither: add `environment: mdbisync` under each job, at the
-same indentation as `runs-on`, and change each `linear-client-id` input,
-before committing the files or starting a sync.
+`v0.1.0-rc.17` or earlier have neither: change them as
+[Moving an existing installation to the environment](configuration.md#moving-an-existing-installation-to-the-environment)
+describes before committing the files or starting a sync.
 
 When the repository has other CI (tests, linters), the pre-commit
 workflow starts it on the commits it pushes, which a push with the
@@ -352,8 +349,9 @@ those checks pass on the fixed commit too.
 | Variable | `MDBISYNC_CI_WORKFLOWS` | Your CI workflows' file names, for example `tests.yml lint.yml`; leave it unset when there are none |
 
 A repository with no CI at all gives the sync's steps
-`merge-without-checks: true` ([configuration](configuration.md#action-inputs)):
-otherwise the sync waits for a check before it merges.
+`merge-without-checks: true` ([configuration](configuration.md#action-inputs);
+releases from `v0.1.0-rc.13` have it): otherwise the sync waits for a
+check before it merges.
 
 It keeps what the files already hold, and stops before writing anything
 when a value it would write differs from one already there. It ends by
@@ -422,6 +420,7 @@ them by path, for example with one annotated folder `docs`:
 git status
 git add .github/workflows/mdbisync.yml .github/workflows/mdbisync-initial-sync.yml \
   .github/workflows/pre-commit.yml .pre-commit-config.yaml docs/README.md
+# With --lfs, also: git add .gitattributes
 # Then git add each Markdown file pre-commit rewrote, as git status lists it.
 git commit -m "Set up the Linear sync"
 git push origin main
@@ -455,7 +454,9 @@ same concurrency group can replace a waiting initial sync.
 The sync needs a starting state, which initial sync creates. Its workflow,
 `.github/workflows/mdbisync-initial-sync.yml`, is one of the files
 `mdbisync init` wrote (without `init`, copy it from
-[`examples/`](../examples/mdbisync-initial-sync.yml)). You run it by hand
+[`examples/`](../examples/mdbisync-initial-sync.yml) and replace each
+`mdbisync/mdbisync@…` pin with `<release-sha>` and its comment with
+`<version>`). You run it by hand
 from the Actions tab, with a direction: `git-to-linear` makes Linear equal
 to git, `linear-to-git` opens a pull request that makes git equal to
 Linear. The first run is a dry run that lists what would change; run it
@@ -476,8 +477,9 @@ git](initial-sync-linear-to-git.md).
    that writes nothing." unchecked → Run workflow.
 2. **Read its summary.** Open the finished run. Its job summary starts
    with the **Setup check** table: each item `passed`, a `warning` (for
-   example, no security hooks), or `FAILED` with a link to the section of
-   this page that fixes it. Below it, the dry run lists by path what would
+   example, no security hooks), `FAILED` with a link to the section of
+   this page that fixes it, or `not checked` when an earlier failure made
+   it impossible to check. Below it, the dry run lists by path what would
    be created, overwritten, removed and left out. Nothing is written. Fix
    any failure and run the dry run again.
 3. **Write.** Run the workflow again with the same `direction` and the

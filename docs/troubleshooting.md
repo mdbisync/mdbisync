@@ -36,7 +36,7 @@ The command line's exit code:
 | 2 | The command or its inputs are wrong. Nothing ran. See [Input errors](#input-errors). |
 | 3 | A setup error. Either the setup check failed and nothing was written, or GitHub keeps refusing the merge (`merge-blocked`), or expected checks never started on the sync pull request's head (`checks-missing`): then the run kept Linear's changes in its state and on the sync branch, but wrote no tracked-branch changes to Linear. Or the sync's head, on either lane, would change files that are not synchronized documents or their assets (`head-unverified`); a person reviews it. Or GitHub merged a sync pull request where the sync had not checked it (`merge-misplaced`); the rest of the run went on as usual. |
 | 4 | The sync has no state: run an initial sync, or merge the pull request of the one that ran. Nothing was written. |
-| 5 | The run did not finish. A sync is partial and the next run goes on; run an initial sync again with the same inputs. Except `container-cap`: running again fails the same way until a person makes room (see [`container-cap`](#container-cap)). |
+| 5 | The run did not finish. A sync is partial and the next run goes on; an initial sync goes on when you run it again with the same inputs. Except `container-cap`: running again fails the same way until a person makes room (see [`container-cap`](#container-cap)); and `suspended-asset-discovery`, which needs the repair in [Suspension and release](sync-cycle.md#suspension-and-release). |
 | 10 to 15 | `<command>: not implemented`: this build does not have the command. |
 
 The action has no exit code: its step fails, or warns for a partial sync,
@@ -62,14 +62,16 @@ step with the bare message, without `error:`.
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
 | `Run this workflow on <branch>, not on <ref>.` | The sync or initial sync workflow ran on a branch other than the tracked branch (main), for example a dispatch on a feature branch, and stopped before any step got a token or a secret. Run it on the tracked branch. If the sync tracks a branch other than main, name it in the workflow's first step (`BRANCH`). |
+| `Set the MDBISYNC_APP_CLIENT_ID GitHub Actions variable.` or `Set the MDBISYNC_LINEAR_CLIENT_ID GitHub Actions variable.` | The workflow's **Check sync variables** step found the named repository variable empty and stopped before any step got a token. Set it to the client ID of the corresponding app ([GitHub App](quickstart.md#github-app), [Linear OAuth app](quickstart.md#linear-oauth-app)). |
 | `error: <message>` (the action: `<message>` alone) | An error stopped the run. Look the message up on this page. |
 
 ## Setup check
 
 Every run checks its setup before it writes anything; `check` runs only
 that. The job summary has one row per check, with the state `passed`,
-`failed`, `warning` or `not-checked` (an earlier failure made it impossible
-to check). A failed row, the summary's first line and the run's last line
+`FAILED`, `warning` or `not checked` (an earlier failure made it impossible
+to check); the run report gives them as `passed`, `failed`, `warning` and
+`not-checked`. A failed row, the summary's first line and the run's last line
 link the [quickstart](quickstart.md) section that fixes the failure, for
 example [GitHub App](quickstart.md#github-app) for a missing permission:
 
@@ -233,8 +235,7 @@ the head's deadline and the red-main hold. See
 comment text and mark limits.
 
 Linear's changes reach the tracked branch through the sync pull request
-(see [usage.md](usage.md#the-sync-pull-request)). Its step reports the codes below. `merge-refused`, `merge-blocked`, `merge-misplaced` and `checks-missing`
-apply to either lane; the summary identifies a suspended merge refusal.
+(see [usage.md](usage.md#the-sync-pull-request)).
 
 For **Suspended files waiting for a manual merge**, fix the listed
 non-document files on the suspended branch (`mdbisync/suspended` by
@@ -248,7 +249,9 @@ run retries the merge. Do not merge the entire Linear state ref into the
 suspended branch: it carries other documents that belong in the normal
 lane.
 
-Its step reports:
+Its step reports the codes below. `merge-refused`, `merge-blocked`,
+`merge-misplaced` and `checks-missing` apply to either lane; the summary
+identifies a suspended merge refusal.
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
@@ -423,7 +426,6 @@ step fails with the same message:
 | `missing command`, `unknown command: <name>` | Run `mdbisync --help` for the commands. |
 | `mdbisync requires Node.js 24.2 or later; install it and try again.` | Install Node.js 24.2 or later. |
 | `the input <name> is required` | Set the input in the workflow, or its `MDBISYNC_*` environment variable on the command line. |
-| `Set the MDBISYNC_APP_CLIENT_ID GitHub Actions variable.` or `Set the MDBISYNC_LINEAR_CLIENT_ID GitHub Actions variable.` | Set the named variable to the client ID for the corresponding app. See [sync environment setup](quickstart.md#sync-environment). |
 | `the input repository must be "owner/name" (it defaults to the workflow's repository)` | Give `repository` as `owner/name`, or leave it empty in a workflow. |
 | `the input document-cap must be a positive safe integer` | Give a whole number above zero. |
 | `the input merge-grace-seconds must be an integer from 0 to 120` | Give a whole number of seconds from 0 to 120. |
@@ -433,7 +435,6 @@ step fails with the same message:
 | `the input app-slug is required: give it the App token step's output app-slug` | In the workflow, give the mdbisync steps `app-slug: ${{ steps.app-token.outputs.app-slug }}`, as the example workflows do. |
 | `the input app-slug must be a GitHub App slug (letters, digits and hyphens)` | Give the App's slug, not its name or its bot login (`<slug>[bot]`); the token step's output `app-slug` is it. |
 | `the input direction is required (initial sync never picks a direction itself)`, `the input direction must be one of git-to-linear, linear-to-git, not "<value>" (initial sync never picks a direction itself)` | Choose `git-to-linear` or `linear-to-git`. |
-| `remote "<name>" is not a valid remote name` | Use a valid git remote name. |
 | `<trackedBranch or syncBranch> "<name>" is not a valid branch name: <problem>` (the problem can be `starts with "-"`) | Use a valid branch name in the `tracked-branch` or `sync-branch` input. |
 | `the tracked branch and both sync lane branches must differ`, `one of the tracked branch and the sync branch is a folder of the other` | Choose two separate branch names, neither inside the other, such as `main` and `mdbisync/linear`. |
 | `refPrefix "<prefix>" is not a valid ref prefix: <problem>`, `refPrefix "<prefix>" must start with "refs/" and name a folder under it`, `refPrefix "<prefix>" must not be under refs/heads, refs/tags or refs/remotes` | Set `state-ref-prefix` to a folder under `refs/` of its own, such as the default `refs/mdbisync/`. |
@@ -453,7 +454,6 @@ the message. Most come from the workflow's configuration:
 | `unknown operation: <name> (expected one of: <operations>)` | Set the action's `operation` to `sync` or `initial-sync`. |
 | `unknown security-step: <name> (expected one of: <steps>, or empty)` | Set `security-step` to `stage` or `apply`, or leave it empty. |
 | `cleanup-tokens belongs before the stage step, not apply` | Move `cleanup-tokens: true` to the `stage` step. |
-| `token cleanup requires exclusive use of the Linear app` | Token cleanup runs only with a Linear app that nothing else uses (see [tokens left by interrupted jobs](configuration.md#tokens-left-by-interrupted-jobs)). |
 | `RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job` | Use `security-step` only in GitHub Actions; leave it empty on the command line. |
 | `the staged candidates come from another version of the action`, `the staged manifest names a file that is not a content hash` | Pin the `stage` and `apply` steps to the same release, and let nothing else write to the runner's temporary folder between them. |
 | `invalid security hook configuration` | Fix the hooks marked `alias: security` in `.pre-commit-config.yaml`. |
@@ -551,6 +551,9 @@ content).
 - `a document has an invalid update time`
 - `no safe destination for a document`
 - `a linked file is not in the upload cache`
+- `remote "<name>" is not a valid remote name` (no input sets the remote)
+- `token cleanup requires exclusive use of the Linear app` (the action
+  always runs token cleanup with exclusive use)
 
 A state commit that cannot be read can also be recovered with an initial
 sync, below.

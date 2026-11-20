@@ -54,7 +54,7 @@ action. Every input of the action, and what it means for this run:
 | Input | Default | In an initial sync from git to Linear |
 | --- | --- | --- |
 | `operation` | `sync` | `initial-sync`; the template sets it. |
-| `direction` | empty | `git-to-linear`. Required, though the action has no default: the initial sync never picks a direction itself. |
+| `direction` | empty | `git-to-linear`. Required, with no default: the initial sync never picks a direction itself. |
 | `confirm` | empty | Only the exact value `true` writes; anything else is a dry run. |
 | `linear-client-id` | none | The Linear OAuth app's client ID, from the repository variable `MDBISYNC_LINEAR_CLIENT_ID`. |
 | `linear-client-secret` | none | Its client secret, from the secret `MDBISYNC_LINEAR_CLIENT_SECRET`. The run mints a token from both and revokes it when it ends. |

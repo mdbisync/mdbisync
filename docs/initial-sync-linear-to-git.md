@@ -12,7 +12,7 @@ Linear. Nothing in Linear changes, not even a title.
 > nothing changes on the tracked branch, and removed files stay in its
 > history after the merge.
 
-How to set up the repository is in the [README](../README.md); how folders
+How to set up the repository is in the [quickstart](quickstart.md); how folders
 map to Linear and what every run checks is in [usage.md](usage.md).
 
 ## When to use it
@@ -28,7 +28,7 @@ Linear equal to git and moves Linear-only documents to Linear's trash.
 
 ## Before you start
 
-- Finish the setup and map each folder to its Linear team or project in the
+- Finish the setup ([quickstart](quickstart.md)) and map each folder to its Linear team or project in the
   front matter of its `README.md`
   ([folder mapping](usage.md#folder-mapping)).
 - In the repository settings, turn on **Allow merge commits**.

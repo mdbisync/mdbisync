@@ -31,8 +31,8 @@ only" has no command-line form.
 | `document-cap` | no | `1000` | `MDBISYNC_DOCUMENT_CAP` | Maximum documents per Linear project or team, trash included. A run warns at 90% and stops before writing above it. |
 | `merge-grace-seconds` | no | `60` | `MDBISYNC_MERGE_GRACE_SECONDS` | Seconds, 0 to 120, a run waits for checks after it opens or moves the sync pull request; 0 leaves the merge to a later run. |
 | `check-deadline-minutes` | no | `60` | `MDBISYNC_CHECK_DEADLINE_MINUTES` | Minutes, 10 to 1440, the sync pull request's checks may stay pending before its batch is suspended. |
-| `required-checks` | no | none | `MDBISYNC_REQUIRED_CHECKS` | Checks, one per line, that every sync pull request head must pass before it merges, each with the publisher it must come from: `<name> @ actions`, `<name> @ app:<App id>` or `<name> @ status:<account id>` ([required checks](usage.md#required-checks)). |
-| `merge-without-checks` | no | `false` | `MDBISYNC_MERGE_WITHOUT_CHECKS` | `true` lets the sync merge a head with no checks at all, for a repository without CI. |
+| `required-checks` | no | none | `MDBISYNC_REQUIRED_CHECKS` | Checks, one per line, that every sync pull request head must pass before it merges, each with the publisher it must come from: `<name> @ actions`, `<name> @ app:<App id>` or `<name> @ status:<account id>` ([required checks](usage.md#required-checks)). From `v0.1.0-rc.13`; this form of the lines from `v0.1.0-rc.18` (`v0.1.0-rc.13` and `rc.14` take bare names, `rc.15` to `rc.17` write `<name> @ actions:<workflow file>` for a GitHub Actions job). |
+| `merge-without-checks` | no | `false` | `MDBISYNC_MERGE_WITHOUT_CHECKS` | `true` lets the sync merge a head with no checks at all, for a repository without CI. From `v0.1.0-rc.13`. |
 | `report-file` | no | none | `MDBISYNC_REPORT_FILE` | Path for the run's report as JSON (names and states only, and git's output for a refused push git reports partly applied), with the job summary beside it as `summary.md`; empty writes none. If a directory on the path is a symbolic link inside the checkout, the files are not written and the step fails; a link at either file's name is replaced, not written through. |
 | `direction` | no | none | `MDBISYNC_DIRECTION` | Initial sync only, and required there: `git-to-linear` or `linear-to-git`. |
 | `confirm` | no | none | `MDBISYNC_CONFIRM` | Initial sync only: `true` writes; anything else is a dry run that writes nothing. |
@@ -54,13 +54,9 @@ tags** with a single **Branch** rule for the tracked branch (`main` by
 default) and no required reviewers. Add the secrets below there. Set
 repository variables under Settings → Secrets and variables → Actions.
 See the [sync environment setup](quickstart.md#sync-environment) for
-GitHub plan requirements and migration order.
-
-When migrating, add the environment secrets and update both installed
-workflows to declare `environment: mdbisync`, then delete the repository
-secrets of the same names. Until the move, the jobs still read repository
-secrets and keep working. The branch rule protects only the environment
-secrets, so delete the repository copies to enforce it.
+GitHub plan requirements, and
+[below](#moving-an-existing-installation-to-the-environment) for an
+installation that keeps them as repository secrets.
 
 | Kind | Name | Holds | Set in |
 | --- | --- | --- | --- |
@@ -70,12 +66,38 @@ secrets, so delete the repository copies to enforce it.
 | Secret | `MDBISYNC_APP_PRIVATE_KEY` | The GitHub App's private key, the whole `.pem` file | [GitHub App](quickstart.md#github-app) |
 | Variable | `MDBISYNC_CI_WORKFLOWS` | The file names of the repository's other CI workflows, which the pre-commit workflow starts on the commits it pushes; optional | [In CI](linear-format.md#in-ci) |
 
-Set the `MDBISYNC_LINEAR_CLIENT_ID` repository variable before updating
-both sync workflows. Delete any old client-ID repository secret after the
-workflows use the variable.
-
 A security hook that needs a key of its own gets it from an environment secret you add,
 in the **Run the security hooks** step's `env:`.
+
+### Moving an existing installation to the environment
+
+Workflows written by `init` of `v0.1.0-rc.17` or earlier, or copied from
+the examples of those releases, declare no environment and read the
+Linear client ID, the Linear client secret and the App's private key from
+repository secrets. To move such an installation, in this order:
+
+1. Create the `mdbisync` environment with its branch rule, as the
+   [sync environment setup](quickstart.md#sync-environment) describes.
+2. Add `MDBISYNC_LINEAR_CLIENT_SECRET` and `MDBISYNC_APP_PRIVATE_KEY` as
+   environment secrets, with their current values. The Linear client
+   secret also signs the sync's state: if you rotate it instead, and the
+   sync then reports `initial-sync-required`, follow
+   [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync).
+3. Add the repository variable `MDBISYNC_LINEAR_CLIENT_ID` with the Linear
+   app's client ID, next to `MDBISYNC_APP_CLIENT_ID`.
+4. In both `mdbisync.yml` and `mdbisync-initial-sync.yml`, add
+   `environment: mdbisync` under the job, at the same indentation as
+   `runs-on`, and change each `linear-client-id` input to
+   `${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}`. Commit both to the tracked
+   branch.
+5. Delete the repository secrets of the same names, and any old client-ID
+   repository secret, under Settings → Secrets and variables → Actions.
+   If an organization secret of the same name is visible to this
+   repository, also remove that access.
+
+Until step 5 the jobs can still read the repository secrets, so the sync
+keeps working, but the branch rule does not protect them: protection takes
+effect once the credentials exist only in the environment.
 
 ## Folder annotations
 
