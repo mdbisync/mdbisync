@@ -14,7 +14,7 @@ and what each run's summary says is in [sync-cycle.md](sync-cycle.md). What
 each message means and how to recover is in
 [troubleshooting.md](troubleshooting.md).
 
-The engine requires Node.js 24 and [Git 2.40 or later](https://github.com/git/git/blob/master/Documentation/RelNotes/2.40.0.adoc).
+The engine requires Node.js 24.2 or later and [Git 2.40 or later](https://github.com/git/git/blob/master/Documentation/RelNotes/2.40.0.adoc).
 
 ## Generate repository files
 
@@ -517,7 +517,7 @@ repos:
 ```
 
 The action runs its checked-in JavaScript bundles without installation.
-The hooks use Node 24 and npm already installed on your machine
+The hooks use Node 24.2 or newer and npm already installed on your machine
 (`language_version: system`); no Node toolchain or registry dependencies are
 downloaded when installing or running them. Use npm 11.16.0 or newer: npm
 11.12.1 rejects pre-commit's local Git package installation. The release

@@ -16,7 +16,7 @@ export const MESSAGES = {
   // The command line and the action.
   'cli.missing-command': 'missing command',
   'cli.unknown-command': 'unknown command: {command}',
-  'cli.node-too-old': 'mdbisync requires Node 24 or newer; install it before running the hook.',
+  'cli.node-too-old': 'mdbisync requires Node 24.2 or newer; install it and try again.',
   'cli.not-implemented': '{command}: not implemented',
   'action.unknown-operation': 'unknown operation: {operation} (expected one of: {operations})',
   'action.unknown-security-step': 'unknown security-step: {step} (expected one of: {steps}, or empty)',

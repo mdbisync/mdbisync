@@ -149,7 +149,14 @@ async function main(): Promise<void> {
   }
 }
 
-if (Number(process.versions.node.split(".")[0]) < 24) {
+// The entry relies on import.meta.main, which Node added in 24.2: on an older
+// Node it is undefined and the entry would exit 0 without running.
+export function nodeVersionSupported(version: string): boolean {
+  const [major = 0, minor = 0] = version.split(".").map(Number);
+  return major > 24 || (major === 24 && minor >= 2);
+}
+
+if (!nodeVersionSupported(process.versions.node)) {
   process.stderr.write(`${message('cli.node-too-old')}\n`);
   process.exitCode = USAGE_EXIT_CODE;
 } else if (import.meta.main) {

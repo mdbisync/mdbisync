@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { COMMANDS, IMPLEMENTED, PREFLIGHT_COMMANDS, USAGE_EXIT_CODE, type CommandName } from "./commands.ts";
-import { runCli } from "./cli.ts";
+import { nodeVersionSupported, runCli } from "./cli.ts";
+import { message } from "./messages.ts";
 import { VERSION } from "./version.ts";
 
 const commandNames = Object.keys(COMMANDS);
@@ -40,6 +41,15 @@ for (const name of PREFLIGHT_COMMANDS) {
     assert.match(result.stderr, new RegExp(`^${name}: the input `));
   });
 }
+
+test("the CLI requires Node 24.2, since its entry relies on import.meta.main", () => {
+  for (const version of ["22.12.0", "24.0.0", "24.1.0", "24.1.9"]) {
+    assert.equal(nodeVersionSupported(version), false, version);
+  }
+  for (const version of ["24.2.0", "24.11.1", "25.0.0", "26.1.0"]) {
+    assert.equal(nodeVersionSupported(version), true, version);
+  }
+});
 
 test("--version prints the package version", async () => {
   assert.deepEqual(await runCli(["--version"]), { exitCode: 0, stdout: `${VERSION}\n`, stderr: "" });
@@ -78,6 +88,15 @@ for (const entry of entries) {
       assert.match(child.stderr, /the input linear-client-id is required/);
     }
     assert.equal(execFileSync(process.execPath, [entry.file, "--version"], { encoding: "utf8" }), `${VERSION}\n`);
+    // On Node 24.0 and 24.1 the entry's import.meta.main check would skip the
+    // run and exit 0; the version check must stop it first. A preload reports
+    // an older Node version to the entry.
+    for (const [version, status] of [["24.1.0", USAGE_EXIT_CODE], ["24.2.0", 0]] as const) {
+      const olderNode = `data:text/javascript,Object.defineProperty(process.versions,"node",{value:"${version}"})`;
+      const child = spawnSync(process.execPath, ["--import", olderNode, entry.file, "--version"], { encoding: "utf8" });
+      assert.equal(child.status, status, `${entry.file} on Node ${version}`);
+      assert.equal(child.stderr, status === 0 ? "" : `${message("cli.node-too-old")}\n`, `${entry.file} on Node ${version}`);
+    }
     // The bundle is the package's `bin`, so it must start with a Node shebang.
     assert.ok(readFileSync(entry.file, "utf8").startsWith("#!/usr/bin/env node\n"), `${entry.file} lacks the shebang`);
   });
