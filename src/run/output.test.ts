@@ -71,6 +71,12 @@ it('writes a report file without following links the checkout holds', async (t) 
   await writeReportFile(`${root}/up/../up.json`, 'up\n', checkout);
   assert.equal(await readFile(join(checkout, 'out', 'up.json'), 'utf8'), 'up\n');
 
+  // Off Windows a backslash is part of a name, not a separator.
+  if (process.platform !== 'win32') {
+    await writeReportFile(join(root, 'reports', 'a\\b.json'), 'slash\n', checkout);
+    assert.equal(await readFile(join(root, 'reports', 'a\\b.json'), 'utf8'), 'slash\n');
+  }
+
   // A regular file keeps its mode; the temporary name does not grow with the report's name.
   const kept = join(root, 'reports', `${'r'.repeat(240)}.json`);
   await writeFile(kept, 'old\n', { mode: 0o600 });

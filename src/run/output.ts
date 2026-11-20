@@ -55,10 +55,10 @@ const MAX_LINKS = 40;
  * @param checkout the repository's working tree
  */
 export async function writeReportFile(path: string, text: string, checkout: string): Promise<void> {
-  const names = (isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`).split(sep).filter((name) => name !== '');
+  const [root, names] = rootAndNames(isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`);
   const name = names.pop();
   if (name === undefined || name === '.' || name === '..') throw new Error(message('output.not-a-file', { path }));
-  const file = join(await reportDirectory(names, await realpath(checkout), path), name);
+  const file = join(await reportDirectory(root, names, await realpath(checkout), path), name);
   const existing = await lstat(file).catch(ifMissing);
   if (existing !== undefined && !existing.isFile() && !existing.isSymbolicLink()) throw new Error(message('output.not-a-file', { path }));
   const kept = existing?.isFile() === true ? existing.mode & 0o7777 : undefined;
@@ -76,11 +76,20 @@ export async function writeReportFile(path: string, text: string, checkout: stri
   }
 }
 
-/** The real directory that `names`, read from the root, lead to; missing ones are made. */
-async function reportDirectory(names: readonly string[], checkout: string, path: string): Promise<string> {
+/** Windows takes both slashes between names; elsewhere a backslash is part of a name. */
+const SEPARATORS = sep === '\\' ? /[\\/]/ : /\//;
+
+/** An absolute path's root (`/`, or a drive such as `C:\`) and the names after it. */
+function rootAndNames(path: string): [string, string[]] {
+  const { root } = parse(path);
+  return [root, path.slice(root.length).split(SEPARATORS).filter((name) => name !== '')];
+}
+
+/** The real directory that `names`, read from `root`, lead to; missing ones are made. */
+async function reportDirectory(root: string, names: readonly string[], checkout: string, path: string): Promise<string> {
   const pending = [...names];
   // `current` never holds a link: each link met is replaced by its target's names.
-  let current = parse(checkout).root;
+  let current = root;
   let links = 0;
   while (pending.length > 0) {
     const name = pending.shift() as string;
@@ -102,8 +111,13 @@ async function reportDirectory(names: readonly string[], checkout: string, path:
     if (inside(checkout, current)) throw new Error(message('output.linked-directory', { path: next }));
     if (++links > MAX_LINKS) throw new Error(message('output.link-loop', { path }));
     const target = await readlink(next);
-    if (isAbsolute(target)) current = parse(target).root;
-    pending.unshift(...target.split(sep).filter((part) => part !== ''));
+    if (isAbsolute(target)) {
+      const [targetRoot, targetNames] = rootAndNames(target);
+      current = targetRoot;
+      pending.unshift(...targetNames);
+    } else {
+      pending.unshift(...rootAndNames(target)[1]);
+    }
   }
   return current;
 }
