@@ -1,12 +1,14 @@
 // The generated Markdown groups of the corpus.
 //
 // Work documents, diagrams, tables, briefs with front matter, notes with
-// HTML and extensions, weekly digests with links, and localization pages
+// Markdown extensions, weekly digests with links, and localization pages
 // read like Kitewing's own documentation and live in its team and project
-// folders. Pairwise construct samples, size extremes, odd names, marker
-// lookalikes, lint errors and unusual typography live in the eng/edge-cases
-// project; long titles and duplicate titles, which need the team zone, live in
-// eng/edge-cases (team zone).
+// folders. They carry no raw HTML, which Linear shows as literal tags; raw
+// HTML stays in the Markdown reference and the edge-case areas. Pairwise
+// construct samples, size extremes, odd names, marker lookalikes, lint errors
+// and unusual typography live in the eng/edge-cases project; long titles and
+// duplicate titles, which need the team zone, live in eng/edge-cases (team
+// zone).
 
 import { posix } from "node:path";
 import { fixText } from "../../src/format/index.ts";
@@ -816,14 +818,16 @@ function frontMatter(ctx: Context): void {
   }
 }
 
-// ---------------------------------------------------------------- HTML and extensions
+// ---------------------------------------------------------------- Markdown extensions
 
-function htmlExtensions(ctx: Context): void {
+// The notes share the "html-extensions" group with the reference's raw HTML
+// samples, but carry only Markdown extensions: no raw HTML in everyday documents.
+function markdownExtensions(ctx: Context): void {
   const { rng } = ctx;
   const forms: [string, (rng: Rng, p: Profile, tp: Topic, n: number) => [string, string]][] = [
-    ["charter", (_r, p) => [`${p.name} team charter`, `<div align="center">\n  <strong>${p.about}</strong>\n</div>\n\nWe meet weekly, write things down and review each other's work within a day.`]],
-    ["draft", (_r, _p, tp) => [`Draft: ${tp.title.toLowerCase()}`, `<!-- Add last week's numbers before sharing. -->\n\n${tp.summary} ${tp.problem}`]],
-    ["review-notes", (_r, _p, tp) => [`${tp.title}: notes for reviewers`, `${tp.summary}\n\n<details>\n<summary>Background</summary>\n\n${tp.problem}\n\n</details>\n\n<details>\n<summary>What could go wrong</summary>\n\n${tp.risk}\n\n</details>`]],
+    ["charter", (_r, p) => [`${p.name} team charter`, `**${p.about}**\n\nWe meet weekly, write things down and review each other's work within a day.`]],
+    ["draft", (_r, _p, tp) => [`Draft: ${tp.title.toLowerCase()}`, `**Before sharing:** add last week's numbers.\n\n${tp.summary} ${tp.problem}`]],
+    ["review-notes", (_r, _p, tp) => [`${tp.title}: notes for reviewers`, `${tp.summary}\n\n## Background\n\n${tp.problem}\n\n## What could go wrong\n\n${tp.risk}`]],
     ["glossary", (_r, p) => [`${p.name} glossary`, `Depot\n: A building where vans are loaded.\n\nRoute\n: The ordered stops of one van for one day.\n\nTime window\n: The hours in which a customer accepts a delivery.`]],
     ["maintenance", (r) => [`Maintenance notice, ${weekDate(r.int(20, 60), r.int(0, 4))}`, `> [!NOTE]\n> The console will be read-only between 05:00 and 05:30 UTC while we upgrade the database. Drivers are not affected.`]],
     ["known-issue", (_r, _p, tp) => [`Known issue: ${tp.title.toLowerCase()}`, `> [!WARNING]\n> ${tp.problem}\n\n${tp.change}`]],
@@ -936,7 +940,7 @@ export function documents(rng: Rng, canaries: Canaries, assets: Assets, taken: S
   typography(ctx);
   linksGroup(ctx);
   frontMatter(ctx);
-  htmlExtensions(ctx);
+  markdownExtensions(ctx);
   conflictMarkers(ctx);
   lintErrors(ctx);
   unsynced(ctx);

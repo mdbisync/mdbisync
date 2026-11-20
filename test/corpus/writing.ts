@@ -652,12 +652,9 @@ function policy(input: WriteInput, topic: Topic, f: Figures): Draft {
     "",
     topic.risk,
     "",
-    "<details>",
-    "<summary>How this policy changes</summary>",
+    "## How this policy changes",
     "",
     `We review it once a year. The last review was on ${weekDate(rng.int(10, 50))}, led by ${people(rng, 1)[0]}.`,
-    "",
-    "</details>",
     "",
     ...f.rest(),
   ];
@@ -731,7 +728,7 @@ function faq(input: WriteInput, topic: Topic, f: Figures): Draft {
   const body = [
     `# ${heading}`,
     "",
-    ...qa.flatMap(([q, a], i) => (i % 2 === 0 ? [`### ${q}`, "", a, ""] : ["<details>", `<summary>${q}</summary>`, "", a, "", "</details>", ""])),
+    ...qa.flatMap(([q, a], i) => (i % 2 === 0 ? [`### ${q}`, "", a, ""] : [`**${q}**`, "", a, ""])),
     ...f.rest(),
   ];
   return { heading, folder: "faq", name: slugify(topic.title), body: body.join("\n") };

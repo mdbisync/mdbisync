@@ -15,6 +15,7 @@ import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { makeSlices, MID_REGRESSIONS, midRegressions, MINI_DOCUMENTS, pickMid } from "./slices.ts";
 import { fixText, linkedFileCheck, lintText } from "../../src/format/index.ts";
+import { isCalloutComment, parse as parseMarkdown, splitFile, visit } from "../../src/format/markdown.ts";
 import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
 import { CHECK_TRAILER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH, type CheckEvent, checkStateMessage, readCheckState } from "./check-workflow.ts";
 import { SET_ASIDE_MESSAGE } from "../../src/sync/suspended.ts";
@@ -482,6 +483,22 @@ test("edge cases stay in the edge-case area and the Markdown reference, away fro
     assert.ok(!edgeGroups.has(file.group), `${file.path} (${file.group}) belongs in ${EDGE} or ${EDGE_ZONE}`);
     assert.notEqual(file.expected, "lint-error", `${file.path} is a lint error outside ${EDGE} and ${EDGE_ZONE}`);
   }
+});
+
+test("everyday documents carry no raw HTML outside code, which Linear shows as literal tags", () => {
+  const exempt = [`${EDGE}/`, `${EDGE_ZONE}/`, "docs/reference/"];
+  let checked = 0;
+  for (const file of corpus().files) {
+    if (file.kind !== "markdown" || !file.synced || exempt.some((p) => file.path.startsWith(p))) continue;
+    const html: string[] = [];
+    // The parser keeps code blocks and code spans out of `html` nodes; Linear's own callout comment is not raw HTML.
+    visit(parseMarkdown(splitFile(file.content.toString()).body), (node) => {
+      if (node.type === "html" && !isCalloutComment(node)) html.push(node.value);
+    });
+    assert.deepEqual(html, [], `${file.path} (${file.group}) shows raw HTML in Linear; keep it in docs/reference/ or ${EDGE}`);
+    checked++;
+  }
+  assert.ok(checked > 1000, `checked only ${checked} everyday documents`);
 });
 
 test("the corpus configuration requires and retains a full release commit pin", () => {
