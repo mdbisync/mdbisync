@@ -6,19 +6,40 @@ Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## Set up and run the tests
 
-You need Node.js 24.2 or later, Git and [pre-commit](https://pre-commit.com/): it runs
-the same hooks as CI, and the scenario harness tests commit through
-pre-commit hooks of a local hook repository.
+You need Node.js 24.2 or later, npm 11.16.0 or later (CI uses 11.21.2; older
+npm rejects pre-commit's install of the hooks from a local repository), Git
+and [pre-commit](https://pre-commit.com/): it runs the same hooks as CI, and
+the scenario harness tests commit through pre-commit hooks of a local hook
+repository. CI installs the pre-commit version pinned in
+[.github/requirements/pre-commit.txt](.github/requirements/pre-commit.txt);
+to use the same one, install it into a virtual environment with
+`pip install --require-hashes --only-binary :all: -r .github/requirements/pre-commit.txt`.
+
+Run them in this order: `npm test` needs the bundles that `npm run build`
+writes to `dist/`, and the quick checks fail sooner than the full suite.
 
 ```sh
 npm ci                     # exact versions from package-lock.json, no install scripts
+npm audit signatures       # registry signatures of the installed packages
+npm run check:install-scripts  # no locked package has install scripts
+npm run check:fixtures     # the fixture bank matches its index
 npm run typecheck
 npm run build              # bundles dist/, checks bundled licenses, writes the notices
+pre-commit run --all-files # the repository's hooks, including the check for Cyrillic text
 npm test
 npm run test:hooks         # needs pre-commit; offline scratch hook and CI checks
 npm run test:template-install  # needs Python 3.11 to 3.14 with venv, and PyPI; template and repository pre-commit installs
                                # TEMPLATE_INSTALL_PYTHON=<python3.10> checks that templates refuse an older Python
-pre-commit run --all-files
+```
+
+`pre-commit install` runs the same hooks on every commit and push.
+
+The test of the release the templates pin reads the release tags and is
+skipped without them. A clone of a fork can lack the newer ones; fetch them
+from this repository:
+
+```sh
+git fetch https://github.com/mdbisync/mdbisync.git 'refs/tags/v*:refs/tags/v*'
 ```
 
 To generate the test corpus with a released hook, pass its release commit
@@ -90,20 +111,35 @@ in the repository's LFS storage.
 | `src/cli.ts` | Command line: `sync`, `initial-sync`, `lint`, `fix`, `init`, `check`, `--version` |
 | `src/action/` | GitHub Action steps: `main` (operation `sync` or `initial-sync`) and `post` |
 | `src/run/` | Inputs and the preflight every run starts with |
+| `src/sync/` | The sync run after the initial sync: both directions, assets, the sync pull request |
+| `src/merge/` | Three-way Markdown merge, conflict markers, and renames or deletions on either side |
 | `src/mapping/` | Folder annotations and the mapping of files to documents |
 | `src/setup/` | The setup check and the refusal to sync without state |
 | `src/format/` | `lint` and `fix`: Markdown in Linear's form ([docs/linear-format.md](docs/linear-format.md)) |
 | `src/initial-sync/` | Initial sync in both directions: plan, dry run, confirmed run |
+| `src/init/` | `init`: writes the workflows (templates in `workflows.json`, mirrored in `examples/`) and configuration into a repository |
 | `src/pull-request/` | Pull requests through GitHub's REST API: open, update, read checks, merge |
 | `src/linear/` | Linear client |
 | `src/state/` | The sync's state refs, trees and LFS reads |
+| `src/release/` | Release build: bundles, SBOM, security gate and report, dependency scan |
+| `src/messages.ts`, `src/codes.ts` | Run messages and reported codes (see [Error messages and codes](#error-messages-and-codes)) |
 | `action.yml` | Action metadata (`node24`, bundled `main` and `post`) |
-| `tools/` | Build and supply-chain checks |
+| `tools/` | Build, supply-chain checks and test runners |
 | `test/fixtures/`, `test/corpus/`, `test/scenarios/`, `test/e2e/` | Test data, corpus generator, scenario specs and end-to-end harness |
+| `examples/` | Workflow templates for users; `init` writes the same files |
+| `security/` | Accepted risks, the dependency review's advisory exceptions and the security reports of final releases |
 
 ## Pull requests
 
 - Keep a pull request to one change, with tests that show it working.
+- Every pull request runs CI (the checks above, with the tests in four
+  shards), CodeQL code scanning and dependency review; all of them must
+  pass before it can merge. A new CodeQL alert blocks the merge until the
+  code is fixed when it is a security alert of medium severity or higher,
+  or any alert of severity error.
+- A change to what users see (inputs, messages, codes, workflows, the
+  format) updates `README.md`, `docs/` and `examples/` (with its copy in
+  `src/init/workflows.json`) in the same pull request.
 - Do not weaken or skip a failing test to make it pass; fix the cause.
 - Write code, comments and docs in English.
 - Dependencies: exact versions with hashes in `package-lock.json`, no
