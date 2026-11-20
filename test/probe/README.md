@@ -76,6 +76,10 @@ result and the probe's log are uploaded as the `format-probe-report`
 artifact, never committed. A manual run can probe another branch through the
 `ref` input.
 
+Mark fixtures waiting for their first live record with `probe_pending: true`
+in the bank index. Whole-bank comparisons skip these fixtures until a manifest
+entry exists. Use `--only` to probe them directly or `--update` to record them.
+
 If Linear stops serving `contentState` (an internal field), the probe
 reports the Yjs part as blocked and still checks the Markdown forms.
 

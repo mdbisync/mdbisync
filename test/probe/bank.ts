@@ -21,6 +21,8 @@ export interface BankFixture {
   basis: 'known' | 'assumed';
   canary: string;
   synced?: boolean;
+  /** Include without a baseline only when recording or probing a focused selection. */
+  probe_pending?: true;
   /** `captured`: fix's form is what the sync captures for Linear's recorded form, which fix cannot write. */
   git_form?: 'captured';
 }

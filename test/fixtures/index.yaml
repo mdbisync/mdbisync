@@ -2508,6 +2508,7 @@ fixtures:
     basis: assumed
     canary: kx-15b4d7c0
     corpus: false
+    probe_pending: true
     note: "a task item holding only an uploaded MP3, in the current file-block form"
   - file: "list-items/audio-mp3-numbered.md"
     group: list-items
@@ -2516,6 +2517,7 @@ fixtures:
     basis: assumed
     canary: kx-8b1c5d2a
     corpus: false
+    probe_pending: true
     note: "a numbered item holding only an uploaded MP3, in the current file-block form"
   - file: "list-items/audio-wav.md"
     group: list-items
@@ -2524,6 +2526,7 @@ fixtures:
     basis: assumed
     canary: kx-d2a693b5
     corpus: false
+    probe_pending: true
     note: "a bullet item holding only an uploaded WAV, in the current file-block form"
   - file: "list-items/audio-ogg.md"
     group: list-items
@@ -2532,6 +2535,7 @@ fixtures:
     basis: assumed
     canary: kx-0de67ab1
     corpus: false
+    probe_pending: true
     note: "a bullet item holding only an uploaded Ogg clip, in the current file-block form"
   - file: "list-items/nested-attachment-csv-one-line.md"
     group: list-items

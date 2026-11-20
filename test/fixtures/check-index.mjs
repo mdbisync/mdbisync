@@ -283,6 +283,7 @@ export function checkBank(bankDir) {
     if (!f.construct) err(`${at}: no construct`);
     if (!CLASSES.includes(f.class)) err(`${at}: class must be one of ${CLASSES.join(', ')}`);
     if (!BASES.includes(f.basis)) err(`${at}: basis must be one of ${BASES.join(', ')}`);
+    if (f.probe_pending !== undefined && f.probe_pending !== true) err(`${at}: probe_pending is either true or left out`);
     if (f.class === 'lint-error' && !rules.has(f.rule)) err(`${at}: lint-error needs a known rule`);
     if (f.class !== 'lint-error' && f.rule !== undefined) err(`${at}: only lint-error fixtures have a rule`);
     if (f.corpus !== undefined && f.corpus !== false) err(`${at}: corpus is either false or left out`);

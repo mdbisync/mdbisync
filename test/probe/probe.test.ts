@@ -15,6 +15,7 @@ import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, sentForm, toLi
 import { PROBE_FACTS, findLimit, isLeftover, isRefusal, runProbe } from './probe.ts';
 import { findDrift, keepReadbacks, refusalKey, writeRecord, yjsText } from './record.ts';
 import { diffLines, keptOnlyInYjs, renderReport } from './report.ts';
+import { main } from './run.ts';
 import { summarizeContentState } from './yjs-summary.ts';
 
 const ASSET_URL = 'https://uploads.example.test/a1b2/banner.png';
@@ -192,10 +193,11 @@ describe('format probe against a fake Linear', () => {
   ] as const) {
     it(`uploads the asset for the ${name} list item before sending it to Linear`, async () => {
       const file = `list-items/${name}.md`;
+      const fixtureBank = loadBank();
       const from = fake.received.length;
       const run = await runProbe({
         client: new LinearClient({ token: 'fake', baseUrl: fake.url }, PROBE_FACTS),
-        bank: loadBank(),
+        bank: fixtureBank,
         runId: 'test-run',
         only: file,
         facts: false,
@@ -207,12 +209,41 @@ describe('format probe against a fake Linear', () => {
       const upload = requests.find((request) => request.operation === 'FileUpload');
       assert.equal(upload?.variables?.filename, filename);
       assert.equal(upload?.variables?.contentType, contentType);
-      const create = requests.find((request) => request.operation === 'CreateDocument');
-      const input = create?.variables?.input as { content: string } | undefined;
+      const putIndex = requests.findIndex((request) => request.method === 'PUT' && request.path === '/upload');
+      const createIndex = requests.findIndex((request) => request.operation === 'CreateDocument');
+      assert.ok(putIndex >= 0 && putIndex < createIndex, 'the storage PUT comes before document creation');
+      assert.equal(requests[putIndex]?.bodyBytes, readFileSync(join(fixtureBank.dir, 'assets', filename)).byteLength);
+      const input = requests[createIndex]?.variables?.input as { content: string } | undefined;
       assert.ok(input?.content.startsWith(`${item}[Site visit recording](${ASSET_URL})\n\n`));
       assert.ok(run.fixtures[0]?.first?.includes(`(../assets/${filename})`), 'the readback restores the bank path');
     });
   }
+
+  it('includes a pending fixture in focused probes and in whole-bank drift checks after recording', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const dir = mkdtempSync(join(tmpdir(), 'probe-pending-'));
+    bankDirectories.push(dir);
+    const file = 'pending.md';
+    writeFileSync(join(dir, file), 'Ref kx-00000001');
+    writeFileSync(join(dir, 'index.yaml'), [
+      'fixtures:',
+      '  - { file: pending.md, group: example, construct: paragraph, class: unchanged, basis: assumed, canary: kx-00000001, probe_pending: true }',
+    ].join('\n'));
+    const env = { LINEAR_TEST_APP_CLIENT_ID: 'probe-client', LINEAR_TEST_APP_CLIENT_SECRET: 'probe-secret', LINEAR_BASE_URL: fake.url };
+    const resultPath = join(dir, 'result.json');
+    const args = ['--bank-dir', dir, '--no-facts', '--json', resultPath];
+    const files = () => (JSON.parse(readFileSync(resultPath, 'utf8')) as { fixtures: Array<{ file: string }> })
+      .fixtures.map((fixture) => fixture.file);
+
+    assert.equal(await main(args, env), 0);
+    assert.deepEqual(files(), []);
+    assert.equal(await main([...args, '--only', file], env), 1, 'a focused comparison reports the missing baseline');
+    assert.deepEqual(files(), [file]);
+    assert.equal(await main([...args, '--update'], env), 0);
+    assert.deepEqual(files(), [file]);
+    assert.equal(await main(args, env), 0);
+    assert.deepEqual(files(), [file]);
+  });
 
   it('records the client\'s own refusal of an over-limit content as that fixture\'s refusal, matching Linear\'s recorded one', async () => {
     // As the test harness's app client: it knows Linear's limit and refuses before sending.

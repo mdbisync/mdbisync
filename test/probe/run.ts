@@ -19,7 +19,7 @@ import { parseArgs } from 'node:util';
 import { LinearClient, RequestStats, withRunToken, type LogEntry } from '../../src/linear/index.ts';
 import { loadBank } from './bank.ts';
 import { PROBE_FACTS, runProbe, type ProbeRun } from './probe.ts';
-import { findDrift, writeRecord } from './record.ts';
+import { findDrift, readManifest, writeRecord } from './record.ts';
 import { renderReport } from './report.ts';
 import { reportText } from '../../src/run/output.ts';
 
@@ -44,6 +44,10 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   }
   const baseUrl = env.LINEAR_BASE_URL;
   const bank = loadBank(values['bank-dir']);
+  if (!values.update && values.only === undefined) {
+    const recorded = readManifest(bank)?.fixtures ?? {};
+    bank.fixtures = bank.fixtures.filter((fixture) => !fixture.probe_pending || Object.hasOwn(recorded, fixture.file));
+  }
   const stats = new RequestStats();
   const complexityLog = new Map<string, number | undefined>();
   const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex')}`;
