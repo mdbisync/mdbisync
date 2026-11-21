@@ -86,6 +86,16 @@
         "subject": "ui.screenshotsDescribed",
         "operator": "equal",
         "expected": true
+      },
+      {
+        "subject": "settle.settled",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "settle.blockedCount",
+        "operator": "equal",
+        "expected": 0
       }
     ]
   }

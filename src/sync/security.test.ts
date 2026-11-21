@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { createFixture } from '../state/test-helpers.ts';
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SCRATCH_BATCH_BYTES, type SecurityGate, SecurityScratchBudgetError, checkTitle, securityGate } from './security.ts';
+import { SCRATCH_BATCH_BYTES, type SecurityGate, SecurityScratchBudgetError, SecurityScratchTreeError, checkTitle, securityGate } from './security.ts';
 import { randomBytes } from 'node:crypto';
 import type { Git } from '../state/index.ts';
 import { answeringGate, checkStaged, stagingGate } from './staged.ts';
@@ -420,6 +421,61 @@ it('stops a check before any read or hook, with a named code, when the tracked f
     const gate = await securityGate(git, tracked, {scratchBytes: 1024 * 1024});
     try {
       assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+    } finally { await gate.close?.(); }
+  } finally { await fixture.cleanup(); }
+});
+
+/** Whether the folder the gate makes its scratch repository in ignores case, as macOS's default file system does. */
+async function tmpIgnoresCase(): Promise<boolean> {
+  const dir = await mkdtemp(join(tmpdir(), 'case-probe-'));
+  try {
+    await writeFile(join(dir, 'probe'), '');
+    return await lstat(join(dir, 'PROBE')).then(() => true, () => false);
+  } finally { await rm(dir, {recursive: true, force: true}); }
+}
+
+it('stops every check with a named code, and blocks no document, when the scratch repository cannot hold the tracked tree', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'.pre-commit-config.yaml': RULE_CONFIG, 'hooks/rule.mjs': RULE_HOOK, '.gitleaks.toml': 'word = "house-codename"\n', 'docs/plan.md': 'Original.\n'});
+    const git = await fixture.clone('unreproducible');
+    // An empty folder is in the tracked tree, and no working tree keeps one: the scratch tree differs, as it does on
+    // a file system that ignores case when two tracked paths differ only by case.
+    const emptyTree = await git.text(['mktree'], {input: ''});
+    const listing = (await git.text(['ls-tree', 'origin/main'])).split('\n').filter(Boolean);
+    const tree = await git.text(['mktree'], {input: [...listing, `040000 tree ${emptyTree}\tempty`].join('\n') + '\n'});
+    const tracked = await git.text(['commit-tree', tree, '-p', 'origin/main', '-m', 'Unreproducible tree'], {env: {GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com'}});
+    const env = {PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8', TRACKED_TREE: tree};
+    const gate = await securityGate(git, tracked, {env});
+    try {
+      // Not a finding on the document: the gate has no answer for any, every time it is asked, a safe text included.
+      for (const text of ['Safe.\n', 'The house-codename.\n', 'Safe.\n']) {
+        await assert.rejects(gate.check(new Map([['docs/plan.md', text]])), (error: unknown) =>
+          error instanceof SecurityScratchTreeError && error.code === 'security-scratch-tree' && /^security-scratch-tree: /.test(error.message) && !error.message.includes('plan'));
+      }
+    } finally { await gate.close?.(); }
+  } finally { await fixture.cleanup(); }
+});
+
+it('stops a check with a named code where two tracked paths differ only by case and the file system ignores case', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'.pre-commit-config.yaml': RULE_CONFIG, 'hooks/rule.mjs': RULE_HOOK, '.gitleaks.toml': 'word = "house-codename"\n', 'docs/plan.md': 'Original.\n'});
+    const git = await fixture.clone('case-collision');
+    const tracked = await trackedWith(git, fixture.root, [
+      {path: 'docs/collisions/Guide.md', mode: '100644', content: 'Upper.\n'},
+      {path: 'docs/collisions/guide.md', mode: '100644', content: 'Lower.\n'},
+    ]);
+    const env = {PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8', TRACKED_TREE: await git.text(['rev-parse', `${tracked}^{tree}`])};
+    const gate = await securityGate(git, tracked, {env});
+    try {
+      if (await tmpIgnoresCase()) {
+        await assert.rejects(gate.check(new Map([['docs/plan.md', 'Safe.\n']])), SecurityScratchTreeError);
+      } else {
+        // A file system that keeps both paths checks as usual, and a real finding still blocks.
+        assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'Safe.\n']])), []);
+        assert.deepEqual(await gate.check(new Map([['docs/plan.md', 'The house-codename.\n']])), [{hook: 'custom-rule', line: 1}]);
+      }
     } finally { await gate.close?.(); }
   } finally { await fixture.cleanup(); }
 });

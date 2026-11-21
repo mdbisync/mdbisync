@@ -57,14 +57,29 @@ export class SecurityScratchBudgetError extends Error {
   }
 }
 
+/**
+ * The scratch repository does not hold the tracked tree as it is: most often on a file system that ignores case or
+ * Unicode normalization, where two tracked paths that differ only by those become one file, or where Git stores a
+ * path in another form; also when the tree lists a file without a valid size. The hooks would check another tree
+ * than the one that is merged, so the gate has no answer for any document, and the run stops.
+ */
+export class SecurityScratchTreeError extends Error {
+  readonly code = 'security-scratch-tree';
+
+  constructor() {
+    super(message('sync.security-scratch-tree'));
+    this.name = 'SecurityScratchTreeError';
+  }
+}
+
 /** The bytes `cat-file --batch` writes for a blob: "<oid> blob <size>\n", the content, and a final newline. */
 function batchBytes(entry: TreeEntry & { size: number }): number {
   return entry.oid.length + String(entry.size).length + 8 + entry.size;
 }
 
-/** A blob entry's listed size, checked: a missing or impossible size fails closed. */
+/** A blob entry's listed size, checked: a missing or impossible size stops the run. */
 function blobSize(entry: TreeEntry): TreeEntry & { size: number } {
-  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error(message('sync.security-tree-differs'));
+  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new SecurityScratchTreeError();
   return entry as TreeEntry & { size: number };
 }
 
@@ -175,8 +190,8 @@ async function throughLink(dir: string, path: string): Promise<boolean> {
  * the tree that is merged. Returns the scratch index's tree, and the paths that tracked symbolic links of support
  * files (any but Markdown documents) resolve to: a candidate may not change those either. Blobs are written and
  * indexed as stored, without filters. A symbolic link is reproduced only when it resolves inside the scratch tree
- * (not its `.git`); one that leads outside it or nowhere, or any other difference between the scratch index and the
- * tracked tree, throws, and the gate fails closed.
+ * (not its `.git`); one that leads outside it or nowhere throws, and the gate fails closed. A scratch index that
+ * differs from the tracked tree throws SecurityScratchTreeError: no document can be checked, and the run stops.
  */
 async function reproduceTree(git: Git, tracked: Oid, entries: readonly TreeEntry[], scratch: Git, dir: string): Promise<{ tree: string; linkedSupport: string[] }> {
   for (const entry of entries) checkRepoPath(entry.path);
@@ -224,7 +239,7 @@ async function reproduceTree(git: Git, tracked: Oid, entries: readonly TreeEntry
     await scratch.run(['update-index', '-z', '--index-info'], { input: gitlinks.map((entry) => `160000 ${entry.oid}\t${entry.path}\0`).join('') });
   }
   const tree = await scratch.text(['write-tree']);
-  if (tree !== await git.text(['rev-parse', `${tracked}^{tree}`])) throw new Error(message('sync.security-tree-differs'));
+  if (tree !== await git.text(['rev-parse', `${tracked}^{tree}`])) throw new SecurityScratchTreeError();
   return { tree, linkedSupport };
 }
 
@@ -300,8 +315,14 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
         }
         return findings;
       } catch (error) {
-        // A tracked tree too large to reproduce gives no answer for any document: the run stops with its code.
-        if (error instanceof SecurityScratchBudgetError) throw error;
+        // A tracked tree too large to reproduce, or one this file system cannot hold, gives no answer for any
+        // document: the run stops with its code. Marking each checked document as rejected would show a security
+        // finding the hooks never made, and the run would never settle.
+        if (error instanceof SecurityScratchBudgetError || error instanceof SecurityScratchTreeError) {
+          // A cleanup failure must not hide the named error; the caller's own close removes what is left.
+          await close().catch(() => {});
+          throw error;
+        }
         // Spawn, filesystem and configuration failures must fail closed without exposing content.
         return [{ hook: SECURITY_ALIAS, line: 1 }];
       }

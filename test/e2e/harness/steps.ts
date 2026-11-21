@@ -373,6 +373,12 @@ export function mergeStillInProgress(report: Readonly<Record<string, unknown>> |
  * window, so the typing falls among the runs and the settling runs capture
  * its end. The window's start, end and runs are kept as
  * `settle.typingWindow` for the evidence.
+ *
+ * Every settle records whether it settled (`settle.settled`: a successful
+ * last run changed nothing and waits for no check) and the documents any
+ * of its runs blocked (`settle.blocked`, their paths), so a scenario can
+ * assert both (`settle.settled`, `settle.blockedCount`). A block that a
+ * later run clears is still counted.
  */
 export async function settle(
   ctx: RunContext, args: Record<string, unknown> = {}, limit = 4, runOnce: () => Promise<void> = () => settleRun(ctx, args), now: () => number = Date.now,
@@ -383,11 +389,23 @@ export async function settle(
   let serverErrors = 0;
   let inProgress = 0;
   let previous: unknown;
+  const blocked: string[] = [];
+  ctx.observations.set('settle.settled', false);
+  ctx.observations.set('settle.blocked', blocked);
+  // Settled: a successful run changed nothing and its sync pull request waits for no check.
+  const settled = (result: EngineResult | undefined) => {
+    ctx.observations.set('settle.settled', result?.exitCode === 0);
+    if (result?.exitCode !== 0) ctx.log('settle: the last run failed; the scenario did not settle');
+  };
   for (let attempt = 0; attempt < limit + waits + merges + serverErrors + inProgress; attempt += 1) {
     const count = ctx.engine.results.length;
     await runOnce();
     // Only a run this attempt recorded is judged: an earlier step's failed run is not this settle's.
     const result = ctx.engine.results.length > count ? ctx.engine.results.at(-1) : undefined;
+    // Every document any run of the settle blocked, so a block that a later run clears is still seen.
+    const newlyBlocked = blockedPaths(result?.report).filter((path) => !blocked.includes(path));
+    blocked.push(...newlyBlocked);
+    if (newlyBlocked.length > 0) ctx.log(`run.settle: the run blocked ${newlyBlocked.length} more document(s): ${newlyBlocked.join(', ')}`);
     const recordsMerge = mergedSyncPullRequest(previous);
     previous = result?.report;
     const verdict = result === undefined ? undefined : settleServerError(result);
@@ -417,9 +435,27 @@ export async function settle(
       else if (last) ctx.log(`settle: the last of ${String(attempt + 1)} runs still changed; the scenario did not settle`);
       continue;
     }
-    if (waits >= limit || !(await waitForSyncPullRequestChecks(ctx, report))) return;
+    if (waits >= limit) {
+      // No more waits: the run settled unless its sync pull request still waits for checks.
+      if (field(report, ['pullRequest', 'checks', 'state']) === 'pending') {
+        ctx.log(`settle: stopped after ${String(limit)} waits for the sync pull request's checks, which are still pending; the scenario did not settle`);
+      } else {
+        settled(result);
+      }
+      return;
+    }
+    if (!(await waitForSyncPullRequestChecks(ctx, report))) {
+      settled(result);
+      return;
+    }
     waits += 1;
   }
+}
+
+/** The paths of the documents a run's capture blocked, as its report lists them; none for a run without a capture. */
+function blockedPaths(report: unknown): string[] {
+  const blocked = field(report, ['capture', 'blocked']);
+  return Array.isArray(blocked) ? blocked.map((entry) => String(field(entry, ['path']))) : [];
 }
 
 /**

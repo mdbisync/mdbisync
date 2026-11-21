@@ -216,3 +216,50 @@ describe('run.settle after the sync pull request merged', () => {
     assert.deepEqual(log, ['settle: the last of 4 runs still changed; the scenario did not settle']);
   });
 });
+
+describe('run.settle records whether it settled and what its last run blocked', () => {
+  /** A run that captured nothing but blocked one document, which counts as a change. */
+  function blockedRun(results: EngineResult[]): void {
+    const blocked = { ...report('changed'), capture: { ok: true, blocked: [{ id: 'doc-1', path: 'docs/reference/notes.md', findings: [{ hook: 'security', line: 1 }] }] } };
+    results.push({ command: 'sync', exitCode: 0, signal: null, timedOut: false, notImplemented: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: blocked });
+  }
+
+  it('records a settle that settled with nothing blocked', async () => {
+    const { ctx } = await settleWith(['changed', 'settled']);
+    assert.equal(ctx.observations.get('settle.settled'), true);
+    assert.deepEqual(ctx.observations.get('settle.blocked'), []);
+  });
+
+  it('does not count a failed run that changed nothing as settled', async () => {
+    const { ctx, runs, log } = await settleWith(['client-error']);
+    assert.equal(runs.length, 1);
+    assert.equal(ctx.observations.get('settle.settled'), false);
+    assert.equal(log.at(-1), 'settle: the last run failed; the scenario did not settle');
+  });
+
+  it('records a settle that did not settle, and the documents its runs blocked', async () => {
+    const results: EngineResult[] = [];
+    const log: string[] = [];
+    const ctx = { live: null, scenario: { setup: { fixtures: [] } }, engine: { results }, observations: new Map<string, unknown>(), log: (line: string) => log.push(line) } as unknown as RunContext;
+    await settle(ctx, {}, 2, async () => blockedRun(results));
+    assert.equal(results.length, 2);
+    assert.equal(ctx.observations.get('settle.settled'), false);
+    assert.deepEqual(ctx.observations.get('settle.blocked'), ['docs/reference/notes.md']);
+    assert.deepEqual(log, [
+      'run.settle: the run blocked 1 more document(s): docs/reference/notes.md',
+      'settle: the last of 2 runs still changed; the scenario did not settle',
+    ]);
+  });
+
+  it('keeps a block that a later run clears among the blocked documents', async () => {
+    const results: EngineResult[] = [];
+    const ctx = { live: null, scenario: { setup: { fixtures: [] } }, engine: { results }, observations: new Map<string, unknown>(), log: () => {} } as unknown as RunContext;
+    await settle(ctx, {}, 4, async () => {
+      if (results.length === 0) blockedRun(results);
+      else results.push({ command: 'sync', exitCode: 0, signal: null, timedOut: false, notImplemented: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: report('settled') });
+    });
+    assert.equal(results.length, 2);
+    assert.equal(ctx.observations.get('settle.settled'), true);
+    assert.deepEqual(ctx.observations.get('settle.blocked'), ['docs/reference/notes.md']);
+  });
+});

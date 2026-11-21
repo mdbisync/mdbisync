@@ -1836,6 +1836,10 @@ export const SUBJECTS: Record<string, Compute> = {
     return true;
   },
 
+  // --- the last settle (steps.ts, settle) ------------------------------------------------------
+  'settle.settled': async (env) => observed(env.ctx, 'settle.settled'),
+  'settle.blockedCount': async (env) => (observed(env.ctx, 'settle.blocked') as string[]).length,
+
   // --- blocked documents (L2-35) ----------------------------------------------------------------
   'securityCanary.isolated': async (env) => {
     const facts = (env.ctx.observations.get('securityCanary.facts') as CanaryFacts[] | undefined) ?? [];

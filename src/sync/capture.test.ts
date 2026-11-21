@@ -23,6 +23,7 @@ import { candidateKey } from './staged.ts';
 import { MERGE_RECORD_MESSAGE, writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
+import { SecurityScratchTreeError, securityGate } from './security.ts';
 import { IMAGE_REPAIR_INPUT_LIMIT } from './image-links.ts';
 
 const markOf = (doc: {icon?: string | null, color?: string | null} | undefined) => ({icon: doc?.icon ?? null, color: doc?.color ?? null});
@@ -1224,6 +1225,46 @@ describe('capture from Linear', () => {
     assert.equal(accepted.blocked.length, 0);
     assert.ok((await text('docs/plan.md')).includes('<renamed.md>'));
     assert.equal(await text('docs/renamed.md'), 'Target.');
+  });
+
+  it('keeps a conflict mark and stops the run when the security hooks cannot be given the tracked tree', async () => {
+    // A passing security hook, so the gate is configured and checks the conflicted document on every run.
+    await fixture.seed({
+      '.pre-commit-config.yaml': `repos:
+  - repo: local
+    hooks:
+      - id: secret-check
+        alias: security
+        name: Secret check
+        entry: node check.mjs
+        language: system
+`,
+      'check.mjs': 'process.exitCode = 0;\n',
+    });
+    await refresh();
+    const doc = world.linear.documents[0]!;
+    Object.assign(doc, {content:`${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`, updatedAt:'2026-01-03T00:00:00Z'});
+    const first = await run();
+    assert.deepEqual(first.blocked, []);
+    assert.deepEqual(markOf(doc), MARKS.conflict);
+    assert.equal(commentsOf(doc.id)?.length, 1);
+    await refresh();
+    // A tracked tree no working tree holds as it is: on a file system that ignores case, two tracked paths that differ
+    // only by case are one file. Here an empty folder stands in for it, which no file system keeps in Git.
+    const git = context.git;
+    const emptyTree = await git.text(['mktree'], {input: ''});
+    const listing = (await git.text(['ls-tree', context.fetched.tracked])).split('\n').filter(Boolean);
+    const tree = await git.text(['mktree'], {input: [...listing, `040000 tree ${emptyTree}\tempty`].join('\n') + '\n'});
+    const unreproducible = await git.text(['commit-tree', tree, '-p', context.fetched.tracked, '-m', 'Unreproducible tree'], {env: {GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com'}});
+    const gate = await securityGate(git, unreproducible);
+    try {
+      await assert.rejects(capture(context, {config, state:context.fetched.state, identity:IDENTITY, security:gate}), (error: unknown) =>
+        error instanceof SecurityScratchTreeError && error.code === 'security-scratch-tree');
+    } finally { await gate.close?.(); }
+    // No document is shown as rejected by the hooks: the conflict keeps its orange mark and its single comment.
+    assert.deepEqual(markOf(doc), MARKS.conflict);
+    assert.equal(commentsOf(doc.id)?.length, 1);
+    assert.equal((await readIds(context.git, (await fetchState(context.git, config)).state.ids)).get('docs/plan.md')?.saved?.notice?.kind, 'conflict');
   });
 
   it('reconciles conflict, blocked and clear marks with durable notices and one original icon', async () => {
