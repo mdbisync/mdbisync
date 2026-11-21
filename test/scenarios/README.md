@@ -112,6 +112,18 @@ editor: its checklist gives the exact Markdown to type, with the run id in the
 alt text, and `linear.await-typed-image` waits until Linear saved it, records
 what Linear stored for it (the image as typed, an upload, another image
 destination, or no image) and takes the stored text as the repair's source.
+L5-22 needs a document longer than Linear's API accepts (250,000 code
+points), which the API refuses on create and on update alike, so a person
+makes it in the editor: `ui.create-huge-document` has the harness write the
+exact text (`characters` long, over the limit, with the run id in its first
+paragraph) to `huge-document.txt` in the run folder, and its checklist item
+names the project, the document's title and the file's sha256 for one paste.
+The person answers pass once the page has saved, whatever Linear kept.
+`linear.await-huge-document` then finds that document, waits until two reads
+agree, and requires that Linear stored the text as prepared (final whitespace
+aside), so more than the limit. A missing, shorter or changed document, or two
+documents with that title, leaves the precondition unmet (`env-blocked`),
+never a stand-in.
 
 An argument named `variants` or `orderings` expands into independent subcases,
 each with a fresh copy of setup and the complete step sequence and assertions.

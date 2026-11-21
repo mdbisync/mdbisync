@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { LEFT_OUT_AT_WRITE_RULES, LEFT_OUT_RULES, RECORD_LEFT_OUT_RULES, UNSYNCED_REASONS } from '../../src/codes.ts';
 import { LINT_RULES } from '../../src/format/rules.ts';
+import { LINEAR_FACTS } from '../../src/linear/facts.ts';
 
 const leftOutRules = new Set<string>([
   ...Object.keys(LINT_RULES), ...UNSYNCED_REASONS, ...LEFT_OUT_RULES, ...LEFT_OUT_AT_WRITE_RULES, ...RECORD_LEFT_OUT_RULES,
@@ -59,6 +60,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "git.scratch-hook": ["fixture", "source"],
   "kill.engine": ["checkpoint"],
   "linear.await-image": ["actor", "target", "timeoutSeconds"],
+  "linear.await-huge-document": ["actor", "timeoutSeconds"],
   "linear.await-typed-image": ["actor", "timeoutSeconds"],
   "linear.conflict-again": ["actor"],
   "linear.create": ["actor", "characters", "fixture", "title"],
@@ -101,6 +103,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "run.workflow": ["command", "confirm", "direction", "event"],
   "run.workflow-parallel": ["events", "replacePending"],
   "ui.assert-dom": ["actor"],
+  "ui.create-huge-document": ["actor", "characters"],
   "ui.follow-document-links": ["actor"],
   "ui.inspect-blocked": ["actor"],
   "ui.inspect-cleared": ["actor"],
@@ -153,6 +156,7 @@ const requiredArguments: Record<string, string[]> = {
     'kill.engine': ['checkpoint'],
     'ui.verify-editor': ['requireIdleSeconds'],
     'ui.type-external-image': ['imageUrl'],
+    'ui.create-huge-document': ['characters'],
 };
 function validateArguments(kind: string, action: string, args: ObjectValue): void {
   const allowed = operationArguments[`${kind}.${action}`];
@@ -197,6 +201,8 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
   if (args.direction !== undefined) oneOf(args.direction, ['git-to-linear', 'linear-to-git'], 'direction');
   if (args.event !== undefined) oneOf(args.event, ['push', 'pull_request', 'workflow_dispatch', 'schedule'], 'event');
   if (kind === 'ui' && action === 'verify-editor') assert.ok((args.requireIdleSeconds as number) >= 120, 'requireIdleSeconds must be at least 120');
+  // Below the API's limit the API makes the document; a person pastes only what the API refuses.
+  if (kind === 'ui' && action === 'create-huge-document') assert.ok(Number.isInteger(args.characters) && (args.characters as number) > LINEAR_FACTS.maxContentLength, "characters must exceed Linear's API content limit");
   if (args.imageUrl !== undefined) assert.match(args.imageUrl as string, TYPED_IMAGE_URL, 'imageUrl must be a plain http(s) URL');
 }
 

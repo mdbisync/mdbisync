@@ -13,6 +13,8 @@ import type { RunNames } from './isolation.ts';
 import type { Assertion, Scenario, Step } from './spec.ts';
 import { LINK_PAIR, type LinkPairFixture } from './fixtures.ts';
 import { typedImage } from './image-gate.ts';
+import { LINEAR_FACTS } from '../../../src/linear/facts.ts';
+import { HUGE_DOCUMENT_FILE, hugeDocument } from './huge-document.ts';
 
 /**
  * The typing window of the typing items: the session starts typing, answers the item at once and hands the answers
@@ -23,7 +25,11 @@ import { typedImage } from './image-gate.ts';
  */
 const TYPING_WINDOW = (a: Record<string, unknown>) => `As you start typing, answer this item pass and hand the answers back with \`ui-result\` at once, in the background. Keep typing until its log shows "running syncs for … seconds while the UI session types", then stop within ${String(a.durationSeconds ?? 60)} seconds: the sync runs go on longer than that. Answer the next item only once \`ui-result\` has finished.`;
 
-const INSTRUCTIONS: Record<string, (args: Record<string, unknown>, runId: string) => string> = {
+/** Linear's API limit as the checklist writes it. */
+const LINEAR_LIMIT = LINEAR_FACTS.maxContentLength.toLocaleString('en-US');
+
+/** `projects`: the run's projects in Linear, as the checklist lists them; steps that create a document name the first. */
+const INSTRUCTIONS: Record<string, (args: Record<string, unknown>, runId: string, projects: readonly string[]) => string> = {
   'verify-editor': (a) => `Check that the signed-in user is ${String(a.actor)}; wait until the screen has been idle at least ${String(a.requireIdleSeconds)} seconds before any input.`,
   'inspect-rendering': (a) => `Open ${String(a.sampleCount ?? 'the')} documents of group "${String(a.group ?? 'any')}"${a.coverAllConstructs === true ? ' covering every construct' : ''}; check headings, lists, task boxes, quotes, code blocks with language labels, Mermaid blocks, tables (rows and columns), images loaded (naturalWidth > 0), attachment links, Unicode and emoji.`,
   'inspect-conflict': () => 'Open the conflicted document: the orange Alert icon shows in the list and the header, the comment from the sync is there, and each of the three markers is a yellow warning callout with an exclamation icon, with the two versions as ordinary text between them.',
@@ -38,6 +44,11 @@ const INSTRUCTIONS: Record<string, (args: Record<string, unknown>, runId: string
   // L6-14: the Markdown is typed, not pasted: typing is the one editor path known to leave an external image.
   'type-external-image': (a, runId) => `Open the target document. At its end, start a new paragraph and type, character by character (do not paste), exactly \`${typedImage(a, runId).markdown}\`, so that the editor turns it into an image. Answer only once Linear has saved it: a reload raises no "Leave site?" prompt. Note after \`observed:\` whether the editor shows an image, a broken image, a link or the text as typed. The harness then waits until Linear's saved document holds it before it syncs.`,
   'inspect-typed-link': (_a, runId) => `Reload the target document. Where you typed the image, it now shows a link with the text "harbor map ${runId}" (or the image's URL, if Linear kept no text for it), not an image, and the document has no red exclamation mark and no comment from the sync about images. Note what you see for the values below.`,
+  // L5-22: Linear's API refuses content over its limit, so a person pastes the text into the editor.
+  'create-huge-document': (a, runId, projects) => {
+    const huge = hugeDocument(a, runId);
+    return `In ${projects[0] === undefined ? "the run's first project (named once the run is set up)" : `project "${projects[0]}"`}, create a new document titled exactly \`${huge.title}\`. Paste into its body, in one paste, the whole text of \`${HUGE_DOCUMENT_FILE}\` in the run folder (next to this checklist): ${huge.text.length} characters of plain text, sha256 \`${huge.sha256}\`. On another machine, copy the file there and check its sha256 first (\`shasum -a 256\`); on a Mac, \`pbcopy < ${HUGE_DOCUMENT_FILE}\` puts it on the clipboard. Do not type it or paste it in parts. If you paste again, first delete the earlier attempt, so the project has one document with that title. Answer pass once the page has finished saving (a reload raises no "Leave site?" prompt), whatever Linear kept: the harness then reads the document and checks that Linear stored more than ${LINEAR_LIMIT} characters before it syncs, and a shorter document leaves the run's precondition unmet. Note after \`observed:\` whether the document still ends with the file's last line and anything Linear showed, such as an error or a cut text.`;
+  },
   'rename-trash-restore': (a) => `Rename the document to "${String(a.title ?? 'renamed')}", then move it to the trash and restore it.`,
   'follow-document-links': () => `Open the document "${LINK_PAIR.source}" in the project named above. It links the document "${LINK_PAIR.target}" twice: "the route notes" to the whole document, and "depot hours" to its heading "Depot hours" (\`#${LINK_PAIR.anchor}\`). In the document view, click each link, going back to "${LINK_PAIR.source}" between the clicks. Record in the values below whether each click opened "${LINK_PAIR.target}" (in place or in a new tab, with no "not found" page) and whether the second one scrolled to the heading. Answer pass once both links are clicked and recorded, whatever they did.`,
   'assert-dom': () => 'Check the page for the expected state below and describe what it shows.',
@@ -71,10 +82,19 @@ const FINAL_LINE_BREAKS = 'line breaks at the end of a text are ignored';
 /** UI steps that act on the scenario's target document: their checklist names it. */
 export const TARGET_UI_STEPS: ReadonlySet<string> = new Set(['type-during-write', 'type-two-editors', 'paste-image', 'type-external-image', 'inspect-typed-link', 'inspect-suspended', 'inspect-released']);
 
+/** Files the checklist's UI steps work from, by name in the run folder: the harness writes them next to the checklist. */
+export function uiFiles(scenario: Scenario, runId: string): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const step of scenario.steps) {
+    if (step.kind === 'ui' && step.action === 'create-huge-document') files.set(HUGE_DOCUMENT_FILE, hugeDocument(step.args, runId).text);
+  }
+  return files;
+}
+
 /** `runId`: the run the checklist is for; some steps name it in what the person types or looks for. */
-export function describeUiStep(step: Step, runId: string): string {
+export function describeUiStep(step: Step, runId: string, projects: readonly string[] = []): string {
   const render = INSTRUCTIONS[step.action];
-  return render === undefined ? `${step.action} (no instruction yet)` : render(step.args, runId);
+  return render === undefined ? `${step.action} (no instruction yet)` : render(step.args, runId, projects);
 }
 
 /** The `ui.*` values the scenario's checks read, in order: its assertions' subjects (both sides of `same-as`), then what its UI steps record. */
@@ -110,7 +130,7 @@ export function renderUiChecklist(
   for (const step of scenario.steps) {
     if (step.kind === 'ui') {
       number += 1;
-      lines.push(`${number}. [ ] As ${String(step.args.actor ?? 'editor-a')}: ${describeUiStep(step, names.runId)}`, '   - result: pass | fail', '   - observed:');
+      lines.push(`${number}. [ ] As ${String(step.args.actor ?? 'editor-a')}: ${describeUiStep(step, names.runId, projects)}`, '   - result: pass | fail', '   - observed:');
     } else {
       lines.push(`- (harness) ${step.kind}.${step.action}: hand back the answers above with \`ui-result\`; the harness runs it, then go on.`);
     }

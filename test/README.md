@@ -431,7 +431,11 @@ document names it. Typing items are answered as typing starts, with
 at least as long as the item lets the session type, so the typing falls
 among the runs. An image pasted in the editor is answered once Linear has
 saved it, and `linear.await-image` waits (bounded) until Linear's saved
-document holds it before the sync runs. When a person resolves a conflict in the UI, the
+document holds it before the sync runs. A document longer than the API
+accepts is pasted from a file the harness writes next to the checklist
+(`huge-document.txt`, its size and sha256 in the item), and
+`linear.await-huge-document` checks that Linear stored that text, over the
+API's limit, before the sync runs; otherwise the run ends `env-blocked`. When a person resolves a conflict in the UI, the
 harness reads the kept version and no longer expects the discarded edits
 (I2). Once every item
 is answered, it runs the checks, writes the result (pass, fail or

@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
 import { LinearError, LinearStoppedError, LinearTokenError, isTransientLinearError } from '../../../src/linear/index.ts';
+import { LINEAR_FACTS, linearLength } from '../../../src/linear/facts.ts';
 import { resolveStateConfig, stateRef, suspendedBranch, Git } from '../../../src/state/index.ts';
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
@@ -37,6 +38,7 @@ import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineC
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { TYPING_METRICS } from './ui-checklist.ts';
 import { commentsWithState, destinationKind, findTypedImage, imageGateRecord, imagePlace, imagesIn, placeLabel, typedImage, withoutImage, writtenImagePath, type ImageRepairSource, type TypedImageRecord } from './image-gate.ts';
+import { hugeDocument, hugeDocumentRecord, hugeDocumentShortfall } from './huge-document.ts';
 import { initFiles } from './init-files.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -1908,6 +1910,12 @@ export function retireDiscarded(ctx: RunContext, conflicted: string, resolved: s
   }
 }
 
+/** How long `linear.await-huge-document` waits for the pasted document to show up and for Linear to save it. */
+const HUGE_DOCUMENT_SAVE_TIMEOUT_SECONDS = 300;
+
+/** How often `linear.await-huge-document` reads when the run sets no poll interval. */
+const HUGE_DOCUMENT_POLL_MS = 5_000;
+
 /** How long `linear.await-image` waits for Linear to save a pasted image; it has taken about three minutes. */
 export const IMAGE_SAVE_TIMEOUT_SECONDS = 300;
 
@@ -2006,11 +2014,61 @@ const LINEAR: Record<string, Executor> = {
     const title = typeof args.title === 'string' ? args.title : `guides/page-${token}`;
     const characters = typeof args.characters === 'number' ? args.characters : 0;
     const body = characters > 0 ? `${noteSentence(token)}\n\n${'Plain text line. '.repeat(Math.ceil(characters / 17)).slice(0, characters)}\n` : `${noteSentence(token)}\n`;
+    // The API refuses more: a longer document is made in the editor (ui.create-huge-document).
+    if (linearLength(body) > LINEAR_FACTS.maxContentLength) throw new Error(`linear.create cannot write ${linearLength(body)} characters: Linear's API refuses content over ${LINEAR_FACTS.maxContentLength}; use ui.create-huge-document`);
     const document = await world.editors[editorOf(args)].createDocument({ projectId: project.id }, { id: randomUUID(), title, content: body });
     const folder = projectFolders(ctx).find((candidate) => candidate.project === project.name)?.folder;
     setTarget(ctx, folder === undefined ? `${title}.md` : `${folder}/${title}.md`, document.id);
     ctx.observations.set('linear.created', document.id);
     ctx.edits.push({ side: 'linear', path: title, token });
+  },
+  // L5-22: the document a person pasted in the editor (`ui.create-huge-document`), longer than the API accepts.
+  'linear.await-huge-document': async (ctx, args) => {
+    const creating = ctx.scenario.steps.find((step) => step.kind === 'ui' && step.action === 'create-huge-document');
+    if (creating === undefined) throw new Error('linear.await-huge-document needs a ui.create-huge-document step');
+    const prepared = hugeDocument(creating.args, ctx.names.runId);
+    const world = live(ctx);
+    // The project the checklist names: the first, as for linear.create.
+    const project = [...world.projects.values()][0];
+    if (project === undefined) throw new EnvBlockedError('the slice maps no project');
+    const editor = world.editors[editorOf(args)];
+    const timeoutSeconds = typeof args.timeoutSeconds === 'number' ? args.timeoutSeconds : HUGE_DOCUMENT_SAVE_TIMEOUT_SECONDS;
+    const deadline = Date.now() + timeoutSeconds * 1000;
+    let id: string | undefined;
+    let content: string | undefined;
+    let previous: string | undefined;
+    // The same text read twice ends the wait: Linear may still be saving the paste. The project is listed until the
+    // document shows up, then only the document is read.
+    for (;;) {
+      if (id === undefined) {
+        const named = (await editor.listDocuments({ projectId: project.id })).filter((document) => document.title === prepared.title);
+        // A retried paste that left its first attempt: which one is the paste is not the harness's guess.
+        if (named.length > 1) throw new EnvBlockedError(`precondition not met: project "${project.name}" has ${named.length} documents titled ${prepared.title}`);
+        id = named[0]?.id;
+      }
+      if (id !== undefined) {
+        const [document] = await editor.getDocuments([id], { withContent: true });
+        if (document === undefined) throw new EnvBlockedError(`precondition not met: the document titled ${prepared.title} was deleted while the harness read it`);
+        previous = content;
+        content = document.content ?? '';
+        if (content === previous && hugeDocumentShortfall(content, prepared) === undefined) break;
+      }
+      if (Date.now() >= deadline) break;
+      await delay(ctx.checkPollMs ?? HUGE_DOCUMENT_POLL_MS, undefined, { signal: ctx.signal });
+    }
+    // Without the document over the limit, L5-22's precondition is not met; nothing shorter stands in for it.
+    if (id === undefined || content === undefined) throw new EnvBlockedError(`precondition not met: no document titled ${prepared.title} in project "${project.name}" ${timeoutSeconds} seconds after the UI session answered`);
+    const record = hugeDocumentRecord(content, prepared);
+    ctx.observations.set('hugeDocument.record', record);
+    // A text still changing says nothing yet about what Linear keeps, whatever its length.
+    if (content !== previous) throw new EnvBlockedError(`precondition not met: Linear's saved document was still changing ${timeoutSeconds} seconds after the UI session answered`);
+    const shortfall = hugeDocumentShortfall(content, prepared);
+    if (shortfall !== undefined) throw new EnvBlockedError(`precondition not met: ${shortfall}`);
+    ctx.log(`linear.await-huge-document: Linear stored ${record.stored} code points (prepared ${record.prepared}; ${record.sameAsPrepared ? 'the text as prepared' : 'not the text as prepared'})`);
+    const folder = projectFolders(ctx).find((candidate) => candidate.project === project.name)?.folder;
+    setTarget(ctx, folder === undefined ? `${prepared.title}.md` : `${folder}/${prepared.title}.md`, id);
+    ctx.observations.set('linear.created', id);
+    ctx.edits.push({ side: 'linear', path: prepared.title, token: prepared.token });
   },
   'linear.move-project': async (ctx, args) => {
     const world = live(ctx);
@@ -2510,7 +2568,7 @@ const OTHER: Record<string, Executor> = {
 };
 
 const UI_ACTIONS = [
-  'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-cleared', 'ui.inspect-conflict', 'ui.inspect-released', 'ui.inspect-rendering',
+  'ui.assert-dom', 'ui.create-huge-document', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-cleared', 'ui.inspect-conflict', 'ui.inspect-released', 'ui.inspect-rendering',
   'ui.inspect-suspended', 'ui.inspect-typed-link', 'ui.paste-image', 'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write',
   'ui.type-external-image', 'ui.type-two-editors', 'ui.verify-editor',
 ];

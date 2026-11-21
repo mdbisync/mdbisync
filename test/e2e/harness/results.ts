@@ -106,6 +106,8 @@ export interface ScenarioResult {
   imageGate?: import('./image-gate.ts').ImageGateRecord;
   /** The image a person typed in the editor (L6-14): the kind of thing Linear stored for it; never the URL. */
   typedImage?: import('./image-gate.ts').TypedImageRecord;
+  /** The document a person pasted over the API's limit (L5-22): lengths and whether Linear kept the text as prepared; never the text. */
+  hugeDocument?: import('./huge-document.ts').HugeDocumentRecord;
 }
 
 export const EXPECTED_RED_FILE = fileURLToPath(new URL('../expected-red.json', import.meta.url));

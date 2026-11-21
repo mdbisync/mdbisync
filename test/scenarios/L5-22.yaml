@@ -2,7 +2,7 @@
   "version": 1,
   "id": "L5-22",
   "slice": "mini",
-  "mode": "local",
+  "mode": "ui",
   "setup": {
     "state": "converged",
     "fixtures": [
@@ -12,12 +12,26 @@
   },
   "steps": [
     {
-      "kind": "linear",
-      "action": "create",
+      "kind": "ui",
+      "action": "verify-editor",
       "args": {
         "actor": "editor-a",
-        "fixture": "huge-document",
+        "requireIdleSeconds": 120
+      }
+    },
+    {
+      "kind": "ui",
+      "action": "create-huge-document",
+      "args": {
+        "actor": "editor-a",
         "characters": 260000
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "await-huge-document",
+      "args": {
+        "actor": "editor-a"
       }
     },
     {

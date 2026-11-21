@@ -38,7 +38,7 @@ import { requiredActionSha, RUN_REFS, runStep, settleFollowUpRuns } from './step
 import { openSetupConflict, prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES, type FixtureTools } from './fixtures.ts';
 import { documentId, projectFolders, targetPath } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
-import { renderUiChecklist, TARGET_UI_STEPS } from './ui-checklist.ts';
+import { renderUiChecklist, TARGET_UI_STEPS, uiFiles } from './ui-checklist.ts';
 import { cleanupKilledTokens } from './token-cleanup.ts';
 import { heldRunOf, saveHeldRun, UI_CHECKLIST_FILE } from './held-run.ts';
 
@@ -946,6 +946,7 @@ export function resultOf(
     ...(ctx.observations.has('conflictMarks') ? { conflictMarks: ctx.observations.get('conflictMarks') as NonNullable<ScenarioResult['conflictMarks']> } : {}),
     ...(ctx.observations.has('imageGate.record') ? { imageGate: ctx.observations.get('imageGate.record') as NonNullable<ScenarioResult['imageGate']> } : {}),
     ...(ctx.observations.has('typedImage.record') ? { typedImage: ctx.observations.get('typedImage.record') as NonNullable<ScenarioResult['typedImage']> } : {}),
+    ...(ctx.observations.has('hugeDocument.record') ? { hugeDocument: ctx.observations.get('hugeDocument.record') as NonNullable<ScenarioResult['hugeDocument']> } : {}),
   };
 }
 
@@ -1014,6 +1015,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     await startRefHistory(ctx);
     for (const [index, step] of scenario.steps.entries()) {
       if (step.kind === 'ui') {
+        for (const [name, text] of uiFiles(scenario, names.runId)) writeFileSync(join(runDir, name), text);
         writeFileSync(join(runDir, UI_CHECKLIST_FILE), renderUiChecklist(scenario, names, ctx, await checklistTarget(ctx, scenario)));
         heldAt = index;
         throw new EnvBlockedError(`ui steps wait for the UI session: checklist ${join(runDir, UI_CHECKLIST_FILE)}`);
