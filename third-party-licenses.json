@@ -21,7 +21,7 @@
   },
   {
     "name": "@rgrove/parse-xml",
-    "version": "5.0.0",
+    "version": "5.1.0",
     "license": "ISC"
   },
   {
@@ -106,7 +106,7 @@
   },
   {
     "name": "mdast-util-to-markdown",
-    "version": "2.2.1",
+    "version": "2.2.3",
     "license": "MIT"
   },
   {
