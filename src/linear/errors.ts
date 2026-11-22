@@ -144,11 +144,12 @@ export class LinearReadBackError extends LinearError {
 }
 
 /**
- * A Linear answer went over a byte limit while it was read, so it was never
- * parsed: one answer over the transport's `responseBytes`
- * (`linear-response-too-large`), or the answers that carry document bodies over
- * the run's `bodyBytes` budget (`linear-body-budget`). Not transient: the same
- * content gives the same answer on the next run.
+ * A Linear answer went over a byte limit: one answer over the transport's
+ * `responseBytes`, given up while it was read and never parsed
+ * (`linear-response-too-large`), or an answer with document bodies that
+ * takes the run over its `bodyBytes` budget, refused before its bodies are
+ * kept (`linear-body-budget`). Not transient: the same content gives the
+ * same answer on the next run.
  */
 export class LinearResponseLimitError extends LinearError {
   readonly code: 'linear-response-too-large' | 'linear-body-budget';

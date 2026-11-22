@@ -43,7 +43,9 @@ export const MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
  * Most bytes of the Linear answers whose document bodies a run holds
  * together (reads of many documents with content), over one run (one
  * transport). Those bodies stay in memory until the run decides what to
- * write, so this bounds that memory, checked as each answer arrives. A few
+ * write, so this bounds that memory: each answer is checked once it is read
+ * (under `MAX_RESPONSE_BYTES`) and before its bodies are kept, so a run holds
+ * at most this plus one answer. An error answer does not count. A few
  * thousand ordinary documents use a small part of it. A read of one
  * document just before it is written is not counted.
  */
@@ -198,8 +200,9 @@ export class GraphQLTransport {
     const key = this.reads === undefined ? undefined : graphqlReadKey(requestBody);
     const kept = key === undefined ? undefined : this.reads?.take(key);
     if (kept !== undefined) {
-      if (kept.body.length > this.#readLimit(bodies)) throw this.#overLimit(operation, bodies);
-      if (bodies) this.#bodyBytesRead += kept.body.length;
+      // Only answers with data and no errors are kept, so a kept answer with bodies always counts.
+      if (kept.body.length > this.#limits.responseBytes) throw new LinearResponseLimitError(operation, 'linear-response-too-large', this.#limits.responseBytes);
+      if (bodies) this.#chargeBodies(operation, kept.body.length);
       return keptData<T>(operation, kept.status, kept.body);
     }
     const answer = await this.#network(operation, 'query', requestBody, bodies);
@@ -262,15 +265,14 @@ export class GraphQLTransport {
       let text = '';
       let bodyError: unknown;
       let over = false;
-      // An error answer carries no bodies: only the per-answer limit applies, so the error it holds is reported.
-      const counted = bodies && response.ok;
+      let bytes = 0;
       try {
-        const read = await readText(response, this.#readLimit(counted));
+        const read = await readText(response, this.#limits.responseBytes);
         if (read === undefined) over = true;
         else {
           text = read.text;
+          bytes = read.bytes;
           body = JSON.parse(text) as typeof body;
-          if (counted) this.#bodyBytesRead += read.bytes;
         }
       } catch (error) {
         body = undefined;
@@ -307,7 +309,7 @@ export class GraphQLTransport {
       this.#log(low ? { ...entry, stop: low } : entry);
 
       if (over) {
-        const error = this.#overLimit(operation, counted);
+        const error = new LinearResponseLimitError(operation, 'linear-response-too-large', this.#limits.responseBytes);
         // A write's answer that was not read leaves its outcome unknown, like a cut connection.
         throw kind === 'mutation' ? new LinearNetworkError(operation, error) : error;
       }
@@ -319,20 +321,16 @@ export class GraphQLTransport {
       if (!response.ok || body === undefined || body.data === undefined || body.data === null) {
         throw new LinearHttpError(operation, response.status, requestId);
       }
+      // Only an answer with data counts: an error answer (a rate limit, a lost cursor) is reported as itself above.
+      if (bodies) this.#chargeBodies(operation, bytes);
       return {data: body.data, text, status: response.status};
     }
   }
 
-  /** Most bytes the next answer may have: one answer's limit, and for bodies what is left of the run's budget. */
-  #readLimit(bodies: boolean): number {
-    return bodies ? Math.min(this.#limits.responseBytes, this.#limits.bodyBytes - this.#bodyBytesRead) : this.#limits.responseBytes;
-  }
-
-  /** The error of an answer over `#readLimit`: the run's body budget when that was the smaller limit. */
-  #overLimit(operation: string, bodies: boolean): LinearResponseLimitError {
-    return bodies && this.#limits.bodyBytes - this.#bodyBytesRead < this.#limits.responseBytes
-      ? new LinearResponseLimitError(operation, 'linear-body-budget', this.#limits.bodyBytes)
-      : new LinearResponseLimitError(operation, 'linear-response-too-large', this.#limits.responseBytes);
+  /** Counts an answer with document bodies toward the run's budget, or refuses it before its bodies are kept. */
+  #chargeBodies(operation: string, bytes: number): void {
+    if (this.#bodyBytesRead + bytes > this.#limits.bodyBytes) throw new LinearResponseLimitError(operation, 'linear-body-budget', this.#limits.bodyBytes);
+    this.#bodyBytesRead += bytes;
   }
 
   /** A request after the stop is refused without being sent; a refused write is counted, so a run can show it stopped writing. */

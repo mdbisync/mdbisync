@@ -10,6 +10,7 @@ import {
   LinearHttpError,
   LinearNetworkError,
   LinearResponseLimitError,
+  LinearStoppedError,
   MAX_PAGE_SIZE,
   MAX_RESPONSE_BYTES,
 } from '../../src/linear/index.ts';
@@ -70,6 +71,21 @@ describe('byte limits of Linear answers', () => {
     assert.equal((await linear.getDocuments(ids)).length, 6);
     // One document read by itself, as the write step reads the document it writes next, is not counted.
     for (let i = 0; i < 10; i += 1) assert.equal((await linear.getDocument('d0', { withContent: true }))?.content?.length, 10_000);
+  });
+
+  it('stops on a rate limit answered with HTTP 200 when the body budget is nearly used up', async () => {
+    const world = fakeWorld();
+    world.linear.documents.push({ id: 'd0', title: 'Note', ...place, content: 'x'.repeat(10_000) });
+    const fetch = fakeFetch(world);
+    let limited = false;
+    const linear = new LinearClient({ token: 't', baseUrl: LINEAR_API, limits: { bodyBytes: 10_500 }, maxRetryAfterSeconds: 0,
+      fetch: async (input, init) => limited
+        ? new Response(JSON.stringify({ errors: [{ message: 'Rate limit exceeded '.repeat(100), extensions: { code: 'RATELIMITED' } }] }), { status: 200 })
+        : fetch(input, init) });
+    assert.equal((await linear.getDocuments(['d0'], { withContent: true })).length, 1);
+    limited = true;
+    await assert.rejects(linear.getDocuments(['d0'], { withContent: true }), (error: unknown) => error instanceof LinearStoppedError);
+    assert.equal(linear.stopped?.kind, 'rate-limited');
   });
 
   it('reports an error answer as itself when the body budget is used up', async () => {
