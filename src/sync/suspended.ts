@@ -250,7 +250,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     if (previous === null || await isAncestor(git, previous, tracked)) return undefined;
     for (const path of await changedPaths(git, tracked, previous)) paths.add(path);
   }
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, previous ?? tracked, paths);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, context.pushedKey, previous ?? tracked, paths);
   const intake = view.commit;
   let head = previous;
   let bases: { tracked: Oid; linear: Oid; view?: Oid };
@@ -430,7 +430,7 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const paths = new Set(await changedPaths(git, tracked, batchTree));
   // The batch's own paths, before the lane's earlier ones join them: its failure describes only these.
   const batchPaths = [...paths].sort();
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, failed, paths);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, context.pushedKey, failed, paths);
   const intake = view.commit;
   const previous = context.fetched.suspended ?? null;
   let head: Oid;

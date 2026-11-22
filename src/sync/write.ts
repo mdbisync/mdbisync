@@ -65,6 +65,7 @@ import {
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
+import { signRepair, signedRepair, signedRepairs } from './pull-repairs.ts';
 import { type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold } from './marks.ts';
 import { stableId } from './stable-id.ts';
 import { suspendedPaths } from './suspended.ts';
@@ -230,6 +231,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // would move `linear` with nothing written (I6). A sync branch GitHub deleted on that merge comes back with the
   // next record, as a branch a person deleted does.
   const ids = await readIds(git, expected.ids);
+  // Only a repair the sync signed is one (`signedRepair`): it alone vouches for a held text or makes its document
+  // wait for its merge. Capture, earlier in the run, reads the document of any other again and records its repair anew.
+  const signedIds = signedRepairs(ids, context.pushedKey);
   const frozen = suspendedPaths(ids);
   const plainFiles = new Map([...ids].map(([path, entry]) => [path, new Set(entry.plainFiles ?? [])]));
   const releasing = [...ids.values()].some((entry) => entry.releaseBase !== undefined);
@@ -257,12 +261,12 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const supersededBefore = await readSupersededIds(git, expected.ids);
   const knownId = knownIdLookup(git, expected.ids, ids);
   const keptAnnotations = await readKeptAnnotations(git, expected.ids);
-  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations });
+  const merge = await mergeLocally(git, linearTip, tracked, signedIds, linear.facts, { knownId, keptAnnotations });
   // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
   if (nothingNew && !releasing) merge.changes.length = 0;
   // Frozen paths remain exactly as capture left them, including deletes and renames.
   const pendingRepairs = new Set<string>();
-  for (const [path, entry] of ids) {
+  for (const [path, entry] of signedIds) {
     if (entry.pullRewrite?.source === undefined || frozen.has(path)) continue;
     if (!(await isAncestor(git, entry.pullRewrite.source, tracked)) || !(await repairMerged(git, entry.pullRewrite.source, tracked, path, entry.pullRewrite.replacement))) {
       pendingRepairs.add(path);
@@ -368,10 +372,15 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     }
   }
   const nextIds: IdMap = new Map(ids);
+  /** `entry` moved from `from` to `to`: a repair the sync signed for `from` is signed again for `to`; an unsigned one stays unsigned. */
+  const resigned = (from: string, to: string, entry: IdEntry): IdEntry => {
+    const repair = signedRepair(context.pushedKey, from, entry);
+    return repair === undefined ? entry : {...entry, pullRewrite: signRepair(context.pushedKey, to, entry.id, repair)};
+  };
   // A file that moved and kept its title, place and text (a renamed project folder): Linear needs nothing, the id map follows the file.
   for (const change of merge.unchanged) {
     if (change.from === change.to) continue;
-    const entry = nextIds.get(change.from) as IdEntry;
+    const entry = resigned(change.from, change.to, nextIds.get(change.from) as IdEntry);
     const plain = plainFiles.get(change.to);
     nextIds.set(change.to, plain === undefined || plain.size === 0 ? entry : {...entry, plainFiles: [...plain]});
     nextIds.delete(change.from);
@@ -752,7 +761,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;
-    const repair = ids.get(file.path)?.pullRewrite;
+    const repair = signedIds.get(file.path)?.pullRewrite;
     if (repair !== undefined && createHash('sha256').update(text).digest('hex') === repair.hash) {
       return createHash('sha256').update(document.content ?? '').digest('hex') === repair.observedHash;
     }
@@ -841,11 +850,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     }
     const entry = nextIds.get(change.from);
     nextIds.delete(change.from);
-    const next = entry !== undefined && entry.id === change.id ? {...entry} : {id: change.id};
+    let next: IdEntry = entry !== undefined && entry.id === change.id ? {...entry} : {id: change.id};
     if (change.content) {
       delete next.pullRewrite;
       delete next.observedDigest;
-    }
+    } else if (change.from !== change.to) next = resigned(change.from, change.to, next);
     const plain = plainFiles.get(change.to);
     if (plain !== undefined && plain.size > 0) next.plainFiles = [...plain];
     nextIds.set(change.to, next);

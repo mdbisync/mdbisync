@@ -196,7 +196,7 @@ async function runWithSecurity(
         // Linear stopped the capture: it staged part of its sets, and the apply step leaves the rest out.
         if (!result.ok) stopped = `\n\n${result.summary}`;
         // The pull request step applies a stored repair only once the hooks have seen its text.
-        await stagePullRepairs(context.git, context.fetched.state, context.mapping.zones, gate);
+        await stagePullRepairs(context.git, context.fetched.state, context.mapping.zones, gate, context.pushedKey);
       }
       staged = { sets: await gate.finish() };
       workSummary = renderStaged(staged.sets) + stopped;

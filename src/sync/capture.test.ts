@@ -1041,6 +1041,26 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), head + '![Chart](https://example.com/chart.png)');
   });
 
+  it('records a repair again, signed, when the stored one has no valid signature', async () => {
+    world.linear.documents[0]!.content = '![Chart](https://example.com/chart.png)\n';
+    const first = await run();
+    await refresh();
+    const ids = await readIds(context.git, first.state.ids);
+    const entry = ids.get('docs/plan.md')!;
+    assert.ok(context.pushedKey.verifiesRepair('docs/plan.md', entry.id, entry.pullRewrite!), 'capture signs the repair it records');
+    // As an earlier version recorded it, or a writer of the ids ref left it: the same repair without the signature.
+    const {mac: _, ...unsigned} = entry.pullRewrite!;
+    ids.set('docs/plan.md', {...entry, pullRewrite: unsigned});
+    const forged = await commitIds(context.git, first.state.ids, ids, IDENTITY);
+    await pushAtomic(context.git, config, [{ref: stateRef(config, 'ids'), expected: first.state.ids, next: forged}]);
+    await refresh();
+    // Linear's document did not change: capture still reads it again and records the repair anew.
+    const second = await run();
+    const again = (await readIds(context.git, second.state.ids)).get('docs/plan.md')!;
+    assert.ok(again.pullRewrite !== undefined && context.pushedKey.verifiesRepair('docs/plan.md', again.id, again.pullRewrite));
+    assert.equal(again.pullRewrite.replacement, unsigned.replacement);
+  });
+
   it('keeps links to an image-blocked reserved document as Linear URLs', async () => {
     // The new document was created from this file, and the answer was lost: the id stays reserved for its path.
     await fixture.seed({'docs/future.md': 'Future.\n'});

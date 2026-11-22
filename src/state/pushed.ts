@@ -15,6 +15,15 @@ export interface PushedRecord {
   mac?: string;
 }
 
+/** The parts of a pull repair its signature covers: all of them. */
+export interface SignedRepair {
+  source?: string;
+  hash: string;
+  observedHash: string;
+  replacement: string;
+  images: ReadonlyArray<{ image: number; total: number; line: number }>;
+}
+
 /** A signature's form in the state. */
 export const PUSHED_MAC = /^[0-9a-f]{64}$/;
 
@@ -70,6 +79,21 @@ export class PushedKey {
   verifiesObservation(tree: Oid, parents: readonly Oid[], text: string, mac: string): boolean {
     if (!PUSHED_MAC.test(mac)) return false;
     return timingSafeEqual(Buffer.from(this.observationMac(tree, parents, text), 'hex'), Buffer.from(mac, 'hex'));
+  }
+
+  /**
+   * The signature of a pull repair the sync recorded: the document's path and
+   * id, the observation commit it came from, the observed bytes it applies to
+   * and the text it puts there, bound to this repository (see `pull-repairs.ts`).
+   */
+  repairMac(path: string, id: string, repair: SignedRepair): string {
+    const images = repair.images.map(({image, total, line}) => [image, total, line]);
+    return createHmac('sha256', this.#key).update(JSON.stringify(['repair-v1', this.#repository, path, id, repair.source ?? null, repair.hash, repair.observedHash, repair.replacement, images])).digest('hex');
+  }
+
+  verifiesRepair(path: string, id: string, repair: SignedRepair & { mac?: unknown }): boolean {
+    if (typeof repair.mac !== 'string' || !PUSHED_MAC.test(repair.mac)) return false;
+    return timingSafeEqual(Buffer.from(this.repairMac(path, id, repair), 'hex'), Buffer.from(repair.mac, 'hex'));
   }
 
   #mac(ref: string, head: Oid): string {
