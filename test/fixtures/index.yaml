@@ -337,6 +337,16 @@ known_constructs:
     class: unchanged
   - construct: table-hash-cells
     class: lint-error
+  - construct: table-hash-escaped-body
+    class: fixable
+  - construct: table-hash-heading-body
+    class: lint-error
+  - construct: table-hash-header-escaped
+    class: unchanged
+  - construct: table-hash-header-bare
+    class: fixable
+  - construct: table-quoted-end
+    class: fixable
   - construct: table-inline-marks
     class: unchanged
   - construct: table-code-span-pipe
@@ -1504,61 +1514,57 @@ fixtures:
   - file: "tables/table-hash-escaped-body.md"
     group: tables
     construct: table-hash-escaped-body
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
+    git_form: captured
     canary: kx-28002669
-    probe_pending: true
     corpus: false
-    note: "a body cell holding only an escaped hash, the form fix keeps; expected to stay text"
+    note: "in fix's form; Linear keeps the escaped body hash as text and adds only a final newline after the table that ends the document, which the sync captures as fix's form"
   - file: "tables/table-hash-double-body.md"
     group: tables
     construct: table-hash-heading-body
     class: lint-error
     rule: table-hash-cell
     line: 3
-    basis: assumed
+    basis: known
     canary: kx-bc99d783
-    probe_pending: true
     corpus: false
-    note: "a body cell holding only two hashes; the rule assumes a heading"
+    note: "Linear stores the two-hash body cell as an empty level-2 heading, written as two hashes and two spaces"
   - file: "tables/table-hash-text-body.md"
     group: tables
     construct: table-hash-heading-body
     class: lint-error
     rule: table-hash-cell
     line: 3
-    basis: assumed
+    basis: known
     canary: kx-75e485e4
-    probe_pending: true
     corpus: false
-    note: "a body cell starting with a hash and a space before text; the rule assumes a heading"
+    note: "Linear stores the body cell as a level-1 heading holding the text"
   - file: "tables/table-hash-header-escaped.md"
     group: tables
     construct: table-hash-header-escaped
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-9b46b921
-    probe_pending: true
     corpus: false
-    note: "a header-only table whose header cell holds an escaped hash"
+    note: "Linear keeps the escaped header hash as text, byte for byte"
   - file: "tables/table-hash-header-bare.md"
     group: tables
     construct: table-hash-header-bare
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-976b8c3d
-    probe_pending: true
     corpus: false
-    note: "a header-only table whose header cell holds a bare hash; fix escapes it, as Linear writes header hashes in the recorded table-header-hash form"
+    note: "Linear keeps the bare header hash as text and writes it escaped, the form fix writes"
   - file: "tables/table-quoted-end.md"
     group: tables
     construct: table-quoted-end
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
+    git_form: captured
     canary: kx-9e3d51a7
-    probe_pending: true
     corpus: false
-    note: "a quoted table with no hash ends the document; the table-header-hash record ends its quoted table with a final newline, so this asks whether that newline belongs to the quoted table alone"
+    note: "in fix's form; Linear adds a final newline after a quoted table that ends the document, as after any table that ends it, which the sync captures as fix's form"
   - file: "tables/table-inline-marks.md"
     group: tables
     construct: table-inline-marks

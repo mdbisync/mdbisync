@@ -1,0 +1,57 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Intro kx-9e3d51a7 before a quoted table.","marks":{"attribution":"user"}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "table",
+          "attrs": {"sizing":"fit"},
+          "children": [
+            {
+              "type": "table_row",
+              "children": [
+                {
+                  "type": "table_header",
+                  "attrs": {"colspan":1,"rowspan":1},
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Name","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {
+                  "type": "table_header",
+                  "attrs": {"colspan":1,"rowspan":1},
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Count","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "table_row",
+              "children": [
+                {
+                  "type": "table_cell",
+                  "attrs": {"colspan":1,"rowspan":1},
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Example","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {
+                  "type": "table_cell",
+                  "attrs": {"colspan":1,"rowspan":1},
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"1","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

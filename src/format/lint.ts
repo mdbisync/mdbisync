@@ -240,7 +240,9 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         break;
       case 'tableCell': {
         // Linear reads heading syntax that starts a body cell as a heading:
-        // a lone `#` becomes an empty one. The header row keeps it as text.
+        // a lone `#` or `##` becomes an empty one, and `# Total` one holding
+        // the text. An escaped `\#` stays text, and the header row keeps a
+        // bare `#` as text too.
         const [row, table] = ancestors.slice(-2).reverse();
         // Test the whole cell text: a first text node of only `#` may be
         // followed by markup (`#**tag**`), which is no heading.
