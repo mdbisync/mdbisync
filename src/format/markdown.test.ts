@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { Nodes, Root } from 'mdast';
+import { EditMap } from 'micromark-util-edit-map';
 import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, joinFile, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { lintText } from './lint.ts';
 import { fixText } from './fix.ts';
@@ -94,6 +98,50 @@ describe('Markdown traversal limits', () => {
     assert.deepEqual(ancestors, [ancestor]);
     assert.throws(() => visit(parse('x'), () => { throw new Error('callback'); }, ancestors), /callback/);
     assert.deepEqual(ancestors, [ancestor]);
+  });
+});
+
+// `markdown.ts` replaces the parser's `EditMap.consume` so that closing a
+// container costs only the events after it. The replacement must reach the
+// copy the parser uses and must do exactly what the original does.
+describe('the parser edit map', () => {
+  it('is the pinned version, the one copy that the parser imports', () => {
+    const require = createRequire(import.meta.url);
+    const ours = require.resolve('micromark-util-edit-map');
+    for (const parser of ['micromark', 'micromark-core-commonmark']) {
+      assert.equal(createRequire(require.resolve(parser)).resolve('micromark-util-edit-map'), ours, parser);
+    }
+    const pinned = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).dependencies['micromark-util-edit-map'];
+    const installed = JSON.parse(readFileSync(join(dirname(ours), 'package.json'), 'utf8')).version;
+    // A new version needs the replacement in markdown.ts reviewed against its `consume`.
+    assert.deepEqual([pinned, installed], ['1.0.0', '1.0.0']);
+  });
+
+  it('applies edits exactly as the original consume', async () => {
+    // A second instance of the module, loaded under another URL, keeps the original.
+    const { EditMap: Original } = await import(`${import.meta.resolve('micromark-util-edit-map')}?original`) as { EditMap: typeof EditMap };
+    assert.notEqual(Original.prototype.consume, EditMap.prototype.consume);
+    let seed = 1;
+    const random = (n: number) => (seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31) % n;
+    for (let round = 0; round < 2_000; round++) {
+      const length = random(40);
+      // Edits that do not overlap, some at the end and some sharing an index, added out of order.
+      const edits: [number, number, string[], boolean][] = [];
+      for (let at = random(4); at <= length; at += 1 + random(5)) {
+        const remove = random(Math.min(3, length - at) + 1);
+        edits.push([at, remove, Array.from({ length: random(3) }, (_, i) => `${at}.${i}`), random(2) === 0]);
+        if (random(4) === 0) edits.push([at, 0, [`${at}.again`], random(2) === 0]);
+        at += remove;
+      }
+      edits.sort(() => random(3) - 1);
+      const apply = (map: EditMap) => {
+        for (const [at, remove, add, before] of edits) (before ? map.addBefore : map.add).call(map, at, remove, add.map((event) => [event]) as never);
+        const events = Array.from({ length }, (_, i) => [i]) as never[];
+        map.consume(events);
+        return events;
+      };
+      assert.deepEqual(apply(new EditMap()), apply(new Original()), `round ${round}`);
+    }
   });
 });
 

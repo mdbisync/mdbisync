@@ -2,6 +2,7 @@
 // marker paragraphs: both are found, read and resolved the same way.
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fixText } from '../format/index.ts';
@@ -128,4 +129,60 @@ test('fix keeps a blank line between a color comment and a plain quote, which is
   const text = '<!-- linear:callout color=#eb5757 -->\n\n> Just a quote.';
   assert.equal(fixText(text), text);
   assert.equal(fixText('<!-- linear:callout color=#eb5757 -->\n\n> [!NOTE]\n> A note.'), '<!-- linear:callout color=#eb5757 -->\n> [!NOTE]\n> A note.');
+});
+
+test('callouts are found by source line after a byte order mark in the body or bare carriage returns', () => {
+  // The parser skips the mark and counts a bare carriage return as a line break: both shift character offsets.
+  const afterMark = `---\ntitle: A\n---\n﻿Intro.\n\n${callouts('One.', 'Two.')}\n`;
+  assert.deepEqual(detectConflicts(afterMark), [{ startLine: 6, endLine: 20, git: 'One.', linear: 'Two.' }]);
+  const afterReturns = `a\rb\rc\rd\n\n> [!NOTE]\n> Note.\n\n> ${MARKERS.git}\n`;
+  assert.deepEqual(detectConflicts(afterReturns), []);
+});
+
+// Each repeated block adds a range the search skips or a quote it reads, and
+// each block quote that a blank line ends is a container the parser closes.
+// The earlier search tested every line against every range, and the parser
+// rewrote all earlier events at each close: a document of the content limit
+// took minutes, now each takes about as long as its parse, a few seconds. So
+// the bounds hold on a busy machine, the search is measured against a parse
+// of the same text, and the parse gets a wide bound of its own that a
+// quadratic parse (minutes) still breaks. A child process runs both, so the
+// parent's timeout stops a stall that a test timeout could not interrupt.
+test('the search stays fast on a document of the content limit full of quotes, code, HTML or callouts', { timeout: 300_000 }, () => {
+  const shapes = {
+    quotes: '> x\n\n',
+    inlineCode: '`a`\n\n',
+    html: '<b>\n\n',
+    fences: '```\nx\n```\n',
+    callouts: '> [!NOTE]\n> x\n\n',
+  };
+  const script = `
+    import { CONTENT_LIMIT } from ${JSON.stringify(new URL('../format/rules.ts', import.meta.url).href)};
+    import { parse } from ${JSON.stringify(new URL('../format/markdown.ts', import.meta.url).href)};
+    import { detectConflicts } from ${JSON.stringify(new URL('./markers.ts', import.meta.url).href)};
+    const tail = ${JSON.stringify(`\n${callouts('One.', 'Two.')}\n`)};
+    const result = {};
+    for (const [name, unit] of Object.entries(${JSON.stringify(shapes)})) {
+      const text = unit.repeat(Math.floor((CONTENT_LIMIT - tail.length) / unit.length)) + tail;
+      let start = performance.now();
+      parse(text);
+      const parseMs = performance.now() - start;
+      start = performance.now();
+      const conflicts = detectConflicts(text);
+      result[name] = { parseMs, searchMs: performance.now() - start, conflicts: conflicts.map(({ git, linear }) => ({ git, linear })) };
+    }
+    console.log(JSON.stringify(result));
+  `;
+  const child = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { encoding: 'utf8', timeout: 280_000 });
+  assert.equal(child.signal, null, 'the search did not finish within the parent timeout');
+  assert.equal(child.status, 0, child.stderr);
+  const result = JSON.parse(child.stdout) as Record<string, { parseMs: number; searchMs: number; conflicts: unknown[] }>;
+  assert.deepEqual(Object.keys(result), Object.keys(shapes));
+  for (const [name, { parseMs, searchMs, conflicts }] of Object.entries(result)) {
+    assert.deepEqual(conflicts, [{ git: 'One.', linear: 'Two.' }], name);
+    const times = `${name}: parse ${Math.round(parseMs)} ms, search ${Math.round(searchMs)} ms`;
+    assert.ok(parseMs < 60_000, times);
+    // The search parses the text once more; the rest of its work is small beside that.
+    assert.ok(searchMs < 3 * parseMs + 2_000, times);
+  }
 });

@@ -6,8 +6,42 @@ import type { Nodes, Root } from 'mdast';
 import { fromMarkdown, type Extension } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
+import { EditMap } from 'micromark-util-edit-map';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { posix } from 'node:path';
+
+type ParserEvent = Parameters<EditMap['consume']>[0][number];
+
+/**
+ * The parser applies the edits of each container it closes, such as a block
+ * quote that a blank line ends, to the whole event list of the document:
+ * `EditMap.consume` copies every event before the first edit and pushes it
+ * back. A document of many separate block quotes then takes time that grows
+ * with the square of its length, minutes at `CONTENT_LIMIT`.
+ *
+ * Loading this module replaces `consume` for every parse in the process, not
+ * only `parse`. The replacement applies the same edits and gives the same
+ * list, but leaves the events before the first edit where they are, so each
+ * close costs only the events after it. It is written for
+ * micromark-util-edit-map 1.0.0, the version pinned in `package.json`;
+ * `markdown.test.ts` checks that pin, that the parser imports this copy, and
+ * that the result equals the original's.
+ */
+EditMap.prototype.consume = function consume(this: EditMap, events: ParserEvent[]): undefined {
+  this.map.sort((a, b) => a[0] - b[0]);
+  // From the last edit back: keep what follows each edit, then its additions.
+  const pieces: ParserEvent[][] = [];
+  for (let index = this.map.length - 1; index >= 0; index--) {
+    const [at, remove, add] = this.map[index]!;
+    pieces.push(events.slice(at + remove), add);
+    events.length = at;
+  }
+  for (let piece = pieces.pop(); piece !== undefined; piece = pieces.pop()) {
+    for (const event of piece) events.push(event);
+  }
+  this.map.length = 0;
+  this.index.clear();
+};
 
 /** A file split into the part that never goes to Linear and the body that does. */
 export interface SplitFile {
@@ -260,10 +294,15 @@ export function isCalloutComment(node: Nodes | undefined): boolean {
 /** The first line of a callout, without its quote prefix: `[!WARNING]` or another alert kind. */
 export const ALERT = /^\[!\w+\][ \t]*$/;
 
+// The lines of the last source `isCallout` read: callers ask about every
+// quote of one document in turn, and a document can hold many quotes.
+let calloutSource: { source: string; lines: string[] } | undefined;
+
 /** Whether a top-level block quote of `source` is a callout: its first line is an alert. */
 export function isCallout(node: Nodes, source: string): boolean {
   if (node.type !== 'blockquote' || !node.position) return false;
-  const first = source.split('\n')[node.position.start.line - 1] ?? '';
+  if (calloutSource?.source !== source) calloutSource = { source, lines: source.split('\n') };
+  const first = calloutSource.lines[node.position.start.line - 1] ?? '';
   return ALERT.test(first.replace(/\r$/, '').replace(/^ {0,3}> ?/, ''));
 }
 

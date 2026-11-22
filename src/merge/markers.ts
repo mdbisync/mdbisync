@@ -67,26 +67,36 @@ export function findMarkerLines(text: string): Map<number, MarkerLine> {
   const tree = parse(body);
   const source = lines(body);
   const callout = (node: Nodes, ancestors: readonly Nodes[]) => ancestors.length === 1 && isCallout(node, body);
-  const excluded: [number, number][] = [];
+  // Each line is looked up once, so the search is linear in lines and nodes.
+  // Excluded ranges can nest: count the ranges open at each line, adding one
+  // where a range starts and taking one away after it ends.
+  const opened = new Int32Array(source.length + 2);
   visit(tree, (node, ancestors) => {
     if (['code', 'inlineCode', 'html', 'blockquote'].includes(node.type) && !callout(node, ancestors) && node.position) {
-      excluded.push([node.position.start.line, node.position.end.line]);
+      opened[Math.min(node.position.start.line, source.length + 1)]!++;
+      opened[Math.min(node.position.end.line + 1, source.length + 1)]!--;
     }
   });
-  // Top-level callouts: [first line, last line, first line of the block with its color comment].
+  // Top-level callouts: [first line, last line, first line of the block with
+  // its color comment]. They do not overlap, so each line is in at most one.
   const quotes: [number, number, number][] = [];
+  const quoteAt = new Int32Array(source.length + 1).fill(-1);
   tree.children.forEach((node, index) => {
     if (!callout(node, [tree]) || !node.position) return;
     const previous = tree.children[index - 1];
     const first = node.position.start.line;
-    quotes.push([first, node.position.end.line, isCalloutComment(previous) ? previous!.position!.start.line : first]);
+    const last = node.position.end.line;
+    for (let line = first; line <= Math.min(last, source.length); line++) quoteAt[line] = quotes.length;
+    quotes.push([first, last, isCalloutComment(previous) ? previous!.position!.start.line : first]);
   });
   const values: readonly string[] = Object.values(MARKERS);
   const found = new Map<number, MarkerLine>();
+  let open = 0;
   source.forEach((text, i) => {
     const line = i + 1;
-    if (excluded.some(([a, b]) => line >= a && line <= b)) return;
-    const quote = quotes.find(([a, b]) => line >= a && line <= b);
+    open += opened[line]!;
+    if (open > 0) return;
+    const quote = quotes[quoteAt[line]!];
     const value = quote ? unquote(lineText(text)) : lineText(text);
     if (!values.includes(value)) return;
     found.set(line + offset, quote
