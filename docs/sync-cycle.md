@@ -228,8 +228,8 @@ running and one pending run in the group: a new arrival replaces an older
 pending run, and does not cancel the running one. This is not a FIFO queue
 that executes every trigger. A later ongoing-sync run reads the current
 state, so replacing a pending trigger does not discard the edits it would
-have read. A live check using pushes and manual dispatches standing in for
-scheduled runs observed at most one active run, at least one replaced pending run, and all edits
+have read. A live check using pushes and manual dispatches observed at
+most one active run, at least one replaced pending run, and all edits
 preserved.
 
 The group serializes these workflows in one repository. It does not lock
@@ -239,9 +239,9 @@ the push is refused rather than partly overwriting state. The next run
 can read the newer state and retry; this does not close the Linear write
 race above. Avoid running an independent writer against the same documents.
 
-Before initial sync or recovery, disable the ongoing-sync workflow, stop
-your own dispatch timer if you run one, and wait for its active run to
-finish. Otherwise a newly queued ongoing-sync run can replace the pending
+Add the ongoing-sync workflow only after the first initial sync. Before a
+later initial sync or recovery, disable it, stop your own dispatch timer if
+you run one, and wait for its active run to finish. Otherwise a newly queued ongoing-sync run can replace the pending
 initial-sync run. Follow the initial-sync direction's instructions before
 confirming its writes.
 
@@ -490,10 +490,8 @@ same check also fails on the tracked tip.
   gets the change one run later
   ([editing while sync runs](#editing-while-sync-runs)).
 - **Linear to git:** the next run captures the edit. Between pushes that
-  is a run from your own timer, GitHub's schedule or a run by hand. With
-  a timer that is within its interval plus the run
-  ([own scheduler](own-scheduler.md)); GitHub's schedule alone can take
-  hours, since GitHub may start scheduled runs late or skip them. The
+  is a run from your own timer or a run by hand. With a timer that is
+  within its interval plus the run ([own scheduler](own-scheduler.md)). The
   same run merges the sync pull request when its checks pass within the
   grace period (`merge-grace-seconds`, default 60 seconds); slower checks
   leave the merge to a later run, one more interval. Run the workflow by

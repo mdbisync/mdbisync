@@ -9,7 +9,7 @@ row.
 ## Action inputs
 
 The inputs of `uses: mdbisync/mdbisync@<release-sha>`, under `with:`. The
-workflows `init` writes set the required ones; the rest keep their
+example workflows set the required ones; the rest keep their
 defaults until you add them. The command line reads the same inputs from
 the environment variables in the third column; an input marked "action
 only" has no command-line form.
@@ -48,7 +48,7 @@ only" has no command-line form.
 
 ## Environment secrets and repository variables
 
-The workflows `init` writes use the `mdbisync` environment. In Settings →
+The example workflows use the `mdbisync` environment. In Settings →
 Environments, set its deployment branches to **Selected branches and
 tags** with a single **Branch** rule for the tracked branch (`main` by
 default) and no required reviewers. Add the secrets below there. Set
@@ -129,7 +129,7 @@ The release's `dist/cli.js`, run as `mdbisync`, for example through
 
 | Command | What it does |
 | --- | --- |
-| `init` | Writes the workflows, the hook configuration and the folder annotations into the repository. |
+| `init` | Writes the workflows and the hook configuration into the repository, optionally with the security hook examples and the Git LFS lines; the quickstart does the same by hand. |
 | `check` | Runs the setup check alone, writing nothing. |
 | `initial-sync` | The initial sync; a dry run unless `MDBISYNC_CONFIRM=true`. |
 | `sync` | The two-way sync. |

@@ -58,15 +58,14 @@ If your repository's plan lacks this support, skip this section: add the
 two secrets of the sections below (`MDBISYNC_LINEAR_CLIENT_SECRET` and
 `MDBISYNC_APP_PRIVATE_KEY`) as repository secrets instead, under Settings
 → Secrets and variables → Actions → Secrets, and remove the line
-`environment: mdbisync` from the jobs of both sync workflows that `init`
-writes. Repository secrets are readable from a workflow run on any branch,
+`environment: mdbisync` from the jobs of both sync workflows. Repository secrets are readable from a workflow run on any branch,
 not only the tracked one; move them to the environment once your plan
 supports it.
 
 In your docs repository, go to Settings → Environments and create
 `mdbisync`. Under **Deployment branches and tags**, choose **Selected
 branches and tags** and add one **Branch** rule for the tracked branch
-(`main` by default). Leave required reviewers off so scheduled and push
+(`main` by default). Leave required reviewers off so dispatched and push
 runs can start automatically. Set the branch rule before adding any secrets
 or pushing the workflows. GitHub records jobs that use the environment in
 the repository's deployment history.
@@ -269,24 +268,23 @@ Changes from Linear pass the hooks you mark `alias: security` before
 anything is pushed to GitHub, where a pushed commit cannot be reliably
 removed. Which hooks those are is your choice:
 
-- **The examples:** `init --security-hooks` adds two: Gitleaks, a secret
+- **The examples:** [`init`](#or-with-one-command-init) with
+  `--security-hooks` adds two: Gitleaks, a secret
   scanner, run in a Docker image pinned by version and digest, and a hook
   that refuses private keys. Docker must be available wherever the hooks
   run: on your machine, and on the runner (GitHub's `ubuntu-latest` has
   it). Review them for your repository's needs. Gitleaks ignores inline
   `gitleaks:allow` comments, which Linear's content could carry; put
   exceptions in your tracked `.gitleaks.toml` or `.gitleaksignore`.
-- **Your own:** run `init --no-security-hooks` (or `--security-hooks` to
-  keep the examples too); after `init` has written the files, add any
-  pre-commit hook to `.pre-commit-config.yaml` and give it
-  `alias: security`, with `stages: [pre-commit, pre-push]`. A hook
+- **Your own:** add any pre-commit hook to `.pre-commit-config.yaml` and
+  give it `alias: security`, with `stages: [pre-commit, pre-push]`. A hook
   that needs a key gets it from a secret you add to the `mdbisync`
   environment. In both
   `mdbisync.yml` and `mdbisync-initial-sync.yml`, under the `env:` of the
   step **Run the security hooks**, add `NAME: ${{ secrets.NAME }}` (the
   step holds a commented example). That step holds none of the sync's
   secrets.
-- **None:** `init --no-security-hooks` and add none. The sync then pushes
+- **None:** add none. The sync then pushes
   Linear's content unchecked, and every run's summary says so.
 
 A document a security hook rejects is not pushed and gets a red mark and
@@ -294,45 +292,25 @@ a comment in Linear that names the hook and line, never the matched text.
 
 ## Repository files
 
-`mdbisync init` writes everything the repository needs: the three
-workflows, the hook configuration and the folder annotations. It runs from
-the release you picked, through npm, with nothing installed globally. In
-your clone of the docs repository, on an up-to-date `main`, at its root:
+The workflows come from [`examples/`](../examples/) of your release:
+`https://github.com/mdbisync/mdbisync/tree/<version>/examples`. Copy two
+of them into your docs repository now, and the sync workflow after the
+initial sync, so that it never runs before there is a
+state to sync from:
 
-```sh
-npm exec --yes --package=git+https://github.com/mdbisync/mdbisync.git#<release-sha> -- \
-  mdbisync init --release-sha <release-sha> --release-version <version> \
-  --folder docs --team ENG --project Handbook \
-  --no-security-hooks
-```
+| File | What it is | When |
+| --- | --- | --- |
+| `.github/workflows/mdbisync-initial-sync.yml` | The one-time initial sync, by hand | Now |
+| `.github/workflows/pre-commit.yml` | The `pre-commit` check on every pull request | Now |
+| `.github/workflows/mdbisync.yml` | The sync, on every push to `main` and by hand | After the initial sync ([first sync run](#first-sync-run)) |
 
-Replace `docs`, `ENG` and `Handbook` with your folder, the Linear team
-(its key or name) and, optionally, a project of that team; leave out
-`--project` to sync the team's own documents. Repeat `--folder` with its
-own `--team` and `--project` for each folder you sync; a folder below an
-annotated one may give only `--project` and inherits the team. Give
-`--security-hooks` or `--no-security-hooks`, as you chose in
-[Security hooks](#security-hooks). Add `--lfs` to store images and other
-embedded files in Git LFS (install Git LFS and run `git lfs install`
-first). Every flag:
-[`init`](configuration.md#init).
-
-It writes:
-
-| File | What it is |
-| --- | --- |
-| `.github/workflows/mdbisync.yml` | The sync, on every push to `main`, every five minutes and by hand |
-| `.github/workflows/mdbisync-initial-sync.yml` | The one-time initial sync, by hand |
-| `.github/workflows/pre-commit.yml` | The `pre-commit` check on every pull request |
-| `.pre-commit-config.yaml` | The `linear-format` hook, and the security hook examples if you asked for them |
-| `<folder>/README.md` | Each folder's annotation, in its front matter |
-| `.gitattributes` | With `--lfs` only: Git LFS lines for the image and document types, and `**/assets/**` for the `assets/` folders where the sync puts files from Linear |
-
-Check that the `sync` job in `mdbisync.yml` and the `initial-sync` job in
-`mdbisync-initial-sync.yml` each declare `environment: mdbisync`, and
-that every `linear-client-id` input reads
-`${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}`. Workflows written by `init` of
-`v0.1.0-rc.17` or earlier have neither: change them as
+In each file, check that every `uses: mdbisync/mdbisync@…` line names
+`<release-sha>` with the comment `# <version>`, and change it if it does
+not. Check that the `initial-sync` job in `mdbisync-initial-sync.yml` (and
+later the `sync` job in `mdbisync.yml`) declares `environment: mdbisync`,
+and that every `linear-client-id` input reads
+`${{ vars.MDBISYNC_LINEAR_CLIENT_ID }}`. Workflows of `v0.1.0-rc.17` or
+earlier have neither: change them as
 [Moving an existing installation to the environment](configuration.md#moving-an-existing-installation-to-the-environment)
 describes before committing the files or starting a sync.
 
@@ -353,23 +331,49 @@ A repository with no CI at all gives the sync's steps
 releases from `v0.1.0-rc.13` have it): otherwise the sync waits for a
 check before it merges.
 
-It keeps what the files already hold, and stops before writing anything
-when a value it would write differs from one already there. It ends by
-printing the steps that remain; the sections below cover them in order.
-The setup check it mentions runs at the start of the initial sync's dry
-run, so there is no separate `check` step here, and the required check
-comes after the first sync run.
-Don't commit yet: install the hooks first.
+The setup check runs at the start of the initial sync's dry run, so there
+is no separate `check` step here, and the required check comes after the
+first sync run. Don't commit yet: add the folder annotations and the hook
+first.
+
+### Or with one command: `init`
+
+`mdbisync init` does the file work of this page in one command. It writes
+the three workflows pinned to your release, adds the `linear-format` hook
+to `.pre-commit-config.yaml` (keeping what the file already holds) and,
+when you ask, the [security hook examples](#security-hooks) and the Git LFS
+lines of `.gitattributes`. It does not map folders: their front matter is
+yours to write ([folder annotations](#folder-annotations)). It runs from
+your release through npm, with nothing installed, in your clone at its
+root:
+
+```sh
+npm exec --yes --package=git+https://github.com/mdbisync/mdbisync.git#<release-sha> -- \
+  mdbisync init --release-sha <release-sha>
+```
+
+In a terminal it asks for what the flags leave out. It writes
+`mdbisync.yml` too: commit that file only after the initial sync. Every
+flag: [`init`](configuration.md#init).
 
 ## Folder annotations
 
-A folder syncs when its `README.md` front matter names a Linear team and,
-optionally, a project ([folder mapping](usage.md#folder-mapping)).
-`mdbisync init` writes it from `--folder`, `--team` and `--project`:
+A folder syncs when the front matter of its `README.md` maps it to Linear
+([folder mapping](usage.md#folder-mapping)). Name a team in the top folder
+and a project of that team in a folder below it; deeper folders inherit
+both. Files under the team folder but outside every project folder are the
+team's own documents. For example, `docs/README.md` names the team:
 
 ```yaml
 ---
 linear-team: ENG
+---
+```
+
+and `docs/handbook/README.md` names a project:
+
+```yaml
+---
 linear-project: Handbook
 ---
 ```
@@ -387,8 +391,7 @@ Files reach Linear only in the form Linear keeps
 ([linear-format.md](linear-format.md)); the `linear-format` pre-commit hook
 puts them in that form. Add it to `.pre-commit-config.yaml`, pinned to a
 release ([pins](usage.md#release-builds-and-pins)). It must come from
-this project's repository, not a `local` hook. `mdbisync init` has
-already added it; without `init`, add it yourself:
+this project's repository, not a `local` hook:
 
 ```yaml
 default_install_hook_types: [pre-commit, pre-push]
@@ -412,15 +415,14 @@ install` in their own clone, so their commits arrive in that form too.
 
 ## Commit the files
 
-Commit what `init` wrote, and any Markdown file `pre-commit run`
-rewrote, and push it to `main`. `git status` lists the files; add each of
-them by path, for example with one annotated folder `docs`:
+Commit the files you added, and any Markdown file `pre-commit run`
+rewrote, and push them to `main`. `git status` lists the files; add each of
+them by path, for example with the folders `docs` and `docs/handbook`:
 
 ```sh
 git status
-git add .github/workflows/mdbisync.yml .github/workflows/mdbisync-initial-sync.yml \
-  .github/workflows/pre-commit.yml .pre-commit-config.yaml docs/README.md
-# With --lfs, also: git add .gitattributes
+git add .github/workflows/mdbisync-initial-sync.yml .github/workflows/pre-commit.yml \
+  .pre-commit-config.yaml docs/README.md docs/handbook/README.md
 # Then git add each Markdown file pre-commit rewrote, as git status lists it.
 git commit -m "Set up the Linear sync"
 git push origin main
@@ -441,22 +443,11 @@ and merge it.
 If the commit stops because `linear-format` rewrote a file, run the same
 `git add` again and commit again: the second attempt passes.
 
-Reaching `main` starts the sync workflow, and its schedule starts it
-again every five minutes; until you disable it, each run writes nothing
-and fails with `initial-sync-required`, which is expected.
-
-Now turn the sync workflow off until the initial sync has finished:
-Actions → **mdbisync** → `⋯` → **Disable workflow**. A sync queued in the
-same concurrency group can replace a waiting initial sync.
-
 ## Initial sync
 
 The sync needs a starting state, which initial sync creates. Its workflow,
-`.github/workflows/mdbisync-initial-sync.yml`, is one of the files
-`mdbisync init` wrote (without `init`, copy it from
-[`examples/`](../examples/mdbisync-initial-sync.yml) and replace each
-`mdbisync/mdbisync@…` pin with `<release-sha>` and its comment with
-`<version>`). You run it by hand
+`.github/workflows/mdbisync-initial-sync.yml`, is the one you added in
+[repository files](#repository-files). You run it by hand
 from the Actions tab, with a direction: `git-to-linear` makes Linear equal
 to git, `linear-to-git` opens a pull request that makes git equal to
 Linear. The first run is a dry run that lists what would change; run it
@@ -499,18 +490,18 @@ merge it with a merge commit.
 
 ## First sync run
 
-Turn the sync back on: Actions → **mdbisync** → **Enable workflow**. Then
-start one run by hand: **mdbisync** → Run workflow → Use workflow from:
-`main` → Run workflow. It finishes green, and its summary shows the setup check and
+Now add the sync workflow: copy `mdbisync.yml` from `examples/` of your
+release to `.github/workflows/`, check it as
+[repository files](#repository-files) says, then commit it and push it to
+`main` (or merge it through a pull request). Reaching `main` starts its
+first run. It finishes green, and its summary shows the setup check and
 what it synchronized; right after an initial sync there is nothing to
-write. From now on it runs on every push to `main` and on GitHub's
-schedule.
+write. From now on it runs on every push to `main`.
 
-GitHub may start scheduled runs hours late or skip them, so a Linear edit
-could wait that long. Now set up a timer of your own that starts the
+Edits in Linear reach git only when a run starts, and GitHub's own
+schedule is unreliable. Set up a timer of your own that starts the
 workflow every few minutes, with a token that may only start workflows in
 this repository: [run the sync from your own scheduler](own-scheduler.md).
-Keep the schedule in the workflow as a fallback.
 
 To see it work, edit a synchronized document in Linear: within a few
 minutes the **Changes from Linear** pull request opens, passes

@@ -202,9 +202,12 @@ and install it on your docs repository. Store its client ID in the variable
 
 ### 4. Start ongoing sync
 
-1. **Add the workflow.** Once the initial sync is done, copy
-   [`mdbisync.yml`](examples/mdbisync.yml) to `.github/workflows/` and push
-   it to `main`. It runs on every push to `main`, in both directions.
+1. **Add the workflows.** Once the initial sync is done, copy
+   [`mdbisync.yml`](examples/mdbisync.yml) and
+   [`pre-commit.yml`](examples/pre-commit.yml) to `.github/workflows/` and
+   push them to `main`. The sync runs on every push to `main`, in both
+   directions, and merges its pull request once the `pre-commit` check
+   passes.
 2. **Set up your scheduler.** Start the workflow on schedule from a cron job
    or systemd timer on your own server (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
 

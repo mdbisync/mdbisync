@@ -36,12 +36,13 @@ instead ([initial-sync-linear-to-git.md](initial-sync-linear-to-git.md)).
 - Run the `linear-format` hook over the repository (`pre-commit run
   linear-format --all-files`) and commit its fixes. A file it cannot fix is
   left out of the run ([what is left out](#what-is-left-out)).
-- Disable the sync workflow (Actions → *mdbisync* → **⋯** → **Disable
-  workflow**), and stop your own dispatch timer if you run one
-  ([own scheduler](own-scheduler.md#stop-the-timer-during-an-initial-sync)),
-  until the initial sync has finished. Both workflows share one
-  queue, and a sync queued behind a running one can replace a waiting
-  initial sync.
+- Keep the sync workflow, `mdbisync.yml`, out of the repository until the
+  initial sync has finished. If it is already there (a later initial sync),
+  disable it (Actions → *mdbisync* → **⋯** → **Disable workflow**) and stop
+  your own dispatch timer if you run one
+  ([own scheduler](own-scheduler.md#stop-the-timer-during-an-initial-sync)).
+  Both workflows share one queue, and a sync queued behind a running one can
+  replace a waiting initial sync.
 - If documents in the synchronized teams and projects should survive, give
   each a file first, or move it to a team or project that no folder maps to.
 
@@ -269,8 +270,8 @@ default), first. Closing the pull request alone is not enough
 ## After the initial sync
 
 1. Check a few documents in Linear: their text, images and links.
-2. Enable the sync workflow, and start your own dispatch timer if you run
-   one ([own scheduler](own-scheduler.md)). Its first run finds nothing to
+2. Add the sync workflow, or enable it again, and start your own dispatch
+   timer ([own scheduler](own-scheduler.md)). Its first run finds nothing to
    write, or opens a pull request with Linear's form of the files Linear
    reformatted.
 3. Fix the files left out, in git; the sync takes each in once it passes.

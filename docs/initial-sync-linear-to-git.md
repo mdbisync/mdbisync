@@ -32,12 +32,13 @@ Linear equal to git and moves Linear-only documents to Linear's trash.
   front matter of its `README.md`
   ([folder mapping](usage.md#folder-mapping)).
 - In the repository settings, turn on **Allow merge commits**.
-- Disable the sync workflow (Actions → *mdbisync* → **⋯** → **Disable
-  workflow**) and stop your own dispatch timer, if you run one
+- Keep the sync workflow, `mdbisync.yml`, out of the repository until the
+  pull request is merged. If it is already there (a later initial sync),
+  disable it (Actions → *mdbisync* → **⋯** → **Disable workflow**), stop
+  your own dispatch timer if you run one
   ([own scheduler](own-scheduler.md#stop-the-timer-during-an-initial-sync)),
-  and keep it disabled until the pull request is merged. Both workflows share
-  one queue, and a sync queued behind a running one can replace a waiting
-  initial sync.
+  and keep both off until the merge. Both workflows share one queue, and a
+  sync queued behind a running one can replace a waiting initial sync.
 
 ## Step 1: dry run
 
@@ -177,8 +178,8 @@ does not merge it and does not add to it.
 4. Merge with **Create a merge commit**, not with squash or rebase. The pull
    request's head commit is the starting point the sync compares both sides
    against.
-5. Enable the sync workflow again, and start your own dispatch timer if
-   you run one.
+5. Add the sync workflow, or enable it again, and start your own dispatch
+   timer ([own scheduler](own-scheduler.md)).
 
 Until the merge, every sync run writes nothing and stops with exit code 4
 and `initial-pull-request-pending`, and a confirmed initial sync from git to
@@ -199,13 +200,14 @@ left to carry.
 
 To abandon the pull request:
 
-1. Keep the sync workflow disabled for all of the following steps.
+1. Keep the sync workflow out of the repository, or disabled, for all of
+   the following steps.
 2. Close the pull request and delete its branch (`mdbisync/linear` by
    default).
 3. Run a new initial sync, in either direction. For `linear-to-git`, its new
    pull request goes through step 3 again.
-4. Enable the sync workflow, and start your own dispatch timer if you run
-   one, only when that initial sync is in place.
+4. Add or enable the sync workflow, and start your own dispatch timer, only
+   when that initial sync is in place.
 
 Closing the pull request or deleting its branch does not cancel the
 unmerged snapshot. Until a new initial sync replaces it, every `sync` run
