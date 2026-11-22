@@ -10,7 +10,8 @@ accepts, and what happens when a file cannot be synced.
 - **In Linear,** the same file is an upload in Linear's own storage.
 
 The sync keeps the two as one set: each file is uploaded to Linear once
-and reused, and each upload taken from Linear is stored once in git.
+and reused, and each upload taken from Linear is stored once per folder in
+git.
 
 ## From git to Linear
 

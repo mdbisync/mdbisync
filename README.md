@@ -25,12 +25,12 @@ as a GitHub Action under apps you create: no server we own, no key we hold.
   the end. No personal API key.
 - **Quality gates before any push.** Changes from Linear pass your
   repository's security and privacy quality gates. Your pre-commit hooks
-  marked with `alias: security` run on every change first, and if one fails,
-  nothing is pushed to git. A rejected change gets a red mark in Linear.
+  marked with `alias: security` run on every change first, and a change one
+  of them rejects is not pushed to git: it gets a red mark in Linear.
 - **The same checks as everyone else.** Changes from Linear reach `main`
   through a sync pull request, with the same checks as the pull requests of
   people and agents.
-- **Every release reviewed by frontier models.** Each release is reviewed for
+- **Every release reviewed by frontier models.** Each final release is reviewed for
   vulnerabilities by two frontier language models, and its security report is
   published with the release (see [Security report](https://mdbisync.com/security/report) and [Dependency report](https://mdbisync.com/security/dependencies)).
 
@@ -148,7 +148,7 @@ No third-party app to trust: it is yours. Install it only on your docs
 repository and keep its key in your secrets.
 
 Give the App read and write access to contents, pull requests and workflows,
-and install it on your docs repository. Store its client ID in the variable
+read access to checks and commit statuses, and install it on your docs repository. Store its client ID in the variable
 `MDBISYNC_APP_CLIENT_ID` and its private key in the secret
 `MDBISYNC_APP_PRIVATE_KEY` (see [exact settings](docs/quickstart.md#github-app)).
 
@@ -190,9 +190,11 @@ and install it on your docs repository. Store its client ID in the variable
      `alias: security` (see [security hooks](docs/quickstart.md#security-hooks)).
    - **Merge commits.** Turn on **Allow merge commits** (Settings → General).
 
-2. **Add the workflow.** Copy
-   [`mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml) to
-   `.github/workflows/` and push it to `main`.
+2. **Add the workflows.** Copy
+   [`mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml), pinned
+   to the same release as the hook, and
+   [`pre-commit.yml`](examples/pre-commit.yml) to `.github/workflows/` and
+   push them to `main`.
 3. **Dry run.** In the Actions tab, run **mdbisync initial sync** in one
    direction: `git-to-linear` or `linear-to-git`. It lists what would
    change and writes nothing.
@@ -202,10 +204,9 @@ and install it on your docs repository. Store its client ID in the variable
 
 ### 4. Start ongoing sync
 
-1. **Add the workflows.** Once the initial sync is done, copy
-   [`mdbisync.yml`](examples/mdbisync.yml) and
-   [`pre-commit.yml`](examples/pre-commit.yml) to `.github/workflows/` and
-   push them to `main`. The sync runs on every push to `main`, in both
+1. **Add the workflow.** Once the initial sync is done, copy
+   [`mdbisync.yml`](examples/mdbisync.yml), pinned to the same release, to
+   `.github/workflows/` and push it to `main`. The sync runs on every push to `main`, in both
    directions, and merges its pull request once the `pre-commit` check
    passes.
 2. **Set up your scheduler.** Start the workflow on a schedule from a cron job

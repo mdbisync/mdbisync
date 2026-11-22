@@ -293,7 +293,7 @@ this time:
 | `missing-in-linear` | Not found in Linear, or in its trash; the next run takes that in. |
 | `conflict` | Changed on both sides in a way git cannot merge; it is written when the conflict is resolved. |
 | `pull-repair-pending` | Waiting for the pull request carrying its image or link repair to merge. |
-| `suspended` | Waits for its suspended changes to reach the tracked branch. |
+| `suspended` | Waits for its suspended changes to reach the main branch. |
 | `renamed-to-unwritable` | Its file was renamed to one that is in conflict or left out; the document stays as it is until that is fixed. |
 
 None needs action unless the same document stays skipped.
