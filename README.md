@@ -30,11 +30,6 @@ as a GitHub Action under apps you create: no server we own, no key we hold.
 - **The same checks as everyone else.** Changes from Linear reach `main`
   through a sync pull request, with the same checks as the pull requests of
   people and agents.
-- **A true three-way merge.** Edits from git and from Linear are merged
-  against the version both sides last agreed on, so changes to different
-  paragraphs simply combine. When both sides change the same paragraph, the
-  document keeps both versions and is marked orange in Linear until someone
-  resolves the conflict.
 - **Every release reviewed by frontier models.** Each release is reviewed for
   vulnerabilities by two frontier language models, and its security report is
   published with the release (see [Security](#security)).
@@ -56,37 +51,16 @@ Two workflows do the work:
 
 ## Conflicts
 
-Edits to different paragraphs merge cleanly, even next to each other. When
-both sides change the same paragraph between two runs, the run writes both
-versions into the document, the same text in Linear and in git, and keeps
-syncing everything else:
+**A true three-way merge.** Edits from git and from Linear are merged against
+the version both sides last agreed on, so changes to different paragraphs
+simply combine. When both sides change the same paragraph, the document keeps
+both versions and is marked orange in Linear until someone resolves the
+conflict.
 
-```markdown
-<!-- linear:callout color=#f2c94c -->
-> [!WARNING]
-> **Sync conflict: git version**
+![A conflict in Linear: the git version and the Linear version of a paragraph between "Sync conflict" callouts](docs/images/conflict-in-linear.png)
 
-The release ships on Tuesday.
-
-<!-- linear:callout color=#f2c94c -->
-> [!WARNING]
-> **Sync conflict: Linear version**
-
-The release ships on Wednesday.
-
-<!-- linear:callout color=#f2c94c -->
-> [!WARNING]
-> **Sync conflict: end**
-```
-
-Each marker shows in Linear as a warning callout, and the document gets an
-alert icon and a comment. Keep the text you want and remove the three
-marker callouts, in Linear or in git; the next run
-takes the result to the other side. A delete against an edit, or two
-different renames, is decided by rules instead: a change beats a delete,
-and git's path beats Linear's title
-([deletes and renames](docs/conflicts.md#deletes-and-renames)). Details:
-[docs/conflicts.md](docs/conflicts.md).
+To resolve it, keep the text you want and remove the conflict markers, in
+Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
 
 ## Features
 
