@@ -4,7 +4,7 @@
 //
 // A sync run is partial when Linear stopped it (a rate limit, a budget
 // running low), a write failed or was rejected, or a state ref moved under
-// it. It kept what it could record, and the next scheduled run goes on from
+// it. It kept what it could record, and the next run goes on from
 // there, so it ends with a warning, not a failure: a sync that meets one of
 // Linear's bad minutes does not fail its job. Other operations have no next
 // run to go on, so a stop fails them.

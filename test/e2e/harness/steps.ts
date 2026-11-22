@@ -598,7 +598,7 @@ async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Prom
   live(ctx);
   const event = typeof args.event === 'string' ? args.event : 'workflow_dispatch';
   const command = (typeof args.command === 'string' ? args.command : 'sync') as CommandName;
-  if (event === 'schedule' && command !== 'sync') throw new Error(`run.workflow cannot run ${command} on a schedule: only the sync workflow has one`);
+  if (event === 'schedule' && command !== 'sync') throw new Error(`run.workflow cannot run ${command} on a schedule: the sandbox scheduler only runs sync`);
   await requireWorkflows(ctx, command);
   // Only a dispatched or scheduled run starts after the snapshot before it (a scheduled one once the run asks
   // for it). A push or pull request run started on an earlier step and may already have written, so it gives
