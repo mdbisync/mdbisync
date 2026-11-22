@@ -6,9 +6,7 @@ accepts, and what happens when a file cannot be synced.
 ## Where files live
 
 - **In git,** a file is an ordinary file of the repository, or a Git LFS
-  object when your `.gitattributes` says so. Add the lines yourself, or let
-  `mdbisync init --lfs` add them
-  ([generate repository files](usage.md#generate-repository-files)).
+  object when your `.gitattributes` says so ([Git LFS](usage.md#git-lfs)).
 - **In Linear,** the same file is an upload in Linear's own storage.
 
 The sync keeps the two as one set: each file is uploaded to Linear once

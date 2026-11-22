@@ -69,11 +69,11 @@ conflict.
 ![A conflict in Linear: the git version and the Linear version of a paragraph between "Sync conflict" callouts](docs/images/conflict-in-linear.png)
 
 To resolve it, keep the text you want and remove the conflict markers, in
-Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
+Linear or in git. See the details in [docs/conflicts.md](docs/conflicts.md).
 
 ## Features
 
-- **Folders as teams and projects.** Map a folder to a Linear team and
+- **Folders as teams and projects.** Map a folder to a Linear team or
   project in the front matter of its `README.md`; the rest of the path
   becomes part of the document's title in Linear (see
   [Folder mapping](docs/usage.md#folder-mapping)).
@@ -81,7 +81,7 @@ Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
   git appear in Linear, and those pasted in Linear are saved to git next to
   the document (see [Images and files](docs/images-and-files.md)).
 - **Git LFS support.** Images and files can be stored in Git LFS, and the
-  sync reads and writes them there (see [Git LFS](docs/usage.md#generate-repository-files)).
+  sync reads and writes them there (see [Git LFS](docs/usage.md#git-lfs)).
 - **Linear's format, checked in your repository.** The `linear-format`
   pre-commit hook's `lint` and `fix` bring your Markdown to the form Linear
   stores before it is synced (see [Linear's Markdown form](docs/linear-format.md)).
@@ -113,15 +113,15 @@ public repositories it is barely followed and turns itself off after 60 days
 without activity; on paid plans it runs late and often skips a run.
 
 So you need a server of your own with a simple cron job or systemd timer
-that starts the workflow on schedule (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
+that starts the workflow on a schedule (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
 
 ### A self-hosted runner
 
 A private repository on GitHub Free gets 2,000 Actions minutes a month,
 enough to run the sync about every 30 minutes. To sync more often
 (recommended), you need more minutes: a sync every five minutes takes about
-8,000 minutes a month. Either pay GitHub for them or set up a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners),
-which costs you only the expense of the server itself (see [Choose the interval](docs/own-scheduler.md#choose-the-interval)).
+8,600 minutes a month. Either pay GitHub for them or set up a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners),
+which costs only the server itself (see [Choose the interval](docs/own-scheduler.md#choose-the-interval)).
 If you sync a public repository with Linear, its GitHub Actions minutes are free.
 
 ## Setup
@@ -208,7 +208,7 @@ and install it on your docs repository. Store its client ID in the variable
    push them to `main`. The sync runs on every push to `main`, in both
    directions, and merges its pull request once the `pre-commit` check
    passes.
-2. **Set up your scheduler.** Start the workflow on schedule from a cron job
+2. **Set up your scheduler.** Start the workflow on a schedule from a cron job
    or systemd timer on your own server (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
 
 ## Documentation

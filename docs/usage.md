@@ -55,15 +55,39 @@ release generated, add `--ignore-gitleaks-allow` before the final ` .`
 of its `entry`; `init` does this itself when the repository's other
 files match the release it is run with.
 
-Use `--lfs` to store embedded files in Git LFS: `init` adds to
-`.gitattributes` a line for each image and document type the sync takes
-from Linear, for files you commit anywhere, and
-`**/assets/** filter=lfs diff=lfs merge=lfs -text`, so every file the
-sync writes into an `assets/` folder goes to LFS whatever its extension.
-The line covers every folder named `assets`, including a website's own;
-if one must stay out of LFS, write your own lines instead. Lines already
-there are kept. Without `--lfs`, your own `.gitattributes`
-decides, as for any commit.
+Use `--lfs` to add the [Git LFS](#git-lfs) lines to `.gitattributes`.
+Lines already there are kept.
+
+Flags work without a terminal. With a terminal attached, `init` asks for
+missing setup choices. It changes local files only and prints the remaining
+setup steps. See `mdbisync init --help` for the flags.
+
+## Git LFS
+
+To store images and files in Git LFS, install Git LFS, run
+`git lfs install`, and add these lines to the repository's
+`.gitattributes` (`mdbisync init --lfs` adds the same lines):
+
+```text
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.jpeg filter=lfs diff=lfs merge=lfs -text
+*.gif filter=lfs diff=lfs merge=lfs -text
+*.webp filter=lfs diff=lfs merge=lfs -text
+*.avif filter=lfs diff=lfs merge=lfs -text
+*.pdf filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.webm filter=lfs diff=lfs merge=lfs -text
+*.svg filter=lfs diff=lfs merge=lfs -text
+**/assets/** filter=lfs diff=lfs merge=lfs -text
+```
+
+The lines by extension cover each type the sync takes from Linear, for
+files you commit anywhere. The last line sends every file the sync writes
+into an `assets/` folder to LFS, whatever its extension. It covers every
+folder named `assets`, including a website's own; if one must stay out of
+LFS, write narrower lines instead. Without such lines, your own
+`.gitattributes` decides, as for any commit.
 
 The sync uploads and reads LFS objects where git-lfs would for the tracked
 branch: git's own configuration (`lfs.url`, `lfs.pushurl`,
@@ -71,10 +95,6 @@ branch: git's own configuration (`lfs.url`, `lfs.pushurl`,
 tracked branch's `.lfsconfig`, then the remote's URL. The `.lfsconfig` of
 the branch a run happens to check out is not read, so another branch
 cannot send the attachments to a server of its choosing.
-
-Flags work without a terminal. With a terminal attached, `init` asks for
-missing setup choices. It changes local files only and prints the remaining
-setup steps. See `mdbisync init --help` for the flags.
 
 ## Folder mapping
 
