@@ -7582,7 +7582,7 @@ var MESSAGES = {
   "sync.invalid-security-config": "invalid security hook configuration",
   "sync.needs-pre-commit": "security hooks require pre-commit on PATH; install pre-commit before capture",
   "sync.security-link-outside": "a tracked symbolic link leads outside the tree the security hooks check",
-  "sync.security-tree-differs": "the tree the security hooks check differs from the tracked tree",
+  "sync.security-scratch-tree": "security-scratch-tree: the scratch repository of the security hooks differs from the tracked tree, most often because this file system ignores case or Unicode normalization",
   "sync.security-scratch-budget": "security-scratch-budget: the tracked files the security hooks need exceed the {bytes}-byte scratch budget",
   "sync.no-runner-temp": "RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job",
   "sync.staged-version": "the staged candidates come from another version of the action",
@@ -7848,7 +7848,119 @@ import { join as join2 } from "node:path";
 // src/mapping/front-matter.ts
 var import_yaml = __toESM(require_dist(), 1);
 
+// node_modules/micromark-util-edit-map/index.js
+var EditMap = class {
+  /**
+   * Create a new edit map.
+   *
+   * @returns
+   *   New instance.
+   */
+  constructor() {
+    this.index = /* @__PURE__ */ new Map();
+    this.map = [];
+  }
+  /**
+   * Create an edit: a remove and/or add at a certain place.
+   *
+   * @param {number} index
+   *   Index at which to apply the edit.
+   * @param {number} remove
+   *   Count of items to remove at the index.
+   * @param {Array<Event>} add
+   *   Items to add at the index.
+   * @returns {undefined}
+   *   Nothing.
+   */
+  add(index, remove, add) {
+    addImplementation(this, index, remove, add, false);
+  }
+  /**
+   * Create an edit: but insert `add` before existing additions, instead of
+   * after them.
+   *
+   * @param {number} index
+   *   Index at which to apply the edit.
+   * @param {number} remove
+   *   Count of items to remove at the index.
+   * @param {Array<Event>} add
+   *   Items to add at the index.
+   * @returns {undefined}
+   *   Nothing.
+   */
+  addBefore(index, remove, add) {
+    addImplementation(this, index, remove, add, true);
+  }
+  /**
+   * Done, change the events.
+   *
+   * @param {Array<Event>} events
+   *   List of events to apply the edits to.
+   * @returns {undefined}
+   *   Nothing.
+   */
+  consume(events) {
+    this.map.sort(function(a, b) {
+      return a[0] - b[0];
+    });
+    if (this.map.length === 0) {
+      return;
+    }
+    let index = this.map.length;
+    const vecs = [];
+    while (index > 0) {
+      index -= 1;
+      vecs.push(events.slice(this.map[index][0] + this.map[index][1]), this.map[index][2]);
+      events.length = this.map[index][0];
+    }
+    vecs.push(events.slice());
+    events.length = 0;
+    let slice = vecs.pop();
+    while (slice) {
+      for (const element of slice) {
+        events.push(element);
+      }
+      slice = vecs.pop();
+    }
+    this.map.length = 0;
+    this.index.clear();
+  }
+};
+function addImplementation(editMap, at, remove, add, before) {
+  if (remove === 0 && add.length === 0) {
+    return;
+  }
+  const existing = editMap.index.get(at);
+  if (existing) {
+    existing[1] += remove;
+    if (before) {
+      add.push(...existing[2]);
+      existing[2] = add;
+    } else {
+      existing[2].push(...add);
+    }
+    return;
+  }
+  const change = [at, remove, add];
+  editMap.map.push(change);
+  editMap.index.set(at, change);
+}
+
 // src/format/markdown.ts
+EditMap.prototype.consume = function consume(events) {
+  this.map.sort((a, b) => a[0] - b[0]);
+  const pieces = [];
+  for (let index = this.map.length - 1; index >= 0; index--) {
+    const [at, remove, add] = this.map[index];
+    pieces.push(events.slice(at + remove), add);
+    events.length = at;
+  }
+  for (let piece = pieces.pop(); piece !== void 0; piece = pieces.pop()) {
+    for (const event of piece) events.push(event);
+  }
+  this.map.length = 0;
+  this.index.clear();
+};
 var isAsciiAlphanumeric = (code) => code !== null && (code >= 48 && code <= 57 || code >= 65 && code <= 90 || code >= 97 && code <= 122);
 var WORD_CODES = [43, 45, 46];
 for (let code = 48; code <= 122; code++) if (isAsciiAlphanumeric(code)) WORD_CODES.push(code);
@@ -7947,11 +8059,18 @@ var SecurityScratchBudgetError = class extends Error {
     this.name = "SecurityScratchBudgetError";
   }
 };
+var SecurityScratchTreeError = class extends Error {
+  code = "security-scratch-tree";
+  constructor() {
+    super(message("sync.security-scratch-tree"));
+    this.name = "SecurityScratchTreeError";
+  }
+};
 function batchBytes(entry) {
   return entry.oid.length + String(entry.size).length + 8 + entry.size;
 }
 function blobSize(entry) {
-  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error(message("sync.security-tree-differs"));
+  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new SecurityScratchTreeError();
   return entry;
 }
 function checkScratchBudget(entries, budget) {
@@ -8056,7 +8175,7 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
     await scratch.run(["update-index", "-z", "--index-info"], { input: gitlinks.map((entry) => `160000 ${entry.oid}	${entry.path}\0`).join("") });
   }
   const tree = await scratch.text(["write-tree"]);
-  if (tree !== await git.text(["rev-parse", `${tracked}^{tree}`])) throw new Error(message("sync.security-tree-differs"));
+  if (tree !== await git.text(["rev-parse", `${tracked}^{tree}`])) throw new SecurityScratchTreeError();
   return { tree, linkedSupport };
 }
 async function securityGate(git, tracked, options = {}) {
@@ -8120,7 +8239,11 @@ async function securityGate(git, tracked, options = {}) {
         }
         return findings;
       } catch (error) {
-        if (error instanceof SecurityScratchBudgetError) throw error;
+        if (error instanceof SecurityScratchBudgetError || error instanceof SecurityScratchTreeError) {
+          await close().catch(() => {
+          });
+          throw error;
+        }
         return [{ hook: SECURITY_ALIAS, line: 1 }];
       }
     }

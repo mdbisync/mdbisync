@@ -19824,7 +19824,7 @@ var MESSAGES = {
   "sync.invalid-security-config": "invalid security hook configuration",
   "sync.needs-pre-commit": "security hooks require pre-commit on PATH; install pre-commit before capture",
   "sync.security-link-outside": "a tracked symbolic link leads outside the tree the security hooks check",
-  "sync.security-tree-differs": "the tree the security hooks check differs from the tracked tree",
+  "sync.security-scratch-tree": "security-scratch-tree: the scratch repository of the security hooks differs from the tracked tree, most often because this file system ignores case or Unicode normalization",
   "sync.security-scratch-budget": "security-scratch-budget: the tracked files the security hooks need exceed the {bytes}-byte scratch budget",
   "sync.no-runner-temp": "RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job",
   "sync.staged-version": "the staged candidates come from another version of the action",

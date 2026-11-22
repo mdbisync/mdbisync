@@ -9529,23 +9529,23 @@ var require_readable = __commonJS({
       }
       // https://fetch.spec.whatwg.org/#dom-body-text
       async text() {
-        return consume(this, "text");
+        return consume2(this, "text");
       }
       // https://fetch.spec.whatwg.org/#dom-body-json
       async json() {
-        return consume(this, "json");
+        return consume2(this, "json");
       }
       // https://fetch.spec.whatwg.org/#dom-body-blob
       async blob() {
-        return consume(this, "blob");
+        return consume2(this, "blob");
       }
       // https://fetch.spec.whatwg.org/#dom-body-bytes
       async bytes() {
-        return consume(this, "bytes");
+        return consume2(this, "bytes");
       }
       // https://fetch.spec.whatwg.org/#dom-body-arraybuffer
       async arrayBuffer() {
-        return consume(this, "arrayBuffer");
+        return consume2(this, "arrayBuffer");
       }
       // https://fetch.spec.whatwg.org/#dom-body-formdata
       async formData() {
@@ -9606,7 +9606,7 @@ var require_readable = __commonJS({
     function isUnusable(self) {
       return util.isDisturbed(self) || isLocked(self);
     }
-    async function consume(stream, type) {
+    async function consume2(stream, type) {
       assert(!stream[kConsume]);
       return new Promise((resolve3, reject) => {
         if (isUnusable(stream)) {
@@ -9642,31 +9642,31 @@ var require_readable = __commonJS({
         }
       });
     }
-    function consumeStart(consume2) {
-      if (consume2.body === null) {
+    function consumeStart(consume3) {
+      if (consume3.body === null) {
         return;
       }
-      const { _readableState: state } = consume2.stream;
+      const { _readableState: state } = consume3.stream;
       if (state.bufferIndex) {
         const start2 = state.bufferIndex;
         const end2 = state.buffer.length;
         for (let n = start2; n < end2; n++) {
-          consumePush(consume2, state.buffer[n]);
+          consumePush(consume3, state.buffer[n]);
         }
       } else {
         for (const chunk of state.buffer) {
-          consumePush(consume2, chunk);
+          consumePush(consume3, chunk);
         }
       }
       if (state.endEmitted) {
         consumeEnd(this[kConsume]);
       } else {
-        consume2.stream.on("end", function() {
+        consume3.stream.on("end", function() {
           consumeEnd(this[kConsume]);
         });
       }
-      consume2.stream.resume();
-      while (consume2.stream.read() != null) {
+      consume3.stream.resume();
+      while (consume3.stream.read() != null) {
       }
     }
     function chunksDecode(chunks, length) {
@@ -9694,8 +9694,8 @@ var require_readable = __commonJS({
       }
       return buffer;
     }
-    function consumeEnd(consume2) {
-      const { type, body: body2, resolve: resolve3, stream, length } = consume2;
+    function consumeEnd(consume3) {
+      const { type, body: body2, resolve: resolve3, stream, length } = consume3;
       try {
         if (type === "text") {
           resolve3(chunksDecode(body2, length));
@@ -9708,30 +9708,30 @@ var require_readable = __commonJS({
         } else if (type === "bytes") {
           resolve3(chunksConcat(body2, length));
         }
-        consumeFinish(consume2);
+        consumeFinish(consume3);
       } catch (err) {
         stream.destroy(err);
       }
     }
-    function consumePush(consume2, chunk) {
-      consume2.length += chunk.length;
-      consume2.body.push(chunk);
+    function consumePush(consume3, chunk) {
+      consume3.length += chunk.length;
+      consume3.body.push(chunk);
     }
-    function consumeFinish(consume2, err) {
-      if (consume2.body === null) {
+    function consumeFinish(consume3, err) {
+      if (consume3.body === null) {
         return;
       }
       if (err) {
-        consume2.reject(err);
+        consume3.reject(err);
       } else {
-        consume2.resolve();
+        consume3.resolve();
       }
-      consume2.type = null;
-      consume2.stream = null;
-      consume2.resolve = null;
-      consume2.reject = null;
-      consume2.length = 0;
-      consume2.body = null;
+      consume3.type = null;
+      consume3.stream = null;
+      consume3.resolve = null;
+      consume3.reject = null;
+      consume3.length = 0;
+      consume3.body = null;
     }
     module.exports = { Readable: BodyReadable, chunksDecode };
   }
@@ -28977,7 +28977,7 @@ var MESSAGES = {
   "sync.invalid-security-config": "invalid security hook configuration",
   "sync.needs-pre-commit": "security hooks require pre-commit on PATH; install pre-commit before capture",
   "sync.security-link-outside": "a tracked symbolic link leads outside the tree the security hooks check",
-  "sync.security-tree-differs": "the tree the security hooks check differs from the tracked tree",
+  "sync.security-scratch-tree": "security-scratch-tree: the scratch repository of the security hooks differs from the tracked tree, most often because this file system ignores case or Unicode normalization",
   "sync.security-scratch-budget": "security-scratch-budget: the tracked files the security hooks need exceed the {bytes}-byte scratch budget",
   "sync.no-runner-temp": "RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job",
   "sync.staged-version": "the staged candidates come from another version of the action",
@@ -29012,7 +29012,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "0.1.0-rc.19" : packageJson.version;
+var VERSION = true ? "0.1.0-rc.20" : packageJson.version;
 
 // src/format/rules.ts
 var LINT_RULES = {
@@ -29023,7 +29023,7 @@ var LINT_RULES = {
   "image-in-link": "The link around an image is dropped.",
   "content-too-long": "Documents over 250,000 characters are rejected.",
   "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax would take too long to parse.",
-  "duplicate-title": "Two files map to one document title.",
+  "duplicate-title": "Two or more files map to one document title.",
   "table-alignment": "Table column alignment is dropped.",
   "link-scheme": "Links must use http, https, mailto, a path or a fragment.",
   "link-title": "A link title is dropped.",
@@ -35050,7 +35050,7 @@ function createTokenizer(parser, initialize, from) {
   const effects = {
     attempt: constructFactory(onsuccessfulconstruct),
     check: constructFactory(onsuccessfulcheck),
-    consume,
+    consume: consume2,
     enter,
     exit: exit3,
     interrupt: constructFactory(onsuccessfulcheck, {
@@ -35132,7 +35132,7 @@ function createTokenizer(parser, initialize, from) {
     expectedCode = code4;
     state = state(code4);
   }
-  function consume(code4) {
+  function consume2(code4) {
     if (markdownLineEnding(code4)) {
       point3.line++;
       point3.column = 1;
@@ -37518,6 +37518,7 @@ function phrasing2(parent, state, info2) {
         state,
         tracker
       );
+      if (!item) continue;
       results.push(item);
       before = lastCharacter(item.sequences[0]);
     } else {
@@ -37540,16 +37541,50 @@ function attentionItem(node2, attention4, state, tracker) {
   const sequences = attentionSequences(node2.type, markers, sizes);
   const sequence = sequences[0];
   const exit3 = state.enter(construct);
-  tracker.move(sequence);
+  const inside2 = state.createTracker(tracker.current());
+  inside2.move(sequence);
   const children = phrasing2(node2, state, {
-    ...tracker.current(),
+    ...inside2.current(),
     before: sequence,
     after: sequence
   });
+  exit3();
+  if (children.length === 0) return;
+  tracker.move(sequence);
   tracker.move(serialize(children, sequence, sequence));
   tracker.move(sequence);
-  exit3();
   return { children, sequences };
+}
+function fix(items, chosen, before, after) {
+  let tokens = render(items, chosen, before, after);
+  let mistake = check(tokens, before, after);
+  while (mistake) {
+    const next = improve(items, chosen, mistake, before, after);
+    if (!next) return;
+    chosen = next.chosen;
+    tokens = next.tokens;
+    mistake = next.mistake;
+  }
+  return tokens;
+}
+function guess(items, chosen, before, after) {
+  let previous3 = before;
+  let index2 = -1;
+  while (++index2 < items.length) {
+    const item = items[index2];
+    if (typeof item === "string") {
+      previous3 = "";
+      continue;
+    }
+    const next = index2 === items.length - 1 ? after : "";
+    const sequence = item.sequences.find(function(value) {
+      const marker = value.charAt(0);
+      return marker !== previous3.charAt(0) && marker !== next.charAt(0) || items.length === 1 && builtins.has(marker) && value.length > before.length;
+    }) || item.sequences[0];
+    if (sequence !== item.sequences[0]) chosen.set(item, sequence);
+    guess(item.children, chosen, sequence, sequence);
+    previous3 = sequence;
+  }
 }
 function render(items, chosen, before, after) {
   const tokens = [];
@@ -37576,14 +37611,14 @@ function render(items, chosen, before, after) {
       next === void 0 ? after : typeof next === "string" ? next : chosen.get(next) || next.sequences[0]
     );
     const inside2 = render(item.children, chosen, sequence, sequence);
-    const head = inside2.length > 0 ? inside2[0].value : "";
+    const head = inside2[0].value;
     const open4 = encodeInfo(
       outsideBefore.charCodeAt(outsideBefore.length - 1),
       head.charCodeAt(0),
       marker
     );
     if (open4.inside) encode(inside2, true);
-    const tail = inside2.length > 0 ? lastCharacter(inside2[inside2.length - 1].value) : "";
+    const tail = lastCharacter(inside2[inside2.length - 1].value);
     const close = encodeInfo(
       outsideAfter.charCodeAt(0),
       tail.charCodeAt(tail.length - 1),
@@ -37603,20 +37638,14 @@ function render(items, chosen, before, after) {
   return tokens;
 }
 function serialize(items, before, after) {
-  let chosen = /* @__PURE__ */ new Map();
-  const initial = render(items, chosen, before, after);
-  let tokens = initial;
-  let mistake = check(tokens, before, after);
-  while (mistake) {
-    const next = improve(items, chosen, mistake, before, after);
-    if (!next) {
-      tokens = initial;
-      break;
-    }
-    chosen = next.chosen;
-    tokens = next.tokens;
-    mistake = next.mistake;
-  }
+  const guessed = /* @__PURE__ */ new Map();
+  guess(items, guessed, before, after);
+  const tokens = (
+    // Start from guesses (based on the preferred sequences).
+    (guessed.size > 0 ? fix(items, guessed, before, after) : void 0) || // If stuck, start from the preferred sequences instead.
+    fix(items, /* @__PURE__ */ new Map(), before, after) || // If stuck again, use the preferred sequences as they are.
+    render(items, /* @__PURE__ */ new Map(), before, after)
+  );
   let result = "";
   for (const token of tokens) result += token.value;
   return result;
@@ -37628,7 +37657,7 @@ emphasis.peek = peek;
 function emphasis(node2, _, state, info2) {
   const exit3 = state.enter("phrasing");
   const item = attentionItem(node2, attention2, state, state.createTracker(info2));
-  const value = serialize([item], info2.before, info2.after);
+  const value = item ? serialize([item], info2.before, info2.after) : "";
   exit3();
   return value;
 }
@@ -38191,7 +38220,7 @@ strong.peek = peek2;
 function strong(node2, _, state, info2) {
   const exit3 = state.enter("phrasing");
   const item = attentionItem(node2, attention3, state, state.createTracker(info2));
-  const value = serialize([item], info2.before, info2.after);
+  const value = item ? serialize([item], info2.before, info2.after) : "";
   exit3();
   return value;
 }
@@ -38565,8 +38594,8 @@ function safe(state, input, config) {
     const subject = value.slice(from, pattern.afterNode ? end2 : void 0);
     let match;
     while (match = expression.exec(subject)) {
-      const before = "before" in pattern || Boolean(pattern.atBreak);
-      const after = "after" in pattern;
+      const before = Boolean(pattern.before || pattern.atBreak);
+      const after = Boolean(pattern.after);
       const position2 = from + match.index + (before ? match[1].length : 0);
       if (own5.call(infos, position2)) {
         if (infos[position2].before && !before) {
@@ -40181,6 +40210,20 @@ function gfm(options) {
 
 // src/format/markdown.ts
 import { posix } from "node:path";
+EditMap.prototype.consume = function consume(events2) {
+  this.map.sort((a, b) => a[0] - b[0]);
+  const pieces = [];
+  for (let index2 = this.map.length - 1; index2 >= 0; index2--) {
+    const [at, remove, add] = this.map[index2];
+    pieces.push(events2.slice(at + remove), add);
+    events2.length = at;
+  }
+  for (let piece = pieces.pop(); piece !== void 0; piece = pieces.pop()) {
+    for (const event of piece) events2.push(event);
+  }
+  this.map.length = 0;
+  this.index.clear();
+};
 var BOM = "\uFEFF";
 var FRONT_MATTER = /^---[ \t]*\r?\n(?:[^\n]*\n)*?---[ \t]*(?:\r?\n|$)/;
 var LEADING_BLANK_LINES = /^(?:[ \t]*\r?\n)+/;
@@ -40283,11 +40326,43 @@ function comparable(body2) {
   };
   return strip(tree);
 }
-var BARE_MARKER = /^((?: {0,3}>[ ]?)*)( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
-var MAYBE_NESTED_BLOCK = /(?:^|\n)[^\S\n]*\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
+function quotePrefix(line2) {
+  let end2 = 0;
+  let lastQuote = 0;
+  for (; ; ) {
+    let at = end2;
+    while (at - end2 < 3 && line2[at] === " ") at++;
+    if (line2[at] !== ">") return { end: end2, lastQuote };
+    lastQuote = at + 1;
+    end2 = line2[lastQuote] === " " ? lastQuote + 1 : lastQuote;
+  }
+}
+var MARKER_REST = /^( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
+function bareMarker(line2) {
+  const { end: end2 } = quotePrefix(line2);
+  const marker = MARKER_REST.exec(line2.slice(end2));
+  return marker === null ? null : { prefix: line2.slice(0, end2), spaces: marker[1], bullet: marker[2] };
+}
+function opensIndentedBracket(line2) {
+  let at = quotePrefix(line2).lastQuote;
+  if (line2[at] !== " ") return false;
+  while (line2[at] === " ") at++;
+  return line2[at] === "[";
+}
+function maybeNestedBlock(lines2) {
+  for (let index2 = 1; index2 + 1 < lines2.length; index2++) {
+    if (/\S/.test(lines2[index2 - 1]) && opensIndentedBracket(lines2[index2 + 1]) && bareMarker(lines2[index2]) !== null) return true;
+  }
+  return false;
+}
+function trimLineEnd(line2) {
+  let end2 = line2.length;
+  while (end2 > 0 && (line2[end2 - 1] === " " || line2[end2 - 1] === "	" || line2[end2 - 1] === "\r")) end2--;
+  return line2.slice(0, end2);
+}
 function nestedFileBlocksOnItemLine(body2) {
-  if (!MAYBE_NESTED_BLOCK.test(body2)) return body2;
   const lines2 = body2.split("\n");
+  if (!maybeNestedBlock(lines2)) return body2;
   const joins = /* @__PURE__ */ new Map();
   visit2(parse2(body2), (node2) => {
     if (node2.type !== "paragraph") return;
@@ -40297,9 +40372,9 @@ function nestedFileBlocksOnItemLine(body2) {
       const linkLine = link2.position.start.line - 1;
       const markerLine = linkLine - 1;
       if (markerLine < node2.position.start.line || before.position.start.line - 1 > markerLine) continue;
-      const marker = BARE_MARKER.exec(lines2[markerLine]);
+      const marker = bareMarker(lines2[markerLine]);
       if (marker === null) continue;
-      const [, prefix, spaces, bullet] = marker;
+      const { prefix, spaces, bullet } = marker;
       const column = prefix.length + spaces.length + bullet.length + 1;
       const line2 = lines2[linkLine];
       if (link2.position.start.column - 1 !== column || line2.slice(0, column) !== prefix + " ".repeat(column - prefix.length)) continue;
@@ -40316,7 +40391,7 @@ function nestedFileBlocksOnItemLine(body2) {
       result.push(lines2[index2]);
       continue;
     }
-    result.push(`${lines2[index2].replace(/[ \t\r]*$/, "")} ${lines2[index2 + 1].slice(column)}`);
+    result.push(`${trimLineEnd(lines2[index2])} ${lines2[index2 + 1].slice(column)}`);
     index2++;
   }
   return result.join("\n");
@@ -40325,18 +40400,14 @@ function isCalloutComment(node2) {
   return node2?.type === "html" && /^<!--\s*linear:callout\b[^]*?-->$/.test(node2.value);
 }
 var ALERT = /^\[!\w+\][ \t]*$/;
+var calloutSource;
 function isCallout(node2, source) {
   if (node2.type !== "blockquote" || !node2.position) return false;
-  const first = source.split("\n")[node2.position.start.line - 1] ?? "";
+  if (calloutSource?.source !== source) calloutSource = { source, lines: source.split("\n") };
+  const first = calloutSource.lines[node2.position.start.line - 1] ?? "";
   return ALERT.test(first.replace(/\r$/, "").replace(/^ {0,3}> ?/, ""));
 }
-function quoteLines(text6) {
-  const codeLines = /* @__PURE__ */ new Set();
-  if (!/^(`{3,}|~{3,})/m.test(text6)) return text6.split("\n").map((line2) => line2 === "" ? ">" : `> ${line2}`).join("\n");
-  for (const node2 of parse2(text6).children) {
-    if (node2.type !== "code" || !node2.position) continue;
-    for (let line2 = node2.position.start.line; line2 <= node2.position.end.line; line2++) codeLines.add(line2);
-  }
+function quoteLines(text6, codeLines) {
   return text6.split("\n").map((line2, index2) => line2 === "" && !codeLines.has(index2 + 1) ? ">" : `> ${line2}`).join("\n");
 }
 function start(node2) {
@@ -40400,15 +40471,19 @@ function destination(url) {
 }
 function linkDestination(url) {
   const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`));
-  const trailing = /\\*$/.exec(inner)[0].length;
-  return `<${inner}${trailing % 2 === 1 ? "\\" : ""}>`;
+  return `<${inner}${trailingBackslashes(inner) % 2 === 1 ? "\\" : ""}>`;
+}
+function trailingBackslashes(text6) {
+  let at = text6.length;
+  while (at > 0 && text6[at - 1] === "\\") at -= 1;
+  return text6.length - at;
 }
 function imageDestination(url) {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
-function bracketedLabel(source, open4) {
+function bracketedLabel(source, open4, limit) {
   let depth2 = 0;
-  for (let at = open4; at < source.length; at++) {
+  for (let at = open4; at < Math.min(limit, source.length); at++) {
     const char = source[at];
     if (char === "\\") at++;
     else if (char === "[") depth2++;
@@ -40463,9 +40538,10 @@ function readAnnotation(readme, text6) {
 function resolveZones(annotations) {
   const zones = /* @__PURE__ */ new Map();
   const problems = [];
-  const ordered = [...annotations].sort((a, b) => depth(a.folder) - depth(b.folder) || compare(a.folder, b.folder));
+  const ordered = annotations.map((annotation) => ({ annotation, depth: depth(annotation.folder) })).sort((a, b) => a.depth - b.depth || compare(a.annotation.folder, b.annotation.folder)).map(({ annotation }) => annotation);
+  const tree = new ZoneTree();
   for (const annotation of ordered) {
-    const inherited = nearestZone(zones, parentOf(annotation.folder));
+    const inherited = tree.nearest(parentOf(annotation.folder));
     const { readme } = annotation;
     if (annotation.team !== void 0 && inherited !== void 0) {
       problems.push({ readme, kind: "nested-team", message: message("annotations.nested-team", { readme, team: inherited.team, folder: display(inherited.teamFolder) }) });
@@ -40489,15 +40565,58 @@ function resolveZones(annotations) {
       zone.projectFolder = annotation.folder;
     }
     zones.set(annotation.folder, zone);
+    tree.add(annotation.folder, zone);
   }
   return { zones, problems };
 }
-function nearestZone(zones, folder) {
-  for (let current = folder; current !== null; current = parentOf(current)) {
-    const zone = zones.get(current);
-    if (zone !== void 0) return zone;
+var ZoneTree = class {
+  root = { children: /* @__PURE__ */ new Map() };
+  add(folder, zone) {
+    let node2 = this.root;
+    if (folder !== "") {
+      for (const name of folder.split("/")) {
+        let child2 = node2.children.get(name);
+        if (child2 === void 0) {
+          child2 = { children: /* @__PURE__ */ new Map() };
+          node2.children.set(name, child2);
+        }
+        node2 = child2;
+      }
+    }
+    node2.zone = zone;
+    node2.folder = folder;
   }
-  return void 0;
+  /** The zone of the nearest annotated folder at or above `folder`. */
+  nearest(folder) {
+    return this.nearestNode(folder)?.zone;
+  }
+  /** The node of the nearest annotated folder at or above `folder`. */
+  nearestNode(folder) {
+    if (folder === null) return void 0;
+    let node2 = this.root;
+    let found = node2.zone === void 0 ? void 0 : node2;
+    if (folder === "") return found;
+    for (let start2 = 0; ; ) {
+      const slash = folder.indexOf("/", start2);
+      node2 = node2.children.get(slash === -1 ? folder.slice(start2) : folder.slice(start2, slash));
+      if (node2 === void 0) return found;
+      if (node2.zone !== void 0) found = node2;
+      if (slash === -1) return found;
+      start2 = slash + 1;
+    }
+  }
+};
+var zoneTrees = /* @__PURE__ */ new WeakMap();
+function nearestZone(zones, folder) {
+  const cached = zoneTrees.get(zones);
+  if (cached !== void 0 && cached.size === zones.size) {
+    const found = cached.tree.nearestNode(folder);
+    if (found === void 0 || zones.get(found.folder) === found.zone) return found?.zone;
+  }
+  const tree = new ZoneTree();
+  for (const [annotated, zone] of zones) tree.add(annotated, zone);
+  zoneTrees.set(zones, { size: zones.size, tree });
+  return tree.nearest(folder);
 }
 function folderOf(path7) {
   const slash = path7.lastIndexOf("/");
@@ -41132,11 +41251,14 @@ function titleKey(place, title) {
   const where = place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
   return `${where}\0${title.normalize("NFC").toLowerCase()}`;
 }
+var COLLISIONS_NAMED = 3;
 function separateCollisions(mapped) {
   const groups = /* @__PURE__ */ new Map();
   for (const document3 of mapped) {
     const key = titleKey(document3.place, document3.title);
-    groups.set(key, [...groups.get(key) ?? [], document3]);
+    const group2 = groups.get(key);
+    if (group2 === void 0) groups.set(key, [document3]);
+    else group2.push(document3);
   }
   const documents = [];
   const leftOut = [];
@@ -41145,16 +41267,20 @@ function separateCollisions(mapped) {
       documents.push(group2[0]);
       continue;
     }
-    for (const document3 of group2) {
+    const named = group2.slice(0, COLLISIONS_NAMED + 1);
+    group2.forEach((document3, index2) => {
+      const collidesWith = named.filter((_, other) => other !== index2).slice(0, COLLISIONS_NAMED).map((other) => other.path);
+      const more = group2.length - 1 - collidesWith.length;
       leftOut.push({
         path: document3.path,
         oid: document3.oid,
         rule: "duplicate-title",
         title: document3.title,
         place: document3.place,
-        collidesWith: group2.filter((other) => other !== document3).map((other) => other.path)
+        collidesWith,
+        ...more > 0 ? { collidesWithMore: more } : {}
       });
-    }
+    });
   }
   return { documents, leftOut };
 }
@@ -44466,7 +44592,7 @@ var StringScanner = class {
     this.string = string3;
     if (this.multiByteMode) {
       let charsToBytes = [];
-      for (let byteIndex = 0, charIndex = 0; charIndex < this.charCount; ++charIndex) {
+      for (let byteIndex = 0, charIndex = 0; charIndex <= this.charCount; ++charIndex) {
         charsToBytes[charIndex] = byteIndex;
         byteIndex += string3.codePointAt(byteIndex) > 65535 ? 2 : 1;
       }
@@ -44621,6 +44747,7 @@ var attValueCharDoubleQuote = /["&<]/;
 var attValueCharSingleQuote = /['&<]/;
 var attValueNormalizedWhitespace = /\r\n|[\n\r\t]/g;
 var endCharData = /<|&|]]>/;
+var markupDeclarationDelimiter = /["'<>\]]|$/;
 var predefinedEntities = Object.freeze(Object.assign(/* @__PURE__ */ Object.create(null), {
   amp: "&",
   apos: "'",
@@ -45125,10 +45252,15 @@ var Parser = class {
   /**
    * Consumes a comment if possible.
    *
+   * @param addToDocument
+   *   Whether the comment may be added to the document (subject to the
+   *   `preserveComments` option). This should be `false` for comments inside a
+   *   DTD internal subset.
+   *
    * @returns Whether a comment was consumed.
    * @see https://www.w3.org/TR/2008/REC-xml-20081126/#NT-Comment
    */
-  consumeComment() {
+  consumeComment(addToDocument = true) {
     let { scanner } = this;
     let startIndex = scanner.charIndex;
     if (!scanner.consumeString("<!--")) {
@@ -45142,7 +45274,7 @@ var Parser = class {
       }
       throw this.error("Unclosed comment");
     }
-    return this.options.preserveComments ? this.addNode(new XmlComment(normalizeLineBreaks(content4)), startIndex) : true;
+    return addToDocument && this.options.preserveComments ? this.addNode(new XmlComment(normalizeLineBreaks(content4)), startIndex) : true;
   }
   /**
    * Consumes a reference in a content context if possible.
@@ -45161,8 +45293,8 @@ var Parser = class {
   /**
    * Consumes a doctype declaration if possible.
    *
-   * This is a loose implementation since doctype declarations are currently
-   * discarded without further parsing.
+   * This is a loose implementation since DTDs are otherwise ignored. The
+   * internal subset is only scanned closely enough to find where it ends.
    *
    * @returns Whether a doctype declaration was consumed.
    * @see https://www.w3.org/TR/2008/REC-xml-20081126/#dtd
@@ -45198,7 +45330,7 @@ var Parser = class {
     }
     let internalSubset;
     if (scanner.consumeString("[")) {
-      internalSubset = scanner.consumeUntilMatch(/\][\x20\t\r\n]*>/);
+      internalSubset = this.consumeInternalSubset();
       if (!scanner.consumeString("]")) {
         throw this.error("Unclosed internal subset");
       }
@@ -45267,6 +45399,60 @@ var Parser = class {
     return false;
   }
   /**
+   * Consumes the contents of a DTD internal subset, stopping before the closing
+   * `]` or at the first content that isn't allowed in an internal subset.
+   *
+   * The end of the internal subset is the first `]` that isn't inside a
+   * comment, processing instruction, or quoted literal, all of which may
+   * legally contain `]>`. Since DTDs are otherwise ignored, markup declarations
+   * are only scanned closely enough to find where they end.
+   *
+   * @returns Raw text of the internal subset.
+   * @see https://www.w3.org/TR/2008/REC-xml-20081126/#NT-intSubset
+   */
+  consumeInternalSubset() {
+    let { scanner } = this;
+    let startByteIndex = scanner.charIndexToByteIndex();
+    while (this.consumeWhitespace() || this.consumeComment(false) || this.consumeProcessingInstruction(false) || this.consumeMarkupDeclaration() || this.consumeParameterEntityReference()) {
+    }
+    return scanner.string.slice(startByteIndex, scanner.charIndexToByteIndex());
+  }
+  /**
+   * Consumes an element, attribute-list, entity, or notation declaration in a
+   * DTD internal subset if possible.
+   *
+   * The declaration isn't fully parsed. Quoted literals are skipped as opaque
+   * units, and the declaration ends at the first `>` outside a literal.
+   *
+   * @returns Whether a markup declaration was consumed.
+   * @see https://www.w3.org/TR/2008/REC-xml-20081126/#NT-markupdecl
+   */
+  consumeMarkupDeclaration() {
+    let { scanner } = this;
+    let startIndex = scanner.charIndex;
+    if (scanner.consumeString("<!ATTLIST")) {
+      if (this.options.rejectAttributeListDeclarations) {
+        scanner.reset(startIndex);
+        throw this.error("Attribute-list declarations aren't allowed when `rejectAttributeListDeclarations` is enabled");
+      }
+    } else if (!scanner.consumeString("<!ELEMENT") && !scanner.consumeString("<!ENTITY") && !scanner.consumeString("<!NOTATION")) {
+      return false;
+    }
+    for (; ; ) {
+      this.validateChars(scanner.consumeUntilMatch(markupDeclarationDelimiter));
+      let char = scanner.peek();
+      if (char === ">") {
+        scanner.advance();
+        return true;
+      }
+      if (char === '"' || char === "'") {
+        this.consumeSystemLiteral();
+        continue;
+      }
+      throw this.error("Unclosed markup declaration");
+    }
+  }
+  /**
    * Consumes `Misc` content if possible.
    *
    * @returns Whether anything was consumed.
@@ -45285,12 +45471,40 @@ var Parser = class {
     return isNameStartChar(this.scanner.peek()) ? this.scanner.consumeMatchFn(isNameChar) : emptyString2;
   }
   /**
+   * Consumes a parameter entity reference in a DTD internal subset if possible.
+   *
+   * Since parse-xml doesn't expand parameter entities, a reference is rejected
+   * when `rejectAttributeListDeclarations` is enabled, because its replacement
+   * text could contain an attribute-list declaration.
+   *
+   * @returns Whether a parameter entity reference was consumed.
+   * @see https://www.w3.org/TR/2008/REC-xml-20081126/#NT-PEReference
+   */
+  consumeParameterEntityReference() {
+    let { scanner } = this;
+    if (scanner.peek() !== "%") {
+      return false;
+    }
+    if (this.options.rejectAttributeListDeclarations) {
+      throw this.error("Parameter entity references aren't allowed when `rejectAttributeListDeclarations` is enabled");
+    }
+    scanner.advance();
+    if (!this.consumeName() || !scanner.consumeString(";")) {
+      throw this.error("Invalid parameter entity reference");
+    }
+    return true;
+  }
+  /**
    * Consumes a processing instruction if possible.
+   *
+   * @param addToDocument
+   *   Whether to add the processing instruction to the document. This should be
+   *   `false` for processing instructions inside a DTD internal subset.
    *
    * @returns Whether a processing instruction was consumed.
    * @see https://www.w3.org/TR/2008/REC-xml-20081126/#sec-pi
    */
-  consumeProcessingInstruction() {
+  consumeProcessingInstruction(addToDocument = true) {
     let { scanner } = this;
     let startIndex = scanner.charIndex;
     if (!scanner.consumeString("<?")) {
@@ -45307,7 +45521,7 @@ var Parser = class {
     }
     if (!this.consumeWhitespace()) {
       if (scanner.consumeString("?>")) {
-        return this.addNode(new XmlProcessingInstruction(name), startIndex);
+        return addToDocument ? this.addNode(new XmlProcessingInstruction(name), startIndex) : true;
       }
       throw this.error("Whitespace is required after a processing instruction name");
     }
@@ -45316,7 +45530,7 @@ var Parser = class {
     if (!scanner.consumeString("?>")) {
       throw this.error("Unterminated processing instruction");
     }
-    return this.addNode(new XmlProcessingInstruction(name, normalizeLineBreaks(content4)), startIndex);
+    return addToDocument ? this.addNode(new XmlProcessingInstruction(name, normalizeLineBreaks(content4)), startIndex) : true;
   }
   /**
    * Consumes a prolog if possible.
@@ -45524,7 +45738,7 @@ var Parser = class {
     for (let i = 0; i < length; ++i) {
       let cp = string3.codePointAt(i);
       if (!isXmlCodePoint(cp)) {
-        this.scanner.reset(-([...string3].length - i));
+        this.scanner.reset(-[...string3.slice(i)].length);
         throw this.error("Invalid character");
       }
       if (cp > 65535) {
@@ -45821,7 +46035,7 @@ function referencesOverLimit(tree, body2) {
   for (const reference of references) {
     const definition3 = definitions.get(reference.identifier);
     if (definition3 === void 0) continue;
-    const label = reference.type === "linkReference" ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body2, start(reference) + 1)) + 5;
+    const label = reference.type === "linkReference" ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body2, start(reference) + 1, end(reference))) + 5;
     const before = written;
     written += label + destinationLength(reference, definition3.url) - length(start(reference), end(reference));
     if ((before <= CONTENT_LIMIT || crossing === void 0) && written > CONTENT_LIMIT) crossing = line(reference);
@@ -46016,26 +46230,46 @@ var Writer = class {
    * definitions are written inline instead.
    */
   blocks(nodes) {
+    return this.writtenBlocks(nodes).text;
+  }
+  /**
+   * The blocks as `blocks` writes them, and the lines (1-based) of the text
+   * that belong to a code block among them. A block quote needs those lines
+   * to write its blank code lines; taking them from the writer, not from a
+   * parse of the written text, keeps nested quotes from parsing their
+   * content once per level.
+   */
+  writtenBlocks(nodes) {
     const written = nodes.filter((node2) => node2.type !== "definition").map((node2) => ({ node: node2, parts: this.block(node2) })).filter(({ parts }) => parts.length > 0);
-    return written.map(({ node: node2, parts }, index2) => {
+    const codeLines = /* @__PURE__ */ new Set();
+    const lastCode = written.findLastIndex(({ node: node2 }) => node2.type === "code");
+    let line2 = 1;
+    const text6 = written.map(({ node: node2, parts }, index2) => {
       const next = written[index2 + 1];
-      if (next === void 0) return parts.join("\n\n");
-      return parts.join("\n\n") + (isCalloutComment(node2) && isCallout(next.node, this.source) ? "\n" : "\n\n");
+      const block = parts.join("\n\n");
+      const separator = next === void 0 ? "" : isCalloutComment(node2) && isCallout(next.node, this.source) ? "\n" : "\n\n";
+      if (index2 <= lastCode) {
+        const breaks = lineBreaks(block);
+        if (node2.type === "code") for (let at = line2; at <= line2 + breaks; at++) codeLines.add(at);
+        line2 += breaks + separator.length;
+      }
+      return block + separator;
     }).join("");
+    return { text: text6, codeLines };
   }
   block(node2) {
     switch (node2.type) {
       case "paragraph":
         return this.paragraph(node2);
       case "heading":
-        return [`${"#".repeat(node2.depth)} ${this.inline(node2.children).replace(/[ \t]*\n[ \t]*/g, " ")}`.trimEnd()];
+        return [`${"#".repeat(node2.depth)} ${joinLines(this.inline(node2.children))}`.trimEnd()];
       case "thematicBreak":
         return ["---"];
       case "blockquote": {
         this.containers.push({ kind: "quote" });
-        const content4 = this.blocks(node2.children);
+        const { text: text6, codeLines } = this.writtenBlocks(node2.children);
         this.containers.pop();
-        return [quoteLines(content4)];
+        return [quoteLines(text6, codeLines)];
       }
       case "list":
         return [this.list(node2)];
@@ -46201,11 +46435,11 @@ ${indent2}[${label}](${destination2})`;
         return;
       }
       case "image":
-        edits.push({ from, to, text: `![${this.label(from + 1)}](${imageDestination(node2.url)})` });
+        edits.push({ from, to, text: `![${this.label(from + 1, to)}](${imageDestination(node2.url)})` });
         return;
       case "imageReference": {
         const definition3 = this.definitions.get(node2.identifier);
-        if (definition3) edits.push({ from, to, text: `![${this.label(from + 1)}](${imageDestination(definition3.url)})` });
+        if (definition3) edits.push({ from, to, text: `![${this.label(from + 1, to)}](${imageDestination(definition3.url)})` });
         return;
       }
       case "text":
@@ -46219,9 +46453,9 @@ ${indent2}[${label}](${destination2})`;
   link(children, url) {
     return `[${this.inline(children)}](${linkDestination(url)})`;
   }
-  /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
-  label(open4) {
-    return bracketedLabel(this.source, open4);
+  /** The bracketed label that opens at `open` (a `[`) and closes before `limit`, as written, without its brackets. */
+  label(open4, limit) {
+    return bracketedLabel(this.source, open4, limit);
   }
 };
 function textEdits(source, from, to, keepAt) {
@@ -46286,9 +46520,14 @@ function relativeFileBlocksAsLinks(body2) {
     const gap = /[ \t]*\r?\n[ \t>]*$/.exec(body2.slice(start(node2), start(paragraph2)));
     if (gap !== null) joins.push({ from: start(paragraph2) - gap[0].length, to: start(paragraph2) });
   });
-  let result = body2;
-  for (const { from, to } of joins.reverse()) result = `${result.slice(0, from)} ${result.slice(to)}`;
-  return result;
+  const parts = [];
+  let at = 0;
+  for (const { from, to } of joins) {
+    parts.push(body2.slice(at, from), " ");
+    at = to;
+  }
+  parts.push(body2.slice(at));
+  return parts.join("");
 }
 function relativeUrls(text6, types) {
   const urls = /* @__PURE__ */ new Set();
@@ -46319,6 +46558,25 @@ function attachmentLink(paragraph2) {
 }
 function prefixLines(text6, prefix, empty2) {
   return text6.split("\n").map((line2) => line2 === "" ? empty2 : prefix + line2).join("\n");
+}
+function joinLines(text6) {
+  if (!text6.includes("\n")) return text6;
+  const lines2 = text6.split("\n");
+  return lines2.map((line2, index2) => {
+    let start2 = 0;
+    let end2 = line2.length;
+    if (index2 > 0) while (start2 < end2 && isSpaceOrTab(line2[start2])) start2 += 1;
+    if (index2 < lines2.length - 1) while (end2 > start2 && isSpaceOrTab(line2[end2 - 1])) end2 -= 1;
+    return line2.slice(start2, end2);
+  }).join(" ");
+}
+function lineBreaks(text6) {
+  let count4 = 0;
+  for (let at = text6.indexOf("\n"); at !== -1; at = text6.indexOf("\n", at + 1)) count4++;
+  return count4;
+}
+function isSpaceOrTab(char) {
+  return char === " " || char === "	";
 }
 
 // src/run/output.ts
@@ -46436,13 +46694,29 @@ function escapeMarkup(text6) {
 }
 var BARE_URL = /(?<=^|[\s(*_~])(?:https?:\/\/|www\.)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+[^\s<\\]*/gi;
 function linkedPart(url) {
-  for (; ; ) {
-    const entity = /&[A-Za-z0-9]+;$/.exec(url);
-    if (entity !== null) url = url.slice(0, entity.index);
-    else if (/[?!.,:*_~'"]$/.test(url)) url = url.slice(0, -1);
-    else if (url.endsWith(")") && url.split(")").length > url.split("(").length) url = url.slice(0, -1);
-    else return url;
+  let end2 = url.length;
+  let open4 = 0;
+  let close = 0;
+  for (const char of url) {
+    if (char === "(") open4++;
+    else if (char === ")") close++;
   }
+  for (; ; ) {
+    const entity = trailingEntity(url, end2);
+    if (entity !== -1) end2 = entity;
+    else if (end2 > 0 && TRAILING_PUNCTUATION.includes(url[end2 - 1])) end2--;
+    else if (url[end2 - 1] === ")" && close > open4) {
+      close--;
+      end2--;
+    } else return url.slice(0, end2);
+  }
+}
+var TRAILING_PUNCTUATION = `?!.,:*_~'"`;
+function trailingEntity(url, end2) {
+  if (url[end2 - 1] !== ";") return -1;
+  let at = end2 - 1;
+  while (at > 0 && /[A-Za-z0-9]/.test(url[at - 1])) at--;
+  return at < end2 - 1 && url[at - 1] === "&" ? at - 1 : -1;
 }
 
 // src/setup/github.ts
@@ -46487,6 +46761,19 @@ var PushedKey = class {
   verifiesObservation(tree, parents, text6, mac) {
     if (!PUSHED_MAC.test(mac)) return false;
     return timingSafeEqual(Buffer.from(this.observationMac(tree, parents, text6), "hex"), Buffer.from(mac, "hex"));
+  }
+  /**
+   * The signature of a pull repair the sync recorded: the document's path and
+   * id, the observation commit it came from, the observed bytes it applies to
+   * and the text it puts there, bound to this repository (see `pull-repairs.ts`).
+   */
+  repairMac(path7, id, repair) {
+    const images = repair.images.map(({ image: image2, total, line: line2 }) => [image2, total, line2]);
+    return createHmac("sha256", this.#key).update(JSON.stringify(["repair-v1", this.#repository, path7, id, repair.source ?? null, repair.hash, repair.observedHash, repair.replacement, images])).digest("hex");
+  }
+  verifiesRepair(path7, id, repair) {
+    if (typeof repair.mac !== "string" || !PUSHED_MAC.test(repair.mac)) return false;
+    return timingSafeEqual(Buffer.from(this.repairMac(path7, id, repair), "hex"), Buffer.from(repair.mac, "hex"));
   }
   #mac(ref, head) {
     return createHmac("sha256", this.#key).update(`${this.#repository}
@@ -47206,11 +47493,11 @@ function checkSyncState(state, config, findings = {}) {
 // src/setup/summary.ts
 var MARK = { passed: "passed", failed: "FAILED", warning: "warning", "not-checked": "not checked" };
 function renderSetupSummary(report) {
-  const fix = fixUrl(report.code);
+  const fix2 = fixUrl(report.code);
   const lines2 = [
     "## Setup check",
     "",
-    report.ok ? "Every required item passed." : `Stopped before any write: \`${report.code}\`.${fix === void 0 ? "" : ` How to fix it: ${fix}`}`,
+    report.ok ? "Every required item passed." : `Stopped before any write: \`${report.code}\`.${fix2 === void 0 ? "" : ` How to fix it: ${fix2}`}`,
     "",
     "| Item | State | Detail |",
     "| --- | --- | --- |",
@@ -48012,7 +48299,9 @@ function restoreFileLinks(body2, written, uploads) {
     const url = uploads.get(link2.hash);
     if (url === void 0) continue;
     const key = withUploadSuffix(url, link2.suffix);
-    raws.set(key, [...raws.get(key) ?? [], link2.written]);
+    const list4 = raws.get(key);
+    if (list4 === void 0) raws.set(key, [link2.written]);
+    else list4.push(link2.written);
   }
   if (raws.size === 0) return body2;
   const seen = /* @__PURE__ */ new Map();
@@ -48079,11 +48368,14 @@ function destinations(body2) {
   return result.sort((a, b) => a.range.from - b.range.from);
 }
 function replaceRanges(text6, replacements) {
-  let result = text6;
-  for (const replacement of [...replacements].sort((a, b) => b.from - a.from)) {
-    result = result.slice(0, replacement.from) + replacement.text + result.slice(replacement.to);
+  const parts = [];
+  let at = 0;
+  for (const replacement of [...replacements].sort((a, b) => a.from - b.from || a.to - b.to)) {
+    parts.push(text6.slice(at, replacement.from), replacement.text);
+    at = replacement.to;
   }
-  return result;
+  parts.push(text6.slice(at));
+  return parts.join("");
 }
 var CONTENT_TYPES = {
   png: "image/png",
@@ -48243,11 +48535,18 @@ var SecurityScratchBudgetError = class extends Error {
     this.name = "SecurityScratchBudgetError";
   }
 };
+var SecurityScratchTreeError = class extends Error {
+  code = "security-scratch-tree";
+  constructor() {
+    super(message("sync.security-scratch-tree"));
+    this.name = "SecurityScratchTreeError";
+  }
+};
 function batchBytes(entry) {
   return entry.oid.length + String(entry.size).length + 8 + entry.size;
 }
 function blobSize(entry) {
-  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error(message("sync.security-tree-differs"));
+  if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new SecurityScratchTreeError();
   return entry;
 }
 function checkScratchBudget(entries, budget) {
@@ -48352,7 +48651,7 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
     await scratch.run(["update-index", "-z", "--index-info"], { input: gitlinks.map((entry) => `160000 ${entry.oid}	${entry.path}\0`).join("") });
   }
   const tree = await scratch.text(["write-tree"]);
-  if (tree !== await git.text(["rev-parse", `${tracked}^{tree}`])) throw new Error(message("sync.security-tree-differs"));
+  if (tree !== await git.text(["rev-parse", `${tracked}^{tree}`])) throw new SecurityScratchTreeError();
   return { tree, linkedSupport };
 }
 async function securityGate(git, tracked, options = {}) {
@@ -48416,7 +48715,11 @@ async function securityGate(git, tracked, options = {}) {
         }
         return findings;
       } catch (error2) {
-        if (error2 instanceof SecurityScratchBudgetError) throw error2;
+        if (error2 instanceof SecurityScratchBudgetError || error2 instanceof SecurityScratchTreeError) {
+          await close().catch(() => {
+          });
+          throw error2;
+        }
         return [{ hook: SECURITY_ALIAS, line: 1 }];
       }
     }
@@ -48471,25 +48774,31 @@ function findMarkerLines(text6) {
   const tree = parse2(body2);
   const source = lines(body2);
   const callout = (node2, ancestors) => ancestors.length === 1 && isCallout(node2, body2);
-  const excluded = [];
+  const opened = new Int32Array(source.length + 2);
   visit2(tree, (node2, ancestors) => {
     if (["code", "inlineCode", "html", "blockquote"].includes(node2.type) && !callout(node2, ancestors) && node2.position) {
-      excluded.push([node2.position.start.line, node2.position.end.line]);
+      opened[Math.min(node2.position.start.line, source.length + 1)]++;
+      opened[Math.min(node2.position.end.line + 1, source.length + 1)]--;
     }
   });
   const quotes = [];
+  const quoteAt = new Int32Array(source.length + 1).fill(-1);
   tree.children.forEach((node2, index2) => {
     if (!callout(node2, [tree]) || !node2.position) return;
     const previous3 = tree.children[index2 - 1];
     const first = node2.position.start.line;
-    quotes.push([first, node2.position.end.line, isCalloutComment(previous3) ? previous3.position.start.line : first]);
+    const last = node2.position.end.line;
+    for (let line2 = first; line2 <= Math.min(last, source.length); line2++) quoteAt[line2] = quotes.length;
+    quotes.push([first, last, isCalloutComment(previous3) ? previous3.position.start.line : first]);
   });
   const values = Object.values(MARKERS);
   const found = /* @__PURE__ */ new Map();
+  let open4 = 0;
   source.forEach((text7, i) => {
     const line2 = i + 1;
-    if (excluded.some(([a, b]) => line2 >= a && line2 <= b)) return;
-    const quote = quotes.find(([a, b]) => line2 >= a && line2 <= b);
+    open4 += opened[line2];
+    if (open4 > 0) return;
+    const quote = quotes[quoteAt[line2]];
     const value = quote ? unquote(lineText2(text7)) : lineText2(text7);
     if (!values.includes(value)) return;
     found.set(line2 + offset, quote ? { value, startLine: quote[2] + offset, endLine: quote[1] + offset, calloutLine: quote[0] + offset } : { value, startLine: line2 + offset, endLine: line2 + offset });
@@ -48533,20 +48842,53 @@ function detectConflicts(text6) {
   return found.sort((a, b) => a.startLine - b.startLine);
 }
 
+// src/merge/conflict-ranges.ts
+var CONFLICT_WIDENING_WORK_LIMIT = 4e6;
+function widenConflictRanges(ranges) {
+  let work = ranges.length;
+  if (work > CONFLICT_WIDENING_WORK_LIMIT) throw new MarkdownLimitError("widening");
+  ranges.sort((a, b) => {
+    if (++work > CONFLICT_WIDENING_WORK_LIMIT) throw new MarkdownLimitError("widening");
+    return a.start - b.start;
+  });
+  const widened = [];
+  let component;
+  let hasConflict = false;
+  for (const range of ranges) {
+    if (component && range.start < component.end) {
+      component.end = Math.max(component.end, range.end);
+      hasConflict ||= range.conflict === true;
+    } else {
+      if (component && hasConflict) widened.push(component);
+      component = { start: range.start, end: range.end };
+      hasConflict = range.conflict === true;
+    }
+  }
+  if (component && hasConflict) widened.push(component);
+  return widened;
+}
+
 // src/merge/merge.ts
+var DEFAULT_MARKER_SIZE = 7;
+var MAX_MARKER_SIZE = 8192;
+var MAX_MERGE_RESULT_BYTES = 32 * 1024 * 1024;
+var MERGE_OK_CODES = Array.from({ length: 128 }, (_, i) => i);
 function tokenize(text6, size) {
   const source = lines(text6);
   const tokens = [];
+  const start2 = `${"<".repeat(size)} git`;
+  const middle = "=".repeat(size);
+  const end2 = `${">".repeat(size)} linear`;
   for (let i = 0; i < source.length; i++) {
     const text7 = source[i];
-    if (lineText2(text7) !== `${"<".repeat(size)} git`) {
+    if (lineText2(text7) !== start2) {
       tokens.push({ kind: "line", text: text7 });
       continue;
     }
     const ours = [];
     const theirs = [];
-    while (++i < source.length && lineText2(source[i]) !== "=".repeat(size)) ours.push(source[i]);
-    while (++i < source.length && lineText2(source[i]) !== `${">".repeat(size)} linear`) theirs.push(source[i]);
+    while (++i < source.length && lineText2(source[i]) !== middle) ours.push(source[i]);
+    while (++i < source.length && lineText2(source[i]) !== end2) theirs.push(source[i]);
     if (i === source.length) throw new Error(message("sync.merge-conflict-output"));
     tokens.push({ kind: "conflict", ours, theirs });
   }
@@ -48588,30 +48930,11 @@ function blockRanges(tokens, side) {
   return ranges;
 }
 function conflictRanges(tokens) {
-  const blocks = [...blockRanges(tokens, "ours"), ...blockRanges(tokens, "theirs")];
-  const ranges = tokens.flatMap((token, i) => token.kind === "conflict" ? [{ start: i, end: i + 1 }] : []);
-  let changed2;
-  do {
-    changed2 = false;
-    for (const range of ranges) {
-      for (const block of blocks) {
-        if (block.start < range.end && block.end > range.start) {
-          const start2 = Math.min(range.start, block.start);
-          const end2 = Math.max(range.end, block.end);
-          if (start2 !== range.start || end2 !== range.end) changed2 = true;
-          range.start = start2;
-          range.end = end2;
-        }
-      }
-    }
-  } while (changed2);
-  const merged = [];
-  for (const range of ranges.sort((a, b) => a.start - b.start)) {
-    const last = merged.at(-1);
-    if (last && range.start < last.end) last.end = Math.max(last.end, range.end);
-    else merged.push({ ...range });
-  }
-  return merged;
+  const ranges = [...blockRanges(tokens, "ours"), ...blockRanges(tokens, "theirs")];
+  tokens.forEach((token, i) => {
+    if (token.kind === "conflict") ranges.push({ start: i, end: i + 1, conflict: true });
+  });
+  return widenConflictRanges(ranges);
 }
 function withoutMarkers(tokens, side) {
   const projection = tokens.flatMap((token) => content3(token, side)).join("");
@@ -48654,10 +48977,15 @@ function completeBlocks(text6) {
     insertions.push({ offset: end2.offset, text: `${raw.endsWith("\n") ? "" : "\n"}${prefix}${close}
 ` });
   });
-  let completed = text6;
-  for (const insertion of insertions.sort((a, b) => b.offset - a.offset)) {
-    completed = completed.slice(0, insertion.offset) + insertion.text + completed.slice(insertion.offset);
+  const pieces = [];
+  let at = 0;
+  const ordered = insertions.map((insertion, index2) => ({ ...insertion, index: index2 })).sort((a, b) => a.offset - b.offset || b.index - a.index);
+  for (const insertion of ordered) {
+    pieces.push(text6.slice(at, insertion.offset), insertion.text);
+    at = insertion.offset;
   }
+  pieces.push(text6.slice(at));
+  const completed = pieces.join("");
   return completed.replace(/\n$/, "");
 }
 function closedHtmlBlock(value) {
@@ -48667,13 +48995,14 @@ x`).children.length > 1;
 function render2(tokens, ranges, finalNewline) {
   let text6 = "";
   let cursor = 0;
+  const lastOursIndex = tokens.findLastIndex((token) => content3(token, "ours").some((line2) => line2 !== ""));
   const armsWithoutMarkers = { ours: withoutMarkers(tokens, "ours"), theirs: withoutMarkers(tokens, "theirs") };
   for (const range of ranges) {
     text6 += tokens.slice(cursor, range.start).map((token) => content3(token, "ours").join("")).join("");
     if (text6 && !text6.endsWith("\n\n")) text6 += text6.endsWith("\n") ? "\n" : "\n\n";
     const arms = (side) => completeBlocks(armsWithoutMarkers[side].slice(range.start, range.end).flat().join("").replace(/^\n|\n$/g, ""));
     cursor = range.end;
-    const last = tokens.slice(cursor).every((token) => content3(token, "ours").join("") === "");
+    const last = cursor > lastOursIndex;
     text6 += `${markerCallout(MARKERS.git)}
 
 ${arms("ours")}
@@ -48688,13 +49017,35 @@ ${markerCallout(MARKERS.end)}${last && !finalNewline ? "" : "\n"}`;
   }
   return text6 + tokens.slice(cursor).map((token) => content3(token, "ours").join("")).join("");
 }
+async function runMergeFile(dir, inputs, size, args) {
+  const inputBytes = inputs.reduce((total, text6) => total + Buffer.byteLength(text6), 0);
+  const frameBytes = 3 * size + 32;
+  const sourceLines = inputs.reduce((total, text6) => total + lineCount(text6) + 1, 0);
+  if (inputBytes + sourceLines * (frameBytes + 1) > MAX_MERGE_RESULT_BYTES) {
+    throw new MarkdownLimitError("merge-output");
+  }
+  const maxOutputBytes = Math.min(MAX_MERGE_RESULT_BYTES, 4 * inputBytes + 16 * frameBytes);
+  try {
+    return await new Git(dir).run([
+      "-c",
+      "merge.conflictStyle=merge",
+      "merge-file",
+      "--stdout",
+      `--marker-size=${size}`,
+      ...args
+    ], { okCodes: MERGE_OK_CODES, maxOutputBytes });
+  } catch (error2) {
+    if (error2 instanceof GitOutputLimitError) throw new MarkdownLimitError("merge-output");
+    throw error2;
+  }
+}
 async function mergeHeads(dir, withBom) {
   const bom = withBom.ours.startsWith("\uFEFF") ? "\uFEFF" : "";
   const heads = Object.fromEntries(Object.entries(withBom).map(([name, text6]) => [name, text6.replace(/^﻿/, "")]));
   if (heads.theirs === heads.base || heads.ours === heads.theirs) return bom + heads.ours;
   if (heads.ours === heads.base) return bom + heads.theirs;
   await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile5(join11(dir, `head-${name}`), text6, { mode: 384 })));
-  const merged = await new Git(dir).run(["merge-file", "--stdout", "head-ours", "head-base", "head-theirs"], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
+  const merged = await runMergeFile(dir, Object.values(heads), DEFAULT_MARKER_SIZE, ["head-ours", "head-base", "head-theirs"]);
   return bom + (merged.code === 0 ? merged.stdout.toString("utf8") : heads.ours);
 }
 async function mergeMarkdown(base, ours, theirs) {
@@ -48704,20 +49055,18 @@ async function mergeMarkdown(base, ours, theirs) {
   base = splitFile(base).body.replaceAll("\r\n", "\n");
   ours = gitFile.body.replaceAll("\r\n", "\n");
   theirs = splitFile(theirs).body.replaceAll("\r\n", "\n");
+  let size = DEFAULT_MARKER_SIZE;
+  for (const text6 of [base, ours, theirs]) {
+    for (const [run2] of text6.matchAll(/<+|=+|>+/g)) {
+      if (run2.length >= MAX_MARKER_SIZE) throw new MarkdownLimitError("merge-marker");
+      size = Math.max(size, run2.length + 1);
+    }
+  }
   const dir = await mkdtemp4(join11(tmpdir5(), "markdown-merge-"));
   try {
     const head = await mergeHeads(dir, heads);
     await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile5(join11(dir, name), text7, { mode: 384 })));
-    let size = 7;
-    for (const text7 of [base, ours, theirs]) {
-      for (const run2 of text7.matchAll(/<+|=+|>+/g)) size = Math.max(size, run2[0].length + 1);
-    }
-    const result = await new Git(dir).run([
-      "-c",
-      "merge.conflictStyle=merge",
-      "merge-file",
-      "--stdout",
-      `--marker-size=${size}`,
+    const result = await runMergeFile(dir, [base, ours, theirs], size, [
       "-L",
       "git",
       "-L",
@@ -48727,7 +49076,7 @@ async function mergeMarkdown(base, ours, theirs) {
       "ours",
       "base",
       "theirs"
-    ], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
+    ]);
     const raw = result.stdout.toString("utf8");
     const tokens = tokenize(raw.replaceAll("\r\n", "\n"), size);
     const ending = ours !== "" ? ours : theirs;
@@ -49221,12 +49570,27 @@ function isReadme(path7) {
 
 // src/sync/pull-repairs.ts
 var repairSet = (path7, replacement) => /* @__PURE__ */ new Map([[path7, replacement]]);
-async function pendingRepairs(git, linear, ids, zones, paths) {
+function signRepair(key, path7, id, repair) {
+  const { mac: _, ...unsigned } = repair;
+  return { ...unsigned, mac: key.repairMac(path7, id, unsigned) };
+}
+function signedRepair(key, path7, entry) {
+  return entry.pullRewrite !== void 0 && key.verifiesRepair(path7, entry.id, entry.pullRewrite) ? entry.pullRewrite : void 0;
+}
+function signedRepairs(ids, key) {
+  return new Map([...ids].map(([path7, entry]) => {
+    if (entry.pullRewrite === void 0 || signedRepair(key, path7, entry) !== void 0) return [path7, entry];
+    const { pullRewrite: _, ...rest } = entry;
+    return [path7, rest];
+  }));
+}
+async function pendingRepairs(git, linear, ids, zones, key, paths) {
   const counts2 = /* @__PURE__ */ new Map();
   for (const entry of ids.values()) counts2.set(entry.id, (counts2.get(entry.id) ?? 0) + 1);
   const pending = [...ids].filter(([path7, entry]) => entry.pullRewrite !== void 0 && counts2.get(entry.id) === 1 && (paths === void 0 || paths.has(path7)));
   const repairs = /* @__PURE__ */ new Map();
-  if (pending.length === 0) return repairs;
+  const unsigned = /* @__PURE__ */ new Set();
+  if (pending.length === 0) return { repairs, unsigned };
   const entries = new Map((await listTree(git, linear, MAPPING_TREE_BYTES)).map((entry) => [entry.path, entry]));
   const files = candidateFiles([...entries.values()], zones);
   const blobs = await new MappingBlobBudget().read(git, files);
@@ -49238,15 +49602,18 @@ async function pendingRepairs(git, linear, ids, zones, paths) {
     const repair = entry.pullRewrite;
     if (source === void 0 || createHash7("sha256").update(source).digest("hex") !== repair.hash) continue;
     if (source.toString("utf8") === repair.replacement) continue;
-    repairs.set(path7, repair);
+    if (signedRepair(key, path7, entry) === void 0) unsigned.add(path7);
+    else repairs.set(path7, repair);
   }
-  return repairs;
+  return { repairs, unsigned };
 }
-async function checkedPullView(git, linear, ids, zones, identity, gate, hold, paths) {
+async function checkedPullView(git, linear, ids, zones, identity, gate, key, hold, paths) {
   const changes = /* @__PURE__ */ new Map();
   const held = /* @__PURE__ */ new Set();
   const notes = [];
-  for (const [path7, repair] of await pendingRepairs(git, linear, ids, zones, paths)) {
+  const { repairs, unsigned } = await pendingRepairs(git, linear, ids, zones, key, paths);
+  for (const path7 of unsigned) held.add(path7);
+  for (const [path7, repair] of repairs) {
     const findings = await gate.check(repairSet(path7, repair.replacement));
     if (findings === null || findings.length > 0) {
       held.add(path7);
@@ -49270,9 +49637,9 @@ async function checkedPullView(git, linear, ids, zones, identity, gate, hold, pa
   } });
   return { commit: commit2, notes };
 }
-async function stagePullRepairs(git, state, zones, gate) {
+async function stagePullRepairs(git, state, zones, gate, key) {
   if (state.linear === null) return;
-  const repairs = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones);
+  const { repairs } = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones, key);
   for (const [path7, repair] of repairs) await gate.check(repairSet(path7, repair.replacement));
 }
 async function readPlainFileProvenance(git, linear, options = {}) {
@@ -49405,9 +49772,18 @@ function rewrite(body2, replace2) {
   return result + body2.slice(at);
 }
 function linksToLinear(body2, fromPath, map4, seen) {
-  const remember = (url, raw) => seen?.set(url, [...seen.get(url) ?? [], raw]);
+  const remember = (url, raw) => {
+    if (seen === void 0) return;
+    const spellings = seen.get(url);
+    if (spellings === void 0) seen.set(url, [raw]);
+    else spellings.push(raw);
+  };
   const aliasesOf = /* @__PURE__ */ new Map();
-  for (const [id, path7] of map4.aliases ?? []) aliasesOf.set(path7, [...aliasesOf.get(path7) ?? [], id]);
+  for (const [id, path7] of map4.aliases ?? []) {
+    const ids = aliasesOf.get(path7);
+    if (ids === void 0) aliasesOf.set(path7, [id]);
+    else ids.push(id);
+  }
   const urlOf = (id, fragment) => {
     const raw = `<${map4.base}/${id}${fragment === void 0 ? "" : `#${encodeFragment(fragment)}`}>`;
     return { raw, url: destinationUrl(raw) ?? raw.slice(1, -1) };
@@ -50064,7 +50440,7 @@ async function maintainSuspended(context, options) {
     if (previous3 === null || await isAncestor(git, previous3, tracked)) return void 0;
     for (const path7 of await changedPaths(git, tracked, previous3)) paths.add(path7);
   }
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, previous3 ?? tracked, paths);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, context.pushedKey, previous3 ?? tracked, paths);
   const intake = view.commit;
   let head = previous3;
   let bases;
@@ -50240,7 +50616,7 @@ async function suspendBatch(context, options, failed2, normalNumber, failures, t
   const batch = await treeCommit(git, batchTree, failed2);
   const paths = new Set(await changedPaths(git, tracked, batchTree));
   const batchPaths = [...paths].sort();
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, failed2, paths);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, context.pushedKey, failed2, paths);
   const intake = view.commit;
   const previous3 = context.fetched.suspended ?? null;
   let head;
@@ -50376,6 +50752,7 @@ async function writeTrackedToLinear(context, options) {
   };
   const cacheLost = await uploadsRebuilding(git, expected.uploads);
   const ids = await readIds(git, expected.ids);
+  const signedIds = signedRepairs(ids, context.pushedKey);
   const frozen = suspendedPaths(ids);
   const plainFiles = new Map([...ids].map(([path7, entry]) => [path7, new Set(entry.plainFiles ?? [])]));
   const releasing = [...ids.values()].some((entry) => entry.releaseBase !== void 0);
@@ -50398,10 +50775,10 @@ async function writeTrackedToLinear(context, options) {
   const supersededBefore = await readSupersededIds(git, expected.ids);
   const knownId = knownIdLookup(git, expected.ids, ids);
   const keptAnnotations = await readKeptAnnotations(git, expected.ids);
-  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations });
+  const merge = await mergeLocally(git, linearTip, tracked, signedIds, linear.facts, { knownId, keptAnnotations });
   if (nothingNew && !releasing) merge.changes.length = 0;
   const pendingRepairs2 = /* @__PURE__ */ new Set();
-  for (const [path7, entry] of ids) {
+  for (const [path7, entry] of signedIds) {
     if (entry.pullRewrite?.source === void 0 || frozen.has(path7)) continue;
     if (!await isAncestor(git, entry.pullRewrite.source, tracked) || !await repairMerged(git, entry.pullRewrite.source, tracked, path7, entry.pullRewrite.replacement)) {
       pendingRepairs2.add(path7);
@@ -50483,9 +50860,13 @@ async function writeTrackedToLinear(context, options) {
     }
   }
   const nextIds = new Map(ids);
+  const resigned = (from, to, entry) => {
+    const repair = signedRepair(context.pushedKey, from, entry);
+    return repair === void 0 ? entry : { ...entry, pullRewrite: signRepair(context.pushedKey, to, entry.id, repair) };
+  };
   for (const change of merge.unchanged) {
     if (change.from === change.to) continue;
-    const entry = nextIds.get(change.from);
+    const entry = resigned(change.from, change.to, nextIds.get(change.from));
     const plain = plainFiles.get(change.to);
     nextIds.set(change.to, plain === void 0 || plain.size === 0 ? entry : { ...entry, plainFiles: [...plain] });
     nextIds.delete(change.from);
@@ -50753,7 +51134,7 @@ async function writeTrackedToLinear(context, options) {
     const occupied = new Set([...linearFiles.keys()].filter((path7) => path7 !== file.path));
     if (document3.title.normalize("NFC") !== file.title.normalize("NFC") && documentPath(folder, document3.title, document3.id, occupied, file.path) !== file.path) return false;
     if (resolves(file.place) && !inPlace(document3, file.place)) return false;
-    const repair = ids.get(file.path)?.pullRewrite;
+    const repair = signedIds.get(file.path)?.pullRewrite;
     if (repair !== void 0 && createHash12("sha256").update(text6).digest("hex") === repair.hash) {
       return createHash12("sha256").update(document3.content ?? "").digest("hex") === repair.observedHash;
     }
@@ -50825,11 +51206,11 @@ async function writeTrackedToLinear(context, options) {
     }
     const entry = nextIds.get(change.from);
     nextIds.delete(change.from);
-    const next = entry !== void 0 && entry.id === change.id ? { ...entry } : { id: change.id };
+    let next = entry !== void 0 && entry.id === change.id ? { ...entry } : { id: change.id };
     if (change.content) {
       delete next.pullRewrite;
       delete next.observedDigest;
-    }
+    } else if (change.from !== change.to) next = resigned(change.from, change.to, next);
     const plain = plainFiles.get(change.to);
     if (plain !== void 0 && plain.size > 0) next.plainFiles = [...plain];
     nextIds.set(change.to, next);
@@ -51673,7 +52054,7 @@ async function pullRequestStep(context, options) {
   if (suspended?.code === "merge-misplaced") return result;
   const ids = await readIds(git, options.state.ids);
   const frozen = suspendedPaths(ids);
-  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, sync ?? tracked);
+  const view = await checkedPullView(git, linear, ids, context.mapping.zones, options.identity ?? context.identity, options.security, context.pushedKey, sync ?? tracked);
   const rewriteNotes = view.notes;
   linear = view.commit;
   const laneLinear = frozen.size === 0 ? linear : await treeCommit(git, await takePaths(git, linear, sync ?? tracked, frozen), linear);
@@ -52855,6 +53236,34 @@ function withNewUploadUrls(text6, added, cache) {
 ${urls.join("\n")}
 `;
 }
+function knownUploadPrefix(known) {
+  const root2 = { next: /* @__PURE__ */ new Map() };
+  for (const url of known) {
+    let node2 = root2;
+    for (const char of url) {
+      let child2 = node2.next.get(char);
+      if (child2 === void 0) node2.next.set(char, child2 = { next: /* @__PURE__ */ new Map() });
+      node2 = child2;
+    }
+    node2.url = url;
+    node2.query = url.includes("?");
+  }
+  return (url) => {
+    let longest;
+    let node2 = root2;
+    for (let at = 0; node2 !== void 0; ) {
+      if (node2.url !== void 0) {
+        const next = url[at];
+        if (next === void 0 || next === "#" || next === (node2.query ? "&" : "?")) longest = node2.url;
+      }
+      if (at >= url.length) break;
+      const char = String.fromCodePoint(url.codePointAt(at));
+      node2 = node2.next.get(char);
+      at += char.length;
+    }
+    return longest;
+  };
+}
 var ImageBlockedError = class extends Error {
   findings;
   constructor(findings) {
@@ -52945,11 +53354,11 @@ var DownloadBlockedError = class extends Error {
     this.reason = reason;
   }
 };
-async function download(url, fetcher, reads, budget, consume) {
+async function download(url, fetcher, reads, budget, consume2) {
   if (!isUpload(url)) throw new Error(message("assets.not-allowed"));
   const key = uploadReadKey(url);
   const kept = reads?.take(key);
-  if (kept !== void 0) consume(kept.body.length);
+  if (kept !== void 0) consume2(kept.body.length);
   if (kept !== void 0 && kept.body.length > budget) throw new AttachmentBudgetError();
   if (kept !== void 0 && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
   try {
@@ -52973,7 +53382,7 @@ async function download(url, fetcher, reads, budget, consume) {
     const chunks = [];
     let size = 0;
     for await (const chunk of response.body) {
-      consume(chunk.length);
+      consume2(chunk.length);
       size += chunk.length;
       if (size > LIMIT) throw new DownloadBlockedError("too-large");
       if (size > budget) throw new AttachmentBudgetError();
@@ -52999,7 +53408,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
     if (answer.error instanceof LinearStoppedError || answer.error instanceof LinearError && isTransientLinearError(answer.error)) throw answer.error;
     return false;
   };
-  const hashPaths = /* @__PURE__ */ new Map();
+  const capturePaths = /* @__PURE__ */ new Map();
   const pathHashes = /* @__PURE__ */ new Map();
   const notFolders = /* @__PURE__ */ new Set();
   const folders = /* @__PURE__ */ new Set();
@@ -53025,7 +53434,14 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
       for (const entry of batch) {
         const blob = blobs.get(entry.oid);
         const hash = parseLfsPointer(blob)?.oid ?? createHash15("sha256").update(blob).digest("hex");
-        hashPaths.set(hash, [...hashPaths.get(hash) ?? [], entry.path]);
+        if (isCaptureName(entry.path) && posix7.basename(entry.path).startsWith(hash)) {
+          let byFolder = capturePaths.get(hash);
+          if (byFolder === void 0) capturePaths.set(hash, byFolder = /* @__PURE__ */ new Map());
+          const folder = posix7.dirname(entry.path);
+          const paths = byFolder.get(folder);
+          if (paths === void 0) byFolder.set(folder, [entry.path]);
+          else paths.push(entry.path);
+        }
         pathHashes.set(entry.path, hash);
       }
     }
@@ -53074,15 +53490,14 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
     const originalBody = body2;
     const rejected = /* @__PURE__ */ new Map();
     let retry;
-    const cachedUrls = [...uploads.values()].sort((a, b) => b.length - a.length);
-    const cachedUrl = (url) => cachedUrls.find((known) => url === known || url.startsWith(`${known}#`) || url.startsWith(`${known}${known.includes("?") ? "&" : "?"}`));
+    const cachedUrl = knownUploadPrefix(uploads.values());
     const knownUpload = (url) => cachedUrl(url) !== void 0;
     if (!sourceDestinations.some(({ node: node2 }) => isUpload(node2.url) || knownUpload(node2.url))) return finish(body2, files, additions);
     await index2();
     const assetsFolder = posix7.join(posix7.dirname(path7), ASSETS_FOLDER);
     const assetsUsable = !notFolders.has(assetsFolder);
     const plainTarget = (target) => plain.has(target) || relocatedPlain.has(target);
-    const captureOf = (hash) => (hashPaths.get(hash) ?? []).find((candidate) => !plainTarget(candidate) && posix7.dirname(candidate) === assetsFolder && isCaptureName(candidate) && posix7.basename(candidate).startsWith(hash));
+    const captureOf = (hash) => capturePaths.get(hash)?.get(assetsFolder)?.find((candidate) => !plainTarget(candidate));
     const place = (hash) => preferredPaths.get(hash) ?? captureOf(hash) ?? unreadableLinks.get(hash);
     const copies = /* @__PURE__ */ new Map();
     const oldAssetsFolder = posix7.join(posix7.dirname(previousPath), ASSETS_FOLDER);
@@ -53151,12 +53566,14 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
     let documentBytes = 0;
     const counted = /* @__PURE__ */ new Set();
     const replacements = [];
+    const hashOfUrl = /* @__PURE__ */ new Map();
+    for (const [hash, known] of uploads) if (!hashOfUrl.has(known)) hashOfUrl.set(known, hash);
     for (const { node: node2, range, outer } of references) {
       const cached = cachedUrl(node2.url);
       const hashAt = node2.url.indexOf("#");
       const url = cached ?? (hashAt === -1 ? node2.url : node2.url.slice(0, hashAt));
       const suffix = (cached === void 0 ? hashAt === -1 ? "" : node2.url.slice(hashAt) : node2.url.slice(cached.length)).replace(/^&/, "?");
-      let hash = [...uploads].find(([, known]) => known === url)?.[0];
+      let hash = hashOfUrl.get(url);
       let assetPath = hash === void 0 ? void 0 : place(hash);
       if (assetPath !== void 0) {
         const source = copies.get(assetPath);
@@ -53273,9 +53690,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
       throw new Error(message("assets.not-allowed"));
     }
     if (retry !== void 0) throw retry;
-    let result = body2;
-    for (const replacement of replacements.sort((a, b) => b.from - a.from)) result = result.slice(0, replacement.from) + replacement.text + result.slice(replacement.to);
-    return finish(result, files, additions);
+    return finish(replaceRanges(body2, replacements), files, additions);
   };
   return Object.assign(capture2, { close: () => spool.close() });
 }
@@ -53977,7 +54392,11 @@ function renderReverseConfirmed(plan, result) {
 }
 var LEFT_OUT_HEAD = ["Path", "Rules", "Lines", "Collides with, or the files"];
 function leftOutRows(entries) {
-  return entries.map((entry) => [entry.path, entry.rules.join(", "), entry.lines.join(", "), (entry.collidesWith ?? entry.files ?? []).join(", ")]);
+  return entries.map((entry) => {
+    const named = (entry.collidesWith ?? entry.files ?? []).join(", ");
+    const others = entry.collidesWithMore === void 0 ? named : `${named}, and ${entry.collidesWithMore} more`;
+    return [entry.path, entry.rules.join(", "), entry.lines.join(", "), others];
+  });
 }
 function pushTable(lines2, title, head, rows, always) {
   if (rows.length === 0 && !always) return;
@@ -54273,11 +54692,12 @@ function planInitialSync(input) {
   const facts = input.facts ?? LINEAR_FACTS;
   const { mapping } = input;
   const leftOut = /* @__PURE__ */ new Map();
-  const leaveOut = (path7, rules, lines2 = [], collidesWith) => {
+  const leaveOut = (path7, rules, lines2 = [], collidesWith, collidesWithMore) => {
     const entry = leftOut.get(path7) ?? { path: path7, rules: [], lines: [] };
     entry.rules = [.../* @__PURE__ */ new Set([...entry.rules, ...rules])].sort();
     entry.lines = [.../* @__PURE__ */ new Set([...entry.lines, ...lines2])].sort((a, b) => a - b);
     if (collidesWith !== void 0) entry.collidesWith = [...collidesWith].sort(compare8);
+    if (collidesWithMore !== void 0) entry.collidesWithMore = collidesWithMore;
     leftOut.set(path7, entry);
   };
   const textOf = (path7) => {
@@ -54292,7 +54712,7 @@ function planInitialSync(input) {
   };
   const leftOutTitles = /* @__PURE__ */ new Map();
   for (const file of mapping.leftOut) {
-    leaveOut(file.path, [file.rule], [], file.collidesWith);
+    leaveOut(file.path, [file.rule], [], file.collidesWith, file.collidesWithMore);
     lint(file.path, file.title);
     leftOutTitles.set(titleIn(file.place, file.title), file.path);
   }
@@ -54435,7 +54855,9 @@ async function rebuildIds({ git, record, linear, facts, targets, allowedPlace, d
     places.set(JSON.stringify(place), place);
     files.set(keyOf(place, title), path7);
     const folder = path7.slice(0, -(title.length + ".md".length)).replace(/\/$/, "");
-    byPlace.set(JSON.stringify(place), [...byPlace.get(JSON.stringify(place)) ?? [], { folder, path: path7 }]);
+    const inPlace = byPlace.get(JSON.stringify(place));
+    if (inPlace === void 0) byPlace.set(JSON.stringify(place), [{ folder, path: path7 }]);
+    else inPlace.push({ folder, path: path7 });
   };
   let initial;
   const sides = /* @__PURE__ */ new Map();
@@ -54674,9 +55096,10 @@ async function capture(context, options) {
       const entry = byId.get(doc.id)?.entry;
       return entry?.saved !== void 0 && (entry.suspended === void 0 || entry.saved.notice?.kind === "blocked");
     };
+    const unsignedRepair = (old) => old.entry.pullRewrite !== void 0 && signedRepair(context.pushedKey, old.path, old.entry) === void 0;
     let selected = [...listed.values()].filter((doc) => {
       const old = byId.get(doc.id);
-      return old === void 0 || marked(doc) || old.entry.observedDigest === void 0 && live(doc) && previous3.has(old.path) && !excludedPath(old.path) || !asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor);
+      return old === void 0 || marked(doc) || old.entry.observedDigest === void 0 && live(doc) && previous3.has(old.path) && !excludedPath(old.path) || unsignedRepair(old) && live(doc) && previous3.has(old.path) || !asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor);
     });
     const invalidZone = (doc, path7) => {
       const zone = nearestZone(mapping.zones, folderOf(path7));
@@ -55001,9 +55424,11 @@ ${assets.plainFiles.join("\n")}
         throw error2;
       }
     };
+    const recordedNow = /* @__PURE__ */ new Set();
     for (const [id, candidate] of candidates2) {
       const old = byId.get(id);
       if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
+      recordedNow.add(id);
       if (old !== void 0 && old.path !== candidate.path) {
         removeBody(old.path);
         ids.delete(old.path);
@@ -55024,7 +55449,9 @@ ${assets.plainFiles.join("\n")}
           replacement: String(repaired),
           images: imageLinks(candidate.doc.content ?? "", new Set(deadUploads)).images
         };
-        if (old?.entry.pullRewrite?.hash === entry.pullRewrite.hash && old.entry.pullRewrite.source !== void 0) entry.pullRewrite.source = old.entry.pullRewrite.source;
+        const recorded2 = old === void 0 ? void 0 : signedRepair(context.pushedKey, old.path, old.entry);
+        if (recorded2?.hash === entry.pullRewrite.hash && recorded2.source !== void 0) entry.pullRewrite.source = recorded2.source;
+        entry.pullRewrite = signRepair(context.pushedKey, candidate.path, id, entry.pullRewrite);
       }
       ids.set(candidate.path, entry);
       for (const [path7, content4] of candidate.files) {
@@ -55048,8 +55475,8 @@ ${assets.plainFiles.join("\n")}
 
 ${plainTrailers.join("\n")}`), identity, sign: signObservation(context.pushedKey) });
     if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
-    for (const [path7, entry] of ids) if (candidates2.has(entry.id) && entry.pullRewrite !== void 0 && entry.pullRewrite.source === void 0) {
-      ids.set(path7, { ...entry, pullRewrite: { ...entry.pullRewrite, source: linearCommit } });
+    for (const [path7, entry] of ids) if (recordedNow.has(entry.id) && entry.pullRewrite !== void 0 && entry.pullRewrite.source === void 0) {
+      ids.set(path7, { ...entry, pullRewrite: signRepair(context.pushedKey, path7, entry.id, { ...entry.pullRewrite, source: linearCommit }) });
     }
     const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
     const recordsRemovals = held.size > 0 || heldBefore.size > 0;
@@ -55572,7 +55999,7 @@ Staging stopped early (${ended}).`);
         if (!result.ok) stopped = `
 
 ${result.summary}`;
-        await stagePullRepairs(context.git, context.fetched.state, context.mapping.zones, gate);
+        await stagePullRepairs(context.git, context.fetched.state, context.mapping.zones, gate, context.pushedKey);
       }
       staged = { sets: await gate.finish() };
       workSummary = renderStaged(staged.sets) + stopped;
@@ -55669,9 +56096,15 @@ function runEnding(outcome2) {
 }
 function stoppedBeforeWritingMessage(command, outcome2) {
   const detail = outcome2.setup?.detail ?? outcome2.refusal?.message;
-  const fix = fixUrl(outcome2.code);
-  const explained = message("run.stopped-before-write", { command, code: String(outcome2.code), detail: detail === void 0 ? "" : message("run.stopped-detail", { detail: detail.replace(/\s*[\r\n]+\s*/g, " ") }) });
-  return fix === void 0 ? explained : message("run.how-to-fix", { message: explained.replace(/\.$/, ""), url: fix });
+  const fix2 = fixUrl(outcome2.code);
+  const explained = message("run.stopped-before-write", { command, code: String(outcome2.code), detail: detail === void 0 ? "" : message("run.stopped-detail", { detail: oneLine2(detail) }) });
+  return fix2 === void 0 ? explained : message("run.how-to-fix", { message: explained.replace(/\.$/, ""), url: fix2 });
+}
+function oneLine2(text6) {
+  const lines2 = text6.split(/[\r\n]+/);
+  if (lines2.length === 1) return text6;
+  const last = lines2.length - 1;
+  return lines2.map((line2, index2) => index2 === 0 ? line2.trimEnd() : index2 === last ? line2.trimStart() : line2.trim()).filter((line2, index2) => line2 !== "" || index2 === 0 || index2 === last).join(" ");
 }
 function stoppedMessage(command) {
   return message("run.stopped-by-linear", { command });

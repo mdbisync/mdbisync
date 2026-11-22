@@ -1,18 +1,18 @@
 {
-  "version": "v0.1.0-rc.19",
-  "source": "c03d22a77fcf4517e3c12d5e5b5dea3aeb191a94",
+  "version": "v0.1.0-rc.20",
+  "source": "e54f638702e79c53e8242d6f62e35a1a0327d08b",
   "files": {
     "action.yml": "51ae4c2f103736b4378c4bf4b0f6f4f0e9d029ca334badde7c13d5e0832c0093",
     ".pre-commit-hooks.yaml": "dbb790a7b1470d2b09a49587ff7741112b7120865e5226df3faca8ecc74bd60b",
     "LICENSE": "a22e32a5583635ee055372e5ab613c3c15845f1c0ff79668bd1fd5068b23f6af",
-    "README.md": "0b4744f0aacee1e5cdb804bf8ba915a37e6a70c7d857d1517b311f1a096467ea",
-    "dist/THIRD_PARTY_NOTICES.txt": "3be34ae3c9515beb4db1192cc817c2ed8d97add99025370f04713ad61882c382",
+    "README.md": "f26173a7e4e4921f9ce82df806b97502506841501281fa673a965203e85774be",
+    "dist/THIRD_PARTY_NOTICES.txt": "3cf312e5a1aad3306ebc8d040bf08b27175d8e36d76ca00412b7a03f723de676",
     "dist/action-main.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
     "dist/action-post.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
-    "dist/action-hooks.js": "7234408fc23784e3dce36cb9506925283557eae03bf48d93acfa47cd30f60686",
-    "dist/action-main.js": "5d20a7113101de64c470f3d9e1dbf99cadce06cb2e961225f088da28c5f63162",
-    "dist/action-post.js": "e346f39372198c4611da810283ec091c144d4a2ef10c6a8fe27a0cc906a3f40b",
-    "dist/cli.js": "e3a79c90668535723ec45627c22e6d8bd4563a79b74a436374cab5da3d328ca3",
-    "package.json": "a4724683fdfc978087ec3f6cf82d67343b4706e598bb68b3c3e40f7fe9dfb864"
+    "dist/action-hooks.js": "ae5b7327f6c708c12548e5121bec63d264a3dd0ade45899e2fc4ed1e694e8498",
+    "dist/action-main.js": "5f6d8e81a8d935fde445b7153848434498b67e4db562f6a34f0748c7abad038b",
+    "dist/action-post.js": "876e65a949ae8f6ebad5a6024176ac7b2c89ee05a340cf73cee62375980c9377",
+    "dist/cli.js": "b38da309c7cf3962c9225885b715a7be9c1706dabe04c839145ac373bbf1a018",
+    "package.json": "b256f682fb502f6a08d3eb18573f48e857c2af8c93c962ec42214d7628450965"
   }
 }
