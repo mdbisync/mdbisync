@@ -3,15 +3,14 @@
 // template passes must be one that release's `action.yml` declares; an
 // input it lacks makes the copied workflow fail. The release commit is
 // not on `main` (release commits live on `releases`), so a shallow checkout
-// cannot read it: PINNED_RELEASE records its inputs, and the last two
-// tests check that record against the release commit and its tag. CI
-// fetches the release tags for them and fails without them; elsewhere a
-// clone without the tag skips them.
+// cannot read it: CI fetches the release tags for the tests that read it
+// and fails without them; elsewhere a clone without the tag skips them.
 //
-// To move the pin: change the SHA and version comment of every
-// `mdbisync/mdbisync` step in `examples/` (and `src/init/workflows.json`,
-// which must equal them), then update PINNED_RELEASE from that release's
-// `action.yml` and run this test in a clone that has the release's tag.
+// Each release moves the pins itself: release.yml's `pins` job runs
+// `src/release/pins.ts`, which rewrites every `mdbisync/mdbisync` step in
+// `examples/`, `src/init/workflows.json` (which must equal them),
+// `src/init/older-releases.json` and the configuration page, and pushes
+// them on a branch for a pull request to `main`.
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -27,32 +26,8 @@ const ACTION = 'mdbisync/mdbisync@';
 /** A `uses:` line of the action, with what follows the `@`. */
 const ACTION_USES = /^\s*(?:-\s+)?uses:\s*mdbisync\/mdbisync@(.*)$/;
 
-/** The release the templates pin, and the inputs its `action.yml` declares. */
-const PINNED_RELEASE = {
-  version: 'v0.1.0-rc.9',
-  sha: 'f1164ace541d364889a7699f5f90929ffa478b68',
-  inputs: {
-    operation: { required: false },
-    'linear-client-id': { required: true },
-    'linear-client-secret': { required: true },
-    'linear-api-url': { required: false },
-    'cleanup-tokens': { required: false },
-    'github-token': { required: true },
-    'app-slug': { required: true },
-    'github-api-url': { required: false },
-    repository: { required: false },
-    'tracked-branch': { required: false },
-    'sync-branch': { required: false },
-    'state-ref-prefix': { required: false },
-    'document-cap': { required: false },
-    'merge-grace-seconds': { required: false },
-    'check-deadline-minutes': { required: false },
-    'report-file': { required: false },
-    direction: { required: false },
-    confirm: { required: false },
-    'security-step': { required: false },
-  },
-} as const;
+/** The release the templates pin: the oldest one `init` writes. */
+const PINNED_RELEASE = MINIMUM_RELEASE;
 
 type Inputs = Record<string, { required: boolean }>;
 interface Step { name?: string; uses?: string; with?: Record<string, unknown> }
@@ -84,15 +59,16 @@ function git(...args: string[]): string | undefined {
   return result.status === 0 ? result.stdout : undefined;
 }
 
-/** Skips the test when this clone lacks `what`, except in CI, which fetches the release tags and must check the record. */
+/** Skips the test when this clone lacks `what`, except in CI, which fetches the release tags and must check the pinned release. */
 function missing(t: TestContext, what: string): void {
-  const message = `${what} is not in this clone; fetch the tag ${PINNED_RELEASE.version} to check the record`;
+  const message = `${what} is not in this clone, so the templates are not checked against the pinned release; fetch the tag ${PINNED_RELEASE.version} to check them`;
   if (process.env['GITHUB_ACTIONS'] === 'true') assert.fail(message);
   t.skip(message);
 }
 
 describe('the release the workflow templates pin', () => {
-  it('every mdbisync step in examples/ pins the recorded release, with its version beside it', () => {
+  it('every mdbisync step in examples/ pins one release, with its version beside it', () => {
+    assert.match(PINNED_RELEASE.sha, /^[a-f0-9]{40}$/);
     let steps = 0;
     for (const { file, text } of templates()) {
       for (const line of text.split('\n')) {
@@ -105,38 +81,29 @@ describe('the release the workflow templates pin', () => {
     assert.ok(steps > 0, 'no template runs mdbisync/mdbisync');
   });
 
-  it('every input a template passes is declared by the pinned release, and every required one is passed', () => {
-    for (const { file, text } of templates()) assert.deepEqual(inputProblems(text, PINNED_RELEASE.inputs), [], file);
-  });
-
   it('finds an input the pinned release lacks, and a required input left out', () => {
     const { text } = templates().find(({ file }) => file === 'mdbisync.yml') ?? assert.fail('mdbisync.yml is missing');
     const workflow = parse(text) as Workflow;
     const step = Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps ?? []).find((each) => each.uses?.startsWith(ACTION)) ?? assert.fail('no mdbisync step');
+    const inputs = Object.fromEntries(Object.keys(step.with ?? {}).map((name) => [name, { required: name === 'app-slug' }]));
     step.with = { ...step.with, 'added-later': 'true' };
     delete step.with['app-slug'];
-    const problems = inputProblems(JSON.stringify(workflow), PINNED_RELEASE.inputs);
+    const problems = inputProblems(JSON.stringify(workflow), inputs);
     assert.deepEqual(problems, [
       `${step.name}: input added-later is not declared by the pinned release`,
       `${step.name}: required input app-slug is missing`,
     ]);
   });
 
-  it('the recorded inputs are the ones the release commit\'s action.yml declares', (t) => {
+  it('every input a template passes is declared by the pinned release\'s action.yml, and every required one is passed', (t) => {
     const actionYml = git('show', `${PINNED_RELEASE.sha}:action.yml`);
     if (actionYml === undefined) return missing(t, `release commit ${PINNED_RELEASE.sha}`);
     const declared = (parse(actionYml) as { inputs: Record<string, { required?: boolean }> }).inputs;
-    assert.deepEqual(
-      Object.fromEntries(Object.entries(declared).map(([name, input]) => [name, { required: input.required === true }])),
-      PINNED_RELEASE.inputs,
-    );
+    const inputs = Object.fromEntries(Object.entries(declared).map(([name, input]) => [name, { required: input.required === true }]));
+    for (const { file, text } of templates()) assert.deepEqual(inputProblems(text, inputs), [], file);
   });
 
-  it('init writes the recorded release as its oldest one', () => {
-    assert.deepEqual(MINIMUM_RELEASE, { sha: PINNED_RELEASE.sha, version: PINNED_RELEASE.version });
-  });
-
-  it('init knows every release before the recorded one by its tagged commit', (t) => {
+  it('init knows every release before the pinned one by its tagged commit', (t) => {
     const tags = git('-c', 'versionsort.suffix=-', 'tag', '--list', 'v*', '--sort=version:refname')?.split('\n').filter(Boolean) ?? [];
     const pinned = tags.indexOf(PINNED_RELEASE.version);
     if (pinned < 0) return missing(t, `the tag ${PINNED_RELEASE.version}`);
@@ -144,7 +111,7 @@ describe('the release the workflow templates pin', () => {
     assert.deepEqual({ ...OLDER_RELEASES }, older);
   });
 
-  it('the recorded version\'s tag names the pinned commit', (t) => {
+  it('the pinned version\'s tag names the pinned commit', (t) => {
     const tagged = git('rev-parse', '--verify', '--quiet', `refs/tags/${PINNED_RELEASE.version}^{commit}`);
     if (tagged === undefined) return missing(t, `the tag ${PINNED_RELEASE.version}`);
     assert.equal(tagged.trim(), PINNED_RELEASE.sha, `the tag ${PINNED_RELEASE.version}`);

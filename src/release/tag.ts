@@ -37,4 +37,6 @@ if (import.meta.main) {
   const summary = `Release tag: ${version}\n\nSource: \`${sourceSha}\`\n\nRelease SHA: \`${releaseSha}\`\n\nPin the action and hook to the release SHA. No GitHub Release was published.\n`;
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, summary);
+  // The pins job moves the workflow templates to this commit.
+  if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `release-sha=${releaseSha}\n`);
 }
