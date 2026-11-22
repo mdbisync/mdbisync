@@ -228,11 +228,57 @@ function comparable(body: string): unknown {
   return strip(tree);
 }
 
-// A bullet or number marker alone on its line, after any quote prefix.
-const BARE_MARKER = /^((?: {0,3}>[ ]?)*)( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
-// A nonblank line, a bare marker, then an indented line opening with `[`.
-// Start at LF-delimited line boundaries so long text lines are scanned once.
-const MAYBE_NESTED_BLOCK = /(?:^|\n)[^\S\n]*\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+-]|\d{1,9}[.)])[ \t]*\r?\n(?: {0,3}>[ ]?)*[ ]+\[/;
+/**
+ * The quote prefix of a line, ` {0,3}>[ ]?` repeated: `end` is where it
+ * ends, with the one space after its last `>`, and `lastQuote` is where that
+ * last `>` ends (0 without one). One pass: a regular expression for the
+ * prefix can give the space between two `>` to either of them, and on a
+ * line of many `> ` that does not match it tries every split.
+ */
+function quotePrefix(line: string): { end: number; lastQuote: number } {
+  let end = 0;
+  let lastQuote = 0;
+  for (;;) {
+    let at = end;
+    while (at - end < 3 && line[at] === ' ') at++;
+    if (line[at] !== '>') return { end, lastQuote };
+    lastQuote = at + 1;
+    end = line[lastQuote] === ' ' ? lastQuote + 1 : lastQuote;
+  }
+}
+
+// A bullet or number marker alone on the rest of its line, after spaces.
+const MARKER_REST = /^( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
+
+/** A bullet or number marker alone on its line, after any quote prefix: its prefix, spaces and marker, or null. */
+function bareMarker(line: string): { prefix: string; spaces: string; bullet: string } | null {
+  const { end } = quotePrefix(line);
+  const marker = MARKER_REST.exec(line.slice(end));
+  return marker === null ? null : { prefix: line.slice(0, end), spaces: marker[1]!, bullet: marker[2]! };
+}
+
+/** Whether a line holds any quote prefix, at least one space, then `[`. */
+function opensIndentedBracket(line: string): boolean {
+  let at = quotePrefix(line).lastQuote;
+  if (line[at] !== ' ') return false;
+  while (line[at] === ' ') at++;
+  return line[at] === '[';
+}
+
+/** Whether a nonblank line is followed by a bare marker line, then by an indented line opening with `[`. */
+function maybeNestedBlock(lines: readonly string[]): boolean {
+  for (let index = 1; index + 1 < lines.length; index++) {
+    if (/\S/.test(lines[index - 1]!) && opensIndentedBracket(lines[index + 1]!) && bareMarker(lines[index]!) !== null) return true;
+  }
+  return false;
+}
+
+/** The line without the spaces, tabs and carriage returns at its end. */
+function trimLineEnd(line: string): string {
+  let end = line.length;
+  while (end > 0 && (line[end - 1] === ' ' || line[end - 1] === '\t' || line[end - 1] === '\r')) end--;
+  return line.slice(0, end);
+}
 
 /**
  * The body with each file block Markdown reads as text written on its
@@ -247,8 +293,8 @@ const MAYBE_NESTED_BLOCK = /(?:^|\n)[^\S\n]*\S[^\n]*\n(?: {0,3}>[ ]?)*[ ]*(?:[*+
  * file blocks already. A file block Markdown reads as an item stays as it is.
  */
 export function nestedFileBlocksOnItemLine(body: string): string {
-  if (!MAYBE_NESTED_BLOCK.test(body)) return body;
   const lines = body.split('\n');
+  if (!maybeNestedBlock(lines)) return body;
   // Line indexes (0-based) of the marker lines to join with the link line after them.
   const joins = new Map<number, number>();
   visit(parse(body), (node) => {
@@ -260,9 +306,9 @@ export function nestedFileBlocksOnItemLine(body: string): string {
       const markerLine = linkLine - 1;
       // The marker line is the paragraph's own text, not its first line.
       if (markerLine < node.position!.start.line || before.position!.start.line - 1 > markerLine) continue;
-      const marker = BARE_MARKER.exec(lines[markerLine]!);
+      const marker = bareMarker(lines[markerLine]!);
       if (marker === null) continue;
-      const [, prefix, spaces, bullet] = marker as unknown as [string, string, string, string];
+      const { prefix, spaces, bullet } = marker;
       const column = prefix.length + spaces.length + bullet.length + 1;
       const line = lines[linkLine]!;
       // The link alone on its line, at the item's content indent.
@@ -280,7 +326,7 @@ export function nestedFileBlocksOnItemLine(body: string): string {
       result.push(lines[index]!);
       continue;
     }
-    result.push(`${lines[index]!.replace(/[ \t\r]*$/, '')} ${lines[index + 1]!.slice(column)}`);
+    result.push(`${trimLineEnd(lines[index]!)} ${lines[index + 1]!.slice(column)}`);
     index++;
   }
   return result.join('\n');

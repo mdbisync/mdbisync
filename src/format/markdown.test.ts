@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { Nodes, Root } from 'mdast';
 import { EditMap } from 'micromark-util-edit-map';
-import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, joinFile, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, joinFile, nestedFileBlocksOnItemLine, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { lintText } from './lint.ts';
 import { fixText } from './fix.ts';
 
@@ -180,6 +181,80 @@ describe('sameMarkdown', () => {
     assert.ok(!sameMarkdown('* Parent\n  * [A](<a.csv>) and [B](<b.csv>)', '* Parent\n  * \n    [A](a.csv) and [B](b.csv)'));
     // A file block Markdown already reads as an item stays a file block.
     assert.ok(!sameMarkdown('* Parent\n\n  * \n    [Report](report.csv)', '* Parent\n\n  * [Report](report.csv)'));
+  });
+
+  it('joins a nested file block under any quote prefix and keeps the marker line apart otherwise', () => {
+    // Quote markers with and without a space after them, indented up to three spaces.
+    assert.equal(nestedFileBlocksOnItemLine('> > * Parent\n> >   * \t\n> >     [A](a.csv)'), '> > * Parent\n> >   * [A](a.csv)');
+    assert.equal(nestedFileBlocksOnItemLine('>> * Parent\n>>   *\n>>     [A](a.csv)'), '>> * Parent\n>>   * [A](a.csv)');
+    assert.equal(nestedFileBlocksOnItemLine('>    > * Parent\n>    >   *\n>    >     [A](a.csv)'), '>    > * Parent\n>    >   * [A](a.csv)');
+    // Four spaces before a `>` make it text, not a quote marker.
+    const indented = '> * Parent\n>   *\n>     > [A](a.csv)';
+    assert.equal(nestedFileBlocksOnItemLine(indented), indented);
+    // A line of quote markers with no marker or link after it.
+    for (const body of ['a\n> > > x', 'a\n> > > -\n> > > x', 'a\n> > > -\n> > >[x']) assert.equal(nestedFileBlocksOnItemLine(body), body);
+  });
+
+  // Each `> ` is a quote marker whose space a regular expression could also
+  // give to the next marker's indent: a line of many of them that did not
+  // match tried every split, about 2^k for k markers, so 40 took hours. A
+  // child process runs the check, so the parent's timeout stops a stall that
+  // a test timeout could not interrupt. The comparison and `fix` run on the
+  // short bodies too; the bounds are loose, as a stall takes far longer.
+  it('stays fast on lines of many quote markers', { timeout: 120_000 }, () => {
+    // Each body's text after the check: null when the check leaves it as it is.
+    const expected = {
+      noMarker: null,
+      markerWithoutLink: null,
+      markerThenBracket: null,
+      joinAfterTrailingBlanks: '> * Parent\n>   * [A](a.csv)',
+      document: null,
+    };
+    // The child builds the bodies: a document of the content limit is longer than one command line argument may be.
+    const script = `
+      import { CONTENT_LIMIT } from ${JSON.stringify(new URL('./rules.ts', import.meta.url).href)};
+      import { MarkdownLimitError, nestedFileBlocksOnItemLine, sameMarkdown } from ${JSON.stringify(new URL('./markdown.ts', import.meta.url).href)};
+      import { fixText } from ${JSON.stringify(new URL('./fix.ts', import.meta.url).href)};
+      const units = '> '.repeat(128);
+      // Below the parser's depth limit, so the check goes on to parse the body.
+      const shallow = '> '.repeat(100);
+      const bodies = {
+        noMarker: 'a\\n' + units + 'x',
+        markerWithoutLink: 'a\\n' + units + '-\\n' + units + 'x',
+        markerThenBracket: 'a\\n' + shallow + '-' + ' '.repeat(10_000) + '\\n' + shallow + ' [x',
+        // Tabs: two trailing spaces would make a hard line break.
+        joinAfterTrailingBlanks: '> * Parent\\n>   *' + '\\t'.repeat(100_000) + '\\n>     [A](a.csv)',
+        document: ('a\\n' + units + 'x\\n').repeat(Math.floor(CONTENT_LIMIT / (units.length + 4))),
+      };
+      const timed = (run) => {
+        const start = performance.now();
+        try {
+          run();
+        } catch (error) {
+          if (!(error instanceof MarkdownLimitError)) throw error;
+        }
+        return performance.now() - start;
+      };
+      const result = {};
+      for (const [name, body] of Object.entries(bodies)) {
+        let text;
+        const times = { check: timed(() => { text = nestedFileBlocksOnItemLine(body); }) };
+        if (name !== 'document') {
+          times.compare = timed(() => sameMarkdown(body, body + '\\n'));
+          times.fix = timed(() => fixText(body));
+        }
+        result[name] = { text: text === body ? null : text, times };
+      }
+      console.log(JSON.stringify(result));
+    `;
+    const child = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { encoding: 'utf8', timeout: 100_000 });
+    assert.equal(child.signal, null, 'the check did not finish within the parent timeout');
+    assert.equal(child.status, 0, child.stderr);
+    const result = JSON.parse(child.stdout) as Record<string, { text: string | null; times: Record<string, number> }>;
+    assert.deepEqual(Object.fromEntries(Object.entries(result).map(([name, { text }]) => [name, text])), expected);
+    for (const [name, { times }] of Object.entries(result)) {
+      for (const [step, ms] of Object.entries(times)) assert.ok(ms < 10_000, `${name} ${step}: ${Math.round(ms)} ms`);
+    }
   });
 
   it('tells a changed document apart', () => {
