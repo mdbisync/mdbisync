@@ -17,7 +17,8 @@ import { type RunReport } from '../run/finish.ts';
 import { Git, commitTree } from '../state/index.ts';
 import { type FakeUpload, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, countLocalLfsObjects, createFixture } from '../state/test-helpers.ts';
-import { DEFAULT_UPLOAD_LIMIT, findFileLinks, resolveTarget, restoreFileLinks } from './uploads.ts';
+import { DEFAULT_UPLOAD_LIMIT, findFileLinks, replaceRanges, resolveTarget, restoreFileLinks } from './uploads.ts';
+import { runScaleScript } from '../scale-test-helpers.ts';
 
 const CANARY = 'kx-5d2a9e40';
 const PRE_COMMIT = `repos:
@@ -668,5 +669,29 @@ describe('file links in a document', () => {
       'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)\n\n![x](a.png) ![y](./a.png) [z](<b.png#p>)\n\n![w](<c d.png>)\n\n[v](e.png#q)',
       'only the written destinations are mapped back',
     );
+  });
+});
+
+describe('replaceRanges', () => {
+  it('replaces ranges given in any order, and keeps the text between them', () => {
+    assert.equal(replaceRanges('a-b-c', [{ from: 4, to: 5, text: 'C' }, { from: 0, to: 1, text: 'AA' }, { from: 2, to: 2, text: '+' }]), 'AA-+b-C');
+    assert.equal(replaceRanges('abc', []), 'abc');
+    // An insertion at the start of a replacement goes before it, in either order.
+    assert.equal(replaceRanges('abcd', [{ from: 1, to: 3, text: 'X' }, { from: 1, to: 1, text: 'Y' }]), 'aYXd');
+    assert.equal(replaceRanges('abcd', [{ from: 1, to: 1, text: 'Y' }, { from: 1, to: 3, text: 'X' }]), 'aYXd');
+  });
+
+  // Each replacement cut the whole text again, and an upload URL is longer
+  // than the path it replaces, so the text grew with every one. A child
+  // process with a timeout replaces a link destination of every line.
+  it('replaces the destinations of a document of short links with upload URLs in linear time', () => {
+    const result = runScaleScript<{ length: number }>({ uploads: new URL('./uploads.ts', import.meta.url) }, `
+      const line = '![](a.png)\\n';
+      const text = line.repeat(25_000);
+      const url = 'https://uploads.linear.app/00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000000';
+      const ranges = Array.from({ length: 25_000 }, (_, index) => ({ from: index * line.length + 4, to: index * line.length + 9, text: url }));
+      console.log(JSON.stringify({ length: uploads.replaceRanges(text, ranges).length }));
+    `, 20_000);
+    assert.equal(result.length, 25_000 * (11 - 5 + 100));
   });
 });

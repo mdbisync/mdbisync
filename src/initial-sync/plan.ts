@@ -23,8 +23,10 @@ export interface LeftOutEntry {
   rules: FileLeftOutRule[];
   /** 1-based lines of the lint findings, front matter included. */
   lines: number[];
-  /** For `duplicate-title`: the other files with the same title in the same place. */
+  /** For `duplicate-title`: other files with the same title in the same place, at most a few. */
   collidesWith?: string[];
+  /** For `duplicate-title`: how many more files have that title, beyond those `collidesWith` names. */
+  collidesWithMore?: number;
   /** The Linear document with the file's title, which the run leaves as it is. */
   documentId?: string;
   /** For a rule found from the files the document links (`upload-too-large`, `upload-unreadable`): those files. */
@@ -127,11 +129,12 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   const facts = input.facts ?? LINEAR_FACTS;
   const { mapping } = input;
   const leftOut = new Map<string, LeftOutEntry>();
-  const leaveOut = (path: string, rules: readonly FileLeftOutRule[], lines: number[] = [], collidesWith?: string[]) => {
+  const leaveOut = (path: string, rules: readonly FileLeftOutRule[], lines: number[] = [], collidesWith?: string[], collidesWithMore?: number) => {
     const entry = leftOut.get(path) ?? { path, rules: [], lines: [] };
     entry.rules = [...new Set([...entry.rules, ...rules])].sort();
     entry.lines = [...new Set([...entry.lines, ...lines])].sort((a, b) => a - b);
     if (collidesWith !== undefined) entry.collidesWith = [...collidesWith].sort(compare);
+    if (collidesWithMore !== undefined) entry.collidesWithMore = collidesWithMore;
     leftOut.set(path, entry);
   };
 
@@ -152,7 +155,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   // Titles of left-out files, by place: their documents stay untouched.
   const leftOutTitles = new Map<string, string>();
   for (const file of mapping.leftOut) {
-    leaveOut(file.path, [file.rule], [], file.collidesWith);
+    leaveOut(file.path, [file.rule], [], file.collidesWith, file.collidesWithMore);
     lint(file.path, file.title);
     leftOutTitles.set(titleIn(file.place, file.title), file.path);
   }

@@ -2,7 +2,7 @@ import { ContentSpool, contentBytes, type FileContent, type SpooledFile } from '
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Definition, Link } from 'mdast';
-import { destinations, findFileLinks, resolveTarget, uploadDestinationUrl } from '../initial-sync/uploads.ts';
+import { destinations, findFileLinks, replaceRanges, resolveTarget, uploadDestinationUrl } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import { encodeFragment } from '../initial-sync/links.ts';
 import { type LinearClient, type LinearReads, uploadReadKey, LinearError, LinearHttpError, LinearStoppedError, isTransientLinearError } from '../linear/index.ts';
@@ -43,6 +43,50 @@ export function isUpload(url: string): boolean {
 export function withNewUploadUrls(text: string, added: ReadonlyMap<string, string>, cache: ReadonlyMap<string, string>): string {
   const urls = [...new Set([...added].filter(([hash, url]) => cache.get(hash) !== url).map(([, url]) => url))];
   return urls.length === 0 ? text : `${text}\n${urls.join('\n')}\n`;
+}
+
+/**
+ * The longest known upload URL a link destination stands for: the URL
+ * itself, or followed by a fragment (`#`) or by more query (`?`, or `&` when
+ * the known URL has a query). The known URLs form a tree by character, so a
+ * destination is read once: comparing every destination with every known URL
+ * took the product of their numbers.
+ */
+function knownUploadPrefix(known: Iterable<string>): (url: string) => string | undefined {
+  const root: UrlNode = { next: new Map() };
+  for (const url of known) {
+    let node = root;
+    for (const char of url) {
+      let child = node.next.get(char);
+      if (child === undefined) node.next.set(char, child = { next: new Map() });
+      node = child;
+    }
+    node.url = url;
+    node.query = url.includes('?');
+  }
+  return (url) => {
+    let longest: string | undefined;
+    let node: UrlNode | undefined = root;
+    // `at` is where the prefix read so far ends, in UTF-16 units like `url[at]`.
+    for (let at = 0; node !== undefined;) {
+      if (node.url !== undefined) {
+        const next = url[at];
+        if (next === undefined || next === '#' || next === (node.query ? '&' : '?')) longest = node.url;
+      }
+      if (at >= url.length) break;
+      const char = String.fromCodePoint(url.codePointAt(at)!);
+      node = node.next.get(char);
+      at += char.length;
+    }
+    return longest;
+  };
+}
+
+interface UrlNode {
+  url?: string;
+  /** Whether `url` has a query, so more query follows it after `&`. */
+  query?: boolean;
+  next: Map<string, UrlNode>;
 }
 
 /** Only positions are retained: a finding must never disclose a destination or alt text. */
@@ -246,8 +290,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     if (answer.error instanceof LinearStoppedError || (answer.error instanceof LinearError && isTransientLinearError(answer.error))) throw answer.error;
     return false;
   };
-  // Every file of the tree with each content hash, in tree order.
-  const hashPaths = new Map<string, string[]>();
+  // The captures of each content hash (files named by the hash), by folder, in tree order.
+  const capturePaths = new Map<string, Map<string, string[]>>();
   const pathHashes = new Map<string, string>();
   // Every path of the tree that is not a folder: an `assets` entry that is a file or a symbolic link is no folder to write into.
   const notFolders = new Set<string>();
@@ -277,7 +321,14 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       for (const entry of batch) {
         const blob = blobs.get(entry.oid)!;
         const hash = parseLfsPointer(blob)?.oid ?? createHash('sha256').update(blob).digest('hex');
-        hashPaths.set(hash, [...hashPaths.get(hash) ?? [], entry.path]);
+        if (isCaptureName(entry.path) && posix.basename(entry.path).startsWith(hash)) {
+          let byFolder = capturePaths.get(hash);
+          if (byFolder === undefined) capturePaths.set(hash, byFolder = new Map());
+          const folder = posix.dirname(entry.path);
+          const paths = byFolder.get(folder);
+          if (paths === undefined) byFolder.set(folder, [entry.path]);
+          else paths.push(entry.path);
+        }
         pathHashes.set(entry.path, hash);
       }
     }
@@ -331,9 +382,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const rejected = new Map<string, ImageFinding['reason']>();
     let retry: DownloadRetryError | undefined;
     // Restore known URLs before restricting new downloads to the upload host.
-    const cachedUrls = [...uploads.values()].sort((a, b) => b.length - a.length);
-    const cachedUrl = (url: string) => cachedUrls.find((known) =>
-      url === known || url.startsWith(`${known}#`) || url.startsWith(`${known}${known.includes('?') ? '&' : '?'}`));
+    const cachedUrl = knownUploadPrefix(uploads.values());
     const knownUpload = (url: string) => cachedUrl(url) !== undefined;
     if (!sourceDestinations.some(({node}) => isUpload(node.url) || knownUpload(node.url))) return finish(body, files, additions);
     await index();
@@ -342,8 +391,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const assetsUsable = !notFolders.has(assetsFolder);
     const plainTarget = (target: string) => plain.has(target) || relocatedPlain.has(target);
     /** The capture of these bytes in the document's own `assets/` folder: a file there named by their hash. */
-    const captureOf = (hash: string): string | undefined => (hashPaths.get(hash) ?? []).find((candidate) =>
-      !plainTarget(candidate) && posix.dirname(candidate) === assetsFolder && isCaptureName(candidate) && posix.basename(candidate).startsWith(hash));
+    const captureOf = (hash: string): string | undefined =>
+      capturePaths.get(hash)?.get(assetsFolder)?.find((candidate) => !plainTarget(candidate));
     /**
      * The repository file holding these bytes: the one the previous text linked, else their capture in the
      * document's own `assets/` folder, else a file the previous text linked that could not be read (its
@@ -441,12 +490,15 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     let documentBytes = 0;
     const counted = new Set<string>();
     const replacements: Array<{from: number; to: number; text: string}> = [];
+    // The first hash whose upload has this URL, as a search of the upload map in its order finds it.
+    const hashOfUrl = new Map<string, string>();
+    for (const [hash, known] of uploads) if (!hashOfUrl.has(known)) hashOfUrl.set(known, hash);
     for (const {node, range, outer} of references) {
       const cached = cachedUrl(node.url);
       const hashAt = node.url.indexOf('#');
       const url = cached ?? (hashAt === -1 ? node.url : node.url.slice(0, hashAt));
       const suffix = (cached === undefined ? (hashAt === -1 ? '' : node.url.slice(hashAt)) : node.url.slice(cached.length)).replace(/^&/, '?');
-      let hash = [...uploads].find(([, known]) => known === url)?.[0];
+      let hash = hashOfUrl.get(url);
       let assetPath = hash === undefined ? undefined : place(hash);
       if (assetPath !== undefined) {
         const source = copies.get(assetPath);
@@ -545,9 +597,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       throw new Error(message('assets.not-allowed'));
     }
     if (retry !== undefined) throw retry;
-    let result = body;
-    for (const replacement of replacements.sort((a,b) => b.from - a.from)) result = result.slice(0,replacement.from) + replacement.text + result.slice(replacement.to);
-    return finish(result, files, additions);
+    return finish(replaceRanges(body, replacements), files, additions);
   };
   return Object.assign(capture, {close: () => spool.close()});
 }

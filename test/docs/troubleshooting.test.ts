@@ -97,7 +97,7 @@ describe('troubleshooting page', () => {
     assert.equal(message('linear.too-long', { operation: 'UpdateDocument', field: 'content', length: 12, limit: 10 }), 'UpdateDocument: content is 12 characters, Linear accepts at most 10');
     assert.equal(message('cli.missing-command'), 'missing command');
     // A value is put in once, never read as a slot itself.
-    assert.equal(message('init.conflicting-folders', { path: '{path}' }), 'conflicting folder options: {path}');
+    assert.equal(message('init.workflow-differs', { name: '{name}' }), 'existing workflow differs: {name}');
   });
 
   it('takes the text of errors, failures and warnings from the table, not from literals', () => {

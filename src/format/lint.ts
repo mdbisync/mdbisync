@@ -154,7 +154,7 @@ export function referencesOverLimit(tree: Root, body: string): number | undefine
     const definition = definitions.get(reference.identifier);
     if (definition === undefined) continue;
     // `fix` writes `[text](destination)` from a link's children, `![label](destination)` from an image's label as written.
-    const label = reference.type === 'linkReference' ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body, start(reference) + 1)) + 5;
+    const label = reference.type === 'linkReference' ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body, start(reference) + 1, end(reference))) + 5;
     const before = written;
     written += label + destinationLength(reference, definition.url) - length(start(reference), end(reference));
     // A text already over the limit (a later pass of `fix`) is named at its first reference.
@@ -330,16 +330,33 @@ export function inAssetsFolder(file: string): boolean {
   return file.split(/[\\/]/).slice(0, -1).includes(ASSETS_FOLDER);
 }
 
-/** Paths whose document titles collide: same path apart from case or Unicode normalization. */
+/** The most other paths a `duplicate-title` finding names; the rest are counted. */
+const COLLISIONS_NAMED = 3;
+
+/**
+ * Paths whose document titles collide: same path apart from case or Unicode
+ * normalization. Each finding names the first few other paths of its group
+ * and counts the rest, so the findings of n colliding files stay linear in n.
+ */
 export function duplicateTitles(files: readonly string[]): Finding[] {
   const groups = new Map<string, string[]>();
   for (const file of files) {
     const key = file.replace(/\.md$/i, '').normalize('NFC').toUpperCase().toLowerCase();
-    groups.set(key, [...(groups.get(key) ?? []), file]);
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [file]);
+    else group.push(file);
   }
   return [...groups.values()]
     .filter((group) => group.length > 1)
-    .flatMap((group) => group.map((file) => ({ file, line: 1, rule: 'duplicate-title' as const, message: `${LINT_RULES['duplicate-title']} (${group.filter((other) => other !== file).join(', ')})` })));
+    .flatMap((group) => {
+      const named = group.slice(0, COLLISIONS_NAMED + 1);
+      return group.map((file, index) => {
+        const others = named.filter((_, other) => other !== index).slice(0, COLLISIONS_NAMED);
+        const more = group.length - 1 - others.length;
+        const list = more > 0 ? `${others.join(', ')}, and ${more} more` : others.join(', ');
+        return { file, line: 1, rule: 'duplicate-title' as const, message: `${LINT_RULES['duplicate-title']} (${list})` };
+      });
+    });
 }
 
 /**

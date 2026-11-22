@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, mkdir, rm, symlink, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile, mkdir, rm, symlink, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -8,10 +8,9 @@ import { runCli } from '../cli.ts';
 import { appCreationUrl } from '../setup/app.ts';
 import { QUICKSTART_URL } from '../setup/fixes.ts';
 import { checkLinearFormatHook, readHookConfig, securityHooks } from '../setup/hooks.ts';
-import { readAnnotation } from '../mapping/annotations.ts';
 
 const sha = '1234567890abcdef1234567890abcdef12345678';
-const flags = ['init', '--release-sha', sha, '--release-version', 'v1.2.3', '--folder', 'guides', '--team', 'Planning', '--project', 'Roadmap'];
+const flags = ['init', '--release-sha', sha, '--release-version', 'v1.2.3'];
 async function fixture(t: import('node:test').TestContext) {
   const cwd = await mkdtemp(join(tmpdir(), 'init-'));
   t.after(() => rm(cwd, { recursive: true, force: true }));
@@ -19,7 +18,7 @@ async function fixture(t: import('node:test').TestContext) {
   return cwd;
 }
 
-test('init creates usable workflows, matching hook pins and folder annotations, without network calls', async (t) => {
+test('init creates usable workflows and matching hook pins, and leaves folder annotations to the person, without network calls', async (t) => {
   const cwd = await fixture(t);
   const result = await runCli(flags, { cwd, fetch: () => { throw new Error('no network'); } });
   assert.equal(result.exitCode, 0, result.stderr);
@@ -36,31 +35,35 @@ test('init creates usable workflows, matching hook pins and folder annotations, 
   assert.equal(parse(config).repos[0].rev, sha);
   assert.equal(checkLinearFormatHook(readHookConfig(config)).state, 'passed');
   assert.deepEqual(securityHooks(readHookConfig(config)), []);
-  assert.deepEqual(readAnnotation('guides/README.md', await readFile(join(cwd, 'guides/README.md'), 'utf8')), {
-    annotation: { folder: 'guides', readme: 'guides/README.md', team: 'Planning', project: 'Roadmap' },
-  });
+  assert.match(config, /repos:\n\s+- repo:/, 'new hooks use block YAML');
+  assert.deepEqual((await readdir(cwd)).sort(), ['.git', '.github', '.pre-commit-config.yaml'], 'init writes no README');
+  assert.match(result.stdout, /README\.md front matter: linear-team names the Linear team, and linear-project a project/);
+  assert.match(result.stdout, /A folder inside a team's folder takes that team and leaves out linear-team\./);
   assert.match(result.stdout, /MDBISYNC_LINEAR_CLIENT_SECRET/);
   assert.ok(result.stdout.includes(appCreationUrl()), 'init prints the link that creates the GitHub App');
   assert.ok(result.stdout.includes(`${QUICKSTART_URL}#github-app`), 'init links the GitHub App section');
   assert.match(result.stdout, /merge commits/i);
   assert.match(result.stdout, /pre-commit install/);
   assert.match(result.stdout, /dry run/i);
-  const before = await stat(join(cwd, 'guides/README.md'));
-  assert.equal((await runCli(flags, { cwd })).exitCode, 0);
-  assert.equal((await stat(join(cwd, 'guides/README.md'))).mtimeMs, before.mtimeMs);
+  const before = await stat(join(cwd, '.github/workflows/mdbisync.yml'));
+  const again = await runCli(flags, { cwd });
+  assert.equal(again.exitCode, 0, again.stderr);
+  assert.match(again.stdout, /already initialized/);
+  assert.equal((await stat(join(cwd, '.github/workflows/mdbisync.yml'))).mtimeMs, before.mtimeMs);
 });
 
-test('init keeps README content and custom hooks, and adds optional pinned security examples', async (t) => {
+test('init keeps README annotations and custom hooks as they are, and adds optional pinned security examples', async (t) => {
   const cwd = await fixture(t);
   await mkdir(join(cwd, 'guides'));
-  await writeFile(join(cwd, 'guides/README.md'), '---\ntitle: Guide # keep this comment\n---\n\n# Guide\n\nKeep these words.\n');
+  // Conflicting annotations are the setup check's to report; init neither reads nor changes them.
+  const readmes = { 'guides/README.md': '---\nlinear-team: Planning # keep this comment\n---\n\n# Guide\n\nKeep these words.\n', 'guides/sub/README.md': '---\nlinear-team: Other\n---\n' };
+  await mkdir(join(cwd, 'guides/sub'));
+  for (const [path, text] of Object.entries(readmes)) await writeFile(join(cwd, path), text);
   await writeFile(join(cwd, '.pre-commit-config.yaml'), '# our hooks\nrepos:\n  - repo: local\n    hooks:\n      - id: custom\n        name: custom\n        language: system\n        entry: true\n');
   const args = [...flags, '--security-hooks'];
   const result = await runCli(args, { cwd });
   assert.equal(result.exitCode, 0, result.stderr);
-  const readme = await readFile(join(cwd, 'guides/README.md'), 'utf8');
-  assert.match(readme, /title: Guide # keep this comment/);
-  assert.ok(readme.endsWith('---\n\n# Guide\n\nKeep these words.\n'));
+  for (const [path, text] of Object.entries(readmes)) assert.equal(await readFile(join(cwd, path), 'utf8'), text, path);
   const config = await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8');
   assert.match(config, /# our hooks/);
   assert.match(config, /id: custom/);
@@ -72,18 +75,15 @@ test('init keeps README content and custom hooks, and adds optional pinned secur
   assert.doesNotMatch(config, /[&*]a\d/, 'each example writes its own lists, without YAML anchors');
   assert.equal((await runCli(args, { cwd })).exitCode, 0);
   assert.equal(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), config);
-  assert.equal(await readFile(join(cwd, 'guides/README.md'), 'utf8'), readme);
+  for (const [path, text] of Object.entries(readmes)) assert.equal(await readFile(join(cwd, path), 'utf8'), text, path);
 });
 
 test('init validates all requested changes before writing and refuses conflicts', async (t) => {
-  for (const conflict of ['workflow', 'annotation', 'yaml']) {
+  for (const conflict of ['workflow', 'yaml']) {
     const cwd = await fixture(t);
-    await mkdir(join(cwd, 'guides'));
     if (conflict === 'workflow') {
       await mkdir(join(cwd, '.github/workflows'), { recursive: true });
       await writeFile(join(cwd, '.github/workflows/mdbisync.yml'), 'custom workflow\n');
-    } else if (conflict === 'annotation') {
-      await writeFile(join(cwd, 'guides/README.md'), '---\nlinear-team: Different\n---\n');
     } else await writeFile(join(cwd, '.pre-commit-config.yaml'), 'repos: [broken');
     const result = await runCli(flags, { cwd });
     assert.equal(result.exitCode, 2);
@@ -91,16 +91,27 @@ test('init validates all requested changes before writing and refuses conflicts'
   }
 });
 
-test('init rejects missing flags, unknown options, invalid pins and escaping paths without prompting', async (t) => {
+test('init rejects missing flags, unknown options, invalid pins and symlinked destinations without prompting', async (t) => {
   const cwd = await fixture(t);
-  for (const args of [['init'], [...flags, '--unknown'], flags.map((v) => v === sha ? 'main' : v), flags.map((v) => v === 'guides' ? '../outside' : v)]) {
+  for (const args of [['init'], [...flags, '--unknown'], flags.map((v) => v === sha ? 'main' : v)]) {
     assert.equal((await runCli(args, { cwd })).exitCode, 2);
   }
   const outside = await mkdtemp(join(tmpdir(), 'outside-'));
   t.after(() => rm(outside, { recursive: true, force: true }));
-  await symlink(outside, join(cwd, 'guides'));
+  await symlink(outside, join(cwd, '.github'));
   assert.equal((await runCli(flags, { cwd })).exitCode, 2);
-  await assert.rejects(readFile(join(outside, 'README.md')), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(outside), []);
+});
+
+test('init no longer takes folder, team or project options', async (t) => {
+  const cwd = await fixture(t);
+  for (const option of ['--folder', '--team', '--project']) {
+    const result = await runCli([...flags, option, 'guides'], { cwd });
+    assert.equal(result.exitCode, 2);
+    assert.ok(result.stderr.startsWith(`init: unknown option: ${option}\n`), result.stderr);
+    assert.doesNotMatch(result.stderr, /--(?:folder|team|project) </, 'the usage no longer lists them');
+  }
+  assert.deepEqual(await readdir(cwd), ['.git']);
 });
 
 // Source execution and the release bundle must carry the same workflow assets.
@@ -116,14 +127,13 @@ test('init refuses a release older than the templates pin and writes the pinned 
   const minimum = MINIMUM_RELEASE.version.replaceAll('.', '\\.');
   const rc2 = '79db9969462ae7f1f00c88e95b311e61db3c455e';
   const cwd = await fixture(t);
-  const refused = await runCli(['init', '--release-sha', rc2, '--release-version', 'v0.1.0-rc.2', '--folder', 'guides', '--team', 'Planning'], { cwd });
+  const refused = await runCli(['init', '--release-sha', rc2, '--release-version', 'v0.1.0-rc.2'], { cwd });
   assert.equal(refused.exitCode, 2);
   assert.match(refused.stderr, new RegExp(`^init: release v0\\.1\\.0-rc\\.2 is older than ${minimum}, the release these workflows are written for and checked against\\. Use ${minimum} or later\n`));
   await assert.rejects(readFile(join(cwd, '.github/workflows/mdbisync.yml')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(cwd, '.pre-commit-config.yaml')), { code: 'ENOENT' });
-  await assert.rejects(readFile(join(cwd, 'guides/README.md')), { code: 'ENOENT' });
 
-  const written = await runCli(['init', '--release-sha', MINIMUM_RELEASE.sha, '--release-version', MINIMUM_RELEASE.version, '--folder', 'guides', '--team', 'Planning', '--no-security-hooks'], { cwd });
+  const written = await runCli(['init', '--release-sha', MINIMUM_RELEASE.sha, '--release-version', MINIMUM_RELEASE.version, '--no-security-hooks'], { cwd });
   assert.equal(written.exitCode, 0, written.stderr);
   const { default: templates } = await import('./workflows.json', { with: { type: 'json' } });
   for (const [name, text] of Object.entries(templates)) assert.equal(await readFile(join(cwd, '.github/workflows', name), 'utf8'), text, name);
@@ -132,7 +142,7 @@ test('init refuses a release older than the templates pin and writes the pinned 
 
 test('init refuses an older release named only by its version, and asks nothing after an older SHA', async (t) => {
   const cwd = await fixture(t);
-  const byVersion = await runCli(['init', '--release-sha', sha, '--release-version', 'v0.1.0-rc.2', '--folder', 'guides', '--team', 'Planning'], { cwd });
+  const byVersion = await runCli(['init', '--release-sha', sha, '--release-version', 'v0.1.0-rc.2'], { cwd });
   assert.equal(byVersion.exitCode, 2);
   assert.match(byVersion.stderr, /^init: release v0\.1\.0-rc\.2 is older than /);
   const { runInit } = await import('./command.ts');
@@ -150,29 +160,18 @@ test('init --help names the oldest release it writes', async () => {
   assert.ok(help.stdout.includes(`The release must be ${MINIMUM_RELEASE.version} or later`), help.stdout);
 });
 
-test('init prompts only through an explicit terminal prompt and accepts team-only folders', async (t) => {
+test('init prompts only through an explicit terminal prompt, for the release and the two choices', async (t) => {
   const cwd = await fixture(t);
   const { runInit } = await import('./command.ts');
   const { LFS_ATTRIBUTES } = await import('./command.ts');
-  const answers = [sha, 'guides', 'Planning', '', 'no', 'yes'];
+  const answers = [sha, 'no', 'yes'];
   const questions: string[] = [];
   const result = await runInit([], { cwd, prompt: async (question) => { questions.push(question); return answers.shift() ?? assert.fail('unexpected question'); } });
   assert.equal(result.exitCode, 0, result.stderr);
   assert.equal(answers.length, 0);
+  assert.deepEqual(questions.slice(0, 2), ['Release commit SHA: ', 'Include security hook examples (requires Docker)? [y/N] ']);
   assert.equal(questions.at(-1), 'Store embedded images and files in Git LFS? [y/N] ');
   assert.equal(await readFile(join(cwd, '.gitattributes'), 'utf8'), `${LFS_ATTRIBUTES.join('\n')}\n`);
-});
-
-test('init rejects an orphan project or nested team before writing files', async (t) => {
-  const cwd = await fixture(t);
-  for (const folders of [
-    ['--folder', 'guides', '--project', 'Roadmap'],
-    ['--folder', 'guides', '--team', 'Planning', '--folder', 'guides/sub', '--team', 'Other'],
-  ]) {
-    const result = await runCli(['init', '--release-sha', sha, ...folders], { cwd });
-    assert.equal(result.exitCode, 2);
-    await assert.rejects(readFile(join(cwd, '.pre-commit-config.yaml')), { code: 'ENOENT' });
-  }
 });
 
 test('the bundled CLI initializes a repository with no dependency installation', async (t) => {
@@ -199,32 +198,22 @@ test('the bundled CLI initializes a repository with no dependency installation',
 test('complete flags do not prompt even when a terminal prompt is available', async (t) => {
   const cwd = await fixture(t);
   const { runInit } = await import('./command.ts');
-  const result = await runInit(flags.slice(1), { cwd, prompt: async () => assert.fail('flags must run non-interactively') });
+  const result = await runInit([...flags.slice(1), '--no-security-hooks', '--lfs'], { cwd, prompt: async () => assert.fail('flags must run non-interactively') });
   assert.equal(result.exitCode, 0, result.stderr);
 });
 
-test('existing descendant mappings are checked before adding a parent annotation', async (t) => {
-  const cwd = await fixture(t);
-  await mkdir(join(cwd, 'guides/sub'), { recursive: true });
-  await writeFile(join(cwd, 'guides/sub/README.md'), '---\nlinear-team: Other\n---\n# Notes\n');
-  assert.equal((await runCli(flags, { cwd })).exitCode, 2);
-  await assert.rejects(readFile(join(cwd, '.pre-commit-config.yaml')), { code: 'ENOENT' });
-});
-
-test('guided setup permits an inherited or existing team without writing an empty annotation', async (t) => {
+test('with the release given, a terminal is asked only the choices the flags left open', async (t) => {
   const { runInit } = await import('./command.ts');
-  for (const inherited of [false, true]) {
+  for (const [given, expected] of [
+    [[], ['Include security hook examples (requires Docker)? [y/N] ', 'Store embedded images and files in Git LFS? [y/N] ']],
+    [['--security-hooks'], ['Store embedded images and files in Git LFS? [y/N] ']],
+    [['--no-lfs'], ['Include security hook examples (requires Docker)? [y/N] ']],
+  ] as const) {
     const cwd = await fixture(t);
-    await mkdir(join(cwd, 'guides/sub'), { recursive: true });
-    await writeFile(join(cwd, 'guides/README.md'), '---\nlinear-team: Planning\n---\n# Notes\n');
-    const answers = [sha, '', 'no', 'no'];
-    const result = await runInit(['--folder', inherited ? 'guides/sub' : 'guides', '--project', 'Roadmap'], {
-      cwd, prompt: async () => answers.shift() ?? assert.fail('unexpected question'),
-    });
+    const questions: string[] = [];
+    const result = await runInit([...flags.slice(1), ...given], { cwd, prompt: async (question) => { questions.push(question); return 'yes'; } });
     assert.equal(result.exitCode, 0, result.stderr);
-    const text = await readFile(join(cwd, inherited ? 'guides/sub/README.md' : 'guides/README.md'), 'utf8');
-    assert.ok(!text.includes('linear-team: ""'));
-    assert.equal((await runCli(['init', '--release-sha', sha, '--folder', inherited ? 'guides/sub' : 'guides', '--project', 'Roadmap'], { cwd })).exitCode, 0);
+    assert.deepEqual(questions, expected, given.join(' '));
   }
 });
 
@@ -235,7 +224,7 @@ test('security opt-in refuses incompatible existing IDs and malformed hooks', as
     await writeFile(join(cwd, '.pre-commit-config.yaml'), before);
     assert.equal((await runCli([...flags, '--security-hooks'], { cwd })).exitCode, 2);
     assert.equal(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), before);
-    await assert.rejects(readFile(join(cwd, 'guides/README.md')), { code: 'ENOENT' });
+    await assert.rejects(readFile(join(cwd, '.github/workflows/mdbisync.yml')), { code: 'ENOENT' });
   }
 });
 
@@ -282,30 +271,11 @@ test('init updates a scanner hook an earlier init generated, and still refuses a
   assert.equal(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), custom);
 });
 
-test('init reports regular-file folder paths as usage errors', async (t) => {
+test('init reports a regular file in a destination path as a usage error', async (t) => {
   const cwd = await fixture(t);
-  await writeFile(join(cwd, 'guides'), 'Keep me.');
+  await writeFile(join(cwd, '.github'), 'Keep me.');
   assert.equal((await runCli(flags, { cwd })).exitCode, 2);
-  assert.equal(await readFile(join(cwd, 'guides'), 'utf8'), 'Keep me.');
-});
-
-test('annotations retain a leading BOM, CRLF body and long unrelated scalars; new hooks use block YAML', async (t) => {
-  for (const frontMatter of [false, true]) {
-    const cwd = await fixture(t);
-    await mkdir(join(cwd, 'guides'));
-    const scalar = 'A long description '.repeat(10);
-    const body = '# Notes\r\n\r\nKeep these words.\r\n';
-    const text = '\uFEFF' + (frontMatter ? `---\r\ndescription: ${scalar.trim()}\r\n---\r\n` : '') + body;
-    await writeFile(join(cwd, 'guides/README.md'), text);
-    const result = await runCli(flags, { cwd });
-    assert.equal(result.exitCode, 0, result.stderr);
-    const after = await readFile(join(cwd, 'guides/README.md'), 'utf8');
-    assert.ok(after.startsWith('\uFEFF---'));
-    assert.ok(after.endsWith(body));
-    assert.equal(after.lastIndexOf('\uFEFF'), 0);
-    if (frontMatter) assert.ok(after.includes(`description: ${scalar.trim()}\r\n`));
-    assert.match(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), /repos:\n\s+- repo:/);
-  }
+  assert.equal(await readFile(join(cwd, '.github'), 'utf8'), 'Keep me.');
 });
 
 test('init --lfs adds the extension and assets-folder lines once, keeping the attributes already there', async (t) => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
@@ -209,6 +210,55 @@ describe('folder mapping', () => {
       'docs/Guide.md': ['duplicate-title', ['docs/guide.md']],
       'docs/guide.md': ['duplicate-title', ['docs/Guide.md']],
     });
+  });
+
+  it('names at most three other files of a larger collision and counts the rest', () => {
+    const names = ['Guide', 'guide', 'GUIDE', 'gUide', 'guIde'];
+    const mapping = mapTree({ 'docs/README.md': team('DOCS'), ...Object.fromEntries(names.map((name) => [`docs/${name}.md`, name])) });
+    const leftOut = Object.fromEntries(mapping.leftOut.map((file) => [file.path, [file.collidesWith, file.collidesWithMore]]));
+    assert.deepEqual(leftOut, {
+      'docs/Guide.md': [['docs/guide.md', 'docs/GUIDE.md', 'docs/gUide.md'], 1],
+      'docs/guide.md': [['docs/Guide.md', 'docs/GUIDE.md', 'docs/gUide.md'], 1],
+      'docs/GUIDE.md': [['docs/Guide.md', 'docs/guide.md', 'docs/gUide.md'], 1],
+      'docs/gUide.md': [['docs/Guide.md', 'docs/guide.md', 'docs/GUIDE.md'], 1],
+      'docs/guIde.md': [['docs/Guide.md', 'docs/guide.md', 'docs/GUIDE.md'], 1],
+    });
+  });
+
+  // Every file of a collision used to list all the others, and each append copied its group: 16,384 case
+  // variants of one name took 2.2 GB. The tree listing's byte budget allows far more, and empty files share
+  // one blob. A child process maps and lints 65,536 variants under a heap limit, and the parent's timeout
+  // stops a stall that a test timeout could not interrupt.
+  it('maps and lints 65,536 case variants of one title in bounded memory', { timeout: 120_000 }, () => {
+    const script = `
+      import { collectAnnotations, mapFiles, resolveZones } from ${JSON.stringify(new URL('./index.ts', import.meta.url).href)};
+      import { duplicateTitles } from ${JSON.stringify(new URL('../format/lint.ts', import.meta.url).href)};
+      const name = 'abcdefghijklmnop';
+      const variants = Array.from({ length: 1 << name.length }, (_, bits) =>
+        [...name].map((letter, at) => (bits >> at) & 1 ? letter.toUpperCase() : letter).join(''));
+      const oid = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391';
+      const entries = [{ path: 'docs/README.md', mode: '100644', type: 'blob', oid: 'a'.repeat(40), size: 1 },
+        ...variants.map((variant) => ({ path: 'docs/' + variant + '.md', mode: '100644', type: 'blob', oid, size: 0 }))];
+      const { annotations } = collectAnnotations(new Map([['docs/README.md', '---\\nlinear-team: DOCS\\n---\\n']]));
+      const { zones } = resolveZones(annotations);
+      const mapping = mapFiles(entries, zones, new Map([[oid, Buffer.alloc(0)], ['a'.repeat(40), Buffer.from('x')]]));
+      const findings = duplicateTitles(variants.map((variant) => variant + '.md'));
+      console.log(JSON.stringify({
+        documents: mapping.documents.length,
+        leftOut: mapping.leftOut.length,
+        named: mapping.leftOut.reduce((most, file) => Math.max(most, file.collidesWith.length), 0),
+        more: [...new Set(mapping.leftOut.map((file) => file.collidesWithMore))],
+        findings: findings.length,
+        longest: findings.reduce((most, finding) => Math.max(most, finding.message.length), 0),
+      }));
+    `;
+    const child = spawnSync(process.execPath, ['--max-old-space-size=256', '--input-type=module', '--eval', script], { encoding: 'utf8', timeout: 90_000 });
+    assert.notEqual((child.error as NodeJS.ErrnoException | undefined)?.code, 'ETIMEDOUT', 'mapping and lint did not finish within the parent timeout');
+    assert.ifError(child.error);
+    assert.equal(child.status, 0, `the child ended with signal ${child.signal}: ${child.stderr}`);
+    const result = JSON.parse(child.stdout) as { documents: number; leftOut: number; named: number; more: number[]; findings: number; longest: number };
+    assert.deepEqual({ ...result, longest: undefined }, { documents: 1, leftOut: 65_536, named: 3, more: [65_532], findings: 65_536, longest: undefined });
+    assert.ok(result.longest < 200, `the longest finding message has ${result.longest} characters`);
   });
 
   it('reports annotation problems with the mapping', () => {
