@@ -125,13 +125,11 @@ replace each `mdbisync/mdbisync@…` pin with your release SHA:
 
 - `mdbisync-initial-sync.yml` runs the initial sync by hand from the Actions
   tab, with a `direction` and a `confirm` box (unchecked: a dry run).
-- `mdbisync.yml` runs the sync on every push to `main`, on GitHub's schedule
-  (every five minutes asked for) and by hand. GitHub runs schedules only on
-  the default branch, may start them hours late or skip them, and turns them
-  off in a public repository after 60 days without activity, so start it
-  from your own timer as well and keep the schedule as a fallback ([own
-  scheduler](own-scheduler.md)). Until the initial sync has run, each sync
-  run writes nothing and fails with `initial-sync-required`.
+- `mdbisync.yml` runs the sync on every push to `main` and through
+  `workflow_dispatch`. Between pushes, dispatch it by hand or from
+  [your own scheduler](own-scheduler.md) to pick up Linear edits and finish
+  pending work. Until the initial sync has run, each sync run writes
+  nothing and fails with `initial-sync-required`.
 
 Both share the concurrency group `mdbisync`, so runs of one repository never
 overlap. GitHub keeps one pending run per group and a newer one replaces it,

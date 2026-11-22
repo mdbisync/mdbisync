@@ -51,9 +51,11 @@ pull requests come from the branches `mdbisync/linear` and
 ![A sync run: Linear's edits are captured through your hooks into the state refs and reach main through the sync pull request; main is merged with Linear's record and written back to Linear.](docs/images/architecture.svg)
 
 After the initial sync, changes from Linear reach `main` only through the
-sync pull request, which merges itself once your checks pass; a batch that
-fails them waits in a suspended pull request. Changes on `main` reach Linear
-in the next run, usually within a minute or two. Each step is in
+sync pull request. A sync run merges it once your checks pass. A batch
+that fails them waits in a suspended pull request. A push to `main`
+starts a run. Between pushes, run the workflow by hand or dispatch it
+from your own timer to pick up Linear edits and finish work from earlier
+runs. Each step is in
 [docs/sync-cycle.md](docs/sync-cycle.md).
 
 ## Conflicts
@@ -144,11 +146,8 @@ and git's path beats Linear's title
 
 - Linear documents only: issues, comments, icons and colors are not synced.
   YAML front matter stays in git.
-- Between pushes, Linear to git waits for the next scheduled or
-  dispatched run. GitHub may start scheduled runs hours late or skip them,
-  on any plan, and turns them off in a public repository after 60 days
-  without activity: for timely runs, start the workflow from your own
-  timer
+- Between pushes, Linear edits reach git when the workflow is run by hand
+  or started by your own timer
   ([docs/own-scheduler.md](docs/own-scheduler.md)).
 - A document with Markdown Linear would lose (a footnote, a link title,
   table alignment), an image from the web, a linked file over 10 MB or more
@@ -243,13 +242,11 @@ The sync workflow, `.github/workflows/mdbisync.yml`, is one of the files
 `init` writes (without `init`, copy
 [`examples/mdbisync.yml`](examples/mdbisync.yml) and replace its pins).
 Once the initial sync is done (for `linear-to-git`, once its pull request
-is merged), enable it again. It runs on every push to
-`main`, on GitHub's schedule and by hand, in both directions.
+is merged), enable it again. It runs in both directions on every push to
+`main` and by hand.
 
-Do not rely on GitHub's schedule to bring Linear edits to git: it can run
-hours late. Start the workflow every few minutes from a timer of your own
-(cron, a systemd timer or another scheduler) with a token that may only
-start workflows in this repository, and keep the schedule as a fallback:
+Use a timer to dispatch the workflow every few minutes so it picks up
+Linear edits and finishes pending work between pushes. See
 [run the sync from your own scheduler](docs/own-scheduler.md).
 
 ## Documentation

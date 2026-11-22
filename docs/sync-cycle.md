@@ -17,8 +17,8 @@ warning is in [troubleshooting.md](troubleshooting.md).
 
 ## One run
 
-The sync workflow runs on every push to the tracked branch, every five
-minutes, and by hand ([workflows](usage.md#workflows)). Runs of one
+The sync workflow runs on every push to the tracked branch and when
+dispatched ([workflows](usage.md#workflows)). Runs of one
 repository share a concurrency group in the supplied workflows
 ([overlapping runs](#overlapping-runs)). Each run makes these steps, in this order:
 
@@ -358,8 +358,9 @@ App for a check run, the same account for a commit status), so a
 same-name check from anyone else does not satisfy it. A head that lacks
 an expected check, or has none, waits. When someone else pushed that head
 (a formatter's fix pushed with a workflow's own token starts no other
-workflow), and five minutes after the sync first saw it nothing on it is
-pending or failed but an expected check never registered, the sync pushes
+workflow), the sync gives its checks at least five minutes to register.
+On a follow-up run, if nothing is pending or failed but an expected check
+still has not registered, the sync pushes
 a commit of its own on top, with the same files: its push starts the
 repository's whole CI. That commit must pass every check the head below it
 waited for, and the pull request merges once they pass, without waiting
@@ -478,15 +479,12 @@ same check also fails on the tracked tip.
   edited in Linear while the run waits for its sync pull request's checks
   gets the change one run later
   ([editing while sync runs](#editing-while-sync-runs)).
-- **Linear to git:** the next run captures the edit. Between pushes that
-  is a run from your own timer, GitHub's schedule or a run by hand. With
-  a timer that is within its interval plus the run
-  ([own scheduler](own-scheduler.md)); GitHub's schedule alone can take
-  hours, since GitHub may start scheduled runs late or skip them. The
-  same run merges the sync pull request when its checks pass within the
-  grace period (`merge-grace-seconds`, default 60 seconds); slower checks
-  leave the merge to a later run, one more interval. Run the workflow by
-  hand to take a Linear edit in sooner.
+- **Linear to git:** the next run captures the edit. Between pushes, a run
+  can come from [your own timer](own-scheduler.md) or a manual dispatch.
+  The same run merges the sync pull request when its checks pass within the
+  grace period (`merge-grace-seconds`, default 60 seconds). Slower checks
+  leave the merge to a later run. Run the workflow by hand to pick up an
+  edit or finish a pending merge sooner.
 - **A conflict** adds no delay: both versions arrive on both sides in the
   same runs that would have carried either edit.
 - **A failing check** moves the batch to **Suspended changes from Linear**

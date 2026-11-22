@@ -223,11 +223,10 @@ describe('workflow templates', () => {
   describe('mdbisync.yml', () => {
     const file = 'mdbisync.yml';
 
-    it('runs on pushes to main, every five minutes and by hand', () => {
+    it('runs on pushes to main and by dispatch', () => {
       const on = workflow(file).on;
-      assert.deepEqual(Object.keys(on).sort(), ['push', 'schedule', 'workflow_dispatch']);
+      assert.deepEqual(Object.keys(on).sort(), ['push', 'workflow_dispatch']);
       assert.deepEqual(on['push'], { branches: ['main'] });
-      assert.deepEqual(on['schedule'], [{ cron: '*/5 * * * *' }]);
       assert.equal(on['workflow_dispatch'], null);
     });
 

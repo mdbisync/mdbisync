@@ -32,8 +32,8 @@ Linear equal to git and moves Linear-only documents to Linear's trash.
   front matter of its `README.md`
   ([folder mapping](usage.md#folder-mapping)).
 - In the repository settings, turn on **Allow merge commits**.
-- Disable the sync workflow (Actions → *mdbisync* → **⋯** → **Disable
-  workflow**) and stop your own dispatch timer, if you run one
+- If the sync workflow is installed, disable it in Actions → *mdbisync* →
+  **⋯** → **Disable workflow**. Stop your own dispatch timer if you run one
   ([own scheduler](own-scheduler.md#stop-the-timer-during-an-initial-sync)),
   and keep it disabled until the pull request is merged. Both workflows share
   one queue, and a sync queued behind a running one can replace a waiting

@@ -9,8 +9,8 @@
 #
 # Each run takes Linear's changes to main through the sync pull request,
 # which the sync merges once its checks pass, and writes main's changes to
-# Linear. It runs on every push to main, on GitHub's schedule, and by hand.
-# For Linear's changes to arrive on time, also start it every few minutes
+# Linear. It runs on every push to main and by hand.
+# To pick up Linear changes between pushes, start it every few minutes
 # from your own scheduler through workflow_dispatch:
 # https://github.com/mdbisync/mdbisync/blob/main/docs/own-scheduler.md
 #
@@ -22,12 +22,6 @@ name: mdbisync
 on:
   push:
     branches: [main]
-  # A fallback, not the trigger to rely on: GitHub may start scheduled runs
-  # hours late or skip them, on any plan, runs them only on the default
-  # branch, and turns them off in a public repository after 60 days without
-  # activity.
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions: {}

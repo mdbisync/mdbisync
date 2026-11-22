@@ -66,7 +66,7 @@ supports it.
 In your docs repository, go to Settings → Environments and create
 `mdbisync`. Under **Deployment branches and tags**, choose **Selected
 branches and tags** and add one **Branch** rule for the tracked branch
-(`main` by default). Leave required reviewers off so scheduled and push
+(`main` by default). Leave required reviewers off so timer dispatches and push
 runs can start automatically. Set the branch rule before adding any secrets
 or pushing the workflows. GitHub records jobs that use the environment in
 the repository's deployment history.
@@ -321,7 +321,7 @@ It writes:
 
 | File | What it is |
 | --- | --- |
-| `.github/workflows/mdbisync.yml` | The sync, on every push to `main`, every five minutes and by hand |
+| `.github/workflows/mdbisync.yml` | The sync, on every push to `main` and when dispatched |
 | `.github/workflows/mdbisync-initial-sync.yml` | The one-time initial sync, by hand |
 | `.github/workflows/pre-commit.yml` | The `pre-commit` check on every pull request |
 | `.pre-commit-config.yaml` | The `linear-format` hook, and the security hook examples if you asked for them |
@@ -441,9 +441,8 @@ and merge it.
 If the commit stops because `linear-format` rewrote a file, run the same
 `git add` again and commit again: the second attempt passes.
 
-Reaching `main` starts the sync workflow, and its schedule starts it
-again every five minutes; until you disable it, each run writes nothing
-and fails with `initial-sync-required`, which is expected.
+Reaching `main` starts the sync workflow. Before the initial sync, a run
+writes nothing and fails with `initial-sync-required`, which is expected.
 
 Now turn the sync workflow off until the initial sync has finished:
 Actions → **mdbisync** → `⋯` → **Disable workflow**. A sync queued in the
@@ -503,14 +502,11 @@ Turn the sync back on: Actions → **mdbisync** → **Enable workflow**. Then
 start one run by hand: **mdbisync** → Run workflow → Use workflow from:
 `main` → Run workflow. It finishes green, and its summary shows the setup check and
 what it synchronized; right after an initial sync there is nothing to
-write. From now on it runs on every push to `main` and on GitHub's
-schedule.
+write. From now on it runs on every push to `main` and whenever dispatched.
 
-GitHub may start scheduled runs hours late or skip them, so a Linear edit
-could wait that long. Now set up a timer of your own that starts the
-workflow every few minutes, with a token that may only start workflows in
-this repository: [run the sync from your own scheduler](own-scheduler.md).
-Keep the schedule in the workflow as a fallback.
+Set up a timer that dispatches the workflow every few minutes to pick up
+Linear edits and finish work from earlier runs between pushes. You can
+also run it by hand. See [run the sync from your own scheduler](own-scheduler.md).
 
 To see it work, edit a synchronized document in Linear: within a few
 minutes the **Changes from Linear** pull request opens, passes

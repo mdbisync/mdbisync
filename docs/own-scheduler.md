@@ -2,27 +2,17 @@
 
 Every sync run works both ways. A push to `main` starts one at once, so
 git reaches Linear within a minute or two, and that run also takes in
-what changed in Linear. Between pushes, a Linear edit waits for the next
-run that GitHub's schedule, a run by hand or a `workflow_dispatch` call
-starts. Do not rely on GitHub's schedule for that. Run your own timer
-that starts the workflow every few minutes, and keep the schedule in the
-workflow as a fallback.
+what changed in Linear. Between pushes, a Linear edit waits for a run
+started by hand or by your own timer through `workflow_dispatch`.
+Those runs also retry partial syncs and merge sync pull requests whose
+checks passed after an earlier run stopped waiting.
 
-## Why not GitHub's schedule alone
+## Switch an existing workflow to your own timer
 
-GitHub documents that a scheduled run can be delayed when Actions is under
-high load, and that some queued jobs may then be dropped
+If your copy of `mdbisync.yml` has an `on.schedule` entry, remove it and
+keep `push` and `workflow_dispatch` under `on`. This stops the extra runs
+from GitHub's timer, which can start late or skip a run
 ([the `schedule` event](https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#schedule)).
-It names no plan that is exempt and publishes no delivery guarantee, so a
-run asked for every five minutes can start hours late, or not at all, and
-a Linear edit waits that long. GitHub also runs schedules only from the
-default branch, no more often than every five minutes, and turns them off
-in a public repository after 60 days without activity
-([disabling a workflow](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow)).
-
-Keep the `schedule:` trigger in `mdbisync.yml` anyway. It needs no setup,
-catches up eventually and keeps the sync going if your own scheduler
-stops.
 
 ## How it works
 
@@ -37,11 +27,10 @@ GitHub answers `204 No Content` and queues a run of `mdbisync.yml` on
 `main` ([create a workflow dispatch event](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)).
 Any scheduler that can send that request works: cron, a systemd timer, a
 scheduled job in another CI system or a cloud scheduler. It needs outbound
-HTTPS only; nothing has to reach it from the internet. A dispatch from a
-scheduled workflow in another GitHub repository does not help: it is the
-same GitHub schedule.
+HTTPS only. A scheduled workflow in another GitHub repository is subject
+to the same delays.
 
-The workflow needs no change. Its `mdbisync` concurrency group runs one
+The workflow's `mdbisync` concurrency group runs one
 run at a time and keeps at most one waiting run, the newest, so dispatches
 that arrive during a run do not pile up. A run that finds nothing changed
 in Linear is short and writes nothing.
@@ -90,8 +79,7 @@ so this page gives no recipe for it.
 Each dispatch is one run. In a public repository runs on GitHub's standard
 hosted runners cost nothing. In a private repository on GitHub-hosted
 runners each run is billed, rounded up to a whole minute per job. The
-table counts the timer's runs; the scheduled runs GitHub starts and the
-runs pushes start come on top:
+table counts the timer's runs. Pushes and manual dispatches add runs:
 
 | Interval | Runs a day | Minutes a month (30 days), at least |
 | --- | --- | --- |
@@ -151,10 +139,7 @@ status: `401` for a wrong or expired token, `403` for a token without the
 Actions write permission, `404` for a wrong repository or workflow name or
 a token without access to the repository, `000` for a network failure or
 timeout. Another `4xx` status usually means the workflow is disabled or
-the branch does not exist: check Actions → **mdbisync**. GitHub disables
-a workflow with a schedule in a public repository after 60 days without
-activity, and then refuses your dispatches too, so enable it again
-there.
+the branch does not exist: check Actions → **mdbisync**.
 
 ## Example: cron
 
@@ -223,14 +208,11 @@ logs never print it, and let a failed request fail the job.
 
 ## Stop the timer during an initial sync
 
-The sync workflow stays disabled during an initial sync, as the initial
-sync steps say, so the timer's dispatches would only fail at every
-interval; and if the workflow were enabled, a dispatched sync could
-replace an initial sync that waits behind a running sync, since both
-share one queue. Start the timer only after the first initial sync has
-finished. Before a later initial sync (recovery), disable the sync
-workflow and stop the timer, then enable and start them again when the
-initial sync is in place:
+Start the timer only after the first initial sync has finished. Before
+a later initial sync (recovery), disable the sync workflow and stop the
+timer. Both workflows share one queue, so a dispatch can replace a waiting
+initial sync. Enable the workflow and restart the timer after the initial
+sync is complete:
 
 - systemd: `systemctl --user stop mdbisync-dispatch.timer`, later
   `systemctl --user start mdbisync-dispatch.timer`;
@@ -238,8 +220,8 @@ initial sync is in place:
 
 ## When runs keep failing
 
-With a timer, a run that fails for a lasting reason (an expired Linear
-secret, a failing setup check) fails at every interval instead of a few
-times a day, and GitHub notifies the token's owner about each failed run.
+An expired Linear secret or a failing setup check can cause runs to fail
+at every interval. GitHub notifies the dispatch token's owner about each
+failed run.
 Fix the cause from the run summary
 ([troubleshooting](troubleshooting.md)), or stop the timer until you can.
