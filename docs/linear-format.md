@@ -351,9 +351,10 @@ preserve any previously accepted text, and continue with other documents.
 
 ### `duplicate-title`
 
-Two files map to one document title. Their paths differ only in letter case
-or Unicode normalization, and Linear cannot tell them apart. Both files are
-reported. The rule compares only the files a run is given: a commit hook
+Two or more files map to one document title. Their paths differ only in
+letter case or Unicode normalization, and Linear cannot tell them apart.
+Every such file is reported. Each finding names up to three of the other
+files and counts the rest (`and 5 more`). The rule compares only the files a run is given: a commit hook
 sees the staged files, so a new file that collides with one already
 committed is reported by `pre-commit run --all-files` (as the CI example
 runs it), not at commit time.
