@@ -4,174 +4,35 @@
 </picture>
 
 Two-way sync between Linear documents and Markdown in your repository. It runs
-as a GitHub Action under apps you create: no server, no webhook, no key we
-hold.
+as a GitHub Action under apps you create: no server we own, no key we hold.
 
 ## Why
 
-One knowledge base, readable by people and agents.
+**One knowledge base, readable by people and agents.**
 
-- **Teams on Linear and git.** Specs, plans and notes stay where product
-  people write them, and live as Markdown next to the code they describe.
-- **Teams working with AI agents.** Agents read current specs from files and
-  write their plans back as files. What they write shows up in Linear for
-  people to read.
-- **Anyone who wants files.** Your Linear documents in your editor, in grep,
-  in backups and in version history, under your control.
-
-Edit in Linear or in git, and both stay in sync.
+- **One to one with your agent, in files.** Specs, plans and documents live as
+  Markdown in your repository, where you and the agent read and write them
+  together.
+- **With your team, in Linear.** The same documents stay in sync in Linear,
+  where anyone can edit, discuss and comment on them without git.
 
 ## Why it is safe
 
 - **Inside your perimeter.** The sync runs in your GitHub Actions runner,
   under a Linear OAuth app and a GitHub App that you create. Nothing runs on
-  our side and we hold no key.
+  our server and we hold no key.
 - **Short-lived tokens.** Each run gets its own Linear token and revokes it at
   the end. No personal API key.
 - **Quality gates before any push.** Changes from Linear pass your
-  repository's security and privacy quality gates, the pre-commit hooks you
-  mark `alias: security`, before anything is pushed. A rejected change gets a
-  red mark in Linear.
-- **The same checks as everyone else.** Linear's changes reach `main` through
-  a sync pull request, with the same checks as the pull requests of people and
-  agents.
-- **Merge edits from both sides.** `main` flows back to Linear through a
-  three-way merge in the runner. A re-read before writing detects changes to
-  tracked documents; edits can still be lost between reading and writing
-  ([editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
-
-## How it works
-
-There is no mdbisync service and no database. Each run is a job in your
-GitHub Actions runner. The sync's state lives in three refs of your
-repository under `refs/mdbisync/`, outside your branches and files, and its
-pull requests come from the branches `mdbisync/linear` and
-`mdbisync/suspended`.
-
-![A sync run: Linear's edits are captured through your hooks into the state refs and reach main through the sync pull request; main is merged with Linear's record and written back to Linear.](docs/images/architecture.svg)
-
-After the initial sync, changes from Linear reach `main` only through the
-sync pull request, which merges itself once your checks pass; a batch that
-fails them waits in a suspended pull request. Changes on `main` reach Linear
-in the next run, usually within a minute or two. Each step is in
-[docs/sync-cycle.md](docs/sync-cycle.md).
-
-## Conflicts
-
-Edits to different paragraphs merge cleanly, even next to each other. When
-both sides change the same paragraph between two runs, the run writes both
-versions into the document, the same text in Linear and in git, and keeps
-syncing everything else:
-
-```markdown
-<!-- linear:callout color=#f2c94c -->
-> [!WARNING]
-> **Sync conflict: git version**
-
-The release ships on Tuesday.
-
-<!-- linear:callout color=#f2c94c -->
-> [!WARNING]
-> **Sync conflict: Linear version**
-
-The release ships on Wednesday.
-
-<!-- linear:callout color=#f2c94c -->
-> [!WARNING]
-> **Sync conflict: end**
-```
-
-Each marker shows in Linear as a warning callout, and the document gets an
-alert icon and a comment. Keep the text you want and remove the three
-marker callouts, in Linear or in git; the next run
-takes the result to the other side. A delete against an edit, or two
-different renames, is decided by rules instead: a change beats a delete,
-and git's path beats Linear's title
-([deletes and renames](docs/conflicts.md#deletes-and-renames)). Details:
-[docs/conflicts.md](docs/conflicts.md).
-
-## Features
-
-- **Both directions:** edits, new documents, renames, moves and deletes
-  travel each way.
-- **Folders as teams and projects:** the front matter of a folder's `README.md`
-  maps it to a Linear team and project; deeper folders become title paths.
-- **Images and files:** files a document links are uploaded to Linear once;
-  supported images and documents pasted in Linear land in an `assets/` folder
-  beside the document (`assets/<sha256>.png`), one per folder, in Git LFS
-  when your `.gitattributes` says so (`mdbisync init --lfs` adds the lines).
-  Files you committed keep their place; a document moved to another folder
-  takes copies of its `assets/` files. Lint refuses Markdown files inside an
-  `assets/` folder. External HTTP(S) images, path
-  images and uploads returning 404 or 410 become ordinary links; an empty alt
-  uses the URL as its label, and an image inside a link keeps the outer link.
-  Empty images and `data:` images are removed. The sync pull request lists
-  every changed image by its place and Markdown line; after merge, the link
-  version is written back to Linear. External images are never downloaded;
-  repaired paths stay plain links and do not upload repository files.
-  Links with schemes other than HTTP, HTTPS or mailto are removed with their
-  text on pull and refused by lint on push. Paths and fragments are allowed.
-  Unsafe or oversized uploads block the document with a red mark and a
-  comment; fixing them clears the comment and restores the icon.
-  New uploads must contain PNG, JPEG, GIF, WebP, AVIF, PDF, MP4, WebM or SVG,
-  identified from their bytes. SVGs with `script` or `foreignObject` elements,
-  animation elements, event attributes, `xml:base` or non-fragment `href`
-  references are blocked. Files already
-  in the repository keep working, except a file an earlier sync captured
-  (named `<sha256>.<ext>`) that the check now refuses: a document that links
-  it again from Linear is blocked, and `mdbisync lint` names the file
-  (`upload-file-refused`) for you to remove or replace. Downloaded files use the detected extension, regardless of
-  the upload URL or declared content type. Unreadable uploads (including redirects)
-  and files larger than 10 MB block the document with a comment. Access errors
-  stop capture; temporary download failures leave the document unmarked and
-  listed as `download-retry` in the run summary until a later run succeeds.
-- **The `linear-format` hook:** `lint` and `fix` keep Markdown in the form
-  Linear stores, so a round trip changes nothing
-  ([docs/linear-format.md](docs/linear-format.md)).
-- **Security hooks before any push:** your `alias: security` pre-commit
-  hooks check Linear's changes; a rejected document gets a red mark in
-  Linear and is not committed. Without such hooks the content is not
-  checked, and every run summary says so.
-- **A sync pull request with your checks:** it merges itself when they pass;
-  a failing batch moves to a suspended lane while other documents keep
-  syncing.
-- **Initial sync with a dry run:** either direction, a dry run first, and a
-  rerun that continues where an interrupted one stopped.
-- **Recovery:** lost state is rebuilt or refused with a clear message, and an
-  initial sync restores it ([docs/troubleshooting.md](docs/troubleshooting.md#recovery-with-initial-sync)).
-
-## Limitations
-
-- Linear documents only: issues, comments, icons and colors are not synced.
-  YAML front matter stays in git.
-- Between pushes, Linear to git waits for the next scheduled or
-  dispatched run. GitHub may start scheduled runs hours late or skip them,
-  on any plan, and turns them off in a public repository after 60 days
-  without activity: for timely runs, start the workflow from your own
-  timer
-  ([docs/own-scheduler.md](docs/own-scheduler.md)).
-- A document with Markdown Linear would lose (a footnote, a link title,
-  table alignment), an image from the web, a linked file over 10 MB or more
-  than 250,000 characters is left out whole: it stays in git only and is
-  listed in the run summary until fixed.
-- The repository must be on GitHub.
-
-## Security
-
-Every final release is reviewed before it is built: by two frontier language
-models (Fable and Astra) and by GitHub CodeQL, whose results are in the
-[security reports](https://mdbisync.com/security/report), and by a
-[dependency scan](https://mdbisync.com/security/dependencies). The image
-counts the open findings of severity high and critical for each; the release
-report also lists every dismissed finding with its reason and the risks we
-accept. The dependency scan runs again every six hours on the latest release,
-so its count follows advisories published after the release; the advisories it
-excepts are listed with their reasons in
-[`security/dependency-exceptions.json`](security/dependency-exceptions.json).
-Each release also carries an SPDX SBOM of its bundled packages
-(`sbom.spdx.json`), and every file of a final release commit is signed with build
-provenance and SBOM attestations; [Verify a release](docs/usage.md#verify-a-release)
-shows how to check them.
+  repository's security and privacy quality gates. Your pre-commit hooks
+  marked with `alias: security` run on every change first, and a change one
+  of them rejects is not pushed to git: it gets a red mark in Linear.
+- **The same checks as everyone else.** Changes from Linear reach `main`
+  through a sync pull request, with the same checks as the pull requests of
+  people and agents.
+- **Every release reviewed by frontier models.** Each final release is reviewed for
+  vulnerabilities by two frontier language models, and its security report is
+  published with the release (see [Security report](https://mdbisync.com/security/report) and [Dependency report](https://mdbisync.com/security/dependencies)).
 
 <p align="center">
   <a href="https://mdbisync.com/security/report">
@@ -182,91 +43,197 @@ shows how to check them.
   </a>
 </p>
 
+## How it works
+
+There is no mdbisync service and no database. Each run is a job in your
+GitHub Actions runner. The sync's state lives in three refs of your
+repository under `refs/mdbisync/`, outside your branches and files. From
+them the sync opens its pull requests to `main`.
+
+Two workflows do the work:
+
+- **Initial sync**, run once by hand, in one direction: it makes Linear
+  equal to `main`, or opens a pull request that makes `main` equal to Linear.
+- **Sync**, run on every push to `main` and on a schedule, keeps both sides
+  equal from then on. GitHub's own scheduler is unreliable, so you will need
+  an external one (see [Required infrastructure](#required-infrastructure)).
+
+## Conflicts
+
+**A true three-way merge.** Edits from git and from Linear are merged against
+the version both sides last agreed on, so changes to different paragraphs
+simply combine. When both sides change the same paragraph, the document keeps
+both versions and is marked orange in Linear until someone resolves the
+conflict.
+
+![A conflict in Linear: the git version and the Linear version of a paragraph between "Sync conflict" callouts](docs/images/conflict-in-linear.png)
+
+To resolve it, keep the text you want and remove the conflict markers, in
+Linear or in git. See the details in [docs/conflicts.md](docs/conflicts.md).
+
+## Features
+
+- **Folders as teams and projects.** Map a folder to a Linear team or
+  project in the front matter of its `README.md`; the rest of the path
+  becomes part of the document's title in Linear (see
+  [Folder mapping](docs/usage.md#folder-mapping)).
+- **Images and files, in git and in Linear.** Images and files you add in
+  git appear in Linear, and those pasted in Linear are saved to git next to
+  the document (see [Images and files](docs/images-and-files.md)).
+- **Git LFS support.** Images and files can be stored in Git LFS, and the
+  sync reads and writes them there (see [Git LFS](docs/usage.md#git-lfs)).
+- **Linear's format, checked in your repository.** The `linear-format`
+  pre-commit hook's `lint` and `fix` bring your Markdown to the form Linear
+  stores before it is synced (see [Linear's Markdown form](docs/linear-format.md)).
+- **Your security hooks.** Pre-commit hooks marked with `alias: security`
+  check every change from Linear before it reaches git.
+
+## Limitations
+
+- Only Linear documents are synced, with the images and files embedded in
+  them. Issues, comments, icons and colors are not.
+- YAML front matter stays in git: Linear never sees it.
+- Rarely, a real-time edit in Linear may be overwritten by the sync and
+  will need to be restored from the document's history. To reduce the
+  chance, the sync rereads each document right before writing it. Linear's
+  API has no conditional write, so the risk cannot be removed entirely
+  (see [editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
+- The repository must be on GitHub.
+
+## Required infrastructure
+
+A push to `main` starts a sync immediately. Edits in Linear are collected and
+reach git with the next scheduled run. So it is important to run your
+workflow on a reliable schedule.
+
+### Your own scheduler
+
+GitHub Actions has a `schedule` trigger, but GitHub does not keep to it. In
+public repositories it is barely followed and turns itself off after 60 days
+without activity; on paid plans it runs late and often skips a run.
+
+So you need a server of your own with a simple cron job or systemd timer
+that starts the workflow on a schedule (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
+
+### A self-hosted runner
+
+A private repository on GitHub Free gets 2,000 Actions minutes a month,
+enough to run the sync about every 30 minutes. To sync more often
+(recommended), you need more minutes: a sync every five minutes takes about
+8,600 minutes a month. Either pay GitHub for them or set up a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners),
+which costs only the server itself (see [Choose the interval](docs/own-scheduler.md#choose-the-interval)).
+If you sync a public repository with Linear, its GitHub Actions minutes are free.
+
 ## Setup
 
 Four steps, all in accounts you already own. Each run checks the whole setup
-before it writes anything, and says what is missing in the run summary. The
-[quickstart](docs/quickstart.md) has every step in order, with the exact
-settings and commands.
+before it writes anything, and says what is missing in the run summary.
 
 ### 1. Create a private Linear OAuth app
 
-Each run gets a short-lived token and revokes it at the end.
+Each run gets a short-lived token and revokes it at the end. No personal API
+key.
 
-Exact settings and the secrets to set: [Linear OAuth app](docs/quickstart.md#linear-oauth-app).
+You can keep the settings below in the repository, but we recommend an
+environment named `mdbisync` that only `main` may use, with the secrets in it
+(see [sync environment](docs/quickstart.md#sync-environment)).
+
+In Linear, create an OAuth application with client credentials on. Store its
+client ID in the variable `MDBISYNC_LINEAR_CLIENT_ID` and its client secret
+in the secret `MDBISYNC_LINEAR_CLIENT_SECRET` (see [exact settings](docs/quickstart.md#linear-oauth-app)).
 
 ### 2. Create your own GitHub App
 
 No third-party app to trust: it is yours. Install it only on your docs
 repository and keep its key in your secrets.
 
-Exact settings, the secrets to set, and a link that opens GitHub's
-new-App form already filled in: [GitHub App](docs/quickstart.md#github-app).
+Give the App read and write access to contents, pull requests and workflows,
+read access to checks and commit statuses, and install it on your docs repository. Store its client ID in the variable
+`MDBISYNC_APP_CLIENT_ID` and its private key in the secret
+`MDBISYNC_APP_PRIVATE_KEY` (see [exact settings](docs/quickstart.md#github-app)).
 
 ### 3. Run a one-time initial sync
 
-First prepare the repository. `mdbisync init` writes the workflows, the
-folder annotations and the `linear-format` hook, and with
-`--security-hooks` two example security hooks; marking hooks of your own
-`alias: security` and the repository setting are yours
-([repository files](docs/quickstart.md#repository-files)):
+1. **Prepare the repository.**
 
-- map a folder to Linear: `linear-team` and `linear-project` in the front
-  matter of its `README.md` ([folder mapping](docs/usage.md#folder-mapping));
-- add the `linear-format` hook to `.pre-commit-config.yaml`, pinned to a
-  release ([pins](docs/usage.md#release-builds-and-pins)), and mark your
-  security hooks `alias: security`;
-- in the repository settings, turn on **Allow merge commits**.
+   - **Folder mapping.** Map folders to Linear in the front matter of their
+     `README.md`. Name a team in the top folder and a project of that team in
+     a folder below it; deeper folders inherit both (see [folder mapping](docs/usage.md#folder-mapping)). For example,
+     `docs/README.md` names the team:
 
-Commit what `init` wrote and push it to `main`
-([commit the files](docs/quickstart.md#commit-the-files)). Then run the
-initial sync workflow, `.github/workflows/mdbisync-initial-sync.yml`,
-by hand from the Actions tab, with a direction: `git-to-linear` makes Linear
-equal to git, `linear-to-git` opens a pull request that makes git equal to
-Linear. The first run is a dry run that lists what would change; run it
-again with `confirm` to write. Without `init`, copy the workflow from
-[`examples/mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml)
-and replace each `mdbisync/mdbisync@…` pin with your release. Before the
-first run, disable the sync workflow (Actions → **mdbisync** → `⋯` →
-**Disable workflow**): it shares one queue with the initial sync, and a
-queued sync run can replace a waiting initial sync.
-Before you take documents from Linear, read
-[initial sync from Linear to git](docs/initial-sync-linear-to-git.md): its
-pull request can remove files, and a person merges it. Before you take
-files to Linear, read
-[initial sync from git to Linear](docs/initial-sync-git-to-linear.md): it
-overwrites documents and moves those without a file to Linear's trash.
+     ```yaml
+     ---
+     linear-team: <team key or name>
+     ---
+     ```
+
+     and `docs/handbook/README.md` names a project:
+
+     ```yaml
+     ---
+     linear-project: <project name>
+     ---
+     ```
+
+   - **Format hook.** Add `linear-format` to `.pre-commit-config.yaml`, pinned
+     to the release (see [linear-format hook](docs/quickstart.md#linear-format-hook)):
+
+     ```yaml
+     repos:
+       - repo: https://github.com/mdbisync/mdbisync
+         rev: <release-sha>
+         hooks:
+           - id: linear-format
+     ```
+
+   - **Security hooks** (optional). Mark your own pre-commit hooks
+     `alias: security` (see [security hooks](docs/quickstart.md#security-hooks)).
+   - **Merge commits.** Turn on **Allow merge commits** (Settings → General).
+
+2. **Add the workflows.** Copy
+   [`mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml), pinned
+   to the same release as the hook, and
+   [`pre-commit.yml`](examples/pre-commit.yml) to `.github/workflows/` and
+   push them to `main`.
+3. **Dry run.** In the Actions tab, run **mdbisync initial sync** in one
+   direction: `git-to-linear` or `linear-to-git`. It lists what would
+   change and writes nothing.
+4. **Real run.** Run it again in the same direction with `confirm` checked.
+   `git-to-linear` writes to Linear; `linear-to-git` opens a pull request,
+   which you review and merge with **Create a merge commit** (see the guides [from git to Linear](docs/initial-sync-git-to-linear.md) and [from Linear to git](docs/initial-sync-linear-to-git.md)).
 
 ### 4. Start ongoing sync
 
-The sync workflow, `.github/workflows/mdbisync.yml`, is one of the files
-`init` writes (without `init`, copy
-[`examples/mdbisync.yml`](examples/mdbisync.yml) and replace its pins).
-Once the initial sync is done (for `linear-to-git`, once its pull request
-is merged), enable it again. It runs on every push to
-`main`, on GitHub's schedule and by hand, in both directions.
-
-Do not rely on GitHub's schedule to bring Linear edits to git: it can run
-hours late. Start the workflow every few minutes from a timer of your own
-(cron, a systemd timer or another scheduler) with a token that may only
-start workflows in this repository, and keep the schedule as a fallback:
-[run the sync from your own scheduler](docs/own-scheduler.md).
+1. **Add the workflow.** Once the initial sync is done, copy
+   [`mdbisync.yml`](examples/mdbisync.yml), pinned to the same release, to
+   `.github/workflows/` and push it to `main`. The sync runs on every push to `main`, in both
+   directions, and merges its pull request once the `pre-commit` check
+   passes.
+2. **Set up your scheduler.** Start the workflow on a schedule from a cron job
+   or systemd timer on your own server (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
 
 ## Documentation
 
 - [Quickstart](docs/quickstart.md): the whole setup, step by step.
+- Initial sync [from git to Linear](docs/initial-sync-git-to-linear.md) and
+  [from Linear to git](docs/initial-sync-linear-to-git.md): the one-time
+  first sync in each direction.
+- [Your own scheduler](docs/own-scheduler.md): start the sync on time, and
+  choose an interval that fits your Actions minutes.
+- [Usage](docs/usage.md): repository files, folder mapping, the setup check,
+  the sync pull request, release pins and verifying a release.
+- [How the sync works](docs/sync-cycle.md): each run, editing while it runs,
+  suspension, timing and the run summary.
+- [Conflicts](docs/conflicts.md): how both sides are merged and how to
+  resolve a conflict.
+- [Images and files](docs/images-and-files.md): how files travel between git
+  and Linear, and which uploads are accepted.
+- [Linear's Markdown form](docs/linear-format.md): the `lint` and `fix` rules
+  of the `linear-format` hook.
 - [Configuration](docs/configuration.md): every input, secret, hook and flag
   with its default.
-- [Usage](docs/usage.md): folder mapping, the setup check, the sync pull
-  request and release pins.
-- [How the sync works](docs/sync-cycle.md): each run step by step, timing and
-  the run summary.
-- [Your own scheduler](docs/own-scheduler.md): start the sync on time from
-  cron, a systemd timer or another scheduler.
-- Initial sync [from git to Linear](docs/initial-sync-git-to-linear.md) and
-  [from Linear to git](docs/initial-sync-linear-to-git.md).
-- [Linear's Markdown form](docs/linear-format.md), [conflicts](docs/conflicts.md)
-  and [troubleshooting](docs/troubleshooting.md).
+- [Troubleshooting](docs/troubleshooting.md): every message and code, and
+  what to do.
 
 ## License
 

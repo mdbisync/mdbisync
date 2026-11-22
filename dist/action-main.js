@@ -28786,14 +28786,11 @@ var MESSAGES = {
   "init.lfs-twice": "choose Git LFS once",
   "init.unknown-option": "unknown option: {option}",
   "init.needs-value": "{option} needs a value",
-  "init.must-follow-folder": "{option} must follow --folder",
-  "init.given-twice-for-folder": "{option} was given twice for a folder",
   "init.given-twice": "{option} was given twice",
   "init.path-outside": "paths must stay inside the repository",
   "init.symlink": "setup destinations must not contain symlinks",
   "init.folder-is-file": "a setup folder path names a regular file",
   "init.invalid-yaml": "invalid YAML configuration",
-  "init.readme-differs": "{folder}/README.md already has a different {key}",
   "init.needs-repos": "{file} needs a repos list",
   "init.invalid-repository-entry": "invalid pre-commit repository entry",
   "init.format-hook-differs": "existing linear-format hook uses a different repository or release",
@@ -28801,9 +28798,7 @@ var MESSAGES = {
   "init.release-sha": "--release-sha must be a full 40-character commit SHA",
   "init.release-too-old": "release {version} is older than {minimum}, the release these workflows are written for and checked against. Use {minimum} or later",
   "init.release-version": "--release-version must be a version such as v1.2.3",
-  "init.needs-folder": "provide --folder with --team and/or --project",
   "init.not-at-root": "run init at the repository root",
-  "init.conflicting-folders": "conflicting folder options: {path}",
   "init.workflow-differs": "existing workflow differs: {name}",
   // The action's inputs and the run's operation.
   "inputs.required": "the input {name} is required",
@@ -29012,7 +29007,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "0.1.0-rc.20" : packageJson.version;
+var VERSION = true ? "1.0.0-rc.1" : packageJson.version;
 
 // src/format/rules.ts
 var LINT_RULES = {

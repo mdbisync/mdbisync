@@ -7400,14 +7400,11 @@ var MESSAGES = {
   "init.lfs-twice": "choose Git LFS once",
   "init.unknown-option": "unknown option: {option}",
   "init.needs-value": "{option} needs a value",
-  "init.must-follow-folder": "{option} must follow --folder",
-  "init.given-twice-for-folder": "{option} was given twice for a folder",
   "init.given-twice": "{option} was given twice",
   "init.path-outside": "paths must stay inside the repository",
   "init.symlink": "setup destinations must not contain symlinks",
   "init.folder-is-file": "a setup folder path names a regular file",
   "init.invalid-yaml": "invalid YAML configuration",
-  "init.readme-differs": "{folder}/README.md already has a different {key}",
   "init.needs-repos": "{file} needs a repos list",
   "init.invalid-repository-entry": "invalid pre-commit repository entry",
   "init.format-hook-differs": "existing linear-format hook uses a different repository or release",
@@ -7415,9 +7412,7 @@ var MESSAGES = {
   "init.release-sha": "--release-sha must be a full 40-character commit SHA",
   "init.release-too-old": "release {version} is older than {minimum}, the release these workflows are written for and checked against. Use {minimum} or later",
   "init.release-version": "--release-version must be a version such as v1.2.3",
-  "init.needs-folder": "provide --folder with --team and/or --project",
   "init.not-at-root": "run init at the repository root",
-  "init.conflicting-folders": "conflicting folder options: {path}",
   "init.workflow-differs": "existing workflow differs: {name}",
   // The action's inputs and the run's operation.
   "inputs.required": "the input {name} is required",
@@ -25953,7 +25948,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "0.1.0-rc.20" : packageJson.version;
+var VERSION2 = true ? "1.0.0-rc.1" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -35130,7 +35125,7 @@ function captureReport(captured) {
 
 // src/init/command.ts
 var import_yaml3 = __toESM(require_dist(), 1);
-import { lstat as lstat3, mkdir as mkdir5, readFile as readFile4, readdir, realpath as realpath3, writeFile as writeFile6 } from "node:fs/promises";
+import { lstat as lstat3, mkdir as mkdir5, readFile as readFile4, realpath as realpath3, writeFile as writeFile6 } from "node:fs/promises";
 import { dirname as dirname3, isAbsolute as isAbsolute3, join as join14, relative as relative3, resolve as resolve3, sep as sep4 } from "node:path";
 
 // src/init/workflows.json
@@ -35357,8 +35352,8 @@ jobs:
 #
 # Each run takes Linear's changes to main through the sync pull request,
 # which the sync merges once its checks pass, and writes main's changes to
-# Linear. It runs on every push to main, on GitHub's schedule, and by hand.
-# For Linear's changes to arrive on time, also start it every few minutes
+# Linear. It runs on every push to main and by hand.
+# To pick up Linear changes between pushes, start it every few minutes
 # from your own scheduler through workflow_dispatch:
 # https://github.com/mdbisync/mdbisync/blob/main/docs/own-scheduler.md
 #
@@ -35370,12 +35365,6 @@ name: mdbisync
 on:
   push:
     branches: [main]
-  # A fallback, not the trigger to rely on: GitHub may start scheduled runs
-  # hours late or skip them, on any plan, runs them only on the default
-  # branch, and turns them off in a public repository after 60 days without
-  # activity.
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -35881,11 +35870,8 @@ function appCreationUrl(organization) {
   return `${base}?${params.toString()}`;
 }
 
-// src/init/releases.ts
-var RELEASE_PIN = /mdbisync\/mdbisync@([a-f0-9]{40}) # (v\S+)/;
-var pinned = RELEASE_PIN.exec(workflows_default["mdbisync.yml"]);
-var MINIMUM_RELEASE = { sha: pinned?.[1] ?? "", version: pinned?.[2] ?? "" };
-var OLDER_RELEASES = {
+// src/init/older-releases.json
+var older_releases_default = {
   c0ee458e4ceac001cf6114a1bffa443d67941298: "v0.1.0-rc.1",
   "79db9969462ae7f1f00c88e95b311e61db3c455e": "v0.1.0-rc.2",
   b015b1cb6e739b5f40c1ae17812779c433d111f9: "v0.1.0-rc.3",
@@ -35896,15 +35882,20 @@ var OLDER_RELEASES = {
   "92a1d9ecd9c89ff18703c9d4f8476d9e3702170e": "v0.1.0-rc.8"
 };
 
+// src/init/releases.ts
+var RELEASE_PIN = /mdbisync\/mdbisync@([a-f0-9]{40}) # (v\S+)/;
+var pinned = RELEASE_PIN.exec(workflows_default["mdbisync.yml"]);
+var MINIMUM_RELEASE = { sha: pinned?.[1] ?? "", version: pinned?.[2] ?? "" };
+var OLDER_RELEASES = older_releases_default;
+
 // src/init/command.ts
 var INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
-  --folder <path> --team <name> [--project <name>]   Repeat for each folder
-  --security-hooks | --no-security-hooks           Optional examples (requires Docker)
-  --lfs | --no-lfs                                 Store embedded files in Git LFS (.gitattributes)
+  --security-hooks | --no-security-hooks   Optional examples (requires Docker)
+  --lfs | --no-lfs                         Store embedded files in Git LFS (.gitattributes)
 The release must be ${MINIMUM_RELEASE.version} or later: the workflows use its action inputs.
-Existing files and annotations are preserved; conflicting values must be resolved first.
+Existing files are preserved; conflicting values must be resolved first.
 `;
-var INIT_VALUE_FLAGS = ["--release-sha", "--release-version", "--folder", "--team", "--project"];
+var INIT_VALUE_FLAGS = ["--release-sha", "--release-version"];
 var INIT_SECURITY_FLAGS = ["--security-hooks", "--no-security-hooks"];
 var INIT_LFS_FLAGS = ["--lfs", "--no-lfs"];
 var GITATTRIBUTES = ".gitattributes";
@@ -35916,7 +35907,7 @@ var LFS_ATTRIBUTES = [
 var InitError = class extends Error {
 };
 function parseArgs(args) {
-  const settings = { folders: [] };
+  const settings = {};
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (INIT_SECURITY_FLAGS.includes(flag ?? "")) {
@@ -35932,18 +35923,9 @@ function parseArgs(args) {
     if (!INIT_VALUE_FLAGS.includes(flag ?? "")) throw new InitError(message("init.unknown-option", { option: String(flag) }));
     const value = args[++i];
     if (value === void 0 || value.startsWith("--") || !value.trim()) throw new InitError(message("init.needs-value", { option: String(flag) }));
-    if (flag === "--folder") settings.folders.push({ path: value });
-    else if (flag === "--team" || flag === "--project") {
-      const folder = settings.folders.at(-1);
-      if (!folder) throw new InitError(message("init.must-follow-folder", { option: flag }));
-      const key = flag === "--team" ? "team" : "project";
-      if (folder[key] !== void 0) throw new InitError(message("init.given-twice-for-folder", { option: flag }));
-      folder[key] = value.trim();
-    } else {
-      const key = flag === "--release-sha" ? "sha" : "version";
-      if (settings[key] !== void 0) throw new InitError(message("init.given-twice", { option: String(flag) }));
-      settings[key] = value;
-    }
+    const key = flag === "--release-sha" ? "sha" : "version";
+    if (settings[key] !== void 0) throw new InitError(message("init.given-twice", { option: String(flag) }));
+    settings[key] = value;
   }
   return settings;
 }
@@ -35975,31 +35957,6 @@ function document3(text6) {
   const doc = (0, import_yaml3.parseDocument)(text6, { prettyErrors: false });
   if (doc.errors.length || !(0, import_yaml3.isMap)(doc.contents) && doc.contents !== null) throw new InitError(message("init.invalid-yaml"));
   return doc;
-}
-function annotate(text6, folder) {
-  const fm = findFrontMatter(text6);
-  const doc = document3(fm?.yaml ?? "");
-  let changed2 = false;
-  for (const [key, value] of [[TEAM_KEY, folder.team], [PROJECT_KEY, folder.project]]) {
-    if (value === void 0) continue;
-    if (doc.has(key)) {
-      if (doc.get(key) !== value) throw new InitError(message("init.readme-differs", { folder: folder.path, key }));
-    } else {
-      doc.set(key, value);
-      changed2 = true;
-    }
-  }
-  if (!changed2) return text6;
-  if (fm === null) {
-    const bom = text6.startsWith("\uFEFF") ? "\uFEFF" : "";
-    const body2 = bom ? text6.slice(1) : text6;
-    return `${bom}---
-${doc.toString({ lineWidth: 0 })}---
-${body2}`;
-  }
-  const opening = /^﻿?---[^\S\r\n]*\r?\n/.exec(text6)[0];
-  const eol2 = opening.endsWith("\r\n") ? "\r\n" : "\n";
-  return opening + doc.toString({ lineWidth: 0 }).replace(/\n/g, eol2) + text6.slice(opening.length + fm.yaml.length);
 }
 function lfsAttributes(text6) {
   const before = text6 ?? "";
@@ -36076,26 +36033,13 @@ async function runInit(args, options = {}) {
   try {
     const settings = parseArgs(args);
     const ask = options.prompt;
-    const needsGuidance = !settings.sha || !settings.folders.length || settings.folders.some((folder) => !folder.team && !folder.project);
-    if (ask && needsGuidance) {
+    if (ask) {
       settings.sha ??= (await ask("Release commit SHA: ")).trim();
       checkRelease(settings);
-      if (!settings.folders.length) settings.folders.push({ path: (await ask("Folder to synchronize: ")).trim() });
-      for (const folder of settings.folders) {
-        if (folder.team === void 0) {
-          const team = (await ask(`Linear team for ${folder.path} (blank to keep or inherit): `)).trim();
-          if (team) folder.team = team;
-        }
-        if (folder.project === void 0) {
-          const project = (await ask(`Linear project for ${folder.path} (blank for team documents): `)).trim();
-          if (project) folder.project = project;
-        }
-      }
       settings.security ??= /^(y|yes)$/i.test((await ask("Include security hook examples (requires Docker)? [y/N] ")).trim());
       settings.lfs ??= /^(y|yes)$/i.test((await ask("Store embedded images and files in Git LFS? [y/N] ")).trim());
     }
     checkRelease(settings);
-    if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || !folder.team && !folder.project)) throw new InitError(message("init.needs-folder"));
     const root2 = await realpath3(options.cwd ?? process.cwd());
     if (!await lstat3(join14(root2, ".git")).catch(() => void 0)) throw new InitError(message("init.not-at-root"));
     const changes = /* @__PURE__ */ new Map();
@@ -36103,7 +36047,6 @@ async function runInit(args, options = {}) {
       const target = await safePath(root2, path2);
       const before = await optionalRead(target);
       const after = create(before);
-      if (changes.has(target) && changes.get(target) !== after) throw new InitError(message("init.conflicting-folders", { path: path2 }));
       if (before !== after) changes.set(target, after);
     };
     for (const [name, template] of Object.entries(workflows_default)) {
@@ -36115,44 +36058,6 @@ async function runInit(args, options = {}) {
     }
     await queue(PRE_COMMIT_CONFIG, (before) => hookConfig(before, settings));
     if (settings.lfs) await queue(GITATTRIBUTES, lfsAttributes);
-    for (const folder of settings.folders) await queue(join14(folder.path, ANNOTATION_FILE), (before) => annotate(before ?? "", folder));
-    const contents = /* @__PURE__ */ new Map();
-    const readmes = /* @__PURE__ */ new Set();
-    for (const folder of settings.folders) {
-      let path2 = resolve3(root2, folder.path);
-      for (; ; ) {
-        readmes.add(join14(path2, ANNOTATION_FILE));
-        if (path2 === root2) break;
-        path2 = dirname3(path2);
-      }
-    }
-    const visited = /* @__PURE__ */ new Set();
-    const descendants = async (folder) => {
-      if (visited.has(folder)) return;
-      visited.add(folder);
-      readmes.add(join14(folder, ANNOTATION_FILE));
-      let entries;
-      try {
-        entries = await readdir(folder, { withFileTypes: true });
-      } catch (error) {
-        if (error.code === "ENOENT") return;
-        throw error;
-      }
-      for (const entry of entries) {
-        if (entry.isDirectory() && ![".git", "node_modules"].includes(entry.name)) await descendants(join14(folder, entry.name));
-      }
-    };
-    for (const folder of settings.folders) await descendants(resolve3(root2, folder.path));
-    for (const path2 of readmes) {
-      await safePath(root2, relative3(root2, path2));
-      const text6 = changes.get(path2) ?? await optionalRead(path2);
-      if (text6 === void 0) continue;
-      contents.set(relative3(root2, path2), text6);
-    }
-    const { annotations, problems } = collectAnnotations(contents);
-    if (problems.length) throw new InitError(problems[0].message);
-    const mapping = resolveZones(annotations);
-    if (mapping.problems.length) throw new InitError(mapping.problems[0].message);
     for (const [path2, text6] of changes) {
       await mkdir5(dirname3(path2), { recursive: true });
       await writeFile6(path2, text6);
@@ -36165,7 +36070,8 @@ Remaining admin steps:
 3. In Settings \u2192 Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET. Delete repository secrets of the same names once the workflows and environment are in place. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. For plan requirements and migration of existing workflows, see ${QUICKSTART_URL}#sync-environment.
 4. Allow merge commits and configure required checks for main.
 5. Install Node.js 24.2 or later and pre-commit. Run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
-6. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
+6. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}.
+7. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
 `;
     return { exitCode: 0, stderr: "", stdout };
   } catch (error) {
