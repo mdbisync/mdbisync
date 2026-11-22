@@ -697,9 +697,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         throw error;
       }
     };
+    // The documents whose entry this capture records anew: only their repairs are this capture's to sign.
+    const recordedNow = new Set<string>();
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
       if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
+      recordedNow.add(id);
       if (old !== undefined && old.path !== candidate.path) {
         removeBody(old.path);
         ids.delete(old.path);
@@ -747,7 +750,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity, sign: signObservation(context.pushedKey) });
     if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
-    for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
+    for (const [path, entry] of ids) if (recordedNow.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
       ids.set(path, {...entry, pullRewrite: signRepair(context.pushedKey, path, entry.id, {...entry.pullRewrite, source: linearCommit})});
     }
     // Record a held removal, and a cleared one, so the next capture reads what this one held.
