@@ -194,20 +194,25 @@ workflow from a timer of your own (see [Required infrastructure](#required-infra
 ## Documentation
 
 - [Quickstart](docs/quickstart.md): the whole setup, step by step.
+- Initial sync [from git to Linear](docs/initial-sync-git-to-linear.md) and
+  [from Linear to git](docs/initial-sync-linear-to-git.md): the one-time
+  first sync in each direction.
+- [Your own scheduler](docs/own-scheduler.md): start the sync on time, and
+  choose an interval that fits your Actions minutes.
+- [Usage](docs/usage.md): repository files, folder mapping, the setup check,
+  the sync pull request, release pins and verifying a release.
+- [How the sync works](docs/sync-cycle.md): each run, editing while it runs,
+  suspension, timing and the run summary.
+- [Conflicts](docs/conflicts.md): how both sides are merged and how to
+  resolve a conflict.
+- [Images and files](docs/images-and-files.md): how files travel between git
+  and Linear, and which uploads are accepted.
+- [Linear's Markdown form](docs/linear-format.md): the `lint` and `fix` rules
+  of the `linear-format` hook.
 - [Configuration](docs/configuration.md): every input, secret, hook and flag
   with its default.
-- [Usage](docs/usage.md): folder mapping, the setup check, the sync pull
-  request and release pins.
-- [How the sync works](docs/sync-cycle.md): each run step by step, timing and
-  the run summary.
-- [Your own scheduler](docs/own-scheduler.md): start the sync on time from
-  cron, a systemd timer or another scheduler.
-- Initial sync [from git to Linear](docs/initial-sync-git-to-linear.md) and
-  [from Linear to git](docs/initial-sync-linear-to-git.md).
-- [Images and files](docs/images-and-files.md): how files travel between
-  git and Linear, and which uploads are accepted.
-- [Linear's Markdown form](docs/linear-format.md), [conflicts](docs/conflicts.md)
-  and [troubleshooting](docs/troubleshooting.md).
+- [Troubleshooting](docs/troubleshooting.md): every message and code, and
+  what to do.
 
 ## License
 
