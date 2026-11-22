@@ -17,7 +17,8 @@ import { validateSha, validateVersion } from './package.ts';
 export const EXCEPTIONS_FILE = 'security/dependency-exceptions.json';
 // The full machine-readable result of one check.
 export const RESULT_FILE = 'dependency-result.json';
-// The small public status of a release's dependencies, attached to the release.
+// The small public status of a release's dependencies: attached to the release at its build, and
+// later committed to the `security-status` branch by the scheduled dependency scan.
 export const STATUS_FILE = 'dependency-scan.json';
 export const RESULT_SCHEMA = 1;
 export const STATUS_SCHEMA = 1;

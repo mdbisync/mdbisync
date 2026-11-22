@@ -369,7 +369,7 @@ jobs:
           node src/release/pins.ts "$RELEASE_VERSION" "$RELEASE_SHA" target
 
   # A final version gets a draft GitHub Release that carries its security report and summary, its
-  # SPDX SBOM and its dependency status, which the scheduled dependency scan later replaces in place.
+  # SPDX SBOM and the dependency status of its build. The scheduled dependency scan never changes a release.
   # It stays a draft until a maintainer publishes it. It runs no repository code.
   publish:
     needs: [report, tag]

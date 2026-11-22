@@ -6,7 +6,9 @@ name: Dependency scan
 # own (`npm audit` of every lock file, minus `security/dependency-exceptions.json`).
 # It blocks nothing; a finding turns the run red. The job summary is the
 # readable report, the artifact holds the machine-readable results, and the
-# latest release's `dependency-scan.json` asset is replaced with the new status.
+# status of the latest release is committed to the `security-status` branch,
+# which the project site reads. Releases are never changed: each keeps the
+# `dependency-scan.json` of its build.
 
 on:
   schedule:
@@ -77,7 +79,9 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-  # Replaces the latest release's dependency status, which the project site reads. It runs no repository code.
+  # Commits the latest release's dependency status to the `security-status` branch, which holds
+  # only that file and which the project site reads from its public raw URL. The first run creates
+  # the branch with no history. It writes through the Git data API and runs no repository code.
   publish:
     needs: scan
     if: ${{ !cancelled() && needs.scan.outputs.release != '' && needs.scan.outputs.release-blocking != '' }}
@@ -87,16 +91,53 @@ jobs:
       contents: write
     env:
       TAG: ${{ needs.scan.outputs.release }}
+      BRANCH: security-status
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dependency-scan
           path: ${{ runner.temp }}/scan
-      - name: Replace the release's dependency status
+      - name: Commit the dependency status to its branch
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release upload "$TAG" "$RUNNER_TEMP/scan/release/dependency-scan.json" --clobber
+        run: |
+          file="$RUNNER_TEMP/scan/release/dependency-scan.json"
+          if ! jq -s -e --arg tag "$TAG" 'length == 1 and .[0].schema == 1 and .[0].release == $tag' "$file" > /dev/null; then
+            echo "The dependency status of $TAG is missing, unreadable or names another release" >&2
+            exit 1
+          fi
+          api="repos/$GITHUB_REPOSITORY"
+          read_api() {
+            curl -sS -o "$1" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H "Accept: $2" "$GITHUB_API_URL/$api/$3"
+          }
+          status="$(read_api "$RUNNER_TEMP/head.json" application/vnd.github+json "git/ref/heads/$BRANCH")"
+          case "$status" in
+            200) parent="$(jq -r .object.sha "$RUNNER_TEMP/head.json")" ;;
+            404) parent='' ;;
+            *) echo "Cannot read the $BRANCH branch: HTTP $status" >&2; exit 1 ;;
+          esac
+          if [ "$status" = 200 ] && ! [[ "$parent" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The $BRANCH branch has an unexpected head" >&2
+            exit 1
+          fi
+          # A rerun of an older run must not replace a newer status.
+          if [ -n "$parent" ]; then
+            status="$(read_api "$RUNNER_TEMP/current.json" application/vnd.github.raw "contents/dependency-scan.json?ref=$parent")"
+            if [ "$status" = 200 ] && jq -e --slurpfile current "$RUNNER_TEMP/current.json" '.checked <= $current[0].checked' "$file" > /dev/null 2>&1; then
+              echo "$BRANCH already holds a status checked at the same time or later"
+              exit 0
+            fi
+          fi
+          blob="$(jq -n --rawfile content "$file" '{content: $content, encoding: "utf-8"}' | gh api "$api/git/blobs" --input - --jq .sha)"
+          tree="$(jq -n --arg blob "$blob" '{tree: [{path: "dependency-scan.json", mode: "100644", type: "blob", sha: $blob}]}' | gh api "$api/git/trees" --input - --jq .sha)"
+          commit="$(jq -n --arg tree "$tree" --arg parent "$parent" --arg message "Dependency status of $TAG" \
+            '{message: $message, tree: $tree, parents: (if $parent == "" then [] else [$parent] end)}' | gh api "$api/git/commits" --input - --jq .sha)"
+          if [ -z "$parent" ]; then
+            jq -n --arg ref "refs/heads/$BRANCH" --arg sha "$commit" '{ref: $ref, sha: $sha}' | gh api "$api/git/refs" --input - > /dev/null
+          else
+            jq -n --arg sha "$commit" '{sha: $sha, force: false}' | gh api -X PATCH "$api/git/refs/heads/$BRANCH" --input - > /dev/null
+          fi
+          echo "$BRANCH: $commit"
 
   # A finding blocks nothing, but it must not go unnoticed: the run ends red and names it.
   # One on main becomes a task; one on the latest release becomes an urgent patch release.

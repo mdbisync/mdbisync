@@ -614,7 +614,10 @@ a maintainer publishes it, the release carries:
   which lists the scan results, every dismissed finding with its reason and
   the accepted risks;
 - the SPDX SBOM of the bundled packages (`sbom.spdx.json`);
-- the dependency scan (`dependency-scan.json`).
+- the dependency scan at its build (`dependency-scan.json`). The "Dependency
+  scan" workflow checks the latest release again every six hours and keeps
+  the current result on the `security-status` branch, without changing the
+  release.
 
 Before the tag is pushed, the workflow signs two GitHub artifact
 attestations for the release:

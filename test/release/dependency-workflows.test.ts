@@ -41,15 +41,110 @@ test('the scan job checks main and the latest final release with main\'s code an
   assert.equal(upload.with!.name, 'dependency-scan');
 });
 
-test('the publish job only replaces the release\'s dependency status and runs no repository code', () => {
-  const publish = read('dependency-scan.yml').jobs.publish as Job;
+test('the publish job writes only the status branch, never a release, and runs no repository code', () => {
+  const workflow = read('dependency-scan.yml');
+  const publish = workflow.jobs.publish as Job & { env: Record<string, string> };
   assert.equal(publish.needs, 'scan');
   assert.match(publish.if!, /needs\.scan\.outputs\.release != ''/);
   assert.match(publish.if!, /needs\.scan\.outputs\.release-blocking != ''/, 'only a completed check of the release is published');
   assert.deepEqual(publish.permissions, { 'contents': 'write' });
+  assert.equal(publish.env.BRANCH, 'security-status');
   assert.ok(publish.steps.every((step) => !step.uses?.startsWith('actions/checkout@') && !/\bnode\b|\bnpm\b/.test(step.run ?? '')));
-  const upload = publish.steps.find((step) => step.run?.startsWith('gh release upload'))!;
-  assert.equal(upload.run, 'gh release upload "$TAG" "$RUNNER_TEMP/scan/release/dependency-scan.json" --clobber');
+  for (const job of Object.values(workflow.jobs) as Job[]) {
+    assert.ok(job.steps.every((step) => !/\bgh release\b|--clobber/.test(step.run ?? '')), 'no job changes a release');
+  }
+});
+
+// The publish step's script, run against stand-ins for curl and gh that record every write.
+const PARENT = 'b'.repeat(40);
+
+function publishStatus(options: { head: number; status: object; parent?: string; current?: string; raw?: string }) {
+  const step = (read('dependency-scan.yml').jobs.publish as Job).steps.find((s) => s.run?.includes('git/commits'))!;
+  const directory = mkdtempSync(join(tmpdir(), 'dependency-publish-'));
+  try {
+    const bin = join(directory, 'bin');
+    mkdirSync(bin);
+    mkdirSync(join(directory, 'scan', 'release'), { recursive: true });
+    writeFileSync(join(directory, 'scan', 'release', 'dependency-scan.json'), options.raw ?? JSON.stringify(options.status));
+    const log = join(directory, 'log');
+    writeFileSync(log, '');
+    writeFileSync(join(bin, 'curl'), [
+      '#!/bin/sh',
+      'out=""; prev=""; for a in "$@"; do [ "$prev" = -o ] && out="$a"; prev="$a"; done',
+      'jq -cn --arg url "$a" \'{read: $url}\' >> "$STUB_LOG"',
+      'case "$a" in',
+      '  */contents/*) printf %s "$STUB_CURRENT" > "$out"; printf 200 ;;',
+      '  *) [ "$STUB_HEAD" = 200 ] && jq -cn --arg sha "$STUB_PARENT" \'{object: {sha: $sha}}\' > "$out"; printf %s "$STUB_HEAD" ;;',
+      'esac',
+    ].join('\n'), { mode: 0o755 });
+    writeFileSync(join(bin, 'gh'), [
+      '#!/bin/sh',
+      'jq -c --arg args "$*" \'{args: $args, body: .}\' >> "$STUB_LOG"',
+      'case "$*" in *git/blobs*) echo blob-sha ;; *git/trees*) echo tree-sha ;; *git/commits*) echo commit-sha ;; esac',
+    ].join('\n'), { mode: 0o755 });
+    const env = {
+      PATH: `${bin}:${process.env.PATH}`, STUB_LOG: log, STUB_HEAD: String(options.head), STUB_PARENT: options.parent ?? PARENT, STUB_CURRENT: options.current ?? JSON.stringify(older), RUNNER_TEMP: directory,
+      GH_TOKEN: 'token', GITHUB_API_URL: 'https://api.github.com', GITHUB_REPOSITORY: 'owner/repo', TAG: 'v1.2.3', BRANCH: 'security-status',
+    };
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', step.run!], { env, encoding: 'utf8' });
+    const calls = readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { read?: string; args?: string; body?: Record<string, unknown> });
+    return { status: result.status, calls };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const status = { schema: 1, release: 'v1.2.3', commit: 'a'.repeat(40), checked: '2026-11-22T06:23:00Z', run: 'https://github.com/owner/repo/actions/runs/2', high: 0, critical: 1 };
+const older = { ...status, checked: '2026-11-22T00:23:00Z', run: 'https://github.com/owner/repo/actions/runs/1' };
+
+test('the first status creates the branch as one commit with no parent, holding only the status file', () => {
+  const { status: exit, calls } = publishStatus({ head: 404, status });
+  assert.equal(exit, 0);
+  assert.deepEqual(calls.map((call) => call.read ?? call.args), [
+    'https://api.github.com/repos/owner/repo/git/ref/heads/security-status',
+    'api repos/owner/repo/git/blobs --input - --jq .sha',
+    'api repos/owner/repo/git/trees --input - --jq .sha',
+    'api repos/owner/repo/git/commits --input - --jq .sha',
+    'api repos/owner/repo/git/refs --input -',
+  ]);
+  assert.deepEqual(JSON.parse(calls[1]!.body!.content as string), status);
+  assert.deepEqual(calls[2]!.body, { tree: [{ path: 'dependency-scan.json', mode: '100644', type: 'blob', sha: 'blob-sha' }] }, 'no base tree: the branch holds this file only');
+  assert.deepEqual(calls[3]!.body, { message: 'Dependency status of v1.2.3', tree: 'tree-sha', parents: [] });
+  assert.deepEqual(calls[4]!.body, { ref: 'refs/heads/security-status', sha: 'commit-sha' });
+});
+
+test('a later status moves the branch forward on top of its head, never by force', () => {
+  for (const current of [JSON.stringify(older), 'not a status']) {
+    const { status: exit, calls } = publishStatus({ head: 200, status, current });
+    assert.equal(exit, 0);
+    assert.equal(calls[1]!.read, `https://api.github.com/repos/owner/repo/contents/dependency-scan.json?ref=${PARENT}`);
+    assert.deepEqual(calls[4]!.body, { message: 'Dependency status of v1.2.3', tree: 'tree-sha', parents: [PARENT] });
+    assert.equal(calls[5]!.args, 'api -X PATCH repos/owner/repo/git/refs/heads/security-status --input -');
+    assert.deepEqual(calls[5]!.body, { sha: 'commit-sha', force: false });
+  }
+});
+
+test('a rerun of an older run leaves a newer or equal status in place', () => {
+  for (const checked of ['2026-11-22T12:23:00Z', status.checked]) {
+    const { status: exit, calls } = publishStatus({ head: 200, status, current: JSON.stringify({ ...status, checked }) });
+    assert.equal(exit, 0);
+    assert.equal(calls.length, 2, 'only the two reads');
+  }
+});
+
+test('a status of another release, or a branch that cannot be read, writes nothing', () => {
+  for (const [options, reads] of [
+    [{ head: 200, status: { ...status, release: 'v1.2.4' } }, 0],
+    [{ head: 200, status: { ...status, schema: 2 } }, 0],
+    [{ head: 500, status }, 1],
+    [{ head: 200, status, parent: 'null' }, 1],
+    [{ head: 200, status, parent: '' }, 1],
+    [{ head: 200, status, raw: `${JSON.stringify(status)}\n${JSON.stringify(status)}` }, 0],
+  ] as const) {
+    const { status: exit, calls } = publishStatus(options);
+    assert.equal(exit, 1);
+    assert.equal(calls.length, reads, JSON.stringify(calls));
+  }
 });
 
 test('the findings job ends the run red for a finding on main or the release, or a scan that did not complete', () => {
