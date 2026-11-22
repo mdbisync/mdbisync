@@ -85,6 +85,7 @@ function blockRanges(tokens: Token[], side: Side): Range[] {
 }
 
 function conflictRanges(tokens: Token[]): Range[] {
+  // Keep blocks whole in both versions, including existing conflict markers.
   const ranges: WideningRange[] = [...blockRanges(tokens, 'ours'), ...blockRanges(tokens, 'theirs')];
   tokens.forEach((token, i) => {
     if (token.kind === 'conflict') ranges.push({ start: i, end: i + 1, conflict: true });
@@ -178,13 +179,14 @@ function closedHtmlBlock(value: string): boolean {
 function render(tokens: Token[], ranges: Range[], finalNewline: boolean): string {
   let text = '';
   let cursor = 0;
+  const lastOursIndex = tokens.findLastIndex((token) => content(token, 'ours').some((line) => line !== ''));
   const armsWithoutMarkers = { ours: withoutMarkers(tokens, 'ours'), theirs: withoutMarkers(tokens, 'theirs') };
   for (const range of ranges) {
     text += tokens.slice(cursor, range.start).map((token) => content(token, 'ours').join('')).join('');
     if (text && !text.endsWith('\n\n')) text += text.endsWith('\n') ? '\n' : '\n\n';
     const arms = (side: Side) => completeBlocks(armsWithoutMarkers[side].slice(range.start, range.end).flat().join('').replace(/^\n|\n$/g, ''));
     cursor = range.end;
-    const last = tokens.slice(cursor).every((token) => content(token, 'ours').join('') === '');
+    const last = cursor > lastOursIndex;
     text += `${markerCallout(MARKERS.git)}\n\n${arms('ours')}\n\n${markerCallout(MARKERS.linear)}\n\n${arms('theirs')}\n\n${markerCallout(MARKERS.end)}${last && !finalNewline ? '' : '\n'}`;
     const next = tokens[cursor];
     if (next?.kind === 'line' && lineText(next.text) !== '') text += '\n';

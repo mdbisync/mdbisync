@@ -562,7 +562,7 @@ The suspended lane and its marks add these lines when applicable:
 | GitHub refused the suspended merge | A merge refusal on that lane; `merge-refused` and `merge-blocked` apply to either lane. |
 | The suspended pull request also changes files | Its merge would change files other than synchronized documents and their assets; `head-unverified` applies to either lane. |
 | A GitHub request for the suspended lane failed; the normal lane still runs. | A later run retries that lane. |
-| Suspended files waiting for a manual merge | Named non-document files could not be merged; see [troubleshooting](troubleshooting.md#the-sync-pull-request). |
+| Suspended files waiting for a manual merge | The named files could not be merged automatically. This can include documents whose merge exceeds a Markdown work limit. See [troubleshooting](troubleshooting.md#the-sync-pull-request). |
 | Failed checks: | Names the failed checks on the suspended head or joining batch. |
 | Checks that did not finish in time: | Names checks reported as pending past the deadline. |
 | The suspended documents' comments in Linear stay as they are: | The same check failed on the tracked tip; its failure must not rewrite document comments. |

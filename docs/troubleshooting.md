@@ -238,7 +238,7 @@ Linear's changes reach the tracked branch through the sync pull request
 (see [usage.md](usage.md#the-sync-pull-request)).
 
 For **Suspended files waiting for a manual merge**, fix the listed
-non-document files on the suspended branch (`mdbisync/suspended` by
+files on the suspended branch (`mdbisync/suspended` by
 default), not the normal branch. For a conflict with the tracked branch,
 setting those files to the tracked branch's current versions removes the
 conflict. To keep a combined version, commit it on the tracked branch
