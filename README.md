@@ -154,35 +154,58 @@ and install it on your docs repository. Store its client ID in the variable
 
 ### 3. Run a one-time initial sync
 
-1. In the repository settings, turn on **Allow merge commits**
-   (Settings → General).
-2. Prepare the repository with mdbisync's command-line tool: `npm exec`
-   fetches it from the release, with nothing to install. In a clone of your
-   docs repository, run `init` with your folder, Linear team and,
-   optionally, project:
+1. **Prepare the repository.**
 
-   ```sh
-   npm exec --yes --package=git+https://github.com/mdbisync/mdbisync.git#<release-sha> -- \
-     mdbisync init --release-sha <release-sha> --release-version <version> \
-     --folder docs --team ENG --project Handbook \
-     --no-security-hooks
-   ```
+   - **Folder mapping.** Map folders to Linear in the front matter of their
+     `README.md`. Name a team in the top folder and a project of that team in
+     a folder below it; deeper folders inherit both (see [folder mapping](docs/usage.md#folder-mapping)). For example,
+     `docs/README.md` names the team:
 
-   It writes the sync workflows, adds the `linear-format` hook and maps the
-   folder to its team and project (see [repository files](docs/quickstart.md#repository-files)).
-   Optionally, mark your own pre-commit hooks `alias: security` (see [security hooks](docs/quickstart.md#security-hooks)).
-3. Commit the files and push them to `main`. Until the initial sync is done,
-   sync runs stop with `initial-sync-required` and write nothing.
-4. Run the initial sync workflow from the Actions tab, in one direction:
-   `git-to-linear` or `linear-to-git`. The first run is a dry run that lists
-   what would change; run it again with `confirm` to write (see the guides
-   [from git to Linear](docs/initial-sync-git-to-linear.md) and [from Linear to git](docs/initial-sync-linear-to-git.md)).
+     ```yaml
+     ---
+     linear-team: <team key or name>
+     ---
+     ```
+
+     and `docs/handbook/README.md` names a project:
+
+     ```yaml
+     ---
+     linear-project: <project name>
+     ---
+     ```
+
+   - **Format hook.** Add `linear-format` to `.pre-commit-config.yaml`, pinned
+     to the release (see [linear-format hook](docs/quickstart.md#linear-format-hook)):
+
+     ```yaml
+     repos:
+       - repo: https://github.com/mdbisync/mdbisync
+         rev: <release-sha>
+         hooks:
+           - id: linear-format
+     ```
+
+   - **Security hooks** (optional). Mark your own pre-commit hooks
+     `alias: security` (see [security hooks](docs/quickstart.md#security-hooks)).
+   - **Merge commits.** Turn on **Allow merge commits** (Settings → General).
+
+2. **Add the workflow.** Copy
+   [`mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml) to
+   `.github/workflows/` and push it to `main`.
+3. **Dry run.** In the Actions tab, run **mdbisync initial sync** in one
+   direction: `git-to-linear` or `linear-to-git`. It lists what would
+   change and writes nothing.
+4. **Real run.** Run it again in the same direction with `confirm` checked.
+   `git-to-linear` writes to Linear; `linear-to-git` opens a pull request,
+   which you review and merge with **Create a merge commit** (see the guides [from git to Linear](docs/initial-sync-git-to-linear.md) and [from Linear to git](docs/initial-sync-linear-to-git.md)).
 
 ### 4. Start ongoing sync
 
-Once the initial sync is done, the sync workflow takes over. It runs on
-every push to `main` and on a schedule, in both directions. For timely runs,
-start it from your own timer (see
+Once the initial sync is done, add the sync workflow: copy
+[`mdbisync.yml`](examples/mdbisync.yml) to `.github/workflows/` and push it
+to `main`. It runs on every push to `main` and on a schedule, in both
+directions. For timely runs, start it from your own timer (see
 [Required infrastructure](#required-infrastructure)).
 
 ## Documentation
