@@ -6,13 +6,14 @@ import { engineRequestCount, remoteRequests, isDocumentWrite, REQUESTS_PER_DOCUM
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
 import { fixText } from '../../../src/format/fix.ts';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
 import { readKeptAnnotations } from '../../../src/initial-sync/confirm.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
-import { PushedKey, readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
+import { IDS_FILE, PushedKey, readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
@@ -837,6 +838,96 @@ export function waitsOnlyForUnreadable(report: Record<string, unknown>, before: 
     && typeof entry['path'] === 'string' && before.get(entry['path']) === writeOmission([UPLOAD_UNREADABLE]));
 }
 
+/** The form `readIds` accepts for an observed digest: SHA-256 in lowercase hex. */
+const OBSERVED_DIGEST = /^[0-9a-f]{64}$/;
+
+/**
+ * The document ids whose entries changed between `old` and `next` (both a
+ * parsed `ids.json`) when they changed only in `observedDigest` values: the
+ * same paths, each with an entry equal to its old one (the same document id)
+ * apart from a digest that both record in the form `readIds` accepts. Null
+ * for any other change, and for none. A capture records Linear's new raw form
+ * of a document this way when the file text it maps to did not change, so
+ * the next sync does not read the same body again; Linear saves a table
+ * document when it is first opened.
+ */
+export function digestOnlyIdsChange(old: unknown, next: unknown): string[] | null {
+  const object = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
+  const before = object(old);
+  const after = object(next);
+  if (before === null || after === null) return null;
+  const paths = Object.keys(before);
+  if (paths.length !== Object.keys(after).length || !paths.every((path) => Object.hasOwn(after, path))) return null;
+  const changed: string[] = [];
+  for (const path of paths) {
+    const was = object(before[path]);
+    const now = object(after[path]);
+    if (was === null || now === null) return null;
+    const { observedDigest: wasDigest, ...wasRest } = was;
+    const { observedDigest: nowDigest, ...nowRest } = now;
+    if (!isDeepStrictEqual(wasRest, nowRest)) return null;
+    if (wasDigest === nowDigest) continue;
+    if (typeof wasDigest !== 'string' || typeof nowDigest !== 'string' || !OBSERVED_DIGEST.test(wasDigest) || !OBSERVED_DIGEST.test(nowDigest)) return null;
+    changed.push(String(now['id']));
+  }
+  return changed.length === 0 ? null : changed;
+}
+
+/** The message of the `ids` commit a capture makes when it records entries alone: no cursor, no held removal. */
+const BARE_CAPTURE_IDS_MESSAGE = 'Capture document ids';
+
+/**
+ * The document ids whose digests the `ids` state ref's move from `old` to
+ * `next` recorded, when that is all the move did: `next` is the ref's tip,
+ * every commit from `old` to it has one parent, changes `ids.json` alone and
+ * carries a capture's bare message (no cursor or held removal, not an initial
+ * sync's progress), and `ids.json` changed as `digestOnlyIdsChange` allows.
+ * Null for any other move; a commit git cannot read counts as one.
+ */
+export async function digestOnlyIdsMove(ctx: RunContext, old: string, next: string): Promise<string[] | null> {
+  const git = await ctx.person();
+  if (await fetchRef(git, `${ctx.names.refPrefix}/ids`) !== next) return null;
+  if ((await git.run(['merge-base', '--is-ancestor', old, next], { okCodes: [0, 1, 128] })).code !== 0) return null;
+  const listed = await git.run(['rev-list', '--parents', `${old}..${next}`], { okCodes: [0, 128] });
+  if (listed.code !== 0) return null;
+  const commits = listed.stdout.toString('utf8').split('\n').filter(Boolean).map((line) => line.split(' '));
+  if (commits.length === 0 || commits.some((line) => line.length !== 2)) return null;
+  // A bare capture message also clears the removals the last capture held: there must be none to clear.
+  const held = await git.run(['log', '-1', '--format=%B', `--grep=^${BARE_CAPTURE_IDS_MESSAGE}`, old], { okCodes: [0, 128] });
+  if (held.code !== 0 || /^Removal-held: /m.test(held.stdout.toString('utf8'))) return null;
+  for (const [commit, parent] of commits as Array<[string, string]>) {
+    // The one change: ids.json modified in place, an ordinary file before and after.
+    const raw = await git.run(['diff-tree', '--no-commit-id', '--no-renames', '--raw', '-r', parent, commit], { okCodes: [0, 128] });
+    const lines = raw.stdout.toString('utf8').split('\n').filter(Boolean);
+    if (raw.code !== 0 || lines.length !== 1 || !/^:100644 100644 [0-9a-f]+ [0-9a-f]+ M\t/.test(lines[0] as string) || !(lines[0] as string).endsWith(`\t${IDS_FILE}`)) return null;
+    const body = await git.run(['log', '-1', '--format=%B', commit], { okCodes: [0, 128] });
+    if (body.code !== 0 || body.stdout.toString('utf8').trim() !== BARE_CAPTURE_IDS_MESSAGE) return null;
+  }
+  const read = async (commit: string): Promise<unknown> => {
+    const blob = await git.run(['cat-file', 'blob', `${commit}:${IDS_FILE}`], { okCodes: [0, 128] });
+    if (blob.code !== 0) return null;
+    try {
+      return JSON.parse(blob.stdout.toString('utf8')) as unknown;
+    } catch {
+      return null;
+    }
+  };
+  return digestOnlyIdsChange(await read(old), await read(next));
+}
+
+/**
+ * Whether a sync report's capture took nothing from Linear into git and
+ * finished: no file changed, removed, held or blocked, no stop, no rebuilt
+ * ids, and none of `documents` (those whose digests it recorded) left out.
+ */
+function capturedNothing(capture: Record<string, unknown> | null | undefined, documents: readonly string[]): boolean {
+  if (capture === null || capture === undefined || !['changed', 'removed', 'heldRemovals', 'blocked', 'leftOut'].every((key) => Array.isArray(capture[key]))) return false;
+  if (!['changed', 'removed', 'heldRemovals', 'blocked'].every((key) => (capture[key] as unknown[]).length === 0)) return false;
+  if (capture['stopped'] !== undefined || capture['rebuiltIds'] !== undefined) return false;
+  const leftOut = new Set((capture['leftOut'] as unknown[]).map((entry) => (entry !== null && typeof entry === 'object' ? (entry as Record<string, unknown>)['id'] : undefined)));
+  return documents.every((id) => !leftOut.has(id));
+}
+
 export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   async I1(ctx, sides) {
     const s = await sides();
@@ -944,10 +1035,24 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
       return bad('I6', `idempotence was not established: the no-change sync run lacks a successful completed report (operation ${String(report?.['operation'])}, ok ${String(report?.['ok'])}, complete ${String(report?.['complete'])}, capture.ok ${String(capture?.['ok'])}, code ${String(report?.['code'])})`);
     }
     const after = await snapshotRefs(ctx);
-    const moved = Object.keys({ ...before, ...after }).filter((ref) => before[ref] !== after[ref]);
+    let moved = Object.keys({ ...before, ...after }).filter((ref) => before[ref] !== after[ref]);
     const writes = (proxy?.counts().mutations ?? 0) - mutationsBefore;
     const trackedMoved = world !== null && (await trackedTip(ctx)) !== trackedBefore;
     const newPullRequests = world === null ? 0 : (await world.rest.pullRequests(`t/${ctx.names.runId}/`)).length - pullRequestsBefore;
+    // The one move that is no change: the `ids` ref alone, recording Linear's new form of bodies whose files stay the
+    // same (Linear saves a table document when it is first opened), while nothing else was written anywhere.
+    const ids = `${ctx.names.refPrefix}/ids`;
+    const old = before[ids];
+    const next = after[ids];
+    // The report's own word on a pull request too: the count above reads only the newest pull requests.
+    const opened = (report?.['pullRequest'] as { pullRequest?: { opened?: unknown } | null } | null | undefined)?.pullRequest?.opened === true;
+    if (moved.length === 1 && moved[0] === ids && old !== undefined && next !== undefined && writes === 0 && !trackedMoved && newPullRequests === 0 && !opened) {
+      const documents = await digestOnlyIdsMove(ctx, old, next);
+      if (documents !== null && capturedNothing(capture, documents)) {
+        ctx.log(`I6: the ids ref moved ${old.slice(0, 12)}..${next.slice(0, 12)} only to record new observed digests of ${documents.length} documents (${documents.join(', ')}); not a change`);
+        moved = [];
+      }
+    }
     if (moved.length > 0 || writes > 0 || trackedMoved || newPullRequests > 0) {
       return bad('I6', `one more run with no changes wrote ${writes} mutations, moved ${moved.length} refs${trackedMoved ? ', moved the tracked branch' : ''} and opened ${newPullRequests} pull requests`);
     }

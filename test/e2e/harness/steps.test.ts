@@ -3044,6 +3044,93 @@ describe('I6 requires a completed no-change sync', () => {
   });
 });
 
+describe('I6 tells an ids move that only records new digests from a real change', () => {
+  const OLD = 'a'.repeat(64);
+  const NEW = 'b'.repeat(64);
+  type Entries = Record<string, Record<string, unknown>>;
+  const capture = { ok: true, changed: [] as string[], removed: [] as string[], heldRemovals: [] as string[], blocked: [] as unknown[], leftOut: [] as unknown[] };
+  const quiet = { operation: 'sync', ok: true, complete: true, capture, code: null, changed: true };
+  const digests = (entries: Entries, digest: string): Entries => Object.fromEntries(Object.entries(entries).map(([path, entry]) => [path, { ...entry, observedDigest: digest }]));
+  const without = (entries: Entries, path: string): Entries => Object.fromEntries(Object.entries(entries).filter(([key]) => key !== path));
+  const PLAN = 'eng/platform/plan.md';
+  type Effect = 'write' | 'tracked' | 'linear' | 'pull-request';
+  const cases: Array<{ name: string; next: (base: Entries) => Entries; base?: (base: Entries) => Entries; files?: Record<string, string>; via?: Record<string, string>; message?: string; startMessage?: string; mode?: string; report?: (base: Entries) => Record<string, unknown>; effect?: Effect; unrelated?: boolean; pass: boolean; detail?: RegExp }> = [
+    { name: 'passes a move whose one changed entry differs only in its digest', next: (base) => ({ ...base, [PLAN]: { ...base[PLAN], observedDigest: NEW } }), pass: true },
+    { name: 'passes new digests on every entry', next: (base) => digests(base, NEW), pass: true },
+    { name: 'fails an added id', next: (base) => ({ ...digests(base, NEW), 'eng/platform/extra.md': { id: 'document-extra', observedDigest: NEW } }), pass: false },
+    { name: 'fails a removed id', next: (base) => without(digests(base, NEW), 'eng/platform/notes.md'), pass: false },
+    { name: 'fails a path change', next: (base) => ({ ...without(digests(base, NEW), PLAN), 'eng/platform/plan-moved.md': { ...base[PLAN], observedDigest: NEW } }), pass: false },
+    { name: 'fails another document id for the same path', next: (base) => ({ ...digests(base, NEW), [PLAN]: { id: 'document-other', observedDigest: NEW } }), pass: false },
+    { name: 'fails a change to another field of an entry', next: (base) => ({ ...digests(base, NEW), [PLAN]: { ...base[PLAN], observedDigest: NEW, plainFiles: ['eng/platform/chart.png'] } }), pass: false },
+    { name: 'fails an entry that drops its digest', next: (base) => ({ ...digests(base, NEW), [PLAN]: { id: base[PLAN]!['id'] } }), pass: false },
+    { name: 'fails a digest the old entry did not record', base: (base) => ({ ...base, [PLAN]: { id: base[PLAN]!['id'] } }), next: (base) => digests(base, NEW), pass: false },
+    { name: 'fails a digest in a form the engine does not read', next: (base) => ({ ...base, [PLAN]: { ...base[PLAN], observedDigest: 'ABC' } }), pass: false },
+    { name: 'fails another state file in the ids commit', next: (base) => digests(base, NEW), files: { 'written.json': '{}' }, pass: false },
+    { name: 'fails another state file in an earlier commit of the move', next: (base) => digests(base, NEW), via: { 'written.json': '{}' }, pass: false },
+    { name: 'fails an ids commit that moves the capture cursor', next: (base) => digests(base, NEW), message: 'Capture document ids\n\nCapture-through: 2026-01-01T00:00:00.000Z', pass: false },
+    { name: 'fails an initial sync progress commit', next: (base) => digests(base, NEW), message: 'Initial sync in progress: document ids', pass: false },
+    { name: 'fails a move that clears a removal the last capture held', startMessage: 'Capture document ids\n\nRemoval-held: document-gone', next: (base) => digests(base, NEW), pass: false },
+    { name: 'fails ids.json turning executable', next: (base) => digests(base, NEW), mode: '100755', pass: false },
+    { name: 'fails a report that says it opened a pull request', next: (base) => digests(base, NEW), report: () => ({ ...quiet, pullRequest: { pullRequest: { number: 1, url: 'https://example.com/pull/1', opened: true } } }), pass: false },
+    { name: 'fails a capture that changed a file', next: (base) => digests(base, NEW), report: () => ({ ...quiet, capture: { ...capture, changed: [PLAN] } }), pass: false },
+    { name: 'fails a capture that left out a document whose digest it recorded', next: (base) => digests(base, NEW), report: (base) => ({ ...quiet, capture: { ...capture, leftOut: [{ id: base[PLAN]!['id'], rule: 'changed-during-run' }] } }), pass: false },
+    { name: 'fails a capture that stopped', next: (base) => digests(base, NEW), report: () => ({ ...quiet, capture: { ...capture, stopped: { reason: 'budget' } } }), pass: false },
+    { name: 'fails a capture report without its lists', next: (base) => digests(base, NEW), report: () => ({ ...quiet, capture: { ok: true } }), pass: false },
+    { name: 'fails a write to Linear', next: (base) => digests(base, NEW), effect: 'write', pass: false, detail: /wrote 1 mutations, moved 1 refs/ },
+    { name: 'fails another state ref that moved too', next: (base) => digests(base, NEW), effect: 'linear', pass: false, detail: /moved 2 refs/ },
+    { name: 'fails a move of the tracked branch', next: (base) => digests(base, NEW), effect: 'tracked', pass: false, detail: /moved the tracked branch/ },
+    { name: 'fails a new pull request', next: (base) => digests(base, NEW), effect: 'pull-request', pass: false, detail: /opened 1 pull requests/ },
+    { name: 'fails a move to a commit that does not descend from the old one', next: (base) => digests(base, NEW), unrelated: true, pass: false },
+  ];
+  async function commitIdsTree(git: Git, entries: Entries, parent: string | null, files: Record<string, string> = {}, message = 'Capture document ids', mode = '100644'): Promise<string> {
+    const lines: string[] = [];
+    for (const [name, text] of Object.entries({ 'ids.json': JSON.stringify(entries), ...files })) {
+      const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: text })).trim();
+      lines.push(`${name === 'ids.json' ? mode : '100644'} blob ${blob}\t${name}`);
+    }
+    const tree = (await git.text(['mktree'], { input: `${lines.join('\n')}\n` })).trim();
+    return (await git.text(['commit-tree', tree, ...(parent === null ? [] : ['-p', parent]), '-m', message])).trim();
+  }
+  for (const fixture of cases) it(fixture.name, async () => {
+    const { ctx, remoteGit, ids } = await fakeRun();
+    const { INVARIANT_CHECKS, snapshotRefs } = await import('./checks.ts');
+    const ref = `${ctx.names.refPrefix}/ids`;
+    const base = (fixture.base ?? ((entries) => entries))(digests(ids, OLD));
+    const start = await commitIdsTree(remoteGit, base, (await remoteGit.text(['rev-parse', ref])).trim(), {}, fixture.startMessage);
+    await remoteGit.run(['update-ref', ref, start]);
+    mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
+    ctx.observations.set('refHistory', [await snapshotRefs(ctx)]);
+    mkdirSync(await ctx.engineClone(), { recursive: true });
+    // The no-change run's ids move, made here; its other effects are the driver's below.
+    const next = fixture.next(base);
+    const parent = fixture.unrelated === true ? null : fixture.via === undefined ? start : await commitIdsTree(remoteGit, next, start, fixture.via);
+    await remoteGit.run(['update-ref', ref, await commitIdsTree(remoteGit, next, parent, fixture.files, fixture.message, fixture.mode)]);
+    const driver = join(ctx.runDir, 'digest-sync.mjs');
+    const marker = join(ctx.runDir, 'effect');
+    const moves: Record<string, string> = { tracked: `refs/heads/${ctx.names.trackedBranch}`, linear: `${ctx.names.refPrefix}/linear` };
+    const move = fixture.effect === 'tracked' || fixture.effect === 'linear' ? moves[fixture.effect] : undefined;
+    writeFileSync(driver, `
+      import { spawnSync } from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      writeFileSync(process.env.MDBISYNC_REPORT_FILE, ${JSON.stringify(JSON.stringify((fixture.report ?? (() => quiet))(base)))});
+      ${fixture.effect === 'write' || fixture.effect === 'pull-request' ? `writeFileSync(${JSON.stringify(marker)}, 'done');` : ''}
+      ${move === undefined ? '' : `spawnSync('git', ['--git-dir', ${JSON.stringify(remoteGit.dir)}, 'update-ref', ${JSON.stringify(move)}, ${JSON.stringify(start)}], { stdio: 'inherit' });`}
+    `);
+    ctx.proxy!.counts = () => ({ total: 0, queries: 0, mutations: fixture.effect === 'write' && existsSync(marker) ? 1 : 0, injected: 0 });
+    if (fixture.effect === 'pull-request') (ctx.live as { rest: unknown }).rest = { pullRequests: async () => (existsSync(marker) ? [{}] : []) };
+    const previous = process.env['MDBISYNC_ENGINE'];
+    process.env['MDBISYNC_ENGINE'] = driver;
+    try {
+      const outcome = await INVARIANT_CHECKS.I6(ctx, () => assert.fail('I6 does not need document bodies'));
+      assert.equal(outcome.ok, fixture.pass, outcome.detail);
+      if (!fixture.pass) assert.match(outcome.detail ?? '', fixture.detail ?? /wrote 0 mutations, moved 1 refs/);
+    } finally {
+      if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
+      else process.env['MDBISYNC_ENGINE'] = previous;
+    }
+  });
+});
+
 describe('GraphQL HTTP fault scenario', () => {
   it('runs L5-07 OAuth setup and injects ListDocuments with exactly one real transport retry', async () => {
     const { ctx } = await fakeRun();
