@@ -56,7 +56,7 @@ Two workflows do the work:
   equal to `main`, or opens a pull request that makes `main` equal to Linear.
 - **Sync**, run on every push to `main` and on a schedule, keeps both sides
   equal from then on. GitHub's schedule can be late, so for timely runs start
-  it from your own timer (see [Scheduler](#scheduler)).
+  it from your own timer (see [Required infrastructure](#required-infrastructure)).
 
 ## Conflicts
 
@@ -99,6 +99,30 @@ Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
   API has no conditional write, so the risk cannot be removed entirely
   (see [editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
 - The repository must be on GitHub.
+
+## Required infrastructure
+
+A push to `main` starts a sync immediately. Edits in Linear are collected and
+reach git with the next scheduled run. So it is important to run your
+workflow on a reliable schedule.
+
+### Your own scheduler
+
+GitHub Actions has a `schedule` trigger, but GitHub does not keep to it. In
+public repositories it is barely followed and turns itself off after 60 days
+without activity; on paid plans it runs late and often skips a run.
+
+So you need a server of your own with a simple cron job or systemd timer
+that starts the workflow on schedule (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
+
+### A self-hosted runner
+
+A private repository on GitHub Free gets 2,000 Actions minutes a month,
+enough to run the sync about every 30 minutes. To sync more often
+(recommended), you need more minutes: a sync every five minutes takes about
+8,000 minutes a month. Either pay GitHub for them or set up a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners),
+which costs you only the expense of the server itself (see [Choose the interval](docs/own-scheduler.md#choose-the-interval)).
+If you sync a public repository with Linear, its GitHub Actions minutes are free.
 
 ## Setup
 
@@ -165,18 +189,7 @@ is merged), enable it again. It runs on every push to
 `main`, on GitHub's schedule and by hand, in both directions.
 
 Do not rely on GitHub's schedule to bring Linear edits to git: start the
-workflow from a timer of your own (see [Scheduler](#scheduler)).
-
-## Scheduler
-
-A push to `main` starts a sync run at once. A Linear edit waits for the
-next run, and GitHub's schedule can start it hours late or skip it, and
-turns itself off in a public repository after 60 days without activity.
-
-For timely runs, start the sync workflow every few minutes from a timer of
-your own (cron, a systemd timer or another scheduler), with a token that may
-only start workflows in this repository. Keep GitHub's schedule as a
-fallback (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
+workflow from a timer of your own (see [Required infrastructure](#required-infrastructure)).
 
 ## Documentation
 

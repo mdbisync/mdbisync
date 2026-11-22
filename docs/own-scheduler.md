@@ -87,23 +87,33 @@ so this page gives no recipe for it.
 
 ## Choose the interval
 
-Each dispatch is one run. In a public repository runs on GitHub's standard
-hosted runners cost nothing. In a private repository on GitHub-hosted
-runners each run is billed, rounded up to a whole minute per job. The
-table counts the timer's runs; the scheduled runs GitHub starts and the
-runs pushes start come on top:
+Each dispatch is one run. Runs of a public repository on GitHub's standard
+hosted runners cost nothing. In a private repository each run on a
+GitHub-hosted runner is billed against your plan's included minutes (2,000 a
+month on GitHub Free), rounded up to a whole minute per job. The table
+counts the timer's runs; runs that pushes start and GitHub's own scheduled
+runs come on top:
 
 | Interval | Runs a day | Minutes a month (30 days), at least |
 | --- | --- | --- |
 | 5 minutes | 288 | 8,640 |
 | 10 minutes | 144 | 4,320 |
 | 15 minutes | 96 | 2,880 |
+| 30 minutes | 48 | 1,440 |
 
-Compare that with the minutes your plan includes and with the terms for
-self-hosted runners on
-[GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
-Where minutes matter, 10 or 15 minutes is a reasonable interval. An
-interval shorter than a run only keeps one run waiting behind it.
+- **Within the free minutes.** On GitHub Free, a 30-minute interval fits in
+  the 2,000 minutes and leaves room for the runs pushes start. Make the
+  workflow's own `schedule:` fallback rare as well, for example
+  `0 */6 * * *`: at every five minutes, the runs GitHub does start use up
+  the rest.
+- **Every five minutes,** for a sync that feels immediate: about 8,640
+  minutes a month. Pay GitHub for the extra minutes, or run the workflow on
+  a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners)
+  by setting its `runs-on` to the runner's labels; that costs only your
+  server. Prices and the terms for self-hosted runners are in
+  [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+
+An interval shorter than a run only keeps one run waiting behind it.
 
 ## A dispatch script
 
