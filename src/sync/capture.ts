@@ -28,7 +28,7 @@ import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
-import { readPlainFileProvenance, repairSet } from './pull-repairs.ts';
+import { readPlainFileProvenance, repairSet, signRepair, signedRepair } from './pull-repairs.ts';
 import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
 import { pendingMove, syncedPlaces } from './tracked-places.ts';
@@ -299,9 +299,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     // Older ids entries have no digest. Read those bodies once so a later write can still verify them if the
     // attachment cache is unavailable.
+    // A stored repair the sync did not sign (one recorded before repairs were signed, or written into the ref) is
+    // never applied: its document is read again, so its repair is recorded anew, signed, or dropped.
+    const unsignedRepair = (old: {path: string; entry: IdEntry}) => old.entry.pullRewrite !== undefined && signedRepair(context.pushedKey, old.path, old.entry) === undefined;
     let selected = [...listed.values()].filter((doc) => {
       const old = byId.get(doc.id);
       return old === undefined || marked(doc) || (old.entry.observedDigest === undefined && live(doc) && previous.has(old.path) && !excludedPath(old.path))
+        || (unsignedRepair(old) && live(doc) && previous.has(old.path))
         || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor));
     });
     const invalidZone = (doc: LinearDocument, path: string) => {
@@ -693,9 +697,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         throw error;
       }
     };
+    // The documents whose entry this capture records anew: only their repairs are this capture's to sign.
+    const recordedNow = new Set<string>();
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
       if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
+      recordedNow.add(id);
       if (old !== undefined && old.path !== candidate.path) {
         removeBody(old.path);
         ids.delete(old.path);
@@ -712,7 +719,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const deadUploads = candidate.assets.deadUploads ?? [];
         entry.pullRewrite = {hash: createHash('sha256').update(observed).digest('hex'), observedHash: createHash('sha256').update(candidate.doc.content ?? '').digest('hex'), replacement: String(repaired),
           images: imageLinks(candidate.doc.content ?? '', new Set(deadUploads)).images};
-        if (old?.entry.pullRewrite?.hash === entry.pullRewrite.hash && old.entry.pullRewrite.source !== undefined) entry.pullRewrite.source = old.entry.pullRewrite.source;
+        const recorded = old === undefined ? undefined : signedRepair(context.pushedKey, old.path, old.entry);
+        if (recorded?.hash === entry.pullRewrite.hash && recorded.source !== undefined) entry.pullRewrite.source = recorded.source;
+        entry.pullRewrite = signRepair(context.pushedKey, candidate.path, id, entry.pullRewrite);
       }
       ids.set(candidate.path, entry);
       for (const [path, content] of candidate.files) {
@@ -741,8 +750,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity, sign: signObservation(context.pushedKey) });
     if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
-    for (const [path, entry] of ids) if (candidates.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
-      ids.set(path, {...entry, pullRewrite: {...entry.pullRewrite, source: linearCommit}});
+    for (const [path, entry] of ids) if (recordedNow.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
+      ids.set(path, {...entry, pullRewrite: signRepair(context.pushedKey, path, entry.id, {...entry.pullRewrite, source: linearCommit})});
     }
     // Record a held removal, and a cleared one, so the next capture reads what this one held.
     // The cursor alone moves no ref. It moves when capture records a change to the

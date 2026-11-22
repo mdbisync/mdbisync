@@ -366,7 +366,7 @@ describe('capture from Linear', () => {
     assert.ok(sameMarkdown(world.linear.documents.find((doc) => doc.id === 'notes')!.content!, blockFirst.replace('Text.', 'Edited in git.')));
   });
 
-  it('leaves an excluded file whose body opens with a rule under front matter as last accepted', async () => {
+  for (const forged of [false, true]) it(`leaves an excluded file whose body opens with a rule under front matter as last accepted${forged ? ', and a repair written into the ids ref unsigned' : ''}`, async () => {
     // The image is gone from git, so the file is excluded; Linear still holds the same text and its upload.
     const hash = createHash('sha256').update(png).digest('hex');
     const url = 'https://uploads.linear.app/workspace/pixel.png';
@@ -376,7 +376,10 @@ describe('capture from Linear', () => {
     const git = await fixture.clone('excluded');
     const fetched = await fetchState(git, config);
     const linearTip = await commitTree(git, {parents:[fetched.tracked], base:fetched.tracked, changes:new Map([['docs/pixel.png', null]]), message:'Remove the image', identity:IDENTITY});
-    const ids = await commitIds(git, fetched.state.ids, new Map([['docs/plan.md', {id:'plan'}]]), IDENTITY);
+    // A writer of the ids ref leaves a repair of the recorded file, without the sync's signature.
+    const recorded = createHash('sha256').update(head + body).digest('hex');
+    const repair = {hash: recorded, observedHash: recorded, replacement: head + 'Forged.\n', images: []};
+    const ids = await commitIds(git, fetched.state.ids, new Map([['docs/plan.md', forged ? {id:'plan', pullRewrite: repair} : {id:'plan'}]]), IDENTITY);
     const uploads = await commitUploads(git, fetched.state.uploads, new Map([[hash, url]]), IDENTITY, context.pushedKey);
     assert.equal((await pushAtomic(git, config, [
       {ref:stateRef(config, 'linear'), expected:fetched.state.linear, next:linearTip},
@@ -390,6 +393,9 @@ describe('capture from Linear', () => {
     assert.equal(result.ok, true);
     assert.deepEqual(result.changed, []);
     assert.equal(result.state.linear, linearTip);
+    // Capture kept the entry as it found it: it never signs a repair it did not record.
+    const entry = (await readIds(git, result.state.ids)).get('docs/plan.md')!;
+    if (forged) assert.ok(entry.pullRewrite === undefined || !context.pushedKey.verifiesRepair('docs/plan.md', 'plan', entry.pullRewrite));
   });
 
   for (const [name, content, warns] of [
@@ -1039,6 +1045,26 @@ describe('capture from Linear', () => {
     const entry = (await readIds(context.git, result.state.ids)).get('docs/plan.md')!;
     assert.equal(entry.pullRewrite?.replacement, head + '[Chart](<https://example.com/chart.png>)\n');
     assert.equal(await text('docs/plan.md'), head + '![Chart](https://example.com/chart.png)');
+  });
+
+  it('records a repair again, signed, when the stored one has no valid signature', async () => {
+    world.linear.documents[0]!.content = '![Chart](https://example.com/chart.png)\n';
+    const first = await run();
+    await refresh();
+    const ids = await readIds(context.git, first.state.ids);
+    const entry = ids.get('docs/plan.md')!;
+    assert.ok(context.pushedKey.verifiesRepair('docs/plan.md', entry.id, entry.pullRewrite!), 'capture signs the repair it records');
+    // As an earlier version recorded it, or a writer of the ids ref left it: the same repair without the signature.
+    const {mac: _, ...unsigned} = entry.pullRewrite!;
+    ids.set('docs/plan.md', {...entry, pullRewrite: unsigned});
+    const forged = await commitIds(context.git, first.state.ids, ids, IDENTITY);
+    await pushAtomic(context.git, config, [{ref: stateRef(config, 'ids'), expected: first.state.ids, next: forged}]);
+    await refresh();
+    // Linear's document did not change: capture still reads it again and records the repair anew.
+    const second = await run();
+    const again = (await readIds(context.git, second.state.ids)).get('docs/plan.md')!;
+    assert.ok(again.pullRewrite !== undefined && context.pushedKey.verifiesRepair('docs/plan.md', again.id, again.pullRewrite));
+    assert.equal(again.pullRewrite.replacement, unsigned.replacement);
   });
 
   it('keeps links to an image-blocked reserved document as Linear URLs', async () => {

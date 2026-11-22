@@ -4,8 +4,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { Git } from '../state/index.ts';
-import { IDENTITY, signTip } from '../state/test-helpers.ts';
+import { IDENTITY, TEST_PUSHED_KEY, signTip } from '../state/test-helpers.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
+import { signRepair } from './pull-repairs.ts';
 
 describe('repair state scope', () => {
   const h = pullRequestHarness();
@@ -19,7 +20,9 @@ describe('repair state scope', () => {
     await signTip(h.fixture.remote);
     const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
     const hash = createHash('sha256').update(source).digest('hex');
-    const forged = { id: duplicate ? ids['combined/guide.md'].id : 'unknown-document', pullRewrite: {hash, observedHash: hash, replacement: 'name: Replaced\n', images: []},
+    // Signed as the sync's own, so the scope checks are what this reaches.
+    const id = duplicate ? ids['combined/guide.md'].id : 'unknown-document';
+    const forged = { id, pullRewrite: signRepair(TEST_PUSHED_KEY, path, id, {hash, observedHash: hash, replacement: 'name: Replaced\n', images: []}),
       ...(suspended ? {suspended: {noticeId: randomUUID(), paths: [path], checks: []}} : {}) };
     await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify({[path]: forged, ...ids}));
     await h.editInLinear('combined/guide.md', '# Guide\n\nA new paragraph.\n');
@@ -73,7 +76,8 @@ describe('repair state scope', () => {
     const replacement = `# Guide\n\nReplaced text${flagged ? ` ${CANARY}` : ''}.\n`;
     const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
     const hash = createHash('sha256').update(source).digest('hex');
-    ids[path] = {...ids[path], pullRewrite: {hash, observedHash: hash, replacement, images: []},
+    // Signed as the sync's own, so the hooks are what this reaches.
+    ids[path] = {...ids[path], pullRewrite: signRepair(TEST_PUSHED_KEY, path, ids[path].id, {hash, observedHash: hash, replacement, images: []}),
       ...(suspended ? {suspended: {noticeId: randomUUID(), paths: [path], checks: []}} : {})};
     await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify(ids));
     await h.editInLinear('combined/page-0.md', '# Page 0\n\nA new paragraph.\n');
@@ -94,6 +98,39 @@ describe('repair state scope', () => {
     if (!flagged) assert.ok(published.includes(replacement), 'a repair the hooks pass is applied');
   });
 
+  // The ids ref is taken as any writer left it: a repair the sync did not sign never reaches a branch, whatever
+  // the hooks say about its text.
+  for (const suspended of [false, true]) for (const hooks of [false, true]) it(`ignores a repair written into the ids ref (suspended ${suspended}, hooks ${hooks})`, async () => {
+    if (suspended) await h.suspendOne();
+    if (hooks) {
+      await h.gitEdit('canary-check.mjs', CHECK);
+      await h.gitEdit('.pre-commit-config.yaml', await hookConfig());
+    }
+    const path = 'combined/guide.md';
+    const source = (await h.fixture.remote.run(['show', `refs/mdbisync/linear:${path}`])).stdout;
+    // Text the hooks do not flag: only the missing signature keeps it out.
+    const token = 'forged-token-7c2a';
+    const replacement = `# Guide\n\nReplaced text ${token}.\n`;
+    const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
+    const hash = createHash('sha256').update(source).digest('hex');
+    ids[path] = {...ids[path], pullRewrite: {hash, observedHash: hash, replacement, images: []},
+      ...(suspended ? {suspended: {noticeId: randomUUID(), paths: [path], checks: []}} : {})};
+    await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify(ids));
+    await h.editInLinear('combined/page-0.md', '# Page 0\n\nA new paragraph.\n');
+    for (let run = 0; run < 2; run++) {
+      const result = await h.sync();
+      assert.equal(result.result.exitCode, 0, result.result.stderr);
+      for (const branch of [SYNC_BRANCH, h.SUSPENDED, 'refs/heads/main']) {
+        const exists = await h.fixture.remote.run(['rev-parse', '--verify', '--quiet', branch], {okCodes: [0, 1]});
+        if (exists.code !== 0) continue;
+        for (const commit of (await h.fixture.remote.text(['rev-list', branch])).split('\n').filter(Boolean)) {
+          const file = await h.fixture.remote.run(['show', `${commit}:${path}`], {okCodes: [0, 128]});
+          if (file.code === 0) assert.ok(!file.stdout.toString('utf8').includes(token), `${branch} ${commit}, run ${run + 1}`);
+        }
+      }
+    }
+  });
+
   // The suspended lane takes in the view the same way; a forged lane repair cannot be kept across runs there, since
   // the lane's hold mark makes each capture record the document again.
   it('holds a repair the hooks refuse, then applies it once they pass it', async () => {
@@ -106,7 +143,7 @@ describe('repair state scope', () => {
     const source = (await h.fixture.remote.run(['show', `refs/mdbisync/linear:${path}`])).stdout;
     const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
     const hash = createHash('sha256').update(source).digest('hex');
-    ids[path] = {...ids[path], pullRewrite: {hash, observedHash: hash, replacement, images: []}};
+    ids[path] = {...ids[path], pullRewrite: signRepair(TEST_PUSHED_KEY, path, ids[path].id, {hash, observedHash: hash, replacement, images: []})};
     await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify(ids));
     await h.editInLinear('combined/page-0.md', '# Page 0\n\nA new paragraph.\n');
     const held = await h.sync();
@@ -132,7 +169,7 @@ describe('repair state scope', () => {
     const source = await signTip(h.fixture.remote);
     const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
     const hash = createHash('sha256').update(observed).digest('hex');
-    ids[path] = {...ids[path], pullRewrite: {source, hash, observedHash: hash, replacement: `# Guide\n\nRepaired ${CANARY}.\n`, images: []}};
+    ids[path] = {...ids[path], pullRewrite: signRepair(TEST_PUSHED_KEY, path, ids[path].id, {source, hash, observedHash: hash, replacement: `# Guide\n\nRepaired ${CANARY}.\n`, images: []})};
     await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify(ids));
     await h.editInLinear('combined/page-0.md', '# Page 0\n\nA new paragraph.\n');
     for (let run = 0; run < 3; run++) {

@@ -1,6 +1,6 @@
 // A checked branch view is derived from an observation without changing the observation ref.
 import { createHash } from 'node:crypto';
-import { type Git, type Oid, type IdMap, type IdEntry, type CommitIdentity, type StateSnapshot, listTree, buildTree, readIds } from '../state/index.ts';
+import { type Git, type Oid, type IdMap, type IdEntry, type CommitIdentity, type StateSnapshot, type PushedKey, listTree, buildTree, readIds } from '../state/index.ts';
 import { candidateFiles, mapFiles, type Zone } from '../mapping/index.ts';
 import { MAPPING_TREE_BYTES, MappingBlobBudget } from '../mapping/blobs.ts';
 import { isSyncedChange, oneLine } from './head-check.ts';
@@ -15,14 +15,42 @@ type Repair = NonNullable<IdEntry['pullRewrite']>;
 /** The set of files the hooks see for a repair: its text alone, the same in every step that asks about it. */
 export const repairSet = (path: string, replacement: string): Map<string, string> => new Map([[path, replacement]]);
 
-/** The repairs a view would apply: mapped synchronized documents with a unique id, still holding the observed text. */
-async function pendingRepairs(git: Git, linear: Oid, ids: IdMap, zones: ReadonlyMap<string, Zone>, paths?: ReadonlySet<string>): Promise<Map<string, Repair>> {
+/** `repair` for the document `id` at `path`, with the sync's signature. */
+export function signRepair(key: PushedKey, path: string, id: string, repair: Repair): Repair {
+  const {mac: _, ...unsigned} = repair;
+  return {...unsigned, mac: key.repairMac(path, id, unsigned)};
+}
+
+/**
+ * The ids ref is taken as any writer left it, so a stored repair is the sync's own only when it carries the sync's
+ * signature for its path and document (`PushedKey.repairMac`). An unsigned one is never applied or trusted as the
+ * held text; capture reads its document again and records the repair anew.
+ */
+export function signedRepair(key: PushedKey, path: string, entry: IdEntry): Repair | undefined {
+  return entry.pullRewrite !== undefined && key.verifiesRepair(path, entry.id, entry.pullRewrite) ? entry.pullRewrite : undefined;
+}
+
+/** The entries of `ids`, with every repair the sync did not sign left out (`signedRepair`). */
+export function signedRepairs(ids: IdMap, key: PushedKey): IdMap {
+  return new Map([...ids].map(([path, entry]) => {
+    if (entry.pullRewrite === undefined || signedRepair(key, path, entry) !== undefined) return [path, entry];
+    const {pullRewrite: _, ...rest} = entry;
+    return [path, rest];
+  }));
+}
+
+/**
+ * The repairs a view would apply: mapped synchronized documents with a unique id, still holding the observed text.
+ * `unsigned` are the paths whose stored repair would apply but lacks the sync's signature.
+ */
+async function pendingRepairs(git: Git, linear: Oid, ids: IdMap, zones: ReadonlyMap<string, Zone>, key: PushedKey, paths?: ReadonlySet<string>): Promise<{repairs: Map<string, Repair>; unsigned: Set<string>}> {
   // A repeated id has no canonical path. Check the complete map, before selecting a lane.
   const counts = new Map<string, number>();
   for (const entry of ids.values()) counts.set(entry.id, (counts.get(entry.id) ?? 0) + 1);
   const pending = [...ids].filter(([path, entry]) => entry.pullRewrite !== undefined && counts.get(entry.id) === 1 && (paths === undefined || paths.has(path)));
   const repairs = new Map<string, Repair>();
-  if (pending.length === 0) return repairs;
+  const unsigned = new Set<string>();
+  if (pending.length === 0) return {repairs, unsigned};
   const entries = new Map((await listTree(git, linear, MAPPING_TREE_BYTES)).map(entry => [entry.path, entry]));
   const files = candidateFiles([...entries.values()], zones);
   const blobs = await new MappingBlobBudget().read(git, files);
@@ -34,22 +62,26 @@ async function pendingRepairs(git: Git, linear: Oid, ids: IdMap, zones: Readonly
     const repair = entry.pullRewrite!;
     if (source === undefined || createHash('sha256').update(source).digest('hex') !== repair.hash) continue;
     if (source.toString('utf8') === repair.replacement) continue;
-    repairs.set(path, repair);
+    if (signedRepair(key, path, entry) === undefined) unsigned.add(path);
+    else repairs.set(path, repair);
   }
-  return repairs;
+  return {repairs, unsigned};
 }
 
 /**
  * The ids ref only stores a repair's text; it is not the text the hooks checked. Each replacement is applied only
- * when the tracked branch's security hooks pass its exact bytes. The document of a refused or unanswered one keeps
- * its version in `hold` (the branch the view is merged into), so neither the repair nor the observation it would
- * replace is proposed: the write step leaves it waiting for its repair, and a later run asks again.
+ * when the sync signed it (`signedRepair`) and the tracked branch's security hooks pass its exact bytes. The document
+ * of an unsigned, refused or unanswered one keeps its version in `hold` (the branch the view is merged into), so
+ * neither the repair nor the observation it would replace is proposed: the write step leaves it waiting for its
+ * repair, and a later run asks again.
  */
-export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: ReadonlyMap<string, Zone>, identity: CommitIdentity, gate: RepairGate, hold: Oid, paths?: ReadonlySet<string>): Promise<{commit: Oid; notes: string[]}> {
+export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: ReadonlyMap<string, Zone>, identity: CommitIdentity, gate: RepairGate, key: PushedKey, hold: Oid, paths?: ReadonlySet<string>): Promise<{commit: Oid; notes: string[]}> {
   const changes = new Map<string, string>();
   const held = new Set<string>();
   const notes: string[] = [];
-  for (const [path, repair] of await pendingRepairs(git, linear, ids, zones, paths)) {
+  const {repairs, unsigned} = await pendingRepairs(git, linear, ids, zones, key, paths);
+  for (const path of unsigned) held.add(path);
+  for (const [path, repair] of repairs) {
     const findings = await gate.check(repairSet(path, repair.replacement));
     if (findings === null || findings.length > 0) { held.add(path); continue; }
     changes.set(path, repair.replacement);
@@ -69,9 +101,9 @@ export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: 
 }
 
 /** The staged steps' first step: asks the hooks about every repair the state refs hold, so the last step can apply it. */
-export async function stagePullRepairs(git: Git, state: StateSnapshot, zones: ReadonlyMap<string, Zone>, gate: RepairGate): Promise<void> {
+export async function stagePullRepairs(git: Git, state: StateSnapshot, zones: ReadonlyMap<string, Zone>, gate: RepairGate, key: PushedKey): Promise<void> {
   if (state.linear === null) return;
-  const repairs = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones);
+  const {repairs} = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones, key);
   for (const [path, repair] of repairs) await gate.check(repairSet(path, repair.replacement));
 }
 

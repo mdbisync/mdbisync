@@ -12,7 +12,7 @@ export {
   suspendedBranch,
 } from './config.ts';
 export { Git, GitError, GitOutputLimitError, type Oid } from './git.ts';
-export { PushedKey, type PushedRecord } from './pushed.ts';
+export { PushedKey, type PushedRecord, type SignedRepair } from './pushed.ts';
 export { signObservation, signedObservation, trustedObservation } from './observation.ts';
 export { type LfsPointer, type LfsRead, type LfsReadResult, GitLfsMissingError, lfsPush, lfsReader, lfsRemote, type LfsRemote, missingLfsObjects, parseLfsPointer, requireGitLfs } from './lfs.ts';
 export { type CommitIdentity, type CommitSpec, NEUTRAL_IDENTITY, type TreeEntry, buildTree, checkRepoPath, commitTree, listTree, readBlobs, writeBlob } from './objects.ts';

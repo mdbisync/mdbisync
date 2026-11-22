@@ -350,8 +350,11 @@ export interface IdEntry {
   observedDigest?: string | undefined;
   /** Targets introduced as path images in Linear; ordinary links to them must never upload files. */
   plainFiles?: string[];
-  /** A checked pull repair, bound to the exact recorded file; Linear still holds the source. */
-  pullRewrite?: { source?: Oid; hash: string; observedHash: string; replacement: string; images: Array<{image: number; total: number; line: number}> };
+  /**
+   * A checked pull repair, bound to the exact recorded file; Linear still holds the source. `mac` is the sync's
+   * signature of it (`PushedKey.repairMac`): a repair without a valid one, in any form, is not the sync's and is never applied.
+   */
+  pullRewrite?: { source?: Oid; hash: string; observedHash: string; replacement: string; images: Array<{image: number; total: number; line: number}>; mac?: string };
   /** The active hold; retained across renames and captured removals. */
   suspended?: SuspensionEpisode;
   /** First write after release must use this Linear commit as its base. */
