@@ -109,7 +109,7 @@ class Writer {
         return this.paragraph(node);
       case 'heading':
         // A setext heading can span lines; an ATX heading is one line.
-        return [`${'#'.repeat(node.depth)} ${this.inline(node.children).replace(/[ \t]*\n[ \t]*/g, ' ')}`.trimEnd()];
+        return [`${'#'.repeat(node.depth)} ${joinLines(this.inline(node.children))}`.trimEnd()];
       case 'thematicBreak':
         return ['---'];
       case 'blockquote': {
@@ -496,4 +496,27 @@ function prefixLines(text: string, prefix: string, empty: string): string {
     .split('\n')
     .map((line) => (line === '' ? empty : prefix + line))
     .join('\n');
+}
+
+/**
+ * Joins lines with one space, dropping the spaces and tabs around each line
+ * break. An index scan keeps it linear: a regular expression that looks for
+ * the break after a run of spaces rescans the run from each of its positions.
+ */
+function joinLines(text: string): string {
+  if (!text.includes('\n')) return text;
+  const lines = text.split('\n');
+  return lines
+    .map((line, index) => {
+      let start = 0;
+      let end = line.length;
+      if (index > 0) while (start < end && isSpaceOrTab(line[start]!)) start += 1;
+      if (index < lines.length - 1) while (end > start && isSpaceOrTab(line[end - 1]!)) end -= 1;
+      return line.slice(start, end);
+    })
+    .join(' ');
+}
+
+function isSpaceOrTab(char: string): boolean {
+  return char === ' ' || char === '\t';
 }

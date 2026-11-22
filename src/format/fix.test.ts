@@ -4,6 +4,7 @@
 
 import type { List } from 'mdast';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { linkedFileCheck } from './lint.ts';
@@ -240,6 +241,58 @@ describe('what fix leaves alone', () => {
 
   it('writes a setext heading of two lines as one ATX line', () => {
     assert.equal(fixText('Title\nmore\n====='), '# Title more');
+  });
+
+  it('drops the spaces and tabs around each line break of a setext heading and keeps the others', () => {
+    assert.equal(fixText('Title \t\n\t more\n====='), '# Title more');
+    assert.equal(fixText('a\t\t\n\t\tb\n---'), '## a b');
+    assert.equal(fixText('a  \n  b\n==='), '# a b');
+    assert.equal(fixText('# a     b'), '# a     b');
+    assert.equal(fixText('a \t b\nc\n==='), '# a \t b c');
+  });
+
+  // The heading's lines were joined by a regular expression that rescanned a
+  // run of spaces or tabs from each of its positions: a heading holding a run
+  // of the content limit took over a minute. The ATX headings are one line;
+  // the setext headings span lines and hold the run inside a line or right
+  // before a line break. A child process runs them, so the parent's timeout
+  // stops a stall that a test timeout could not interrupt; each run is
+  // measured against a parse of the same text.
+  it('fixes a heading holding a run of spaces or tabs of the content limit in about the time of its parse', { timeout: 120_000 }, () => {
+    const script = `
+      import { CONTENT_LIMIT } from ${JSON.stringify(new URL('./rules.ts', import.meta.url).href)};
+      import { fixText } from ${JSON.stringify(new URL('./fix.ts', import.meta.url).href)};
+      import { parse } from ${JSON.stringify(new URL('./markdown.ts', import.meta.url).href)};
+      const spaces = ' '.repeat(CONTENT_LIMIT - 10);
+      const tabs = '\\t'.repeat(CONTENT_LIMIT - 10);
+      const cases = {
+        'ATX, spaces': ['# a' + spaces + 'b', '# a' + spaces + 'b'],
+        'ATX, tabs': ['# a' + tabs + 'b', '# a' + tabs + 'b'],
+        'setext, run inside a line': ['a' + spaces + 'x\\nb\\n===', '# a' + spaces + 'x b'],
+        'setext, run before a line break': ['a' + spaces + '\\nb\\n===', '# a b'],
+      };
+      const result = {};
+      for (const [name, [text, expected]] of Object.entries(cases)) {
+        let start = performance.now();
+        parse(text);
+        const parseMs = performance.now() - start;
+        start = performance.now();
+        const fixed = fixText(text);
+        result[name] = { parseMs, fixMs: performance.now() - start, expected: fixed === expected };
+      }
+      console.log(JSON.stringify(result));
+    `;
+    const child = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { encoding: 'utf8', timeout: 100_000 });
+    assert.equal(child.signal, null, 'fix did not finish within the parent timeout');
+    assert.equal(child.status, 0, child.stderr);
+    const result = JSON.parse(child.stdout) as Record<string, { parseMs: number; fixMs: number; expected: boolean }>;
+    assert.deepEqual(Object.keys(result), ['ATX, spaces', 'ATX, tabs', 'setext, run inside a line', 'setext, run before a line break']);
+    for (const [name, { parseMs, fixMs, expected }] of Object.entries(result)) {
+      assert.ok(expected, `${name}: fix writes the heading on one line, the run kept inside it`);
+      const times = `${name}: parse ${Math.round(parseMs)} ms, fix ${Math.round(fixMs)} ms`;
+      // fix lints and parses the text a few times; the join adds little beside that.
+      assert.ok(fixMs < 10 * parseMs + 5_000, times);
+    }
   });
 
   it('keeps image alt text and destinations valid', () => {
