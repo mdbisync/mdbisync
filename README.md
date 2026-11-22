@@ -81,20 +81,8 @@ Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
 
 ## Security
 
-Every final release is reviewed before it is built: by two frontier language
-models (Fable and Astra) and by GitHub CodeQL, whose results are in the
-[security reports](https://mdbisync.com/security/report), and by a
-[dependency scan](https://mdbisync.com/security/dependencies). The image
-counts the open findings of severity high and critical for each; the release
-report also lists every dismissed finding with its reason and the risks we
-accept. The dependency scan runs again every six hours on the latest release,
-so its count follows advisories published after the release; the advisories it
-excepts are listed with their reasons in
-[`security/dependency-exceptions.json`](security/dependency-exceptions.json).
-Each release also carries an SPDX SBOM of its bundled packages
-(`sbom.spdx.json`), and every file of a final release commit is signed with build
-provenance and SBOM attestations; [Verify a release](docs/usage.md#verify-a-release)
-shows how to check them.
+Every release is reviewed by frontier models, GitHub CodeQL and dependency
+scanners. (see  [Security reports](https://mdbisync.com/security/report) and  [Dependency scan](https://mdbisync.com/security/dependencies))
 
 <p align="center">
   <a href="https://mdbisync.com/security/report">
