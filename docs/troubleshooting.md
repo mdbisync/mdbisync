@@ -291,12 +291,17 @@ this time:
 | --- | --- |
 | `edited-in-linear` | Changed in Linear since it was read; the next run takes that change in and writes again. |
 | `missing-in-linear` | Not found in Linear, or in its trash; the next run takes that in. |
-| `conflict` | Changed on both sides in a way git cannot merge or exceeded a Markdown merge limit. If the sync skipped the document without writing markers, check both versions for very long runs of `<`, `=` or `>` and resolve any differences manually. The sync keeps both versions until the conflict is resolved. |
+| `conflict` | Changed on both sides in a way git cannot merge; it is written when the conflict is resolved. |
 | `pull-repair-pending` | Waiting for the pull request carrying its image or link repair to merge. |
 | `suspended` | Waits for its suspended changes to reach the main branch. |
 | `renamed-to-unwritable` | Its file was renamed to one that is in conflict or left out; the document stays as it is until that is fixed. |
 
 None needs action unless the same document stays skipped.
+
+A document that exceeds a Markdown merge limit is also reported as `conflict`.
+If the document has no conflict markers, check both versions for very long
+runs of `<`, `=` or `>` and resolve the differences manually. The sync keeps
+both versions until the conflict is resolved.
 
 ## Decided by the conflict rules
 
