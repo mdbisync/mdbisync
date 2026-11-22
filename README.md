@@ -79,25 +79,6 @@ Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
 - **Your security hooks.** Pre-commit hooks marked with `alias: security`
   check every change from Linear before it reaches git.
 
-## Limitations
-
-- Linear documents only: issues, comments, icons and colors are not synced.
-  YAML front matter stays in git.
-- Between pushes, Linear to git waits for the next scheduled or
-  dispatched run. GitHub may start scheduled runs hours late or skip them,
-  on any plan, and turns them off in a public repository after 60 days
-  without activity: for timely runs, start the workflow from your own
-  timer
-  ([docs/own-scheduler.md](docs/own-scheduler.md)).
-- A document with Markdown Linear would lose (a footnote, a link title,
-  table alignment), an image from the web, a linked file over 10 MB or more
-  than 250,000 characters is left out whole: it stays in git only and is
-  listed in the run summary until fixed.
-- An edit made in Linear while a run is writing that same document can be
-  lost
-  ([editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
-- The repository must be on GitHub.
-
 ## Security
 
 Every final release is reviewed before it is built: by two frontier language
@@ -123,6 +104,25 @@ shows how to check them.
     </picture>
   </a>
 </p>
+
+## Limitations
+
+- Linear documents only: issues, comments, icons and colors are not synced.
+  YAML front matter stays in git.
+- Between pushes, Linear to git waits for the next scheduled or
+  dispatched run. GitHub may start scheduled runs hours late or skip them,
+  on any plan, and turns them off in a public repository after 60 days
+  without activity: for timely runs, start the workflow from your own
+  timer
+  ([docs/own-scheduler.md](docs/own-scheduler.md)).
+- A document with Markdown Linear would lose (a footnote, a link title,
+  table alignment), an image from the web, a linked file over 10 MB or more
+  than 250,000 characters is left out whole: it stays in git only and is
+  listed in the run summary until fixed.
+- An edit made in Linear while a run is writing that same document can be
+  lost
+  ([editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
+- The repository must be on GitHub.
 
 ## Setup
 
