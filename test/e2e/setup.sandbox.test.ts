@@ -64,16 +64,26 @@ describe('setup check against GitHub', { skip: appId && keyFile && repository ? 
   it('passes the App token with all its permissions and reads the merge setting', async () => {
     const { token, revoke } = await installationToken();
     try {
-      const result = await checkGitHub({ repository, token, commit: await commit(token), syncBranches });
+      let firstRulesResponse: Response | undefined;
+      const fetchImpl: typeof fetch = async (input, init) => {
+        const response = await fetch(input, init);
+        if (firstRulesResponse === undefined && response.status < 500 && new URL(String(input)).pathname.includes('/rules/branches/')) {
+          firstRulesResponse = response.clone();
+        }
+        return response;
+      };
+      const result = await checkGitHub({ repository, token, commit: await commit(token), syncBranches, fetch: fetchImpl });
       assert.equal(result.access.state, 'passed', result.access.detail);
       assert.notEqual(result.mergeCommits.state, 'not-checked', result.mergeCommits.detail);
       assert.ok(['passed', 'warning'].includes(result.syncBranchRules.state), result.syncBranchRules.detail);
-      const rules = await github('/repos/' + repository + '/rules/branches/main', token);
-      if (rules.status === 403) {
+      assert.ok(firstRulesResponse, result.syncBranchRules.detail);
+      if (firstRulesResponse.status === 403) {
+        const body = await firstRulesResponse.json() as { message?: string };
+        assert.match(body.message ?? '', /^Upgrade to GitHub .+ or make this repository public to enable this feature\.$/i);
         assert.equal(result.syncBranchRules.state, 'warning', result.syncBranchRules.detail);
         assert.match(result.syncBranchRules.detail, /^GitHub rulesets are unavailable for this repository on its current plan\./);
       } else {
-        assert.equal(rules.status, 200);
+        assert.equal(firstRulesResponse.status, 200);
         assert.match(result.syncBranchRules.detail, /^mdbisync\/linear and mdbisync\/suspended: creations /, result.syncBranchRules.detail);
       }
     } finally {

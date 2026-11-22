@@ -81,7 +81,7 @@ example [GitHub App](quickstart.md#github-app) for a missing permission:
 | `github-access` | The GitHub token can read the repository and has the permissions the sync needs. |
 | `github-app` | GitHub has the bot account of the App named by `app-slug`; the sync's commits name it as their author. |
 | `merge-commits` | The repository allows merge commits. |
-| `sync-branch-rules` | A warning when no ruleset restricts creating or deleting a sync branch or when GitHub did not give the rules. If GitHub reports a plan restriction, use a plan that supports rulesets for the repository to configure those restrictions. The run goes on. It names updates on their own. |
+| `sync-branch-rules` | A warning when no ruleset restricts creating or deleting a sync branch, or when GitHub did not give the rules. The run goes on. It names updates on their own. |
 | `linear-format-hook` | `.pre-commit-config.yaml` has the `linear-format` hook. |
 | `annotations` | Every `linear-team` and `linear-project` in a `README.md` front matter is valid. |
 | `annotation-targets` | Every annotated team and project exists in Linear, once. |
@@ -134,11 +134,12 @@ The warnings say:
   The check reads rulesets only: classic branch protection rules do not
   count. When creations and deletions are restricted, the row passes and
   still says whether updates are.
+- `GitHub rulesets are unavailable for this repository on its current plan. To restrict sync branch creation and deletion, use a plan that supports rulesets for this repository and configure an active ruleset.`
+  See [Who may push to the sync branches](quickstart.md#who-may-push-to-the-sync-branches).
 - `GitHub answered HTTP <status> while reading the rules of <branch>; the
   sync branches may not be kept to the App`: GitHub did not give the rules.
-  The next run reads them again. If it repeats with HTTP 403 or 404, the
-  repository may not have rulesets on its plan (a private repository on
-  GitHub Free), so the sync branches cannot be kept to the App this way.
+  The next run reads them again. If it repeats, check the repository's
+  active rulesets in Settings → Rules → Rulesets.
 - `no pre-commit hook marked "alias: security": content is pushed unchecked`:
   nothing checks what comes from Linear before it is pushed. Add hooks marked
   `alias: security` if you want that (`mdbisync init --security-hooks` adds
