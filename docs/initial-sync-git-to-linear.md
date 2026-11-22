@@ -36,8 +36,8 @@ instead ([initial-sync-linear-to-git.md](initial-sync-linear-to-git.md)).
 - Run the `linear-format` hook over the repository (`pre-commit run
   linear-format --all-files`) and commit its fixes. A file it cannot fix is
   left out of the run ([what is left out](#what-is-left-out)).
-- If the sync workflow is installed, disable it in Actions → *mdbisync* →
-  **⋯** → **Disable workflow**. Stop your own dispatch timer if you run one
+- Disable the sync workflow (Actions → *mdbisync* → **⋯** → **Disable
+  workflow**), and stop your own dispatch timer if you run one
   ([own scheduler](own-scheduler.md#stop-the-timer-during-an-initial-sync)),
   until the initial sync has finished. Both workflows share one
   queue, and a sync queued behind a running one can replace a waiting

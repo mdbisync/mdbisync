@@ -28,7 +28,7 @@ export function renderStop(stop: WriteStop): string[] {
 
 /**
  * The summary of a run Linear stopped before it could write. A sync run is
- * partial and the next run starts again; another operation is run
+ * partial and the next scheduled run starts again; another operation is run
  * again by hand.
  */
 export function renderStoppedBeforeWriting(stop: WriteStop, partial: boolean): string {

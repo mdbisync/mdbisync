@@ -48,7 +48,7 @@ step with the bare message, without `error:`.
 | Last line | Meaning and what to do |
 | --- | --- |
 | `<command>: stopped before any write (<code>): <detail>` | The setup check, or the sync's state, stopped the run before it wrote anything. The code is one of the [setup check codes](#setup-check) or [sync state codes](#sync-state). When the quickstart has a section that fixes it, the line ends with `. How to fix it: <link>`. |
-| `warning: <command>: partial, will continue (<code>)` | A sync run did part of its work and recorded what it finished. The next sync run goes on from there. See [Partial sync runs](#partial-sync-runs). |
+| `warning: <command>: partial, will continue (<code>)` | A sync run did part of its work and recorded what it finished. The next scheduled run goes on from there; nothing to do unless it repeats. See [Partial sync runs](#partial-sync-runs). |
 | `<command>: stopped by Linear before any write; run it again once the limit has reset` | Linear's rate limit stopped an initial sync or a check before it wrote anything. Wait for the reset time in the job summary and run it again. |
 | `<command>: stopped before any write (container-cap); reduce additions or check document-cap` | See [`container-cap`](#container-cap). |
 | `<command>: not finished (<code>); run it again with the same inputs` | An initial sync stopped part way. Run it again with the same direction and `confirm`; it skips what it already did. See [Initial sync](#initial-sync). |
@@ -165,8 +165,7 @@ writes nothing and ends with exit code 4:
 
 A partial sync run kept what it could record; the next run goes on from
 there, so the job ends with a warning, not a failure. The summary says
-which documents were written and which were not. You can dispatch the
-workflow by hand to resume before the next push or timer run.
+which documents were written and which were not.
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
