@@ -55,8 +55,8 @@ Two workflows do the work:
 - **Initial sync**, run once by hand, in one direction: it makes Linear
   equal to `main`, or opens a pull request that makes `main` equal to Linear.
 - **Sync**, run on every push to `main` and on a schedule, keeps both sides
-  equal from then on. GitHub's schedule can be late, so for timely runs start
-  it from your own timer (see [Required infrastructure](#required-infrastructure)).
+  equal from then on. GitHub's own scheduler is unreliable, so you will need
+  an external one (see [Required infrastructure](#required-infrastructure)).
 
 ## Conflicts
 
@@ -202,11 +202,11 @@ and install it on your docs repository. Store its client ID in the variable
 
 ### 4. Start ongoing sync
 
-Once the initial sync is done, add the sync workflow: copy
-[`mdbisync.yml`](examples/mdbisync.yml) to `.github/workflows/` and push it
-to `main`. It runs on every push to `main` and on a schedule, in both
-directions. For timely runs, start it from your own timer (see
-[Required infrastructure](#required-infrastructure)).
+1. **Add the workflow.** Once the initial sync is done, copy
+   [`mdbisync.yml`](examples/mdbisync.yml) to `.github/workflows/` and push
+   it to `main`. It runs on every push to `main`, in both directions.
+2. **Set up your scheduler.** Start the workflow on schedule from a cron job
+   or systemd timer on your own server (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
 
 ## Documentation
 
