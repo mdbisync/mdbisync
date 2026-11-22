@@ -5,9 +5,9 @@
 // before anything is created. The repository's merge settings are read the
 // same way (they are visible to a token with write access). The App's bot
 // account, which the sync's commits name as their author, is read by the
-// App's slug. The rules on the sync branches are read too (any token with
-// metadata access can): whether creating, updating and deleting them is
-// restricted, as a ruleset that keeps them to the App does.
+// App's slug. Where the repository supports rulesets, metadata access is
+// enough to check whether creating, updating and deleting the sync branches
+// is restricted.
 
 import { setTimeout } from 'node:timers/promises';
 import { type CommitIdentity, NEUTRAL_IDENTITY } from '../state/index.ts';
@@ -158,6 +158,10 @@ async function checkSyncBranchRules(target: GitHubTarget): Promise<CheckResult> 
     const answer = await request('GET', `/rules/branches/${branch.split('/').map(encodeURIComponent).join('/')}?per_page=100`);
     if (answer.status === 429 || (answer.status === 403 && isRateLimited(answer))) {
       throw new Error(message('setup.github-rate-limited-rules', { status: answer.status, branch }));
+    }
+    const reason = (answer.json as { message?: unknown } | null)?.message;
+    if (answer.status === 403 && typeof reason === 'string' && /^Upgrade to GitHub .+ or make this repository public to enable this feature\.$/i.test(reason)) {
+      return warning('sync-branch-rules', message('setup.sync-branch-rules-plan'));
     }
     if (answer.status < 200 || answer.status >= 300 || !Array.isArray(answer.json)) {
       return warning('sync-branch-rules', message('setup.sync-branch-rules-unread', { status: answer.status, branch }));

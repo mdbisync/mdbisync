@@ -101,6 +101,7 @@ export const MESSAGES = {
   'setup.merge-commits-unknown': 'GitHub did not show whether merge commits are allowed',
   'setup.merge-commits-off': 'merge commits are not allowed in the repository settings',
   'setup.github-rate-limited-rules': 'GitHub rate-limited the setup check while reading the rules of {branch} (HTTP {status}); run again later',
+  'setup.sync-branch-rules-plan': 'GitHub rulesets are unavailable for this repository on its current plan. To restrict sync branch creation and deletion, use a plan that supports rulesets for this repository and configure an active ruleset.',
   'setup.sync-branch-rules-unread': 'GitHub answered HTTP {status} while reading the rules of {branch}; the sync branches may not be kept to the App',
   'setup.sync-branch-rules': '{branches}: {rules}',
   'setup.sync-branch-rules-open': '{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch',

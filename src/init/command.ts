@@ -216,13 +216,14 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
     const stdout = `${changes.size ? `Wrote ${changes.size} repository files.` : 'Repository files are already initialized.'}
 
 Remaining admin steps:
-1. Create a Linear OAuth app with read,write client credentials. Set repository variable MDBISYNC_LINEAR_CLIENT_ID. Set it before enabling the workflows. Remove any old repository secret for this client ID once the updated workflows are in place.
-2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID.
-3. In Settings → Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET. Delete repository secrets of the same names once the workflows and environment are in place. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. For plan requirements and migration of existing workflows, see ${QUICKSTART_URL}#sync-environment.
-4. Allow merge commits and configure required checks for main.
-5. Install Node.js 24.2 or later and pre-commit. Run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? ' Install Git LFS and run git lfs install.' : ''}
-6. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}.
-7. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
+1. In Settings → Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. For plan requirements and migration of existing workflows, see ${QUICKSTART_URL}#sync-environment.
+2. Create a Linear OAuth app with read,write client credentials. Set repository variable MDBISYNC_LINEAR_CLIENT_ID. Set it before enabling the workflows. Remove any old repository secret for this client ID once the updated workflows are in place.
+3. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID. Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET. Delete repository secrets of the same names once the workflows and environment are in place. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets.
+4. Allow merge commits.
+5. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}.
+6. Install Node.js 24.2 or later and pre-commit. Run pre-commit install --hook-type pre-commit --hook-type pre-push, then pre-commit run --all-files. Security scanner examples also need Docker.${settings.lfs ? ' Install Git LFS and run git lfs install.' : ''}
+7. Commit the setup files except .github/workflows/mdbisync.yml and push them to the tracked branch or merge them through a pull request. Dispatch initial sync with a direction and leave confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
+8. After initial sync finishes, commit .github/workflows/mdbisync.yml and push it to the tracked branch or merge it through a pull request to start the first sync run.
 `;
     return { exitCode: 0, stderr: '', stdout };
   } catch (error) {

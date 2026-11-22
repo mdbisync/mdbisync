@@ -68,7 +68,14 @@ describe('setup check against GitHub', { skip: appId && keyFile && repository ? 
       assert.equal(result.access.state, 'passed', result.access.detail);
       assert.notEqual(result.mergeCommits.state, 'not-checked', result.mergeCommits.detail);
       assert.ok(['passed', 'warning'].includes(result.syncBranchRules.state), result.syncBranchRules.detail);
-      assert.match(result.syncBranchRules.detail, /^mdbisync\/linear and mdbisync\/suspended: creations /, result.syncBranchRules.detail);
+      const rules = await github('/repos/' + repository + '/rules/branches/main', token);
+      if (rules.status === 403) {
+        assert.equal(result.syncBranchRules.state, 'warning', result.syncBranchRules.detail);
+        assert.match(result.syncBranchRules.detail, /^GitHub rulesets are unavailable for this repository on its current plan\./);
+      } else {
+        assert.equal(rules.status, 200);
+        assert.match(result.syncBranchRules.detail, /^mdbisync\/linear and mdbisync\/suspended: creations /, result.syncBranchRules.detail);
+      }
     } finally {
       await revoke();
     }

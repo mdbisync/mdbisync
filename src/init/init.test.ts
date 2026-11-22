@@ -42,9 +42,18 @@ test('init creates usable workflows and matching hook pins, and leaves folder an
   assert.match(result.stdout, /MDBISYNC_LINEAR_CLIENT_SECRET/);
   assert.ok(result.stdout.includes(appCreationUrl()), 'init prints the link that creates the GitHub App');
   assert.ok(result.stdout.includes(`${QUICKSTART_URL}#github-app`), 'init links the GitHub App section');
-  assert.match(result.stdout, /merge commits/i);
-  assert.match(result.stdout, /pre-commit install/);
-  assert.match(result.stdout, /dry run/i);
+  const steps = result.stdout.split('Remaining admin steps:\n')[1]?.trim().split('\n');
+  assert.ok(steps);
+  assert.match(steps[0] ?? '', /^1\. In Settings → Environments, create mdbisync/);
+  assert.match(steps[1] ?? '', /^2\. Create a Linear OAuth app/);
+  assert.match(steps[2] ?? '', /^3\. Create a GitHub App/);
+  assert.deepEqual(steps.slice(3), [
+    '4. Allow merge commits.',
+    "5. Mark each folder to synchronize in its README.md front matter: linear-team names the Linear team, and linear-project a project for that folder's documents. A folder inside a team's folder takes that team and leaves out linear-team.",
+    '6. Install Node.js 24.2 or later and pre-commit. Run pre-commit install --hook-type pre-commit --hook-type pre-push, then pre-commit run --all-files. Security scanner examples also need Docker.',
+    '7. Commit the setup files except .github/workflows/mdbisync.yml and push them to the tracked branch or merge them through a pull request. Dispatch initial sync with a direction and leave confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.',
+    '8. After initial sync finishes, commit .github/workflows/mdbisync.yml and push it to the tracked branch or merge it through a pull request to start the first sync run.',
+  ]);
   const before = await stat(join(cwd, '.github/workflows/mdbisync.yml'));
   const again = await runCli(flags, { cwd });
   assert.equal(again.exitCode, 0, again.stderr);

@@ -272,6 +272,28 @@ describe('the rules on the sync branches', () => {
     assert.match(result.syncBranchRules.detail, /^sync\/linear and sync\/suspended: creations not restricted on sync\/suspended; deletions not restricted on sync\/suspended; updates restricted;/);
   });
 
+  it('distinguishes a ruleset plan restriction from other forbidden responses', async () => {
+    for (const [response, detail] of [
+      [
+        'Upgrade to GitHub Pro or make this repository public to enable this feature.',
+        'GitHub rulesets are unavailable for this repository on its current plan. To restrict sync branch creation and deletion, use a plan that supports rulesets for this repository and configure an active ruleset.',
+      ],
+      [
+        'Resource not accessible by integration',
+        'GitHub answered HTTP 403 while reading the rules of mdbisync/linear; the sync branches may not be kept to the App',
+      ],
+    ]) {
+      const world = fakeWorld();
+      const fallback = fakeFetch(world);
+      const fetchImpl: typeof fetch = async (input, init) => String(input).includes('/rules/branches/')
+        ? Response.json({ message: response }, { status: 403 })
+        : fallback(input, init);
+      const result = await checkGitHub({ ...target(world), fetch: fetchImpl });
+      assert.equal(result.access.state, 'passed');
+      assert.deepEqual(result.syncBranchRules, { name: 'sync-branch-rules', state: 'warning', detail });
+    }
+  });
+
   it('warns when GitHub does not answer with the rules, and stops on a rate limit', async () => {
     const world = fakeWorld();
     world.github.branchRulesStatus = 500;

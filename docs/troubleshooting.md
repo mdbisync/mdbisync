@@ -81,7 +81,7 @@ example [GitHub App](quickstart.md#github-app) for a missing permission:
 | `github-access` | The GitHub token can read the repository and has the permissions the sync needs. |
 | `github-app` | GitHub has the bot account of the App named by `app-slug`; the sync's commits name it as their author. |
 | `merge-commits` | The repository allows merge commits. |
-| `sync-branch-rules` | A warning when no ruleset restricts creating or deleting a sync branch, or when GitHub did not give the rules; the run goes on. It names updates on their own. |
+| `sync-branch-rules` | A warning when no ruleset restricts creating or deleting a sync branch or when GitHub did not give the rules. If GitHub reports a plan restriction, use a plan that supports rulesets for the repository to configure those restrictions. The run goes on. It names updates on their own. |
 | `linear-format-hook` | `.pre-commit-config.yaml` has the `linear-format` hook. |
 | `annotations` | Every `linear-team` and `linear-project` in a `README.md` front matter is valid. |
 | `annotation-targets` | Every annotated team and project exists in Linear, once. |
