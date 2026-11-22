@@ -4,22 +4,17 @@
 </picture>
 
 Two-way sync between Linear documents and Markdown in your repository. It runs
-as a GitHub Action under apps you create: no server, no webhook, no key we
-hold.
+as a GitHub Action under apps you create: no server we own, no key we hold.
 
 ## Why
 
-One knowledge base, readable by people and agents.
+**One knowledge base, readable by people and agents.**
 
-- **Teams on Linear and git.** Specs, plans and notes stay where product
-  people write them, and live as Markdown next to the code they describe.
-- **Teams working with AI agents.** Agents read current specs from files and
-  write their plans back as files. What they write shows up in Linear for
-  people to read.
-- **Anyone who wants files.** Your Linear documents in your editor, in grep,
-  in backups and in version history, under your control.
-
-Edit in Linear or in git, and both stay in sync.
+- **One to one with your agent, in files.** Specs, plans and documents live as
+  Markdown in your repository, where you and the agent read and write them
+  together.
+- **With your team, in Linear.** The same documents stay in sync in Linear,
+  where anyone can edit, discuss and comment on them without git.
 
 ## Why it is safe
 
