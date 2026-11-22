@@ -307,6 +307,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+    outputs:
+      release-sha: ${{ steps.tag.outputs.release-sha }}
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       SOURCE_SHA: ${{ inputs.source-sha }}
@@ -323,12 +325,48 @@ jobs:
           name: release-tree
           path: ${{ runner.temp }}
       - name: Append release commit to releases and create new tag
+        id: tag
         run: |
           mkdir "$RUNNER_TEMP/release"
           tar -C "$RUNNER_TEMP/release" -xf "$RUNNER_TEMP/release.tar"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           node src/release/tag.ts "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/release"
+
+  # Moves the workflow templates on main to the new release. A release commit cannot name its own
+  # SHA, so the pins go to main afterwards: this job commits them on the branch release-pins-<version>,
+  # cut from main's current head, and pushes it; a pull request from that branch takes them to main
+  # through the usual checks. It never pushes to main and never forces a push. Like the tag job, it
+  # runs the dispatched workflow's implementation, with Node and Git only.
+  pins:
+    needs: tag
+    # Explicit, like the tag job's: a pre-release skips the gate, and the implicit success() would skip this job too.
+    if: ${{ !cancelled() && needs.tag.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SHA: ${{ needs.tag.outputs.release-sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Main's current head and every release tag, the new one included; only this checkout can push.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: target
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Push the templates pinned to the new release
+        run: |
+          git -C target config user.name 'github-actions[bot]'
+          git -C target config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          node src/release/pins.ts "$RELEASE_VERSION" "$RELEASE_SHA" target
 
   # A final version gets a draft GitHub Release that carries its security report and summary, its
   # SPDX SBOM and its dependency status, which the scheduled dependency scan later replaces in place.

@@ -117,7 +117,7 @@ function simulate(ref: string, version: string, outcomes: Partial<Record<string,
 }
 
 const main = 'refs/heads/main';
-const passing = { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', publish: 'success' } as const;
+const passing = { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', pins: 'success', publish: 'success' } as const;
 
 test('the tag writer runs from the dispatched workflow commit even when releasing older source', () => {
   const checkout = jobs.tag!.steps.find(step => step.uses?.startsWith('actions/checkout@'))!;
@@ -127,13 +127,14 @@ test('the tag writer runs from the dispatched workflow commit even when releasin
   assert.equal(workflow.concurrency['cancel-in-progress'], false);
 });
 
-test('release.yml has the gate, report, test, build, attest, tag, publish and final check jobs in that order', () => {
-  assert.deepEqual(Object.keys(jobs), ['gate', 'report', 'test', 'build', 'attest', 'tag', 'publish', 'tagged']);
+test('release.yml has the gate, report, test, build, attest, tag, pins, publish and final check jobs in that order', () => {
+  assert.deepEqual(Object.keys(jobs), ['gate', 'report', 'test', 'build', 'attest', 'tag', 'pins', 'publish', 'tagged']);
   assert.deepEqual(needsOf('report'), ['gate']);
   assert.deepEqual(needsOf('test'), ['gate']);
   assert.deepEqual(needsOf('build'), ['gate', 'test']);
   assert.deepEqual(needsOf('attest'), ['gate', 'report', 'build']);
   assert.deepEqual(needsOf('tag'), ['gate', 'report', 'build', 'attest']);
+  assert.deepEqual(needsOf('pins'), ['tag']);
   assert.deepEqual(needsOf('publish'), ['report', 'tag']);
   assert.deepEqual(needsOf('tagged'), ['tag']);
   assert.deepEqual(jobs.tagged!.permissions, {});
@@ -153,31 +154,31 @@ test('the tag job itself requires a passed gate, a security report and attestati
 
 test('a pre-release skips the gate and the attestations, then builds and tags', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', passing);
-  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'success', build: 'success', attest: 'skipped', tag: 'success', publish: 'skipped', tagged: 'success' });
+  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'success', build: 'success', attest: 'skipped', tag: 'success', pins: 'success', publish: 'skipped', tagged: 'success' });
   assert.equal(conclusion, 'success');
 });
 
 test('a final release that passed the gate writes its security report, tests, builds, attests, tags and drafts its release', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', passing);
-  assert.deepEqual(results, { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', publish: 'success', tagged: 'success' });
+  assert.deepEqual(results, { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', pins: 'success', publish: 'success', tagged: 'success' });
   assert.equal(conclusion, 'success');
 });
 
 test('a final release that failed the gate tests, builds, attests and tags nothing and fails', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, gate: 'failure' });
-  assert.deepEqual(results, { gate: 'failure', report: 'skipped', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'failure' });
+  assert.deepEqual(results, { gate: 'failure', report: 'skipped', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', pins: 'skipped', publish: 'skipped', tagged: 'failure' });
   assert.equal(conclusion, 'failure');
 });
 
 test('a final release whose attestation failed tags nothing and fails', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, attest: 'failure' });
-  assert.deepEqual(results, { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'failure', tag: 'skipped', publish: 'skipped', tagged: 'failure' });
+  assert.deepEqual(results, { gate: 'success', report: 'success', test: 'success', build: 'success', attest: 'failure', tag: 'skipped', pins: 'skipped', publish: 'skipped', tagged: 'failure' });
   assert.equal(conclusion, 'failure');
 });
 
 test('a final release whose security report failed signs nothing, tags nothing, drafts no release and fails', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, report: 'failure' });
-  assert.deepEqual(results, { gate: 'success', report: 'failure', test: 'success', build: 'success', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'failure' });
+  assert.deepEqual(results, { gate: 'success', report: 'failure', test: 'success', build: 'success', attest: 'skipped', tag: 'skipped', pins: 'skipped', publish: 'skipped', tagged: 'failure' });
   assert.equal(conclusion, 'failure');
 });
 
@@ -186,6 +187,32 @@ test('a final release whose draft release failed keeps its tag and fails', () =>
   assert.equal(results.tag, 'success');
   assert.equal(results.tagged, 'success');
   assert.equal(conclusion, 'failure');
+});
+
+test('a release whose pins could not be pushed keeps its tag and draft release and fails', () => {
+  for (const version of ['v0.1.0-rc.9', 'v0.1.0']) {
+    const { results, conclusion } = simulate(main, version, { ...passing, pins: 'failure' });
+    assert.equal(results.tag, 'success', version);
+    assert.equal(results.tagged, 'success', version);
+    assert.equal(results.publish, version.includes('-') ? 'skipped' : 'success', version);
+    assert.equal(conclusion, 'failure', version);
+  }
+});
+
+test('the pins job runs the dispatched workflow\'s code, pushes from a checkout of main with tags, and installs nothing', () => {
+  const job = jobs.pins! as Job & { 'timeout-minutes'?: number };
+  assert.deepEqual(job.permissions, { contents: 'write' });
+  assert.equal(job.env?.RELEASE_SHA, '${{ needs.tag.outputs.release-sha }}');
+  assert.equal((jobs.tag as Job & { outputs?: Record<string, string> }).outputs?.['release-sha'], '${{ steps.tag.outputs.release-sha }}');
+  assert.ok(jobs.tag!.steps.some((step) => (step as { id?: string }).id === 'tag' && step.run?.includes('node src/release/tag.ts')));
+  const checkouts = job.steps.filter((step) => step.uses?.startsWith('actions/checkout@'));
+  assert.deepEqual(checkouts.map((step) => step.with), [
+    { 'persist-credentials': false },
+    { ref: 'main', path: 'target', 'fetch-depth': 0 },
+  ]);
+  const runs = job.steps.flatMap((step) => step.run ?? []).join('\n');
+  assert.match(runs, /node src\/release\/pins\.ts "\$RELEASE_VERSION" "\$RELEASE_SHA" target/);
+  assert.doesNotMatch(runs, /\bnpm\b|\bgit push\b/, 'no dependency install, and no push outside pins.ts');
 });
 
 test('a failed test shard builds, attests and tags nothing, for a pre-release and a final release', () => {
@@ -201,7 +228,7 @@ test('a failed test shard builds, attests and tags nothing, for a pre-release an
 
 test('a cancelled test shard builds and tags nothing and the run ends cancelled', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', { ...passing, test: 'cancelled' });
-  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'cancelled', build: 'skipped', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'skipped' });
+  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'cancelled', build: 'skipped', attest: 'skipped', tag: 'skipped', pins: 'skipped', publish: 'skipped', tagged: 'skipped' });
   assert.equal(conclusion, 'cancelled');
 });
 
@@ -252,14 +279,14 @@ test('a failed tag fails the run', () => {
 
 test('a cancelled build tags nothing and the run ends cancelled, without a failed check', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', { ...passing, build: 'cancelled' });
-  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'success', build: 'cancelled', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'skipped' });
+  assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'success', build: 'cancelled', attest: 'skipped', tag: 'skipped', pins: 'skipped', publish: 'skipped', tagged: 'skipped' });
   assert.equal(conclusion, 'cancelled');
 });
 
 test('a run outside main skips every release job and does not end as success', () => {
   for (const version of ['v0.1.0-rc.9', 'v0.1.0']) {
     const { results, conclusion } = simulate('refs/heads/other', version, passing);
-    assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', publish: 'skipped', tagged: 'failure' }, version);
+    assert.deepEqual(results, { gate: 'skipped', report: 'skipped', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', pins: 'skipped', publish: 'skipped', tagged: 'failure' }, version);
     assert.equal(conclusion, 'failure', version);
   }
 });

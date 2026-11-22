@@ -498,6 +498,16 @@ has only its source parent). Its summary prints the release SHA. No generated fi
 `main`, no existing tag is replaced, and no GitHub Release is published.
 A failed build leaves existing pins unchanged.
 
+A release commit cannot name its own SHA, so the workflow templates in
+[`examples/`](../examples) and the copy `init` writes move to a release
+after it is tagged: the workflow then commits them, pinned to the new
+release, on the branch `release-pins-<version>` cut from `main`, and pushes
+that branch. Its summary links the pull request to open from it; `main`
+changes only when that pull request passes its checks and is merged. A
+copy of the templates from `main` pins the newest release whose pull
+request has merged. Once they pin a final release, a pre-release leaves
+them as they are, and so does a release older than the one they pin.
+
 A final version such as `v1.0.0` is built the same way, but only after a
 security gate passes. The gate refuses the build unless the source commit
 has a `security-gate` commit status of `success` posted by the GitHub App
