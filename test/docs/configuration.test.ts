@@ -149,9 +149,9 @@ describe('quickstart', () => {
     assert.ok(QUICKSTART.includes('`.pre-commit-config.yaml`'));
   });
 
-  it('pins the CLI and the hook to the same release placeholder', () => {
+  it('pins the CLI and the hook to the same release placeholder, with its version comment', () => {
     assert.match(QUICKSTART, /npm exec --yes --package=git\+https:\/\/github\.com\/mdbisync\/mdbisync\.git#<release-sha> --/);
-    assert.match(QUICKSTART, /mdbisync init --release-sha <release-sha>/);
+    assert.match(QUICKSTART, /mdbisync init --release-sha <release-sha> --release-version <version>/);
     assert.match(QUICKSTART, /rev: <release-sha>/);
   });
 });
