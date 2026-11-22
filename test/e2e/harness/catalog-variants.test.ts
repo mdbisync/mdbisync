@@ -10,7 +10,7 @@ import { DOCUMENTS, runOnFakeServices } from './fake-services.ts';
 import { commentsWithState, destinationKind, imageGateRecord, imagePlace, isImageNotice, noticeImageLabels, placeLabel, withoutImage, writtenImagePath } from './image-gate.ts';
 import { renderRunMarkdown } from './report.ts';
 import { resultOf } from './runner.ts';
-import { INIT_FILES, initArguments, initRelease, readmeBody, withoutAnnotation } from './init-files.ts';
+import { INIT_FILES, initArguments, initRelease, withoutAnnotation } from './init-files.ts';
 import { loadScenarios } from './spec.ts';
 import { STEP_ACTIONS } from './steps.ts';
 import { REQUIRED_SETUP_CHECKS, subjectSource } from './subjects.ts';
@@ -314,29 +314,30 @@ describe('git.init-files', () => {
     assert.equal(withoutAnnotation(readme), '# Notes\n\nText.\n');
     assert.equal(withoutAnnotation('---\ntitle: Notes\nlinear-team: ENG\n---\nText.\n'), '---\ntitle: Notes\n---\nText.\n');
     assert.equal(withoutAnnotation('Text.\n'), 'Text.\n');
-    assert.equal(readmeBody(readme), '# Notes\n\nText.\n');
-    assert.equal(readmeBody('Text.\n'), 'Text.\n');
   });
 
-  it('names one folder per annotation, the root as ".", and the release under test or the templates\' release', () => {
-    assert.deepEqual(initArguments([{ folder: '', team: 'ENG', project: null }, { folder: 'eng/notes', team: null, project: 'Field notes' }], { sha: 'a'.repeat(40) }),
-      ['--release-sha', 'a'.repeat(40), '--no-security-hooks', '--folder', '.', '--team', 'ENG', '--folder', 'eng/notes', '--project', 'Field notes']);
+  it('names no folder, and pins the release under test or the templates\' release', () => {
+    assert.deepEqual(initArguments({ sha: 'a'.repeat(40) }), ['--release-sha', 'a'.repeat(40), '--no-security-hooks']);
+    assert.deepEqual(initArguments({ sha: 'a'.repeat(40), version: 'v1.2.3' }), ['--release-sha', 'a'.repeat(40), '--release-version', 'v1.2.3', '--no-security-hooks']);
     assert.deepEqual(initRelease(undefined), { sha: MINIMUM_RELEASE.sha, version: MINIMUM_RELEASE.version });
     assert.deepEqual(initRelease('b'.repeat(40)), { sha: 'b'.repeat(40) });
   });
 
   it('L1-23: the person\'s init files pass the setup check as runs.0, then L1-03\'s dry run holds', { timeout: 240_000 }, async (t) => {
     let committed: string[] = [];
+    let annotated: string[] = [];
     const outcomes = await runOnFakeServices(t, scenario('L1-23'), DOCUMENTS, {
       inspect: async (ctx: RunContext) => {
         committed = ctx.observations.get('init.files') as string[];
+        annotated = ctx.observations.get('init.annotated') as string[];
         const git = await ctx.person();
         for (const path of INIT_FILES) assert.ok((await git.text(['show', `HEAD:${path}`])).length > 0, `${path} is committed`);
         assert.match(await git.text(['show', 'HEAD:eng/notes/README.md']), /^---\nlinear-team: ENG\nlinear-project: Field notes\n---/);
       },
     });
     allHold(outcomes, ['I3', 'I4', 'I5', 'I8', 'I9', 'runs.0.ok', 'runs.0.setupChecks.failed', 'runs.0.setupChecks.names', 'summary.plan.paths', 'summary.leftOut', 'writes.total', 'summary.canaryCount']);
-    assert.deepEqual(committed, [...INIT_FILES, 'eng/notes/README.md']);
+    assert.deepEqual(committed, [...INIT_FILES], 'init writes only its own files');
+    assert.deepEqual(annotated, ['eng/notes/README.md'], 'the person annotates the folder by hand');
     assert.ok(REQUIRED_SETUP_CHECKS.length > 0);
   });
 });

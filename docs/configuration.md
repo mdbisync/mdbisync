@@ -145,9 +145,6 @@ environment variables; secrets never go in arguments.
 | --- | --- | --- |
 | `--release-sha` | none, required | The 40-character release SHA the workflows and the hook are pinned to: `v0.1.0-rc.9` or a later release. |
 | `--release-version` | none | The release's version, written as a comment beside each pin. |
-| `--folder` | none, at least one | A folder to synchronize; the `--team` and `--project` after it apply to it. Repeat for each folder. |
-| `--team` | none | The folder's Linear team, by key or name. A folder needs a team or a project. |
-| `--project` | none | The folder's Linear project; its team may come from a folder above. |
 | `--security-hooks` | off | Adds the two security hook examples (Docker needed where they run). |
 | `--no-security-hooks` | on | Adds none; give one of the two to make the choice explicit. |
 | `--lfs` | off | Adds to `.gitattributes` the Git LFS lines for embedded files: one per image and document type the sync takes from Linear (`*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp`, `*.avif`, `*.pdf`, `*.mp4`, `*.webm`, `*.svg`) and `**/assets/** filter=lfs diff=lfs merge=lfs -text` for every `assets/` folder. That line covers every folder named `assets` in the repository, a website's own included; leave out `--lfs` and write your own lines if one must stay out of LFS. Lines already there are kept and not repeated. |

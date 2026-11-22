@@ -21,7 +21,7 @@ async function initSecurityHooks(): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), 'scanner-init-'));
   try {
     await mkdir(join(cwd, '.git'));
-    const result = await runCli(['init', '--release-sha', 'a'.repeat(40), '--folder', 'docs', '--team', 'ENG', '--security-hooks'], { cwd });
+    const result = await runCli(['init', '--release-sha', 'a'.repeat(40), '--security-hooks'], { cwd });
     assert.equal(result.exitCode, 0, result.stderr);
     const doc = parseDocument(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'));
     const repos = (doc.toJS() as { repos: Array<{ repo: string }> }).repos;
