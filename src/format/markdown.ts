@@ -117,8 +117,8 @@ export const MARKDOWN_MAX_NODES = 500_000;
 export const INLINE_WORK_LIMIT = 250_000_000;
 
 export class MarkdownLimitError extends Error {
-  readonly limit: 'depth' | 'nodes' | 'inline';
-  constructor(limit: 'depth' | 'nodes' | 'inline') {
+  readonly limit: 'depth' | 'nodes' | 'inline' | 'conflict widening';
+  constructor(limit: MarkdownLimitError['limit']) {
     super(`Markdown exceeds the ${limit} limit.`);
     this.name = 'MarkdownLimitError';
     this.limit = limit;
