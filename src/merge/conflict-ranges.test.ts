@@ -16,7 +16,7 @@ test('widening keeps only overlapping components that contain a conflict', () =>
   ]), [{ start: 1, end: 6 }, { start: 9, end: 10 }]);
 });
 
-test('widening keeps thousands of independent ranges within a bounded time', { timeout: 15_000 }, () => {
+test('widening handles thousands of independent and overlapping intervals within a bounded time', { timeout: 15_000 }, () => {
   const script = `
     import assert from 'node:assert/strict';
     import { CONTENT_LIMIT } from ${JSON.stringify(new URL('../format/rules.ts', import.meta.url).href)};
@@ -28,6 +28,13 @@ test('widening keeps thousands of independent ranges within a bounded time', { t
       expected.push({ start, end: start + 3 });
     }
     assert.deepEqual(widenConflictRanges(intervals.reverse()), expected);
+
+    const center = 25_000;
+    const nested = Array.from({ length: center }, (_, start) => ({ start, end: 2 * center - start }));
+    assert.deepEqual(widenConflictRanges([
+      { start: center, end: center + 1, conflict: true },
+      ...nested.reverse(),
+    ]), [{ start: 0, end: 2 * center }]);
   `;
   const child = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { encoding: 'utf8', timeout: 10_000 });
   assert.ifError(child.error);
