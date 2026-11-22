@@ -12,6 +12,7 @@ import { captureAssets, createAssetCapture as makeCapture, uploadAccessProbe, Do
 import { imageLinks } from './image-links.ts';
 import { destinations, withUploadSuffix } from '../initial-sync/uploads.ts';
 import { CONTENT_LIMIT, fixText } from '../format/index.ts';
+import { runScaleScript } from '../scale-test-helpers.ts';
 
 const captures: ReturnType<typeof makeCapture>[] = [];
 const createAssetCapture: typeof makeCapture = (...args) => { const capture = makeCapture(...args); captures.push(capture); return capture; };
@@ -636,4 +637,20 @@ it('repairs a dead cached upload with query and fragment suffixes', async () => 
     const result = await captureAssets(git, resolveStateConfig({}), base, 'plan.md', `![Chart](${url}?version=2#part)`, new Map([['a'.repeat(64),url]]), async () => new Response(null,{status:404}));
     assert.equal(result.body, `[Chart](<${url}?version=2#part>)`);
   } finally { await fixture.cleanup(); }
+});
+
+// The capture copied a path list for every file of a shared hash, compared
+// each destination with every cached upload, searched the tree's copies of
+// the bytes again for every reference and cut the whole text for every
+// replacement. A child process with a timeout captures a document of many
+// references to one cached upload in a tree of many copies of its bytes, and
+// the same document in a tree of one copy with a cache of one.
+it('captures many references to a cached upload in a tree of many copies of its bytes in about the time of a small tree', { timeout: 200_000 }, () => {
+  const result = runScaleScript<{ control: { ms: number; linked: boolean }; scaled: { ms: number; linked: boolean } }>({ scale: new URL('./assets-scale-test-helpers.ts', import.meta.url) }, `
+    const control = await scale.captureManyCopies(1, 1, 5000);
+    const scaled = await scale.captureManyCopies(30000, 2000, 5000);
+    console.log(JSON.stringify({ control, scaled }));
+  `, 180_000);
+  assert.ok(result.control.linked && result.scaled.linked, 'every reference is linked to the capture in the assets folder');
+  assert.ok(result.scaled.ms < 2 * result.control.ms + 2_000, `small tree ${Math.round(result.control.ms)} ms, large tree ${Math.round(result.scaled.ms)} ms`);
 });

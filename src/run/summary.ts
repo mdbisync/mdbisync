@@ -54,13 +54,37 @@ function escapeMarkup(text: string): string {
  */
 const BARE_URL = /(?<=^|[\s(*_~])(?:https?:\/\/|www\.)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+[^\s<\\]*/gi;
 
-/** The part GFM links: it leaves out trailing punctuation, an unmatched `)` and a trailing entity reference. */
+/**
+ * The part GFM links: it leaves out trailing punctuation, an unmatched `)` and
+ * a trailing entity reference. It moves an end index and keeps the counts of
+ * parentheses as it goes: cutting and recounting the whole URL for each
+ * trailing character took time that grows with the square of their number.
+ */
 function linkedPart(url: string): string {
-  for (;;) {
-    const entity = /&[A-Za-z0-9]+;$/.exec(url);
-    if (entity !== null) url = url.slice(0, entity.index);
-    else if (/[?!.,:*_~'"]$/.test(url)) url = url.slice(0, -1);
-    else if (url.endsWith(')') && url.split(')').length > url.split('(').length) url = url.slice(0, -1);
-    else return url;
+  let end = url.length;
+  let open = 0;
+  let close = 0;
+  for (const char of url) {
+    if (char === '(') open++;
+    else if (char === ')') close++;
   }
+  for (;;) {
+    const entity = trailingEntity(url, end);
+    if (entity !== -1) end = entity;
+    else if (end > 0 && TRAILING_PUNCTUATION.includes(url[end - 1]!)) end--;
+    else if (url[end - 1] === ')' && close > open) {
+      close--;
+      end--;
+    } else return url.slice(0, end);
+  }
+}
+
+const TRAILING_PUNCTUATION = `?!.,:*_~'"`;
+
+/** Where an entity reference (`&name;`) that ends `url` before `end` starts, or -1. */
+function trailingEntity(url: string, end: number): number {
+  if (url[end - 1] !== ';') return -1;
+  let at = end - 1;
+  while (at > 0 && /[A-Za-z0-9]/.test(url[at - 1]!)) at--;
+  return at < end - 1 && url[at - 1] === '&' ? at - 1 : -1;
 }

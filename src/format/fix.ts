@@ -90,17 +90,39 @@ class Writer {
    * definitions are written inline instead.
    */
   private blocks(nodes: readonly (RootContent | BlockContent | DefinitionContent)[]): string {
+    return this.writtenBlocks(nodes).text;
+  }
+
+  /**
+   * The blocks as `blocks` writes them, and the lines (1-based) of the text
+   * that belong to a code block among them. A block quote needs those lines
+   * to write its blank code lines; taking them from the writer, not from a
+   * parse of the written text, keeps nested quotes from parsing their
+   * content once per level.
+   */
+  private writtenBlocks(nodes: readonly (RootContent | BlockContent | DefinitionContent)[]): { text: string; codeLines: Set<number> } {
     const written = nodes
       .filter((node) => node.type !== 'definition')
       .map((node) => ({ node, parts: this.block(node) }))
       .filter(({ parts }) => parts.length > 0);
-    return written
+    const codeLines = new Set<number>();
+    // Lines are counted only up to the last code block: no later line is code.
+    const lastCode = written.findLastIndex(({ node }) => node.type === 'code');
+    let line = 1;
+    const text = written
       .map(({ node, parts }, index) => {
         const next = written[index + 1];
-        if (next === undefined) return parts.join('\n\n');
-        return parts.join('\n\n') + (isCalloutComment(node) && isCallout(next.node, this.source) ? '\n' : '\n\n');
+        const block = parts.join('\n\n');
+        const separator = next === undefined ? '' : isCalloutComment(node) && isCallout(next.node, this.source) ? '\n' : '\n\n';
+        if (index <= lastCode) {
+          const breaks = lineBreaks(block);
+          if (node.type === 'code') for (let at = line; at <= line + breaks; at++) codeLines.add(at);
+          line += breaks + separator.length;
+        }
+        return block + separator;
       })
       .join('');
+    return { text, codeLines };
   }
 
   private block(node: RootContent | BlockContent | DefinitionContent): string[] {
@@ -114,9 +136,9 @@ class Writer {
         return ['---'];
       case 'blockquote': {
         this.containers.push({ kind: 'quote' });
-        const content = this.blocks(node.children);
+        const { text, codeLines } = this.writtenBlocks(node.children);
         this.containers.pop();
-        return [quoteLines(content)];
+        return [quoteLines(text, codeLines)];
       }
       case 'list':
         return [this.list(node)];
@@ -309,11 +331,11 @@ class Writer {
         return;
       }
       case 'image':
-        edits.push({ from, to, text: `![${this.label(from + 1)}](${imageDestination(node.url)})` });
+        edits.push({ from, to, text: `![${this.label(from + 1, to)}](${imageDestination(node.url)})` });
         return;
       case 'imageReference': {
         const definition = this.definitions.get(node.identifier);
-        if (definition) edits.push({ from, to, text: `![${this.label(from + 1)}](${imageDestination(definition.url)})` });
+        if (definition) edits.push({ from, to, text: `![${this.label(from + 1, to)}](${imageDestination(definition.url)})` });
         return;
       }
       case 'text':
@@ -329,9 +351,9 @@ class Writer {
     return `[${this.inline(children)}](${linkDestination(url)})`;
   }
 
-  /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
-  private label(open: number): string {
-    return bracketedLabel(this.source, open);
+  /** The bracketed label that opens at `open` (a `[`) and closes before `limit`, as written, without its brackets. */
+  private label(open: number, limit: number): string {
+    return bracketedLabel(this.source, open, limit);
   }
 }
 
@@ -444,9 +466,16 @@ export function relativeFileBlocksAsLinks(body: string): string {
     const gap = /[ \t]*\r?\n[ \t>]*$/.exec(body.slice(start(node), start(paragraph)));
     if (gap !== null) joins.push({ from: start(paragraph) - gap[0].length, to: start(paragraph) });
   });
-  let result = body;
-  for (const { from, to } of joins.reverse()) result = `${result.slice(0, from)} ${result.slice(to)}`;
-  return result;
+  // One pass over the joins, in text order: cutting each out of the whole
+  // result would copy the text once per file block.
+  const parts: string[] = [];
+  let at = 0;
+  for (const { from, to } of joins) {
+    parts.push(body.slice(at, from), ' ');
+    at = to;
+  }
+  parts.push(body.slice(at));
+  return parts.join('');
 }
 
 /** The destinations of relative links in the text (no scheme, not an anchor), as written. */
@@ -515,6 +544,13 @@ function joinLines(text: string): string {
       return line.slice(start, end);
     })
     .join(' ');
+}
+
+/** The number of line breaks in the text. */
+function lineBreaks(text: string): number {
+  let count = 0;
+  for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) count++;
+  return count;
 }
 
 function isSpaceOrTab(char: string): boolean {
