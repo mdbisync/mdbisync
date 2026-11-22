@@ -5,12 +5,16 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import { gfmFromMarkdown } from 'mdast-util-gfm';
+import { gfm } from 'micromark-extension-gfm';
 import { fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { lintText } from './lint.ts';
-import { sameMarkdown } from './markdown.ts';
+import { parse, sameMarkdown } from './markdown.ts';
 import { runScaleScript } from '../scale-test-helpers.ts';
 
 const modules = {
+  merge: new URL('../merge/merge.ts', import.meta.url),
   rules: new URL('./rules.ts', import.meta.url),
   fix: new URL('./fix.ts', import.meta.url),
   lint: new URL('./lint.ts', import.meta.url),
@@ -86,5 +90,49 @@ describe('nested quotes', () => {
       return head + line.repeat(Math.floor((rules.CONTENT_LIMIT - 20 - head.length) / line.length));
     })()`, `fix.fixText(text)`);
     assert.ok(timing.ms < 4 * timing.parseMs + 2_000, report(timing));
+  });
+});
+
+describe('lazy continuation lines', () => {
+  // Lines that continue a paragraph in a quote or list item without its
+  // prefix: the parser walked back over the paragraph for each of them.
+  it('keep the trees of quotes and list items with lazy lines', () => {
+    const texts = [
+      '- a\nb\nc\n',
+      '> a\nb\n> c\nd\n',
+      '1. a\n   b\nc\n\n   d\n',
+      '> - a\nb\n\n> 1. c\n>    d\ne\n',
+      '> ```\n> a\nb\n',
+      '- a\n' + 'b\n'.repeat(2_000),
+      '> a\n' + '> b\nc\n'.repeat(1_000),
+    ];
+    for (const text of texts) {
+      assert.deepEqual(parse(text), fromMarkdown(text, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }), JSON.stringify(text.slice(0, 40)));
+    }
+  });
+
+  // The walk stops at the open paragraph, so only its own events count, not
+  // the blocks before it in the same quote or item.
+  it('in many short paragraphs of one long quote or list item are accepted', () => {
+    const fence = '```';
+    const texts = [
+      '> p\n> q\nlazy\n>\n'.repeat(12_000),
+      '1. a\n\n' + '   p\n  lazy\n\n'.repeat(15_000),
+      `- intro\n\n  ${fence}\n${'  a\n'.repeat(15_000)}  ${fence}\n\n${'  first\nsecond\n\n'.repeat(700)}`,
+      `- intro\n\n  ${fence}\n${'  a\n'.repeat(15_000)}  ${fence}\n\n${'  first\nsecond\n\n'.repeat(321)}  first\nsecond\n`,
+    ];
+    for (const text of texts) assert.deepEqual(lintText('a.md', text), [], JSON.stringify(text.slice(0, 20)));
+  });
+
+  it('up to the content limit are linted, fixed and merged within a bound', { timeout: 70_000 }, () => {
+    const result = runScaleScript<{ rules: string[][]; fixed: boolean; merge: string }>(modules, `
+      const fill = (head, unit) => head + unit.repeat(Math.floor((rules.CONTENT_LIMIT - 20 - head.length) / unit.length));
+      const texts = [fill('- a\\n', 'b\\n'), fill('> a\\n', '    b\\n'), fill('- a\\n', '  b\\nc\\n'), fill('> - > 1. a\\n', 'b\\n')];
+      const lints = texts.map((text) => lint.lintText('a.md', text).map(({ rule }) => rule));
+      const fixed = texts.every((text) => fix.fixText(text) === text);
+      const merged = await merge.mergeMarkdown(texts[0], 'x\\n\\n' + texts[0], texts[0] + '\\ny\\n').then(() => 'merged', (error) => error.message);
+      console.log(JSON.stringify({ rules: lints, fixed, merge: merged }));
+    `, 60_000);
+    assert.deepEqual(result, { rules: Array(4).fill(['markdown-complexity']), fixed: true, merge: 'Markdown exceeds the lazy limit.' });
   });
 });

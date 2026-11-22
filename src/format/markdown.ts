@@ -116,8 +116,24 @@ export const MARKDOWN_MAX_NODES = 500_000;
  */
 export const INLINE_WORK_LIMIT = 250_000_000;
 
+/**
+ * For every lazy line (a line that continues a paragraph in a block quote
+ * or list item without the container's prefix), the parser's document step
+ * walks back over the events of the open container's blocks (the flow) to
+ * the latest token that spans the line's start, usually the paragraph's own
+ * (micromark 4.0.3, `writeToChild` in `lib/initialize/document.js`). A list
+ * item followed by many lazy lines then takes time that grows with the
+ * square of their number, tens of minutes at `CONTENT_LIMIT`. The walk sits
+ * inside a closure of the document tokenizer, so it cannot be replaced the
+ * way `EditMap.consume` is. `parse` adds up, over the document's lazy lines,
+ * the most that walk can visit, and refuses the body over this budget. An
+ * ordinary document stays far below it: for a lazy line inside a paragraph
+ * that is that paragraph's events so far, and such paragraphs are short.
+ */
+export const LAZY_WORK_LIMIT = 20_000_000;
+
 export class MarkdownLimitError extends Error {
-  readonly limit: 'depth' | 'nodes' | 'inline' | 'widening' | 'merge-marker' | 'merge-output';
+  readonly limit: 'depth' | 'nodes' | 'inline' | 'lazy' | 'widening' | 'merge-marker' | 'merge-output';
   constructor(limit: MarkdownLimitError['limit']) {
     super(`Markdown exceeds the ${limit} limit.`);
     this.name = 'MarkdownLimitError';
@@ -126,7 +142,7 @@ export class MarkdownLimitError extends Error {
 }
 
 export function parse(body: string, mdastExtensions: Extension[] = []): Root {
-  const tree = fromMarkdown(body, { extensions: [gfm(), inlineBudget()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
+  const tree = fromMarkdown(body, { extensions: [gfm(), inlineBudget(), lazyBudget()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
   // Validate before returning the tree to any recursive renderer or comparer.
   visit(tree, () => {});
   return tree;
@@ -180,6 +196,92 @@ function inlineBudget(): MicromarkExtension {
   for (const code of WORD_CODES) text[code] = word;
   text[91] = bracket;
   return { text };
+}
+
+type Parser = TokenizeContext['parser'];
+
+type FlowTokenizer = ReturnType<Parser['flow']>;
+
+/**
+ * A parser extension that counts the lazy-line work of one parse and throws
+ * `MarkdownLimitError` past `LAZY_WORK_LIMIT`. It only watches: its
+ * constructs read nothing and decline, so the parse itself is unchanged.
+ *
+ * The document step creates each flow's tokenizer with `parser.flow` once
+ * its container checks at the start of a line have failed, so a container
+ * construct that every such check tries can wrap `parser.flow` first. The
+ * wrapper notes the line of each chunk the document step writes to the flow:
+ * `defineSkip` gets the chunk's start right before `write`. Closing a flow
+ * writes without one, and no walk follows. A flow construct tried first at
+ * the start of every block (except a blank line) notes where the block's
+ * events begin.
+ *
+ * After the write of a lazy line, the walk stops at the latest token that
+ * started before the line and is still open or ends after its start. A
+ * block that began on an earlier line and is still open (the flow's
+ * `currentConstruct`) has such a token at or after its first event, so the
+ * walk visits at most the events since then. Otherwise (the block ended or
+ * began on this line, or the line is blank) the walk may go back to the
+ * flow's first event, so the budget counts them all; that walk then closes
+ * the containers the line left out.
+ */
+function lazyBudget(): MicromarkExtension {
+  let work = 0;
+  let watching = false;
+  // The flow being written, for the block construct.
+  let writing: FlowTokenizer | undefined;
+  // Where the latest block of each flow began: its first event and its line.
+  const blocks = new WeakMap<FlowTokenizer, { from: number; line: number }>();
+  const watch = (parser: Parser): void => {
+    watching = true;
+    const create = parser.flow;
+    parser.flow = (from) => {
+      const flow = create(from);
+      const { defineSkip, write } = flow;
+      let line: number | undefined;
+      flow.defineSkip = (point) => {
+        line = point.line;
+        return defineSkip(point);
+      };
+      flow.write = (slice) => {
+        const chunkLine = line;
+        line = undefined;
+        writing = flow;
+        let events;
+        try {
+          events = write(slice);
+        } finally {
+          writing = undefined;
+        }
+        if (chunkLine !== undefined && parser.lazy[chunkLine]) {
+          const block = blocks.get(flow);
+          const open = flow.currentConstruct !== undefined && block !== undefined && block.line < chunkLine;
+          work += flow.events.length - (open ? block.from : 0);
+          if (work > LAZY_WORK_LIMIT) throw new MarkdownLimitError('lazy');
+        }
+        return events;
+      };
+      return flow;
+    };
+  };
+  const container: Construct = {
+    name: 'lazyBudget',
+    partial: true,
+    tokenize(this: TokenizeContext, _effects, _ok, nok) {
+      if (!watching) watch(this.parser);
+      return nok;
+    },
+  };
+  const block: Construct = {
+    name: 'lazyBudgetBlock',
+    partial: true,
+    tokenize(this: TokenizeContext, _effects, _ok, nok) {
+      if (writing !== undefined) blocks.set(writing, { from: this.events.length, line: this.now().line });
+      return nok;
+    },
+  };
+  // Also under the characters indented code is tried for, so it comes before that construct.
+  return { document: { null: container }, flowInitial: { null: block, [-2]: block, [-1]: block, [32]: block } };
 }
 
 /** An old accepted body can be too complex to use as a comparison baseline. */

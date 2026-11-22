@@ -102,6 +102,18 @@ describe('Markdown traversal limits', () => {
   });
 });
 
+// `markdown.ts` counts the parser's walk over lazy lines through its document
+// and flow tokenizers, which a new parser version may change.
+describe('the parser for the lazy-line budget', () => {
+  it('is the version the budget was written for', () => {
+    const fromMarkdown = createRequire(import.meta.url).resolve('mdast-util-from-markdown');
+    const micromark = createRequire(fromMarkdown).resolve('micromark');
+    const installed = JSON.parse(readFileSync(join(dirname(micromark), 'package.json'), 'utf8')).version;
+    // A new version needs `lazyBudget` in markdown.ts reviewed against `writeToChild` in its `lib/initialize/document.js`.
+    assert.equal(installed, '4.0.3');
+  });
+});
+
 // `markdown.ts` replaces the parser's `EditMap.consume` so that closing a
 // container costs only the events after it. The replacement must reach the
 // copy the parser uses and must do exactly what the original does.
