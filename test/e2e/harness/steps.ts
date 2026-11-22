@@ -26,7 +26,7 @@ import { resolveStateConfig, stateRef, suspendedBranch, Git } from '../../../src
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
-import { findDrift, keepReadbacks } from '../../probe/record.ts';
+import { findDrift, keepReadbacks, recordedBank } from '../../probe/record.ts';
 import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, contentCanaries, fetchRef, editsFound, expectsDocument, holdsToken, lostEdits, readSides, recordRefs, snapshotRefs, bodyOf, type Sides } from './checks.ts';
 import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
@@ -952,7 +952,8 @@ const RUN: Record<string, Executor> = {
     // Linear as the OAuth app and reads it back; it cleans up its own projects.
     const world = live(ctx);
     const bankDir = ctx.observations.get('probe.bankDir');
-    const bank = loadBank(typeof bankDir === 'string' ? bankDir : undefined);
+    // A whole-bank comparison: fixtures still waiting for their first record are left out.
+    const bank = recordedBank(loadBank(typeof bankDir === 'string' ? bankDir : undefined));
     const index = Number(ctx.observations.get('probe.runs') ?? 0);
     ctx.observations.set('probe.runs', index + 1);
     let run;

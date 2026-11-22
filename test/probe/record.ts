@@ -30,6 +30,16 @@ export function readManifest(bank: Bank): Manifest | undefined {
 }
 
 /**
+ * The bank a whole-bank comparison probes: a `probe_pending` fixture waits
+ * for its first record, so it is left out until the manifest has an entry
+ * for it. Focused probes (`--only`) and recording (`--update`) take it.
+ */
+export function recordedBank(bank: Bank): Bank {
+  const recorded = readManifest(bank)?.fixtures ?? {};
+  return { ...bank, fixtures: bank.fixtures.filter((fixture) => !fixture.probe_pending || Object.hasOwn(recorded, fixture.file)) };
+}
+
+/**
  * The Yjs tree as JSON: one line per node, and each text run with its marks
  * on a single line, so large documents stay small and diffs stay readable.
  */

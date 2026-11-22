@@ -45,6 +45,7 @@ Each fixture entry has:
 | `macos_unsafe` | `true` together with `name_as` |
 | `git_form` | `captured` on a `fixable` fixture when Linear records an equivalent form with different bytes, such as angle brackets around an MP3 task item's destination. The tests expect `fix` to reach the form the sync captures |
 | `corpus` | `false` keeps the fixture or asset out of the test corpus, so a probe question waiting for Linear's recorded form does not move the corpus slices; the probe still writes it |
+| `probe_pending` | `true` on a fixture whose recorded form waits for the format probe: a whole-bank probe check skips it until the probe's manifest has an entry for it. A pending `fixable` fixture carries the form `fix` writes as its `.linear.md` until the probe records Linear's. Once recorded, its basis becomes `known` and its construct joins `known_constructs` |
 | `note` | free text |
 
 Every rule in `rules` needs at least one fixture. Only `.md` files are

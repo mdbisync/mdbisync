@@ -190,6 +190,37 @@ describe('run.probe', () => {
     }
   });
 
+  it('leaves out a fixture still waiting for its first record, as the probe command does', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'probe-pending-'));
+    try {
+      writeFileSync(join(dir, 'pending.md'), 'Ref kx-00000001');
+      writeFileSync(join(dir, 'index.yaml'), [
+        'fixtures:',
+        '  - { file: pending.md, group: example, construct: paragraph, class: unchanged, basis: assumed, canary: kx-00000001, probe_pending: true }',
+      ].join('\n'));
+      const operations: string[] = [];
+      const answers: Record<string, unknown> = {
+        Teams: { teams: { nodes: [{ id: 'team-1', key: 'ENG' }] } },
+        ProbeLeftovers: { viewer: { id: 'app-user' }, projects: { nodes: [] } },
+        CreateProject: { projectCreate: { project: { id: 'project-1' } } },
+        DeleteProject: { projectDelete: { success: true } },
+      };
+      const app = {
+        request: async (operation: string) => {
+          operations.push(operation);
+          if (!(operation in answers)) throw new Error(`unexpected ${operation}`);
+          return answers[operation];
+        },
+      };
+      const ctx = { observations: new Map<string, unknown>([['probe.bankDir', dir]]), runDir: dir, live: { app }, log: () => {} } as unknown as RunContext;
+      await STEP_ACTIONS['run.probe']!(ctx, {});
+      assert.deepEqual(operations, ['Teams', 'ProbeLeftovers', 'CreateProject', 'DeleteProject'], 'the pending fixture is not sent');
+      assert.deepEqual(ctx.observations.get('probe.drift'), [], 'nor reported as not recorded');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('lets any other error fail the scenario instead of hiding it as env-blocked', async () => {
     const bug = new TypeError('a bug in the probe');
     await assert.rejects(probeFailingWith(bug), (thrown: Error) => thrown === bug);
