@@ -498,7 +498,7 @@ has only its source parent). Its summary prints the release SHA. No generated fi
 `main`, no existing tag is replaced, and no GitHub Release is published.
 A failed build leaves existing pins unchanged.
 
-A final version such as `v0.1.0` is built the same way, but only after a
+A final version such as `v1.0.0` is built the same way, but only after a
 security gate passes. The gate refuses the build unless the source commit
 has a `security-gate` commit status of `success` posted by the GitHub App
 bot user whose id the workflow sets in `SECURITY_GATE_CREATOR_ID` (only the
@@ -579,6 +579,11 @@ git ls-remote https://github.com/mdbisync/mdbisync 'refs/tags/v0.1.0-rc.9^{}'
 discover these release commits on `releases`. Keep the hook on an explicitly
 resolved release SHA when updating it.
 
+A release can also change the workflow templates in `examples/`. Your
+workflows are copies of them, so a new pin does not bring those changes: when
+you update, compare your workflows with the new release's templates and apply
+their changes, keeping your own settings.
+
 The action's bundles include third-party packages under their own licenses;
 every release commit ships their license texts and notices in
 `dist/THIRD_PARTY_NOTICES.txt`.
@@ -620,16 +625,16 @@ by design.
 To check a final release you need the GitHub CLI 2.68 or newer, signed in
 (`gh auth login`; the attestation lookup needs a token even for this public
 repository), `jq`, and `sha256sum` (`shasum -a 256` on macOS). The commands
-use `v0.1.0` as the example version.
+use `v1.0.0` as the example version.
 
 1. Check out the release without line-ending conversion, so the files keep
    the exact bytes that were signed, and read its source commit from the
    tag message (`Source: <sha>`):
 
    ```sh
-   git clone -c core.autocrlf=false --branch v0.1.0 --depth 1 https://github.com/mdbisync/mdbisync mdbisync-v0.1.0
-   cd mdbisync-v0.1.0
-   git cat-file -p v0.1.0 | grep '^Source: '
+   git clone -c core.autocrlf=false --branch v1.0.0 --depth 1 https://github.com/mdbisync/mdbisync mdbisync-v1.0.0
+   cd mdbisync-v1.0.0
+   git cat-file -p v1.0.0 | grep '^Source: '
    ```
 
 2. Verify the build provenance, then check every file of the checkout
@@ -659,7 +664,7 @@ use `v0.1.0` as the example version.
      --source-ref refs/heads/main --source-digest <source-sha> \
      --predicate-type https://spdx.dev/Document/v2.3 \
      --format json > ../sbom-attestation.json &&
-   gh release download v0.1.0 --repo mdbisync/mdbisync --pattern sbom.spdx.json --dir .. &&
+   gh release download v1.0.0 --repo mdbisync/mdbisync --pattern sbom.spdx.json --dir .. &&
    jq -e --slurpfile sbom ../sbom.spdx.json \
      'any(.[]; .verificationResult.statement.predicate == $sbom[0])' ../sbom-attestation.json
    ```

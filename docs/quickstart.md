@@ -44,7 +44,7 @@ first; a version with `-rc` is a pre-release and sorts before its final
 release. Take the last line without `-rc`, or the last line if every
 version is a pre-release: its first
 column, 40 hexadecimal characters, is the release SHA, and the part
-between `refs/tags/` and `^{}` is the version, for example `v0.1.0`
+between `refs/tags/` and `^{}` is the version, for example `v1.0.0`
 (or `v0.1.0-rc.9` for a pre-release). The steps below call them
 `<release-sha>` and `<version>`. More on pins:
 [release builds and pins](usage.md#release-builds-and-pins).

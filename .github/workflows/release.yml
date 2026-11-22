@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: New release tag, a pre-release such as v0.1.0-rc.1 or a final version such as v0.1.0 (gated)
+        description: New release tag, a pre-release such as v1.0.0-rc.1 or a final version such as v1.0.0 (gated)
         required: true
         type: string
       source-sha:
