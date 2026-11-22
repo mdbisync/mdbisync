@@ -259,6 +259,18 @@ describe('lint rules', () => {
     assert.deepEqual(findings.map((f) => f.file).sort(), ['café.md', 'café.md', 'notes/Guide.md', 'notes/guide.md'].sort());
     assert.ok(findings.every((f) => f.rule === 'duplicate-title' && f.line === 1));
   });
+
+  it('names at most three other paths of a larger title collision and counts the rest', () => {
+    const findings = duplicateTitles(['Guide.md', 'guide.md', 'GUIDE.md', 'gUide.md', 'guIde.md', 'other.md']);
+    assert.deepEqual(findings.map((f) => [f.file, f.message]), [
+      ['Guide.md', 'Two or more files map to one document title. (guide.md, GUIDE.md, gUide.md, and 1 more)'],
+      ['guide.md', 'Two or more files map to one document title. (Guide.md, GUIDE.md, gUide.md, and 1 more)'],
+      ['GUIDE.md', 'Two or more files map to one document title. (Guide.md, guide.md, gUide.md, and 1 more)'],
+      ['gUide.md', 'Two or more files map to one document title. (Guide.md, guide.md, GUIDE.md, and 1 more)'],
+      ['guIde.md', 'Two or more files map to one document title. (Guide.md, guide.md, GUIDE.md, and 1 more)'],
+    ]);
+    assert.equal(duplicateTitles(['a.md', 'A.md'])[0]?.message, 'Two or more files map to one document title. (A.md)');
+  });
 });
 
 describe('lint and fix commands', () => {

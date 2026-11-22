@@ -7,6 +7,7 @@ import { describe, it } from 'node:test';
 import { buildReport, failed } from '../setup/report.ts';
 import { exitStatusOf, partialCode, pullRequestEnding, stoppedBeforeWritingMessage } from './exit.ts';
 import { type OperationOutcome } from './operation.ts';
+import { runScaleScript } from '../scale-test-helpers.ts';
 
 /** A sync outcome with only the fields the ending reads. */
 function sync(pullRequestCode: string | undefined, writeCode: string | undefined): OperationOutcome {
@@ -104,5 +105,33 @@ describe('the message of a run stopped before any write', () => {
       'check: stopped before any write (no-annotations). How to fix it: https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#folder-annotations',
     );
     assert.equal(stoppedBeforeWritingMessage('sync', stopped({ code: 'stopped' })), 'sync: stopped before any write (stopped)');
+  });
+});
+
+describe('a detail on one line', () => {
+  const refused = (detail: string): OperationOutcome =>
+    ({ operation: 'sync', ok: false, summary: '', notImplemented: false, refusedPushes: [], writes: { linear: {}, git: {}, pullRequests: {} }, code: 'initial-sync-required', refusal: { code: 'initial-sync-required', message: detail } }) as OperationOutcome;
+
+  it('joins lines as the regular expression did, for every short text of spaces, breaks and letters', () => {
+    let texts = [''];
+    for (let length = 1; length <= 6; length++) {
+      texts = texts.flatMap((text) => [' ', '\t', '\n', '\r', ' ', 'a'].map((char) => text + char));
+      for (const text of texts) {
+        const joined = text.replace(/\s*[\r\n]+\s*/g, ' ');
+        assert.equal(stoppedBeforeWritingMessage('sync', refused(text)), stoppedBeforeWritingMessage('sync', refused(joined)), JSON.stringify(text));
+      }
+    }
+  });
+
+  // A regular expression for the space around a break rescanned a long run
+  // of spaces from each of its positions: a team name of a million spaces in
+  // a README took minutes. A child process with a timeout runs it.
+  it('is made from a detail holding a long run of spaces in linear time', () => {
+    const result = runScaleScript<{ length: number }>({ exit: new URL('./exit.ts', import.meta.url) }, `
+      const detail = 'not found in Linear: team "a' + ' '.repeat(1_000_000) + 'a"\\nnext';
+      const outcome = { operation: 'sync', ok: false, summary: '', notImplemented: false, refusedPushes: [], writes: { linear: {}, git: {}, pullRequests: {} }, code: 'initial-sync-required', refusal: { code: 'initial-sync-required', message: detail } };
+      console.log(JSON.stringify({ length: exit.stoppedBeforeWritingMessage('sync', outcome).length }));
+    `, 30_000);
+    assert.ok(result.length > 1_000_000);
   });
 });

@@ -58,7 +58,9 @@ export async function rebuildIds({ git, record, linear, facts, targets, allowedP
     places.set(JSON.stringify(place), place);
     files.set(keyOf(place, title), path);
     const folder = path.slice(0, -(title.length + '.md'.length)).replace(/\/$/, '');
-    byPlace.set(JSON.stringify(place), [...(byPlace.get(JSON.stringify(place)) ?? []), { folder, path }]);
+    const inPlace = byPlace.get(JSON.stringify(place));
+    if (inPlace === undefined) byPlace.set(JSON.stringify(place), [{ folder, path }]);
+    else inPlace.push({ folder, path });
   };
   // A file left out now gets the document of its last synchronized version, with the title and place Linear was given
   // then. Several such files walk the same commits of the chain: each commit is read once.

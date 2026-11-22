@@ -83,9 +83,15 @@ export interface Zone {
 export function resolveZones(annotations: readonly Annotation[]): { zones: Map<string, Zone>; problems: AnnotationProblem[] } {
   const zones = new Map<string, Zone>();
   const problems: AnnotationProblem[] = [];
-  const ordered = [...annotations].sort((a, b) => depth(a.folder) - depth(b.folder) || compare(a.folder, b.folder));
+  const ordered = annotations
+    .map((annotation) => ({ annotation, depth: depth(annotation.folder) }))
+    .sort((a, b) => a.depth - b.depth || compare(a.annotation.folder, b.annotation.folder))
+    .map(({ annotation }) => annotation);
+  // Zones are added as they resolve, shallow folders first, so the tree of
+  // the zones so far always holds every folder above the one resolving.
+  const tree = new ZoneTree();
   for (const annotation of ordered) {
-    const inherited = nearestZone(zones, parentOf(annotation.folder));
+    const inherited = tree.nearest(parentOf(annotation.folder));
     const { readme } = annotation;
     if (annotation.team !== undefined && inherited !== undefined) {
       problems.push({ readme, kind: 'nested-team', message: message('annotations.nested-team', { readme, team: inherited.team, folder: display(inherited.teamFolder) }) });
@@ -111,17 +117,82 @@ export function resolveZones(annotations: readonly Annotation[]): { zones: Map<s
       zone.projectFolder = annotation.folder;
     }
     zones.set(annotation.folder, zone);
+    tree.add(annotation.folder, zone);
   }
   return { zones, problems };
 }
 
+/**
+ * Annotated folders by path component, from the root down. A lookup walks
+ * the components of a folder once. Looking each ancestor folder up by its
+ * full path instead hashes every prefix of the path, which for a deep path
+ * costs its depth times its length, and the mapping looks up every file.
+ */
+class ZoneTree {
+  private readonly root: ZoneNode = { children: new Map() };
+
+  add(folder: string, zone: Zone): void {
+    let node = this.root;
+    if (folder !== '') {
+      for (const name of folder.split('/')) {
+        let child = node.children.get(name);
+        if (child === undefined) {
+          child = { children: new Map() };
+          node.children.set(name, child);
+        }
+        node = child;
+      }
+    }
+    node.zone = zone;
+    node.folder = folder;
+  }
+
+  /** The zone of the nearest annotated folder at or above `folder`. */
+  nearest(folder: string | null): Zone | undefined {
+    return this.nearestNode(folder)?.zone;
+  }
+
+  /** The node of the nearest annotated folder at or above `folder`. */
+  nearestNode(folder: string | null): ZoneNode | undefined {
+    if (folder === null) return undefined;
+    let node: ZoneNode | undefined = this.root;
+    let found = node.zone === undefined ? undefined : node;
+    if (folder === '') return found;
+    for (let start = 0; ;) {
+      const slash = folder.indexOf('/', start);
+      node = node.children.get(slash === -1 ? folder.slice(start) : folder.slice(start, slash));
+      if (node === undefined) return found;
+      if (node.zone !== undefined) found = node;
+      if (slash === -1) return found;
+      start = slash + 1;
+    }
+  }
+}
+
+interface ZoneNode {
+  zone?: Zone;
+  /** The annotated folder, with `zone`. */
+  folder?: string;
+  children: Map<string, ZoneNode>;
+}
+
+// The tree of each zones map, built on its first lookup. Zone maps are
+// built and then read, but a caller may add a folder or give one another
+// zone: a map whose size changed is built again, and so is one whose zone
+// for the folder found is no longer the one the tree holds.
+const zoneTrees = new WeakMap<ReadonlyMap<string, Zone>, { size: number; tree: ZoneTree }>();
+
 /** The zone of the nearest annotated folder at or above `folder`. */
 export function nearestZone(zones: ReadonlyMap<string, Zone>, folder: string | null): Zone | undefined {
-  for (let current = folder; current !== null; current = parentOf(current)) {
-    const zone = zones.get(current);
-    if (zone !== undefined) return zone;
+  const cached = zoneTrees.get(zones);
+  if (cached !== undefined && cached.size === zones.size) {
+    const found = cached.tree.nearestNode(folder);
+    if (found === undefined || zones.get(found.folder!) === found.zone) return found?.zone;
   }
-  return undefined;
+  const tree = new ZoneTree();
+  for (const [annotated, zone] of zones) tree.add(annotated, zone);
+  zoneTrees.set(zones, { size: zones.size, tree });
+  return tree.nearest(folder);
 }
 
 export function folderOf(path: string): string {
