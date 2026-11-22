@@ -90,17 +90,14 @@ Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
 
 ## Limitations
 
-- Linear documents only: issues, comments, icons and colors are not synced.
-  YAML front matter stays in git.
-- Between pushes, a Linear edit reaches git only with the next run, and
-  GitHub's schedule can start it hours late (see [Scheduler](#scheduler)).
-- A document with Markdown Linear would lose (a footnote, a link title,
-  table alignment), an image from the web, a linked file over 10 MB or more
-  than 250,000 characters is left out whole: it stays in git only and is
-  listed in the run summary until fixed.
-- An edit made in Linear while a run is writing that same document can be
-  lost
-  ([editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
+- Only Linear documents are synced, with the images and files embedded in
+  them. Issues, comments, icons and colors are not.
+- YAML front matter stays in git: Linear never sees it.
+- Rarely, a real-time edit in Linear may be overwritten by the sync and
+  will need to be restored from the document's history. To reduce the
+  chance, the sync rereads each document right before writing it. Linear's
+  API has no conditional write, so the risk cannot be removed entirely
+  (see [editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
 - The repository must be on GitHub.
 
 ## Setup
