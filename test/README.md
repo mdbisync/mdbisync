@@ -5,9 +5,8 @@ a scenario with an id (`L1-04`, `L3-02`), and a harness runs the scenarios
 against a real Git repository and a real Linear workspace. A scenario is
 written before the code that makes it pass, so most of them start red.
 
-This page explains how to build the test corpus, run scenarios, read their
-reports, and which credentials a live run needs. Unit tests and the
-general setup are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+This page explains how to set up and run the tests, build the test corpus,
+run scenarios, read their reports, and which credentials a live run needs.
 
 ## What is here
 
@@ -25,18 +24,87 @@ initial sync from Git to Linear, L1R initial sync from Linear to Git, L2
 changes on one side, L3 conflicts, L4 concurrency, L5 errors and recovery,
 L6 checks in the Linear UI.
 
-## Prerequisites
+## Set up and run the tests
 
-Node.js 24.2 or later, Git and [pre-commit](https://pre-commit.com/), then from the
-repository root:
+You need Node.js 24.2 or later, npm 11.16.0 or later (CI uses 11.21.2; older
+npm rejects pre-commit's install of the hooks from a local repository), Git
+and [pre-commit](https://pre-commit.com/): it runs the same hooks as CI, and
+the scenarios commit through pre-commit hooks. CI installs the pre-commit
+version pinned in
+[.github/requirements/pre-commit.txt](../.github/requirements/pre-commit.txt);
+to use the same one, install it into a virtual environment with
+`pip install --require-hashes --only-binary :all: -r .github/requirements/pre-commit.txt`.
+
+Run these from the repository root, in this order: `npm test` needs the
+bundles that `npm run build` writes to `dist/`, and the quick checks fail
+sooner than the full suite.
 
 ```sh
-npm ci
-npm run build
+npm ci                     # exact versions from package-lock.json, no install scripts
+npm audit signatures       # registry signatures of the installed packages
+npm run check:install-scripts  # no locked package has install scripts
+npm run check:fixtures     # the fixture bank matches its index
+npm run typecheck
+npm run build              # bundles dist/, checks bundled licenses, writes the notices
+pre-commit run --all-files # the repository's hooks, including the check for Cyrillic text
+npm test
+npm run test:hooks         # needs pre-commit; offline scratch hook and CI checks
+npm run test:template-install  # needs Python 3.11 to 3.14 with venv, and PyPI; template and repository pre-commit installs
+                               # TEMPLATE_INSTALL_PYTHON=<python3.10> checks that templates refuse an older Python
 ```
 
-Scenarios that commit as a person go through released pre-commit hooks,
-which need npm 11.16.0 or newer.
+`pre-commit install` runs the same hooks on every commit and push.
+
+`npm test` needs no network or accounts. Scenarios that commit as a person
+go through released pre-commit hooks, which need npm 11.16.0 or newer; with
+an older npm those runs are reported as blocked by the environment.
+
+The test of the release the templates pin reads the release tags and is
+skipped without them. A clone of a fork can lack the newer ones; fetch them
+from this repository:
+
+```sh
+git fetch https://github.com/mdbisync/mdbisync.git 'refs/tags/v*:refs/tags/v*'
+```
+
+### Live tests with your own Linear workspace
+
+Tests that talk to Linear or GitHub are skipped unless you set the variables
+below. They create and delete their own data: use a workspace and a
+repository made for testing, never ones with real work in them.
+
+1. Create a Linear workspace for testing (the free plan is enough) with at
+   least one team.
+2. In that workspace, create an OAuth application (Settings, API, OAuth
+   applications) and enable client credentials for it, with the `read` and
+   `write` scopes. The tests mint a short-lived token from it and revoke it
+   at the end.
+3. For the state tests, install Git LFS locally and create an empty GitHub
+   repository that your local Git credentials can push to.
+
+| Variable | Used by | Meaning |
+| --- | --- | --- |
+| `LINEAR_TEST_APP_CLIENT_ID` | Linear client contract test, format probe | the OAuth application's client id |
+| `LINEAR_TEST_APP_CLIENT_SECRET` | Linear client contract test, format probe | its client secret |
+| `LINEAR_TEST_TEAM_KEY` | Linear client contract test, format probe | optional: the team to use (default: the first team) |
+| `LINEAR_BASE_URL` | Linear client contract test, format probe | optional: a proxy in front of Linear's API |
+| `LINEAR_CONTRACT_REPORT` | Linear client contract test | optional: write the contract test's request report to this file |
+| `MDBISYNC_TEST_SANDBOX_URL` | state tests | the URL of your test repository |
+
+```sh
+export LINEAR_TEST_APP_CLIENT_ID=... LINEAR_TEST_APP_CLIENT_SECRET=...
+export MDBISYNC_TEST_SANDBOX_URL=https://github.com/<you>/<test-repository>.git
+npm test
+npm run probe:format -- --report report.md   # see probe/README.md
+```
+
+Each run works under its own random names: projects in Linear, and a branch
+and refs under `refs/mdbisync-t/` in the test repository. It removes them at
+the end. The Git LFS objects the state tests upload (a few kilobytes) stay
+in the repository's LFS storage.
+
+The scenarios need more credentials; they are in
+[Credentials for live runs](#credentials-for-live-runs).
 
 ## Build the corpus
 
