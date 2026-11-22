@@ -1,30 +1,27 @@
 // Repository setup is local: validate the entire change before writing files.
-import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parseDocument, isMap, isScalar, isSeq } from 'yaml';
 import templates from './workflows.json' with { type: 'json' };
 import type { CliResult } from '../cli.ts';
-import { ANNOTATION_FILE, TEAM_KEY, PROJECT_KEY, resolveZones } from '../mapping/annotations.ts';
-import { collectAnnotations } from '../mapping/mapping.ts';
+import { PROJECT_KEY, TEAM_KEY } from '../mapping/annotations.ts';
 import { appCreationUrl } from '../setup/app.ts';
 import { QUICKSTART_URL } from '../setup/fixes.ts';
 import { PROJECT_URL } from '../version.ts';
 import { IGNORE_INLINE_ALLOW, LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
-import { findFrontMatter } from '../mapping/front-matter.ts';
 import { message } from '../messages.ts';
 import { MINIMUM_RELEASE, OLDER_RELEASES, RELEASE_PIN } from './releases.ts';
 import { ASSETS_FOLDER, UPLOAD_EXTENSIONS } from '../sync/upload-type.ts';
 
 export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
-  --folder <path> --team <name> [--project <name>]   Repeat for each folder
-  --security-hooks | --no-security-hooks           Optional examples (requires Docker)
-  --lfs | --no-lfs                                 Store embedded files in Git LFS (.gitattributes)
+  --security-hooks | --no-security-hooks   Optional examples (requires Docker)
+  --lfs | --no-lfs                         Store embedded files in Git LFS (.gitattributes)
 The release must be ${MINIMUM_RELEASE.version} or later: the workflows use its action inputs.
-Existing files and annotations are preserved; conflicting values must be resolved first.
+Existing files are preserved; conflicting values must be resolved first.
 `;
 
 /** The flags `init` accepts: the ones that take a value, then the security and the Git LFS choices. */
-export const INIT_VALUE_FLAGS = ['--release-sha', '--release-version', '--folder', '--team', '--project'] as const;
+export const INIT_VALUE_FLAGS = ['--release-sha', '--release-version'] as const;
 export const INIT_SECURITY_FLAGS = ['--security-hooks', '--no-security-hooks'] as const;
 export const INIT_LFS_FLAGS = ['--lfs', '--no-lfs'] as const;
 
@@ -40,13 +37,12 @@ export const LFS_ATTRIBUTES: readonly string[] = [
   `**/${ASSETS_FOLDER}/** ${LFS}`,
 ];
 
-interface Folder { path: string; team?: string; project?: string }
-interface Settings { sha?: string; version?: string; security?: boolean; lfs?: boolean; folders: Folder[] }
+interface Settings { sha?: string; version?: string; security?: boolean; lfs?: boolean }
 export interface InitOptions { cwd?: string; prompt?: (question: string) => Promise<string> }
 class InitError extends Error {}
 
 function parseArgs(args: readonly string[]): Settings {
-  const settings: Settings = { folders: [] };
+  const settings: Settings = {};
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if ((INIT_SECURITY_FLAGS as readonly string[]).includes(flag ?? '')) {
@@ -62,18 +58,9 @@ function parseArgs(args: readonly string[]): Settings {
     if (!(INIT_VALUE_FLAGS as readonly string[]).includes(flag ?? '')) throw new InitError(message('init.unknown-option', { option: String(flag) }));
     const value = args[++i];
     if (value === undefined || value.startsWith('--') || !value.trim()) throw new InitError(message('init.needs-value', { option: String(flag) }));
-    if (flag === '--folder') settings.folders.push({ path: value });
-    else if (flag === '--team' || flag === '--project') {
-      const folder = settings.folders.at(-1);
-      if (!folder) throw new InitError(message('init.must-follow-folder', { option: flag }));
-      const key = flag === '--team' ? 'team' : 'project';
-      if (folder[key] !== undefined) throw new InitError(message('init.given-twice-for-folder', { option: flag }));
-      folder[key] = value.trim();
-    } else {
-      const key = flag === '--release-sha' ? 'sha' : 'version';
-      if (settings[key] !== undefined) throw new InitError(message('init.given-twice', { option: String(flag) }));
-      settings[key] = value;
-    }
+    const key = flag === '--release-sha' ? 'sha' : 'version';
+    if (settings[key] !== undefined) throw new InitError(message('init.given-twice', { option: String(flag) }));
+    settings[key] = value;
   }
   return settings;
 }
@@ -104,28 +91,6 @@ function document(text: string) {
   const doc = parseDocument(text, { prettyErrors: false });
   if (doc.errors.length || (!isMap(doc.contents) && doc.contents !== null)) throw new InitError(message('init.invalid-yaml'));
   return doc;
-}
-
-function annotate(text: string, folder: Folder): string {
-  const fm = findFrontMatter(text);
-  const doc = document(fm?.yaml ?? '');
-  let changed = false;
-  for (const [key, value] of [[TEAM_KEY, folder.team], [PROJECT_KEY, folder.project]] as const) {
-    if (value === undefined) continue;
-    if (doc.has(key)) {
-      if (doc.get(key) !== value) throw new InitError(message('init.readme-differs', { folder: folder.path, key }));
-    } else { doc.set(key, value); changed = true; }
-  }
-  if (!changed) return text;
-  if (fm === null) {
-    const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
-    const body = bom ? text.slice(1) : text;
-    return `${bom}---\n${doc.toString({ lineWidth: 0 })}---\n${body}`;
-  }
-  // Replace only the YAML, leaving the fences, README body and line endings intact.
-  const opening = /^﻿?---[^\S\r\n]*\r?\n/.exec(text)![0];
-  const eol = opening.endsWith('\r\n') ? '\r\n' : '\n';
-  return opening + doc.toString({ lineWidth: 0 }).replace(/\n/g, eol) + text.slice(opening.length + fm.yaml.length);
 }
 
 /** The repository's attributes with every missing LFS line added after its own lines, which stay as they are. */
@@ -215,26 +180,13 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
   try {
     const settings = parseArgs(args);
     const ask = options.prompt;
-    const needsGuidance = !settings.sha || !settings.folders.length || settings.folders.some((folder) => !folder.team && !folder.project);
-    if (ask && needsGuidance) {
-      settings.sha ??= (await ask('Release commit SHA: ')).trim();
+    if (ask && !settings.sha) {
+      settings.sha = (await ask('Release commit SHA: ')).trim();
       checkRelease(settings);
-      if (!settings.folders.length) settings.folders.push({ path: (await ask('Folder to synchronize: ')).trim() });
-      for (const folder of settings.folders) {
-        if (folder.team === undefined) {
-          const team = (await ask(`Linear team for ${folder.path} (blank to keep or inherit): `)).trim();
-          if (team) folder.team = team;
-        }
-        if (folder.project === undefined) {
-          const project = (await ask(`Linear project for ${folder.path} (blank for team documents): `)).trim();
-          if (project) folder.project = project;
-        }
-      }
       settings.security ??= /^(y|yes)$/i.test((await ask('Include security hook examples (requires Docker)? [y/N] ')).trim());
       settings.lfs ??= /^(y|yes)$/i.test((await ask('Store embedded images and files in Git LFS? [y/N] ')).trim());
     }
     checkRelease(settings);
-    if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || (!folder.team && !folder.project))) throw new InitError(message('init.needs-folder'));
     const root = await realpath(options.cwd ?? process.cwd());
     if (!await lstat(join(root, '.git')).catch(() => undefined)) throw new InitError(message('init.not-at-root'));
     const changes = new Map<string, string>();
@@ -242,7 +194,6 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       const target = await safePath(root, path);
       const before = await optionalRead(target);
       const after = create(before);
-      if (changes.has(target) && changes.get(target) !== after) throw new InitError(message('init.conflicting-folders', { path }));
       if (before !== after) changes.set(target, after);
     };
     for (const [name, template] of Object.entries(templates)) {
@@ -254,42 +205,6 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
     }
     await queue(PRE_COMMIT_CONFIG, (before) => hookConfig(before, settings));
     if (settings.lfs) await queue(GITATTRIBUTES, lfsAttributes);
-    for (const folder of settings.folders) await queue(join(folder.path, ANNOTATION_FILE), (before) => annotate(before ?? '', folder));
-    // Include existing parent annotations when a project inherits its team.
-    const contents = new Map<string, string>();
-    const readmes = new Set<string>();
-    for (const folder of settings.folders) {
-      let path = resolve(root, folder.path);
-      for (;;) {
-        readmes.add(join(path, ANNOTATION_FILE));
-        if (path === root) break;
-        path = dirname(path);
-      }
-    }
-    // A new parent annotation can invalidate an existing descendant mapping.
-    const visited = new Set<string>();
-    const descendants = async (folder: string): Promise<void> => {
-      if (visited.has(folder)) return;
-      visited.add(folder);
-      readmes.add(join(folder, ANNOTATION_FILE));
-      let entries;
-      try { entries = await readdir(folder, { withFileTypes: true }); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-      for (const entry of entries) {
-        if (entry.isDirectory() && !['.git', 'node_modules'].includes(entry.name)) await descendants(join(folder, entry.name));
-      }
-    };
-    for (const folder of settings.folders) await descendants(resolve(root, folder.path));
-    for (const path of readmes) {
-      await safePath(root, relative(root, path));
-      const text = changes.get(path) ?? await optionalRead(path);
-      if (text === undefined) continue;
-      contents.set(relative(root, path), text);
-    }
-    const { annotations, problems } = collectAnnotations(contents);
-    if (problems.length) throw new InitError(problems[0]!.message);
-    const mapping = resolveZones(annotations);
-    if (mapping.problems.length) throw new InitError(mapping.problems[0]!.message);
     for (const [path, text] of changes) {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text);
@@ -302,7 +217,8 @@ Remaining admin steps:
 3. In Settings → Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET. Delete repository secrets of the same names once the workflows and environment are in place. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. For plan requirements and migration of existing workflows, see ${QUICKSTART_URL}#sync-environment.
 4. Allow merge commits and configure required checks for main.
 5. Install Node.js 24.2 or later and pre-commit. Run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? ' Install Git LFS and run git lfs install.' : ''}
-6. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
+6. Mark each folder to synchronize: give its README.md front matter ${TEAM_KEY} (the Linear team) and, for a project's documents, ${PROJECT_KEY}. A project's team may come from a folder above.
+7. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
 `;
     return { exitCode: 0, stderr: '', stdout };
   } catch (error) {

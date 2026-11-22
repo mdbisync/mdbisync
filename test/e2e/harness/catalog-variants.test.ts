@@ -10,7 +10,7 @@ import { DOCUMENTS, runOnFakeServices } from './fake-services.ts';
 import { commentsWithState, destinationKind, imageGateRecord, imagePlace, isImageNotice, noticeImageLabels, placeLabel, withoutImage, writtenImagePath } from './image-gate.ts';
 import { renderRunMarkdown } from './report.ts';
 import { resultOf } from './runner.ts';
-import { INIT_FILES, initArguments, initRelease, readmeBody, withoutAnnotation } from './init-files.ts';
+import { INIT_FILES, initArguments, initRelease, withoutAnnotation } from './init-files.ts';
 import { loadScenarios } from './spec.ts';
 import { STEP_ACTIONS } from './steps.ts';
 import { REQUIRED_SETUP_CHECKS, subjectSource } from './subjects.ts';
@@ -314,13 +314,11 @@ describe('git.init-files', () => {
     assert.equal(withoutAnnotation(readme), '# Notes\n\nText.\n');
     assert.equal(withoutAnnotation('---\ntitle: Notes\nlinear-team: ENG\n---\nText.\n'), '---\ntitle: Notes\n---\nText.\n');
     assert.equal(withoutAnnotation('Text.\n'), 'Text.\n');
-    assert.equal(readmeBody(readme), '# Notes\n\nText.\n');
-    assert.equal(readmeBody('Text.\n'), 'Text.\n');
   });
 
-  it('names one folder per annotation, the root as ".", and the release under test or the templates\' release', () => {
-    assert.deepEqual(initArguments([{ folder: '', team: 'ENG', project: null }, { folder: 'eng/notes', team: null, project: 'Field notes' }], { sha: 'a'.repeat(40) }),
-      ['--release-sha', 'a'.repeat(40), '--no-security-hooks', '--folder', '.', '--team', 'ENG', '--folder', 'eng/notes', '--project', 'Field notes']);
+  it('names no folder, and pins the release under test or the templates\' release', () => {
+    assert.deepEqual(initArguments({ sha: 'a'.repeat(40) }), ['--release-sha', 'a'.repeat(40), '--no-security-hooks']);
+    assert.deepEqual(initArguments({ sha: 'a'.repeat(40), version: 'v1.2.3' }), ['--release-sha', 'a'.repeat(40), '--release-version', 'v1.2.3', '--no-security-hooks']);
     assert.deepEqual(initRelease(undefined), { sha: MINIMUM_RELEASE.sha, version: MINIMUM_RELEASE.version });
     assert.deepEqual(initRelease('b'.repeat(40)), { sha: 'b'.repeat(40) });
   });
