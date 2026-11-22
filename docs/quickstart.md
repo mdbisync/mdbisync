@@ -545,8 +545,8 @@ A failing batch moves to the one **Suspended changes from Linear** pull
 request on `mdbisync/suspended` (the default branch names), and the
 normal pull request closes so other documents can continue. A suspended
 document shows a red exclamation mark (`Alert`) and a comment naming the
-check, linking to its run when available, and listing annotations for that
-file or “did not finish in time”. Security hooks still run before push;
+check, linking to its run when available, and listing the check's
+annotations for that file or “did not finish in time”. Security hooks still run before push;
 their blocked mark takes precedence.
 
 Suspended documents are frozen both ways: Linear edits go only to the

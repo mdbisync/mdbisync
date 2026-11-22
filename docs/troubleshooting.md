@@ -200,8 +200,8 @@ other documents continue through **Changes from Linear** on
 are pending before the deadline, the normal lane waits to merge.
 
 Suspended documents show a red exclamation mark (`Alert`) and one comment
-naming the failed check and linking to its run when available, with annotations for that
-file, or “did not finish in time”. Later failures edit that comment.
+naming the failed check and linking to its run when available, with the check's
+annotations for that file, or “did not finish in time”. Later failures edit that comment.
 A blocked security-hook mark takes precedence over suspension, which
 takes precedence over conflict. Suspended documents are frozen both ways:
 Linear edits go only to the suspended lane; git edits wait for release.
@@ -277,7 +277,7 @@ instead of creating it twice.
 | --- | --- | --- |
 | `stopped` | Linear's rate limit stopped it. | Run it again after the reset time in the summary. |
 | `write-failed` | Linear failed or rejected a write; the **Failed** table names it. | Run it again; if the same document fails, look up its error. |
-| `state-moved` | A state ref moved while it worked: another run is working on this repository. | Wait for the other run, then run the initial sync again. Disable the sync workflow during an initial sync. |
+| `state-moved` | A state ref moved while it worked: another run is working on this repository. | Wait for the other run, then run the initial sync again. Keep the sync workflow out of the repository, or disabled, during an initial sync. |
 | `container-cap` | See [`container-cap`](#container-cap). | |
 | `pull-request-failed` | From Linear: the state is recorded, but the pull request could not be opened. | Run it again with the same inputs to open it. |
 | `sync-branch-changed` | From Linear: the sync branch holds commits this initial sync did not make, so it recorded nothing. | Merge or close the sync branch's pull request and delete the branch, then run it again. |
@@ -293,7 +293,7 @@ this time:
 | `missing-in-linear` | Not found in Linear, or in its trash; the next run takes that in. |
 | `conflict` | Changed on both sides in a way git cannot merge; it is written when the conflict is resolved. |
 | `pull-repair-pending` | Waiting for the pull request carrying its image or link repair to merge. |
-| `suspended` | Waits for its suspended changes to reach the main branch. |
+| `suspended` | Waits for its suspended changes to reach the tracked branch. |
 | `renamed-to-unwritable` | Its file was renamed to one that is in conflict or left out; the document stays as it is until that is fixed. |
 
 None needs action unless the same document stays skipped.
@@ -363,7 +363,7 @@ or replace the file
 
 External http(s) and path images, and image uploads answering 404 or 410,
 become ordinary links in the sync pull request. Empty and `data:` images are
-removed. The PR lists each image by place and line; after merge, the write
+removed. The pull request lists each image by place and line; after merge, the write
 step puts the repaired text into Linear. These repairs do not cause an
 `image-blocked` notice. Unsupported or oversized upload bytes remain blocked.
 A repaired text enters the pull request only after the repository's security

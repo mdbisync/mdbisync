@@ -28,8 +28,8 @@ branch reach Linear in the next run, usually within a minute or two
 
 ## One run
 
-The sync workflow runs on every push to the tracked branch, every five
-minutes, and by hand ([workflows](usage.md#workflows)). Runs of one
+The sync workflow runs on every push to the tracked branch and on every
+dispatch, by hand or from your own scheduler ([workflows](usage.md#workflows)). Runs of one
 repository share a concurrency group in the supplied workflows
 ([overlapping runs](#overlapping-runs)). Each run makes these steps, in this order:
 

@@ -141,7 +141,7 @@ reasons:
   the run cannot read (`upload-unreadable`), such as an LFS object the
   remote's LFS server does not have. The dry run judges a file in Git LFS by
   its pointer and asks the LFS server only whether it holds the object; it
-  downloads nothing.
+  downloads nothing;
 - a plain link to a repository file in a document Linear already holds, when
   the `linear` and `ids` state refs are lost (`link-provenance-unknown`):
   the run cannot tell it from a link a Linear member wrote.
@@ -243,7 +243,7 @@ artifact.
 ## A run that stops
 
 A large repository needs more than one run. Linear's rate limit stops a run
-before it runs out (`stopped`), and the job's time limit of 55 minutes, set
+before the limit runs out (`stopped`), and the job's time limit of 55 minutes, set
 by the GitHub App token's one-hour lifetime, ends one. When Linear fails or
 rejects a write, the run writes the rest but trashes nothing
 (`write-failed`). A state ref that another run moves under it ends it too
