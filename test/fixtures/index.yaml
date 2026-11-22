@@ -1501,6 +1501,64 @@ fixtures:
     basis: known
     canary: kx-a71b6d09
     note: "Linear keeps the header hashes as text and stores the lone body hash as an empty heading"
+  - file: "tables/table-hash-escaped-body.md"
+    group: tables
+    construct: table-hash-escaped-body
+    class: unchanged
+    basis: assumed
+    canary: kx-28002669
+    probe_pending: true
+    corpus: false
+    note: "a body cell holding only an escaped hash, the form fix keeps; expected to stay text"
+  - file: "tables/table-hash-double-body.md"
+    group: tables
+    construct: table-hash-heading-body
+    class: lint-error
+    rule: table-hash-cell
+    line: 3
+    basis: assumed
+    canary: kx-bc99d783
+    probe_pending: true
+    corpus: false
+    note: "a body cell holding only two hashes; the rule assumes a heading"
+  - file: "tables/table-hash-text-body.md"
+    group: tables
+    construct: table-hash-heading-body
+    class: lint-error
+    rule: table-hash-cell
+    line: 3
+    basis: assumed
+    canary: kx-75e485e4
+    probe_pending: true
+    corpus: false
+    note: "a body cell starting with a hash and a space before text; the rule assumes a heading"
+  - file: "tables/table-hash-header-escaped.md"
+    group: tables
+    construct: table-hash-header-escaped
+    class: unchanged
+    basis: assumed
+    canary: kx-9b46b921
+    probe_pending: true
+    corpus: false
+    note: "a header-only table whose header cell holds an escaped hash"
+  - file: "tables/table-hash-header-bare.md"
+    group: tables
+    construct: table-hash-header-bare
+    class: fixable
+    basis: assumed
+    canary: kx-976b8c3d
+    probe_pending: true
+    corpus: false
+    note: "a header-only table whose header cell holds a bare hash; fix escapes it, as Linear writes header hashes in the recorded table-header-hash form"
+  - file: "tables/table-quoted-end.md"
+    group: tables
+    construct: table-quoted-end
+    class: unchanged
+    basis: assumed
+    canary: kx-9e3d51a7
+    probe_pending: true
+    corpus: false
+    note: "a quoted table with no hash ends the document; the table-header-hash record ends its quoted table with a final newline, so this asks whether that newline belongs to the quoted table alone"
   - file: "tables/table-inline-marks.md"
     group: tables
     construct: table-inline-marks
