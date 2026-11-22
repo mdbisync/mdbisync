@@ -150,9 +150,9 @@ environment variables; secrets never go in arguments.
 | `--lfs` | off | Adds to `.gitattributes` the Git LFS lines for embedded files: one per image and document type the sync takes from Linear (`*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp`, `*.avif`, `*.pdf`, `*.mp4`, `*.webm`, `*.svg`) and `**/assets/** filter=lfs diff=lfs merge=lfs -text` for every `assets/` folder. That line covers every folder named `assets` in the repository, a website's own included; leave out `--lfs` and write your own lines if one must stay out of LFS. Lines already there are kept and not repeated. |
 | `--no-lfs` | on | Leaves `.gitattributes` as it is: your own attributes decide what goes to LFS. |
 
-With a terminal attached and the release SHA, a folder, or a folder's
-team or project missing, `init` asks for those, and then whether to add
-the security hook examples and the Git LFS lines. It changes local files only.
+With a terminal attached, `init` asks for the release SHA when it is
+missing, and whether to add the security hook examples and the Git LFS
+lines when their flags are missing. It changes local files only.
 
 The workflows `init` writes are made for the release their examples pin,
 `v0.1.0-rc.9`, and pass action inputs that earlier releases lack. `init`

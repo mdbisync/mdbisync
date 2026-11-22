@@ -476,20 +476,14 @@ the message. Most come from the workflow's configuration:
 | Message | What to do |
 | --- | --- |
 | `run init at the repository root` | Run it in the folder that holds `.git`. |
-| `provide --folder with --team and/or --project` | Name at least one folder, each with a team or project. |
-| `unknown option: <flag>`, `<flag> needs a value`, `<flag> must follow --folder`, `<flag> was given twice for a folder`, `<flag> was given twice`, `choose security hooks once`, `choose Git LFS once` | Fix the flags; `mdbisync init --help` lists them. |
+| `unknown option: <flag>`, `<flag> needs a value`, `<flag> was given twice`, `choose security hooks once`, `choose Git LFS once` | Fix the flags; `mdbisync init --help` lists them. |
 | `--release-sha must be a full 40-character commit SHA`, `--release-version must be a version such as v1.2.3` | Give the release commit SHA and version (see [usage.md](usage.md#release-builds-and-pins)). |
 | `release <version> is older than <minimum>, the release these workflows are written for and checked against. Use <minimum> or later` | Pick `<minimum>` or a later release (see [`init`](configuration.md#init)): the workflows pass action inputs that the older release lacks. |
-| `paths must stay inside the repository`, `setup destinations must not contain symlinks`, `a setup folder path names a regular file` | Give folder paths inside the repository, without symbolic links. |
-| `conflicting folder options: <path>` | Give each folder its options once. |
-| `invalid YAML configuration`, `.pre-commit-config.yaml needs a repos list`, `invalid pre-commit repository entry` | Fix `.pre-commit-config.yaml` or the `README.md` front matter. |
-| `<folder>/README.md already has a different <key>` | Edit or remove that annotation first. |
+| `paths must stay inside the repository`, `setup destinations must not contain symlinks`, `a setup folder path names a regular file` | A file `init` writes (in `.github/workflows/`, `.pre-commit-config.yaml`, `.gitattributes`) or a folder on its path is a symbolic link, leads outside the repository, or is a regular file where a folder should be. Move it aside and run `init` again. |
+| `invalid YAML configuration`, `.pre-commit-config.yaml needs a repos list`, `invalid pre-commit repository entry` | Fix `.pre-commit-config.yaml`. |
 | `existing linear-format hook uses a different repository or release` | Update the hook's `rev` by hand to the release you pass, or pass the release it uses. |
 | `existing <hook> hook differs from the security example; reconcile it first` | Change or rename your hook, or leave out `--security-hooks`. |
 | `existing workflow differs: <name>` | Merge the changes into your workflow by hand, or move it aside. |
-
-An annotation problem from [Annotation problems](#annotation-problems) can
-also end `init`.
 
 ## Linear and GitHub request errors
 
