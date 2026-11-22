@@ -163,10 +163,18 @@ function completeBlocks(text: string): string {
   // A separate variable, not `text`: the visit above reads `text`, and static
   // analysis that merges a captured variable's assignments would otherwise
   // see the inserted end strings flow into the source it parses.
-  let completed = text;
-  for (const insertion of insertions.sort((a, b) => b.offset - a.offset)) {
-    completed = completed.slice(0, insertion.offset) + insertion.text + completed.slice(insertion.offset);
+  // The pieces are joined once: inserting each end into the whole text would
+  // copy it once per unclosed block.
+  const pieces: string[] = [];
+  let at = 0;
+  // Ends at one offset go in the reverse of their visit order: inner block first.
+  const ordered = insertions.map((insertion, index) => ({ ...insertion, index })).sort((a, b) => a.offset - b.offset || b.index - a.index);
+  for (const insertion of ordered) {
+    pieces.push(text.slice(at, insertion.offset), insertion.text);
+    at = insertion.offset;
   }
+  pieces.push(text.slice(at));
+  const completed = pieces.join('');
   return completed.replace(/\n$/, '');
 }
 

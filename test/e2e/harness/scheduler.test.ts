@@ -26,10 +26,9 @@ const scheduler = (actionSha?: string) =>
   parse(renderScheduler(readTemplate(WORKFLOW_FILES.sync), actionSha)) as { name: string; on: Record<string, unknown>; concurrency: Record<string, unknown>; jobs: Record<string, Job> };
 
 describe('the scheduled sync on the sandbox\'s default branch', () => {
-  it('runs on the template\'s schedule and by hand, one tick at a time', () => {
+  it('runs on the sandbox schedule and by hand, one tick at a time', () => {
     const parsed = scheduler();
-    const template = parse(readTemplate(WORKFLOW_FILES.sync)) as { on: Record<string, unknown> };
-    assert.deepEqual(parsed.on, { schedule: template.on['schedule'], workflow_dispatch: null });
+    assert.deepEqual(parsed.on, { schedule: [{ cron: '*/5 * * * *' }], workflow_dispatch: null });
     assert.deepEqual(parsed.concurrency, { group: SCHEDULER_GROUP, 'cancel-in-progress': false });
     assert.equal(parsed.name, 'mdbisync (scheduled)');
     assert.equal(SCHEDULER_FILE, 'mdbisync-scheduled.yml');
@@ -73,8 +72,8 @@ describe('the scheduled sync on the sandbox\'s default branch', () => {
     assert.ok(renderScheduler(template).includes(`${ACTION_REPOSITORY}@${pinnedActionSha(template)}`));
   });
 
-  it('refuses a template without a schedule', () => {
-    assert.throws(() => renderScheduler('on:\n  workflow_dispatch:\nconcurrency:\n  group: mdbisync\njobs:\n  sync:\n    runs-on: ubuntu-latest\n    steps: []\n'), /no schedule/);
+  it('refuses a template without workflow_dispatch', () => {
+    assert.throws(() => renderScheduler('on:\n  push:\nconcurrency:\n  group: mdbisync\njobs:\n  sync:\n    runs-on: ubuntu-latest\n    steps: []\n'), /no workflow_dispatch/);
   });
 });
 

@@ -4,7 +4,7 @@
 //
 // A sync run is partial when Linear stopped it (a rate limit, a budget
 // running low), a write failed or was rejected, or a state ref moved under
-// it. It kept what it could record, and the next scheduled run goes on from
+// it. It kept what it could record, and the next run goes on from
 // there, so it ends with a warning, not a failure: a sync that meets one of
 // Linear's bad minutes does not fail its job. Other operations have no next
 // run to go on, so a stop fails them.
@@ -124,8 +124,24 @@ export function stoppedBeforeWritingMessage(command: string, outcome: OperationO
   const detail = outcome.setup?.detail ?? outcome.refusal?.message;
   const fix = fixUrl(outcome.code);
   // Names from README front matter may hold line breaks; one line keeps them from reading as further log lines.
-  const explained = message('run.stopped-before-write', { command, code: String(outcome.code), detail: detail === undefined ? '' : message('run.stopped-detail', { detail: detail.replace(/\s*[\r\n]+\s*/g, ' ') }) });
+  const explained = message('run.stopped-before-write', { command, code: String(outcome.code), detail: detail === undefined ? '' : message('run.stopped-detail', { detail: oneLine(detail) }) });
   return fix === undefined ? explained : message('run.how-to-fix', { message: explained.replace(/\.$/, ''), url: fix });
+}
+
+/**
+ * The text on one line: each run of line breaks, with the white space around
+ * it, becomes one space. Split, not a regular expression for the space before
+ * a break: that one rescans a long run of spaces from each of its positions.
+ */
+function oneLine(text: string): string {
+  const lines = text.split(/[\r\n]+/);
+  if (lines.length === 1) return text;
+  const last = lines.length - 1;
+  return lines
+    .map((line, index) => (index === 0 ? line.trimEnd() : index === last ? line.trimStart() : line.trim()))
+    // A line of white space only joins the space around it.
+    .filter((line, index) => line !== '' || index === 0 || index === last)
+    .join(' ');
 }
 
 /** The message of a run that is not a sync, stopped by Linear before any write. */

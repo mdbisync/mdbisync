@@ -34,7 +34,7 @@ describe('workflow templates rendered for a run', () => {
       const parsed = parse(renderForRun(sync, { ...RUN, ...drivers })) as { on: Record<string, unknown>; jobs: Record<string, { if?: string }> };
       const guarded = Object.values(parsed.jobs).every((job) => job.if === DISPATCH_GUARD || job.if?.startsWith(`${DISPATCH_GUARD} && (`) === true);
       assert.equal(guarded, syncDispatchOnly(drivers), JSON.stringify(drivers));
-      assert.equal('schedule' in parsed.on, !syncDispatchOnly(drivers) && 'schedule' in (parse(sync) as { on: Record<string, unknown> }).on);
+      assert.ok(!('schedule' in parsed.on));
     }
   });
   it('the initial sync: the run\'s group, runner, names, branches and refs, and a report artifact', () => {
@@ -134,12 +134,10 @@ describe('workflow templates rendered for a run', () => {
     assert.throws(() => renderForRun('x: ${{ secrets.MDBISYNC_OTHER }}\n', RUN), /no sandbox setting for secrets\.MDBISYNC_OTHER/);
   });
 
-  it('the sync: push on the run\'s branch, the schedule and dispatch kept, the run\'s group', () => {
+  it('the sync: push on the run\'s branch, dispatch and the run\'s group', () => {
     const text = renderForRun(readTemplate(WORKFLOW_FILES.sync), { ...RUN, actionSha: SHA });
     const parsed = parse(text) as { on: Record<string, { branches?: string[] } | null>; concurrency: { group: string } };
-    assert.deepEqual(parsed.on['push'], { branches: [RUN.trackedBranch] });
-    assert.ok(Array.isArray(parsed.on['schedule']));
-    assert.ok('workflow_dispatch' in parsed.on);
+    assert.deepEqual(parsed.on, { push: { branches: [RUN.trackedBranch] }, workflow_dispatch: null });
     assert.equal(parsed.concurrency.group, RUN.group);
     const [job] = jobsOf(text);
     const action = job!.steps.find((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`));

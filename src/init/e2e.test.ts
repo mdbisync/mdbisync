@@ -1,4 +1,4 @@
-// Init's files feed the actual setup check and dry-run planner against fake APIs.
+// Init's files, with the folders the person annotated, feed the actual setup check and dry-run planner against fake APIs.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { join } from 'node:path';
@@ -30,18 +30,16 @@ test('init output passes setup and L1-03 dry-run assertions on mini documents', 
     const result = readAnnotation(file.path, text);
     if ('annotation' in result && result.annotation) {
       const { annotation } = result;
-      args.push('--folder', annotation.folder);
       if (annotation.team) {
-        args.push('--team', annotation.team);
         world.linear.teams.push({ id: `team-${annotation.team}`, key: annotation.team, name: annotation.team });
       }
       if (annotation.project) {
-        args.push('--project', annotation.project);
         const team = annotation.team ?? (annotation.folder.startsWith('eng/') ? 'ENG' : 'DOCS');
         world.linear.projects.push({ id: `project-${annotation.project}`, name: annotation.project, teamIds: [`team-${team}`] });
       }
-      files[file.path] = text.replace(/^linear-(team|project):[^\n]*\n/gm, '');
-    } else files[file.path] = file.content;
+    }
+    // The person annotates the folders; init writes only the workflows and the hooks.
+    files[file.path] = file.content;
   }
   await fixture.seed(files);
   const initialized = await runCli(args, { cwd: join(fixture.root, 'seed') });

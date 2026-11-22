@@ -154,7 +154,7 @@ export function referencesOverLimit(tree: Root, body: string): number | undefine
     const definition = definitions.get(reference.identifier);
     if (definition === undefined) continue;
     // `fix` writes `[text](destination)` from a link's children, `![label](destination)` from an image's label as written.
-    const label = reference.type === 'linkReference' ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body, start(reference) + 1)) + 5;
+    const label = reference.type === 'linkReference' ? childrenLength(reference, length) + 4 : codePoints(bracketedLabel(body, start(reference) + 1, end(reference))) + 5;
     const before = written;
     written += label + destinationLength(reference, definition.url) - length(start(reference), end(reference));
     // A text already over the limit (a later pass of `fix`) is named at its first reference.

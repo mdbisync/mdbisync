@@ -591,7 +591,9 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
     const url = uploads.get(link.hash);
     if (url === undefined) continue;
     const key = withUploadSuffix(url, link.suffix);
-    raws.set(key, [...(raws.get(key) ?? []), link.written]);
+    const list = raws.get(key);
+    if (list === undefined) raws.set(key, [link.written]);
+    else list.push(link.written);
   }
   if (raws.size === 0) return body;
   const seen = new Map<string, number>();
@@ -675,12 +677,18 @@ export function destinations(body: string): Array<{ node: DestinationNode; range
 }
 
 /** Replaces non-overlapping ranges of `text`. */
-function replaceRanges(text: string, replacements: ReadonlyArray<{ from: number; to: number; text: string }>): string {
-  let result = text;
-  for (const replacement of [...replacements].sort((a, b) => b.from - a.from)) {
-    result = result.slice(0, replacement.from) + replacement.text + result.slice(replacement.to);
+export function replaceRanges(text: string, replacements: ReadonlyArray<{ from: number; to: number; text: string }>): string {
+  // One pass in text order, joined once: replacing each range in the whole
+  // result would copy the text once per replacement.
+  const parts: string[] = [];
+  let at = 0;
+  // An insertion (an empty range) goes before a replacement that starts at the same place.
+  for (const replacement of [...replacements].sort((a, b) => a.from - b.from || a.to - b.to)) {
+    parts.push(text.slice(at, replacement.from), replacement.text);
+    at = replacement.to;
   }
-  return result;
+  parts.push(text.slice(at));
+  return parts.join('');
 }
 
 

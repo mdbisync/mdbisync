@@ -98,10 +98,10 @@ cannot take a checkpoint pause or fault armed for the next sync.
 
 `git.init-files` prepares the repository the way a person does with
 `mdbisync init`: it removes the setup's annotation keys and the files `init`
-writes, runs `init` with one folder per annotation (pinned to the release
-under test when `MDBISYNC_TEST_ACTION_SHA` names one), checks that the files
-parse, pin that release, keep README bodies and annotations and do not change
-on a second run, and commits them. `linear.image-path` writes a relative image
+writes, runs `init` (pinned to the release under test when
+`MDBISYNC_TEST_ACTION_SHA` names one), checks that the files parse, pin that
+release, leave the READMEs as they are and do not change on a second run,
+then writes each annotation back by hand, as a person does, and commits them. `linear.image-path` writes a relative image
 path into a synced document through the API and records the image's place and
 line in the text Linear stored. `linear.inspect-image-repair` reads the unchanged
 Linear document, raw observation, proposed link version and pull request
