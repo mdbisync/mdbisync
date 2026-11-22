@@ -173,6 +173,41 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal((await documentOf('eng/notes/review.md')).content, '# Review\n\nValid update.\n');
   });
 
+  for (const limit of ['marker length', 'output size']) {
+    it(`leaves a merge over the ${limit} limit unresolved while updating a valid neighbor`, async (t) => {
+      const path = 'eng/notes/plan.md';
+      const document = await documentOf(path);
+      const linear = limit === 'marker length'
+        ? ['# Plan', '', '```text', '='.repeat(8_192), '```'].join('\n')
+        : '# Plan\n\nLinear update.\n';
+      const tracked = '# Plan\n\nGit update.\n';
+      document.content = linear;
+      touch(document);
+      await commit({[path]: tracked, 'eng/notes/review.md': '# Review\n\nValid update.\n'});
+
+      const run = Git.prototype.run;
+      let bodyMerges = 0;
+      t.mock.method(Git.prototype, 'run', async function (this: Git, args: Parameters<Git['run']>[0], options?: Parameters<Git['run']>[1]) {
+        if (!args.includes('merge-file')) return run.call(this, args, options);
+        bodyMerges++;
+        assert.ok(args.includes('ours'));
+        assert.ok(options?.maxOutputBytes !== undefined && options.maxOutputBytes > 1 && options.maxOutputBytes < 10_000);
+        // Use a small, ordinary diff to exercise the real output cutoff
+        // without changing the byte budget passed by the merge.
+        await writeFile(join(this.dir, 'empty'), '');
+        await writeFile(join(this.dir, 'sample'), 'A status line.\n'.repeat(Math.ceil(options.maxOutputBytes / 15)));
+        return run.call(this, ['diff', '--no-index', '--', 'empty', 'sample'], options);
+      });
+
+      const {report} = await sync();
+      assert.equal(bodyMerges, limit === 'marker length' ? 0 : 1);
+      assert.ok(report.sync?.skipped.some((entry) => entry.path === path && entry.reason === 'conflict'));
+      assert.equal(document.content, linear);
+      assert.equal(await show(`refs/heads/main:${path}`), tracked);
+      assert.equal((await documentOf('eng/notes/review.md')).content, '# Review\n\nValid update.\n');
+    });
+  }
+
   /** Every live document holds its file's body; no title twice in a place. */
   async function assertConverged() {
     const map = await ids();
