@@ -43,5 +43,5 @@ test('widening handles thousands of independent and overlapping intervals within
 
 test('widening rejects work above its budget with a Markdown limit error', () => {
   assert.throws(() => widenConflictRanges(new Array(CONFLICT_WIDENING_WORK_LIMIT + 1)),
-    (error) => error instanceof MarkdownLimitError && error.limit === 'conflict widening');
+    (error) => error instanceof MarkdownLimitError && error.limit === 'widening');
 });

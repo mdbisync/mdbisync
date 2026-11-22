@@ -9,9 +9,9 @@ export const CONFLICT_WIDENING_WORK_LIMIT = 4_000_000;
 export function widenConflictRanges(ranges: WideningRange[]): Range[] {
   // Reserve one step per interval for the sweep, then count sort comparisons.
   let work = ranges.length;
-  if (work > CONFLICT_WIDENING_WORK_LIMIT) throw new MarkdownLimitError('conflict widening');
+  if (work > CONFLICT_WIDENING_WORK_LIMIT) throw new MarkdownLimitError('widening');
   ranges.sort((a, b) => {
-    if (++work > CONFLICT_WIDENING_WORK_LIMIT) throw new MarkdownLimitError('conflict widening');
+    if (++work > CONFLICT_WIDENING_WORK_LIMIT) throw new MarkdownLimitError('widening');
     return a.start - b.start;
   });
 
