@@ -32,7 +32,16 @@ as a GitHub Action under apps you create: no server we own, no key we hold.
   people and agents.
 - **Every release reviewed by frontier models.** Each release is reviewed for
   vulnerabilities by two frontier language models, and its security report is
-  published with the release (see [Security](#security)).
+  published with the release (see [Security report](https://mdbisync.com/security/report) and [Dependency report](https://mdbisync.com/security/dependencies)).
+
+<p align="center">
+  <a href="https://mdbisync.com/security/report">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://mdbisync.com/badge/security-dark.svg">
+      <img alt="Security scan of the latest release: high and critical findings per tool" src="https://mdbisync.com/badge/security.svg">
+    </picture>
+  </a>
+</p>
 
 ## How it works
 
@@ -78,20 +87,6 @@ Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
   stores before it is synced (see [Linear's Markdown form](docs/linear-format.md)).
 - **Your security hooks.** Pre-commit hooks marked with `alias: security`
   check every change from Linear before it reaches git.
-
-## Security
-
-Every release is reviewed by frontier models, GitHub CodeQL and dependency
-scanners. (see  [Security reports](https://mdbisync.com/security/report) and  [Dependency scan](https://mdbisync.com/security/dependencies))
-
-<p align="center">
-  <a href="https://mdbisync.com/security/report">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://mdbisync.com/badge/security-dark.svg">
-      <img alt="Security scan of the latest release: high and critical findings per tool" src="https://mdbisync.com/badge/security.svg">
-    </picture>
-  </a>
-</p>
 
 ## Limitations
 
