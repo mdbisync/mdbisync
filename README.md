@@ -97,12 +97,8 @@ scanners. (see  [Security reports](https://mdbisync.com/security/report) and  [D
 
 - Linear documents only: issues, comments, icons and colors are not synced.
   YAML front matter stays in git.
-- Between pushes, Linear to git waits for the next scheduled or
-  dispatched run. GitHub may start scheduled runs hours late or skip them,
-  on any plan, and turns them off in a public repository after 60 days
-  without activity: for timely runs, start the workflow from your own
-  timer
-  ([docs/own-scheduler.md](docs/own-scheduler.md)).
+- Between pushes, a Linear edit reaches git only with the next run, and
+  GitHub's schedule can start it hours late (see [Scheduler](#scheduler)).
 - A document with Markdown Linear would lose (a footnote, a link title,
   table alignment), an image from the web, a linked file over 10 MB or more
   than 250,000 characters is left out whole: it stays in git only and is
@@ -176,11 +172,19 @@ Once the initial sync is done (for `linear-to-git`, once its pull request
 is merged), enable it again. It runs on every push to
 `main`, on GitHub's schedule and by hand, in both directions.
 
-Do not rely on GitHub's schedule to bring Linear edits to git: it can run
-hours late. Start the workflow every few minutes from a timer of your own
-(cron, a systemd timer or another scheduler) with a token that may only
-start workflows in this repository, and keep the schedule as a fallback:
-[run the sync from your own scheduler](docs/own-scheduler.md).
+Do not rely on GitHub's schedule to bring Linear edits to git: start the
+workflow from a timer of your own (see [Scheduler](#scheduler)).
+
+## Scheduler
+
+A push to `main` starts a sync run at once. A Linear edit waits for the
+next run, and GitHub's schedule can start it hours late or skip it, and
+turns itself off in a public repository after 60 days without activity.
+
+For timely runs, start the sync workflow every few minutes from a timer of
+your own (cron, a systemd timer or another scheduler), with a token that may
+only start workflows in this repository. Keep GitHub's schedule as a
+fallback (see [Run the sync from your own scheduler](docs/own-scheduler.md)).
 
 ## Documentation
 
