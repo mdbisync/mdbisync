@@ -204,10 +204,28 @@ If the approving reviews come from a classic branch protection rule,
 don't give the App that rule's bypass, **Allow specified actors to bypass
 required pull requests**: it lets the App push to `main` directly, cannot
 be limited to pull requests and exists only in repositories an
-organization owns. Turn off the rule's required reviews and require them
-in a ruleset that targets `main`, with the App's bypass as above; the
-rule's other requirements and branches stay as they are
-([branch protection rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-branch-protection-rule)).
+organization owns. Instead, require the reviews in a ruleset that targets
+`main`, with the App's bypass as above: under **Require a pull request
+before merging** the review settings are **Require approvals**, **Require
+review from Code Owners** and **Require approval of the most recent
+reviewable push**; set the ones the classic rule has in the ruleset. Then
+keep the classic protection from requiring them on `main`:
+
+- **The rule's pattern is exactly `main`:** turn those settings off in it
+  and keep the rest.
+- **Any other pattern** (such as `*`, which also matches branches created
+  later): leave that rule as it is and add a classic rule for `main` by
+  name, with the same settings except those. Only one classic rule applies
+  to a branch, and a rule that names the branch takes priority over a
+  pattern, so the other branches keep their reviews
+  ([branch protection rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-branch-protection-rule)).
+  A later change to the pattern rule no longer reaches `main`: make it in
+  both rules.
+
+A classic rule that matches the sync branches (`mdbisync/linear`,
+`mdbisync/suspended`) and requires pull requests refuses the App's pushes
+to them: use a pattern that does not match them, and protect them with the
+ruleset in [who may push to the sync branches](#who-may-push-to-the-sync-branches).
 
 ### Keep the App's bypass to `main`
 
