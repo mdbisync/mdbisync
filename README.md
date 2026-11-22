@@ -20,36 +20,39 @@ as a GitHub Action under apps you create: no server we own, no key we hold.
 
 - **Inside your perimeter.** The sync runs in your GitHub Actions runner,
   under a Linear OAuth app and a GitHub App that you create. Nothing runs on
-  our side and we hold no key.
+  our server and we hold no key.
 - **Short-lived tokens.** Each run gets its own Linear token and revokes it at
   the end. No personal API key.
 - **Quality gates before any push.** Changes from Linear pass your
-  repository's security and privacy quality gates, the pre-commit hooks you
-  mark `alias: security`, before anything is pushed. A rejected change gets a
-  red mark in Linear.
-- **The same checks as everyone else.** Linear's changes reach `main` through
-  a sync pull request, with the same checks as the pull requests of people and
-  agents.
-- **Merge edits from both sides.** `main` flows back to Linear through a
-  three-way merge in the runner. A re-read before writing detects changes to
-  tracked documents; edits can still be lost between reading and writing
-  ([editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
+  repository's security and privacy quality gates. Your pre-commit hooks
+  marked with `alias: security` run on every change first, and if one fails,
+  nothing is pushed to git. A rejected change gets a red mark in Linear.
+- **The same checks as everyone else.** Changes from Linear reach `main`
+  through a sync pull request, with the same checks as the pull requests of
+  people and agents.
+- **A true three-way merge.** Edits from git and from Linear are merged
+  against the version both sides last agreed on, so changes to different
+  paragraphs simply combine. When both sides change the same paragraph, the
+  document keeps both versions and is marked orange in Linear until someone
+  resolves the conflict.
+- **Every release reviewed by frontier models.** Each release is reviewed for
+  vulnerabilities by two frontier language models, and its security report is
+  published with the release (see [Security](#security)).
 
 ## How it works
 
 There is no mdbisync service and no database. Each run is a job in your
 GitHub Actions runner. The sync's state lives in three refs of your
-repository under `refs/mdbisync/`, outside your branches and files, and its
-pull requests come from the branches `mdbisync/linear` and
-`mdbisync/suspended`.
+repository under `refs/mdbisync/`, outside your branches and files. From
+them the sync opens its pull requests to `main`.
 
-![A sync run: Linear's edits are captured through your hooks into the state refs and reach main through the sync pull request; main is merged with Linear's record and written back to Linear.](docs/images/architecture.svg)
+Two workflows do the work:
 
-After the initial sync, changes from Linear reach `main` only through the
-sync pull request, which merges itself once your checks pass; a batch that
-fails them waits in a suspended pull request. Changes on `main` reach Linear
-in the next run, usually within a minute or two. Each step is in
-[docs/sync-cycle.md](docs/sync-cycle.md).
+- **Initial sync**, run once by hand, in one direction: it makes Linear
+  equal to `main`, or opens a pull request that makes `main` equal to Linear.
+- **Sync**, run on every push to `main` and on a schedule, keeps both sides
+  equal from then on. GitHub's schedule can be late, so for timely runs start
+  it from your own timer (see [Scheduler](#scheduler)).
 
 ## Conflicts
 
@@ -124,7 +127,7 @@ and git's path beats Linear's title
   Linear stores, so a round trip changes nothing
   ([docs/linear-format.md](docs/linear-format.md)).
 - **Security hooks before any push:** your `alias: security` pre-commit
-  hooks check Linear's changes; a rejected document gets a red mark in
+  hooks check changes from Linear; a rejected document gets a red mark in
   Linear and is not committed. Without such hooks the content is not
   checked, and every run summary says so.
 - **A sync pull request with your checks:** it merges itself when they pass;
@@ -149,6 +152,9 @@ and git's path beats Linear's title
   table alignment), an image from the web, a linked file over 10 MB or more
   than 250,000 characters is left out whole: it stays in git only and is
   listed in the run summary until fixed.
+- An edit made in Linear while a run is writing that same document can be
+  lost
+  ([editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
 - The repository must be on GitHub.
 
 ## Security

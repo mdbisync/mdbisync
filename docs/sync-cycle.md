@@ -15,6 +15,17 @@ How to set up the workflows, the folder mapping and the setup check are in
 is in [conflicts.md](conflicts.md), and what to do about each code and
 warning is in [troubleshooting.md](troubleshooting.md).
 
+## Overview
+
+![A sync run: Linear's edits are captured through your hooks into the state refs and reach main through the sync pull request; main is merged with Linear's record and written back to Linear.](images/architecture.svg)
+
+Changes from Linear reach the tracked branch only through the sync pull
+request, which merges itself once your checks pass; a batch that fails them
+waits in a suspended pull request
+([suspension and release](#suspension-and-release)). Changes on the tracked
+branch reach Linear in the next run, usually within a minute or two
+([how long it takes](#how-long-it-takes)).
+
 ## One run
 
 The sync workflow runs on every push to the tracked branch, every five
