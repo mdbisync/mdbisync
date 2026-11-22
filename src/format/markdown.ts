@@ -117,7 +117,7 @@ export const MARKDOWN_MAX_NODES = 500_000;
 export const INLINE_WORK_LIMIT = 250_000_000;
 
 export class MarkdownLimitError extends Error {
-  readonly limit: 'depth' | 'nodes' | 'inline' | 'widening';
+  readonly limit: 'depth' | 'nodes' | 'inline' | 'widening' | 'merge-marker' | 'merge-output';
   constructor(limit: MarkdownLimitError['limit']) {
     super(`Markdown exceeds the ${limit} limit.`);
     this.name = 'MarkdownLimitError';
@@ -355,18 +355,12 @@ export function isCallout(node: Nodes, source: string): boolean {
 /**
  * The text as the content of a block quote, the way Linear writes one: each
  * line after `> `, a blank line as a bare `>`, except a blank line of a
- * code block's content, which keeps the space (`> `).
+ * code block's content, which keeps the space (`> `). `codeLines` holds the
+ * lines (1-based) of the code blocks directly in the quote; a nested quote
+ * has already written its blank code lines as `> `, and Linear's form of
+ * code in a list is unrecorded.
  */
-export function quoteLines(text: string): string {
-  const codeLines = new Set<number>();
-  // Only fences can hold a blank line here: fix writes no indented code.
-  if (!/^(`{3,}|~{3,})/m.test(text)) return text.split('\n').map((line) => (line === '' ? '>' : `> ${line}`)).join('\n');
-  // Only code directly in the quote: a nested quote has already written its
-  // blank code lines as `> `, and Linear's form of code in a list is unrecorded.
-  for (const node of parse(text).children) {
-    if (node.type !== 'code' || !node.position) continue;
-    for (let line = node.position.start.line; line <= node.position.end.line; line++) codeLines.add(line);
-  }
+export function quoteLines(text: string, codeLines: ReadonlySet<number>): string {
   return text
     .split('\n')
     .map((line, index) => (line === '' && !codeLines.has(index + 1) ? '>' : `> ${line}`))
@@ -461,8 +455,18 @@ function destination(url: string): string {
  */
 export function linkDestination(url: string): string {
   const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
-  const trailing = /\\*$/.exec(inner)![0].length;
-  return `<${inner}${trailing % 2 === 1 ? '\\' : ''}>`;
+  return `<${inner}${trailingBackslashes(inner) % 2 === 1 ? '\\' : ''}>`;
+}
+
+/**
+ * The number of backslashes that end `text`, counted from its end. A regular
+ * expression for the run rescans it from each of its positions when another
+ * character follows it.
+ */
+function trailingBackslashes(text: string): number {
+  let at = text.length;
+  while (at > 0 && text[at - 1] === '\\') at -= 1;
+  return text.length - at;
 }
 
 /** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */
@@ -470,10 +474,16 @@ export function imageDestination(url: string): string {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
-/** The bracketed label that opens at `open` (a `[`) in `source`, as written, without its brackets. */
-export function bracketedLabel(source: string, open: number): string {
+/**
+ * The bracketed label that opens at `open` (a `[`) in `source`, as written,
+ * without its brackets, or an empty string when it does not close before
+ * `limit`, the end of its node. The search stays inside the node: brackets in
+ * a code span of the label are not counted by Markdown, and an unclosed count
+ * would otherwise scan the rest of the document for every label.
+ */
+export function bracketedLabel(source: string, open: number, limit: number): string {
   let depth = 0;
-  for (let at = open; at < source.length; at++) {
+  for (let at = open; at < Math.min(limit, source.length); at++) {
     const char = source[at];
     if (char === '\\') at++;
     else if (char === '[') depth++;

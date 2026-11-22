@@ -298,6 +298,11 @@ this time:
 
 None needs action unless the same document stays skipped.
 
+A document that exceeds a Markdown merge limit is also reported as `conflict`.
+If the document has no conflict markers, check both versions for very long
+runs of `<`, `=` or `>` and resolve the differences manually. The sync keeps
+both versions until the conflict is resolved.
+
 ## Decided by the conflict rules
 
 When a file and its document change on both sides in ways that cannot both
@@ -321,7 +326,7 @@ the reason is fixed. The summaries list each with its rules:
 
 | Rule | Meaning | What to do |
 | --- | --- | --- |
-| `duplicate-title` | Two files map to one document title (their names differ only in letter case or Unicode normalization). | Rename one of them. |
+| `duplicate-title` | Two or more files map to one document title (their names differ only in letter case or Unicode normalization). | Rename all but one of them. |
 | `title-too-long` | The title made from the file's path is longer than Linear accepts. | Use a shorter file name or folder path. |
 | `content-too-long` | The text is longer than the 250,000 characters Linear accepts. Its other rules are not checked until it is shorter. | Split the file, then lint the parts. |
 | `markdown-complexity` | The Markdown tree exceeds 128 levels or 500,000 nodes, padding a table's short rows to its header width would add over 250,000 characters or take it past that node limit, writing each reference link's destination in full would take the text over 250,000 characters, or a paragraph's inline syntax would take too long to parse. | Reduce nesting, fill in or split the table, write fewer references to a long destination, split long paragraphs with blank lines, or split the file. |

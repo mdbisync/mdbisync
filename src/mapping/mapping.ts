@@ -55,7 +55,10 @@ export interface LeftOutFile {
   rule: Extract<LeftOutRule, 'duplicate-title'>;
   title: string;
   place: Place;
+  /** Other files with the same title in the same place: at most `COLLISIONS_NAMED` of them. */
   collidesWith: string[];
+  /** How many more files have that title, beyond those `collidesWith` names. */
+  collidesWithMore?: number;
 }
 
 export interface RepositoryMapping {
@@ -193,11 +196,16 @@ export function titleKey(place: Place, title: string): string {
   return `${where}\0${title.normalize('NFC').toLowerCase()}`;
 }
 
+/** The most other paths a left-out file's `collidesWith` names; `collidesWithMore` counts the rest. */
+const COLLISIONS_NAMED = 3;
+
 function separateCollisions(mapped: readonly MappedDocument[]): { documents: MappedDocument[]; leftOut: LeftOutFile[] } {
   const groups = new Map<string, MappedDocument[]>();
   for (const document of mapped) {
     const key = titleKey(document.place, document.title);
-    groups.set(key, [...(groups.get(key) ?? []), document]);
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [document]);
+    else group.push(document);
   }
   const documents: MappedDocument[] = [];
   const leftOut: LeftOutFile[] = [];
@@ -206,16 +214,22 @@ function separateCollisions(mapped: readonly MappedDocument[]): { documents: Map
       documents.push(group[0] as MappedDocument);
       continue;
     }
-    for (const document of group) {
+    // Each file names the first few others of its group and counts the rest, so a group of n files
+    // reports a number of paths linear in n, not n squared.
+    const named = group.slice(0, COLLISIONS_NAMED + 1);
+    group.forEach((document, index) => {
+      const collidesWith = named.filter((_, other) => other !== index).slice(0, COLLISIONS_NAMED).map((other) => other.path);
+      const more = group.length - 1 - collidesWith.length;
       leftOut.push({
         path: document.path,
         oid: document.oid,
         rule: 'duplicate-title',
         title: document.title,
         place: document.place,
-        collidesWith: group.filter((other) => other !== document).map((other) => other.path),
+        collidesWith,
+        ...(more > 0 ? { collidesWithMore: more } : {}),
       });
-    }
+    });
   }
   return { documents, leftOut };
 }

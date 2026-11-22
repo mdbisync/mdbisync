@@ -218,4 +218,15 @@ describe('renderDryRun', () => {
     assert.match(summary, /^\| a\\\|b\.md \| team "ENG" \|$/m);
     assert.match(summary, /### Overwrite \(0\)\n\nNone\./);
   });
+
+  it('names a few files of a larger title collision and counts the rest, in the summary and the report', () => {
+    const names = ['Guide', 'guide', 'GUIDE', 'gUide', 'guIde', 'guiDe'];
+    const { mapping, texts } = mapTree({ 'eng/README.md': '---\nlinear-team: ENG\n---\n', ...Object.fromEntries(names.map((name) => [`eng/${name}.md`, name])) });
+    const plan = planInitialSync({ mapping, texts, places: [{ place: ENG, documents: [] }] });
+    const entry = plan.leftOut.find((left) => left.path === 'eng/guIde.md');
+    assert.deepEqual(entry, { path: 'eng/guIde.md', rules: ['duplicate-title'], lines: [], collidesWith: ['eng/GUIDE.md', 'eng/Guide.md', 'eng/guide.md'], collidesWithMore: 2 });
+    assert.match(renderDryRun(plan), /^\| eng\/guIde\.md \| duplicate-title \|  \| eng\/GUIDE\.md, eng\/Guide\.md, eng\/guide\.md, and 2 more \|$/m);
+    const reported = toPlanReport(plan, 'git-to-linear', false).leftOutFiles.find((left) => left.path === 'eng/guIde.md');
+    assert.equal(reported?.collidesWithMore, 2);
+  });
 });

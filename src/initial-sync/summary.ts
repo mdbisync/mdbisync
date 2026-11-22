@@ -194,7 +194,11 @@ export function renderReverseConfirmed(plan: ReversePlan, result: ReverseResult)
 const LEFT_OUT_HEAD = ['Path', 'Rules', 'Lines', 'Collides with, or the files'];
 
 function leftOutRows(entries: readonly LeftOutEntry[]): string[][] {
-  return entries.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? entry.files ?? []).join(', ')]);
+  return entries.map((entry) => {
+    const named = (entry.collidesWith ?? entry.files ?? []).join(', ');
+    const others = entry.collidesWithMore === undefined ? named : `${named}, and ${entry.collidesWithMore} more`;
+    return [entry.path, entry.rules.join(', '), entry.lines.join(', '), others];
+  });
 }
 
 /** Adds a table section; an empty one says "None." when `always`, and is skipped otherwise. */

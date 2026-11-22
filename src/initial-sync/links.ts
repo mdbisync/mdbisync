@@ -138,10 +138,19 @@ export type LinkSpellings = Map<string, string[]>;
  * the way back can restore the exact spelling of each link.
  */
 export function linksToLinear(body: string, fromPath: string, map: LinkMap, seen?: LinkSpellings): string {
-  const remember = (url: string, raw: string) => seen?.set(url, [...(seen.get(url) ?? []), raw]);
+  const remember = (url: string, raw: string) => {
+    if (seen === undefined) return;
+    const spellings = seen.get(url);
+    if (spellings === undefined) seen.set(url, [raw]);
+    else spellings.push(raw);
+  };
   /** Path → the superseded ids that name it: a link by one of them comes back with the same spelling. */
   const aliasesOf = new Map<string, string[]>();
-  for (const [id, path] of map.aliases ?? []) aliasesOf.set(path, [...(aliasesOf.get(path) ?? []), id]);
+  for (const [id, path] of map.aliases ?? []) {
+    const ids = aliasesOf.get(path);
+    if (ids === undefined) aliasesOf.set(path, [id]);
+    else ids.push(id);
+  }
   const urlOf = (id: string, fragment: string | undefined) => {
     const raw = `<${map.base}/${id}${fragment === undefined ? '' : `#${encodeFragment(fragment)}`}>`;
     return { raw, url: destinationUrl(raw) ?? raw.slice(1, -1) };

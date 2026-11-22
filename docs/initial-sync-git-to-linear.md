@@ -112,7 +112,7 @@ and lists it by path, never with document content:
 | Create | A file without a document. It will get a new document in the team or project in the **In Linear** column. |
 | Overwrite | A file with a document. The document, named in the **Document** column by id, will get the file's text. A document that already holds it is not written. |
 | Move to trash | A document without a file. It will go to Linear's trash. The **Path** column names it by its id, `<folder>/<document id>.md`: its title comes from Linear alone, and the security hooks never read it, so the summary and the report do not show it. A newer document with the title of a file in the same place is listed at that file's path. |
-| Left out | A file the run will not take, with the rules that stop it, the lines of `linear-format` findings, and the files it collides with or links. |
+| Left out | A file the run will not take, with the rules that stop it, the lines of `linear-format` findings, and the files it collides with (up to three, then a count of the rest) or links. |
 | Container document capacity | A team or project near or over its document cap. Shown only when there is one. |
 
 Read **Move to trash** carefully. To keep a document listed there, add its
@@ -236,8 +236,9 @@ after 120 s`) and how many items it did not write yet.
 With `report-file` set, the run writes its report as JSON (names, paths and
 states, never content) and the job summary beside it as `summary.md`. Its
 `summary.plan` lists the paths to create, overwrite and move to trash,
-`summary.leftOutFiles` the left-out files with their rules, and
-`initialSync` the confirmed run's outcome. A workflow can upload both as an
+`summary.leftOutFiles` the left-out files with their rules (for a title
+collision, `collidesWith` names up to three of the other files and
+`collidesWithMore` counts the rest), and `initialSync` the confirmed run's outcome. A workflow can upload both as an
 artifact.
 
 ## A run that stops

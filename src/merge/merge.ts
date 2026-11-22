@@ -2,8 +2,8 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Nodes } from 'mdast';
-import { isCalloutComment, parse, splitFile, visit } from '../format/markdown.ts';
-import { Git } from '../state/git.ts';
+import { isCalloutComment, lineCount, MarkdownLimitError, parse, splitFile, visit } from '../format/markdown.ts';
+import { Git, GitOutputLimitError } from '../state/git.ts';
 import { detectConflicts, findMarkerLines, lines, lineText, markerCallout, MARKERS } from './markers.ts';
 import type { Conflict } from './markers.ts';
 import { message } from '../messages.ts';
@@ -19,19 +19,27 @@ export interface MergeResult {
 type Token = { kind: 'line'; text: string } | { kind: 'conflict'; ours: string[]; theirs: string[] };
 type Side = 'ours' | 'theirs';
 
+const DEFAULT_MARKER_SIZE = 7;
+const MAX_MARKER_SIZE = 8_192;
+const MAX_MERGE_RESULT_BYTES = 32 * 1024 * 1024;
+const MERGE_OK_CODES = Array.from({ length: 128 }, (_, i) => i);
+
 function tokenize(text: string, size: number): Token[] {
   const source = lines(text);
   const tokens: Token[] = [];
+  const start = `${'<'.repeat(size)} git`;
+  const middle = '='.repeat(size);
+  const end = `${'>'.repeat(size)} linear`;
   for (let i = 0; i < source.length; i++) {
     const text = source[i]!;
-    if (lineText(text) !== `${'<'.repeat(size)} git`) {
+    if (lineText(text) !== start) {
       tokens.push({ kind: 'line', text });
       continue;
     }
     const ours: string[] = [];
     const theirs: string[] = [];
-    while (++i < source.length && lineText(source[i]!) !== '='.repeat(size)) ours.push(source[i]!);
-    while (++i < source.length && lineText(source[i]!) !== `${'>'.repeat(size)} linear`) theirs.push(source[i]!);
+    while (++i < source.length && lineText(source[i]!) !== middle) ours.push(source[i]!);
+    while (++i < source.length && lineText(source[i]!) !== end) theirs.push(source[i]!);
     if (i === source.length) throw new Error(message('sync.merge-conflict-output'));
     tokens.push({ kind: 'conflict', ours, theirs });
   }
@@ -155,10 +163,18 @@ function completeBlocks(text: string): string {
   // A separate variable, not `text`: the visit above reads `text`, and static
   // analysis that merges a captured variable's assignments would otherwise
   // see the inserted end strings flow into the source it parses.
-  let completed = text;
-  for (const insertion of insertions.sort((a, b) => b.offset - a.offset)) {
-    completed = completed.slice(0, insertion.offset) + insertion.text + completed.slice(insertion.offset);
+  // The pieces are joined once: inserting each end into the whole text would
+  // copy it once per unclosed block.
+  const pieces: string[] = [];
+  let at = 0;
+  // Ends at one offset go in the reverse of their visit order: inner block first.
+  const ordered = insertions.map((insertion, index) => ({ ...insertion, index })).sort((a, b) => a.offset - b.offset || b.index - a.index);
+  for (const insertion of ordered) {
+    pieces.push(text.slice(at, insertion.offset), insertion.text);
+    at = insertion.offset;
   }
+  pieces.push(text.slice(at));
+  const completed = pieces.join('');
   return completed.replace(/\n$/, '');
 }
 
@@ -194,6 +210,30 @@ function render(tokens: Token[], ranges: Range[], finalNewline: boolean): string
   return text + tokens.slice(cursor).map((token) => content(token, 'ours').join('')).join('');
 }
 
+async function runMergeFile(dir: string, inputs: readonly string[], size: number, args: string[]) {
+  const inputBytes = inputs.reduce((total, text) => total + Buffer.byteLength(text), 0);
+  const frameBytes = 3 * size + 32;
+  // Git builds the result in memory before it writes to stdout. Every hunk
+  // consumes at least one source line, so one frame and an added newline per
+  // input line also cover the worst case before the subprocess starts.
+  const sourceLines = inputs.reduce((total, text) => total + lineCount(text) + 1, 0);
+  if (inputBytes + sourceLines * (frameBytes + 1) > MAX_MERGE_RESULT_BYTES) {
+    throw new MarkdownLimitError('merge-output');
+  }
+  // Allow output proportional to the input plus framing for 16 hunks. More
+  // hunks can fit in the proportional budget, but large markers cannot make
+  // the allowance grow with both the number of input lines and marker width.
+  const maxOutputBytes = Math.min(MAX_MERGE_RESULT_BYTES, 4 * inputBytes + 16 * frameBytes);
+  try {
+    return await new Git(dir).run([
+      '-c', 'merge.conflictStyle=merge', 'merge-file', '--stdout', `--marker-size=${size}`, ...args,
+    ], { okCodes: MERGE_OK_CODES, maxOutputBytes });
+  } catch (error) {
+    if (error instanceof GitOutputLimitError) throw new MarkdownLimitError('merge-output');
+    throw error;
+  }
+}
+
 /**
  * The front matter of a merge: one side's when only that side changed it,
  * git's line merge when both did and their lines do not overlap, and the
@@ -208,7 +248,7 @@ async function mergeHeads(dir: string, withBom: { base: string; ours: string; th
   if (heads.theirs === heads.base || heads.ours === heads.theirs) return bom + heads.ours;
   if (heads.ours === heads.base) return bom + heads.theirs;
   await Promise.all(Object.entries(heads).map(([name, text]) => writeFile(join(dir, `head-${name}`), text, { mode: 0o600 })));
-  const merged = await new Git(dir).run(['merge-file', '--stdout', 'head-ours', 'head-base', 'head-theirs'], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
+  const merged = await runMergeFile(dir, Object.values(heads), DEFAULT_MARKER_SIZE, ['head-ours', 'head-base', 'head-theirs']);
   return bom + (merged.code === 0 ? merged.stdout.toString('utf8') : heads.ours);
 }
 
@@ -226,20 +266,22 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string):
   base = splitFile(base).body.replaceAll('\r\n', '\n');
   ours = gitFile.body.replaceAll('\r\n', '\n');
   theirs = splitFile(theirs).body.replaceAll('\r\n', '\n');
+  // Pick a delimiter wider than any literal run in the body. Front matter
+  // uses a fixed size because its conflict markers are never interpreted.
+  let size = DEFAULT_MARKER_SIZE;
+  for (const text of [base, ours, theirs]) {
+    for (const [run] of text.matchAll(/<+|=+|>+/g)) {
+      if (run.length >= MAX_MARKER_SIZE) throw new MarkdownLimitError('merge-marker');
+      size = Math.max(size, run.length + 1);
+    }
+  }
   const dir = await mkdtemp(join(tmpdir(), 'markdown-merge-'));
   try {
     const head = await mergeHeads(dir, heads);
     await Promise.all([['base', base], ['ours', ours], ['theirs', theirs]].map(([name, text]) => writeFile(join(dir, name!), text!, { mode: 0o600 })));
-    // Pick a delimiter wider than any run in the input, so literal git markers
-    // and labels can never be mistaken for merge-file's framing.
-    let size = 7;
-    for (const text of [base, ours, theirs]) {
-      for (const run of text.matchAll(/<+|=+|>+/g)) size = Math.max(size, run[0].length + 1);
-    }
-    const result = await new Git(dir).run([
-      '-c', 'merge.conflictStyle=merge', 'merge-file', '--stdout', `--marker-size=${size}`,
+    const result = await runMergeFile(dir, [base, ours, theirs], size, [
       '-L', 'git', '-L', 'base', '-L', 'linear', 'ours', 'base', 'theirs',
-    ], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
+    ]);
     const raw = result.stdout.toString('utf8');
     const tokens = tokenize(raw.replaceAll('\r\n', '\n'), size);
     // A conflict that runs to the end of the document closes with a marker line, which ends with a newline only when

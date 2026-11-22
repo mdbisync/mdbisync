@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { test } from 'node:test';
+import { MarkdownLimitError } from '../format/markdown.ts';
+import { Git } from '../state/git.ts';
 import { detectConflicts, MARKERS, mergeMarkdown } from './index.ts';
 import { markerCallout } from './markers.ts';
 
@@ -72,6 +74,43 @@ test('L3-02: both versions of a paragraph appear between marker paragraphs', asy
   const result = await mergeMarkdown('old\n', 'git edit\n', 'Linear edit\n');
   assert.equal(result.text, conflict('git edit', 'Linear edit'));
   assert.deepEqual(result.conflicts, [{ startLine: 1, endLine: 15, git: 'git edit', linear: 'Linear edit' }]);
+});
+
+test('runs just below the marker limit stay literal inside both conflict arms', async () => {
+  const fence = (text: string) => ['```', ...['<', '=', '>'].map((character) => character.repeat(8_191)), text, '```'].join('\n');
+  const ours = fence('Git edit');
+  const theirs = fence('Linear edit');
+  const result = await mergeMarkdown(fence('Draft'), ours, theirs);
+  assert.equal(result.text, conflict(ours, theirs).trimEnd());
+  assert.equal(result.conflicts.length, 1);
+});
+
+test('a front matter merge that exceeds its output budget stops the document merge', async (t) => {
+  const run = Git.prototype.run;
+  const merge = t.mock.method(Git.prototype, 'run', function (this: Git, args: Parameters<Git['run']>[0], options?: Parameters<Git['run']>[1]) {
+    assert.ok(args.includes('head-ours'));
+    assert.ok(options?.maxOutputBytes !== undefined && options.maxOutputBytes > 1 && options.maxOutputBytes < 10_000);
+    // Use an ordinary edit and a smaller limit to exercise the stream cutoff.
+    return run.call(this, args, { ...options, maxOutputBytes: 1 });
+  });
+  const file = (owner: string) => `---\nowner: ${owner}\n---\n\nBody.\n`;
+  await assert.rejects(mergeMarkdown(file('Draft'), file('Git'), file('Linear')),
+    (error) => error instanceof MarkdownLimitError && error.limit === 'merge-output');
+  assert.equal(merge.mock.callCount(), 1);
+});
+
+test('front matter literals do not set the body marker width', async () => {
+  const head = `---\nbanner: "${'='.repeat(8_192)}"\n---\n\n`;
+  const result = await mergeMarkdown(head + 'Draft\n', head + 'Git edit\n', head + 'Linear edit\n');
+  assert.equal(result.text, head + conflict('Git edit', 'Linear edit'));
+});
+
+test('a document over the merge allocation budget stops before starting Git', async (t) => {
+  const merge = t.mock.method(Git.prototype, 'run');
+  const prefix = ['```', '='.repeat(8_191), 'A stable line.\n'.repeat(500) + '```', '', ''].join('\n');
+  await assert.rejects(mergeMarkdown(prefix + 'Draft', prefix + 'Git edit', prefix + 'Linear edit'),
+    (error) => error instanceof MarkdownLimitError && error.limit === 'merge-output');
+  assert.equal(merge.mock.callCount(), 0);
 });
 
 for (const [scenario, block] of [
