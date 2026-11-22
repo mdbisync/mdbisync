@@ -95,9 +95,10 @@ Linear → Settings → Administration → API → OAuth applications → New
 
 Create it. Each run asks this app for a token with the scopes `read` and
 `write`; the form has no scope setting of its own. Such a token reaches
-only the workspace's public teams
-([Linear OAuth](https://linear.app/developers/oauth-2-0-authentication)),
-so a folder cannot name a private team.
+the workspace's public teams; an admin can change the app's team access
+on its page in Linear's settings
+([Linear OAuth](https://linear.app/developers/oauth-2-0-authentication)).
+Every team your folders name must be one the app reaches.
 
 In your docs repository, add the client ID under Settings → Secrets
 and variables → Actions → Variables. Add the client secret under
@@ -116,7 +117,8 @@ copy, your password manager: don't leave it in a file, a note or a chat.
 The run stops here when Linear refuses the credentials, when the token
 lacks the `read` or `write` scope, or when the app sees no team at all.
 Check that both settings hold the app's current values (a regenerated secret
-replaces the old one), and that the teams your folders name are public.
+replaces the old one), and that the app reaches the teams your folders
+name.
 
 ## GitHub App
 
@@ -198,10 +200,13 @@ list: Settings → Rules → Rulesets → the ruleset → Bypass list → Add
 bypass → your App, set its mode to **For pull requests only** (not
 **Always allow**) → Save changes.
 
-If a classic branch protection rule protects `main`, replace it with such a
-ruleset. Its bypass, **Allow specified actors to bypass required pull
-requests**, lets the App push to `main` directly, cannot be limited to
-pull requests and exists only in repositories an organization owns
+If the approving reviews come from a classic branch protection rule,
+don't give the App that rule's bypass, **Allow specified actors to bypass
+required pull requests**: it lets the App push to `main` directly, cannot
+be limited to pull requests and exists only in repositories an
+organization owns. Turn off the rule's required reviews and require them
+in a ruleset that targets `main`, with the App's bypass as above; the
+rule's other requirements and branches stay as they are
 ([branch protection rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-branch-protection-rule)).
 
 ### Keep the App's bypass to `main`
@@ -371,8 +376,8 @@ A folder syncs when the front matter of its `README.md` maps it to Linear
 and a project of that team in the same `README.md` or in a folder below
 it; deeper folders inherit both. Files under the team folder but outside
 every project folder are the team's own documents. The team and the
-project must already exist in Linear: create the project there before the
-dry run, as the sync creates neither. For example, `docs/README.md` names
+project must already exist in Linear: create them there before the dry
+run, as the sync creates neither. For example, `docs/README.md` names
 the team:
 
 ```yaml
@@ -390,7 +395,8 @@ linear-project: Handbook
 ```
 
 The run stops here when no folder is annotated, an annotation is invalid,
-a team or project is not found in Linear or matches more than one, or two
+a team or project is not found in Linear (also a team the app does not
+reach, see [Linear OAuth app](#linear-oauth-app)) or matches more than one, or two
 folders map to the same project or team documents. The message names the
 folder, team or project. A team matches by key or by name, a project by its
 exact name within that team; after a rename in Linear, update the
@@ -516,9 +522,11 @@ this repository: [run the sync from your own scheduler](own-scheduler.md).
 
 To see it work, edit a synchronized document in Linear: within a few
 minutes the **Changes from Linear** pull request opens and runs
-`pre-commit`; the first run after its checks pass merges it. Edit a
-synchronized file on `main` and the next run writes it to Linear. How each change travels and what you see on
-each side: [sync-cycle.md](sync-cycle.md).
+`pre-commit`. The same run merges it when its checks pass within the
+grace period (`merge-grace-seconds`, a minute by default); slower checks
+leave the merge to the first run after they pass. Edit a synchronized
+file on `main` and the next run writes it to Linear. How each change travels and what you see on each
+side: [sync-cycle.md](sync-cycle.md).
 
 ## Two layers of checks
 
