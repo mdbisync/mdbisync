@@ -8,6 +8,7 @@ import {
   LinearHttpError,
   LinearNetworkError,
   LinearReadBackError,
+  LinearResponseLimitError,
   LinearStoppedError,
   LinearUploadError,
   isTransientLinearError,
@@ -214,23 +215,38 @@ export class LinearClient {
   /**
    * Reads documents by id, one request per page of ids (one request for up
    * to `pageSize` ids). Trashed documents are included; ids that no longer
-   * exist are absent from the result.
+   * exist are absent from the result. Bodies read here count toward the
+   * run's body budget: the caller holds them together.
    */
   async getDocuments(ids: readonly string[], options: Omit<ListOptions, 'includeArchived'> = {}): Promise<LinearDocument[]> {
+    return this.#documentsById(ids, options, true);
+  }
+
+  async #documentsById(ids: readonly string[], options: Omit<ListOptions, 'includeArchived'>, counted: boolean): Promise<LinearDocument[]> {
+    const withContent = options.withContent ?? false;
     const pageSize = clampPageSize(options.pageSize);
     const result: LinearDocument[] = [];
-    for (let start = 0; start < ids.length; start += pageSize) {
-      const chunk = ids.slice(start, start + pageSize);
-      const data = await this.request<{ documents: { nodes: RawDocument[] } }>(
-        'GetDocuments',
-        'query',
-        `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
-          documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
-            nodes { ${DOCUMENT_FIELDS} }
-          }
-        }`,
-        { ids: chunk, first: chunk.length, withContent: options.withContent ?? false },
-      );
+    const pages: Array<readonly string[]> = [];
+    for (let start = 0; start < ids.length; start += pageSize) pages.push(ids.slice(start, start + pageSize));
+    for (let chunk = pages.shift(); chunk !== undefined; chunk = pages.shift()) {
+      let data: { documents: { nodes: RawDocument[] } };
+      try {
+        data = await this.transport.query<{ documents: { nodes: RawDocument[] } }>(
+          'GetDocuments',
+          `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
+            documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
+              nodes { ${DOCUMENT_FIELDS} }
+            }
+          }`,
+          { ids: chunk, first: chunk.length, withContent },
+          { bodies: withContent && counted },
+        );
+      } catch (error) {
+        if (!pageTooLarge(error, chunk.length)) throw error;
+        const half = Math.ceil(chunk.length / 2);
+        pages.unshift(chunk.slice(0, half), chunk.slice(half));
+        continue;
+      }
       result.push(...data.documents.nodes.map(toDocument));
     }
     return result;
@@ -238,13 +254,15 @@ export class LinearClient {
 
   /**
    * Reads one document by id with `document(id:)`, which answers for trashed
-   * and archived documents too; null when Linear no longer has the id.
+   * and archived documents too; null when Linear no longer has the id. Its
+   * body is not counted toward the run's body budget: one document at a
+   * time, bounded by Linear's content limit and the per-answer limit, read
+   * by the write step just before it writes that document.
    */
   async getDocument(id: string, { withContent = false }: { withContent?: boolean } = {}): Promise<LinearDocument | null> {
     try {
-      const data = await this.request<{ document: RawDocument | null }>(
+      const data = await this.transport.query<{ document: RawDocument | null }>(
         'GetDocument',
-        'query',
         `query GetDocument($id: String!, $withContent: Boolean!) {
           document(id: $id) { ${DOCUMENT_FIELDS} }
         }`,
@@ -594,7 +612,7 @@ export class LinearClient {
   async #findCreated(id: string, place: DocumentPlace, title: string, createError: LinearError): Promise<LinearDocument | undefined> {
     let found: LinearDocument | undefined;
     try {
-      [found] = await this.getDocuments([id], { withContent: true });
+      [found] = await this.#documentsById([id], { withContent: true }, false);
     } catch (error) {
       if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
       throw createError;
@@ -610,7 +628,7 @@ export class LinearClient {
     if (this.facts.mutationsReturnStoredContent) return written;
     let stored: LinearDocument | undefined;
     try {
-      [stored] = await this.getDocuments([written.id], { withContent: true });
+      [stored] = await this.#documentsById([written.id], { withContent: true }, false);
     } catch (error) {
       // A stop stays a stop: writeEach then reports the write as interrupted.
       if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
@@ -641,33 +659,37 @@ export class LinearClient {
 
   async #listPages(operation: string, filter: unknown, options: ListOptions): Promise<LinearDocument[]> {
     const result: LinearDocument[] = [];
+    const withContent = options.withContent ?? false;
+    let first = clampPageSize(options.pageSize);
     let after: string | null = null;
-    do {
-      const data: { documents: { nodes: RawDocument[]; pageInfo: PageInfo } } = await this.request(
-        operation,
-        'query',
-        `query ${operation}($filter: DocumentFilter, $first: Int!, $after: String, $includeArchived: Boolean!, $withContent: Boolean!) {
-          documents(filter: $filter, first: $first, after: $after, includeArchived: $includeArchived, orderBy: createdAt) {
-            nodes { ${DOCUMENT_FIELDS} }
-            pageInfo { hasNextPage endCursor }
-          }
-        }`,
-        {
-          filter,
-          first: clampPageSize(options.pageSize),
-          after,
-          includeArchived: options.includeArchived ?? false,
-          withContent: options.withContent ?? false,
-        },
-      );
+    for (;;) {
+      let data: { documents: { nodes: RawDocument[]; pageInfo: PageInfo } };
+      try {
+        data = await this.transport.query(
+          operation,
+          `query ${operation}($filter: DocumentFilter, $first: Int!, $after: String, $includeArchived: Boolean!, $withContent: Boolean!) {
+            documents(filter: $filter, first: $first, after: $after, includeArchived: $includeArchived, orderBy: createdAt) {
+              nodes { ${DOCUMENT_FIELDS} }
+              pageInfo { hasNextPage endCursor }
+            }
+          }`,
+          { filter, first, after, includeArchived: options.includeArchived ?? false, withContent },
+          { bodies: withContent },
+        );
+      } catch (error) {
+        if (!pageTooLarge(error, first)) throw error;
+        // The same page again in half the size, and the rest of the listing in that size.
+        first = Math.ceil(first / 2);
+        continue;
+      }
       result.push(...data.documents.nodes.map(toDocument));
       const { hasNextPage, endCursor } = data.documents.pageInfo;
       if (hasNextPage && endCursor === null) {
         throw new LinearError(operation, message('linear.page-without-cursor', { operation }));
       }
-      after = hasNextPage ? endCursor : null;
-    } while (after !== null);
-    return result;
+      if (!hasNextPage) return result;
+      after = endCursor;
+    }
   }
 }
 
@@ -737,4 +759,13 @@ function isCursorNotFound(error: unknown): boolean {
 
 function clampPageSize(pageSize: number | undefined): number {
   return Math.max(1, Math.min(MAX_PAGE_SIZE, Math.floor(pageSize ?? DEFAULT_PAGE_SIZE)));
+}
+
+/**
+ * A page Linear answered with more than the per-answer limit. Each document
+ * fits it, but a full page of long ones may not: the caller reads that page
+ * again in halves.
+ */
+function pageTooLarge(error: unknown, documents: number): boolean {
+  return documents > 1 && error instanceof LinearResponseLimitError && error.code === 'linear-response-too-large';
 }

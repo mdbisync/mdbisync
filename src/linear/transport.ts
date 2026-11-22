@@ -11,6 +11,7 @@ import {
   LinearGraphQLError,
   LinearHttpError,
   LinearNetworkError,
+  LinearResponseLimitError,
   LinearStoppedError,
   type GraphQLErrorShape,
   type StopReason,
@@ -30,6 +31,30 @@ import { type LinearReads, graphqlReadKey } from './reads.ts';
 import { message } from '../messages.ts';
 
 export const DEFAULT_BASE_URL = 'https://api.linear.app';
+
+/**
+ * Most bytes of one Linear answer. A full page of 250 documents at Linear's
+ * longest content (250,000 code points) is about 63 MB as ASCII JSON; this
+ * leaves room for escapes and wider characters. The answer is read as a
+ * stream and given up past this, before it is parsed.
+ */
+export const MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
+/**
+ * Most bytes of the Linear answers whose document bodies a run holds
+ * together (reads of many documents with content), over one run (one
+ * transport). Those bodies stay in memory until the run decides what to
+ * write, so this bounds that memory, checked as each answer arrives. A few
+ * thousand ordinary documents use a small part of it. A read of one
+ * document just before it is written is not counted.
+ */
+export const DOCUMENT_BODY_BUDGET_BYTES = 256 * 1024 * 1024;
+
+export interface ResponseLimits {
+  /** Most bytes of one answer. */
+  responseBytes: number;
+  /** Most bytes of all answers read with document bodies. */
+  bodyBytes: number;
+}
 
 export type OperationKind = 'query' | 'mutation';
 
@@ -87,6 +112,8 @@ export interface TransportOptions {
   /** API origin; a test proxy can sit here. Defaults to https://api.linear.app. */
   baseUrl?: string | undefined;
   budgetFloor?: Partial<BudgetFloor>;
+  /** Byte limits of Linear's answers; `MAX_RESPONSE_BYTES` and `DOCUMENT_BODY_BUDGET_BYTES` unless a test sets others. */
+  limits?: Partial<ResponseLimits>;
   /** Longest Retry-After, in seconds, that is waited out with one retry. */
   maxRetryAfterSeconds?: number;
   timeoutMs?: number;
@@ -110,6 +137,8 @@ export class GraphQLTransport {
   #sleep: (ms: number) => Promise<void>;
   #stopped: StopReason | undefined;
   #lastRateLimit: RateLimitSnapshot | undefined;
+  #limits: ResponseLimits;
+  #bodyBytesRead = 0;
 
   constructor(options: TransportOptions) {
     this.#token = options.token;
@@ -117,6 +146,7 @@ export class GraphQLTransport {
     this.#auth = authMetadata(options.auth);
     this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
     this.#floor = { ...DEFAULT_BUDGET_FLOOR, ...options.budgetFloor };
+    this.#limits = { responseBytes: MAX_RESPONSE_BYTES, bodyBytes: DOCUMENT_BODY_BUDGET_BYTES, ...options.limits };
     this.#maxRetryAfterSeconds = options.maxRetryAfterSeconds ?? 10;
     this.#timeoutMs = options.timeoutMs ?? 60_000;
     this.#hooks = options.hooks ?? {};
@@ -157,14 +187,22 @@ export class GraphQLTransport {
     return kind === 'mutation' ? this.mutate<T>(operation, query, variables) : this.query<T>(operation, query, variables);
   }
 
-  /** Reads alone can consume or record a saved answer. */
-  async query<T>(operation: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  /**
+   * Reads alone can consume or record a saved answer. With `bodies`, the
+   * answer carries document bodies and counts toward the run's body budget,
+   * a kept answer too.
+   */
+  async query<T>(operation: string, query: string, variables: Record<string, unknown> = {}, { bodies = false }: { bodies?: boolean } = {}): Promise<T> {
     if (this.#stopped) throw this.#refuse(operation, 'query', this.#stopped);
     const requestBody = JSON.stringify({ query, variables, operationName: operation });
     const key = this.reads === undefined ? undefined : graphqlReadKey(requestBody);
     const kept = key === undefined ? undefined : this.reads?.take(key);
-    if (kept !== undefined) return keptData<T>(operation, kept.status, kept.body);
-    const answer = await this.#network(operation, 'query', requestBody);
+    if (kept !== undefined) {
+      if (kept.body.length > this.#readLimit(bodies)) throw this.#overLimit(operation, bodies);
+      if (bodies) this.#bodyBytesRead += kept.body.length;
+      return keptData<T>(operation, kept.status, kept.body);
+    }
+    const answer = await this.#network(operation, 'query', requestBody, bodies);
     if (key !== undefined) this.reads?.keep(key, { status: answer.status, type: 'application/json', body: Buffer.from(answer.text, 'utf8') });
     return answer.data as T;
   }
@@ -182,7 +220,7 @@ export class GraphQLTransport {
   }
 
   /** Network execution shared by reads and writes; has no read-store access. */
-  async #network(operation: string, kind: OperationKind, requestBody: string): Promise<{data: unknown; text: string; status: number}> {
+  async #network(operation: string, kind: OperationKind, requestBody: string, bodies = false): Promise<{data: unknown; text: string; status: number}> {
     for (let attempt = 1; ; attempt += 1) {
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
       const info: RequestInfo = { operation, kind, attempt };
@@ -223,9 +261,17 @@ export class GraphQLTransport {
       let body: { data?: unknown; errors?: GraphQLErrorShape[] } | undefined;
       let text = '';
       let bodyError: unknown;
+      let over = false;
+      // An error answer carries no bodies: only the per-answer limit applies, so the error it holds is reported.
+      const counted = bodies && response.ok;
       try {
-        text = await response.text();
-        body = JSON.parse(text) as typeof body;
+        const read = await readText(response, this.#readLimit(counted));
+        if (read === undefined) over = true;
+        else {
+          text = read.text;
+          body = JSON.parse(text) as typeof body;
+          if (counted) this.#bodyBytesRead += read.bytes;
+        }
       } catch (error) {
         body = undefined;
         bodyError = error;
@@ -260,6 +306,11 @@ export class GraphQLTransport {
       if (low) this.#stopped = low;
       this.#log(low ? { ...entry, stop: low } : entry);
 
+      if (over) {
+        const error = this.#overLimit(operation, counted);
+        // A write's answer that was not read leaves its outcome unknown, like a cut connection.
+        throw kind === 'mutation' ? new LinearNetworkError(operation, error) : error;
+      }
       const firstError = body?.errors?.[0];
       if (firstError) throw new LinearGraphQLError(operation, response.status, firstError, requestId);
       // A success status with an unreadable body (cut connection, timeout while
@@ -270,6 +321,18 @@ export class GraphQLTransport {
       }
       return {data: body.data, text, status: response.status};
     }
+  }
+
+  /** Most bytes the next answer may have: one answer's limit, and for bodies what is left of the run's budget. */
+  #readLimit(bodies: boolean): number {
+    return bodies ? Math.min(this.#limits.responseBytes, this.#limits.bodyBytes - this.#bodyBytesRead) : this.#limits.responseBytes;
+  }
+
+  /** The error of an answer over `#readLimit`: the run's body budget when that was the smaller limit. */
+  #overLimit(operation: string, bodies: boolean): LinearResponseLimitError {
+    return bodies && this.#limits.bodyBytes - this.#bodyBytesRead < this.#limits.responseBytes
+      ? new LinearResponseLimitError(operation, 'linear-body-budget', this.#limits.bodyBytes)
+      : new LinearResponseLimitError(operation, 'linear-response-too-large', this.#limits.responseBytes);
   }
 
   /** A request after the stop is refused without being sent; a refused write is counted, so a run can show it stopped writing. */
@@ -296,6 +359,29 @@ function keptData<T>(operation: string, status: number, bytes: Buffer): T {
     throw new LinearHttpError(operation, status, undefined);
   }
   return body.data as T;
+}
+
+/**
+ * The answer's text and its size in bytes, or undefined when it has more
+ * than `limit` bytes: reading stops there and the rest is never held.
+ * Decoded like `response.text()`, which drops a leading byte order mark.
+ */
+async function readText(response: Response, limit: number): Promise<{ text: string; bytes: number } | undefined> {
+  if (response.body === null) return { text: '', bytes: 0 };
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > limit) {
+      await reader.cancel().catch(() => {});
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return { text: new TextDecoder().decode(Buffer.concat(chunks, bytes)), bytes };
 }
 
 function isRateLimited(status: number, errors: GraphQLErrorShape[] | undefined): boolean {

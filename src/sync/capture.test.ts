@@ -5,7 +5,7 @@ import { type Fixture, createFixture, IDENTITY, mergeOnGitHub, remoteRef } from 
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs, PushedKey } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES } from '../mapping/blobs.ts';
-import { LinearClient, LinearReads, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
+import { LinearClient, LinearReads, LinearStoppedError, LinearHttpError, LinearResponseLimitError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { runCli } from '../cli.ts';
@@ -116,6 +116,26 @@ describe('capture from Linear', () => {
     assert.deepEqual(String(batches[0]!.arguments[1]?.input).trim().split('\n'), annotationOids);
     assert.equal(listDocuments.mock.callCount(), 0);
     assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), initial);
+  });
+
+  it('stops before any write and keeps the cursor and refs when the selected bodies are over the body budget', async () => {
+    for (let i = 0; i < 3; i += 1) world.linear.documents.push({ id: `note-${i}`, title: `note-${i}`, content: 'x'.repeat(20_000), projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
+    const before = Object.fromEntries(await Promise.all((['linear', 'ids', 'uploads'] as const).map(async (store) => [store, await remoteRef(fixture, stateRef(config, store))])));
+    const writes = world.linear.writes.count;
+    context.linear = new LinearClient({ token: 'test', baseUrl: LINEAR_API, fetch: fakeFetch(world), limits: { bodyBytes: 30_000 } });
+    await assert.rejects(run(), (error: unknown) => {
+      assert.ok(error instanceof LinearResponseLimitError);
+      assert.equal(error.code, 'linear-body-budget');
+      assert.match(error.message, /^linear-body-budget: GetDocuments: .* 30000-byte budget/);
+      return true;
+    });
+    for (const [store, oid] of Object.entries(before)) assert.equal(await remoteRef(fixture, stateRef(config, store as 'linear' | 'ids' | 'uploads')), oid);
+    assert.equal(world.linear.writes.count, writes);
+    // The same documents within the default budget are captured.
+    context.linear = new LinearClient({ token: 'test', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
+    const result = await run();
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.changed.filter((path) => path.startsWith('docs/note-')).sort(), ['docs/note-0.md', 'docs/note-1.md', 'docs/note-2.md']);
   });
 
   it('keeps the state ref when a captured edit would exceed the mapping budget', async () => {

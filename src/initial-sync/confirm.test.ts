@@ -13,6 +13,7 @@ import { type RunReport } from '../run/finish.ts';
 import { environmentName, readInputs } from '../run/inputs.ts';
 import { runPreflight } from '../run/preflight.ts';
 import { Git, type IdEntry } from '../state/index.ts';
+import { LinearClient, LinearResponseLimitError } from '../linear/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { type ConfirmedResult, FINAL_IDS_MESSAGE, PROGRESS_MESSAGE, confirmInitialSync } from './confirm.ts';
@@ -660,6 +661,25 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.deepEqual(preparedIds, firstIds);
     assert.equal(world.linear.writes.count, writes, 'the second run wrote to Linear');
     assert.deepEqual(await refs(), refsBefore);
+  });
+
+  it('stops before any write when the bodies of the documents already in Linear are over the body budget', async () => {
+    const world = fakeWorld();
+    for (let i = 0; i < 3; i += 1) world.linear.documents.push({ id: `old-${i}`, title: `Old ${i}`, projectId: 'project-api', content: 'x'.repeat(20_000), createdAt: '2026-01-01T00:00:00Z' });
+    const values = env();
+    const inputs = readInputs((name) => values[environmentName(name) as keyof typeof values] ?? '');
+    const before = await refs();
+    const writes = world.linear.writes.count;
+    let refused: unknown;
+    await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, log: () => undefined, fetch: fakeFetch(world) }, async (context) => {
+      const linear = new LinearClient({ token: 'test', baseUrl: LINEAR_API, fetch: fakeFetch(world), limits: { bodyBytes: 30_000 } });
+      refused = await confirmInitialSync({ ...context, linear }, { config: inputs.state }).then(() => undefined, (error: unknown) => error);
+    });
+    assert.ok(refused instanceof LinearResponseLimitError, String(refused));
+    assert.equal(refused.code, 'linear-body-budget');
+    assert.match(refused.message, /30000-byte budget/);
+    assert.equal(world.linear.writes.count, writes);
+    assert.deepEqual(await refs(), before);
   });
 
   it("records Linear's form of a file it reformatted, with the file's front matter, and leaves the tracked branch alone", async () => {

@@ -74,6 +74,22 @@ describe('Linear reads kept for the next step', () => {
     } finally { recording.close(); replaying?.close(); }
   });
 
+  it('counts kept answers with document bodies toward the body budget of the step that takes them', async () => {
+    fake.operations.set('GetDocuments', () => ({ body: { data: { documents: { nodes: [fakeDocument('d1', { content: 'x'.repeat(20_000) })] } } } }));
+    await record(async (client) => {
+      for (let i = 0; i < 2; i += 1) assert.equal((await client.getDocuments([`d${i}`], { withContent: true })).length, 1);
+    });
+    fake.received.length = 0;
+    const reads = await LinearReads.replaying(dir);
+    assert.ok(reads !== null);
+    try {
+      const client = new LinearClient({ token: 'unused', baseUrl: fake.url, reads, limits: { bodyBytes: 30_000 } });
+      assert.equal((await client.getDocuments(['d0'], { withContent: true })).length, 1);
+      await assert.rejects(client.getDocuments(['d1'], { withContent: true }), { code: 'linear-body-budget' });
+    } finally { reads.close(); }
+    assert.deepEqual(paths(), []);
+  });
+
   it('answers the stage step\'s reads without a token or a request of its own', async () => {
     await record(async (client) => {
       await client.transport.request('Teams', 'query', QUERY);
