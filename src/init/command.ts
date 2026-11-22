@@ -70,7 +70,10 @@ async function optionalRead(path: string): Promise<string | undefined> {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
 }
 
-/** Reject symlinks throughout a destination, including a dangling symlink. */
+/**
+ * Reject symlinks throughout a destination, including a dangling symlink. init's destinations are fixed
+ * names, so the path checks guard against a future caller rather than user input.
+ */
 async function safePath(root: string, path: string): Promise<string> {
   if (isAbsolute(path) || path.split(/[\\/]/).includes('..') || path.includes('\\')) throw new InitError(message('init.path-outside'));
   const target = resolve(root, path);
@@ -180,8 +183,9 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
   try {
     const settings = parseArgs(args);
     const ask = options.prompt;
-    if (ask && !settings.sha) {
-      settings.sha = (await ask('Release commit SHA: ')).trim();
+    // With a terminal, init asks for what the flags left open: the release, then each of the two choices.
+    if (ask) {
+      settings.sha ??= (await ask('Release commit SHA: ')).trim();
       checkRelease(settings);
       settings.security ??= /^(y|yes)$/i.test((await ask('Include security hook examples (requires Docker)? [y/N] ')).trim());
       settings.lfs ??= /^(y|yes)$/i.test((await ask('Store embedded images and files in Git LFS? [y/N] ')).trim());
@@ -217,7 +221,7 @@ Remaining admin steps:
 3. In Settings → Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET. Delete repository secrets of the same names once the workflows and environment are in place. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. For plan requirements and migration of existing workflows, see ${QUICKSTART_URL}#sync-environment.
 4. Allow merge commits and configure required checks for main.
 5. Install Node.js 24.2 or later and pre-commit. Run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? ' Install Git LFS and run git lfs install.' : ''}
-6. Mark each folder to synchronize: give its README.md front matter ${TEAM_KEY} (the Linear team) and, for a project's documents, ${PROJECT_KEY}. A project's team may come from a folder above.
+6. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}.
 7. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
 `;
     return { exitCode: 0, stderr: '', stdout };

@@ -18,6 +18,7 @@ import { runInit } from '../../../src/init/command.ts';
 import { MINIMUM_RELEASE, RELEASE_PIN } from '../../../src/init/releases.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
+import type { Git } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { readAnnotation } from './corpus.ts';
 import { ProductError } from './results.ts';
@@ -84,7 +85,7 @@ export async function initFiles(ctx: RunContext, actionSha: string | undefined):
   const outputs = [...INIT_FILES, ...readmes.keys()];
   let written: Map<string, string>;
   try {
-    written = await runCheckedInit(git.dir, args, release, unprepared);
+    written = await runCheckedInit(git, args, release, unprepared);
   } finally {
     // The clone goes back to its commit whether init kept its promises or not, so a failure leaves no half-prepared
     // clone behind for the checks, and the commit below pulls cleanly and then writes what init wrote.
@@ -92,12 +93,12 @@ export async function initFiles(ctx: RunContext, actionSha: string | undefined):
     await git.run(['clean', '--quiet', '-f', '--', ...outputs]);
   }
   // The person annotates each folder by hand: its README gets back the team and project the setup gave it.
-  for (const [path, text] of readmes) written.set(path, text);
   // The hooks this commit adds are not installed yet; the person commits the prepared files as they are.
-  await commitAsPerson(ctx, new Map(written), 'Prepare the repository for the sync', true);
+  await commitAsPerson(ctx, new Map([...written, ...readmes]), 'Prepare the repository for the sync', true);
   ctx.observations.set('init.arguments', args);
-  ctx.observations.set('init.files', outputs);
-  writeFileSync(join(ctx.runDir, 'init-files.json'), `${JSON.stringify({ release, arguments: args, annotated: [...readmes.keys()], removedBeforeInit: [...unprepared].filter(([, text]) => text === null).map(([path]) => path), written: Object.fromEntries(written), idempotent: true }, null, 2)}\n`);
+  ctx.observations.set('init.files', [...written.keys()]);
+  ctx.observations.set('init.annotated', [...readmes.keys()]);
+  writeFileSync(join(ctx.runDir, 'init-files.json'), `${JSON.stringify({ release, arguments: args, annotatedByHand: [...readmes.keys()], removedBeforeInit: [...unprepared].filter(([, text]) => text === null).map(([path]) => path), written: Object.fromEntries(written), idempotent: true }, null, 2)}\n`);
 }
 
 /** A file `init` must have written; a missing one is init's failure. */
@@ -111,11 +112,26 @@ function current(dir: string, path: string): string | null {
   return existsSync(join(dir, path)) ? readFileSync(join(dir, path), 'utf8') : null;
 }
 
+/** The clone's changes outside the files `init` writes, as `git status` lists them: what init must not add to. */
+async function otherChanges(git: Git): Promise<string> {
+  const entries = (await git.text(['status', '--porcelain=v1', '-z', '--untracked-files=all'])).split('\0').filter(Boolean);
+  return entries.filter((entry) => !INIT_FILES.includes(entry.slice(3))).sort().join('\n');
+}
+
 /**
- * Runs `init` twice in `dir` and checks what it promises; returns the files the first run wrote.
+ * Runs `init` twice in the clone and checks what it promises; returns the files the first run wrote.
  * `unprepared` holds the repository's files before init: the READMEs without annotations, and null for init's own files.
  */
-async function runCheckedInit(dir: string, args: readonly string[], release: { sha: string }, unprepared: ReadonlyMap<string, string | null>): Promise<Map<string, string>> {
+async function runCheckedInit(git: Git, args: readonly string[], release: { sha: string }, unprepared: ReadonlyMap<string, string | null>): Promise<Map<string, string>> {
+  const dir = git.dir;
+  const before = await otherChanges(git);
+  // Folder annotations are the person's: init leaves every README as it found it and adds no file of its own choosing.
+  const leftAlone = async (run: string): Promise<void> => {
+    const touched = [...unprepared].filter(([path, text]) => text !== null && current(dir, path) !== text).map(([path]) => path);
+    if (touched.length > 0) throw new ProductError(`init ${run} changed ${touched.join(', ')}`);
+    const after = await otherChanges(git);
+    if (after !== before) throw new ProductError(`init ${run} changed files besides its own: ${after.split('\n').filter((entry) => !before.split('\n').includes(entry)).join(', ')}`);
+  };
   const first = await runInit(args, { cwd: dir });
   if (first.exitCode !== 0) throw new ProductError(`init failed: ${first.stderr.trim()}`);
   const written = new Map(INIT_FILES.map((path) => [path, writtenFile(dir, path)]));
@@ -129,11 +145,10 @@ async function runCheckedInit(dir: string, args: readonly string[], release: { s
     // Only the workflows that run the sync's action pin a release; the pre-commit workflow runs the hooks.
     if (RELEASE_PIN.test(template) && !(written.get(path) ?? '').includes(`mdbisync/mdbisync@${release.sha}`)) throw new ProductError(`init did not pin ${path} to ${release.sha}`);
   }
-  // Folder annotations are the person's: init leaves every README as it found it.
-  const touched = [...unprepared].filter(([path, before]) => before !== null && current(dir, path) !== before).map(([path]) => path);
-  if (touched.length > 0) throw new ProductError(`init changed ${touched.join(', ')}`);
+  await leftAlone('run once');
   const second = await runInit(args, { cwd: dir });
   if (second.exitCode !== 0) throw new ProductError(`init failed when run again: ${second.stderr.trim()}`);
+  await leftAlone('run again');
   const changedAgain = INIT_FILES.filter((path) => writtenFile(dir, path) !== written.get(path));
   if (changedAgain.length > 0) throw new ProductError(`init run again changed ${changedAgain.join(', ')}`);
   return written;

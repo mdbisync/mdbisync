@@ -325,16 +325,19 @@ describe('git.init-files', () => {
 
   it('L1-23: the person\'s init files pass the setup check as runs.0, then L1-03\'s dry run holds', { timeout: 240_000 }, async (t) => {
     let committed: string[] = [];
+    let annotated: string[] = [];
     const outcomes = await runOnFakeServices(t, scenario('L1-23'), DOCUMENTS, {
       inspect: async (ctx: RunContext) => {
         committed = ctx.observations.get('init.files') as string[];
+        annotated = ctx.observations.get('init.annotated') as string[];
         const git = await ctx.person();
         for (const path of INIT_FILES) assert.ok((await git.text(['show', `HEAD:${path}`])).length > 0, `${path} is committed`);
         assert.match(await git.text(['show', 'HEAD:eng/notes/README.md']), /^---\nlinear-team: ENG\nlinear-project: Field notes\n---/);
       },
     });
     allHold(outcomes, ['I3', 'I4', 'I5', 'I8', 'I9', 'runs.0.ok', 'runs.0.setupChecks.failed', 'runs.0.setupChecks.names', 'summary.plan.paths', 'summary.leftOut', 'writes.total', 'summary.canaryCount']);
-    assert.deepEqual(committed, [...INIT_FILES, 'eng/notes/README.md']);
+    assert.deepEqual(committed, [...INIT_FILES], 'init writes only its own files');
+    assert.deepEqual(annotated, ['eng/notes/README.md'], 'the person annotates the folder by hand');
     assert.ok(REQUIRED_SETUP_CHECKS.length > 0);
   });
 });

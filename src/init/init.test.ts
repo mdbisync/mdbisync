@@ -37,7 +37,8 @@ test('init creates usable workflows and matching hook pins, and leaves folder an
   assert.deepEqual(securityHooks(readHookConfig(config)), []);
   assert.match(config, /repos:\n\s+- repo:/, 'new hooks use block YAML');
   assert.deepEqual((await readdir(cwd)).sort(), ['.git', '.github', '.pre-commit-config.yaml'], 'init writes no README');
-  assert.match(result.stdout, /README\.md front matter linear-team \(the Linear team\) and, for a project's documents, linear-project/);
+  assert.match(result.stdout, /README\.md front matter: linear-team names the Linear team, and linear-project a project/);
+  assert.match(result.stdout, /A folder inside a team's folder takes that team and leaves out linear-team\./);
   assert.match(result.stdout, /MDBISYNC_LINEAR_CLIENT_SECRET/);
   assert.ok(result.stdout.includes(appCreationUrl()), 'init prints the link that creates the GitHub App');
   assert.ok(result.stdout.includes(`${QUICKSTART_URL}#github-app`), 'init links the GitHub App section');
@@ -197,8 +198,23 @@ test('the bundled CLI initializes a repository with no dependency installation',
 test('complete flags do not prompt even when a terminal prompt is available', async (t) => {
   const cwd = await fixture(t);
   const { runInit } = await import('./command.ts');
-  const result = await runInit(flags.slice(1), { cwd, prompt: async () => assert.fail('flags must run non-interactively') });
+  const result = await runInit([...flags.slice(1), '--no-security-hooks', '--lfs'], { cwd, prompt: async () => assert.fail('flags must run non-interactively') });
   assert.equal(result.exitCode, 0, result.stderr);
+});
+
+test('with the release given, a terminal is asked only the choices the flags left open', async (t) => {
+  const { runInit } = await import('./command.ts');
+  for (const [given, expected] of [
+    [[], ['Include security hook examples (requires Docker)? [y/N] ', 'Store embedded images and files in Git LFS? [y/N] ']],
+    [['--security-hooks'], ['Store embedded images and files in Git LFS? [y/N] ']],
+    [['--no-lfs'], ['Include security hook examples (requires Docker)? [y/N] ']],
+  ] as const) {
+    const cwd = await fixture(t);
+    const questions: string[] = [];
+    const result = await runInit([...flags.slice(1), ...given], { cwd, prompt: async (question) => { questions.push(question); return 'yes'; } });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(questions, expected, given.join(' '));
+  }
 });
 
 test('security opt-in refuses incompatible existing IDs and malformed hooks', async (t) => {
