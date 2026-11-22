@@ -64,53 +64,20 @@ Linear or in git. See details in [docs/conflicts.md](docs/conflicts.md).
 
 ## Features
 
-- **Both directions:** edits, new documents, renames, moves and deletes
-  travel each way.
-- **Folders as teams and projects:** the front matter of a folder's `README.md`
-  maps it to a Linear team and project; deeper folders become title paths.
-- **Images and files:** files a document links are uploaded to Linear once;
-  supported images and documents pasted in Linear land in an `assets/` folder
-  beside the document (`assets/<sha256>.png`), one per folder, in Git LFS
-  when your `.gitattributes` says so (`mdbisync init --lfs` adds the lines).
-  Files you committed keep their place; a document moved to another folder
-  takes copies of its `assets/` files. Lint refuses Markdown files inside an
-  `assets/` folder. External HTTP(S) images, path
-  images and uploads returning 404 or 410 become ordinary links; an empty alt
-  uses the URL as its label, and an image inside a link keeps the outer link.
-  Empty images and `data:` images are removed. The sync pull request lists
-  every changed image by its place and Markdown line; after merge, the link
-  version is written back to Linear. External images are never downloaded;
-  repaired paths stay plain links and do not upload repository files.
-  Links with schemes other than HTTP, HTTPS or mailto are removed with their
-  text on pull and refused by lint on push. Paths and fragments are allowed.
-  Unsafe or oversized uploads block the document with a red mark and a
-  comment; fixing them clears the comment and restores the icon.
-  New uploads must contain PNG, JPEG, GIF, WebP, AVIF, PDF, MP4, WebM or SVG,
-  identified from their bytes. SVGs with `script` or `foreignObject` elements,
-  animation elements, event attributes, `xml:base` or non-fragment `href`
-  references are blocked. Files already
-  in the repository keep working, except a file an earlier sync captured
-  (named `<sha256>.<ext>`) that the check now refuses: a document that links
-  it again from Linear is blocked, and `mdbisync lint` names the file
-  (`upload-file-refused`) for you to remove or replace. Downloaded files use the detected extension, regardless of
-  the upload URL or declared content type. Unreadable uploads (including redirects)
-  and files larger than 10 MB block the document with a comment. Access errors
-  stop capture; temporary download failures leave the document unmarked and
-  listed as `download-retry` in the run summary until a later run succeeds.
-- **The `linear-format` hook:** `lint` and `fix` keep Markdown in the form
-  Linear stores, so a round trip changes nothing
-  ([docs/linear-format.md](docs/linear-format.md)).
-- **Security hooks before any push:** your `alias: security` pre-commit
-  hooks check changes from Linear; a rejected document gets a red mark in
-  Linear and is not committed. Without such hooks the content is not
-  checked, and every run summary says so.
-- **A sync pull request with your checks:** it merges itself when they pass;
-  a failing batch moves to a suspended lane while other documents keep
-  syncing.
-- **Initial sync with a dry run:** either direction, a dry run first, and a
-  rerun that continues where an interrupted one stopped.
-- **Recovery:** lost state is rebuilt or refused with a clear message, and an
-  initial sync restores it ([docs/troubleshooting.md](docs/troubleshooting.md#recovery-with-initial-sync)).
+- **Folders as teams and projects.** Map a folder to a Linear team and
+  project in the front matter of its `README.md`; the rest of the path
+  becomes part of the document's title in Linear (see
+  [Folder mapping](docs/usage.md#folder-mapping)).
+- **Images and files, in git and in Linear.** Images and files you add in
+  git appear in Linear, and those pasted in Linear are saved to git next to
+  the document (see [Images and files](docs/images-and-files.md)).
+- **Git LFS support.** Images and files can be stored in Git LFS, and the
+  sync reads and writes them there (see [Git LFS](docs/usage.md#generate-repository-files)).
+- **Linear's format, checked in your repository.** The `linear-format`
+  pre-commit hook's `lint` and `fix` bring your Markdown to the form Linear
+  stores before it is synced (see [Linear's Markdown form](docs/linear-format.md)).
+- **Your security hooks.** Pre-commit hooks marked with `alias: security`
+  check every change from Linear before it reaches git.
 
 ## Limitations
 
@@ -240,6 +207,8 @@ start workflows in this repository, and keep the schedule as a fallback:
   cron, a systemd timer or another scheduler.
 - Initial sync [from git to Linear](docs/initial-sync-git-to-linear.md) and
   [from Linear to git](docs/initial-sync-linear-to-git.md).
+- [Images and files](docs/images-and-files.md): how files travel between
+  git and Linear, and which uploads are accepted.
 - [Linear's Markdown form](docs/linear-format.md), [conflicts](docs/conflicts.md)
   and [troubleshooting](docs/troubleshooting.md).
 
