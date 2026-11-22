@@ -127,69 +127,63 @@ If you sync a public repository with Linear, its GitHub Actions minutes are free
 ## Setup
 
 Four steps, all in accounts you already own. Each run checks the whole setup
-before it writes anything, and says what is missing in the run summary. The
-[quickstart](docs/quickstart.md) has every step in order, with the exact
-settings and commands.
+before it writes anything, and says what is missing in the run summary.
 
 ### 1. Create a private Linear OAuth app
 
-Each run gets a short-lived token and revokes it at the end.
+Each run gets a short-lived token and revokes it at the end. No personal API
+key.
 
-Exact settings and the secrets to set: [Linear OAuth app](docs/quickstart.md#linear-oauth-app).
+You can keep the settings below in the repository, but we recommend an
+environment named `mdbisync` that only `main` may use, with the secrets in it
+(see [sync environment](docs/quickstart.md#sync-environment)).
+
+In Linear, create an OAuth application with client credentials on. Store its
+client ID in the variable `MDBISYNC_LINEAR_CLIENT_ID` and its client secret
+in the secret `MDBISYNC_LINEAR_CLIENT_SECRET` (see [exact settings](docs/quickstart.md#linear-oauth-app)).
 
 ### 2. Create your own GitHub App
 
 No third-party app to trust: it is yours. Install it only on your docs
 repository and keep its key in your secrets.
 
-Exact settings, the secrets to set, and a link that opens GitHub's
-new-App form already filled in: [GitHub App](docs/quickstart.md#github-app).
+Give the App read and write access to contents, pull requests and workflows,
+and install it on your docs repository. Store its client ID in the variable
+`MDBISYNC_APP_CLIENT_ID` and its private key in the secret
+`MDBISYNC_APP_PRIVATE_KEY` (see [exact settings](docs/quickstart.md#github-app)).
 
 ### 3. Run a one-time initial sync
 
-First prepare the repository. `mdbisync init` writes the workflows, the
-folder annotations and the `linear-format` hook, and with
-`--security-hooks` two example security hooks; marking hooks of your own
-`alias: security` and the repository setting are yours
-([repository files](docs/quickstart.md#repository-files)):
+1. In the repository settings, turn on **Allow merge commits**
+   (Settings → General).
+2. Prepare the repository with mdbisync's command-line tool: `npm exec`
+   fetches it from the release, with nothing to install. In a clone of your
+   docs repository, run `init` with your folder, Linear team and,
+   optionally, project:
 
-- map a folder to Linear: `linear-team` and `linear-project` in the front
-  matter of its `README.md` ([folder mapping](docs/usage.md#folder-mapping));
-- add the `linear-format` hook to `.pre-commit-config.yaml`, pinned to a
-  release ([pins](docs/usage.md#release-builds-and-pins)), and mark your
-  security hooks `alias: security`;
-- in the repository settings, turn on **Allow merge commits**.
+   ```sh
+   npm exec --yes --package=git+https://github.com/mdbisync/mdbisync.git#<release-sha> -- \
+     mdbisync init --release-sha <release-sha> --release-version <version> \
+     --folder docs --team ENG --project Handbook \
+     --no-security-hooks
+   ```
 
-Commit what `init` wrote and push it to `main`
-([commit the files](docs/quickstart.md#commit-the-files)). Then run the
-initial sync workflow, `.github/workflows/mdbisync-initial-sync.yml`,
-by hand from the Actions tab, with a direction: `git-to-linear` makes Linear
-equal to git, `linear-to-git` opens a pull request that makes git equal to
-Linear. The first run is a dry run that lists what would change; run it
-again with `confirm` to write. Without `init`, copy the workflow from
-[`examples/mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml)
-and replace each `mdbisync/mdbisync@…` pin with your release. Before the
-first run, disable the sync workflow (Actions → **mdbisync** → `⋯` →
-**Disable workflow**): it shares one queue with the initial sync, and a
-queued sync run can replace a waiting initial sync.
-Before you take documents from Linear, read
-[initial sync from Linear to git](docs/initial-sync-linear-to-git.md): its
-pull request can remove files, and a person merges it. Before you take
-files to Linear, read
-[initial sync from git to Linear](docs/initial-sync-git-to-linear.md): it
-overwrites documents and moves those without a file to Linear's trash.
+   It writes the sync workflows, adds the `linear-format` hook and maps the
+   folder to its team and project (see [repository files](docs/quickstart.md#repository-files)).
+   Optionally, mark your own pre-commit hooks `alias: security` (see [security hooks](docs/quickstart.md#security-hooks)).
+3. Commit the files and push them to `main`. Until the initial sync is done,
+   sync runs stop with `initial-sync-required` and write nothing.
+4. Run the initial sync workflow from the Actions tab, in one direction:
+   `git-to-linear` or `linear-to-git`. The first run is a dry run that lists
+   what would change; run it again with `confirm` to write (see the guides
+   [from git to Linear](docs/initial-sync-git-to-linear.md) and [from Linear to git](docs/initial-sync-linear-to-git.md)).
 
 ### 4. Start ongoing sync
 
-The sync workflow, `.github/workflows/mdbisync.yml`, is one of the files
-`init` writes (without `init`, copy
-[`examples/mdbisync.yml`](examples/mdbisync.yml) and replace its pins).
-Once the initial sync is done (for `linear-to-git`, once its pull request
-is merged), enable it again. It runs on every push to
-`main`, on GitHub's schedule and by hand, in both directions.
-
-Do not rely on GitHub's schedule to bring Linear edits to git: start the
-workflow from a timer of your own (see [Required infrastructure](#required-infrastructure)).
+Once the initial sync is done, the sync workflow takes over. It runs on
+every push to `main` and on a schedule, in both directions. For timely runs,
+start it from your own timer (see
+[Required infrastructure](#required-infrastructure)).
 
 ## Documentation
 
