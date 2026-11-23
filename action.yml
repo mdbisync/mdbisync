@@ -1,5 +1,8 @@
 name: mdbisync
-description: Two-way sync between Markdown files in a Git repository and Linear documents.
+description: "Two-way sync of Linear documents and Markdown files in your repo. Your GitHub App, your keys."
+branding:
+  icon: refresh-cw
+  color: green
 inputs:
   operation:
     description: "What to run: `sync` (the recurring two-way sync) or `initial-sync` (the one-time sync that makes one side match the other)."

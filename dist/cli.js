@@ -7464,6 +7464,7 @@ var MESSAGES = {
   "setup.merge-commits-unknown": "GitHub did not show whether merge commits are allowed",
   "setup.merge-commits-off": "merge commits are not allowed in the repository settings",
   "setup.github-rate-limited-rules": "GitHub rate-limited the setup check while reading the rules of {branch} (HTTP {status}); run again later",
+  "setup.sync-branch-rules-plan": "GitHub rulesets are unavailable for this repository on its current plan. To restrict sync branch creation and deletion, use a plan that supports rulesets for this repository and configure an active ruleset.",
   "setup.sync-branch-rules-unread": "GitHub answered HTTP {status} while reading the rules of {branch}; the sync branches may not be kept to the App",
   "setup.sync-branch-rules": "{branches}: {rules}",
   "setup.sync-branch-rules-open": "{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch",
@@ -7536,6 +7537,8 @@ var MESSAGES = {
   "linear.error": "{operation}: Linear error {code} (HTTP {status}, request {request}): {detail}",
   "linear.answered": "{operation}: Linear answered HTTP {status} (request {request})",
   "linear.request-failed": "{operation}: request to Linear failed ({cause})",
+  "linear.response-too-large": "linear-response-too-large: {operation}: a Linear answer is over the {bytes}-byte limit and was not read",
+  "linear.body-budget": "linear-body-budget: {operation}: the Linear document bodies this run reads are over the {bytes}-byte budget",
   "linear.too-long": "{operation}: {field} is {length} characters, Linear accepts at most {limit}",
   "linear.read-back-failed": "{operation}: written, but reading back the stored record failed",
   "linear.token-refused": "oauth.token: Linear refused the token request ({reason})",
@@ -7707,6 +7710,15 @@ var LinearReadBackError = class extends LinearError {
   constructor(operation, document4, cause) {
     super(operation, message("linear.read-back-failed", { operation }), { cause });
     this.document = document4;
+  }
+};
+var LinearResponseLimitError = class extends LinearError {
+  code;
+  limit;
+  constructor(operation, code4, limit) {
+    super(operation, message(code4 === "linear-body-budget" ? "linear.body-budget" : "linear.response-too-large", { operation, bytes: limit }));
+    this.code = code4;
+    this.limit = limit;
   }
 };
 var LinearUploadError = class extends LinearError {
@@ -8050,6 +8062,8 @@ var LinearReads = class _LinearReads {
 
 // src/linear/transport.ts
 var DEFAULT_BASE_URL = "https://api.linear.app";
+var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
+var DOCUMENT_BODY_BUDGET_BYTES = 256 * 1024 * 1024;
 var GraphQLTransport = class {
   stats;
   baseUrl;
@@ -8064,12 +8078,15 @@ var GraphQLTransport = class {
   #sleep;
   #stopped;
   #lastRateLimit;
+  #limits;
+  #bodyBytesRead = 0;
   constructor(options) {
     this.#token = options.token;
     if (options.reads !== void 0) this.reads = options.reads;
     this.#auth = authMetadata(options.auth);
     this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
     this.#floor = { ...DEFAULT_BUDGET_FLOOR, ...options.budgetFloor };
+    this.#limits = { responseBytes: MAX_RESPONSE_BYTES, bodyBytes: DOCUMENT_BODY_BUDGET_BYTES, ...options.limits };
     this.#maxRetryAfterSeconds = options.maxRetryAfterSeconds ?? 10;
     this.#timeoutMs = options.timeoutMs ?? 6e4;
     this.#hooks = options.hooks ?? {};
@@ -8099,14 +8116,22 @@ var GraphQLTransport = class {
   async request(operation, kind, query, variables = {}) {
     return kind === "mutation" ? this.mutate(operation, query, variables) : this.query(operation, query, variables);
   }
-  /** Reads alone can consume or record a saved answer. */
-  async query(operation, query, variables = {}) {
+  /**
+   * Reads alone can consume or record a saved answer. With `bodies`, the
+   * answer carries document bodies and counts toward the run's body budget,
+   * a kept answer too.
+   */
+  async query(operation, query, variables = {}, { bodies = false } = {}) {
     if (this.#stopped) throw this.#refuse(operation, "query", this.#stopped);
     const requestBody = JSON.stringify({ query, variables, operationName: operation });
     const key = this.reads === void 0 ? void 0 : graphqlReadKey(requestBody);
     const kept = key === void 0 ? void 0 : this.reads?.take(key);
-    if (kept !== void 0) return keptData(operation, kept.status, kept.body);
-    const answer = await this.#network(operation, "query", requestBody);
+    if (kept !== void 0) {
+      if (kept.body.length > this.#limits.responseBytes) throw new LinearResponseLimitError(operation, "linear-response-too-large", this.#limits.responseBytes);
+      if (bodies) this.#chargeBodies(operation, kept.body.length);
+      return keptData(operation, kept.status, kept.body);
+    }
+    const answer = await this.#network(operation, "query", requestBody, bodies);
     if (key !== void 0) this.reads?.keep(key, { status: answer.status, type: "application/json", body: Buffer.from(answer.text, "utf8") });
     return answer.data;
   }
@@ -8121,7 +8146,7 @@ var GraphQLTransport = class {
     return (await this.#network(operation, "mutation", requestBody)).data;
   }
   /** Network execution shared by reads and writes; has no read-store access. */
-  async #network(operation, kind, requestBody) {
+  async #network(operation, kind, requestBody, bodies = false) {
     for (let attempt = 1; ; attempt += 1) {
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
       const info = { operation, kind, attempt };
@@ -8166,9 +8191,16 @@ var GraphQLTransport = class {
       let body2;
       let text6 = "";
       let bodyError;
+      let over = false;
+      let bytes = 0;
       try {
-        text6 = await response.text();
-        body2 = JSON.parse(text6);
+        const read = await readText(response, this.#limits.responseBytes);
+        if (read === void 0) over = true;
+        else {
+          text6 = read.text;
+          bytes = read.bytes;
+          body2 = JSON.parse(text6);
+        }
       } catch (error) {
         body2 = void 0;
         bodyError = error;
@@ -8198,14 +8230,24 @@ var GraphQLTransport = class {
       const low = findLowBudget(operation, rateLimit, this.#floor);
       if (low) this.#stopped = low;
       this.#log(low ? { ...entry, stop: low } : entry);
+      if (over) {
+        const error = new LinearResponseLimitError(operation, "linear-response-too-large", this.#limits.responseBytes);
+        throw kind === "mutation" ? new LinearNetworkError(operation, error) : error;
+      }
       const firstError = body2?.errors?.[0];
       if (firstError) throw new LinearGraphQLError(operation, response.status, firstError, requestId);
       if (response.ok && body2 === void 0) throw new LinearNetworkError(operation, bodyError);
       if (!response.ok || body2 === void 0 || body2.data === void 0 || body2.data === null) {
         throw new LinearHttpError(operation, response.status, requestId);
       }
+      if (bodies) this.#chargeBodies(operation, bytes);
       return { data: body2.data, text: text6, status: response.status };
     }
+  }
+  /** Counts an answer with document bodies toward the run's budget, or refuses it before its bodies are kept. */
+  #chargeBodies(operation, bytes) {
+    if (this.#bodyBytesRead + bytes > this.#limits.bodyBytes) throw new LinearResponseLimitError(operation, "linear-body-budget", this.#limits.bodyBytes);
+    this.#bodyBytesRead += bytes;
   }
   /** A request after the stop is refused without being sent; a refused write is counted, so a run can show it stopped writing. */
   #refuse(operation, kind, reason) {
@@ -8228,6 +8270,24 @@ function keptData(operation, status, bytes) {
     throw new LinearHttpError(operation, status, void 0);
   }
   return body2.data;
+}
+async function readText(response, limit) {
+  if (response.body === null) return { text: "", bytes: 0 };
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > limit) {
+      await reader.cancel().catch(() => {
+      });
+      return void 0;
+    }
+    chunks.push(value);
+  }
+  return { text: new TextDecoder().decode(Buffer.concat(chunks, bytes)), bytes };
 }
 function isRateLimited(status, errors) {
   return status === 429 || (errors ?? []).some((error) => error.extensions?.code === "RATELIMITED");
@@ -8303,36 +8363,52 @@ var LinearClient = class {
   /**
    * Reads documents by id, one request per page of ids (one request for up
    * to `pageSize` ids). Trashed documents are included; ids that no longer
-   * exist are absent from the result.
+   * exist are absent from the result. Bodies read here count toward the
+   * run's body budget: the caller holds them together.
    */
   async getDocuments(ids, options = {}) {
+    return this.#documentsById(ids, options, true);
+  }
+  async #documentsById(ids, options, counted) {
+    const withContent = options.withContent ?? false;
     const pageSize = clampPageSize(options.pageSize);
     const result = [];
-    for (let start2 = 0; start2 < ids.length; start2 += pageSize) {
-      const chunk = ids.slice(start2, start2 + pageSize);
-      const data = await this.request(
-        "GetDocuments",
-        "query",
-        `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
-          documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
-            nodes { ${DOCUMENT_FIELDS} }
-          }
-        }`,
-        { ids: chunk, first: chunk.length, withContent: options.withContent ?? false }
-      );
+    const pages = [];
+    for (let start2 = 0; start2 < ids.length; start2 += pageSize) pages.push(ids.slice(start2, start2 + pageSize));
+    for (let chunk = pages.shift(); chunk !== void 0; chunk = pages.shift()) {
+      let data;
+      try {
+        data = await this.transport.query(
+          "GetDocuments",
+          `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
+            documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
+              nodes { ${DOCUMENT_FIELDS} }
+            }
+          }`,
+          { ids: chunk, first: chunk.length, withContent },
+          { bodies: withContent && counted }
+        );
+      } catch (error) {
+        if (!pageTooLarge(error, chunk.length)) throw error;
+        const half = Math.ceil(chunk.length / 2);
+        pages.unshift(chunk.slice(0, half), chunk.slice(half));
+        continue;
+      }
       result.push(...data.documents.nodes.map(toDocument));
     }
     return result;
   }
   /**
    * Reads one document by id with `document(id:)`, which answers for trashed
-   * and archived documents too; null when Linear no longer has the id.
+   * and archived documents too; null when Linear no longer has the id. Its
+   * body is not counted toward the run's body budget: one document at a
+   * time, bounded by Linear's content limit and the per-answer limit, read
+   * by the write step just before it writes that document.
    */
   async getDocument(id, { withContent = false } = {}) {
     try {
-      const data = await this.request(
+      const data = await this.transport.query(
         "GetDocument",
-        "query",
         `query GetDocument($id: String!, $withContent: Boolean!) {
           document(id: $id) { ${DOCUMENT_FIELDS} }
         }`,
@@ -8648,7 +8724,7 @@ var LinearClient = class {
   async #findCreated(id, place, title, createError) {
     let found;
     try {
-      [found] = await this.getDocuments([id], { withContent: true });
+      [found] = await this.#documentsById([id], { withContent: true }, false);
     } catch (error) {
       if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
       throw createError;
@@ -8663,7 +8739,7 @@ var LinearClient = class {
     if (this.facts.mutationsReturnStoredContent) return written;
     let stored;
     try {
-      [stored] = await this.getDocuments([written.id], { withContent: true });
+      [stored] = await this.#documentsById([written.id], { withContent: true }, false);
     } catch (error) {
       if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
       throw new LinearReadBackError(operation, written, error);
@@ -8690,33 +8766,36 @@ var LinearClient = class {
   }
   async #listPages(operation, filter, options) {
     const result = [];
+    const withContent = options.withContent ?? false;
+    let first = clampPageSize(options.pageSize);
     let after = null;
-    do {
-      const data = await this.request(
-        operation,
-        "query",
-        `query ${operation}($filter: DocumentFilter, $first: Int!, $after: String, $includeArchived: Boolean!, $withContent: Boolean!) {
-          documents(filter: $filter, first: $first, after: $after, includeArchived: $includeArchived, orderBy: createdAt) {
-            nodes { ${DOCUMENT_FIELDS} }
-            pageInfo { hasNextPage endCursor }
-          }
-        }`,
-        {
-          filter,
-          first: clampPageSize(options.pageSize),
-          after,
-          includeArchived: options.includeArchived ?? false,
-          withContent: options.withContent ?? false
-        }
-      );
+    for (; ; ) {
+      let data;
+      try {
+        data = await this.transport.query(
+          operation,
+          `query ${operation}($filter: DocumentFilter, $first: Int!, $after: String, $includeArchived: Boolean!, $withContent: Boolean!) {
+            documents(filter: $filter, first: $first, after: $after, includeArchived: $includeArchived, orderBy: createdAt) {
+              nodes { ${DOCUMENT_FIELDS} }
+              pageInfo { hasNextPage endCursor }
+            }
+          }`,
+          { filter, first, after, includeArchived: options.includeArchived ?? false, withContent },
+          { bodies: withContent }
+        );
+      } catch (error) {
+        if (!pageTooLarge(error, first)) throw error;
+        first = Math.ceil(first / 2);
+        continue;
+      }
       result.push(...data.documents.nodes.map(toDocument));
       const { hasNextPage, endCursor } = data.documents.pageInfo;
       if (hasNextPage && endCursor === null) {
         throw new LinearError(operation, message("linear.page-without-cursor", { operation }));
       }
-      after = hasNextPage ? endCursor : null;
-    } while (after !== null);
-    return result;
+      if (!hasNextPage) return result;
+      after = endCursor;
+    }
   }
 };
 function succeeded(operation, payload) {
@@ -8732,6 +8811,9 @@ function isCursorNotFound(error) {
 }
 function clampPageSize(pageSize) {
   return Math.max(1, Math.min(MAX_PAGE_SIZE, Math.floor(pageSize ?? DEFAULT_PAGE_SIZE)));
+}
+function pageTooLarge(error, documents) {
+  return documents > 1 && error instanceof LinearResponseLimitError && error.code === "linear-response-too-large";
 }
 
 // src/linear/token.ts
@@ -9845,7 +9927,7 @@ var LINT_RULES = {
   "table-hash-cell": "A table body cell starting with # becomes a heading.",
   "image-in-link": "The link around an image is dropped.",
   "content-too-long": "Documents over 250,000 characters are rejected.",
-  "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax would take too long to parse.",
+  "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.",
   "duplicate-title": "Two or more files map to one document title.",
   "table-alignment": "Table column alignment is dropped.",
   "link-scheme": "Links must use http, https, mailto, a path or a fragment.",
@@ -9952,6 +10034,10 @@ async function checkSyncBranchRules(target) {
     const answer = await request2("GET", `/rules/branches/${branch.split("/").map(encodeURIComponent).join("/")}?per_page=100`);
     if (answer.status === 429 || answer.status === 403 && isRateLimited2(answer)) {
       throw new Error(message("setup.github-rate-limited-rules", { status: answer.status, branch }));
+    }
+    const reason = answer.json?.message;
+    if (answer.status === 403 && typeof reason === "string" && /^Upgrade to GitHub .+ or make this repository public to enable this feature\.$/i.test(reason)) {
+      return warning("sync-branch-rules", message("setup.sync-branch-rules-plan"));
     }
     if (answer.status < 200 || answer.status >= 300 || !Array.isArray(answer.json)) {
       return warning("sync-branch-rules", message("setup.sync-branch-rules-unread", { status: answer.status, branch }));
@@ -24784,6 +24870,7 @@ function lineCount(text6) {
 var MARKDOWN_MAX_DEPTH = 128;
 var MARKDOWN_MAX_NODES = 5e5;
 var INLINE_WORK_LIMIT = 25e7;
+var LAZY_WORK_LIMIT = 2e7;
 var MarkdownLimitError = class extends Error {
   limit;
   constructor(limit) {
@@ -24793,7 +24880,7 @@ var MarkdownLimitError = class extends Error {
   }
 };
 function parse2(body2, mdastExtensions = []) {
-  const tree = fromMarkdown(body2, { extensions: [gfm(), inlineBudget()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
+  const tree = fromMarkdown(body2, { extensions: [gfm(), inlineBudget(), lazyBudget()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
   visit2(tree, () => {
   });
   return tree;
@@ -24829,6 +24916,61 @@ function inlineBudget() {
   for (const code4 of WORD_CODES) text6[code4] = word;
   text6[91] = bracket;
   return { text: text6 };
+}
+function lazyBudget() {
+  let work = 0;
+  let watching = false;
+  let writing;
+  const blocks = /* @__PURE__ */ new WeakMap();
+  const watch = (parser) => {
+    watching = true;
+    const create = parser.flow;
+    parser.flow = (from) => {
+      const flow3 = create(from);
+      const { defineSkip, write } = flow3;
+      let line2;
+      flow3.defineSkip = (point3) => {
+        line2 = point3.line;
+        return defineSkip(point3);
+      };
+      flow3.write = (slice) => {
+        const chunkLine = line2;
+        line2 = void 0;
+        writing = flow3;
+        let events;
+        try {
+          events = write(slice);
+        } finally {
+          writing = void 0;
+        }
+        if (chunkLine !== void 0 && parser.lazy[chunkLine]) {
+          const block2 = blocks.get(flow3);
+          const open3 = flow3.currentConstruct !== void 0 && block2 !== void 0 && block2.line < chunkLine;
+          work += flow3.events.length - (open3 ? block2.from : 0);
+          if (work > LAZY_WORK_LIMIT) throw new MarkdownLimitError("lazy");
+        }
+        return events;
+      };
+      return flow3;
+    };
+  };
+  const container = {
+    name: "lazyBudget",
+    partial: true,
+    tokenize(_effects, _ok, nok) {
+      if (!watching) watch(this.parser);
+      return nok;
+    }
+  };
+  const block = {
+    name: "lazyBudgetBlock",
+    partial: true,
+    tokenize(_effects, _ok, nok) {
+      if (writing !== void 0) blocks.set(writing, { from: this.events.length, line: this.now().line });
+      return nok;
+    }
+  };
+  return { document: { null: container }, flowInitial: { null: block, [-2]: block, [-1]: block, [32]: block } };
 }
 function markdownBaseline(body2) {
   if (body2 === void 0) return void 0;
@@ -25948,7 +26090,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.0-rc.1" : packageJson.version;
+var VERSION2 = true ? "1.0.0-rc.2" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -35303,7 +35445,7 @@ jobs:
       # it ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's documents
         id: stage
-        uses: mdbisync/mdbisync@f1164ace541d364889a7699f5f90929ffa478b68 # v0.1.0-rc.9
+        uses: mdbisync/mdbisync@e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0 # v1.0.0-rc.1
         with:
           operation: initial-sync
           security-step: stage
@@ -35330,7 +35472,7 @@ jobs:
       # what the hooks saw; a document they have not seen (the hooks step did
       # not run) keeps the tracked branch's version and is listed as left out.
       - name: Initial sync
-        uses: mdbisync/mdbisync@f1164ace541d364889a7699f5f90929ffa478b68 # v0.1.0-rc.9
+        uses: mdbisync/mdbisync@e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0 # v1.0.0-rc.1
         with:
           operation: initial-sync
           security-step: apply
@@ -35503,7 +35645,7 @@ jobs:
       # ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's changes
         id: stage
-        uses: mdbisync/mdbisync@f1164ace541d364889a7699f5f90929ffa478b68 # v0.1.0-rc.9
+        uses: mdbisync/mdbisync@e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0 # v1.0.0-rc.1
         with:
           operation: sync
           security-step: stage
@@ -35528,7 +35670,7 @@ jobs:
       # so it pushes what the hooks saw; a later change in Linear waits for
       # the next run.
       - name: Sync
-        uses: mdbisync/mdbisync@f1164ace541d364889a7699f5f90929ffa478b68 # v0.1.0-rc.9
+        uses: mdbisync/mdbisync@e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0 # v1.0.0-rc.1
         with:
           operation: sync
           security-step: apply
@@ -35879,7 +36021,19 @@ var older_releases_default = {
   d7d1f9f0acc5677574bf7b77e41ffb3c52e5377f: "v0.1.0-rc.5",
   e4e305d00c35414b19ecf2996504b6f9ab622c4c: "v0.1.0-rc.6",
   d5655bd74239d88d4323957d0945163678698858: "v0.1.0-rc.7",
-  "92a1d9ecd9c89ff18703c9d4f8476d9e3702170e": "v0.1.0-rc.8"
+  "92a1d9ecd9c89ff18703c9d4f8476d9e3702170e": "v0.1.0-rc.8",
+  f1164ace541d364889a7699f5f90929ffa478b68: "v0.1.0-rc.9",
+  b3a0aa1ec3d48975a50c37edf468bbda3cd8e11b: "v0.1.0-rc.10",
+  f2b65609e5a6339846bb188226aeefe2ef3952d8: "v0.1.0-rc.11",
+  dee0c1b1f76d790460c472dafb74300375cb14b5: "v0.1.0-rc.12",
+  "429c1e304da3f3558253a0499e979b2a378d1fbe": "v0.1.0-rc.13",
+  e88bed1f16524002ee1c3b7ae7c10533e8920748: "v0.1.0-rc.14",
+  "6789933cd57b1b61ff6a5df23b8ede250511f260": "v0.1.0-rc.15",
+  "2a5fbec5227214635ec208f81afcef0185580049": "v0.1.0-rc.16",
+  "2d8a131612d4f80a7a78dd2a474bb0c1a941f268": "v0.1.0-rc.17",
+  "4049d1d167a12bc846f54a893eb2112d52917a4d": "v0.1.0-rc.18",
+  "8feb2cc39fec965f3bb4212525d31c9a3472bf7d": "v0.1.0-rc.19",
+  "10dd5950c35457c5b102a0652ce831ba0d599742": "v0.1.0-rc.20"
 };
 
 // src/init/releases.ts
@@ -36065,13 +36219,14 @@ async function runInit(args, options = {}) {
     const stdout = `${changes.size ? `Wrote ${changes.size} repository files.` : "Repository files are already initialized."}
 
 Remaining admin steps:
-1. Create a Linear OAuth app with read,write client credentials. Set repository variable MDBISYNC_LINEAR_CLIENT_ID. Set it before enabling the workflows. Remove any old repository secret for this client ID once the updated workflows are in place.
-2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID.
-3. In Settings \u2192 Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. Add environment secrets MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET. Delete repository secrets of the same names once the workflows and environment are in place. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. For plan requirements and migration of existing workflows, see ${QUICKSTART_URL}#sync-environment.
-4. Allow merge commits and configure required checks for main.
-5. Install Node.js 24.2 or later and pre-commit. Run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
-6. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}.
-7. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
+1. In Settings \u2192 Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. If your plan lacks environments or you are moving existing repository secrets, follow ${QUICKSTART_URL}#sync-environment. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. After moving the secrets and updating the workflows, delete the old repository secrets.
+2. Create a Linear OAuth app with read,write client credentials. Set repository variable MDBISYNC_LINEAR_CLIENT_ID and add environment secret MDBISYNC_LINEAR_CLIENT_SECRET. Remove any old repository secret for this client ID once the updated workflows are in place.
+3. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID and add environment secret MDBISYNC_APP_PRIVATE_KEY.
+4. Allow merge commits.
+5. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}.
+6. Install Node.js 24.2 or later and pre-commit. Run pre-commit install --hook-type pre-commit --hook-type pre-push, then pre-commit run --all-files. If the hook rewrites files and fails, run it again. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
+7. If you track a branch other than main, set tracked-branch on the mdbisync action steps, update BRANCH in both sync workflows, and update the push trigger in mdbisync.yml. Commit the setup files except .github/workflows/mdbisync.yml and push them to the tracked branch or merge them through a pull request. Dispatch initial sync from the tracked branch with a direction and leave confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
+8. After initial sync finishes (for linear-to-git, merge its pull request with Create a merge commit), commit .github/workflows/mdbisync.yml and push it to the tracked branch or merge it through a pull request to start the first sync run. After that run, you can make pre-commit a required check. See ${QUICKSTART_URL}#two-layers-of-checks.
 `;
     return { exitCode: 0, stderr: "", stdout };
   } catch (error) {

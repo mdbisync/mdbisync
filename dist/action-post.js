@@ -19697,6 +19697,7 @@ var MESSAGES = {
   "setup.merge-commits-unknown": "GitHub did not show whether merge commits are allowed",
   "setup.merge-commits-off": "merge commits are not allowed in the repository settings",
   "setup.github-rate-limited-rules": "GitHub rate-limited the setup check while reading the rules of {branch} (HTTP {status}); run again later",
+  "setup.sync-branch-rules-plan": "GitHub rulesets are unavailable for this repository on its current plan. To restrict sync branch creation and deletion, use a plan that supports rulesets for this repository and configure an active ruleset.",
   "setup.sync-branch-rules-unread": "GitHub answered HTTP {status} while reading the rules of {branch}; the sync branches may not be kept to the App",
   "setup.sync-branch-rules": "{branches}: {rules}",
   "setup.sync-branch-rules-open": "{branches}: {rules}; no ruleset keeps those who can push from creating or deleting a sync branch",
@@ -19769,6 +19770,8 @@ var MESSAGES = {
   "linear.error": "{operation}: Linear error {code} (HTTP {status}, request {request}): {detail}",
   "linear.answered": "{operation}: Linear answered HTTP {status} (request {request})",
   "linear.request-failed": "{operation}: request to Linear failed ({cause})",
+  "linear.response-too-large": "linear-response-too-large: {operation}: a Linear answer is over the {bytes}-byte limit and was not read",
+  "linear.body-budget": "linear-body-budget: {operation}: the Linear document bodies this run reads are over the {bytes}-byte budget",
   "linear.too-long": "{operation}: {field} is {length} characters, Linear accepts at most {limit}",
   "linear.read-back-failed": "{operation}: written, but reading back the stored record failed",
   "linear.token-refused": "oauth.token: Linear refused the token request ({reason})",
@@ -19923,6 +19926,8 @@ function emitLog(log, entry) {
 
 // src/linear/transport.ts
 var DEFAULT_BASE_URL = "https://api.linear.app";
+var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
+var DOCUMENT_BODY_BUDGET_BYTES = 256 * 1024 * 1024;
 var defaultFetch = (input, init) => globalThis.fetch(input, init);
 function trimSlash(url) {
   return url.replace(/\/+$/, "");

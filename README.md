@@ -10,11 +10,11 @@ as a GitHub Action under apps you create: no server we own, no key we hold.
 
 **One knowledge base, readable by people and agents.**
 
-- **One to one with your agent, in files.** Specs, plans and documents live as
-  Markdown in your repository, where you and the agent read and write them
-  together.
-- **With your team, in Linear.** The same documents stay in sync in Linear,
-  where anyone can edit, discuss and comment on them without git.
+- **Collaborate with your agent in Markdown files.** Specs, plans and
+  documents live in your repository, where you and the agent read and write
+  them together.
+- **Collaborate with your team in Linear.** The same documents stay in sync
+  in Linear, where anyone can edit, discuss and comment on them without git.
 
 ## Why it is safe
 
