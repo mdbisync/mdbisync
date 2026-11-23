@@ -1,12 +1,14 @@
 // How a run ends when Linear's faults and the sync pull request's failures
-// meet: a failure a person must fix comes first, a transient pull request
-// failure yields to a partial ending, and alone it fails the run.
+// meet: a failure a person must fix comes first, and a pull request step the
+// next run repeats on its own (a moved ref, a failed GitHub request) makes the
+// run partial, after Linear's own partial code.
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { buildReport, failed } from '../setup/report.ts';
 import { exitStatusOf, partialCode, pullRequestEnding, stoppedBeforeWritingMessage } from './exit.ts';
 import { type OperationOutcome } from './operation.ts';
+import { PULL_REQUEST_CODES, type PullRequestCode } from '../codes.ts';
 import { runScaleScript } from '../scale-test-helpers.ts';
 
 /** A sync outcome with only the fields the ending reads. */
@@ -32,7 +34,9 @@ describe('the ending of a sync run', () => {
     ['an initial pull request waiting for a person beats a partial write', 'initial-pull-request-pending', 'write-failed', undefined, 'failure', 'initial-pull-request-pending'],
     ['a GitHub server error yields to a partial write', 'github-failed', 'stopped', 'stopped', 'warning', undefined],
     ['a lost pull request lease yields to a partial write', 'state-moved', 'write-failed', 'write-failed', 'warning', undefined],
-    ['a GitHub server error alone fails the run', 'github-failed', undefined, undefined, 'failure', 'github-failed'],
+    ['a GitHub server error alone makes the run partial', 'github-failed', undefined, 'github-failed', 'warning', undefined],
+    ['a moved ref in the pull request step alone makes the run partial', 'state-moved', undefined, 'state-moved', 'warning', undefined],
+    ['a container at its cap beats a moved ref in the pull request step', 'state-moved', 'container-cap', undefined, 'failure', undefined],
     ['a partial write alone is partial', undefined, 'stopped', 'stopped', 'warning', undefined],
     ['a container at its cap is a failure', undefined, 'container-cap', undefined, 'failure', undefined],
     ['a finished run succeeds', undefined, undefined, undefined, 'success', undefined],
@@ -58,6 +62,37 @@ describe('the ending of a sync run', () => {
     (both.sync as unknown as { pullRequest: unknown }).pullRequest = { holdMarks: { set: [], updated: [], cleared: [], deferred: 0, removed: [], code: 'write-failed' } };
     assert.equal(partialCode(both), 'stopped');
   });
+});
+
+describe('the exit status of each sync pull request code alone', () => {
+  // What each code's result holds besides the code, so its failure message has what it names.
+  const fields: Partial<Record<PullRequestCode, Record<string, unknown>>> = {
+    'merge-blocked': { status: 405, reason: 'Required status check is expected' },
+    'checks-missing': { checks: { missing: ['ci / test'] } },
+    'merge-misplaced': { misplaced: { branch: 'release', commit: 'a'.repeat(40) } },
+    'head-unverified': { unverified: ['.github/workflows/ci.yml'] },
+    'suspended-asset-discovery': { reason: 'an asset link points outside the folder' },
+  };
+  // Warn: the next run repeats the step with nothing for a person to do. Fail: a person must act.
+  const expected: Record<PullRequestCode, 'success' | 'warning' | 'failure'> = {
+    conflict: 'success',
+    'merge-refused': 'success',
+    'state-moved': 'warning',
+    'github-failed': 'warning',
+    'merge-blocked': 'failure',
+    'checks-missing': 'failure',
+    'initial-pull-request-pending': 'failure',
+    'head-unverified': 'failure',
+    'merge-misplaced': 'failure',
+    'suspended-asset-discovery': 'failure',
+  };
+  for (const code of PULL_REQUEST_CODES) {
+    it(`${code} ends the run with ${expected[code]}`, () => {
+      const outcome = sync(code, undefined);
+      Object.assign((outcome.sync as unknown as { pullRequest: object }).pullRequest, fields[code] ?? {});
+      assert.equal(exitStatusOf(outcome), expected[code]);
+    });
+  }
 });
 
 describe('the message of a run stopped before any write', () => {

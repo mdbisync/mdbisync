@@ -3,11 +3,13 @@
 // are what the command line, the action and the report each give.
 //
 // A sync run is partial when Linear stopped it (a rate limit, a budget
-// running low), a write failed or was rejected, or a state ref moved under
-// it. It kept what it could record, and the next run goes on from
-// there, so it ends with a warning, not a failure: a sync that meets one of
-// Linear's bad minutes does not fail its job. Other operations have no next
-// run to go on, so a stop fails them.
+// running low), a write failed or was rejected, a state ref moved under
+// it, or the sync pull request step stopped on a moved ref or a failed
+// GitHub request. It kept what it could record, and the next run goes on
+// from there, so it ends with a warning, not a failure: a sync that meets
+// one of Linear's or GitHub's bad minutes does not fail its job. A run fails
+// only when a person must act. Other operations have no next run to go on,
+// so a stop fails them.
 
 import {
   COMMANDS,
@@ -17,7 +19,7 @@ import {
   notImplementedMessage,
 } from '../commands.ts';
 import { fixUrl } from '../setup/fixes.ts';
-import { type PullRequestFailure, pullRequestFailure } from '../sync/index.ts';
+import { type PullRequestFailure, pullRequestFailure, pullRequestPartialCode } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 import { PARTIAL } from './stop.ts';
 import { type HeldCode } from '../codes.ts';
@@ -25,31 +27,36 @@ import { message } from '../messages.ts';
 
 export type ExitStatus = 'success' | 'warning' | 'failure';
 
-/** Why a sync run is partial: a capture or write code, or a removal capture held. */
+/** Why a sync run is partial: a capture, write or sync pull request code, or a removal capture held. */
 export type PartialCode =
   | NonNullable<NonNullable<OperationOutcome['captured']>['code']>
   | Exclude<NonNullable<NonNullable<NonNullable<OperationOutcome['sync']>['write']>['code']>, 'container-cap'>
+  | NonNullable<ReturnType<typeof pullRequestPartialCode>>
   | HeldCode;
 
 /**
  * Why a sync run is partial, or undefined when it is not: Linear stopped it
  * (in the setup check, the capture or the write step), failed a request
  * while capturing, held a removal it could not confirm, failed or rejected
- * a write, or a state ref moved. A container at its document cap is not
- * partial: the next run cannot go on until a person makes room; nor is a
- * sync pull request that needs a person.
+ * a write, or a state ref moved; or, Linear's side done, the sync pull
+ * request step stopped on a moved ref or a failed GitHub request. A
+ * container at its document cap is not partial: the next run cannot go on
+ * until a person makes room; nor is a sync pull request that needs a person.
  */
 export function partialCode(outcome: OperationOutcome): PartialCode | undefined {
   if (pullRequestEnding(outcome) !== null) return undefined;
-  return linearPartialCode(outcome);
+  const linear = linearPartialCode(outcome);
+  if (linear !== undefined || outcome.operation !== 'sync' || outcome.sync?.write?.code === 'container-cap') return linear;
+  return pullRequestPartialCode(outcome.sync?.pullRequest);
 }
 
 /**
  * The sync pull request's failure that decides how the run ends, or null.
  * A failure a person must fix (a failed check, an initial sync waiting to
- * be merged) comes before a partial ending. A transient one (a lost lease,
- * a GitHub server error) yields to a partial ending, since the next run
- * repeats both; alone, it fails the run.
+ * be merged) comes before a partial ending. A suspended batch whose assets
+ * could not be collected yields to a partial ending on Linear's side;
+ * alone, it fails the run. A moved ref or a failed GitHub request is no
+ * failure: it makes the run partial (`partialCode`).
  */
 export function pullRequestEnding(outcome: OperationOutcome): PullRequestFailure | null {
   const failure = pullRequestFailure(outcome.sync?.pullRequest);

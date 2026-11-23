@@ -178,9 +178,12 @@ interface MergeRefusal {
   reason: string;
 }
 
-/** How a run ends because of step 2; null when step 2 leaves the run successful (waiting for checks, a conflict, a refused merge). */
+/**
+ * How a run ends because of step 2; null when step 2 leaves the run successful (waiting for checks, a conflict, a
+ * refused merge) or partial (`pullRequestPartialCode`).
+ */
 export interface PullRequestFailure {
-  /** `setup`: a repeatedly refused merge; `no-state`: an initial sync from Linear waits for a person; `incomplete`: run again. */
+  /** `setup`: a repeatedly refused merge; `no-state`: an initial sync from Linear waits for a person; `incomplete`: a suspended batch's repair. */
   kind: 'setup' | 'no-state' | 'incomplete';
   code: NonNullable<PullRequestResult['code']>;
   message: string;
@@ -198,15 +201,17 @@ export function pullRequestFailure(result: PullRequestResult | undefined): PullR
   // Either lane's head that waits for a person, after the endings above and before a lane that only needs another run.
   const unverified = result?.unverified ?? result?.suspended?.unverified;
   if (unverified !== undefined) return {kind:'setup', code:'head-unverified', message:message('pull-request.head-unverified', {code:'head-unverified', files:unverifiedList(unverified)})};
-  switch (result?.code) {
-    case 'state-moved':
-    case 'github-failed':
-      return { kind: 'incomplete', code: result.code, message: message('pull-request.not-finished', { code: result.code }) };
-    case 'suspended-asset-discovery':
-      return { kind: 'incomplete', code: result.code, message: message('pull-request.suspended-asset-discovery', { code: result.code, reason: result.reason ?? '' }) };
-    default:
-      return null;
-  }
+  if (result?.code === 'suspended-asset-discovery') return { kind: 'incomplete', code: result.code, message: message('pull-request.suspended-asset-discovery', { code: result.code, reason: result.reason ?? '' }) };
+  return null;
+}
+
+/**
+ * Why step 2 stopped part way with nothing for a person to do, or undefined: a state ref moved under it, or a GitHub
+ * request failed or got no answer. The next run repeats the step, so the run is partial, not failed. A GitHub refusal
+ * that needs a person (a missing permission) fails the setup check of every run before step 2.
+ */
+export function pullRequestPartialCode(result: PullRequestResult | undefined): 'state-moved' | 'github-failed' | undefined {
+  return result?.code === 'state-moved' || result?.code === 'github-failed' ? result.code : undefined;
 }
 
 export async function syncPullRequest(context: RunContext, options: PullRequestOptions): Promise<PullRequestResult> {

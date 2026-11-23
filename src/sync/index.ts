@@ -8,6 +8,7 @@ export {
   SYNC_BRANCH_MERGE_MESSAGE,
   SYNC_PULL_REQUEST_TITLE,
   pullRequestFailure,
+  pullRequestPartialCode,
   syncPullRequest,
 } from './pull-request.ts';
 export { renderSync } from './summary.ts';

@@ -59,7 +59,6 @@ step with the bare message, without `error:`.
 | `<command>: waits for a person (head-unverified): the sync pull request also changes files that are not synchronized documents or their assets (<files>); a person reviews and merges it` | See [`head-unverified`](#the-sync-pull-request). |
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: the batch stays suspended (suspended-asset-discovery). <reason>` | See [`suspended-asset-discovery`](#the-sync-pull-request). |
-| `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
 | `Run this workflow on <branch>, not on <ref>.` | The sync or initial sync workflow ran on a branch other than the tracked branch (main), for example a dispatch on a feature branch, and stopped before any step got a token or a secret. Run it on the tracked branch. If the sync tracks a branch other than main, name it in the workflow's first step (`BRANCH`). |
 | `Set the MDBISYNC_APP_CLIENT_ID GitHub Actions variable.` or `Set the MDBISYNC_LINEAR_CLIENT_ID GitHub Actions variable.` | The workflow's **Check sync variables** step found the named repository variable empty and stopped before any step got a token. Set it to the client ID of the corresponding app ([GitHub App](quickstart.md#github-app), [Linear OAuth app](quickstart.md#linear-oauth-app)). |
@@ -166,7 +165,9 @@ writes nothing and ends with exit code 4:
 
 A partial sync run kept what it could record; the next run goes on from
 there, so the job ends with a warning, not a failure. The summary says
-which documents were written and which were not.
+which documents were written and which were not. The sync pull request
+step's `state-moved` and `github-failed` end a run the same way (see
+[The sync pull request](#the-sync-pull-request)).
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
@@ -254,6 +255,15 @@ Its step reports the codes below. `merge-refused`, `merge-blocked`,
 `merge-misplaced` and `checks-missing` apply to either lane; the summary
 identifies a suspended merge refusal.
 
+How each code ends the run, when nothing else in it does:
+
+- `conflict` and `merge-refused` leave it successful: the sync goes on with
+  them on its own.
+- `state-moved` and `github-failed` end it with a warning,
+  `sync: partial, will continue (<code>)`: the next run repeats the step
+  with nothing for a person to do.
+- The other codes fail it: a person must act.
+
 | Code | Meaning | What to do |
 | --- | --- | --- |
 | `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request <link> (<reason>); a later run tries again.` When GitHub refused because of merge conflicts (`Pull Request has merge conflicts`), the next run first merges the tracked branch into the sync branch, unless the head already holds the tracked branch's latest commit. When GitHub answers `Merge already in progress` (HTTP 405), usually after it answered an earlier merge with a server error, the run reads the pull request again for up to a minute and counts a merge that lands meanwhile; otherwise a later run looks again. That answer never becomes `merge-blocked`. | Nothing; a later run tries again. |
@@ -264,7 +274,7 @@ identifies a suspended merge refusal.
 | `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. For documents the sync merges with conflict markers: this run into Linear's state, a later run into the sync branch. | Resolve the markers on either side ([conflicts.md](conflicts.md#resolving-a-conflict)). A conflicting file that is not a document waits: merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve it there; the sync keeps those commits. |
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked, or right before its merge the sync pull request no longer targeted the tracked branch, or the tracked branch had moved since the sync checked the merge. | Nothing; the next run updates the pull request. |
-| `github-failed` | A GitHub request for the sync pull request failed or got no answer. | Nothing, unless it repeats; then check GitHub's status and the App's permissions. |
+| `github-failed` | A GitHub request for the sync pull request failed or got no answer. A missing permission fails the [setup check](#setup-check) of every run before this step. | Nothing, unless it repeats; then check GitHub's status. |
 | `head-unverified` | The sync pull request, or the suspended one, would also change files that are not synchronized documents or their assets: anything outside an annotated folder, inside a `.github` folder, of another type, or not a regular file, or a `README.md` change that adds, edits or removes a folder's Linear team or project (exit code 3). Someone added those changes to its branch; the sync does not merge them by itself. The description and the run summary list the files. | Review the changes. Merge the pull request yourself with a merge commit, or remove those changes from its branch with an ordinary commit (no force push); a later run merges what remains. To keep others from pushing to the sync branches, see [quickstart.md](quickstart.md#who-may-push-to-the-sync-branches). |
 
 ## Initial sync

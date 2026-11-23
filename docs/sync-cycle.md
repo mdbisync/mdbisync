@@ -638,10 +638,13 @@ document cap or more ([`container-cap`](troubleshooting.md#container-cap)).
 
 ### How the run ends
 
-A finished run succeeds. A partial run ends with a warning,
-`sync: partial, will continue (<code>)`: Linear stopped it, a request to
-Linear or a write failed, a state ref moved while it captured or wrote, or
-a removal is held. It kept what it could record, and the next run goes on
+A finished run succeeds, also when the sync pull request meets a conflict
+or a refused merge that a later run takes up (`conflict`, `merge-refused`).
+A partial run ends with a warning, `sync: partial, will continue (<code>)`:
+Linear stopped it, a request to Linear or a write failed, a state ref moved
+while it captured or wrote, a removal is held, or the sync pull request
+step stopped on a moved ref or a failed GitHub request (`state-moved`,
+`github-failed`). It kept what it could record, and the next run goes on
 from there. A run fails when it needs a person: the setup check failed, GitHub refuses
 a merge again (`merge-blocked`), expected checks never started on the sync
 pull request (`checks-missing`), the sync pull request changes files that
@@ -651,10 +654,7 @@ initial sync from Linear is not merged yet, the sync has no state yet
 (`initial-sync-required`), a container is full (`container-cap`), or the
 assets of a suspended batch cannot be collected safely
 (`suspended-asset-discovery`; in a run that is also partial on Linear's
-side, it yields to the partial ending). It also fails when only the sync
-pull request step did not finish (`sync: not finished (<code>); run it
-again`, for `state-moved` or `github-failed` there): the next run tries
-again. An initial sync from Linear stays pending until a person merges its
+side, it yields to the partial ending). An initial sync from Linear stays pending until a person merges its
 pull request or a new initial sync replaces it; closing the pull request or
 deleting its branch does not cancel it
 ([`initial-pull-request-pending`](troubleshooting.md#sync-state)).

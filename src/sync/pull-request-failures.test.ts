@@ -294,7 +294,8 @@ describe('sync: pull request failures', () => {
 
     const broken = await sync();
     assert.equal(broken.result.exitCode, INCOMPLETE_EXIT_CODE, broken.result.stderr);
-    assert.match(broken.result.stderr, /not finished \(github-failed\)/);
+    assert.match(broken.result.stderr, /partial, will continue \(github-failed\)/);
+    assert.equal(broken.report.exitStatus, 'warning');
     assert.equal(broken.report.pullRequest?.code, 'github-failed');
     assert.equal(broken.report.pullRequest?.status, undefined);
     assert.match(broken.summary, /A request to GitHub for the sync pull request got no answer/);
@@ -363,7 +364,7 @@ describe('sync: pull request failures', () => {
     assert.equal(((await documentOf('eng/notes/plan.md')).content ?? '').split('Server errors.').length, 2, 'and once in Linear');
   });
 
-  it('a GitHub server error on every request of the pull request step ends each run incomplete, and the next run converges', async () => {
+  it('a GitHub server error on every request of the pull request step ends each run partial, and the next run converges', async () => {
     await editInLinear('eng/notes/plan.md', `# Plan\n\nEvery server error. ${CANARY}\n`);
     await sync();
     const steps = ['GET /pulls', 'PATCH /pulls/1', 'GET /commits/', 'PUT /pulls/1/merge'];
@@ -375,7 +376,7 @@ describe('sync: pull request failures', () => {
       assert.equal(broken.result.exitCode, INCOMPLETE_EXIT_CODE, `${step}: ${broken.result.stderr}`);
       assert.equal(broken.report.pullRequest?.code, 'github-failed', step);
       assert.equal(broken.report.pullRequest?.status, 500, step);
-      assert.equal(broken.report.exitStatus, 'failure', step);
+      assert.equal(broken.report.exitStatus, 'warning', step);
     }
     delete h.world.github.serverError;
     let run = await sync();
@@ -400,7 +401,7 @@ describe('sync: pull request failures', () => {
       const broken = await sync();
       assert.equal(broken.result.exitCode, INCOMPLETE_EXIT_CODE, `${step}: ${broken.result.stderr}`);
       assert.equal(broken.report.pullRequest?.code, 'github-failed', step);
-      assert.equal(broken.report.exitStatus, 'failure', step);
+      assert.equal(broken.report.exitStatus, 'warning', step);
     }
     delete h.world.github.reset;
     let run = await sync();

@@ -102,7 +102,12 @@ const ROWS: Row[] = [
   {
     name: 'a GitHub failure in the sync pull request step alone',
     outcome: syncRun('github-failed'),
-    status: 'failure', exitCode: 5, message: 'sync: not finished (github-failed); run it again', code: 'github-failed',
+    status: 'warning', exitCode: 5, message: 'sync: partial, will continue (github-failed)', code: 'github-failed',
+  },
+  {
+    name: 'a ref that moved in the sync pull request step alone',
+    outcome: syncRun('state-moved'),
+    status: 'warning', exitCode: 5, message: 'sync: partial, will continue (state-moved)', code: 'state-moved',
   },
   {
     name: 'a GitHub failure yields to a partial write',
