@@ -853,10 +853,17 @@ describe('capture from Linear', () => {
     assert.equal(world.linear.documents[0]!.title, '');
   });
 
-  it('does not trash a document whose title was cleared in Linear after the capture when its file is deleted in git', async () => {
+  for (const title of ['plan', 'Untitled']) it(`does not trash a document titled ${title} whose title was cleared in Linear after the capture when its file is deleted in git`, async () => {
+    if (title !== 'plan') {
+      Object.assign(world.linear.documents[0]!, { title, updatedAt: '2026-01-02T00:00:00Z' });
+      await run();
+      await refresh();
+    }
+    const path = `docs/${title}.md`;
     const captured = await run();
+    assert.equal((await readIds(context.git, captured.state.ids)).get(path)?.id, 'plan');
     Object.assign(world.linear.documents[0]!, { title: '', updatedAt: '2026-01-03T00:00:00Z' });
-    const tracked = await commitTree(context.git, {parents:[captured.state.linear!], base:captured.state.linear, changes:new Map([['docs/plan.md', null]]), message:'Delete document', identity:IDENTITY});
+    const tracked = await commitTree(context.git, {parents:[captured.state.linear!], base:captured.state.linear, changes:new Map([[path, null]]), message:'Delete document', identity:IDENTITY});
     await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
     await refresh();
     const written = await writeTrackedToLinear(context, {config, state:captured.state, captured:captured.documents});
