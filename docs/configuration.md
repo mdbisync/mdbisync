@@ -143,7 +143,7 @@ environment variables; secrets never go in arguments.
 
 | Flag | Default | Value |
 | --- | --- | --- |
-| `--release-sha` | none, required | The 40-character release SHA the workflows and the hook are pinned to: `v1.0.0-rc.1` or a later release. |
+| `--release-sha` | none, required | The 40-character release SHA the workflows and the hook are pinned to: `v1.0.0` or a later release. |
 | `--release-version` | none | The release's version, written as a comment beside each pin. |
 | `--security-hooks` | off | Adds the two security hook examples (Docker needed where they run). |
 | `--no-security-hooks` | on | Adds none; give one of the two to make the choice explicit. |
@@ -155,7 +155,7 @@ missing, and whether to add the security hook examples and the Git LFS
 lines when their flags are missing. It changes local files only.
 
 The workflows `init` writes are made for the release their examples pin,
-`v1.0.0-rc.1`, and pass action inputs that earlier releases lack. `init`
+`v1.0.0`, and pass action inputs that earlier releases lack. `init`
 refuses an earlier release, given by its SHA or its `--release-version`,
 and names it; it writes any other SHA as given, since it works offline and
 cannot check one it does not know.
