@@ -19677,7 +19677,8 @@ var MESSAGES = {
   "pull-request.checks-missing": "setup error ({code}): the sync pull request waited past the check deadline for checks that never started ({checks})",
   "pull-request.initial-pending": "stopped short ({code}): an initial sync from Linear waits for a person to merge it",
   "pull-request.head-unverified": "waits for a person ({code}): the sync pull request also changes files that are not synchronized documents or their assets ({files}); a person reviews and merges it",
-  "pull-request.not-finished": "not finished ({code}); run it again",
+  "pull-request.push-rejected": "setup error ({code}): GitHub refused the push to the sync branch ({reason}); let the sync's GitHub App push to it",
+  "pull-request.github-refused": "setup error ({code}): GitHub refused a request for the sync pull request (HTTP {status}); the job summary names it",
   "pull-request.suspended-asset-discovery": "the batch stays suspended ({code}). {reason}",
   // The setup check.
   "setup.left-out": "{count} files left out, not synced: {files}{more}",

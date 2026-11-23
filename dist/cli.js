@@ -7444,7 +7444,8 @@ var MESSAGES = {
   "pull-request.checks-missing": "setup error ({code}): the sync pull request waited past the check deadline for checks that never started ({checks})",
   "pull-request.initial-pending": "stopped short ({code}): an initial sync from Linear waits for a person to merge it",
   "pull-request.head-unverified": "waits for a person ({code}): the sync pull request also changes files that are not synchronized documents or their assets ({files}); a person reviews and merges it",
-  "pull-request.not-finished": "not finished ({code}); run it again",
+  "pull-request.push-rejected": "setup error ({code}): GitHub refused the push to the sync branch ({reason}); let the sync's GitHub App push to it",
+  "pull-request.github-refused": "setup error ({code}): GitHub refused a request for the sync pull request (HTTP {status}); the job summary names it",
   "pull-request.suspended-asset-discovery": "the batch stays suspended ({code}). {reason}",
   // The setup check.
   "setup.left-out": "{count} files left out, not synced: {files}{more}",
@@ -10121,35 +10122,41 @@ import { setTimeout as setTimeout3 } from "node:timers/promises";
 var PullRequestError = class extends Error {
   /** GitHub's HTTP status; undefined when no answer came. */
   status;
-  constructor(what, status, cause) {
+  /** GitHub refused the request for its rate limit, primary or secondary (a 403 or 429 that says so). */
+  rateLimited;
+  constructor(what, status, cause, rateLimited = false) {
     super(status === void 0 ? message("github.no-answer", { action: what }) : message("github.answered", { status, action: what }), cause === void 0 ? void 0 : { cause });
     this.name = "PullRequestError";
     this.status = status;
+    this.rateLimited = rateLimited;
   }
 };
+function answerError(what, answer) {
+  return new PullRequestError(what, answer.status, void 0, answer.rateLimited);
+}
 async function findOpenPullRequest(target, head, base) {
   const owner = target.repository.split("/")[0];
   const query = new URLSearchParams({ state: "open", head: `${owner}:${head}`, base, per_page: "10" });
   const answer = await request(target, "GET", `/pulls?${query.toString()}`);
-  if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message("github.listing"), answer.status);
+  if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message("github.listing"), answer);
   const found = answer.json.map(toPullRequest).find((pr) => pr !== null && pr.head === head && pr.base === base && pr.headRepository?.toLowerCase() === target.repository.toLowerCase());
   return found ?? null;
 }
 async function openPullRequest(target, spec) {
   const answer = await request(target, "POST", "/pulls", { title: spec.title, head: spec.head, base: spec.base, body: spec.body, maintainer_can_modify: false }, { kind: "opened", accepted: 201 });
   const opened = answer.status === 201 ? toPullRequest(answer.json) : null;
-  if (opened === null) throw new PullRequestError(message("github.opening"), answer.status);
+  if (opened === null) throw answerError(message("github.opening"), answer);
   return opened;
 }
 async function updatePullRequest(target, number, text6) {
   const answer = await request(target, "PATCH", `/pulls/${number}`, { title: text6.title, body: text6.body }, { kind: "updated", accepted: 200 });
   const updated = answer.status === 200 ? toPullRequest(answer.json) : null;
-  if (updated === null) throw new PullRequestError(message("github.updating"), answer.status);
+  if (updated === null) throw answerError(message("github.updating"), answer);
   return updated;
 }
 async function closePullRequest(target, number) {
   const answer = await request(target, "PATCH", `/pulls/${number}`, { state: "closed" }, { kind: "closed", accepted: 200 });
-  if (answer.status !== 200) throw new PullRequestError(message("github.closing"), answer.status);
+  if (answer.status !== 200) throw answerError(message("github.closing"), answer);
 }
 async function closePullRequestAtHead(target, number, head) {
   const deadline = AbortSignal.timeout(5e3);
@@ -10158,7 +10165,7 @@ async function closePullRequestAtHead(target, number, head) {
   try {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const answer = await request({ ...target, signal }, "GET", `/pulls/${number}`);
-      if (answer.status !== 200) throw new PullRequestError(message("github.reading-pull-request"), answer.status);
+      if (answer.status !== 200) throw answerError(message("github.reading-pull-request"), answer);
       const pr = answer.json;
       if (pr?.state === "closed") return true;
       if (pr?.state === "open" && pr.head?.sha === head) {
@@ -10201,7 +10208,7 @@ async function readPullRequest(target, number) {
   const answer = await request(target, "GET", `/pulls/${number}`);
   const pr = answer.json;
   if (answer.status !== 200 || pr === null || pr.state !== "open" && pr.state !== "closed" || typeof pr.base?.ref !== "string") {
-    throw new PullRequestError(message("github.reading-pull-request"), answer.status);
+    throw answerError(message("github.reading-pull-request"), answer);
   }
   const mergeCommit = pr.merged === true && typeof pr.merge_commit_sha === "string" ? pr.merge_commit_sha : null;
   return { state: pr.state, base: pr.base.ref, mergeCommit };
@@ -10224,6 +10231,7 @@ async function request(target, method, path2, body2, write) {
   const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, "")}/repos/${target.repository}`;
   let status;
   let text6;
+  let headers;
   try {
     const response = await (target.fetch ?? fetch)(`${base}${path2}`, {
       method,
@@ -10237,6 +10245,7 @@ async function request(target, method, path2, body2, write) {
       signal: AbortSignal.any([AbortSignal.timeout(3e4), ...target.signal ? [target.signal] : []])
     });
     status = response.status;
+    headers = response.headers;
     if (write !== void 0 && status === write.accepted) target.writes?.set(write.kind, (target.writes.get(write.kind) ?? 0) + 1);
     text6 = await response.text();
   } catch (error) {
@@ -10248,7 +10257,7 @@ async function request(target, method, path2, body2, write) {
     json = JSON.parse(text6);
   } catch {
   }
-  return { status, json };
+  return { status, json, rateLimited: (status === 403 || status === 429) && isRateLimited2({ status, headers, json }) };
 }
 function isTransportError(error) {
   if (error instanceof TypeError) return true;
@@ -10298,7 +10307,7 @@ async function readCommitChecks(target, sha, options) {
   const answer = await request(target, "GET", `/commits/${sha}/status?per_page=${PAGE_SIZE}`);
   const combined = answer.json;
   if (answer.status !== 200 || combined === null || typeof combined.total_count !== "number" || !Array.isArray(combined.statuses)) {
-    throw new PullRequestError(message("github.reading-statuses"), answer.status);
+    throw answerError(message("github.reading-statuses"), answer);
   }
   if (combined.total_count > combined.statuses.length) unlisted.push(`${combined.total_count - combined.statuses.length} more commit statuses`);
   const statuses = combined.statuses;
@@ -10314,7 +10323,7 @@ async function statusCreators(target, sha, ids) {
   const creators = /* @__PURE__ */ new Map();
   for (let page = 1; page <= MAX_PAGES && creators.size < ids.size; page += 1) {
     const answer = await request(target, "GET", `/commits/${sha}/statuses?per_page=${PAGE_SIZE}&page=${page}`);
-    if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message("github.reading-statuses"), answer.status);
+    if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message("github.reading-statuses"), answer);
     const listed = answer.json;
     for (const status of listed) if (ids.has(status.id) && !creators.has(status.id)) creators.set(status.id, status.creator?.id);
     if (listed.length < PAGE_SIZE) break;
@@ -10374,7 +10383,7 @@ async function readAnnotations(target, checkRunId) {
   const annotations = [];
   for (let page = 1; page <= MAX_ANNOTATION_PAGES; page += 1) {
     const answer = await request(target, "GET", `/check-runs/${checkRunId}/annotations?per_page=${PAGE_SIZE}&page=${page}`);
-    if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message("github.reading-annotations"), answer.status);
+    if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message("github.reading-annotations"), answer);
     const items = answer.json;
     for (const item of items) {
       if (typeof item.path !== "string" || typeof item.message !== "string") continue;
@@ -10430,7 +10439,7 @@ async function mergePullRequest(target, number, sha) {
     const landed = await awaitMerge(target, number, MERGE_IN_PROGRESS_WAIT_SECONDS);
     if (landed !== null) return { merged: true, sha: landed, late: true };
   }
-  throw new PullRequestError(message("github.merging"), answer.status);
+  throw answerError(message("github.merging"), answer);
 }
 async function awaitMerge(target, number, seconds) {
   const clock = target.clock ?? REAL_CLOCK;
@@ -26090,7 +26099,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.0-rc.2" : packageJson.version;
+var VERSION2 = true ? "1.0.0-rc.3" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -28638,19 +28647,36 @@ function titlePath(title) {
 function inFolder(folder, name) {
   return folder === "" && name.startsWith("-") ? `%2D${name.slice(1)}` : posix3.join(folder, name);
 }
+var UNTITLED = "Untitled";
+function isUntitled(title) {
+  return title.normalize("NFC").trim() === "";
+}
+function fileTitle(title) {
+  return isUntitled(title) ? UNTITLED : title;
+}
 function titleFile(folder, title) {
-  return `${inFolder(folder, titlePath(title))}.md`;
+  return `${inFolder(folder, titlePath(fileTitle(title)))}.md`;
 }
 function pathKey(path2) {
   return path2.normalize("NFC").toLowerCase();
 }
-function documentPath(folder, title, id, occupied, previous3, invalid2 = () => false) {
+function conflictsIn(folder, occupied, invalid2) {
   const keys = [...occupied].map(pathKey);
   const inAssets = (path2) => inAssetsFolder(folder === "" ? path2 : path2.slice(folder.length + 1));
-  const conflicts = (path2) => inAssets(path2) || invalid2(path2) || keys.some((key) => key === pathKey(path2) || key.startsWith(`${pathKey(path2)}/`) || pathKey(path2).startsWith(`${key}/`));
+  return (path2) => inAssets(path2) || invalid2(path2) || keys.some((key) => key === pathKey(path2) || key.startsWith(`${pathKey(path2)}/`) || pathKey(path2).startsWith(`${key}/`));
+}
+var unsafe2 = (folder, path2) => folder === "" && path2.startsWith("-") || path2.split("/").some(isGitDirectoryName);
+var ENCODED_EMPTY = /^%00(?:~[0-9a-f]{12}(?:-\d+)?)?\.md$/;
+function keptPath(folder, occupied, previous3, invalid2 = () => false) {
+  if (conflictsIn(folder, occupied, invalid2)(previous3) || unsafe2(folder, previous3) || ENCODED_EMPTY.test(posix3.basename(previous3))) return void 0;
+  return previous3;
+}
+function documentPath(folder, documentTitle, id, occupied, previous3, invalid2 = () => false) {
+  const title = fileTitle(documentTitle);
+  const conflicts = conflictsIn(folder, occupied, invalid2);
   let candidate = titleFile(folder, title);
   const raw = `${folder === "" ? "" : `${folder}/`}${title}.md`;
-  if (previous3 === raw && !conflicts(previous3) && !(folder === "" && raw.startsWith("-")) && !previous3.split("/").some(isGitDirectoryName)) return previous3;
+  if (previous3 === raw && !conflicts(previous3) && !unsafe2(folder, previous3)) return previous3;
   const suffix = createHash8("sha256").update(id).digest("hex").slice(0, 12);
   const flattened = titlePath(title).replaceAll("/", "%2F");
   const flat = shorten(flattened, title);
@@ -29386,7 +29412,7 @@ async function maintainSuspended(context, options) {
       }
     } catch (error) {
       if (!(error instanceof PullRequestError)) throw error;
-      return { ...pending, code: "github-failed", ...error.status === void 0 ? {} : { status: error.status } };
+      return { ...pending, code: "github-failed", ...error.status === void 0 ? {} : { status: error.status }, ...error.rateLimited ? { rateLimited: true } : {} };
     }
   }
   const tracked = context.fetched.tracked;
@@ -30087,7 +30113,13 @@ async function writeTrackedToLinear(context, options) {
     const document4 = withCurrentIds(held);
     const folder = file.path.slice(0, -(file.title.length + ".md".length)).replace(/\/$/, "");
     const occupied = new Set([...linearFiles.keys()].filter((path2) => path2 !== file.path));
-    if (document4.title.normalize("NFC") !== file.title.normalize("NFC") && documentPath(folder, document4.title, document4.id, occupied, file.path) !== file.path) return false;
+    if (document4.title.normalize("NFC") !== file.title.normalize("NFC")) {
+      if (isUntitled(document4.title)) {
+        const capturedTitle = options.captured?.get(document4.id)?.title;
+        if (capturedTitle === void 0 || !isUntitled(capturedTitle)) return false;
+        if (documentPath(folder, document4.title, document4.id, occupied, file.path) !== file.path && keptPath(folder, occupied, file.path) !== file.path) return false;
+      } else if (documentPath(folder, document4.title, document4.id, occupied, file.path) !== file.path) return false;
+    }
     if (resolves(file.place) && !inPlace(document4, file.place)) return false;
     const repair = signedIds.get(file.path)?.pullRewrite;
     if (repair !== void 0 && createHash12("sha256").update(text6).digest("hex") === repair.hash) {
@@ -30962,15 +30994,20 @@ function pullRequestFailure(result) {
   if (result?.code === "initial-pull-request-pending") return { kind: "no-state", code: result.code, message: message("pull-request.initial-pending", { code: result.code }) };
   const unverified = result?.unverified ?? result?.suspended?.unverified;
   if (unverified !== void 0) return { kind: "setup", code: "head-unverified", message: message("pull-request.head-unverified", { code: "head-unverified", files: unverifiedList(unverified) }) };
-  switch (result?.code) {
-    case "state-moved":
-    case "github-failed":
-      return { kind: "incomplete", code: result.code, message: message("pull-request.not-finished", { code: result.code }) };
-    case "suspended-asset-discovery":
-      return { kind: "incomplete", code: result.code, message: message("pull-request.suspended-asset-discovery", { code: result.code, reason: result.reason ?? "" }) };
-    default:
-      return null;
+  if (result?.code === "push-rejected") return { kind: "setup", code: result.code, message: message("pull-request.push-rejected", { code: result.code, reason: result.reason ?? "" }) };
+  if (result?.code === "github-failed" && !transientGitHubFailure(result)) {
+    return { kind: "setup", code: result.code, message: message("pull-request.github-refused", { code: result.code, status: String(result.status) }) };
   }
+  if (result?.code === "suspended-asset-discovery") return { kind: "incomplete", code: result.code, message: message("pull-request.suspended-asset-discovery", { code: result.code, reason: result.reason ?? "" }) };
+  return null;
+}
+function pullRequestPartialCode(result) {
+  if (result?.code === "state-moved") return result.code;
+  return result?.code === "github-failed" && transientGitHubFailure(result) ? result.code : void 0;
+}
+function transientGitHubFailure(failure) {
+  const { status } = failure;
+  return status === void 0 || status >= 500 || status === 408 || status === 429 || failure.rateLimited === true;
 }
 async function syncPullRequest(context, options) {
   if (options.security !== void 0) return pullRequestStep(context, { ...options, security: options.security });
@@ -30991,7 +31028,7 @@ async function pullRequestStep(context, options) {
   } catch (error) {
     if (error instanceof UnverifiedHead) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], code: "head-unverified", unverified: error.paths };
     const code4 = error instanceof LaneMoved ? "state-moved" : error instanceof LaneConflict ? "conflict" : error instanceof PullRequestError ? "github-failed" : void 0;
-    if (error instanceof PullRequestError) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], code: "github-failed", ...error.status === void 0 ? {} : { status: error.status } };
+    if (error instanceof PullRequestError) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], code: "github-failed", ...error.status === void 0 ? {} : { status: error.status }, ...error.rateLimited ? { rateLimited: true } : {} };
     else if (error instanceof LaneConflict) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], conflicts: error.paths };
     else if (code4 === void 0 && !(error instanceof UnverifiedHead)) throw error;
     else if (code4 !== void 0) return { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], code: code4 };
@@ -31003,6 +31040,7 @@ async function pullRequestStep(context, options) {
   if (suspended !== void 0) result.suspended = suspended;
   if (suspended?.code !== void 0 && suspended.code !== "checks-missing" && suspended.code !== "merge-misplaced") result.code = suspended.code;
   if (suspended?.status !== void 0) result.status = suspended.status;
+  if (suspended?.rateLimited === true) result.rateLimited = true;
   if (suspended?.reason !== void 0) result.reason = suspended.reason;
   if (linear === null || suspended?.normalClosePending === true) return result;
   if (suspended?.code === "suspended-asset-discovery") return result;
@@ -31114,7 +31152,7 @@ ${checksAgainTrailer(again.from)}`;
     }
     if (head !== sync) {
       const pushed = await pushSyncBranch(context, options, sync, head);
-      if (!pushed.ok) return { ...result, code: "state-moved" };
+      if (!pushed.ok) return pushed.reason === "stale" ? { ...result, code: "state-moved" } : { ...result, code: "push-rejected", reason: oneLine(pushed.refs.map((ref) => ref.message).join("; ")) };
       result.branchMoved = true;
       result.marked = [...new Set(resolved.marked)].sort();
       result.decided = [...new Set(resolved.decided)].sort();
@@ -31210,7 +31248,7 @@ ${checksAgainTrailer(again.from)}`;
     if (error instanceof UnverifiedHead) return { ...result, code: "head-unverified", unverified: error.paths, ...result.suspended === void 0 ? {} : { suspended: { ...result.suspended, code: "head-unverified", unverified: error.paths } } };
     if (error instanceof LaneMoved) return { ...result, code: "state-moved" };
     if (error instanceof LaneConflict) return { ...result, code: "conflict" };
-    if (error instanceof PullRequestError) return { ...result, code: "github-failed", ...error.status === void 0 ? {} : { status: error.status } };
+    if (error instanceof PullRequestError) return { ...result, code: "github-failed", ...error.status === void 0 ? {} : { status: error.status }, ...error.rateLimited ? { rateLimited: true } : {} };
     throw error;
   }
 }
@@ -31439,8 +31477,11 @@ function renderPullRequest(result) {
       break;
     case "github-failed":
       lines2.push(
-        result.status === void 0 ? "A request to GitHub for the sync pull request got no answer (the connection broke or timed out); the next run tries again." : `GitHub refused or failed a request for the sync pull request (HTTP ${result.status}); the next run tries again.`
+        result.status === void 0 ? "A request to GitHub for the sync pull request got no answer (the connection broke or timed out); the next run tries again." : transientGitHubFailure(result) ? `GitHub ${result.rateLimited === true ? "limited the rate of" : "failed"} a request for the sync pull request (HTTP ${result.status}); the next run tries again.` : `Setup error: GitHub refused a request for the sync pull request (HTTP ${result.status}). The next run sends the same request: a person checks what GitHub refuses, for example a repository rule or the App's access.`
       );
+      break;
+    case "push-rejected":
+      lines2.push(`Setup error: GitHub refused the push to the sync branch (\`${(result.reason ?? "").replace(/[`\r\n]/g, " ")}\`). Nothing reaches the sync pull request until a person lets the sync's GitHub App push to that branch, for example on the bypass list of the rule that refuses it.`);
       break;
     default:
       if (explained) break;
@@ -33851,7 +33892,7 @@ async function rebuildIds({ git, record, linear, facts, targets, allowedPlace, d
   for (const document4 of order) {
     if (document4.projectId === null && document4.teamId === null) continue;
     const place = document4.projectId !== null ? { projectId: document4.projectId } : { teamId: document4.teamId };
-    const path2 = files.get(keyOf(place, document4.title));
+    const path2 = files.get(keyOf(place, fileTitle(document4.title)));
     if (path2 !== void 0 && !ids.has(path2)) ids.set(path2, { id: document4.id });
     else unmatched.push({ document: document4, place });
   }
@@ -34068,18 +34109,48 @@ async function capture(context, options) {
     };
     const destination2 = (doc, occupied2, allocated2 = /* @__PURE__ */ new Map()) => {
       if (retained.has(doc.id)) return retained.get(doc.id);
+      const folder = folderFor(doc);
+      const invalid2 = (path2) => invalidZone(doc, path2);
+      const untitled = isUntitled(doc.title);
       const own6 = reservedById.get(doc.id);
-      if (own6 !== void 0 && !occupied2.has(own6) && !allocated2.has(own6) && !invalidZone(doc, own6) && documentPath(folderFor(doc), doc.title, doc.id, occupied2, own6, (path2) => invalidZone(doc, path2)) === own6) return own6;
+      if (own6 !== void 0 && !occupied2.has(own6) && !allocated2.has(own6) && !invalidZone(doc, own6) && (untitled ? keptPath(folder, occupied2, own6, invalid2) : documentPath(folder, doc.title, doc.id, occupied2, own6, invalid2)) === own6) return own6;
       const old = byId.get(doc.id);
       const available = new Set(occupied2);
       if (old !== void 0 && (!allocated2.has(old.path) || allocated2.get(old.path) === doc.id)) available.delete(old.path);
       const prior = old !== void 0 && !mapping.files.has(old.path) && old.path.split("/").some((part) => part.toLowerCase() === ".github") ? void 0 : old?.path;
-      return documentPath(folderFor(doc), doc.title, doc.id, available, prior, (path2) => invalidZone(doc, path2));
+      const kept = untitled && prior !== void 0 && isMarkdownPath(prior) && previous3.has(prior) ? keptPath(folder, available, prior, invalid2) : void 0;
+      return kept ?? documentPath(folder, doc.title, doc.id, available, prior, invalid2);
     };
-    if (gone.size > 0 || [...listed.values()].some((doc) => {
+    const leaving = /* @__PURE__ */ new Map();
+    for (const id of gone) leaving.set(byId.get(id).path, id);
+    const moving = [...listed.values()].filter((doc) => {
       const old = byId.get(doc.id);
       return old !== void 0 && !unreadIds.has(doc.id) && (!live(doc) || destination2(doc, occupied) !== old.path);
-    })) selected = [...listed.values()];
+    });
+    for (const doc of moving) leaving.set(byId.get(doc.id).path, doc.id);
+    for (const [id, own6] of reservedById) {
+      const doc = listed.get(id);
+      if (doc !== void 0 && (!live(doc) || destination2(doc, occupied) !== own6)) leaving.set(own6, id);
+    }
+    const linksTo = (paths2, old) => {
+      const prior = previous3.get(old.path);
+      if (prior === void 0) return false;
+      if (excludedPath(old.path)) return true;
+      try {
+        return hasDocumentLinks(splitFile(prior.toString("utf8")).body, old.path, paths2);
+      } catch (error) {
+        if (error instanceof MarkdownLimitError) return true;
+        throw error;
+      }
+    };
+    if (leaving.size > 0) {
+      const chosen = /* @__PURE__ */ new Set([...selected, ...moving]);
+      for (const doc of listed.values()) {
+        const old = byId.get(doc.id);
+        if (!chosen.has(doc) && old !== void 0 && linksTo(leaving, old)) chosen.add(doc);
+      }
+      selected = [...chosen];
+    }
     selected = selected.filter((doc) => !unreadIds.has(doc.id));
     const documents = new Map([...listed].filter(([, doc]) => placed(doc)));
     const work = /* @__PURE__ */ new Map();
@@ -34087,6 +34158,22 @@ async function capture(context, options) {
       if (placed(doc)) documents.set(doc.id, doc);
       else documents.delete(doc.id);
       work.set(doc.id, doc);
+    }
+    const late = /* @__PURE__ */ new Map();
+    for (const doc of work.values()) {
+      const old = byId.get(doc.id);
+      if (old !== void 0 && !leaving.has(old.path) && (!live(doc) || destination2(doc, occupied) !== old.path)) late.set(old.path, doc.id);
+    }
+    if (late.size > 0) {
+      const linking = [...listed.values()].filter((doc) => {
+        const old = byId.get(doc.id);
+        return !work.has(doc.id) && !unreadIds.has(doc.id) && live(doc) && old !== void 0 && linksTo(late, old);
+      });
+      for (const doc of await linear.getDocuments(linking.map((doc2) => doc2.id), { withContent: true })) {
+        if (placed(doc)) documents.set(doc.id, doc);
+        else documents.delete(doc.id);
+        work.set(doc.id, doc);
+      }
     }
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
     result.documents = documents;
@@ -35005,7 +35092,9 @@ function renderStaged(sets) {
 // src/run/exit.ts
 function partialCode(outcome2) {
   if (pullRequestEnding(outcome2) !== null) return void 0;
-  return linearPartialCode(outcome2);
+  const linear = linearPartialCode(outcome2);
+  if (linear !== void 0 || outcome2.operation !== "sync" || outcome2.sync?.write?.code === "container-cap") return linear;
+  return pullRequestPartialCode(outcome2.sync?.pullRequest);
 }
 function pullRequestEnding(outcome2) {
   const failure = pullRequestFailure(outcome2.sync?.pullRequest);
