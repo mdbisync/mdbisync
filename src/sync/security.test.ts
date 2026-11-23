@@ -1,13 +1,121 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { createFixture } from '../state/test-helpers.ts';
-import { access, lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { SCRATCH_BATCH_BYTES, type SecurityGate, SecurityScratchBudgetError, SecurityScratchTreeError, checkTitle, securityGate } from './security.ts';
 import { randomBytes } from 'node:crypto';
 import type { Git } from '../state/index.ts';
 import { answeringGate, checkStaged, stagingGate } from './staged.ts';
+
+const FILE_HOOK = `repos:
+  - repo: local
+    hooks:
+      - id: content-check
+        alias: security
+        name: Content check
+        entry: blocked-text
+        language: pygrep
+        stages: [pre-commit, pre-push]
+`;
+
+async function checkFileHookSets(sets: ReadonlyMap<string, string>[], extra: Record<string, string> = {}) {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({ '.pre-commit-config.yaml': FILE_HOOK, ...extra });
+    const git = await fixture.clone('batched-hooks');
+    const tracked = await git.text(['rev-parse', 'origin/main']);
+    const folder = join(fixture.root, 'stage');
+    const bin = join(fixture.root, 'bin');
+    const log = join(fixture.root, 'hook-runs');
+    await mkdir(bin);
+    await writeFile(join(bin, 'pre-commit'), `#!/bin/sh
+if [ "$1" = run ]; then printf '%s\\n' "$*" >> "$HOOK_RUNS"; fi
+export PATH="$ORIGINAL_PATH"
+exec pre-commit "$@"
+`, { mode: 0o700 });
+    const path = process.env.PATH ?? '';
+    const env = { PATH: bin + delimiter + path, HOME: process.env.HOME ?? '', LANG: 'C.UTF-8', ORIGINAL_PATH: path, HOOK_RUNS: log };
+    const staged = await stagingGate(git, tracked, folder);
+    for (const set of sets) await staged.check(set);
+    await staged.finish();
+    const result = await checkStaged(git, folder, env);
+    const gate = await answeringGate(git, tracked, folder);
+    const findings = await Promise.all(sets.map((set) => gate.check(set)));
+    const runs = (await readFile(log, 'utf8')).trimEnd().split('\n');
+    return { result, findings, runs };
+  } finally { await fixture.cleanup(); }
+}
+
+it('attributes a finding in any file of a batched set to every set that contains it', async () => {
+  const shared = ['docs/shared.md', 'Safe first line.\nblocked-text\n'] as const;
+  const { result, findings, runs } = await checkFileHookSets([
+    new Map([['docs/first.md', 'Safe.\n'], shared]),
+    new Map([['docs/second.md', 'Safe.\n']]),
+    new Map([['docs/third.md', 'Safe.\n'], shared]),
+  ]);
+  const rejected = [{ hook: 'content-check', line: 2 }, { hook: 'content-check', line: 2 }];
+  assert.deepEqual(result, { sets: 3, rejected: 2, unanswered: 0 });
+  assert.deepEqual(findings, [rejected, [], rejected]);
+  assert.ok(runs.some((run) => run.includes('docs/first.md docs/shared.md docs/second.md docs/third.md')));
+});
+
+it('checks different contents at the same path in separate batches', async () => {
+  const { result, findings, runs } = await checkFileHookSets([
+    new Map([['docs/plan.md', 'blocked-text\n'], ['docs/first.md', 'Safe.\n']]),
+    new Map([['docs/plan.md', 'Safe.\n'], ['docs/second.md', 'Safe.\n']]),
+    new Map([['docs/notes.md', 'Safe.\n']]),
+  ]);
+  assert.deepEqual(result, { sets: 3, rejected: 1, unanswered: 0 });
+  assert.deepEqual(findings, [[{ hook: 'content-check', line: 1 }, { hook: 'content-check', line: 1 }], [], []]);
+  assert.ok(runs.some((run) => run.includes('docs/first.md docs/notes.md')));
+  assert.ok(runs.every((run) => !run.includes('docs/first.md') || !run.includes('docs/second.md')));
+});
+
+it('checks many staged title and body sets with one process per compatible batch and hook stage', async () => {
+  const sets = Array.from({ length: 24 }, (_, at) => {
+    const path = `docs/plan-${at}.md`;
+    return [new Map([[path, 'Title\n']]), new Map([[path, 'First paragraph.\n']])];
+  }).flat();
+  const { result, findings, runs } = await checkFileHookSets(sets);
+  assert.deepEqual(result, { sets: 48, rejected: 0, unanswered: 0 });
+  assert.ok(findings.every((set) => set?.length === 0));
+  assert.equal(runs.length, 4);
+  for (const run of runs) assert.equal(run.split(' --files ')[1]?.split(' ').length, 24);
+});
+
+it('keeps sets isolated when a security hook inherits its alias through a YAML merge', async () => {
+  const { result, findings, runs } = await checkFileHookSets([
+    new Map([['docs/first.md', 'Safe.\n']]),
+    new Map([['docs/second.md', 'Safe.\n']]),
+  ], {
+    '.pre-commit-config.yaml': FILE_HOOK + `      - <<: { alias: security }
+        id: tree-check
+        name: Tree check
+        language: system
+        entry: node tree-check.mjs
+        stages: [pre-commit]
+`,
+    'tree-check.mjs': `import {existsSync} from 'node:fs';
+if (existsSync('docs/first.md') && !existsSync('docs/second.md')) process.exitCode = 1;
+`,
+  });
+  assert.deepEqual(result, { sets: 2, rejected: 1, unanswered: 0 });
+  assert.deepEqual(findings, [[{ hook: 'security', line: 1 }], []]);
+  assert.equal(runs.length, 4);
+  assert.ok(runs.every((run) => !run.includes('docs/first.md') || !run.includes('docs/second.md')));
+});
+
+it('does not let another set satisfy a candidate interpreted as a Git pathspec', async () => {
+  const { result, findings, runs } = await checkFileHookSets([
+    new Map([[':(literal)docs/second.md', 'Safe.\n']]),
+    new Map([['docs/second.md', 'Safe.\n']]),
+  ]);
+  assert.deepEqual(result, { sets: 2, rejected: 1, unanswered: 0 });
+  assert.deepEqual(findings, [[{ hook: 'security', line: 1 }], []]);
+  assert.equal(runs.length, 2);
+});
 
 it('runs security aliases at both stages and returns no hook output or matched value', async () => {
   const fixture = await createFixture();

@@ -8,7 +8,7 @@ import { dirname, join, sep } from 'node:path';
 import { Git, GitOutputLimitError, type Oid, type TreeEntry, listTree, readBlobs, checkRepoPath, parseLfsPointer } from '../state/index.ts';
 import { isGitDirectoryName } from '../state/objects.ts';
 import { createHash } from 'node:crypto';
-import { readHookConfig, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
+import { readHookConfig, securityHooks, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { isMarkdownPath } from '../mapping/index.ts';
 import { message } from '../messages.ts';
 
@@ -21,6 +21,11 @@ export interface SecurityGate {
    */
   check(files: ReadonlyMap<string, FileContent>): Promise<SecurityFinding[] | null>;
   close?(): Promise<void>;
+}
+
+interface ScratchSecurityGate extends SecurityGate {
+  /** A clean union proves every member set passed. A failure must be resolved by checking smaller sets. */
+  passesBatch?(files: ReadonlyMap<string, FileContent>): Promise<boolean>;
 }
 
 /** Neither errors nor returned findings contain raw hook output. */
@@ -139,12 +144,16 @@ export interface SecurityGateOptions {
   scratchBytes?: number;
 }
 
-/** The ids of the tracked commit's security hooks; none without a configuration. */
-export async function securityHookIds(git: Git, tracked: Oid): Promise<string[]> {
+async function trackedHookConfig(git: Git, tracked: Oid) {
   const read = await git.run(['cat-file', 'blob', `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
   const config = readHookConfig(read.code === 0 ? read.stdout.toString('utf8') : null);
   if (config.invalid !== undefined) throw new Error(message('sync.invalid-security-config'));
-  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+  return config;
+}
+
+/** The ids of the tracked commit's security hooks; none without a configuration. */
+export async function securityHookIds(git: Git, tracked: Oid): Promise<string[]> {
+  return securityHooks(await trackedHookConfig(git, tracked));
 }
 
 /**
@@ -244,9 +253,10 @@ async function reproduceTree(git: Git, tracked: Oid, entries: readonly TreeEntry
 }
 
 /** Uses the tracked branch's configuration and support files, never a Linear-supplied config. */
-export async function securityGate(git: Git, tracked: Oid, options: SecurityGateOptions = {}): Promise<SecurityGate> {
+export async function securityGate(git: Git, tracked: Oid, options: SecurityGateOptions = {}): Promise<ScratchSecurityGate> {
   const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8' };
-  const hooks = await securityHookIds(git, tracked);
+  const config = await trackedHookConfig(git, tracked);
+  const hooks = securityHooks(config);
   if (hooks.length > 0 && (await runHooks(git.dir, ['--version'], env)).code !== 0) throw new Error(message('sync.needs-pre-commit'));
   const budget = options.scratchBytes ?? SCRATCH_TREE_BYTES;
   let dir: string | undefined;
@@ -257,10 +267,10 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
     if (dir !== undefined) await rm(dir, { recursive: true, force: true });
     dir = undefined;
   };
-  return {
+  const gate = {
     configured: hooks.length > 0,
     close,
-    async check(files) {
+    async check(files: ReadonlyMap<string, FileContent>, batch = false): Promise<SecurityFinding[]> {
       if (hooks.length === 0) return [];
       try {
         if (dir === undefined) {
@@ -275,8 +285,11 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
         // Restore only our disposable repository, including hook changes from the previous document.
         await scratch.run(['read-tree', '--reset', '-u', baseline]);
         await scratch.run(['clean', '-fdx', '--quiet']);
+        const written = new Set<string>();
         for (const [path, content] of files) {
           checkRepoPath(path);
+          // Git's pathspecs can match another set's file, even after the option delimiter.
+          if (batch && (path.startsWith(':') || /[*?\[]/.test(path))) return [{ hook: SECURITY_ALIAS, line: 1 }];
           // pre-commit and its hooks would read a path that starts with `-` as an option, such as `--config`.
           if (path === PRE_COMMIT_CONFIG || path.startsWith('-')) return [{ hook: SECURITY_ALIAS, line: 1 }];
           // A write through a tracked link would land in its target while the hooks are handed the link, which they
@@ -284,6 +297,13 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
           if (await throughLink(dir, path)) return [{ hook: SECURITY_ALIAS, line: 1 }];
           await mkdir(dirname(join(dir, path)), { recursive: true });
           await writeFile(join(dir, path), contentBytes(content));
+          if (batch) {
+            // Distinct Git paths can address the same file on the scratch filesystem.
+            const { dev, ino } = await lstat(join(dir, path), { bigint: true });
+            const identity = `${dev}:${ino}`;
+            if (written.has(identity)) return [{ hook: SECURITY_ALIAS, line: 1 }];
+            written.add(identity);
+          }
         }
         // The hooks run the tracked branch's scripts and read its support files: a candidate replaces none of them,
         // so its text never becomes code the hooks run. Git, not the path's spelling, says which tracked files the
@@ -299,6 +319,7 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
           if (result.code !== 0 && result.output.trim() === `No hook with id \`security\` in stage \`${stage}\``) continue;
           ran = true;
           if (result.code !== 0) {
+            if (batch) return [{ hook: SECURITY_ALIAS, line: 1 }];
             const failed = hooks.filter((id) => result.output.includes(`- hook id: ${id}\n`));
             const escaped = [...files.keys()].map((path) => path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
             const located = new RegExp(`(?:${escaped.join('|')}):(\\d+)(?::|\\b)`, 'g');
@@ -328,6 +349,8 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
       }
     },
   };
+  if (!config.securityBatchable || !gate.configured) return gate;
+  return { ...gate, passesBatch: async (files) => (await gate.check(files, true)).length === 0 };
 }
 
 /**

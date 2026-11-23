@@ -37,6 +37,10 @@ const MANIFEST = 'manifest.json';
 const ANSWERS = 'answers.json';
 const READS = 'linear-reads';
 const VERSION = 1;
+const BATCH_SETS = 128;
+const BATCH_CONTENT_BYTES = 32 * 1024 * 1024;
+// Bound the arguments to git and pre-commit, including sets with many long paths.
+const BATCH_PATH_BYTES = 24 * 1024;
 
 interface Manifest {
   version: number;
@@ -124,6 +128,17 @@ export interface StagedCheck {
   unanswered: number;
 }
 
+interface VerifiedSet {
+  key: string;
+  files: ReadonlyMap<string, Buffer>;
+}
+
+function union(sets: readonly VerifiedSet[]): Map<string, Buffer> {
+  const files = new Map<string, Buffer>();
+  for (const set of sets) for (const [path, content] of set.files) files.set(path, content);
+  return files;
+}
+
 /**
  * Step 2: runs the tracked branch's security hooks on every staged set, with
  * `env` as the hooks' environment, and writes the findings beside them.
@@ -135,22 +150,75 @@ export async function checkStaged(git: Git, folder: string, env: Record<string, 
   const answers: Answers = { version: VERSION, tracked: manifest.tracked, answers: {} };
   if (manifest.sets.length > 0) {
     const gate = await securityGate(git, manifest.tracked, { env });
+    const record = (key: string, findings: SecurityFinding[]) => {
+      if (findings.length > 0) result.rejected += 1;
+      answers.answers[key] = findings;
+    };
+    const checkOne = async ({ key, files }: VerifiedSet) => {
+      record(key, (await gate.check(files)) ?? [{ hook: SECURITY_ALIAS, line: 1 }]);
+    };
+    const checkBatch = async (sets: readonly VerifiedSet[], files: ReadonlyMap<string, Buffer>): Promise<void> => {
+      if (sets.length === 1) {
+        await checkOne(sets[0]!);
+      } else if (await gate.passesBatch!(files)) {
+        for (const { key } of sets) record(key, []);
+      } else {
+        // A hook can fail without identifying every file. Isolate the affected sets
+        // without relying on untrusted diagnostics to allow any of them through.
+        const middle = Math.floor(sets.length / 2);
+        const left = sets.slice(0, middle);
+        const right = sets.slice(middle);
+        await checkBatch(left, union(left));
+        await checkBatch(right, union(right));
+      }
+    };
+    const batches: Array<{ sets: VerifiedSet[]; files: Map<string, Buffer> }> = [];
+    let pendingSets = 0;
+    let pendingBytes = 0;
+    let pendingPathBytes = 0;
+    const flush = async () => {
+      for (const { sets, files } of batches) await checkBatch(sets, files);
+      batches.length = 0;
+      pendingSets = pendingBytes = pendingPathBytes = 0;
+    };
     try {
       for (const set of manifest.sets) {
         const files = new Map<string, Buffer>();
+        let bytes = 0;
+        let pathBytes = 0;
         for (const { path, sha256: hash } of set.files) {
           checkRepoPath(path);
           if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(message('sync.staged-hash'));
-          files.set(path, await readFile(join(folder, 'files', hash)));
+          const content = await readFile(join(folder, 'files', hash));
+          files.set(path, content);
+          bytes += content.length;
+          pathBytes += Buffer.byteLength(path) + 1;
         }
         if ([...files].some(([path, content]) => sha256(content) !== set.files.find((file) => file.path === path)?.sha256) || candidateKey(files) !== set.key) {
           result.unanswered += 1;
           continue;
         }
-        const findings = (await gate.check(files)) ?? [{ hook: SECURITY_ALIAS, line: 1 }];
-        if (findings.length > 0) result.rejected += 1;
-        answers.answers[set.key] = findings;
+        const verified = { key: set.key, files };
+        if (gate.passesBatch === undefined || files.size === 0 || bytes > BATCH_CONTENT_BYTES || pathBytes > BATCH_PATH_BYTES) {
+          await flush();
+          await checkOne(verified);
+          continue;
+        }
+        if (pendingSets === BATCH_SETS || pendingBytes + bytes > BATCH_CONTENT_BYTES || pendingPathBytes + pathBytes > BATCH_PATH_BYTES) await flush();
+        // A title and its body often use the same path. Put each into an existing
+        // compatible batch so alternating title and body sets still batch well.
+        let batch = batches.find(({ files: combined }) => [...files].every(([path, content]) => combined.get(path)?.equals(content) ?? true));
+        if (batch === undefined) {
+          batch = { sets: [], files: new Map() };
+          batches.push(batch);
+        }
+        batch.sets.push(verified);
+        for (const [path, content] of files) batch.files.set(path, content);
+        pendingSets++;
+        pendingBytes += bytes;
+        pendingPathBytes += pathBytes;
       }
+      await flush();
     } finally {
       await gate.close?.();
     }
