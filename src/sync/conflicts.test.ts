@@ -824,4 +824,200 @@ describe('sync: conflicts through the cycle (L3)', () => {
     await settle();
     for (let i = 0; i < CONFLICTS; i += 1) assert.equal(detectConflicts(await show(`refs/heads/main:${NOTES}/batch-${i}.md`)).length, 1);
   });
+  describe('MDS-011-26: changes that land while a run writes or its sync pull request waits', () => {
+    /**
+     * Runs `change` after the capture has listed and read Linear, right before the write step's first query: inside
+     * the window between capture and re-read. Unlike `afterCapture`, it also fires when the capture read no content.
+     */
+    const beforeWriteStep = (change: () => void) => {
+      let listed = false;
+      let read = false;
+      world.linear.beforeQuery = (operation, variables) => {
+        if (!listed) listed = operation === 'ListDocuments';
+        else if (!read && operation === 'GetDocuments' && variables.withContent === true) read = true;
+        else {
+          delete world.linear.beforeQuery;
+          change();
+        }
+      };
+    };
+
+    /** GitHub refuses to merge the sync pull request for now, so its changes stay pending on the sync branch. */
+    const holdSyncPullRequest = () => {
+      world.github.merge = async () => ({ status: 405, message: 'Pull Request is not mergeable' });
+    };
+    const releaseSyncPullRequest = () => {
+      world.github.merge = mergeOnRemote;
+    };
+
+    /** A run that leaves its sync pull request open: GitHub refused the merge. */
+    async function heldSync() {
+      // Through `sync()`, so the held head is recorded and a later rewrite of the sync branch fails I4.
+      const run = await sync();
+      assert.ok(world.github.pullRequests.some((pr) => pr.state === 'open'), 'the sync pull request stays open');
+      return run;
+    }
+
+    /**
+     * Like `settle`, but a run that skipped a document is not quiet: it ends incomplete, and the next run takes the
+     * skipped change in. Returns the runs.
+     */
+    async function converge() {
+      const runs = [];
+      for (let i = 0; i < 6; i += 1) {
+        const linearWrites = world.linear.writes.count;
+        const run = await sync();
+        runs.push(run);
+        const open = world.github.pullRequests.some((pr) => pr.state === 'open');
+        const quiet = run.writes.length === 0 && world.linear.writes.count === linearWrites && run.report.complete === true;
+        if (!open && quiet && run.report.pullRequest?.needed === false) return runs;
+      }
+      assert.fail('the sync did not converge');
+    }
+
+    const live = () => world.linear.documents.filter((document) => !document.trashed);
+
+    it('a git edit meets a Linear rename made after the capture: the rename is not set back, and both apply', async () => {
+      const document = await documentOf(DOC);
+      const edited = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.');
+      beforeWriteStep(() => {
+        document.title = 'Roadmap';
+        touch(document);
+      });
+      await commitGit({ [DOC]: edited });
+      const [first] = await converge();
+      assert.deepEqual(first?.report.sync?.skipped, [{ path: DOC, reason: 'edited-in-linear' }]);
+      assert.equal(document.title, 'Roadmap');
+      assert.equal(await pathOf(document.id), `${NOTES}/Roadmap.md`);
+      assert.ok(!(await exists(`refs/heads/main:${DOC}`)), 'the old path stayed on the tracked branch');
+      await assertBothSides(`${NOTES}/Roadmap.md`, edited);
+    });
+
+    it('a git delete meets a Linear edit made after the capture: the document is not trashed, and its file comes back', async () => {
+      const document = await documentOf(DOC);
+      const edited = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, Linear.');
+      beforeWriteStep(() => {
+        document.content = edited;
+        touch(document);
+      });
+      await commitGit({ [DOC]: null });
+      const [first, second] = await converge();
+      assert.deepEqual(first?.report.sync?.skipped, [{ path: DOC, reason: 'edited-in-linear' }]);
+      assert.deepEqual(second?.report.sync?.decided.map((entry) => [entry.path, entry.summary.code]), [[DOC, 'edit-wins-delete']]);
+      assert.ok(!document.trashed);
+      await assertBothSides(DOC, edited);
+    });
+
+    it('a new file meets a Linear document of the same title created after the capture: one document holds both texts', async () => {
+      const ours = `# FAQ\n\nAnswers from git. ${CANARY}`;
+      const theirs = `# FAQ\n\nAnswers from Linear. ${CANARY}`;
+      const plan = await documentOf(DOC);
+      beforeWriteStep(() => {
+        const made: FakeDocument = { id: 'made-in-linear', title: 'faq', projectId: plan.projectId as string, createdAt: '2026-02-01T00:00:00.000Z', content: theirs };
+        world.linear.documents.push(made);
+        touch(made);
+      });
+      await commitGit({ [`${NOTES}/faq.md`]: ours });
+      const [first] = await converge();
+      assert.deepEqual(first?.report.sync?.skipped, [{ path: `${NOTES}/faq.md`, reason: 'edited-in-linear' }]);
+      assert.deepEqual(live().filter((document) => document.title === 'faq').map((document) => document.id), ['made-in-linear']);
+      assert.equal((await ids())[`${NOTES}/faq.md`]?.id, 'made-in-linear');
+      const result = await show(`refs/heads/main:${NOTES}/faq.md`);
+      assertOneConflict(result, `Answers from git. ${CANARY}`, `Answers from Linear. ${CANARY}`);
+      assert.equal((await documentOf(`${NOTES}/faq.md`)).content, result);
+    });
+
+    it('a Linear rename waits in the sync pull request while git edits the file at its old path: one document, both apply', async () => {
+      holdSyncPullRequest();
+      const document = await documentOf(DOC);
+      document.title = 'Roadmap';
+      touch(document);
+      await heldSync();
+      const edited = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.');
+      await commitGit({ [DOC]: edited });
+      releaseSyncPullRequest();
+      const [first] = await converge();
+      // An edit and a rename that do not conflict merge as ordinary changes: no rule decides, nothing is skipped.
+      assert.deepEqual(first?.report.sync?.decided, []);
+      assert.deepEqual(first?.report.sync?.skipped, []);
+      assert.deepEqual(live().filter((d) => d.title === 'plan' || d.title === 'Roadmap').map((d) => d.id), [document.id]);
+      assert.equal(await pathOf(document.id), `${NOTES}/Roadmap.md`);
+      assert.ok(!(await exists(`refs/heads/main:${DOC}`)), 'the old path stayed on the tracked branch');
+      await assertBothSides(`${NOTES}/Roadmap.md`, edited);
+    });
+
+    it('a Linear rename waits in the sync pull request while git renames the file elsewhere: the git path wins, no duplicate', async () => {
+      holdSyncPullRequest();
+      const document = await documentOf(DOC);
+      document.title = 'Roadmap';
+      touch(document);
+      await heldSync();
+      await commitGit({}, { from: DOC, to: `${NOTES}/schedule.md` });
+      releaseSyncPullRequest();
+      const [first] = await converge();
+      assert.deepEqual(first?.report.sync?.decided.map((entry) => [entry.path, entry.summary.code]), [[`${NOTES}/schedule.md`, 'git-path-wins']]);
+      assert.deepEqual(live().filter((d) => ['plan', 'Roadmap', 'schedule'].includes(d.title)).map((d) => d.id), [document.id]);
+      assert.equal(document.title, 'schedule');
+      assert.ok(!(await exists(`refs/heads/main:${NOTES}/Roadmap.md`)));
+      assert.ok(!(await exists(`refs/heads/main:${DOC}`)));
+      await assertBothSides(`${NOTES}/schedule.md`, PLAN);
+    });
+
+    it('a Linear trash waits in the sync pull request while git edits the file: the edit wins, the document is restored', async () => {
+      holdSyncPullRequest();
+      const document = await documentOf(DOC);
+      document.trashed = true;
+      touch(document);
+      await heldSync();
+      const edited = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.');
+      await commitGit({ [DOC]: edited });
+      releaseSyncPullRequest();
+      const [first] = await converge();
+      assert.deepEqual(first?.report.sync?.decided.map((entry) => [entry.path, entry.summary.code]), [[DOC, 'edit-wins-delete']]);
+      assert.ok(!document.trashed);
+      assert.equal((await documentOf(DOC)).id, document.id);
+      await assertBothSides(DOC, edited);
+    });
+
+    it('a conflict resolved in Linear while its markers wait in the sync pull request reaches git resolved', async () => {
+      holdSyncPullRequest();
+      await editInLinear(DOC, PLAN.replace('Beta paragraph.', 'Beta paragraph, Linear.'));
+      await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, git.') });
+      // The first run writes the conflict to Linear; the second carries the markers to the held sync pull request.
+      assert.equal((await sync()).report.sync?.conflicts.length, 1);
+      await heldSync();
+      assert.equal((await documentOf(DOC)).icon, MARKS.conflict.icon);
+      const resolved = PLAN.replace('Beta paragraph.', 'Beta paragraph, resolved.');
+      await editInLinear(DOC, resolved);
+      releaseSyncPullRequest();
+      await converge();
+      await assertBothSides(DOC, resolved);
+      const document = await documentOf(DOC);
+      assert.deepEqual({ icon: document.icon ?? null, color: document.color ?? null }, { icon: null, color: null });
+    });
+
+    it('a conflict edited in git before its markers reach the tracked branch becomes one new conflict that keeps every text', async () => {
+      await editInLinear(DOC, PLAN.replace('Beta paragraph.', 'Beta paragraph, Linear.'));
+      await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, git.') });
+      assert.equal((await sync()).report.sync?.conflicts.length, 1);
+      // The person edits the paragraph in git while the tracked branch does not hold the markers yet.
+      assert.equal(detectConflicts(await show(`refs/heads/main:${DOC}`)).length, 0, 'the markers reached the tracked branch already');
+      await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, resolved.') });
+      await converge();
+      const result = await show(`refs/heads/main:${DOC}`);
+      assert.equal((await documentOf(DOC)).content, result);
+      // One complete conflict: the person's text with Linear's line as the git version, the earlier versions as Linear's.
+      assertOneConflict(result, 'Beta paragraph, resolved.\n\nBeta paragraph, Linear.', 'Beta paragraph, git.\n\nBeta paragraph, Linear.');
+      assert.equal((await documentOf(DOC)).icon, MARKS.conflict.icon);
+
+      // Resolved again once the markers are on the tracked branch, the conflict clears.
+      const resolved = PLAN.replace('Beta paragraph.', 'Beta paragraph, resolved.');
+      await commitGit({ [DOC]: resolved });
+      await converge();
+      await assertBothSides(DOC, resolved);
+      const document = await documentOf(DOC);
+      assert.deepEqual({ icon: document.icon ?? null, color: document.color ?? null }, { icon: null, color: null });
+      assert.ok(comments(document).length > 0 && comments(document).every((comment) => comment.resolved === true), 'a conflict comment stays open');
+    });
+  });
 });
