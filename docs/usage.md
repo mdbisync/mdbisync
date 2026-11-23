@@ -281,6 +281,14 @@ by one rule, the same in the initial sync and in the sync:
 The `ids` state ref ties the file to its document, so the sync does not
 rename the document after its file name.
 
+Linear keeps a new document's title empty until one is typed. A document
+whose title is empty or only white space gets the file `Untitled.md` in its
+folder (a second one, or a document titled `Untitled`, gets the suffix
+above), and moves to its title's file once it has a title. A document that
+already has a file keeps it when its title is cleared, while that path stays
+free and safe; a `%00.md` file that earlier versions made for an untitled
+document moves to `Untitled.md`.
+
 Existing tracked files inside `.github` keep their paths, so GitHub templates
 stay in place. Changes to those files still require human review. Unsafe paths
 from earlier captures that have not reached the tracked branch use encoded names.

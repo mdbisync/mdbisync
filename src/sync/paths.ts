@@ -43,23 +43,53 @@ export function titlePath(title: string): string {
  */
 function inFolder(folder: string, name: string): string { return folder === '' && name.startsWith('-') ? `%2D${name.slice(1)}` : posix.join(folder, name); }
 
+/** The name a document with an empty title gets: Linear keeps a new document untitled until one is typed. */
+export const UNTITLED = 'Untitled';
+
+/** Whether a title is empty or only white space, and so names no file of its own. */
+export function isUntitled(title: string): boolean { return title.normalize('NFC').trim() === ''; }
+
+/** The title a document's file is named after: `Untitled` for an empty one. */
+export function fileTitle(title: string): string { return isUntitled(title) ? UNTITLED : title; }
+
 /** The file a title names in a folder, before any collision suffix. */
-export function titleFile(folder: string, title: string): string { return `${inFolder(folder, titlePath(title))}.md`; }
+export function titleFile(folder: string, title: string): string { return `${inFolder(folder, titlePath(fileTitle(title)))}.md`; }
 
 export function pathKey(path: string): string { return path.normalize('NFC').toLowerCase(); }
 
-/** Never overwrite an existing file, directory, or case-insensitive alias. */
-export function documentPath(folder: string, title: string, id: string, occupied: ReadonlySet<string>, previous?: string, invalid: (path: string) => boolean = () => false): string {
+/** Whether a path lands on an occupied path, its ancestor or descendant, an `assets` folder, or an invalid place. */
+function conflictsIn(folder: string, occupied: ReadonlySet<string>, invalid: (path: string) => boolean): (path: string) => boolean {
   const keys = [...occupied].map(pathKey);
   // A title must not place its document inside an `assets` folder below the annotated folder: the sync keeps
   // embedded files there, and lint refuses documents in it. Such a title is flattened like a taken one.
   const inAssets = (path: string) => inAssetsFolder(folder === '' ? path : path.slice(folder.length + 1));
-  const conflicts = (path: string) => inAssets(path) || invalid(path) || keys.some((key) => key === pathKey(path) || key.startsWith(`${pathKey(path)}/`) || pathKey(path).startsWith(`${key}/`));
+  return (path) => inAssets(path) || invalid(path) || keys.some((key) => key === pathKey(path) || key.startsWith(`${pathKey(path)}/`) || pathKey(path).startsWith(`${key}/`));
+}
+
+/** A path that would be read as an option or names the Git directory. */
+const unsafe = (folder: string, path: string) => (folder === '' && path.startsWith('-')) || path.split('/').some(isGitDirectoryName);
+
+/** The name earlier versions gave a document with an empty title: `%00.md`, or that name with a collision suffix. */
+const ENCODED_EMPTY = /^%00(?:~[0-9a-f]{12}(?:-\d+)?)?\.md$/;
+
+/**
+ * The path a document whose title was cleared keeps: an empty title names no file, so the file it has stays, unless
+ * that path is no longer safe or free, or is the encoded empty name earlier versions gave untitled documents.
+ */
+export function keptPath(folder: string, occupied: ReadonlySet<string>, previous: string, invalid: (path: string) => boolean = () => false): string | undefined {
+  if (conflictsIn(folder, occupied, invalid)(previous) || unsafe(folder, previous) || ENCODED_EMPTY.test(posix.basename(previous))) return undefined;
+  return previous;
+}
+
+/** Never overwrite an existing file, directory, or case-insensitive alias. */
+export function documentPath(folder: string, documentTitle: string, id: string, occupied: ReadonlySet<string>, previous?: string, invalid: (path: string) => boolean = () => false): string {
+  const title = fileTitle(documentTitle);
+  const conflicts = conflictsIn(folder, occupied, invalid);
   let candidate = titleFile(folder, title);
   // An existing git-originated spelling already represents this title,
   // unless it would be read as an option or names the Git directory.
   const raw = `${folder === '' ? '' : `${folder}/`}${title}.md`;
-  if (previous === raw && !conflicts(previous) && !(folder === '' && raw.startsWith('-')) && !previous.split('/').some(isGitDirectoryName)) return previous;
+  if (previous === raw && !conflicts(previous) && !unsafe(folder, previous)) return previous;
   const suffix = createHash('sha256').update(id).digest('hex').slice(0, 12);
   // A conflicting ancestor may be a file; flatten the title in that case.
   const flattened = titlePath(title).replaceAll('/', '%2F');

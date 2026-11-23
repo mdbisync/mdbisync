@@ -24,7 +24,7 @@ import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } fro
 import { MARKS, type ConflictNotices, markWritesLinear, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { matchesObservedBody, observedDigest, readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
-import { documentPath } from './paths.ts';
+import { documentPath, isUntitled, keptPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
@@ -317,17 +317,23 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     const destination = (doc: LinearDocument, occupied: ReadonlySet<string>, allocated: ReadonlyMap<string, string> = new Map()) => {
       if (retained.has(doc.id)) return retained.get(doc.id)!;
+      const folder = folderFor(doc)!;
+      const invalid = (path: string) => invalidZone(doc, path);
+      // An empty title names no file: a document whose title was cleared keeps the file it has, where it still can.
+      const untitled = isUntitled(doc.title);
       const own = reservedById.get(doc.id);
       // And only where the sync would put this document itself: its title's own spelling, with no alias of a taken path.
       if (own !== undefined && !occupied.has(own) && !allocated.has(own) && !invalidZone(doc, own)
-        && documentPath(folderFor(doc)!, doc.title, doc.id, occupied, own, (path) => invalidZone(doc, path)) === own) return own;
+        && (untitled ? keptPath(folder, occupied, own, invalid) : documentPath(folder, doc.title, doc.id, occupied, own, invalid)) === own) return own;
       const old = byId.get(doc.id);
       const available = new Set(occupied);
       if (old !== undefined && (!allocated.has(old.path) || allocated.get(old.path) === doc.id)) available.delete(old.path);
       // Keep Git-authored paths: moving a tracked `.github` file could disable a template.
       // An unsafe spelling only in earlier capture state must use the encoded title instead.
       const prior = old !== undefined && !mapping.files.has(old.path) && old.path.split('/').some((part) => part.toLowerCase() === '.github') ? undefined : old?.path;
-      return documentPath(folderFor(doc)!, doc.title, doc.id, available, prior, (path) => invalidZone(doc, path));
+      // Only a file the record holds: an `ids` path alone is a claim, not a file.
+      const kept = untitled && prior !== undefined && isMarkdownPath(prior) && previous.has(prior) ? keptPath(folder, available, prior, invalid) : undefined;
+      return kept ?? documentPath(folder, doc.title, doc.id, available, prior, invalid);
     };
     // An unchanged source may link a renamed, moved or removed target. When a path changes, the documents that move
     // are read again, and so are those whose recorded file links one of the paths that move or go, so their links

@@ -28,7 +28,7 @@ import { IMAGE_REPAIR_INPUT_LIMIT } from './image-links.ts';
 
 const markOf = (doc: {icon?: string | null, color?: string | null} | undefined) => ({icon: doc?.icon ?? null, color: doc?.color ?? null});
 import { RECORD_MESSAGE } from '../initial-sync/confirm.ts';
-import { documentPath, titlePath } from './paths.ts';
+import { documentPath, keptPath, titlePath } from './paths.ts';
 import { buildTree, checkRepoPath, isGitDirectoryName } from '../state/objects.ts';
 
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
@@ -798,6 +798,99 @@ describe('capture from Linear', () => {
     const ids = await readIds(context.git, result.state.ids);
     assert.equal(ids.get('other/guides/renamed.md')?.id, 'plan');
     assert.equal(ids.has('docs/plan.md'), false);
+  });
+
+  for (const title of ['', ' ']) it(`captures a new document with ${title === '' ? 'an empty' : 'a blank'} title as Untitled and renames it once it has a title`, async () => {
+    world.linear.documents.push({ id: 'draft', title, content: 'Draft.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
+    const first = await run();
+    assert.deepEqual(first.changed, ['docs/Untitled.md']);
+    assert.equal(await text('docs/Untitled.md'), 'Draft.');
+    assert.equal((await readIds(context.git, first.state.ids)).get('docs/Untitled.md')?.id, 'draft');
+    await refresh();
+    assert.equal((await run()).state.linear, first.state.linear, 'the next run moves nothing');
+    await refresh();
+    Object.assign(world.linear.documents[1]!, { title: 'draft', updatedAt: '2026-01-03T00:00:00Z' });
+    const titled = await run();
+    assert.equal(await text('docs/draft.md'), 'Draft.');
+    const ids = await readIds(context.git, titled.state.ids);
+    assert.equal(ids.get('docs/draft.md')?.id, 'draft');
+    assert.equal(ids.has('docs/Untitled.md'), false);
+    assert.ok(!(await listTree(context.git, titled.state.linear!)).some((entry) => entry.path === 'docs/Untitled.md'));
+  });
+
+  it('gives later untitled documents and one titled Untitled in the same folder the collision suffix', async () => {
+    world.linear.documents.push(
+      { id: 'first', title: '', content: 'First.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' },
+      { id: 'second', title: '', content: 'Second.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z' },
+      { id: 'named', title: 'Untitled', content: 'Named.\n', projectId: 'project-api', createdAt: '2026-01-04T00:00:00Z' },
+    );
+    const result = await run();
+    const suffixed = (id: string) => documentPath('docs', '', id, new Set(['docs/Untitled.md']));
+    assert.match(suffixed('second'), /^docs\/Untitled~[0-9a-f]{12}\.md$/);
+    const ids = await readIds(context.git, result.state.ids);
+    assert.equal(ids.get('docs/Untitled.md')?.id, 'first');
+    assert.equal(ids.get(suffixed('second'))?.id, 'second');
+    assert.equal(ids.get(suffixed('named'))?.id, 'named');
+    assert.equal(await text(suffixed('second')), 'Second.');
+    assert.ok(!(await listTree(context.git, result.state.linear!)).some((entry) => entry.path.includes('%00')));
+  });
+
+  it('keeps the file and path of a tracked document whose title is cleared, and writes its git edits to Linear', async () => {
+    Object.assign(world.linear.documents[0]!, { title: '', content: 'Edited in Linear.\n', updatedAt: '2026-01-03T00:00:00Z' });
+    const captured = await run();
+    assert.deepEqual(captured.changed, ['docs/plan.md']);
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.');
+    assert.deepEqual((await listTree(context.git, captured.state.linear!)).map((entry) => entry.path).filter((path) => path.startsWith('docs/')).sort(), ['docs/README.md', 'docs/plan.md']);
+    assert.equal((await readIds(context.git, captured.state.ids)).get('docs/plan.md')?.id, 'plan');
+    await refresh();
+    assert.equal((await run()).state.linear, captured.state.linear, 'the next run moves nothing');
+    const tracked = await commitTree(context.git, {parents:[captured.state.linear!], base:captured.state.linear, changes:new Map([['docs/plan.md', '---\ncategory: work\n---\n\nEdited in git.\n']]), message:'Edit document', identity:IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    const written = await writeTrackedToLinear(context, {config, state:captured.state, captured:captured.documents});
+    assert.deepEqual(written.updated, ['docs/plan.md']);
+    assert.equal(world.linear.documents[0]!.content, 'Edited in git.\n');
+    assert.equal(world.linear.documents[0]!.title, '');
+  });
+
+  for (const title of ['plan', 'Untitled']) it(`does not trash a document titled ${title} whose title was cleared in Linear after the capture when its file is deleted in git`, async () => {
+    if (title !== 'plan') {
+      Object.assign(world.linear.documents[0]!, { title, updatedAt: '2026-01-02T00:00:00Z' });
+      await run();
+      await refresh();
+    }
+    const path = `docs/${title}.md`;
+    const captured = await run();
+    assert.equal((await readIds(context.git, captured.state.ids)).get(path)?.id, 'plan');
+    Object.assign(world.linear.documents[0]!, { title: '', updatedAt: '2026-01-03T00:00:00Z' });
+    const tracked = await commitTree(context.git, {parents:[captured.state.linear!], base:captured.state.linear, changes:new Map([[path, null]]), message:'Delete document', identity:IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    const written = await writeTrackedToLinear(context, {config, state:captured.state, captured:captured.documents});
+    assert.deepEqual(written.trashed, []);
+    assert.notEqual(world.linear.documents[0]!.trashed, true);
+  });
+
+  it('moves an untitled document from the %00.md name earlier versions gave it to Untitled.md', async () => {
+    const { git } = context;
+    const state = context.fetched.state;
+    const legacy = 'docs/%00.md';
+    const tree = await buildTree(git, state.linear!, new Map([['docs/plan.md', null], [legacy, '---\ncategory: work\n---\n\nOriginal.\n']]));
+    const env = { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email };
+    const linear = await git.text(['commit-tree', '--no-gpg-sign', tree, '-p', state.linear!, '-m', 'Earlier capture'], { env });
+    const ids = await commitIds(git, state.ids, new Map([[legacy, { id: 'plan' }]]), IDENTITY);
+    const pushed = await pushAtomic(git, config, [
+      { ref: stateRef(config, 'linear'), expected: state.linear, next: linear },
+      { ref: stateRef(config, 'ids'), expected: state.ids, next: ids },
+    ]);
+    assert.equal(pushed.ok, true);
+    await refresh();
+    Object.assign(world.linear.documents[0]!, { title: '', updatedAt: '2026-01-03T00:00:00Z' });
+    const result = await run();
+    assert.equal(await text('docs/Untitled.md'), '---\ncategory: work\n---\n\nOriginal.');
+    const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.includes(legacy), paths.join(', '));
+    assert.equal((await readIds(git, result.state.ids)).get('docs/Untitled.md')?.id, 'plan');
   });
 
   it('never places a new document inside an assets folder, and keeps its place on the next run', async () => {
@@ -1891,6 +1984,18 @@ describe('capture from Linear', () => {
     context.linear.getDocuments = async (ids, options) => { if (options?.withContent) calls.push([...ids]); return original(ids, options); };
     await run();
     assert.ok(calls.every((ids) => !ids.includes('plan')), 'old content was reread');
+  });
+
+  it('keeps the path of a document whose title was cleared only while it is free and safe', () => {
+    assert.equal(keptPath('docs', new Set(), 'docs/plan.md'), 'docs/plan.md');
+    assert.equal(keptPath('docs', new Set(['docs/Plan.md']), 'docs/plan.md'), undefined);
+    assert.equal(keptPath('docs', new Set(), 'docs/assets/plan.md'), undefined);
+    assert.equal(keptPath('docs', new Set(), 'docs/plan.md', () => true), undefined);
+    assert.equal(keptPath('', new Set(), '-plan.md'), undefined);
+    assert.equal(keptPath('docs', new Set(), 'docs/.git/plan.md'), undefined);
+    for (const name of ['%00.md', '%00~0123456789ab.md', '%00~0123456789ab-2.md']) assert.equal(keptPath('docs', new Set(), `docs/${name}`), undefined);
+    assert.equal(keptPath('docs', new Set(), 'docs/%00/plan.md'), 'docs/%00/plan.md');
+    assert.equal(documentPath('docs', ' ', 'id', new Set()), 'docs/Untitled.md');
   });
 
   it('reports unchecked content every time and makes no content commit for icon-only updates', async () => {

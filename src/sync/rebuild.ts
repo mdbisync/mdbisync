@@ -26,7 +26,7 @@ import { type ResolvedTargets } from '../setup/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { type Git, type IdMap, type Oid, isAncestor } from '../state/index.ts';
 import { type Side, lastSynchronized } from './merge.ts';
-import { documentPath } from './paths.ts';
+import { documentPath, fileTitle } from './paths.ts';
 
 export interface RebuildInput {
   git: Git;
@@ -99,7 +99,7 @@ export async function rebuildIds({ git, record, linear, facts, targets, allowedP
   for (const document of order) {
     if (document.projectId === null && document.teamId === null) continue;
     const place: DocumentPlace = document.projectId !== null ? { projectId: document.projectId } : { teamId: document.teamId as string };
-    const path = files.get(keyOf(place, document.title));
+    const path = files.get(keyOf(place, fileTitle(document.title)));
     if (path !== undefined && !ids.has(path)) ids.set(path, { id: document.id });
     else unmatched.push({ document, place });
   }

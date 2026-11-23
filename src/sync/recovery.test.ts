@@ -462,6 +462,26 @@ describe('sync: lost state and deleted branches', () => {
     await assertConverged();
   });
 
+  it('L5-13: an untitled document and one titled Untitled get their files back, with no second file', async () => {
+    world.linear.documents.push(
+      { id: 'doc-blank', title: '', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# Blank\n\nNo title yet. ${CANARY}` },
+      { id: 'doc-named', title: 'Untitled', projectId: 'project-handbook', createdAt: '2026-01-04T00:00:00.000Z', content: `# Named\n\nTitled Untitled. ${CANARY}` },
+    );
+    await settle();
+    const before = await ids();
+    assert.equal(before['combined/Untitled.md']?.id, 'doc-blank');
+    assert.ok(Object.entries(before).some(([path, entry]) => entry.id === 'doc-named' && /^combined\/Untitled~[0-9a-f]{12}\.md$/.test(path)));
+    const tracked = await rev('refs/heads/main');
+    await fixture.remote.run(['update-ref', '-d', STATE('ids')]);
+
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(await ids(), before);
+    assert.deepEqual(run.writes, []);
+    await settle();
+    assert.equal(await rev('refs/heads/main'), tracked, 'no second file');
+  });
+
   it('L5-14: a re-upload whose search for the documents to relink is stopped by a rate limit stays pending', async () => {
     await fixture.remote.run(['update-ref', '-d', STATE('uploads')]);
     const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '1' };

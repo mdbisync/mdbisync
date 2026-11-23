@@ -23,7 +23,7 @@
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
-import { documentPath } from './paths.ts';
+import { documentPath, isUntitled, keptPath } from './paths.ts';
 import { joinFile, sameMarkdown, splitFile } from '../format/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
@@ -756,8 +756,15 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Capture can encode a title or assign a stable collision suffix.
     const folder = file.path.slice(0, -(file.title.length + '.md'.length)).replace(/\/$/, '');
     const occupied = new Set([...linearFiles.keys()].filter((path) => path !== file.path));
-    if (document.title.normalize('NFC') !== file.title.normalize('NFC')
-      && documentPath(folder, document.title, document.id, occupied, file.path) !== file.path) return false;
+    if (document.title.normalize('NFC') !== file.title.normalize('NFC')) {
+      if (isUntitled(document.title)) {
+        // An empty title names no file: the capture names it `Untitled`, or keeps the file the document has where it
+        // still can. Only for a title the capture already saw empty: one cleared since is an edit in Linear.
+        const capturedTitle = options.captured?.get(document.id)?.title;
+        if (capturedTitle === undefined || !isUntitled(capturedTitle)) return false;
+        if (documentPath(folder, document.title, document.id, occupied, file.path) !== file.path && keptPath(folder, occupied, file.path) !== file.path) return false;
+      } else if (documentPath(folder, document.title, document.id, occupied, file.path) !== file.path) return false;
+    }
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;
