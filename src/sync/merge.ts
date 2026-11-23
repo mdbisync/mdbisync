@@ -8,14 +8,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readAnnotation } from '../mapping/index.ts';
-import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
+import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, MappingBlobBudgetError, readableBlob } from '../mapping/blobs.ts';
 import { mapTree, requireReadableAnnotations } from '../mapping/mapping.ts';
-import { type TreeEntry } from '../state/objects.ts';
+import { type TreeEntry, parseTreeListing } from '../state/objects.ts';
 import { lintInTree, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping } from '../mapping/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
-import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
+import { type StructuralResult, type StructuralSummary, type Version, detectConflicts, mergeMarkdown, resolveStructural } from '../merge/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
 import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, NEUTRAL_IDENTITY, buildTree, checkRepoPath, commitTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
 import { message } from '../messages.ts';
@@ -148,7 +148,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     }
     mergeBase = await treeCommit(git, baseTree, mergeBase);
   }
-  const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase);
+  const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase, true);
   const { tree, unresolved: conflicts } = resolved;
 
   const linearSide = await synchronizedFiles(git, linear, facts, ids);
@@ -314,16 +314,19 @@ export interface MarkedMerge {
  * Merges `gitSide` into `linearSide` as step 3 does: git's merge, then the
  * sync's own merge of each document git could not merge. In the markers,
  * `gitSide`'s text is the git version and `linearSide`'s the Linear version.
- * `ids` maps `linearSide`'s paths to documents. It writes objects only.
+ * `ids` maps `linearSide`'s paths to documents. With `echo` (step 3 only),
+ * a conflict Linear still holds as the sync wrote it, which the tracked
+ * branch resolves, is merged from its earlier versions. It writes objects
+ * only.
  */
-export async function mergeWithMarkers(git: Git, linearSide: Oid, gitSide: Oid, ids: IdMap, knownId?: MergeOptions['knownId'], explicitBase?: Oid): Promise<MarkedMerge> {
+export async function mergeWithMarkers(git: Git, linearSide: Oid, gitSide: Oid, ids: IdMap, knownId?: MergeOptions['knownId'], explicitBase?: Oid, echo = false): Promise<MarkedMerge> {
   const base = explicitBase ?? await git.text(['merge-base', linearSide, gitSide]);
   const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ...(explicitBase === undefined ? [] : [`--merge-base=${explicitBase}`]), linearSide, gitSide], { okCodes: [0, 1] });
   const [gitTree, ...rest] = merged.stdout.toString('utf8').split('\0');
   if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message('sync.no-merge-tree'));
   const unmerged = [...new Set(rest.filter((path) => path !== ''))].sort(compare);
   const renames = await renamesBetween(git, base, gitSide);
-  const resolved = await resolveConflicts(git, { base, linear: linearSide, tracked: gitSide, tree: gitTree, unmerged, renames, ids, knownId });
+  const resolved = await resolveConflicts(git, { base, linear: linearSide, tracked: gitSide, tree: gitTree, unmerged, renames, ids, knownId, echo });
   return { base, renames, resolved };
 }
 
@@ -488,6 +491,8 @@ interface ConflictInput {
   renames: Map<string, string>;
   ids: IdMap;
   knownId?: MergeOptions['knownId'];
+  /** Step 3's merge with Linear: a conflict Linear still holds as the sync wrote it, which the tracked branch resolves, is merged from its earlier versions (`echoedConflicts`). */
+  echo?: boolean;
 }
 
 export interface Resolved {
@@ -587,6 +592,7 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
     entry === undefined ? null : { path: entry.path, text: blobs.get(entry.oid)!.toString('utf8') };
 
   const changes = new Map<string, string | null>();
+  const echo = input.echo === true ? echoedConflicts(git, input.linear) : null;
   for (const { base, tracked, linear, involved } of groups) {
     const basePath = base?.path ?? null;
     const linearPath = linear?.path ?? null;
@@ -596,6 +602,10 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
       git: version(tracked),
       linear: version(linear),
     };
+    if (echo !== null && base !== undefined && tracked !== undefined && linear !== undefined && base.path === tracked.path && base.path === linear.path) {
+      const earlier = await echo(base, tracked, linear);
+      if (earlier !== null) Object.assign(versions, { base: { path: base.path, text: earlier.base }, linear: { path: base.path, text: earlier.linear } });
+    }
     let result: StructuralResult;
     let gone: StructuralSummary | undefined;
     try {
@@ -624,6 +634,67 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
   out.tree = await buildTree(git, input.tree, changes);
   out.unresolved.sort(compare);
   return out;
+}
+
+/**
+ * A conflict the sync wrote that has not reached the tracked branch yet,
+ * which the tracked branch's newer text resolves: the base and Linear
+ * versions that conflict was merged from, to merge the newer text with in
+ * their place.
+ *
+ * The newest commit of the `linear` chain (first parents) that changed the
+ * document wrote its current text, so Linear did not change it since. That
+ * commit must be a record: a merge whose second parent is a tracked commit
+ * with the merge base's text, and whose first parent holds Linear's text
+ * before the write, without markers. Merging that text with the record's
+ * git text, from their merge base (an empty text when the base lacks the
+ * document), must give exactly the recorded text, markers included, and the
+ * merge base's text holds none (they have not reached the tracked branch).
+ *
+ * The merge of the tracked branch's text with those versions counts only
+ * when it already holds every change the tracked branch made since the
+ * merge base: merging that change into it again changes nothing. A git
+ * edit that sets a line back to the older text, or writes new text into
+ * the conflict, fails that check. Null otherwise, and the merge stays as it
+ * was: Linear changed the document after the write (its edit conflicts as
+ * any other), the record cannot be read back to the same text, or the
+ * merge would drop a git edit.
+ */
+function echoedConflicts(git: Git, linear: Oid): (base: TreeEntry, tracked: TreeEntry, linearEntry: TreeEntry) => Promise<{ base: string; linear: string } | null> {
+  const budget = new MappingBlobBudget();
+  const entryAt = async (commit: Oid, path: string): Promise<TreeEntry | undefined> => {
+    const { stdout } = await git.run(['--literal-pathspecs', 'ls-tree', '-z', '-l', '--full-tree', commit, '--', path]);
+    return parseTreeListing(stdout).find((entry) => entry.path === path && entry.type === 'blob' && readableBlob(entry));
+  };
+  const textOf = async (entry: TreeEntry) => (await budget.read(git, [entry])).get(entry.oid)!.toString('utf8');
+  const versions = async (base: TreeEntry, tracked: TreeEntry, linearEntry: TreeEntry) => {
+    const path = linearEntry.path;
+    const [baseText, trackedText, linearText] = await Promise.all([textOf(base), textOf(tracked), textOf(linearEntry)]);
+    if (detectConflicts(linearText).length === 0 || detectConflicts(baseText).length > 0) return null;
+    const [commit, parent, second, ...more] = (await git.text(['--literal-pathspecs', 'log', '--first-parent', '--max-count=1', '--format=%H %P', linear, '--', path])).split(' ');
+    if (commit === undefined || parent === undefined || second === undefined || more.length > 0) return null;
+    const [previous, recordGit] = await Promise.all([entryAt(parent, path), entryAt(second, path)]);
+    if (previous === undefined || recordGit?.oid !== base.oid) return null;
+    const previousText = await textOf(previous);
+    if (detectConflicts(previousText).length > 0) return null;
+    const merged = await git.run(['merge-base', parent, second], { okCodes: [0, 1] });
+    if (merged.code !== 0) return null;
+    const older = await entryAt(merged.stdout.toString('utf8').trim(), path);
+    const olderText = older === undefined ? '' : await textOf(older);
+    if ((await mergeMarkdown(olderText, baseText, previousText)).text !== linearText) return null;
+    const result = (await mergeMarkdown(olderText, trackedText, previousText)).text;
+    if ((await mergeMarkdown(baseText, trackedText, result)).text !== result) return null;
+    return { base: olderText, linear: previousText };
+  };
+  return async (base, tracked, linearEntry) => {
+    try {
+      return await versions(base, tracked, linearEntry);
+    } catch (error) {
+      // A text the merge refuses, or one past the read budget, keeps the merge as it was.
+      if (error instanceof MarkdownLimitError || error instanceof MappingBlobBudgetError) return null;
+      throw error;
+    }
+  };
 }
 
 /** Renames git detects between two commits: old path → new path. */

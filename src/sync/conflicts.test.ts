@@ -996,28 +996,92 @@ describe('sync: conflicts through the cycle (L3)', () => {
       assert.deepEqual({ icon: document.icon ?? null, color: document.color ?? null }, { icon: null, color: null });
     });
 
-    it('a conflict edited in git before its markers reach the tracked branch becomes one new conflict that keeps every text', async () => {
+    /** A same-paragraph conflict written to Linear whose markers have not reached the tracked branch yet. */
+    async function conflictInLinearOnly() {
       await editInLinear(DOC, PLAN.replace('Beta paragraph.', 'Beta paragraph, Linear.'));
       await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, git.') });
       assert.equal((await sync()).report.sync?.conflicts.length, 1);
-      // The person edits the paragraph in git while the tracked branch does not hold the markers yet.
+      assert.equal((await documentOf(DOC)).icon, MARKS.conflict.icon);
       assert.equal(detectConflicts(await show(`refs/heads/main:${DOC}`)).length, 0, 'the markers reached the tracked branch already');
+    }
+
+    async function assertCleared() {
+      const document = await documentOf(DOC);
+      assert.deepEqual({ icon: document.icon ?? null, color: document.color ?? null }, { icon: null, color: null });
+      assert.ok(comments(document).length > 0 && comments(document).every((comment) => comment.resolved === true), 'a conflict comment stays open');
+    }
+
+    it('a conflict resolved in git with Linear\'s version before its markers reach the tracked branch clears in one resolution', async () => {
+      await conflictInLinearOnly();
+      // The person sees the conflict in Linear and keeps Linear's version in git, with a git edit elsewhere.
+      const resolved = PLAN.replace('Beta paragraph.', 'Beta paragraph, Linear.').replace('Alpha paragraph.', 'Alpha paragraph, git.');
+      await commitGit({ [DOC]: resolved });
+      await converge();
+      await assertBothSides(DOC, resolved);
+      await assertCleared();
+    });
+
+    it('a conflict edited in git with new text before its markers reach the tracked branch becomes one new conflict that keeps every text', async () => {
+      await conflictInLinearOnly();
       await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, resolved.') });
       await converge();
       const result = await show(`refs/heads/main:${DOC}`);
       assert.equal((await documentOf(DOC)).content, result);
-      // One complete conflict: the person's text with Linear's line as the git version, the earlier versions as Linear's.
+      // New text is not taken as the resolution: it may be a further git edit made without seeing the conflict.
       assertOneConflict(result, 'Beta paragraph, resolved.\n\nBeta paragraph, Linear.', 'Beta paragraph, git.\n\nBeta paragraph, Linear.');
       assert.equal((await documentOf(DOC)).icon, MARKS.conflict.icon);
 
-      // Resolved again once the markers are on the tracked branch, the conflict clears.
       const resolved = PLAN.replace('Beta paragraph.', 'Beta paragraph, resolved.');
       await commitGit({ [DOC]: resolved });
       await converge();
       await assertBothSides(DOC, resolved);
-      const document = await documentOf(DOC);
-      assert.deepEqual({ icon: document.icon ?? null, color: document.color ?? null }, { icon: null, color: null });
-      assert.ok(comments(document).length > 0 && comments(document).every((comment) => comment.resolved === true), 'a conflict comment stays open');
+      await assertCleared();
+    });
+
+    it('a conflict resolved in git with Linear\'s version after a run took in another git change, while its markers wait, clears', async () => {
+      holdSyncPullRequest();
+      await conflictInLinearOnly();
+      const other = `# Other\n\nTouched in git. ${CANARY}`;
+      await commitGit({ [`${NOTES}/other.md`]: other });
+      await heldSync();
+      const resolved = PLAN.replace('Beta paragraph.', 'Beta paragraph, Linear.');
+      await commitGit({ [DOC]: resolved });
+      releaseSyncPullRequest();
+      await converge();
+      await assertBothSides(DOC, resolved);
+      await assertBothSides(`${NOTES}/other.md`, other);
+      await assertCleared();
+    });
+
+    it('a conflict resolved in git with Linear\'s version that also sets back an agreed edit keeps the set-back, and the conflict', async () => {
+      // Both sides make the same Alpha edit and conflict on Beta.
+      await editInLinear(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, agreed.').replace('Beta paragraph.', 'Beta paragraph, Linear.'));
+      await commitGit({ [DOC]: PLAN.replace('Alpha paragraph.', 'Alpha paragraph, agreed.').replace('Beta paragraph.', 'Beta paragraph, git.') });
+      assert.equal((await sync()).report.sync?.conflicts.length, 1);
+      assert.equal(detectConflicts(await show(`refs/heads/main:${DOC}`)).length, 0, 'the markers reached the tracked branch already');
+      // Git sets Alpha back and takes Linear's Beta: merged from the older base, the set-back would look like no change.
+      await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, Linear.') });
+      await converge();
+      const result = await show(`refs/heads/main:${DOC}`);
+      assert.equal((await documentOf(DOC)).content, result);
+      assert.ok(result.includes('Alpha paragraph.') && !result.includes('Alpha paragraph, agreed.'), `the set-back was lost:\n${result}`);
+      assert.equal(detectConflicts(result).length, 1, `expected one conflict:\n${result}`);
+      assert.ok(result.includes('Beta paragraph, Linear.'));
+    });
+
+    it('a conflict edited on both sides before its markers reach the tracked branch stays a conflict that keeps every text', async () => {
+      await conflictInLinearOnly();
+      // Linear edits the conflict's lines again: its edit is not the sync's own write, so it conflicts with git's.
+      const linear = ((await documentOf(DOC)).content ?? '').replace('Beta paragraph, Linear.', 'Beta paragraph, Linear again.');
+      await editInLinear(DOC, linear);
+      await commitGit({ [DOC]: PLAN.replace('Beta paragraph.', 'Beta paragraph, Linear.') });
+      await converge();
+      const result = await show(`refs/heads/main:${DOC}`);
+      assert.equal((await documentOf(DOC)).content, result);
+      assert.equal(detectConflicts(result).length, 1, `expected one conflict:\n${result}`);
+      assert.equal(result.split(MARKERS.git).length, 2, 'markers are nested or repeated');
+      for (const text of ['Beta paragraph, git.', 'Beta paragraph, Linear again.']) assert.ok(result.includes(text), `${text} was lost`);
+      assert.equal((await documentOf(DOC)).icon, MARKS.conflict.icon);
     });
   });
 });

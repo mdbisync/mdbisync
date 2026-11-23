@@ -215,14 +215,18 @@ While you resolve:
 - **If both sides change the same lines again** before the conflict is
   resolved, the next run writes a new conflict in place of the old one.
   Markers are never nested.
-- **Resolving in git before the markers reach it** is such an edit too. A
+- **Resolving in git before the markers reach it** works only in part. A
   conflict reaches the tracked branch only when its sync pull request
   merges: usually a run or two after it appears in Linear, later while
   checks or branch protection hold the pull request. If you change those
-  lines on the tracked branch before then, the next run writes a new
-  conflict that keeps your text and the earlier versions. Nothing is lost,
-  but you resolve twice. Resolve in Linear, or wait until the file on the
-  tracked branch has the markers.
+  lines on the tracked branch before then, keeping Linear's version, the
+  conflict clears, as long as nobody changed the document in Linear since
+  the conflict appeared and your commit sets no other line of it back to an
+  earlier text. Any other text there gives a new conflict that keeps your
+  text and the earlier versions: the sync cannot tell a resolution from a
+  further git edit made without seeing the conflict, so it never drops
+  Linear's version on its own. To resolve once with any text, resolve in
+  Linear, or wait until the file on the tracked branch has the markers.
 
 ## Whole tables, code blocks and lists
 
