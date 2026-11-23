@@ -29011,7 +29011,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.0-rc.4" : packageJson.version;
+var VERSION = true ? "1.0.0" : packageJson.version;
 
 // src/format/rules.ts
 var LINT_RULES = {
