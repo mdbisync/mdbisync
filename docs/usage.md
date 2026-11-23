@@ -499,14 +499,28 @@ has only its source parent). Its summary prints the release SHA. No generated fi
 A failed build leaves existing pins unchanged.
 
 A release commit cannot name its own SHA, so the workflow templates in
-[`examples/`](../examples) and the copy `init` writes move to a release
-after it is tagged: the workflow then commits them, pinned to the new
-release, on the branch `release-pins-<version>` cut from `main`, and pushes
-that branch. Its summary links the pull request to open from it; `main`
-changes only when that pull request passes its checks and is merged. A
-copy of the templates from `main` pins the newest release whose pull
-request has merged. Once they pin a final release, a pre-release leaves
-them as they are, and so does a release older than the one they pin.
+[`examples/`](../examples) and the copy `init` writes move to a final
+release after it is tagged: the workflow then commits them, pinned to the
+new release, on the branch `release-pins-<version>` cut from `main`, and
+pushes that branch. A pre-release never moves them, and neither does a
+release older than the one they pin; the run's summary says why. `main`
+changes only when the pull request from that branch passes its checks and
+is merged, so a copy of the templates from `main` pins the release of the
+last pins pull request that merged. Until the first final release, that is
+the pre-release the templates were last moved to.
+
+The workflow opens that pull request itself and turns on auto-merge
+(squash) when the repository variable `RELEASE_PINS_APP_CLIENT_ID` and the
+secret `RELEASE_PINS_APP_PRIVATE_KEY` hold the client ID and a private key
+of a GitHub App: a pull request opened with the workflow's own token would
+run its checks only after someone approves them. Give the App the
+repository permissions Contents and Pull requests, read and write, install
+it on this repository only, and turn on
+"Allow auto-merge" in the repository settings. The pull request merges once
+its required checks pass and any review `main` requires is given. Without
+the variable or the secret, or when the App cannot open the pull request,
+the summary says so and links the branch: open the pull request from it by
+hand. The release succeeds either way.
 
 A final version such as `v1.0.0` is built the same way, but only after a
 security gate passes. The gate refuses the build unless the source commit
@@ -544,19 +558,19 @@ never passes. A status posted before the setting changed does not count;
 scan the source commit again.
 
 Use the **release commit SHA**, which differs from the source SHA, in both
-configuration files. Replace the placeholder with the summary's 40-character
-release SHA and keep its version comment:
+configuration files. Replace `<release-sha>` with the summary's 40-character
+release SHA and `<version>` with its version, such as `v1.0.0`:
 
 ```yaml
 # In a GitHub Actions workflow:
-- uses: mdbisync/mdbisync@<release-sha> # v0.1.0-rc.9
+- uses: mdbisync/mdbisync@<release-sha> # <version>
 ```
 
 ```yaml
 # In .pre-commit-config.yaml:
 repos:
   - repo: https://github.com/mdbisync/mdbisync
-    rev: <release-sha> # v0.1.0-rc.9
+    rev: <release-sha> # <version>
     hooks:
       - id: linear-format
 ```
@@ -582,7 +596,7 @@ To update to a specific release, resolve its annotated tag and use the
 first column as both pins:
 
 ```sh
-git ls-remote https://github.com/mdbisync/mdbisync 'refs/tags/v0.1.0-rc.9^{}'
+git ls-remote https://github.com/mdbisync/mdbisync 'refs/tags/<version>^{}'
 ```
 
 `pre-commit autoupdate` follows the default branch's source history and cannot

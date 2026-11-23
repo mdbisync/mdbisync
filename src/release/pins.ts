@@ -1,11 +1,13 @@
-// After a release is tagged, moves the workflow templates to it: the
+// After a final release is tagged, moves the workflow templates to it: the
 // `mdbisync/mdbisync@<sha> # <version>` pins in `examples/`, the copy of
 // the templates `init` embeds, the list of releases `init` refuses as
 // older, and the configuration page that names the oldest release `init`
-// writes. A release commit cannot name its own SHA, so the release cannot
-// carry these pins; this step commits them on a branch cut from `main` and
-// pushes that branch, and a pull request takes it to `main` through the
-// usual checks. It needs only Node and Git, like the tag step.
+// writes. A pre-release never moves them, so nobody copies a release
+// candidate from the examples. A release commit cannot name its own SHA, so
+// the release cannot carry these pins; this step commits them on a branch
+// cut from `main` and pushes that branch, and a pull request takes it to
+// `main` through the usual checks. It needs only Node and Git, like the tag
+// step.
 import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -59,9 +61,8 @@ const isPreRelease = (version: string): boolean => version.includes('-');
  * example template, the embedded templates, the older releases and the
  * configuration page. `tags` lists every release tag, oldest first, with the
  * commit it names; `release` must be among them. The templates keep their
- * pin when they already pin `release` or a later release, and when they pin
- * a final release and `release` is a pre-release: a copy from `main` never
- * moves from a final release back to a pre-release.
+ * pin when `release` is a pre-release, and when they already pin `release`
+ * or a later release.
  */
 export function pinFiles(files: Readonly<Record<string, string>>, release: Release, tags: readonly Release[]): Pins {
   validateSha(release.sha);
@@ -71,9 +72,9 @@ export function pinFiles(files: Readonly<Record<string, string>>, release: Relea
   const position = (version: string) => tags.findIndex((tag) => tag.version === version);
   const index = position(release.version);
   if (index < 0 || tags[index]!.sha !== release.sha) throw new Error(`The tag ${release.version} does not name ${release.sha}`);
+  if (isPreRelease(release.version)) return { kept: `${release.version} is a pre-release: the workflow templates keep their pin, and only a final release moves them.` };
   if (previous.version === release.version && previous.sha === release.sha) return { kept: `The workflow templates on main already pin ${release.version}.` };
   if (position(previous.version) >= index) return { kept: `The workflow templates on main pin ${previous.version}, which is not older than ${release.version}; they keep it.` };
-  if (!isPreRelease(previous.version) && isPreRelease(release.version)) return { kept: `The workflow templates on main pin the final release ${previous.version}; the pre-release ${release.version} does not replace it.` };
 
   const changed: Record<string, string> = {};
   const pin = `mdbisync/mdbisync@${release.sha} # ${release.version}`;
@@ -114,7 +115,8 @@ function required(files: Readonly<Record<string, string>>, path: string): string
 
 /**
  * In `repository`, a clean checkout of `main` with every release tag,
- * commits the pins of `release` on a new branch and pushes it to `origin`.
+ * commits the pins of the final release `release` on a new branch and pushes
+ * it to `origin`; a pre-release pushes nothing.
  * The push never forces, and a branch left by an earlier run refuses it.
  * Returns the branch, or why the templates keep their pin.
  */
@@ -158,7 +160,9 @@ if (import.meta.main) {
   const summary = 'kept' in result
     ? `${result.kept}\n`
     : `The workflow templates pinned to ${version} are on the branch \`${result.branch}\`.`
-      + (server && project ? ` Open a pull request: ${server}/${project}/compare/main...${result.branch}?expand=1\n` : '\n');
+      + (server && project ? ` Compare it with main: ${server}/${project}/compare/main...${result.branch}?expand=1\n` : '\n');
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, summary);
+  // The next steps open the pull request from this branch.
+  if ('branch' in result && process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `branch=${result.branch}\n`);
 }

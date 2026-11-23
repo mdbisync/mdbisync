@@ -19,7 +19,7 @@ interface Job {
   if?: string;
   permissions?: Record<string, string>;
   env?: Record<string, string>;
-  steps: { name?: string; if?: string; uses?: string; with?: Record<string, string>; run?: string; env?: Record<string, string> }[];
+  steps: { name?: string; id?: string; if?: string; uses?: string; with?: Record<string, string>; run?: string; env?: Record<string, string>; 'working-directory'?: string }[];
 }
 interface Context { ref: string; version: string; cancelled: boolean; results: Map<string, Result>; upstream: string[] }
 
@@ -213,6 +213,112 @@ test('the pins job runs the dispatched workflow\'s code, pushes from a checkout 
   const runs = job.steps.flatMap((step) => step.run ?? []).join('\n');
   assert.match(runs, /node src\/release\/pins\.ts "\$RELEASE_VERSION" "\$RELEASE_SHA" target/);
   assert.doesNotMatch(runs, /\bnpm\b|\bgit push\b/, 'no dependency install, and no push outside pins.ts');
+});
+
+const pinsStep = (id: string) => jobs.pins!.steps.find((step) => step.id === id) ?? assert.fail(`no pins step ${id}`);
+
+test('only the step that opens the pins pull request holds the App token, scoped to this repository, and it runs no repository code', () => {
+  const steps = jobs.pins!.steps;
+  const token = pinsStep('token');
+  assert.equal(token.if, "${{ steps.app.outputs.configured == 'true' }}");
+  assert.match(token.uses!, /^actions\/create-github-app-token@[0-9a-f]{40}$/);
+  assert.deepEqual(token.with, {
+    'client-id': '${{ vars.RELEASE_PINS_APP_CLIENT_ID }}',
+    'private-key': '${{ secrets.RELEASE_PINS_APP_PRIVATE_KEY }}',
+    owner: '${{ github.repository_owner }}',
+    repositories: '${{ github.event.repository.name }}',
+    'permission-contents': 'write',
+    'permission-pull-requests': 'write',
+  });
+  const readers = steps.filter((step) => JSON.stringify(step).includes('steps.token.outputs.token'));
+  assert.equal(readers.length, 1, 'one step reads the token');
+  const open = readers[0]!;
+  assert.equal(steps.indexOf(open), steps.length - 1, 'it is the last step');
+  assert.equal(open.if, "${{ steps.app.outputs.configured == 'true' }}");
+  assert.equal(open.uses, undefined);
+  assert.equal(open['working-directory'], '${{ runner.temp }}', 'outside the checkouts');
+  assert.doesNotMatch(open.run!, /\bnode\b|\bnpm\b|\bgit\b|src\//, 'gh only');
+  assert.match(open.run!, /gh pr create --repo "\$GH_REPO" --base main --head "\$PINS_BRANCH"/);
+  assert.match(open.run!, /gh pr merge "\$url" --repo "\$GH_REPO" --auto --squash/);
+  // The tag and the branch are pushed by now: an App that fails must not fail the release.
+  assert.equal((token as { 'continue-on-error'?: boolean })['continue-on-error'], true);
+  // The private key reaches the token step only; the check step sees whether it is set.
+  assert.deepEqual(steps.filter((step) => JSON.stringify(step).includes('secrets.')).map((step) => step.id), ['app', 'token']);
+  assert.equal(pinsStep('app').env?.APP_PRIVATE_KEY_SET, "${{ secrets.RELEASE_PINS_APP_PRIVATE_KEY != '' }}");
+});
+
+test('a pins branch without the App configuration opens no pull request, says so and still succeeds', () => {
+  const app = pinsStep('app');
+  assert.equal(app.if, "${{ steps.pins.outputs.branch != '' }}", 'a pre-release pushes no branch, so nothing more runs');
+  const directory = mkdtempSync(join(tmpdir(), 'release-pins-app-'));
+  try {
+    const check = (clientId: string, keySet: string) => {
+      const output = join(directory, `output-${clientId}-${keySet}`);
+      const summary = join(directory, `summary-${clientId}-${keySet}`);
+      writeFileSync(output, '');
+      writeFileSync(summary, '');
+      const run = spawnSync('bash', ['-e', '-c', app.run!], { env: { ...process.env, APP_CLIENT_ID: clientId, APP_PRIVATE_KEY_SET: keySet, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary } });
+      assert.equal(run.status, 0, run.stderr.toString());
+      return { output: readFileSync(output, 'utf8'), summary: readFileSync(summary, 'utf8') };
+    };
+    for (const [clientId, keySet] of [['', 'false'], ['', 'true'], ['Iv23example', 'false']] as const) {
+      const { output, summary } = check(clientId, keySet);
+      assert.equal(output, '', `${clientId} ${keySet}: no token, so no pull request`);
+      assert.match(summary, /The release pins App is not configured \(variable `RELEASE_PINS_APP_CLIENT_ID`, secret `RELEASE_PINS_APP_PRIVATE_KEY`\)/);
+    }
+    assert.deepEqual(check('Iv23example', 'true'), { output: 'configured=true\n', summary: '' });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('the pins pull request step opens the pull request with auto-merge, and only warns when the App fails', () => {
+  const open = jobs.pins!.steps.at(-1)!;
+  const directory = mkdtempSync(join(tmpdir(), 'release-pins-open-'));
+  try {
+    const bin = join(directory, 'bin');
+    mkdirSync(bin);
+    // A stand-in for gh that logs its arguments and fails the subcommands named in FAIL.
+    writeFileSync(join(bin, 'gh'), [
+      '#!/bin/sh',
+      'echo "$*" >> "$GH_LOG"',
+      'case " $FAIL " in *" $2 "*) exit 1;; esac',
+      '[ "$2" = create ] && echo https://github.example/pull/1',
+      'exit 0',
+    ].join('\n'), { mode: 0o755 });
+    const run = (name: string, token: string, fail: string) => {
+      const summary = join(directory, `summary-${name}`);
+      const log = join(directory, `gh-${name}`);
+      writeFileSync(summary, '');
+      writeFileSync(log, '');
+      const result = spawnSync('bash', ['-e', '-c', open.run!], {
+        env: {
+          PATH: `${bin}:${process.env.PATH}`, GH_LOG: log, FAIL: fail, GITHUB_STEP_SUMMARY: summary,
+          GH_TOKEN: token, GH_REPO: 'owner/repo', PINS_BRANCH: 'release-pins-v9.0.0', RELEASE_VERSION: 'v9.0.0', RELEASE_SHA: 'a'.repeat(40),
+        },
+      });
+      assert.equal(result.status, 0, `${name}: ${result.stderr.toString()}`);
+      return { summary: readFileSync(summary, 'utf8'), gh: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => line.split(' ').slice(0, 2).join(' ')), stdout: result.stdout.toString() };
+    };
+
+    const opened = run('opened', 'token', '');
+    assert.deepEqual(opened.gh, ['pr create', 'pr merge']);
+    assert.match(opened.summary, /^Opened https:\/\/github\.example\/pull\/1 with auto-merge/);
+
+    const manual = run('no-auto-merge', 'token', 'merge');
+    assert.match(manual.summary, /auto-merge could not be turned on/);
+    assert.match(manual.stdout, /::warning::Auto-merge could not be turned on/);
+
+    const refused = run('no-pull-request', 'token', 'create');
+    assert.deepEqual(refused.gh, ['pr create']);
+    assert.match(refused.summary, /could not open the pull request: open the pull request from the branch above/);
+
+    const tokenless = run('no-token', '', '');
+    assert.deepEqual(tokenless.gh, [], 'no gh call without a token');
+    assert.match(tokenless.summary, /gave no token .*: open the pull request from the branch above/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('a failed test shard builds, attests and tags nothing, for a pre-release and a final release', () => {

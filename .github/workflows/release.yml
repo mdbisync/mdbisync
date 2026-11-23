@@ -333,11 +333,15 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           node src/release/tag.ts "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/release"
 
-  # Moves the workflow templates on main to the new release. A release commit cannot name its own
-  # SHA, so the pins go to main afterwards: this job commits them on the branch release-pins-<version>,
-  # cut from main's current head, and pushes it; a pull request from that branch takes them to main
-  # through the usual checks. It never pushes to main and never forces a push. Like the tag job, it
-  # runs the dispatched workflow's implementation, with Node and Git only.
+  # Moves the workflow templates on main to a new final release; a pre-release leaves them as they are
+  # and says so in the summary. A release commit cannot name its own SHA, so the pins go to main
+  # afterwards: this job commits them on the branch release-pins-<version>, cut from main's current
+  # head, and pushes it; a pull request from that branch takes them to main through the usual checks.
+  # It never pushes to main and never forces a push. Like the tag job, it runs the dispatched
+  # workflow's implementation, with Node and Git only. A pull request the workflow token opens would
+  # run its checks only after someone approves them, so the release pins App opens it and turns on
+  # auto-merge. Without the App's variable and secret, or when the App fails, the summary links the
+  # branch instead and the release still succeeds.
   pins:
     needs: tag
     # Explicit, like the tag job's: a pre-release skips the gate, and the implicit success() would skip this job too.
@@ -363,10 +367,65 @@ jobs:
         with:
           node-version: 24
       - name: Push the templates pinned to the new release
+        id: pins
         run: |
           git -C target config user.name 'github-actions[bot]'
           git -C target config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           node src/release/pins.ts "$RELEASE_VERSION" "$RELEASE_SHA" target
+      - name: Check the release pins App configuration
+        id: app
+        if: ${{ steps.pins.outputs.branch != '' }}
+        env:
+          APP_CLIENT_ID: ${{ vars.RELEASE_PINS_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY_SET: ${{ secrets.RELEASE_PINS_APP_PRIVATE_KEY != '' }}
+        run: |
+          if [ -n "$APP_CLIENT_ID" ] && [ "$APP_PRIVATE_KEY_SET" = true ]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'The release pins App is not configured (variable `RELEASE_PINS_APP_CLIENT_ID`, secret `RELEASE_PINS_APP_PRIVATE_KEY`), so no pull request was opened: open it from the branch above.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # The token is limited to this repository and to what opening and merging the pull request needs,
+      # and is revoked when the job ends. Only the next step reads it, and it runs no repository code.
+      # The tag and the branch are already pushed, so an App that does not work only warns.
+      - name: Get a token of the release pins App
+        id: token
+        if: ${{ steps.app.outputs.configured == 'true' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_PINS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_PINS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Open the pins pull request with auto-merge
+        if: ${{ steps.app.outputs.configured == 'true' }}
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          PINS_BRANCH: ${{ steps.pins.outputs.branch }}
+        run: |
+          by_hand() {
+            echo "::warning::$1"
+            echo "$1: open the pull request from the branch above." >> "$GITHUB_STEP_SUMMARY"
+          }
+          if [ -z "$GH_TOKEN" ]; then
+            by_hand 'The release pins App gave no token (is it installed on this repository with Contents and Pull requests read and write?)'
+            exit 0
+          fi
+          if ! url=$(gh pr create --repo "$GH_REPO" --base main --head "$PINS_BRANCH" --title "Pin the workflow templates to $RELEASE_VERSION" \
+            --body "Moves the workflow templates, the templates \`init\` writes, its list of older releases and the configuration page to $RELEASE_VERSION (release commit $RELEASE_SHA)."); then
+            by_hand 'The release pins App could not open the pull request'
+            exit 0
+          fi
+          if gh pr merge "$url" --repo "$GH_REPO" --auto --squash; then
+            echo "Opened $url with auto-merge: it merges once its required checks pass and any review main requires is given." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Auto-merge could not be turned on for $url"
+            echo "Opened $url, but auto-merge could not be turned on (is \"Allow auto-merge\" on in the repository settings?): merge it once its checks pass." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # A final version gets a draft GitHub Release that carries its security report and summary, its
   # SPDX SBOM and the dependency status of its build. The scheduled dependency scan never changes a release.

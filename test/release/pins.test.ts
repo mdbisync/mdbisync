@@ -1,6 +1,7 @@
 // The release's pins step: it moves the workflow templates, the copy `init`
-// embeds, the older releases and the configuration page to the release it
-// just tagged, and pushes them on a branch cut from main. Run on the
+// embeds, the older releases and the configuration page to the final release
+// it just tagged, and pushes them on a branch cut from main; a pre-release
+// moves nothing. Run on the
 // repository's own files, so a change to the templates or the page that the
 // step could no longer rewrite fails here, before a release finds it.
 
@@ -95,18 +96,26 @@ test('refuses a tag that names another commit, templates that disagree and a pag
   assert.throws(() => pinFiles(reworded, NEXT, tagsUpTo(NEXT)), /names the oldest release 0 times/);
 });
 
-test('keeps the pin for a release older than the pinned one, and for a pre-release after a final release', async () => {
+test('keeps the pin for a release older than the pinned one, and for every pre-release', async () => {
   const files = await repositoryFiles();
-  const older = Object.entries(OLDER_RELEASES).map(([sha, version]) => ({ sha, version })).at(-1)!;
-  assert.deepEqual(pinFiles(files, older, tagsUpTo(NEXT)), { kept: `The workflow templates on main pin ${MINIMUM_RELEASE.version}, which is not older than ${older.version}; they keep it.` });
+  const afterNext = { ...files, ...pinFiles(files, NEXT, tagsUpTo(NEXT)).files };
+  assert.deepEqual(pinFiles(afterNext, BETWEEN, tagsUpTo(NEXT)), { kept: `The workflow templates on main pin ${NEXT.version}, which is not older than ${BETWEEN.version}; they keep it.` });
 
-  const final: Release = BETWEEN;
-  const afterFinal = { ...files, ...pinFiles(files, final, tagsUpTo(BETWEEN)).files };
-  assert.equal(pinnedRelease({ [`${EXAMPLES}/mdbisync.yml`]: afterFinal[`${EXAMPLES}/mdbisync.yml`]! }).version, final.version);
+  // A pre-release leaves the templates as they are, whichever release they pin.
   const candidate: Release = { sha: 'd'.repeat(40), version: 'v999.0.1-rc.1' };
-  assert.deepEqual(pinFiles(afterFinal, candidate, [...tagsUpTo(BETWEEN), candidate]), { kept: `The workflow templates on main pin the final release ${final.version}; the pre-release ${candidate.version} does not replace it.` });
-  // The next final release moves them again.
-  assert.ok(pinFiles(afterFinal, NEXT, [...tagsUpTo(BETWEEN), candidate, NEXT]).files);
+  const kept = { kept: `${candidate.version} is a pre-release: the workflow templates keep their pin, and only a final release moves them.` };
+  assert.deepEqual(pinFiles(files, candidate, [...tagsUpTo(BETWEEN), candidate]), kept);
+  // It still checks its tag and the templates first.
+  assert.throws(() => pinFiles(files, { ...candidate, sha: 'c'.repeat(40) }, [...tagsUpTo(BETWEEN), candidate]), /does not name/);
+  const [first] = Object.keys(files).filter((path) => files[path]!.match(RELEASE_PIN));
+  const split = { ...files, [first!]: files[first!]!.replace(RELEASE_PIN, `mdbisync/mdbisync@${BETWEEN.sha} # ${BETWEEN.version}`) };
+  assert.throws(() => pinFiles(split, candidate, [...tagsUpTo(BETWEEN), candidate]), /pin more than one release/);
+  const afterFinal = { ...files, ...pinFiles(files, BETWEEN, tagsUpTo(BETWEEN)).files };
+  assert.equal(pinnedRelease({ [`${EXAMPLES}/mdbisync.yml`]: afterFinal[`${EXAMPLES}/mdbisync.yml`]! }).version, BETWEEN.version);
+  assert.deepEqual(pinFiles(afterFinal, candidate, [...tagsUpTo(BETWEEN), candidate]), kept);
+  // The next final release moves them, and lists the pre-release among the older ones.
+  const moved = pinFiles(afterFinal, NEXT, [...tagsUpTo(BETWEEN), candidate, NEXT]).files ?? assert.fail('the templates kept their pin');
+  assert.equal(JSON.parse(moved[OLDER_RELEASES_FILE]!)[candidate.sha], candidate.version);
 });
 
 /** A `main` on a bare origin with the repository's step files, pinned to a fixture release, and a release after it. */
@@ -119,14 +128,15 @@ async function fixture(t: TestContext) {
   execFileSync('git', ['init', '--quiet', '--bare', '-b', 'main', origin]);
   execFileSync('git', ['init', '--quiet', '-b', 'main', seed]);
   for (const [key, value] of [['user.name', 'Release Test'], ['user.email', 'release@example.com'], ['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']]) run(seed, 'config', key!, value!);
-  // Two release commits, as on the releases branch; the templates pin the first.
+  // Release commits, as on the releases branch; the templates pin the first.
   const releaseCommit = (version: string) => {
     const commit = run(seed, 'commit-tree', run(seed, 'hash-object', '-t', 'tree', '-w', '--stdin'), '-m', `Release ${version}`);
     run(seed, 'tag', '-a', version, commit, '-m', `Release ${version}`);
     return { sha: commit, version };
   };
-  const first = releaseCommit('v0.1.0-rc.1');
-  const second = releaseCommit('v0.1.0-rc.2');
+  const first = releaseCommit('v0.1.0');
+  const candidate = releaseCommit('v0.2.0-rc.1');
+  const second = releaseCommit('v0.2.0');
   const files = await repositoryFiles();
   for (const [path, text] of Object.entries(files)) {
     const pinned = path === OLDER_RELEASES_FILE ? '{}\n'
@@ -135,7 +145,7 @@ async function fixture(t: TestContext) {
     await writeFile(join(seed, path), pinned);
   }
   run(seed, 'add', '.');
-  run(seed, 'commit', '--quiet', '-m', 'Templates pinned to rc.1');
+  run(seed, 'commit', '--quiet', '-m', 'Templates pinned to v0.1.0');
   run(seed, 'remote', 'add', 'origin', origin);
   run(seed, 'push', '--quiet', 'origin', 'main', '--tags');
   /** A clone of main with every tag, as the pins job checks it out. */
@@ -145,24 +155,24 @@ async function fixture(t: TestContext) {
     for (const [key, value] of [['user.name', 'Release Test'], ['user.email', 'release@example.com'], ['commit.gpgsign', 'false']]) run(path, 'config', key!, value!);
     return path;
   };
-  return { origin, run, first, second, clone, main: run(seed, 'rev-parse', 'HEAD') };
+  return { origin, run, first, candidate, second, clone, main: run(seed, 'rev-parse', 'HEAD') };
 }
 
-test('pushes the pins on a new branch from main and leaves main as it is', async (t) => {
-  const { origin, run, first, second, clone, main } = await fixture(t);
+test('pushes a final release\'s pins on a new branch from main and leaves main as it is', async (t) => {
+  const { origin, run, first, candidate, second, clone, main } = await fixture(t);
   const { branch } = await pinRelease(clone('job'), second) as { branch: string };
   assert.equal(branch, pinBranch(second.version));
-  assert.equal(branch, 'release-pins-v0.1.0-rc.2');
+  assert.equal(branch, 'release-pins-v0.2.0');
   assert.equal(run(origin, 'rev-parse', 'main'), main, 'main is not pushed');
   const pushed = run(origin, 'rev-parse', `refs/heads/${branch}`);
   assert.equal(run(origin, 'rev-parse', `${pushed}^`), main, 'one commit on main');
-  assert.equal(run(origin, 'log', '-1', '--format=%s', pushed), 'Pin the workflow templates to v0.1.0-rc.2');
+  assert.equal(run(origin, 'log', '-1', '--format=%s', pushed), 'Pin the workflow templates to v0.2.0');
   const show = (path: string) => execFileSync('git', ['-C', origin, 'show', `${pushed}:${path}`], { encoding: 'utf8' });
   assert.ok(show(`${EXAMPLES}/mdbisync.yml`).includes(`mdbisync/mdbisync@${second.sha} # ${second.version}`));
   assert.ok(!show(`${EXAMPLES}/mdbisync.yml`).includes(first.sha));
   const embedded = JSON.parse(show(INIT_TEMPLATES)) as Record<string, string>;
   for (const [name, text] of Object.entries(embedded)) assert.equal(text, show(`${EXAMPLES}/${name}`), name);
-  assert.deepEqual(JSON.parse(show(OLDER_RELEASES_FILE)), { [first.sha]: first.version });
+  assert.deepEqual(JSON.parse(show(OLDER_RELEASES_FILE)), { [first.sha]: first.version, [candidate.sha]: candidate.version });
   assert.ok(pageNames(show(CONFIGURATION_PAGE), second.version));
   assert.deepEqual(run(origin, 'diff', '--name-only', main, pushed).split('\n').sort(), [
     CONFIGURATION_PAGE, `${EXAMPLES}/mdbisync-initial-sync.yml`, `${EXAMPLES}/mdbisync.yml`, OLDER_RELEASES_FILE, INIT_TEMPLATES,
@@ -173,7 +183,7 @@ test('pushes the pins on a new branch from main and leaves main as it is', async
   await writeFile(join(again, 'note'), '');
   await assert.rejects(pinRelease(again, second), /local changes/);
   await rm(join(again, 'note'));
-  await assert.rejects(pinRelease(again, second), /The branch release-pins-v0\.1\.0-rc\.2 already exists on origin/);
+  await assert.rejects(pinRelease(again, second), /The branch release-pins-v0\.2\.0 already exists on origin/);
   assert.equal(run(origin, 'rev-parse', `refs/heads/${branch}`), pushed);
 });
 
@@ -187,6 +197,12 @@ test('refuses a pins branch that already exists even where the push would fast-f
   run(origin, 'update-ref', `refs/heads/${branch}`, main);
   await assert.rejects(pinRelease(job, second), /already exists on origin/);
   assert.equal(run(origin, 'rev-parse', `refs/heads/${branch}`), main, 'the branch is not fast-forwarded');
+});
+
+test('pushes no branch for a pre-release', async (t) => {
+  const { origin, candidate, clone, run } = await fixture(t);
+  assert.deepEqual(await pinRelease(clone('candidate'), candidate), { kept: `${candidate.version} is a pre-release: the workflow templates keep their pin, and only a final release moves them.` });
+  assert.equal(run(origin, 'for-each-ref', '--format=%(refname)', 'refs/heads/'), 'refs/heads/main');
 });
 
 test('pushes nothing when main already pins the release, and refuses a tag that names another commit', async (t) => {

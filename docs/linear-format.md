@@ -577,7 +577,7 @@ how to find its SHA):
 ```yaml
 repos:
   - repo: https://github.com/mdbisync/mdbisync
-    rev: <release-sha> # v0.1.0-rc.9
+    rev: <release-sha> # <version>
     hooks:
       - id: linear-format
 ```

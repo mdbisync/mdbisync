@@ -6,7 +6,7 @@
 // cannot read it: CI fetches the release tags for the tests that read it
 // and fails without them; elsewhere a clone without the tag skips them.
 //
-// Each release moves the pins itself: release.yml's `pins` job runs
+// Each final release moves the pins itself: release.yml's `pins` job runs
 // `src/release/pins.ts`, which rewrites every `mdbisync/mdbisync` step in
 // `examples/`, `src/init/workflows.json` (which must equal them),
 // `src/init/older-releases.json` and the configuration page, and pushes
