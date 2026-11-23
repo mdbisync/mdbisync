@@ -1,9 +1,13 @@
 // Which failed scheduled soak workflows the soak may let the next scheduled
 // run recover from, and how many. Only a GitHub server error (HTTP 5xx) in
-// the sync pull request step qualifies: the engine ends that run incomplete
-// on purpose and the next run repeats the step. Every other failure stops the
+// the sync pull request step qualifies: the engine ends that run partial on
+// purpose and the next run repeats the step. Every other failure stops the
 // soak, as does a bound used up (`soak` in load.ts). `run.settle` runs again
 // after the same failure, within its own bound (`settleServerError`).
+//
+// The engine ends a GitHub failure in the sync pull request step with a
+// warning, which the workflow reports as a success; releases before it failed
+// the run. The soak counts either as a failed run (`failedOnGitHub`).
 
 import type { EngineResult } from './engine.ts';
 import { observedTokens } from './soak-report.ts';
@@ -47,22 +51,33 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 const empty = (value: unknown) => value === undefined || (Array.isArray(value) && value.length === 0);
 
-/** The engine's own line for this ending, which the action reports as the sync step's failure. */
-const ENGINE_LINE = 'sync: not finished (github-failed)';
+/** The engine's own line for this ending, which the action reports as the sync step's warning. */
+const ENGINE_LINE = 'sync: partial, will continue (github-failed)';
+/** The same ending's line in releases that failed the sync step on it. */
+const FAILED_ENGINE_LINE = 'sync: not finished (github-failed)';
 
 /**
- * Whether a scheduled workflow that ended with a nonzero exit failed only on a GitHub server error in the sync pull
- * request step: the run concluded `failure` (not cancelled or timed out) with the engine's own line for that ending
- * in its logs, its report says so and holds no suspended lane, nothing else in the
+ * Whether a run ended on a GitHub failure in the sync pull request step: its report's code says so, whether the run
+ * failed (earlier releases) or warned. The soak and the settle count it as a failed run either way.
+ */
+export function failedOnGitHub(result: EngineResult): boolean {
+  return result.exitCode !== 0 || result.report?.code === 'github-failed';
+}
+
+/**
+ * Whether a scheduled workflow failed only on a GitHub server error in the sync pull request step: the run concluded
+ * `success` with the engine's warning line for that ending in its logs, or `failure` (not cancelled or timed out)
+ * with an earlier release's failure line, its report says so and holds no suspended lane, nothing else in the
  * report failed, and every engine token it minted was confirmed revoked. Anything the run does not show is refused.
  */
 export function recoverableServerError(result: EngineResult): ServerErrorVerdict {
-  if (result.exitCode === 0) return { refused: 'the run succeeded' };
+  const warned = result.exitCode === 0 && result.conclusion === 'success' && result.stdout.includes(ENGINE_LINE);
+  if (result.exitCode === 0 && !warned) return { refused: 'the run succeeded' };
   if (result.remote === undefined) return { refused: 'not a workflow run' };
-  if (result.timedOut || result.signal !== null || result.exitCode === null || result.conclusion !== 'failure') {
+  if (result.timedOut || result.signal !== null || result.exitCode === null || (!warned && result.conclusion !== 'failure')) {
     return { refused: `the run did not end on its own failure (conclusion ${String(result.conclusion)})` };
   }
-  if (!result.stdout.includes(ENGINE_LINE)) return { refused: 'the logs lack the sync step\'s own GitHub failure' };
+  if (!warned && !result.stdout.includes(FAILED_ENGINE_LINE)) return { refused: 'the logs lack the sync step\'s own GitHub failure' };
   const verdict = serverErrorInReport(result.report);
   if ('refused' in verdict) return verdict;
   const tokens = observedTokens([result]);
@@ -77,7 +92,7 @@ export function recoverableServerError(result: EngineResult): ServerErrorVerdict
  */
 export function serverErrorInReport(report: Readonly<Record<string, unknown>> | null): ServerErrorVerdict {
   if (report === null) return { refused: 'the run left no engine report' };
-  if (report.operation !== 'sync' || report.code !== 'github-failed' || report.exitStatus !== 'failure') {
+  if (report.operation !== 'sync' || report.code !== 'github-failed' || (report.exitStatus !== 'warning' && report.exitStatus !== 'failure')) {
     return { refused: `the run ended with code ${String(report.code)}, not a GitHub failure of the sync pull request` };
   }
   const pullRequest = record(report.pullRequest);
@@ -122,12 +137,13 @@ export function settleServerError(result: EngineResult): ServerErrorVerdict {
 }
 
 /**
- * How a completed scheduled workflow with a nonzero exit fails the soak: always with the strict failure, and with
- * the line a later run may recover from when the run qualifies (`recoverableServerError`). `note` says which, for
- * the log.
+ * How a completed scheduled workflow that failed (`failedOnGitHub`) fails the soak: always with the strict failure,
+ * and with the line a later run may recover from when the run qualifies (`recoverableServerError`). `note` says
+ * which, for the log.
  */
 export function failedWorkflow(result: EngineResult): { error: ProductError; recoverable?: string; note: string } {
-  const error = new ProductError(`scheduled soak workflow ${result.remote?.runId ?? 'unknown'} failed (exit ${String(result.exitCode)})`);
+  const how = result.exitCode === 0 ? 'ended on a GitHub failure in the sync pull request step' : `failed (exit ${String(result.exitCode)})`;
+  const error = new ProductError(`scheduled soak workflow ${result.remote?.runId ?? 'unknown'} ${how}`);
   const verdict = recoverableServerError(result);
   if ('refused' in verdict) return { error, note: `not recoverable: ${verdict.refused}` };
   const recoverable = describeServerError(verdict.recoverable);

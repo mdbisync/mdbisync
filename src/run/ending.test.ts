@@ -37,7 +37,7 @@ function write(fields: Record<string, unknown> = {}) {
 }
 
 /** A sync run that reached its write step, with the pull request's code and the write's fields. */
-function syncRun(pullRequestCode: string | undefined, writeFields: Record<string, unknown> = {}, captureFields: Record<string, unknown> = {}): OperationOutcome {
+function syncRun(pullRequestCode: string | undefined, writeFields: Record<string, unknown> = {}, captureFields: Record<string, unknown> = {}, pullRequestFields: Record<string, unknown> = {}): OperationOutcome {
   const result = write(writeFields);
   return outcome({
     captured: capture(captureFields),
@@ -46,7 +46,7 @@ function syncRun(pullRequestCode: string | undefined, writeFields: Record<string
       changed: true,
       trackedTip: 'tip',
       capture: capture(),
-      pullRequest: { needed: true, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], ...(pullRequestCode === undefined ? {} : { code: pullRequestCode }) },
+      pullRequest: { needed: true, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], ...(pullRequestCode === undefined ? {} : { code: pullRequestCode }), ...pullRequestFields },
       write: result,
     },
   });
@@ -103,6 +103,16 @@ const ROWS: Row[] = [
     name: 'a GitHub failure in the sync pull request step alone',
     outcome: syncRun('github-failed'),
     status: 'warning', exitCode: 5, message: 'sync: partial, will continue (github-failed)', code: 'github-failed',
+  },
+  {
+    name: 'a GitHub refusal of a sync pull request request',
+    outcome: syncRun('github-failed', {}, {}, { status: 422 }),
+    status: 'failure', exitCode: 3, message: 'sync: setup error (github-failed): GitHub refused a request for the sync pull request (HTTP 422); the job summary names it', code: 'github-failed',
+  },
+  {
+    name: 'a push to the sync branch a rule rejects',
+    outcome: syncRun('push-rejected', {}, {}, { reason: 'refs/heads/mdbisync/linear: push declined due to repository rule violations' }),
+    status: 'failure', exitCode: 3, message: "sync: setup error (push-rejected): GitHub refused the push to the sync branch (refs/heads/mdbisync/linear: push declined due to repository rule violations); let the sync's GitHub App push to it", code: 'push-rejected',
   },
   {
     name: 'a ref that moved in the sync pull request step alone',

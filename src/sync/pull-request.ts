@@ -154,6 +154,7 @@ export interface PullRequestResult {
    * - `initial-pull-request-pending`: the sync branch holds the record of an initial sync from Linear that a person has not merged.
    * - `state-moved`: the sync branch moved while this run worked, or the pull request's base or the tracked branch changed after the sync checked the merge.
    * - `github-failed`: GitHub refused or failed a request, or no answer came; `status` is its HTTP status, absent when no answer came.
+   * - `push-rejected`: the remote refused the push to the sync branch for a reason other than a moved ref (a rule, a hook); `reason` holds git's words. A setup error: a person lets the App push to it.
    * - `head-unverified`: the merge would change files other than synchronized documents and their assets (`unverified`); the sync leaves the pull request to a person.
    * - `suspended-asset-discovery`: the sync could not safely collect a suspended batch's assets and leaves the batch in place.
    * - `merge-misplaced`: GitHub merged the pull request somewhere other than on the tracked branch commit the sync checked (`misplaced`): its base or the tracked branch changed between the sync's last read and the merge. A setup error: a person checks the branch that took the merge.
@@ -165,7 +166,7 @@ export interface PullRequestResult {
   misplaced?: MisplacedMerge;
   /** GitHub's HTTP status for `merge-refused`, `merge-blocked` and `github-failed`. */
   status?: number;
-  /** The reason for a merge refusal or suspended asset discovery hold, on one line. */
+  /** The reason for a merge refusal, a rejected push or suspended asset discovery hold, on one line. */
   reason?: string;
 }
 
@@ -201,17 +202,30 @@ export function pullRequestFailure(result: PullRequestResult | undefined): PullR
   // Either lane's head that waits for a person, after the endings above and before a lane that only needs another run.
   const unverified = result?.unverified ?? result?.suspended?.unverified;
   if (unverified !== undefined) return {kind:'setup', code:'head-unverified', message:message('pull-request.head-unverified', {code:'head-unverified', files:unverifiedList(unverified)})};
+  if (result?.code === 'push-rejected') return { kind: 'setup', code: result.code, message: message('pull-request.push-rejected', { code: result.code, reason: result.reason ?? '' }) };
+  if (result?.code === 'github-failed' && !transientGitHubFailure(result.status)) {
+    return { kind: 'setup', code: result.code, message: message('pull-request.github-refused', { code: result.code, status: String(result.status) }) };
+  }
   if (result?.code === 'suspended-asset-discovery') return { kind: 'incomplete', code: result.code, message: message('pull-request.suspended-asset-discovery', { code: result.code, reason: result.reason ?? '' }) };
   return null;
 }
 
 /**
  * Why step 2 stopped part way with nothing for a person to do, or undefined: a state ref moved under it, or a GitHub
- * request failed or got no answer. The next run repeats the step, so the run is partial, not failed. A GitHub refusal
- * that needs a person (a missing permission) fails the setup check of every run before step 2.
+ * request failed in a way that passes (`transientGitHubFailure`). The next run repeats the step, so the run is
+ * partial, not failed.
  */
 export function pullRequestPartialCode(result: PullRequestResult | undefined): 'state-moved' | 'github-failed' | undefined {
-  return result?.code === 'state-moved' || result?.code === 'github-failed' ? result.code : undefined;
+  if (result?.code === 'state-moved') return result.code;
+  return result?.code === 'github-failed' && transientGitHubFailure(result.status) ? result.code : undefined;
+}
+
+/**
+ * Whether a failed GitHub request passes on its own: no answer came, GitHub failed it (5xx), timed it out (408) or
+ * limited the rate (429). Any other answer refuses the request itself, and the next run sends the same one.
+ */
+function transientGitHubFailure(status: number | undefined): boolean {
+  return status === undefined || status >= 500 || status === 408 || status === 429;
 }
 
 export async function syncPullRequest(context: RunContext, options: PullRequestOptions): Promise<PullRequestResult> {
@@ -404,7 +418,8 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
     }
     if (head !== sync) {
       const pushed = await pushSyncBranch(context, options, sync, head);
-      if (!pushed.ok) return { ...result, code: 'state-moved' };
+      // A lost lease is another run's move; any other refusal (a rule, a hook) repeats until a person acts.
+      if (!pushed.ok) return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : { ...result, code: 'push-rejected', reason: oneLine(pushed.refs.map((ref) => ref.message).join('; ')) };
       result.branchMoved = true;
       result.marked = [...new Set(resolved.marked)].sort();
       result.decided = [...new Set(resolved.decided)].sort();
@@ -862,8 +877,13 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       lines.push(
         result.status === undefined
           ? 'A request to GitHub for the sync pull request got no answer (the connection broke or timed out); the next run tries again.'
-          : `GitHub refused or failed a request for the sync pull request (HTTP ${result.status}); the next run tries again.`,
+          : transientGitHubFailure(result.status)
+            ? `GitHub failed a request for the sync pull request (HTTP ${result.status}); the next run tries again.`
+            : `Setup error: GitHub refused a request for the sync pull request (HTTP ${result.status}). The next run sends the same request: a person checks what GitHub refuses, for example a repository rule or the App's access.`,
       );
+      break;
+    case 'push-rejected':
+      lines.push(`Setup error: GitHub refused the push to the sync branch (\`${(result.reason ?? '').replace(/[`\r\n]/g, ' ')}\`). Nothing reaches the sync pull request until a person lets the sync's GitHub App push to that branch, for example on the bypass list of the rule that refuses it.`);
       break;
     default:
       if (explained) break;

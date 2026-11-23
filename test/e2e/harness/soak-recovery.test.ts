@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { EngineResult } from './engine.ts';
 import type { LogEntry } from '../../../src/linear/index.ts';
-import { describeServerError, failedWorkflow, pullRequestStepClean, recoverableServerError, settleServerError, soakServerErrorPolicy, STRICT_SERVER_ERRORS } from './soak-recovery.ts';
+import { describeServerError, failedOnGitHub, failedWorkflow, pullRequestStepClean, recoverableServerError, settleServerError, soakServerErrorPolicy, STRICT_SERVER_ERRORS } from './soak-recovery.ts';
 import { ProductError } from './results.ts';
 
 const entry = (operation: string, extra: Partial<LogEntry> = {}): LogEntry => ({
@@ -62,7 +62,7 @@ describe('soak recovery from GitHub server errors', () => {
     assert.ok('refused' in recoverableServerError(run({}, { pullRequest: { code: 'merge-refused' } })));
     assert.ok('refused' in recoverableServerError(run({ report: { ...report(), pullRequest: null } })));
     assert.ok('refused' in recoverableServerError(run({}, { operation: 'initial-sync' })));
-    assert.ok('refused' in recoverableServerError(run({}, { exitStatus: 'warning' })));
+    assert.ok('refused' in recoverableServerError(run({}, { exitStatus: 'success' })));
   });
 
   it('refuses a report that shows another failure next to the server error', () => {
@@ -121,6 +121,19 @@ describe('soak recovery from GitHub server errors', () => {
     assert.deepEqual(recoverableServerError(run(remote(unconfirmed))), { refused: 'the run\'s token revocation is unconfirmed' });
     // No token diagnostics at all: unknown, not zero.
     assert.deepEqual(recoverableServerError(run(remote([]))), { refused: 'the run\'s token revocation is unconfirmed' });
+  });
+
+  it('takes the engine\'s warning for the same ending, which the workflow reports as a success', () => {
+    const warned = (changes: Partial<EngineResult> = {}, reportChanges: Parameters<typeof report>[0] = {}) => run({
+      exitCode: 0, conclusion: 'success', stdout: 'Sync\t2026-11-13T09:15:12Z ##[warning]sync: partial, will continue (github-failed)\n', ...changes,
+    }, { exitStatus: 'warning', ...reportChanges });
+    assert.deepEqual(recoverableServerError(warned()), { recoverable: { status: 500, workflowRunId: 43, pullRequest: 328 } });
+    assert.deepEqual(recoverableServerError(warned({}, { pullRequest: { status: 422 } })), { refused: 'GitHub answered HTTP 422, not a server error' });
+    // A success without the engine's warning line is a success.
+    assert.deepEqual(recoverableServerError(warned({ stdout: '' })), { refused: 'the run succeeded' });
+    assert.equal(failedOnGitHub(warned()), true);
+    assert.equal(failedOnGitHub(run({ exitCode: 0, conclusion: 'success' }, { code: null, exitStatus: 'success', pullRequest: { code: undefined, status: undefined } })), false);
+    assert.equal(failedWorkflow(warned()).error.message, 'scheduled soak workflow 43 ended on a GitHub failure in the sync pull request step');
   });
 
   it('fails the soak with the strict failure, and names a recoverable one for the soak\'s bound', () => {

@@ -196,7 +196,7 @@ for (const file of process.argv.slice(2)) {
       'app-slug': FAKE_APP_SLUG,
       'github-api-url': `${bridge}/github`,
       'merge-grace-seconds': '0',
-      repository: 'example/repository',
+      repository: 'owner/repo',
       'report-file': join(fixture.root, `${name}-report`, 'report.json'),
       ...inputs,
     };
@@ -403,7 +403,7 @@ for (const file of process.argv.slice(2)) {
     assert.equal((await hooksStep(again)).status, 0);
     const next = await action('apply-2', { operation: 'sync', 'security-step': 'apply' });
     // The fake GitHub has no merge for the first run's pull request, so this run ends at that step; the capture is what counts here.
-    assert.ok(next.status === 0 || /not finished \(github-failed\)/.test(next.stdout), next.stdout);
+    assert.ok(next.status === 0 || /partial, will continue \(github-failed\)/.test(next.stdout), next.stdout);
     assert.deepEqual((await report('apply-2')).capture.leftOut, []);
     assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nUnseen secret-like edit.');
   });
@@ -558,7 +558,7 @@ for (const file of process.argv.slice(2)) {
       assert.equal((await hooksStep(stage)).status, 0);
       const apply = await action(`${name}-apply`, { operation: 'sync', 'security-step': 'apply' });
       // The fake GitHub has no merge for the first run's pull request, so a later run ends at that step; the capture is what counts here.
-      assert.ok(apply.status === 0 || /not finished \(github-failed\)/.test(apply.stdout), apply.stdout);
+      assert.ok(apply.status === 0 || /partial, will continue \(github-failed\)/.test(apply.stdout), apply.stdout);
       return (await report(`${name}-apply`)).capture;
     };
     const target = { id: 'target', title: 'target', projectId: 'project-api', content: 'Target.\n', createdAt: '2026-01-04T00:00:00Z' };

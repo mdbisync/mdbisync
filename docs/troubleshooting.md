@@ -34,7 +34,7 @@ The command line's exit code:
 | 0 | Done. |
 | 1 | An error that stopped the run: the message starts with `error:`. Look it up on this page; see [Errors found during the run](#errors-found-during-the-run) and [Errors that point to a bug](#errors-that-point-to-a-bug). |
 | 2 | The command or its inputs are wrong. Nothing ran. See [Input errors](#input-errors). |
-| 3 | A setup error. Either the setup check failed and nothing was written, or GitHub keeps refusing the merge (`merge-blocked`), or expected checks never started on the sync pull request's head (`checks-missing`): then the run kept Linear's changes in its state and on the sync branch, but wrote no tracked-branch changes to Linear. Or the sync's head, on either lane, would change files that are not synchronized documents or their assets (`head-unverified`); a person reviews it. Or GitHub merged a sync pull request where the sync had not checked it (`merge-misplaced`); the rest of the run went on as usual. |
+| 3 | A setup error. Either the setup check failed and nothing was written, or GitHub keeps refusing the merge (`merge-blocked`), or expected checks never started on the sync pull request's head (`checks-missing`): then the run kept Linear's changes in its state and on the sync branch, but wrote no tracked-branch changes to Linear. Or the sync's head, on either lane, would change files that are not synchronized documents or their assets (`head-unverified`); a person reviews it. Or GitHub merged a sync pull request where the sync had not checked it (`merge-misplaced`); the rest of the run went on as usual. Or GitHub refused the push to the sync branch (`push-rejected`) or a request for the sync pull request (`github-failed` with an HTTP 4xx status other than 408 and 429). |
 | 4 | The sync has no state: run an initial sync, or merge the pull request of the one that ran. Nothing was written. |
 | 5 | The run did not finish. A sync is partial and the next run goes on; an initial sync goes on when you run it again with the same inputs. Except `container-cap`: running again fails the same way until a person makes room (see [`container-cap`](#container-cap)); and `suspended-asset-discovery`, which needs the repair in [Suspension and release](sync-cycle.md#suspension-and-release). |
 | 10 to 15 | `<command>: not implemented`: this build does not have the command. |
@@ -55,6 +55,8 @@ step with the bare message, without `error:`.
 | `<command>: not finished (sync-branch-changed); merge or close the pull request of the sync branch and delete the branch, then run it again` | See [`sync-branch-changed`](#initial-sync). |
 | `<command>: setup error (merge-blocked): GitHub refuses again to merge the sync pull request (<reason>)` | See [`merge-blocked`](#the-sync-pull-request). |
 | `<command>: setup error (merge-misplaced): GitHub merged a sync pull request into <branch> at <commit>, not onto the tracked branch commit the sync checked; a person checks that branch` | See [`merge-misplaced`](#the-sync-pull-request). |
+| `<command>: setup error (push-rejected): GitHub refused the push to the sync branch (<reason>); let the sync's GitHub App push to it` | See [`push-rejected`](#the-sync-pull-request). |
+| `<command>: setup error (github-failed): GitHub refused a request for the sync pull request (HTTP <status>); the job summary names it` | See [`github-failed`](#the-sync-pull-request). |
 | `<command>: setup error (checks-missing): the sync pull request waited past the check deadline for checks that never started (<checks>)` | See [`checks-missing`](#the-sync-pull-request). |
 | `<command>: waits for a person (head-unverified): the sync pull request also changes files that are not synchronized documents or their assets (<files>); a person reviews and merges it` | See [`head-unverified`](#the-sync-pull-request). |
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
@@ -166,7 +168,8 @@ writes nothing and ends with exit code 4:
 A partial sync run kept what it could record; the next run goes on from
 there, so the job ends with a warning, not a failure. The summary says
 which documents were written and which were not. The sync pull request
-step's `state-moved` and `github-failed` end a run the same way (see
+step's `state-moved`, and its `github-failed` when the request may pass
+next time, end a run the same way (see
 [The sync pull request](#the-sync-pull-request)).
 
 | Code | Meaning | What to do |
@@ -259,7 +262,8 @@ How each code ends the run, when nothing else in it does:
 
 - `conflict` and `merge-refused` leave it successful: the sync goes on with
   them on its own.
-- `state-moved` and `github-failed` end it with a warning,
+- `state-moved`, and `github-failed` when GitHub gave no answer or HTTP
+  5xx, 408 or 429, end it with a warning,
   `sync: partial, will continue (<code>)`: the next run repeats the step
   with nothing for a person to do.
 - The other codes fail it: a person must act.
@@ -274,7 +278,8 @@ How each code ends the run, when nothing else in it does:
 | `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. For documents the sync merges with conflict markers: this run into Linear's state, a later run into the sync branch. | Resolve the markers on either side ([conflicts.md](conflicts.md#resolving-a-conflict)). A conflicting file that is not a document waits: merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve it there; the sync keeps those commits. |
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked, or right before its merge the sync pull request no longer targeted the tracked branch, or the tracked branch had moved since the sync checked the merge. | Nothing; the next run updates the pull request. |
-| `github-failed` | A GitHub request for the sync pull request failed or got no answer. A missing permission fails the [setup check](#setup-check) of every run before this step. | Nothing, unless it repeats; then check GitHub's status. |
+| `github-failed` | A GitHub request for the sync pull request failed or got no answer. With no answer, or HTTP 5xx, 408 or 429, the run warns and the next run tries again. With any other status GitHub refused the request itself, and the run fails (exit code 3): the next run sends the same request. | For a warning, nothing unless it repeats; then check GitHub's status. For a failure, the job summary gives the status; check the repository's rules and the App's access. |
+| `push-rejected` | GitHub refused the push to the sync branch for a reason other than another run's move, such as a ruleset or a push rule (exit code 3). Linear's changes stay in the sync's state; none reach the sync pull request. | Let the sync's GitHub App push to the sync branch, for example on the bypass list of the rule that refuses it ([who may push to the sync branches](quickstart.md#who-may-push-to-the-sync-branches)). A later run pushes. |
 | `head-unverified` | The sync pull request, or the suspended one, would also change files that are not synchronized documents or their assets: anything outside an annotated folder, inside a `.github` folder, of another type, or not a regular file, or a `README.md` change that adds, edits or removes a folder's Linear team or project (exit code 3). Someone added those changes to its branch; the sync does not merge them by itself. The description and the run summary list the files. | Review the changes. Merge the pull request yourself with a merge commit, or remove those changes from its branch with an ordinary commit (no force push); a later run merges what remains. To keep others from pushing to the sync branches, see [quickstart.md](quickstart.md#who-may-push-to-the-sync-branches). |
 
 ## Initial sync

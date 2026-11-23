@@ -99,7 +99,7 @@ export const RECORD_CODES = ['stopped', 'state-moved', 'pull-request-failed', 's
 export type RecordCode = (typeof RECORD_CODES)[number];
 
 /** Why the sync pull request step did not finish. */
-export const PULL_REQUEST_CODES = ['conflict', 'merge-refused', 'merge-blocked', 'checks-missing', 'initial-pull-request-pending', 'state-moved', 'github-failed', 'head-unverified', 'merge-misplaced', 'suspended-asset-discovery'] as const;
+export const PULL_REQUEST_CODES = ['conflict', 'merge-refused', 'merge-blocked', 'checks-missing', 'initial-pull-request-pending', 'state-moved', 'github-failed', 'head-unverified', 'merge-misplaced', 'suspended-asset-discovery', 'push-rejected'] as const;
 export type PullRequestCode = (typeof PULL_REQUEST_CODES)[number];
 
 /** A sync run is partial because it held a removal it could not confirm. */

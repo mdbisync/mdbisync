@@ -71,6 +71,7 @@ describe('the exit status of each sync pull request code alone', () => {
     'checks-missing': { checks: { missing: ['ci / test'] } },
     'merge-misplaced': { misplaced: { branch: 'release', commit: 'a'.repeat(40) } },
     'head-unverified': { unverified: ['.github/workflows/ci.yml'] },
+    'push-rejected': { reason: 'refs/heads/mdbisync/linear: pre-receive hook declined' },
     'suspended-asset-discovery': { reason: 'an asset link points outside the folder' },
   };
   // Warn: the next run repeats the step with nothing for a person to do. Fail: a person must act.
@@ -85,6 +86,7 @@ describe('the exit status of each sync pull request code alone', () => {
     'head-unverified': 'failure',
     'merge-misplaced': 'failure',
     'suspended-asset-discovery': 'failure',
+    'push-rejected': 'failure',
   };
   for (const code of PULL_REQUEST_CODES) {
     it(`${code} ends the run with ${expected[code]}`, () => {
@@ -93,6 +95,18 @@ describe('the exit status of each sync pull request code alone', () => {
       assert.equal(exitStatusOf(outcome), expected[code]);
     });
   }
+
+  it('github-failed warns when the request may pass next time and fails when GitHub refused the request itself', () => {
+    const cases: Array<[number | undefined, 'warning' | 'failure']> = [
+      [undefined, 'warning'], [500, 'warning'], [502, 'warning'], [408, 'warning'], [429, 'warning'],
+      [403, 'failure'], [404, 'failure'], [409, 'failure'], [422, 'failure'],
+    ];
+    for (const [status, ending] of cases) {
+      const outcome = sync('github-failed', undefined);
+      Object.assign((outcome.sync as unknown as { pullRequest: object }).pullRequest, { status });
+      assert.equal(exitStatusOf(outcome), ending, String(status));
+    }
+  });
 });
 
 describe('the message of a run stopped before any write', () => {

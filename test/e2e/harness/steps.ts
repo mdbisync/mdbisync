@@ -43,7 +43,7 @@ import { initFiles } from './init-files.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { soakDrainSyncs } from './soak-drain.ts';
-import { describeServerError, failedWorkflow, pullRequestStepClean, settleServerError, soakServerErrorPolicy } from './soak-recovery.ts';
+import { describeServerError, failedOnGitHub, failedWorkflow, pullRequestStepClean, settleServerError, soakServerErrorPolicy } from './soak-recovery.ts';
 import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver, type SoakBoundary, type SoakDriver, type SoakResult } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure, type CheckOutcome } from './results.ts';
@@ -396,8 +396,9 @@ export async function settle(
   ctx.observations.set('settle.blocked', blocked);
   // Settled: a successful run changed nothing and its sync pull request waits for no check.
   const settled = (result: EngineResult | undefined) => {
-    ctx.observations.set('settle.settled', result?.exitCode === 0);
-    if (result?.exitCode !== 0) ctx.log('settle: the last run failed; the scenario did not settle');
+    const failed = result === undefined || failedOnGitHub(result);
+    ctx.observations.set('settle.settled', !failed);
+    if (failed) ctx.log('settle: the last run failed; the scenario did not settle');
   };
   for (let attempt = 0; attempt < limit + waits + merges + serverErrors + inProgress; attempt += 1) {
     const count = ctx.engine.results.length;
@@ -1179,7 +1180,7 @@ const RUN: Record<string, Executor> = {
         let recoverable: string | undefined;
         let recovers = true;
         if (failure === undefined && completed) {
-          if (result.exitCode !== 0) {
+          if (failedOnGitHub(result)) {
             // Only a GitHub server error in the sync pull request step, with the run's tokens confirmed revoked.
             const failed = failedWorkflow(result);
             failure = failed.error;

@@ -591,7 +591,7 @@ head says “it merges after the suspended pull request, whose checks still run.
 Any other line stands for one of the codes (`conflict`, `merge-refused`,
 `merge-blocked`, `merge-misplaced`, `checks-missing`,
 `initial-pull-request-pending`, `state-moved`, `github-failed`,
-`head-unverified`), explained in
+`head-unverified`, `push-rejected`), explained in
 [the sync pull request](troubleshooting.md#the-sync-pull-request). The
 section also counts the files the pull request changes, and names the
 documents where pending edits on the sync branch met later edits
@@ -643,13 +643,16 @@ or a refused merge that a later run takes up (`conflict`, `merge-refused`).
 A partial run ends with a warning, `sync: partial, will continue (<code>)`:
 Linear stopped it, a request to Linear or a write failed, a state ref moved
 while it captured or wrote, a removal is held, or the sync pull request
-step stopped on a moved ref or a failed GitHub request (`state-moved`,
-`github-failed`). It kept what it could record, and the next run goes on
+step stopped on a moved ref or on a GitHub request that may pass next time
+(`state-moved`, `github-failed`). It kept what it could record, and the next run goes on
 from there. A run fails when it needs a person: the setup check failed, GitHub refuses
 a merge again (`merge-blocked`), expected checks never started on the sync
 pull request (`checks-missing`), the sync pull request changes files that
 are not synchronized documents (`head-unverified`), GitHub merged a sync
-pull request where the sync had not checked it (`merge-misplaced`), an
+pull request where the sync had not checked it (`merge-misplaced`),
+GitHub refused the push to the sync branch (`push-rejected`) or refused a
+request for the sync pull request itself (`github-failed` with an HTTP 4xx
+status other than 408 and 429), an
 initial sync from Linear is not merged yet, the sync has no state yet
 (`initial-sync-required`), a container is full (`container-cap`), or the
 assets of a suspended batch cannot be collected safely

@@ -61,6 +61,19 @@ async function settleWith(endings: Ending[], limit?: number, options: { args?: R
 }
 
 describe('run.settle after a GitHub server error', () => {
+  it('runs again after a server error the engine ended with a warning', async () => {
+    const results: EngineResult[] = [];
+    const ctx = { live: null, scenario: { setup: { fixtures: [] } }, engine: { results }, observations: new Map<string, unknown>(), log: () => undefined } as unknown as RunContext;
+    const runOnce = async () => {
+      const warned = results.length === 0;
+      const ending = warned ? { ...report('server-error'), exitStatus: 'warning' } : report('settled');
+      results.push({ command: 'sync', exitCode: warned ? 5 : 0, signal: null, timedOut: false, notImplemented: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: ending });
+    };
+    await settle(ctx, {}, 4, runOnce);
+    assert.equal(ctx.observations.get('settle.serverErrorRetries'), 1);
+    assert.equal(ctx.observations.get('settle.settled'), true);
+  });
+
   it('runs again after one server error and settles, keeping the failed run among the results', async () => {
     const { outcome, runs, ctx, log } = await settleWith(['changed', 'server-error', 'changed', 'settled']);
     assert.equal(outcome, undefined);
