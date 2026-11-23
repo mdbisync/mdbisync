@@ -329,6 +329,22 @@ describe('sync: pull request failures', () => {
     assert.deepEqual(opened.writes, ['POST /pulls']);
   });
 
+  it('a 403 GitHub gives for its rate limit ends the run partial, not as a setup error', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nLimited at first. ${CANARY}\n`);
+    h.world.github.rateLimitPullRequests = true;
+    const limited = await sync();
+    assert.equal(limited.result.exitCode, INCOMPLETE_EXIT_CODE, limited.result.stderr);
+    assert.match(limited.result.stderr, /partial, will continue \(github-failed\)/);
+    assert.equal(limited.report.exitStatus, 'warning');
+    assert.equal(limited.report.pullRequest?.status, 403);
+    assert.equal(limited.report.pullRequest?.rateLimited, true);
+    assert.match(limited.summary, /GitHub limited the rate of a request for the sync pull request \(HTTP 403\); the next run tries again\./);
+    h.world.github.rateLimitPullRequests = false;
+    const opened = await sync();
+    assert.equal(opened.result.exitCode, 0, opened.result.stderr);
+    assert.deepEqual(opened.writes, ['POST /pulls']);
+  });
+
   it('a push to the sync branch that a rule rejects fails the run as a setup error, not as a moved ref', async () => {
     await editInLinear('eng/notes/plan.md', `# Plan\n\nFirst edit. ${CANARY}\n`);
     await sync();

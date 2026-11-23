@@ -261,7 +261,7 @@ function isNetworkFailure(error: unknown): boolean {
   return error instanceof TypeError;
 }
 
-interface Answer {
+export interface Answer {
   status: number;
   headers: Headers;
   json: unknown;
@@ -271,7 +271,7 @@ interface Answer {
  * GitHub answers a primary or secondary rate limit with 403 too; it is a
  * wait, not a missing permission.
  */
-function isRateLimited(answer: Answer): boolean {
+export function isRateLimited(answer: Answer): boolean {
   const message = (answer.json as { message?: unknown } | null)?.message;
   return (
     answer.headers.has('retry-after') ||

@@ -58,6 +58,8 @@ export interface SuspendedResult {
   /** For `merge-misplaced`: the branch GitHub merged the suspended pull request into and its merge commit. */
   misplaced?: MisplacedMerge;
   status?: number;
+  /** For `github-failed`: GitHub refused the request for its rate limit. */
+  rateLimited?: true;
   reason?: string;
 }
 
@@ -240,7 +242,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       }
     } catch (error) {
       if (!(error instanceof PullRequestError)) throw error;
-      return { ...pending, code: 'github-failed', ...(error.status === undefined ? {} : { status: error.status }) };
+      return { ...pending, code: 'github-failed', ...(error.status === undefined ? {} : { status: error.status }), ...(error.rateLimited ? { rateLimited: true as const } : {}) };
     }
   }
   const tracked = context.fetched.tracked;

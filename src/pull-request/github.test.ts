@@ -196,3 +196,24 @@ describe('closing only at the expected pull request head', () => {
     finally { clearInterval(keepAlive); }
   });
 });
+
+describe('a refusal for the rate limit', () => {
+  const refusal = async (status: number, body: unknown, headers: Record<string, string> = {}) => {
+    const fetch = (async () => new Response(JSON.stringify(body), { status, headers })) as typeof globalThis.fetch;
+    const error = await openPullRequest({ repository: 'owner/repo', token: 'token', apiUrl: 'https://api.example.test', fetch }, spec).then(() => undefined, (caught: unknown) => caught);
+    assert.ok(error instanceof PullRequestError);
+    return error;
+  };
+
+  it('keeps that a 403 or 429 was GitHub limiting the rate, by its message or headers', async () => {
+    assert.equal((await refusal(403, { message: 'You have exceeded a secondary rate limit.' })).rateLimited, true);
+    assert.equal((await refusal(403, { message: 'Forbidden' }, { 'retry-after': '60' })).rateLimited, true);
+    assert.equal((await refusal(403, { message: 'API rate limit exceeded' }, { 'x-ratelimit-remaining': '0' })).rateLimited, true);
+    assert.equal((await refusal(429, { message: 'Too many requests' }, { 'retry-after': '1' })).rateLimited, true);
+  });
+
+  it('is not a 403 that refuses access, nor another status', async () => {
+    assert.equal((await refusal(403, { message: 'Resource not accessible by integration' })).rateLimited, false);
+    assert.equal((await refusal(422, { message: 'Validation Failed' }, { 'retry-after': '60' })).rateLimited, false);
+  });
+});

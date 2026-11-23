@@ -652,7 +652,7 @@ are not synchronized documents (`head-unverified`), GitHub merged a sync
 pull request where the sync had not checked it (`merge-misplaced`),
 GitHub refused the push to the sync branch (`push-rejected`) or refused a
 request for the sync pull request itself (`github-failed` with an HTTP 4xx
-status other than 408 and 429), an
+status other than 408, 429 and a rate-limit 403), an
 initial sync from Linear is not merged yet, the sync has no state yet
 (`initial-sync-required`), a container is full (`container-cap`), or the
 assets of a suspended batch cannot be collected safely

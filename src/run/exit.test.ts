@@ -106,6 +106,10 @@ describe('the exit status of each sync pull request code alone', () => {
       Object.assign((outcome.sync as unknown as { pullRequest: object }).pullRequest, { status });
       assert.equal(exitStatusOf(outcome), ending, String(status));
     }
+    // A 403 GitHub gives for its rate limit passes like a 429.
+    const limited = sync('github-failed', undefined);
+    Object.assign((limited.sync as unknown as { pullRequest: object }).pullRequest, { status: 403, rateLimited: true });
+    assert.equal(exitStatusOf(limited), 'warning');
   });
 });
 

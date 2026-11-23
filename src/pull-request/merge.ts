@@ -4,7 +4,7 @@
 // private repository on GitHub Free cannot have.
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { type CheckClock, type GitHubRepository, PullRequestError, readPullRequest, request } from './github.ts';
+import { answerError, type CheckClock, type GitHubRepository, PullRequestError, readPullRequest, request } from './github.ts';
 import { message } from '../messages.ts';
 
 /** Check run conclusions that let a merge go ahead. */
@@ -161,7 +161,7 @@ export async function readCommitChecks(target: GitHubRepository, sha: string, op
   const answer = await request(target, 'GET', `/commits/${sha}/status?per_page=${PAGE_SIZE}`);
   const combined = answer.json as { total_count?: unknown; statuses?: unknown } | null;
   if (answer.status !== 200 || combined === null || typeof combined.total_count !== 'number' || !Array.isArray(combined.statuses)) {
-    throw new PullRequestError(message('github.reading-statuses'), answer.status);
+    throw answerError(message('github.reading-statuses'), answer);
   }
   // The combined status lists at most one page of contexts; ones it does not show are never read as passed.
   if (combined.total_count > combined.statuses.length) unlisted.push(`${combined.total_count - combined.statuses.length} more commit statuses`);
@@ -185,7 +185,7 @@ async function statusCreators(target: GitHubRepository, sha: string, ids: Readon
   const creators = new Map<unknown, unknown>();
   for (let page = 1; page <= MAX_PAGES && creators.size < ids.size; page += 1) {
     const answer = await request(target, 'GET', `/commits/${sha}/statuses?per_page=${PAGE_SIZE}&page=${page}`);
-    if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message('github.reading-statuses'), answer.status);
+    if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message('github.reading-statuses'), answer);
     const listed = answer.json as Array<{ id?: unknown; creator?: { id?: unknown } | null }>;
     for (const status of listed) if (ids.has(status.id) && !creators.has(status.id)) creators.set(status.id, status.creator?.id);
     if (listed.length < PAGE_SIZE) break;
@@ -262,7 +262,7 @@ export async function readAnnotations(target: GitHubRepository, checkRunId: numb
   const annotations: CheckAnnotation[] = [];
   for (let page = 1; page <= MAX_ANNOTATION_PAGES; page += 1) {
     const answer = await request(target, 'GET', `/check-runs/${checkRunId}/annotations?per_page=${PAGE_SIZE}&page=${page}`);
-    if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message('github.reading-annotations'), answer.status);
+    if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message('github.reading-annotations'), answer);
     const items = answer.json as Array<{ path?: unknown; start_line?: unknown; title?: unknown; message?: unknown }>;
     for (const item of items) {
       if (typeof item.path !== 'string' || typeof item.message !== 'string') continue;
@@ -355,7 +355,7 @@ export async function mergePullRequest(target: GitHubRepository, number: number,
     const landed = await awaitMerge(target, number, MERGE_IN_PROGRESS_WAIT_SECONDS);
     if (landed !== null) return { merged: true, sha: landed, late: true };
   }
-  throw new PullRequestError(message('github.merging'), answer.status);
+  throw answerError(message('github.merging'), answer);
 }
 
 /**

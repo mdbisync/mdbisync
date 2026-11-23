@@ -147,6 +147,8 @@ export interface FakeWorld {
     pullRequestHead?: (pr: FakePullRequest) => Promise<string>;
     /** Answer 422 to every pull request a run tries to open. */
     refusePullRequests?: boolean;
+    /** Answer 403 for the secondary rate limit to every pull request a run tries to open. */
+    rateLimitPullRequests?: boolean;
     /** Checks by commit; a commit without an entry has none. */
     checks?: Map<string, FakeCheck[]>;
     /** Check runs in the order the world first listed them: a run's id is its place here, from 1. */
@@ -385,6 +387,7 @@ async function pullRequests(world: FakeWorld, method: string, rest: string, init
   if (body.head === undefined) return undefined;
   if (world.github.missing.has('pull_requests:write')) return json(403, { message: 'Resource not accessible by integration' });
   if (world.github.refusePullRequests) return json(422, { message: 'Validation Failed' });
+  if (world.github.rateLimitPullRequests) return json(403, { message: 'You have exceeded a secondary rate limit.' });
   if (store.some((pr) => pr.state === 'open' && pr.head === body.head && pr.base === body.base && (pr.headRepository ?? 'owner/repo') === 'owner/repo')) {
     return json(422, { message: 'Validation Failed', errors: [{ message: 'A pull request already exists' }] });
   }

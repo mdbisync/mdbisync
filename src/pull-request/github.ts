@@ -2,7 +2,7 @@
 // (the deployer's GitHub App). Finds the open pull request from a branch or
 // opens one. Merging is in merge.ts, for the callers that may merge.
 
-import { DEFAULT_GITHUB_API_URL } from '../setup/github.ts';
+import { DEFAULT_GITHUB_API_URL, isRateLimited } from '../setup/github.ts';
 import { message } from '../messages.ts';
 import { setTimeout } from 'node:timers/promises';
 
@@ -59,17 +59,26 @@ export interface NewPullRequest {
 
 /**
  * GitHub refused or failed a pull request request, or the request did not
- * complete (a reset connection, a timeout); carries the status, never a body.
+ * complete (a reset connection, a timeout); carries the status and whether
+ * GitHub limited the rate, never a body.
  */
 export class PullRequestError extends Error {
   /** GitHub's HTTP status; undefined when no answer came. */
   readonly status: number | undefined;
+  /** GitHub refused the request for its rate limit, primary or secondary (a 403 or 429 that says so). */
+  readonly rateLimited: boolean;
 
-  constructor(what: string, status: number | undefined, cause?: unknown) {
+  constructor(what: string, status: number | undefined, cause?: unknown, rateLimited = false) {
     super(status === undefined ? message('github.no-answer', { action: what }) : message('github.answered', { status, action: what }), cause === undefined ? undefined : { cause });
     this.name = 'PullRequestError';
     this.status = status;
+    this.rateLimited = rateLimited;
   }
+}
+
+/** The error for a request GitHub answered with something other than what the caller needs. */
+export function answerError(what: string, answer: { status: number; rateLimited: boolean }): PullRequestError {
+  return new PullRequestError(what, answer.status, undefined, answer.rateLimited);
 }
 
 /** The open pull request from this repository's `head` into `base`, or null. */
@@ -77,7 +86,7 @@ export async function findOpenPullRequest(target: GitHubRepository, head: string
   const owner = target.repository.split('/')[0] as string;
   const query = new URLSearchParams({ state: 'open', head: `${owner}:${head}`, base, per_page: '10' });
   const answer = await request(target, 'GET', `/pulls?${query.toString()}`);
-  if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message('github.listing'), answer.status);
+  if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message('github.listing'), answer);
   const found = (answer.json as unknown[]).map(toPullRequest).find((pr) => pr !== null && pr.head === head && pr.base === base && pr.headRepository?.toLowerCase() === target.repository.toLowerCase());
   return found ?? null;
 }
@@ -86,7 +95,7 @@ export async function findOpenPullRequest(target: GitHubRepository, head: string
 export async function openPullRequest(target: GitHubRepository, spec: NewPullRequest): Promise<PullRequest> {
   const answer = await request(target, 'POST', '/pulls', { title: spec.title, head: spec.head, base: spec.base, body: spec.body, maintainer_can_modify: false }, { kind: 'opened', accepted: 201 });
   const opened = answer.status === 201 ? toPullRequest(answer.json) : null;
-  if (opened === null) throw new PullRequestError(message('github.opening'), answer.status);
+  if (opened === null) throw answerError(message('github.opening'), answer);
   return opened;
 }
 
@@ -94,14 +103,14 @@ export async function openPullRequest(target: GitHubRepository, spec: NewPullReq
 export async function updatePullRequest(target: GitHubRepository, number: number, text: { title: string; body: string }): Promise<PullRequest> {
   const answer = await request(target, 'PATCH', `/pulls/${number}`, { title: text.title, body: text.body }, { kind: 'updated', accepted: 200 });
   const updated = answer.status === 200 ? toPullRequest(answer.json) : null;
-  if (updated === null) throw new PullRequestError(message('github.updating'), answer.status);
+  if (updated === null) throw answerError(message('github.updating'), answer);
   return updated;
 }
 
 /** Closes a pull request without merging it. */
 export async function closePullRequest(target: GitHubRepository, number: number): Promise<void> {
   const answer = await request(target, 'PATCH', `/pulls/${number}`, { state: 'closed' }, { kind: 'closed', accepted: 200 });
-  if (answer.status !== 200) throw new PullRequestError(message('github.closing'), answer.status);
+  if (answer.status !== 200) throw answerError(message('github.closing'), answer);
 }
 
 /**
@@ -117,7 +126,7 @@ export async function closePullRequestAtHead(target: GitHubRepository, number: n
   try {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const answer = await request({ ...target, signal }, 'GET', `/pulls/${number}`);
-      if (answer.status !== 200) throw new PullRequestError(message('github.reading-pull-request'), answer.status);
+      if (answer.status !== 200) throw answerError(message('github.reading-pull-request'), answer);
       const pr = answer.json as { state?: unknown; head?: { sha?: unknown } } | null;
       if (pr?.state === 'closed') return true;
       if (pr?.state === 'open' && pr.head?.sha === head) {
@@ -189,7 +198,7 @@ export async function readPullRequest(target: GitHubRepository, number: number):
   const answer = await request(target, 'GET', `/pulls/${number}`);
   const pr = answer.json as { state?: unknown; base?: { ref?: unknown } | null; merged?: unknown; merge_commit_sha?: unknown } | null;
   if (answer.status !== 200 || pr === null || (pr.state !== 'open' && pr.state !== 'closed') || typeof pr.base?.ref !== 'string') {
-    throw new PullRequestError(message('github.reading-pull-request'), answer.status);
+    throw answerError(message('github.reading-pull-request'), answer);
   }
   // On an open pull request `merge_commit_sha` names GitHub's test merge, not a merge.
   const mergeCommit = pr.merged === true && typeof pr.merge_commit_sha === 'string' ? pr.merge_commit_sha : null;
@@ -216,10 +225,11 @@ function toPullRequest(value: unknown): PullRequest | null {
  * accepting status is counted in `target.writes` as soon as it arrives, also
  * when the answer's body then cannot be read.
  */
-export async function request(target: GitHubRepository, method: string, path: string, body?: Record<string, unknown>, write?: WriteCall): Promise<{ status: number; json: unknown }> {
+export async function request(target: GitHubRepository, method: string, path: string, body?: Record<string, unknown>, write?: WriteCall): Promise<{ status: number; json: unknown; rateLimited: boolean }> {
   const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}/repos/${target.repository}`;
   let status: number;
   let text: string;
+  let headers: Headers;
   try {
     const response = await (target.fetch ?? fetch)(`${base}${path}`, {
       method,
@@ -233,6 +243,7 @@ export async function request(target: GitHubRepository, method: string, path: st
       signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(target.signal ? [target.signal] : [])]),
     });
     status = response.status;
+    headers = response.headers;
     if (write !== undefined && status === write.accepted) target.writes?.set(write.kind, (target.writes.get(write.kind) ?? 0) + 1);
     text = await response.text();
   } catch (error) {
@@ -249,7 +260,8 @@ export async function request(target: GitHubRepository, method: string, path: st
   } catch {
     // A body that is not JSON carries nothing the caller needs.
   }
-  return { status, json };
+  // GitHub answers a primary or secondary rate limit with 403 as well as 429.
+  return { status, json, rateLimited: (status === 403 || status === 429) && isRateLimited({ status, headers, json }) };
 }
 
 /** What fetch throws when no answer comes: a network failure (`TypeError`) or the timeout (`TimeoutError`, `AbortError`). */
