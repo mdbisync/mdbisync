@@ -510,10 +510,15 @@ last pins pull request that merged. Until the first final release, that is
 the pre-release the templates were last moved to.
 
 The workflow opens that pull request itself and turns on auto-merge
-(squash) when the repository variable `RELEASE_PINS_APP_CLIENT_ID` and the
-secret `RELEASE_PINS_APP_PRIVATE_KEY` hold the client ID and a private key
-of a GitHub App: a pull request opened with the workflow's own token would
-run its checks only after someone approves them. Give the App the
+(squash) when the variable `RELEASE_PINS_APP_CLIENT_ID` and the secret
+`RELEASE_PINS_APP_PRIVATE_KEY` of the `release-pins` environment hold the
+client ID and a private key of a GitHub App: a pull request opened with the
+workflow's own token would run its checks only after someone approves them.
+Create that environment before the next final release, limit its
+deployment branches to `main` and give it no required reviewers, so a
+release asks for no second approval; only the job that moves the pins uses
+it. Store both values only in that environment and remove any repository
+variable or secret of the same name. Give the App the
 repository permissions Contents and Pull requests, read and write, install
 it on this repository only, and turn on
 "Allow auto-merge" in the repository settings. The pull request merges once

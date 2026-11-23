@@ -340,12 +340,15 @@ jobs:
   # It never pushes to main and never forces a push. Like the tag job, it runs the dispatched
   # workflow's implementation, with Node and Git only. A pull request the workflow token opens would
   # run its checks only after someone approves them, so the release pins App opens it and turns on
-  # auto-merge. Without the App's variable and secret, or when the App fails, the summary links the
-  # branch instead and the release still succeeds.
+  # auto-merge. The App's variable and secret live in the environment release-pins, which allows only
+  # main and has no reviewers, so a release needs no second approval; the tag job runs only on main, so
+  # this job's ref always meets that rule. Without the App's variable and secret, or when the App fails,
+  # the summary links the branch instead and the release still succeeds.
   pins:
     needs: tag
     # Explicit, like the tag job's: a pre-release skips the gate, and the implicit success() would skip this job too.
     if: ${{ !cancelled() && needs.tag.result == 'success' }}
+    environment: release-pins
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -382,7 +385,7 @@ jobs:
           if [ -n "$APP_CLIENT_ID" ] && [ "$APP_PRIVATE_KEY_SET" = true ]; then
             echo 'configured=true' >> "$GITHUB_OUTPUT"
           else
-            echo 'The release pins App is not configured (variable `RELEASE_PINS_APP_CLIENT_ID`, secret `RELEASE_PINS_APP_PRIVATE_KEY`), so no pull request was opened: open it from the branch above.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'The release pins App is not configured (environment `release-pins`: variable `RELEASE_PINS_APP_CLIENT_ID`, secret `RELEASE_PINS_APP_PRIVATE_KEY`), so no pull request was opened: open it from the branch above.' >> "$GITHUB_STEP_SUMMARY"
           fi
       # The token is limited to this repository and to what opening and merging the pull request needs,
       # and is revoked when the job ends. Only the next step reads it, and it runs no repository code.

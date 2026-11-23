@@ -17,6 +17,7 @@ type Result = 'success' | 'failure' | 'cancelled' | 'skipped';
 interface Job {
   needs?: string | string[];
   if?: string;
+  environment?: string;
   permissions?: Record<string, string>;
   env?: Record<string, string>;
   steps: { name?: string; id?: string; if?: string; uses?: string; with?: Record<string, string>; run?: string; env?: Record<string, string>; 'working-directory'?: string }[];
@@ -202,6 +203,15 @@ test('a release whose pins could not be pushed keeps its tag and draft release a
 test('the pins job runs the dispatched workflow\'s code, pushes from a checkout of main with tags, and installs nothing', () => {
   const job = jobs.pins! as Job & { 'timeout-minutes'?: number };
   assert.deepEqual(job.permissions, { contents: 'write' });
+  // The App's variable and secret live in release-pins (main only, no reviewers), never in the gate's
+  // release environment, whose required review would ask for a second approval.
+  assert.equal(job.environment, 'release-pins');
+  assert.equal(jobs.gate!.environment, 'release');
+  assert.deepEqual(Object.entries(jobs).filter(([, other]) => other.environment !== undefined).map(([name]) => name), ['gate', 'pins']);
+  assert.deepEqual(Object.entries(jobs).filter(([, other]) => JSON.stringify(other).includes('RELEASE_PINS_APP_')).map(([name]) => name), ['pins']);
+  // The environment allows main only: the job runs only after the tag job, which needs a build from main.
+  assert.ok(upstreamOf('pins').includes('build'));
+  assert.match(jobs.build!.if!, /github\.ref == 'refs\/heads\/main'/);
   assert.equal(job.env?.RELEASE_SHA, '${{ needs.tag.outputs.release-sha }}');
   assert.equal((jobs.tag as Job & { outputs?: Record<string, string> }).outputs?.['release-sha'], '${{ steps.tag.outputs.release-sha }}');
   assert.ok(jobs.tag!.steps.some((step) => (step as { id?: string }).id === 'tag' && step.run?.includes('node src/release/tag.ts')));
@@ -264,7 +274,7 @@ test('a pins branch without the App configuration opens no pull request, says so
     for (const [clientId, keySet] of [['', 'false'], ['', 'true'], ['Iv23example', 'false']] as const) {
       const { output, summary } = check(clientId, keySet);
       assert.equal(output, '', `${clientId} ${keySet}: no token, so no pull request`);
-      assert.match(summary, /The release pins App is not configured \(variable `RELEASE_PINS_APP_CLIENT_ID`, secret `RELEASE_PINS_APP_PRIVATE_KEY`\)/);
+      assert.match(summary, /The release pins App is not configured \(environment `release-pins`: variable `RELEASE_PINS_APP_CLIENT_ID`, secret `RELEASE_PINS_APP_PRIVATE_KEY`\)/);
     }
     assert.deepEqual(check('Iv23example', 'true'), { output: 'configured=true\n', summary: '' });
   } finally {
