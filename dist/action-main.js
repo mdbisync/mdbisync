@@ -29011,7 +29011,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.0-rc.3" : packageJson.version;
+var VERSION = true ? "1.0.0-rc.4" : packageJson.version;
 
 // src/format/rules.ts
 var LINT_RULES = {
@@ -47508,6 +47508,8 @@ var LINEAR_FORMAT_HOOK = "linear-format";
 var IGNORE_INLINE_ALLOW = "--ignore-gitleaks-allow";
 var IGNORES_INLINE_ALLOW = /(?:^|\s)--ignore-gitleaks-allow(?:=true)?(?=\s|$)/;
 var LOCAL_REPOS = /* @__PURE__ */ new Set(["local", "meta"]);
+var PRE_COMMIT_HOOKS = "https://github.com/pre-commit/pre-commit-hooks";
+var PRE_COMMIT_HOOKS_REV = "3e8a8703264a2f4a69428a0aa4dcb512790b2c8c";
 function readHookConfig(text6) {
   if (text6 === null) return { hooks: [] };
   let data;
@@ -47519,16 +47521,37 @@ function readHookConfig(text6) {
   const repos = isRecord(data) ? data.repos : void 0;
   if (!Array.isArray(repos)) return { hooks: [], invalid: message("setup.hooks-no-repos", { file: PRE_COMMIT_CONFIG }) };
   const hooks = [];
+  let securityBatchable = isRecord(data) && !Object.hasOwn(data, "<<") && !/!!merge|!<|%TAG/.test(text6);
   for (const repo of repos) {
-    if (!isRecord(repo) || !Array.isArray(repo.hooks)) continue;
+    if (!isRecord(repo)) continue;
+    securityBatchable &&= !Object.hasOwn(repo, "<<");
+    if (!Array.isArray(repo.hooks)) continue;
+    const pinned = repo.repo === PRE_COMMIT_HOOKS && repo.rev === PRE_COMMIT_HOOKS_REV;
     const source = typeof repo.repo === "string" ? repo.repo : "";
     for (const hook of repo.hooks) {
-      if (!isRecord(hook) || typeof hook.id !== "string") continue;
+      if (!isRecord(hook)) continue;
+      securityBatchable &&= !Object.hasOwn(hook, "<<");
+      if (typeof hook.id !== "string") continue;
+      if (hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS) {
+        securityBatchable &&= fileLocalHook(source, pinned, hook);
+      } else if (typeof hook.alias !== "string") {
+        securityBatchable &&= LOCAL_REPOS.has(source) || pinned;
+      }
       const command = [hook.entry, ...Array.isArray(hook.args) ? hook.args : []].filter((part) => typeof part === "string").join(" ");
       hooks.push({ id: hook.id, repo: source, ...typeof hook.alias === "string" ? { alias: hook.alias } : {}, ...command ? { command } : {} });
     }
   }
-  return { hooks };
+  return { hooks, securityBatchable };
+}
+function fileLocalHook(repo, pinned, hook) {
+  const selection = ["id", "name", "alias", "description", "files", "exclude", "types", "types_or", "exclude_types", "stages", "require_serial", "verbose", "pass_filenames", "always_run"];
+  if (hook.pass_filenames !== void 0 && hook.pass_filenames !== true) return false;
+  if (hook.always_run !== void 0 && hook.always_run !== false) return false;
+  if (repo === "local" && hook.language === "pygrep") {
+    const entry = hook.entry;
+    return typeof entry === "string" && (!entry.startsWith("-") || entry === "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----") && (hook.args === void 0 || Array.isArray(hook.args) && hook.args.every((arg) => ["-i", "--ignore-case", "--multiline", "--negate"].includes(arg))) && Object.keys(hook).every((key) => [...selection, "language", "entry", "args"].includes(key));
+  }
+  return pinned && hook.id === "detect-private-key" && Object.keys(hook).every((key) => selection.includes(key));
 }
 function securityHooks(config) {
   return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
@@ -48724,11 +48747,14 @@ async function readInBatches(git, entries, use, alone) {
   }
   await flush();
 }
-async function securityHookIds(git, tracked) {
+async function trackedHookConfig(git, tracked) {
   const read = await git.run(["cat-file", "blob", `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
   const config = readHookConfig(read.code === 0 ? read.stdout.toString("utf8") : null);
   if (config.invalid !== void 0) throw new Error(message("sync.invalid-security-config"));
-  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+  return config;
+}
+async function securityHookIds(git, tracked) {
+  return securityHooks(await trackedHookConfig(git, tracked));
 }
 async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
   const changed2 = (await scratch.run(["diff", "--name-only", "--no-renames", "-z"])).stdout.toString("utf8").split("\0").filter((path7) => path7 !== "");
@@ -48802,7 +48828,8 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
 }
 async function securityGate(git, tracked, options = {}) {
   const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C.UTF-8" };
-  const hooks = await securityHookIds(git, tracked);
+  const config = await trackedHookConfig(git, tracked);
+  const hooks = securityHooks(config);
   if (hooks.length > 0 && (await runHooks(git.dir, ["--version"], env)).code !== 0) throw new Error(message("sync.needs-pre-commit"));
   const budget = options.scratchBytes ?? SCRATCH_TREE_BYTES;
   let dir;
@@ -48813,10 +48840,10 @@ async function securityGate(git, tracked, options = {}) {
     if (dir !== void 0) await rm4(dir, { recursive: true, force: true });
     dir = void 0;
   };
-  return {
+  const gate = {
     configured: hooks.length > 0,
     close,
-    async check(files) {
+    async check(files, batch = false) {
       if (hooks.length === 0) return [];
       try {
         if (dir === void 0) {
@@ -48829,12 +48856,20 @@ async function securityGate(git, tracked, options = {}) {
         }
         await scratch.run(["read-tree", "--reset", "-u", baseline]);
         await scratch.run(["clean", "-fdx", "--quiet"]);
+        const written = /* @__PURE__ */ new Set();
         for (const [path7, content4] of files) {
           checkRepoPath(path7);
+          if (batch && (path7.startsWith(":") || /[*?\[]/.test(path7))) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (path7 === PRE_COMMIT_CONFIG || path7.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (await throughLink(dir, path7)) return [{ hook: SECURITY_ALIAS, line: 1 }];
           await mkdir4(dirname4(join10(dir, path7)), { recursive: true });
           await writeFile4(join10(dir, path7), contentBytes(content4));
+          if (batch) {
+            const { dev, ino } = await lstat3(join10(dir, path7), { bigint: true });
+            const identity = `${dev}:${ino}`;
+            if (written.has(identity)) return [{ hook: SECURITY_ALIAS, line: 1 }];
+            written.add(identity);
+          }
         }
         if (!await onlyDocumentsChanged(scratch, dir, files, linkedSupport)) return [{ hook: SECURITY_ALIAS, line: 1 }];
         await scratch.run(["add", "--force", "--", ...files.keys()]);
@@ -48845,6 +48880,7 @@ async function securityGate(git, tracked, options = {}) {
           if (result.code !== 0 && result.output.trim() === `No hook with id \`security\` in stage \`${stage}\``) continue;
           ran = true;
           if (result.code !== 0) {
+            if (batch) return [{ hook: SECURITY_ALIAS, line: 1 }];
             const failed2 = hooks.filter((id) => result.output.includes(`- hook id: ${id}
 `));
             const escaped = [...files.keys()].map((path7) => path7.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -48870,6 +48906,8 @@ async function securityGate(git, tracked, options = {}) {
       }
     }
   };
+  if (!config.securityBatchable || !gate.configured) return gate;
+  return { ...gate, passesBatch: async (files) => (await gate.check(files, true)).length === 0 };
 }
 async function checkTitle(gate, path7, title) {
   try {
@@ -49353,7 +49391,7 @@ async function mergeLocally(git, linear, tracked, ids, facts = LINEAR_FACTS, opt
     }
     mergeBase = await treeCommit(git, baseTree, mergeBase);
   }
-  const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase);
+  const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase, true);
   const { tree, unresolved: conflicts } = resolved;
   const linearSide = await synchronizedFiles(git, linear, facts, ids);
   const resultSide = await synchronizedFiles(git, tree, facts);
@@ -49478,14 +49516,14 @@ function knownIdLookup(git, idsCommit, ids) {
     return void 0;
   };
 }
-async function mergeWithMarkers(git, linearSide, gitSide, ids, knownId, explicitBase) {
+async function mergeWithMarkers(git, linearSide, gitSide, ids, knownId, explicitBase, echo = false) {
   const base = explicitBase ?? await git.text(["merge-base", linearSide, gitSide]);
   const merged = await git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ...explicitBase === void 0 ? [] : [`--merge-base=${explicitBase}`], linearSide, gitSide], { okCodes: [0, 1] });
   const [gitTree, ...rest] = merged.stdout.toString("utf8").split("\0");
   if (gitTree === void 0 || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message("sync.no-merge-tree"));
   const unmerged = [...new Set(rest.filter((path7) => path7 !== ""))].sort(compare3);
   const renames = await renamesBetween(git, base, gitSide);
-  const resolved = await resolveConflicts(git, { base, linear: linearSide, tracked: gitSide, tree: gitTree, unmerged, renames, ids, knownId });
+  const resolved = await resolveConflicts(git, { base, linear: linearSide, tracked: gitSide, tree: gitTree, unmerged, renames, ids, knownId, echo });
   return { base, renames, resolved };
 }
 function changePath(change) {
@@ -49625,6 +49663,7 @@ async function resolveConflicts(git, input) {
   const blobs = await new MappingBlobBudget().read(git, groups.flatMap(({ base, tracked, linear }) => [base, tracked, linear].filter((entry) => entry !== void 0)));
   const version = (entry) => entry === void 0 ? null : { path: entry.path, text: blobs.get(entry.oid).toString("utf8") };
   const changes = /* @__PURE__ */ new Map();
+  const echo = input.echo === true ? echoedConflicts(git, input.linear) : null;
   for (const { base, tracked, linear, involved } of groups) {
     const basePath = base?.path ?? null;
     const linearPath = linear?.path ?? null;
@@ -49634,6 +49673,10 @@ async function resolveConflicts(git, input) {
       git: version(tracked),
       linear: version(linear)
     };
+    if (echo !== null && base !== void 0 && tracked !== void 0 && linear !== void 0 && base.path === tracked.path && base.path === linear.path) {
+      const earlier = await echo(base, tracked, linear);
+      if (earlier !== null) Object.assign(versions, { base: { path: base.path, text: earlier.base }, linear: { path: base.path, text: earlier.linear } });
+    }
     let result;
     let gone;
     try {
@@ -49662,6 +49705,41 @@ async function resolveConflicts(git, input) {
   out.tree = await buildTree(git, input.tree, changes);
   out.unresolved.sort(compare3);
   return out;
+}
+function echoedConflicts(git, linear) {
+  const budget = new MappingBlobBudget();
+  const entryAt = async (commit2, path7) => {
+    const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", commit2, "--", path7]);
+    return parseTreeListing(stdout).find((entry) => entry.path === path7 && entry.type === "blob" && readableBlob(entry));
+  };
+  const textOf = async (entry) => (await budget.read(git, [entry])).get(entry.oid).toString("utf8");
+  const versions = async (base, tracked, linearEntry) => {
+    const path7 = linearEntry.path;
+    const [baseText, trackedText, linearText] = await Promise.all([textOf(base), textOf(tracked), textOf(linearEntry)]);
+    if (detectConflicts(linearText).length === 0 || detectConflicts(baseText).length > 0) return null;
+    const [commit2, parent, second, ...more] = (await git.text(["--literal-pathspecs", "log", "--first-parent", "--max-count=1", "--format=%H %P", linear, "--", path7])).split(" ");
+    if (commit2 === void 0 || parent === void 0 || second === void 0 || more.length > 0) return null;
+    const [previous3, recordGit] = await Promise.all([entryAt(parent, path7), entryAt(second, path7)]);
+    if (previous3 === void 0 || recordGit?.oid !== base.oid) return null;
+    const previousText = await textOf(previous3);
+    if (detectConflicts(previousText).length > 0) return null;
+    const merged = await git.run(["merge-base", parent, second], { okCodes: [0, 1] });
+    if (merged.code !== 0) return null;
+    const older = await entryAt(merged.stdout.toString("utf8").trim(), path7);
+    const olderText = older === void 0 ? "" : await textOf(older);
+    if ((await mergeMarkdown(olderText, baseText, previousText)).text !== linearText) return null;
+    const result = (await mergeMarkdown(olderText, trackedText, previousText)).text;
+    if ((await mergeMarkdown(baseText, trackedText, result)).text !== result) return null;
+    return { base: olderText, linear: previousText };
+  };
+  return async (base, tracked, linearEntry) => {
+    try {
+      return await versions(base, tracked, linearEntry);
+    } catch (error2) {
+      if (error2 instanceof MarkdownLimitError || error2 instanceof MappingBlobBudgetError) return null;
+      throw error2;
+    }
+  };
 }
 async function renamesBetween(git, from, to) {
   const { stdout } = await git.run(["diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--diff-filter=R", "--name-status", "-z", from, to]);
@@ -56062,6 +56140,8 @@ var MANIFEST = "manifest.json";
 var ANSWERS = "answers.json";
 var READS = "linear-reads";
 var VERSION3 = 1;
+var BATCH_CONTENT_BYTES = 32 * 1024 * 1024;
+var BATCH_PATH_BYTES = 24 * 1024;
 function stageFolder(env = process.env) {
   const base = env["RUNNER_TEMP"];
   if (base === void 0 || base === "") throw new Error(message("sync.no-runner-temp"));

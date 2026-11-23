@@ -7975,6 +7975,9 @@ var CONTENT_LIMIT = 25e4;
 // src/setup/hooks.ts
 var PRE_COMMIT_CONFIG = ".pre-commit-config.yaml";
 var SECURITY_ALIAS = "security";
+var LOCAL_REPOS = /* @__PURE__ */ new Set(["local", "meta"]);
+var PRE_COMMIT_HOOKS = "https://github.com/pre-commit/pre-commit-hooks";
+var PRE_COMMIT_HOOKS_REV = "3e8a8703264a2f4a69428a0aa4dcb512790b2c8c";
 function readHookConfig(text) {
   if (text === null) return { hooks: [] };
   let data;
@@ -7986,16 +7989,40 @@ function readHookConfig(text) {
   const repos = isRecord(data) ? data.repos : void 0;
   if (!Array.isArray(repos)) return { hooks: [], invalid: message("setup.hooks-no-repos", { file: PRE_COMMIT_CONFIG }) };
   const hooks = [];
+  let securityBatchable = isRecord(data) && !Object.hasOwn(data, "<<") && !/!!merge|!<|%TAG/.test(text);
   for (const repo of repos) {
-    if (!isRecord(repo) || !Array.isArray(repo.hooks)) continue;
+    if (!isRecord(repo)) continue;
+    securityBatchable &&= !Object.hasOwn(repo, "<<");
+    if (!Array.isArray(repo.hooks)) continue;
+    const pinned = repo.repo === PRE_COMMIT_HOOKS && repo.rev === PRE_COMMIT_HOOKS_REV;
     const source = typeof repo.repo === "string" ? repo.repo : "";
     for (const hook of repo.hooks) {
-      if (!isRecord(hook) || typeof hook.id !== "string") continue;
+      if (!isRecord(hook)) continue;
+      securityBatchable &&= !Object.hasOwn(hook, "<<");
+      if (typeof hook.id !== "string") continue;
+      if (hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS) {
+        securityBatchable &&= fileLocalHook(source, pinned, hook);
+      } else if (typeof hook.alias !== "string") {
+        securityBatchable &&= LOCAL_REPOS.has(source) || pinned;
+      }
       const command = [hook.entry, ...Array.isArray(hook.args) ? hook.args : []].filter((part) => typeof part === "string").join(" ");
       hooks.push({ id: hook.id, repo: source, ...typeof hook.alias === "string" ? { alias: hook.alias } : {}, ...command ? { command } : {} });
     }
   }
-  return { hooks };
+  return { hooks, securityBatchable };
+}
+function fileLocalHook(repo, pinned, hook) {
+  const selection = ["id", "name", "alias", "description", "files", "exclude", "types", "types_or", "exclude_types", "stages", "require_serial", "verbose", "pass_filenames", "always_run"];
+  if (hook.pass_filenames !== void 0 && hook.pass_filenames !== true) return false;
+  if (hook.always_run !== void 0 && hook.always_run !== false) return false;
+  if (repo === "local" && hook.language === "pygrep") {
+    const entry = hook.entry;
+    return typeof entry === "string" && (!entry.startsWith("-") || entry === "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----") && (hook.args === void 0 || Array.isArray(hook.args) && hook.args.every((arg) => ["-i", "--ignore-case", "--multiline", "--negate"].includes(arg))) && Object.keys(hook).every((key) => [...selection, "language", "entry", "args"].includes(key));
+  }
+  return pinned && hook.id === "detect-private-key" && Object.keys(hook).every((key) => selection.includes(key));
+}
+function securityHooks(config) {
+  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
 }
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -8101,11 +8128,11 @@ async function readInBatches(git, entries, use, alone) {
   }
   await flush();
 }
-async function securityHookIds(git, tracked) {
+async function trackedHookConfig(git, tracked) {
   const read = await git.run(["cat-file", "blob", `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
   const config = readHookConfig(read.code === 0 ? read.stdout.toString("utf8") : null);
   if (config.invalid !== void 0) throw new Error(message("sync.invalid-security-config"));
-  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+  return config;
 }
 async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
   const changed = (await scratch.run(["diff", "--name-only", "--no-renames", "-z"])).stdout.toString("utf8").split("\0").filter((path) => path !== "");
@@ -8179,7 +8206,8 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
 }
 async function securityGate(git, tracked, options = {}) {
   const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C.UTF-8" };
-  const hooks = await securityHookIds(git, tracked);
+  const config = await trackedHookConfig(git, tracked);
+  const hooks = securityHooks(config);
   if (hooks.length > 0 && (await runHooks(git.dir, ["--version"], env)).code !== 0) throw new Error(message("sync.needs-pre-commit"));
   const budget = options.scratchBytes ?? SCRATCH_TREE_BYTES;
   let dir;
@@ -8190,10 +8218,10 @@ async function securityGate(git, tracked, options = {}) {
     if (dir !== void 0) await rm(dir, { recursive: true, force: true });
     dir = void 0;
   };
-  return {
+  const gate = {
     configured: hooks.length > 0,
     close,
-    async check(files) {
+    async check(files, batch = false) {
       if (hooks.length === 0) return [];
       try {
         if (dir === void 0) {
@@ -8206,12 +8234,20 @@ async function securityGate(git, tracked, options = {}) {
         }
         await scratch.run(["read-tree", "--reset", "-u", baseline]);
         await scratch.run(["clean", "-fdx", "--quiet"]);
+        const written = /* @__PURE__ */ new Set();
         for (const [path, content] of files) {
           checkRepoPath(path);
+          if (batch && (path.startsWith(":") || /[*?\[]/.test(path))) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (path === PRE_COMMIT_CONFIG || path.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (await throughLink(dir, path)) return [{ hook: SECURITY_ALIAS, line: 1 }];
           await mkdir(dirname(join(dir, path)), { recursive: true });
           await writeFile(join(dir, path), contentBytes(content));
+          if (batch) {
+            const { dev, ino } = await lstat(join(dir, path), { bigint: true });
+            const identity = `${dev}:${ino}`;
+            if (written.has(identity)) return [{ hook: SECURITY_ALIAS, line: 1 }];
+            written.add(identity);
+          }
         }
         if (!await onlyDocumentsChanged(scratch, dir, files, linkedSupport)) return [{ hook: SECURITY_ALIAS, line: 1 }];
         await scratch.run(["add", "--force", "--", ...files.keys()]);
@@ -8222,6 +8258,7 @@ async function securityGate(git, tracked, options = {}) {
           if (result.code !== 0 && result.output.trim() === `No hook with id \`security\` in stage \`${stage}\``) continue;
           ran = true;
           if (result.code !== 0) {
+            if (batch) return [{ hook: SECURITY_ALIAS, line: 1 }];
             const failed2 = hooks.filter((id) => result.output.includes(`- hook id: ${id}
 `));
             const escaped = [...files.keys()].map((path) => path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -8247,6 +8284,8 @@ async function securityGate(git, tracked, options = {}) {
       }
     }
   };
+  if (!config.securityBatchable || !gate.configured) return gate;
+  return { ...gate, passesBatch: async (files) => (await gate.check(files, true)).length === 0 };
 }
 
 // src/sync/staged.ts
@@ -8254,6 +8293,9 @@ var STAGE_FOLDER = "mdbisync-candidates";
 var MANIFEST = "manifest.json";
 var ANSWERS = "answers.json";
 var VERSION = 1;
+var BATCH_SETS = 128;
+var BATCH_CONTENT_BYTES = 32 * 1024 * 1024;
+var BATCH_PATH_BYTES = 24 * 1024;
 function stageFolder(env = process.env) {
   const base = env["RUNNER_TEMP"];
   if (base === void 0 || base === "") throw new Error(message("sync.no-runner-temp"));
@@ -8264,6 +8306,11 @@ function candidateKey(files) {
   const pairs = [...files].map(([path, content]) => [path, sha256(content)]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
   return sha256(JSON.stringify(pairs));
 }
+function union(sets) {
+  const files = /* @__PURE__ */ new Map();
+  for (const set of sets) for (const [path, content] of set.files) files.set(path, content);
+  return files;
+}
 async function checkStaged(git, folder, env) {
   const manifest = JSON.parse(await readFile2(join2(folder, MANIFEST), "utf8"));
   if (manifest.version !== VERSION) throw new Error(message("sync.staged-version"));
@@ -8271,22 +8318,71 @@ async function checkStaged(git, folder, env) {
   const answers = { version: VERSION, tracked: manifest.tracked, answers: {} };
   if (manifest.sets.length > 0) {
     const gate = await securityGate(git, manifest.tracked, { env });
+    const record = (key, findings) => {
+      if (findings.length > 0) result.rejected += 1;
+      answers.answers[key] = findings;
+    };
+    const checkOne = async ({ key, files }) => {
+      record(key, await gate.check(files) ?? [{ hook: SECURITY_ALIAS, line: 1 }]);
+    };
+    const checkBatch = async (sets, files) => {
+      if (sets.length === 1) {
+        await checkOne(sets[0]);
+      } else if (await gate.passesBatch(files)) {
+        for (const { key } of sets) record(key, []);
+      } else {
+        const middle = Math.floor(sets.length / 2);
+        const left = sets.slice(0, middle);
+        const right = sets.slice(middle);
+        await checkBatch(left, union(left));
+        await checkBatch(right, union(right));
+      }
+    };
+    const batches = [];
+    let pendingSets = 0;
+    let pendingBytes = 0;
+    let pendingPathBytes = 0;
+    const flush = async () => {
+      for (const { sets, files } of batches) await checkBatch(sets, files);
+      batches.length = 0;
+      pendingSets = pendingBytes = pendingPathBytes = 0;
+    };
     try {
       for (const set of manifest.sets) {
         const files = /* @__PURE__ */ new Map();
+        let bytes = 0;
+        let pathBytes = 0;
         for (const { path, sha256: hash } of set.files) {
           checkRepoPath(path);
           if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(message("sync.staged-hash"));
-          files.set(path, await readFile2(join2(folder, "files", hash)));
+          const content = await readFile2(join2(folder, "files", hash));
+          files.set(path, content);
+          bytes += content.length;
+          pathBytes += Buffer.byteLength(path) + 1;
         }
         if ([...files].some(([path, content]) => sha256(content) !== set.files.find((file) => file.path === path)?.sha256) || candidateKey(files) !== set.key) {
           result.unanswered += 1;
           continue;
         }
-        const findings = await gate.check(files) ?? [{ hook: SECURITY_ALIAS, line: 1 }];
-        if (findings.length > 0) result.rejected += 1;
-        answers.answers[set.key] = findings;
+        const verified = { key: set.key, files };
+        if (gate.passesBatch === void 0 || files.size === 0 || bytes > BATCH_CONTENT_BYTES || pathBytes > BATCH_PATH_BYTES) {
+          await flush();
+          await checkOne(verified);
+          continue;
+        }
+        if (pendingSets === BATCH_SETS || pendingBytes + bytes > BATCH_CONTENT_BYTES || pendingPathBytes + pathBytes > BATCH_PATH_BYTES) await flush();
+        let batch = batches.find(({ files: combined }) => [...files].every(([path, content]) => combined.get(path)?.equals(content) ?? true));
+        if (batch === void 0) {
+          batch = { sets: [], files: /* @__PURE__ */ new Map() };
+          batches.push(batch);
+        }
+        batch.sets.push(verified);
+        for (const [path, content] of files) batch.files.set(path, content);
+        pendingSets++;
+        pendingBytes += bytes;
+        pendingPathBytes += pathBytes;
       }
+      await flush();
     } finally {
       await gate.close?.();
     }
