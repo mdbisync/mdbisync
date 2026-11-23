@@ -165,14 +165,18 @@ describe('sync: conflicts through the cycle (L3)', () => {
   /** The fake gives each document the content id `content-<id>`. */
   const comments = (document: FakeDocument) => [...world.linear.comments.values()].filter((comment) => comment.documentContentId === `content-${document.id}`);
 
-  /** Runs `change` right after the capture has read the documents' content, before the write step. */
+  /**
+   * Runs `change` right after the capture, before the write step's first query. Every test that uses it trashes the
+   * one document: the capture finds it in its one listing (a single page, the archive included) and reads nothing
+   * more, so the next query is the write step's.
+   */
   const afterCapture = (change: () => void) => {
-    let read = false;
-    world.linear.beforeQuery = (operation, variables) => {
-      if (read) {
+    let listed = false;
+    world.linear.beforeQuery = (operation) => {
+      if (listed) {
         delete world.linear.beforeQuery;
         change();
-      } else if (operation === 'GetDocuments' && variables.withContent === true) read = true;
+      } else if (operation === 'ListDocuments') listed = true;
     };
   };
 
@@ -462,13 +466,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
     document.archivedAt = new Date().toISOString();
     touch(document);
     // Removed from the trash for good after the capture has read it as removed (L5-19).
-    let read = false;
-    world.linear.beforeQuery = (operation, variables) => {
-      if (read) {
-        delete world.linear.beforeQuery;
-        world.linear.documents.splice(world.linear.documents.indexOf(document), 1);
-      } else if (operation === 'GetDocuments' && variables.withContent === true) read = true;
-    };
+    afterCapture(() => world.linear.documents.splice(world.linear.documents.indexOf(document), 1));
     const edited = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.');
     await commitGit({ [DOC]: edited });
     const [first] = await settle();

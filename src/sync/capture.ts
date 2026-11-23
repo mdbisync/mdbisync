@@ -14,7 +14,7 @@ import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob
 import { fixLinearText, joinFile, linkedFileCheck, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
-import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
+import { documentUrlBase, hasDocumentLinks, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -329,12 +329,42 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const prior = old !== undefined && !mapping.files.has(old.path) && old.path.split('/').some((part) => part.toLowerCase() === '.github') ? undefined : old?.path;
       return documentPath(folderFor(doc)!, doc.title, doc.id, available, prior, (path) => invalidZone(doc, path));
     };
-    // An unchanged source may link a renamed, moved or removed target.
-    // Re-read bodies when a path changes so those inbound links are translated too.
-    if (gone.size > 0 || [...listed.values()].some((doc) => {
+    // An unchanged source may link a renamed, moved or removed target. When a path changes, the documents that move
+    // are read again, and so are those whose recorded file links one of the paths that move or go, so their links
+    // are translated too. Any other document keeps its file as it is: reading every body would show the hooks the
+    // whole workspace again for one rename.
+    const leaving = new Map<string, string>();
+    for (const id of gone) leaving.set(byId.get(id)!.path, id);
+    const moving = [...listed.values()].filter((doc) => {
       const old = byId.get(doc.id);
       return old !== undefined && !unreadIds.has(doc.id) && (!live(doc) || destination(doc, occupied) !== old.path);
-    })) selected = [...listed.values()];
+    });
+    for (const doc of moving) leaving.set(byId.get(doc.id)!.path, doc.id);
+    // Earlier runs wrote links to a new document's reserved path too: they move when it does not end up there.
+    for (const [id, own] of reservedById) {
+      const doc = listed.get(id);
+      if (doc !== undefined && (!live(doc) || destination(doc, occupied) !== own)) leaving.set(own, id);
+    }
+    // Whether a recorded file's body links one of `paths`, as the translation reads it. A body past the Markdown
+    // limits, and a file that holds Git's excluded version instead of the document's own text, count as linking.
+    const linksTo = (paths: ReadonlyMap<string, string>, old: {path: string}) => {
+      const prior = previous.get(old.path);
+      if (prior === undefined) return false;
+      if (excludedPath(old.path)) return true;
+      try { return hasDocumentLinks(splitFile(prior.toString('utf8')).body, old.path, paths); }
+      catch (error) {
+        if (error instanceof MarkdownLimitError) return true;
+        throw error;
+      }
+    };
+    if (leaving.size > 0) {
+      const chosen = new Set([...selected, ...moving]);
+      for (const doc of listed.values()) {
+        const old = byId.get(doc.id);
+        if (!chosen.has(doc) && old !== undefined && linksTo(leaving, old)) chosen.add(doc);
+      }
+      selected = [...chosen];
+    }
     selected = selected.filter((doc) => !unreadIds.has(doc.id));
     const documents = new Map<string, LinearDocument>([...listed].filter(([, doc]) => placed(doc)));
     const work = new Map<string, LinearDocument>();
@@ -343,6 +373,23 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (placed(doc)) documents.set(doc.id, doc);
       else documents.delete(doc.id);
       work.set(doc.id, doc);
+    }
+    // A document renamed or moved after the listing moves by this read: the files linking its old path are read too.
+    const late = new Map<string, string>();
+    for (const doc of work.values()) {
+      const old = byId.get(doc.id);
+      if (old !== undefined && !leaving.has(old.path) && (!live(doc) || destination(doc, occupied) !== old.path)) late.set(old.path, doc.id);
+    }
+    if (late.size > 0) {
+      const linking = [...listed.values()].filter((doc) => {
+        const old = byId.get(doc.id);
+        return !work.has(doc.id) && !unreadIds.has(doc.id) && live(doc) && old !== undefined && linksTo(late, old);
+      });
+      for (const doc of await linear.getDocuments(linking.map((doc) => doc.id), { withContent: true })) {
+        if (placed(doc)) documents.set(doc.id, doc);
+        else documents.delete(doc.id);
+        work.set(doc.id, doc);
+      }
     }
     // Keep metadata for out-of-scope documents; never infer deletion from a missing page.
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
