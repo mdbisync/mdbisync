@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { beforeEach, afterEach, describe, it } from 'node:test';
+import { type TestContext, beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY, mergeOnGitHub, remoteRef } from '../state/test-helpers.ts';
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs, PushedKey } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
@@ -1364,6 +1364,93 @@ describe('capture from Linear', () => {
     assert.equal(accepted.blocked.length, 0);
     assert.ok((await text('docs/plan.md')).includes('<renamed.md>'));
     assert.equal(await text('docs/renamed.md'), 'Target.');
+  });
+
+  describe('a path change reads only the documents it affects', () => {
+    const fetchPng = async () => new Response(png);
+    // `plan` links `target`; `pictured` embeds an upload and links nothing, so the hooks would see it on every read.
+    beforeEach(async () => {
+      world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target)\n';
+      world.linear.documents.push(
+        {id: 'target', title: 'target', projectId: 'project-api', content: 'Target.\n', createdAt: '2026-01-04T00:00:00Z'},
+        {id: 'pictured', title: 'pictured', projectId: 'project-api', content: '![Pixel](https://uploads.linear.app/workspace/pixel.png)\n', createdAt: '2026-01-02T00:00:00Z'},
+      );
+      await capture(context, {config, state: context.fetched.state, fetch: fetchPng});
+      await refresh();
+      assert.ok((await text('docs/plan.md')).includes('<target.md>'));
+    });
+    const target = () => world.linear.documents.find((doc) => doc.id === 'target')!;
+    /** The stage step of the next run: the documents it reads with their content, and the paths of each set it stages. */
+    const stage = async (t: TestContext, state = context.fetched.state) => {
+      const getDocuments = t.mock.method(context.linear, 'getDocuments');
+      const staged: string[][] = [];
+      const result = await capture(context, {config, state, stageOnly: true, fetch: fetchPng, security: {configured: true, check: async (files) => { staged.push([...files.keys()]); return []; }}});
+      assert.equal(result.ok, true);
+      const read = getDocuments.mock.calls.filter(({arguments: [, options]}) => options?.withContent === true).flatMap(({arguments: [ids]}) => [...ids]);
+      return {read: read.sort(), staged};
+    };
+    const unrelatedUnstaged = (staged: string[][]) => assert.ok(staged.every((files) => !files.some((path) => path.startsWith('docs/pictured') || path.includes('assets/'))), JSON.stringify(staged));
+    /** Writes `files` over the recorded tree: the state the next run starts from. */
+    const recordFiles = async (files: Record<string, string>) => {
+      const base = context.fetched.state.linear!;
+      const linear = await commitTree(context.git, {parents: [base], base, changes: new Map(Object.entries(files)), message: 'Recorded files', identity: IDENTITY});
+      return {...context.fetched.state, linear};
+    };
+
+    it('a rename reads and stages the renamed document and those linking it, not the whole workspace', async (t) => {
+      Object.assign(target(), {title: 'renamed', updatedAt: '2026-01-05T00:00:00Z'});
+      const {read, staged} = await stage(t);
+      assert.deepEqual(read, ['plan', 'target']);
+      unrelatedUnstaged(staged);
+      assert.ok(staged.some((files) => files.includes('docs/renamed.md')));
+      assert.ok(staged.some((files) => files.includes('docs/plan.md')));
+      // The whole cycle still moves the link with its target.
+      await refresh();
+      await capture(context, {config, state: context.fetched.state, fetch: fetchPng});
+      assert.ok((await text('docs/plan.md')).includes('<renamed.md>'));
+    });
+
+    for (const removal of ['trashed', 'removed for good'] as const) {
+      it(`a document ${removal} in Linear reads again only the documents linking it`, async (t) => {
+        if (removal === 'trashed') Object.assign(target(), {trashed: true, updatedAt: '2026-01-05T00:00:00Z'});
+        else world.linear.documents.splice(world.linear.documents.indexOf(target()), 1);
+        const {read, staged} = await stage(t);
+        assert.deepEqual(read, ['plan']);
+        unrelatedUnstaged(staged);
+        await refresh();
+        const result = await capture(context, {config, state: context.fetched.state, fetch: fetchPng});
+        assert.ok(result.removed.includes('docs/target.md'));
+        assert.ok(!(await text('docs/plan.md')).includes('<target.md>'));
+      });
+    }
+
+    it('reads the documents linking one renamed after the listing, when its edit was read anyway', async (t) => {
+      Object.assign(target(), {content: 'Target, edited.\n', updatedAt: '2026-01-05T00:00:00Z'});
+      world.linear.beforeQuery = (operation, variables) => {
+        if (operation !== 'GetDocuments' || variables.withContent !== true) return;
+        delete world.linear.beforeQuery;
+        Object.assign(target(), {title: 'renamed', updatedAt: '2026-01-06T00:00:00Z'});
+      };
+      const {read} = await stage(t);
+      assert.deepEqual(read, ['plan', 'target']);
+      await refresh();
+      await capture(context, {config, state: context.fetched.state, fetch: fetchPng});
+      assert.ok((await text('docs/plan.md')).includes('<renamed.md>'));
+    });
+
+    it('finds a link below front matter that a Markdown reading of the whole file would hide', async (t) => {
+      const state = await recordFiles({'docs/plan.md': '---\nnote: |\n  ```\n---\n\n[Target](<target.md>)\n'});
+      Object.assign(target(), {title: 'renamed', updatedAt: '2026-01-05T00:00:00Z'});
+      const {read} = await stage(t, state);
+      assert.deepEqual(read, ['plan', 'target']);
+    });
+
+    it('reads again a recorded document past the Markdown limits instead of stopping the run', async (t) => {
+      const state = await recordFiles({'docs/pictured.md': `${'> '.repeat(130)}deep\n`});
+      Object.assign(target(), {title: 'renamed', updatedAt: '2026-01-05T00:00:00Z'});
+      const {read} = await stage(t, state);
+      assert.deepEqual(read, ['pictured', 'plan', 'target']);
+    });
   });
 
   it('keeps a conflict mark and stops the run when the security hooks cannot be given the tracked tree', async () => {
