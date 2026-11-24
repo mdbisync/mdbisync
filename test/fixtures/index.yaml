@@ -1849,6 +1849,15 @@ fixtures:
     class: fixable
     basis: known
     canary: kx-5fcfc282
+  - file: "links/bare-url-backslash.md"
+    group: links
+    construct: autolink-literal-backslash
+    class: fixable
+    basis: assumed
+    canary: kx-6d25b0a1
+    corpus: false
+    probe_pending: true
+    note: "a bare URL ending in a backslash, then a line holding only --: fix writes one link and keeps the rest once"
   - file: "links/reference.md"
     group: links
     construct: link-reference
