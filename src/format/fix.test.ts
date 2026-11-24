@@ -702,6 +702,8 @@ describe('what fix leaves alone', () => {
       ['# Notes on "www.example.com"\n', '# Notes on "[www.example.com](<http://www.example.com>)"'],
       ['Skip xwww.example.com, then "www.example.com".\n', 'Skip xwww.example.com, then "[www.example.com](<http://www.example.com>)".'],
       ['Mail "&amp;team@example.com" now.\n', 'Mail "&[team@example.com](<mailto:team@example.com>)" now.'],
+      // `&notanentity;` names no character, so it is text as written.
+      ['See "www.example.com/?x=1&notanentity;=2" and _more_.\n', 'See "[www.example.com/?x=1\\&notanentity;=2](<http://www.example.com/?x=1&amp;notanentity;=2>)" and *more*.'],
       // A `!` before the address stays text: written as is, it would make an image.
       ['See "!www.example.com" and _more_.\n', 'See "\\![www.example.com](<http://www.example.com>)" and *more*.'],
       ['See !https://example.com and _more_.\n', 'See \\![https://example.com](<https://example.com>) and *more*.'],

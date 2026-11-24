@@ -4,6 +4,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { Nodes, Paragraph, Parent, PhrasingContent, Root, Text } from 'mdast';
 import { fromMarkdown, type Extension, type Transform } from 'mdast-util-from-markdown';
+import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
 import { EditMap } from 'micromark-util-edit-map';
@@ -209,8 +210,8 @@ function mergedText(nodes: readonly PhrasingContent[]): PhrasingContent[] {
   return merged;
 }
 
-/** A backslash escape or a character reference: source that reads as other characters. */
-const DECODED = /\\[!-/:-@[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
+/** A backslash escape or a character reference: source that can read as other characters. */
+const DECODED = /\\[!-/:-@[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]{1,31}));/g;
 
 /**
  * Gives `parts`, the search's split of `text`, the source offsets they come
@@ -228,7 +229,11 @@ function placeParts(parts: PhrasingContent[], text: Text, source: string, points
   const raw = source.slice(from, end(text));
   // decoded[i]: how many of the first i source characters belong to an escape or a reference.
   const decoded = new Uint32Array(raw.length + 1);
-  for (const match of raw.matchAll(DECODED)) decoded.fill(1, match.index + 1, match.index + match[0].length + 1);
+  for (const match of raw.matchAll(DECODED)) {
+    // A name that is no character reference stays text, as written.
+    if (match[1] !== undefined && decodeNamedCharacterReference(match[1]) === false) continue;
+    decoded.fill(1, match.index + 1, match.index + match[0].length + 1);
+  }
   for (let at = 1; at <= raw.length; at++) decoded[at] = decoded[at - 1]! + decoded[at]!;
   const literal = (at: number, length: number): boolean => decoded[at + length] === decoded[at];
   const labels = new Map<string, { value: number[]; source: number[]; next: number }>();
