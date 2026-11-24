@@ -27,7 +27,7 @@ import { posix } from 'node:path';
 import { documentPath, isUntitled, keptPath } from './paths.ts';
 import { joinFile, sameMarkdown, splitFile } from '../format/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
-import { type DocumentPatch, type LinearClient, type LinearDocument, DocumentTooLongError, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
+import { type DocumentPatch, type LinearClient, type LinearDocument, DocumentTooLongError, LinearError, LinearStoppedError, describeLinearError, lengthRefusal } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
@@ -397,7 +397,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   /** Paths of the merge result whose changes were not made: the record keeps the `linear` tip's version. */
   const notDone: DocumentChange[] = [];
   /**
-   * New documents left out while writing because a linked file is over the upload limit or confirmed absent.
+   * New documents left out while writing because a linked file is over the upload limit or confirmed absent, or
+   * because the body, its links rewritten, is longer than Linear accepts.
    * Like a file the lint leaves out, each stays in git only until it is fixed there, so it does not keep the run from completing: a
    * later run cannot write it either. A merge record holds the merge result's version, so the file joins once git
    * changes it; a partial record keeps the tip's, as for every change not made.
@@ -412,7 +413,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * recorded with its new body would count as kept and never be written.
    */
   const leftOutForGood = (change: DocumentChange, error: LeaveOutError): change is CreateChange =>
-    (error.rule === UPLOAD_TOO_LARGE || (error.rule === UPLOAD_UNREADABLE && error.missingLfsObject)) && change.kind === 'create' && change.restore === undefined && !adoptable.has(change.path)
+    (error.rule === UPLOAD_TOO_LARGE || (error.rule === UPLOAD_UNREADABLE && error.missingLfsObject)) && newDocument(change);
+  /**
+   * A document Linear does not hold yet, not a README (see `leftOutForGood`). Links are written by document id, so a
+   * body over the content limit stays over it until git changes the file.
+   */
+  const newDocument = (change: DocumentChange): change is CreateChange =>
+    change.kind === 'create' && change.restore === undefined && !adoptable.has(change.path)
     && change.path !== 'README.md' && !change.path.endsWith('/README.md');
   // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
   // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
@@ -534,7 +541,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         }
         if (error instanceof DocumentTooLongError && error.field === 'content') {
           result.leftOutAtWrite.push({ path, rule: 'content-too-long' });
-          notDone.push(change);
+          if (newDocument(change)) leftOutNew.push(change);
+          else notDone.push(change);
           continue;
         }
         if (error instanceof LeaveOutError) {
@@ -939,6 +947,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (before === undefined) return skip(change.path, 'missing-in-linear');
     if ((seen === undefined && !removed.trashed && removed.archivedAt === null) || !unchangedSince(removed, before)) return skip(change.path, 'edited-in-linear');
     if (removed.trashed || removed.archivedAt !== null) {
+      // Linear would refuse the body only after the restore: refuse it before anything changes there.
+      const refusal = lengthRefusal({ content: body }, linear.facts);
+      if (refusal !== undefined) throw new DocumentTooLongError('UpdateDocument', refusal);
       await linear.restoreDocument(removed.id);
       // Unarchiving changes status and may change the timestamp. The text and location should still be the same.
       const restored = await linear.getDocument(removed.id, { withContent: true });

@@ -1,5 +1,6 @@
 // Lint rules: Markdown that formatting or sync would lose or alter. `fix` never rewrites
-// a file with one of these; the author decides what to keep.
+// a file with one of these; the author decides what to keep. A rewrite can still take a
+// file past the content limit: `fix` saves it, and content-too-long reports it.
 
 import { CONTENT_LIMIT } from '../linear/facts.ts';
 
@@ -11,7 +12,7 @@ export const LINT_RULES = {
   'table-escaped-pipe': 'An escaped pipe in a plain table cell splits the row.',
   'table-hash-cell': 'A table body cell starting with # becomes a heading.',
   'image-in-link': 'The link around an image is dropped.',
-  'content-too-long': `This document exceeds Linear's ${CONTENT_LIMIT.toLocaleString('en-US')}-character content limit. The author must decide how to shorten or split it.`,
+  'content-too-long': "This document exceeds Linear's 250,000-character content limit. The author must decide how to shorten or split it.",
   'markdown-complexity': 'Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.',
   'duplicate-title': 'Two or more files map to one document title.',
   'table-alignment': 'Table column alignment is dropped.',
