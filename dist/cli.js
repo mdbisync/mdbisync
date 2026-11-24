@@ -7398,6 +7398,7 @@ var MESSAGES = {
   // `init`.
   "init.security-twice": "choose security hooks once",
   "init.lfs-twice": "choose Git LFS once",
+  "init.create-projects-release": "--create-projects requires a release that supports the create-projects action input. Release {version} does not support it",
   "init.unknown-option": "unknown option: {option}",
   "init.needs-value": "{option} needs a value",
   "init.given-twice": "{option} was given twice",
@@ -7424,6 +7425,7 @@ var MESSAGES = {
   "inputs.check-deadline": "the input check-deadline-minutes must be an integer from 10 to 1440",
   "inputs.required-checks": "the input required-checks must name each check with the publisher it must come from, one per line, as `<name> @ actions` for a GitHub Actions job, `<name> @ app:<App id>` or `<name> @ status:<account id>`, with names of at most 255 characters; this line is not: {line}",
   "inputs.merge-without-checks": "the input merge-without-checks must be true or false",
+  "inputs.create-projects": "the input create-projects must be true or false",
   "inputs.direction": "the input direction {problem} (initial sync never picks a direction itself)",
   "inputs.direction-missing": "is required",
   "inputs.direction-unknown": 'must be one of {directions}, not "{direction}"',
@@ -7435,6 +7437,8 @@ var MESSAGES = {
   "run.stopped-detail": ": {detail}",
   "run.how-to-fix": "{message}. How to fix it: {url}",
   "run.stopped-by-linear": "{command}: stopped by Linear before any write; run it again once the limit has reset",
+  "run.project-create-stopped": "{command}: stopped by Linear while creating projects. Run it again once the limit has reset",
+  "run.project-create-failed": "Could not create {project} in Linear ({reason}). Check its name and the app\u2019s access, including any renamed or archived project, then run again.",
   "run.not-finished-sync-branch": "{command}: not finished ({code}); merge or close the pull request of the sync branch and delete the branch, then run it again",
   "run.not-finished": "{command}: not finished ({code}); run it again with the same inputs",
   "run.revoke-failed": "the run's Linear token could not be revoked: {reason}",
@@ -7484,6 +7488,8 @@ var MESSAGES = {
   "setup.target-not-found": "not found in Linear: {targets}",
   "setup.target-ambiguous": "more than one match in Linear: {targets}",
   "setup.target-shared": "more than one folder maps to {targets}",
+  "setup.project-create-failed": "Linear did not confirm project creation",
+  "setup.project-name-changed": "Linear returned a different name for the created project",
   "setup.linear-untrusted": "{ref} is at a commit the sync did not sign: someone else pushed it, or the sync wrote it before it signed its records or under another linear-client-secret. Its files could reach the sync pull request unchecked. Run initial sync again to record the state anew. The sync wrote nothing.",
   "setup.initial-sync-unfinished": "An initial sync stopped before it finished: run it again with the same inputs first. The sync wrote nothing.",
   "setup.initial-sync-required": "{ref} does not exist: run initial sync first. The sync wrote nothing.",
@@ -7578,6 +7584,7 @@ var MESSAGES = {
   "sync.needs-initial-sync": "run initial sync first",
   "sync.places-unresolved": "the previously recorded document places could not be resolved",
   "sync.recorded-place-unknown": "the recorded state names a Linear place for {folder} that is not a move the tracked branch made and the sync has not recorded yet; the state refs were changed outside the sync",
+  "sync.recorded-project-missing": 'previously synchronized project "{project}" of team "{team}" is missing in Linear. Restore access to the project or update its annotation before syncing',
   "sync.lost-lease": "state moved while recording document marks",
   "sync.no-lfs-pointer": "LFS did not return a pointer",
   "sync.lfs-pointer-mismatch": "LFS returned a pointer to other content than it was given",
@@ -7752,10 +7759,11 @@ function causeName(cause) {
 }
 
 // src/linear/facts.ts
+var CONTENT_LIMIT = 25e4;
 var LINEAR_FACTS = Object.freeze({
   mutationsReturnStoredContent: true,
   maxTitleLength: 512,
-  maxContentLength: 25e4,
+  maxContentLength: CONTENT_LIMIT,
   teamFilterIncludesProjectDocuments: false
 });
 function linearLength(text6) {
@@ -9924,28 +9932,30 @@ async function readFiles(git, config, commit2, paths) {
 var LINT_RULES = {
   footnote: "Footnotes are dropped.",
   subscript: "Tilde subscript is dropped.",
-  "table-escaped-pipe": "An escaped pipe in a plain table cell splits the row.",
+  "table-escaped-pipe": "An escaped pipe in a plain table cell splits the row. Put the cell text in inline code, or rephrase it without the pipe.",
   "table-hash-cell": "A table body cell starting with # becomes a heading.",
   "image-in-link": "The link around an image is dropped.",
-  "content-too-long": "Documents over 250,000 characters are rejected.",
+  "content-too-long": "This document exceeds Linear's 250,000-character content limit. The author must decide how to shorten or split it.",
   "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.",
   "duplicate-title": "Two or more files map to one document title.",
-  "table-alignment": "Table column alignment is dropped.",
-  "link-scheme": "Links must use http, https, mailto, a path or a fragment.",
-  "link-title": "A link title is dropped.",
-  "image-title": "An image title is dropped from the Markdown.",
-  "code-in-emphasis": "Bold or italic around inline code is dropped from the code.",
-  "hard-break-backslash": "A backslash line break becomes a plain line break.",
-  "git-conflict-marker": "Git conflict marker lines are rewritten as headings, quotes or collapsible sections.",
+  "table-alignment": "Table column alignment is dropped. Remove the colons from the separator row to accept that.",
+  "link-scheme": "Links must use http, https, mailto, a path or a fragment. Change the destination, or write the address as inline code.",
+  "link-title": "A link title is dropped. Remove the title, or move its text into the link text.",
+  "image-title": "An image title is dropped from the Markdown. Remove the title, or move its text into the alt text.",
+  "code-in-emphasis": "Bold or italic around inline code is dropped from the code. Write the code without emphasis, or emphasize the words around it.",
+  "hard-break-backslash": "A backslash line break becomes a plain line break. Run fix to write it as two trailing spaces; where fix leaves it, put the text on one line or start a new paragraph.",
+  "hard-break-in-heading": "A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.",
+  "git-conflict-marker": "Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.",
   "url-in-html": "A URL inside raw HTML is turned into a Markdown link.",
-  "block-first-in-list-item": "A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item.",
-  "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it.",
+  "block-first-in-list-item": "A list item that starts with a heading, code, a quote, a list or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
+  "ordered-task-list": "An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.",
+  "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path.",
   "image-file-missing": "An image must name a file that exists in the repository, not a folder or a Markdown document.",
   "upload-file-refused": "A file named as the sync names a captured upload fails the upload check: documents that link it are blocked when they change in Linear.",
   "document-in-assets-folder": "A Markdown document cannot be inside a folder named assets, which holds the files documents embed."
 };
+var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash"]);
 var IMAGE_PLACE_RULES = /* @__PURE__ */ new Set(["image-not-in-repository", "image-file-missing"]);
-var CONTENT_LIMIT = 25e4;
 
 // src/setup/report.ts
 function passed(name, detail) {
@@ -10470,6 +10480,9 @@ function refusalReason(message2) {
 // src/format/command.ts
 import { closeSync, constants as constants2, existsSync, fstatSync, ftruncateSync, lstatSync, openSync, readdirSync, readFileSync as readFileSync2, readlinkSync, realpathSync, statSync, writeSync } from "node:fs";
 import { basename, join as join7, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
+
+// src/format/fix.ts
+import { isDeepStrictEqual as isDeepStrictEqual2 } from "node:util";
 
 // node_modules/character-entities/index.js
 var characterEntities = {
@@ -14523,6 +14536,77 @@ var nameToEmoji = {
   wales: "\u{1F3F4}\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}"
 };
 
+// node_modules/micromark-util-character/index.js
+var asciiAlpha = regexCheck(/[A-Za-z]/);
+var asciiAlphanumeric = regexCheck(/[\dA-Za-z]/);
+var asciiAtext = regexCheck(/[#-'*+\--9=?A-Z^-~]/);
+function asciiControl(code4) {
+  return (
+    // Special whitespace codes (which have negative values), C0 and Control
+    // character DEL
+    code4 !== null && (code4 < 32 || code4 === 127)
+  );
+}
+var asciiDigit = regexCheck(/\d/);
+var asciiHexDigit = regexCheck(/[\dA-Fa-f]/);
+var asciiPunctuation = regexCheck(/[!-/:-@[-`{-~]/);
+function markdownLineEnding(code4) {
+  return code4 !== null && code4 < -2;
+}
+function markdownLineEndingOrSpace(code4) {
+  return code4 !== null && (code4 < 0 || code4 === 32);
+}
+function markdownSpace(code4) {
+  return code4 === -2 || code4 === -1 || code4 === 32;
+}
+var unicodePunctuation = regexCheck(new RegExp("\\p{P}|\\p{S}", "u"));
+var unicodeWhitespace = regexCheck(/\s/);
+function regexCheck(regex) {
+  return check2;
+  function check2(code4) {
+    return code4 !== null && code4 > -1 && regex.test(String.fromCharCode(code4));
+  }
+}
+
+// node_modules/micromark-util-sanitize-uri/index.js
+function normalizeUri(value) {
+  const result = [];
+  let index2 = -1;
+  let start2 = 0;
+  let skip = 0;
+  while (++index2 < value.length) {
+    const code4 = value.charCodeAt(index2);
+    let replace2 = "";
+    if (code4 === 37 && asciiAlphanumeric(value.charCodeAt(index2 + 1)) && asciiAlphanumeric(value.charCodeAt(index2 + 2))) {
+      skip = 2;
+    } else if (code4 < 128) {
+      if (!/[!#$&-;=?-Z_a-z~]/.test(String.fromCharCode(code4))) {
+        replace2 = String.fromCharCode(code4);
+      }
+    } else if (code4 > 55295 && code4 < 57344) {
+      const next = value.charCodeAt(index2 + 1);
+      if (code4 < 56320 && next > 56319 && next < 57344) {
+        replace2 = String.fromCharCode(code4, next);
+        skip = 1;
+      } else {
+        replace2 = "\uFFFD";
+      }
+    } else {
+      replace2 = String.fromCharCode(code4);
+    }
+    if (replace2) {
+      result.push(value.slice(start2, index2), encodeURIComponent(replace2));
+      start2 = index2 + skip + 1;
+      replace2 = "";
+    }
+    if (skip) {
+      index2 += skip;
+      skip = 0;
+    }
+  }
+  return result.join("") + value.slice(start2);
+}
+
 // node_modules/@rgrove/parse-xml/dist/lib/StringScanner.js
 var emptyString = "";
 var surrogatePair = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g;
@@ -16025,77 +16109,6 @@ function decodeNumericCharacterReference(value, base) {
 // node_modules/micromark-util-normalize-identifier/index.js
 function normalizeIdentifier(value) {
   return value.replace(/[\t\n\r ]+/g, " ").replace(/^ | $/g, "").toLowerCase().toUpperCase();
-}
-
-// node_modules/micromark-util-character/index.js
-var asciiAlpha = regexCheck(/[A-Za-z]/);
-var asciiAlphanumeric = regexCheck(/[\dA-Za-z]/);
-var asciiAtext = regexCheck(/[#-'*+\--9=?A-Z^-~]/);
-function asciiControl(code4) {
-  return (
-    // Special whitespace codes (which have negative values), C0 and Control
-    // character DEL
-    code4 !== null && (code4 < 32 || code4 === 127)
-  );
-}
-var asciiDigit = regexCheck(/\d/);
-var asciiHexDigit = regexCheck(/[\dA-Fa-f]/);
-var asciiPunctuation = regexCheck(/[!-/:-@[-`{-~]/);
-function markdownLineEnding(code4) {
-  return code4 !== null && code4 < -2;
-}
-function markdownLineEndingOrSpace(code4) {
-  return code4 !== null && (code4 < 0 || code4 === 32);
-}
-function markdownSpace(code4) {
-  return code4 === -2 || code4 === -1 || code4 === 32;
-}
-var unicodePunctuation = regexCheck(new RegExp("\\p{P}|\\p{S}", "u"));
-var unicodeWhitespace = regexCheck(/\s/);
-function regexCheck(regex) {
-  return check2;
-  function check2(code4) {
-    return code4 !== null && code4 > -1 && regex.test(String.fromCharCode(code4));
-  }
-}
-
-// node_modules/micromark-util-sanitize-uri/index.js
-function normalizeUri(value) {
-  const result = [];
-  let index2 = -1;
-  let start2 = 0;
-  let skip = 0;
-  while (++index2 < value.length) {
-    const code4 = value.charCodeAt(index2);
-    let replace2 = "";
-    if (code4 === 37 && asciiAlphanumeric(value.charCodeAt(index2 + 1)) && asciiAlphanumeric(value.charCodeAt(index2 + 2))) {
-      skip = 2;
-    } else if (code4 < 128) {
-      if (!/[!#$&-;=?-Z_a-z~]/.test(String.fromCharCode(code4))) {
-        replace2 = String.fromCharCode(code4);
-      }
-    } else if (code4 > 55295 && code4 < 57344) {
-      const next = value.charCodeAt(index2 + 1);
-      if (code4 < 56320 && next > 56319 && next < 57344) {
-        replace2 = String.fromCharCode(code4, next);
-        skip = 1;
-      } else {
-        replace2 = "\uFFFD";
-      }
-    } else {
-      replace2 = String.fromCharCode(code4);
-    }
-    if (replace2) {
-      result.push(value.slice(start2, index2), encodeURIComponent(replace2));
-      start2 = index2 + skip + 1;
-      replace2 = "";
-    }
-    if (skip) {
-      index2 += skip;
-      skip = 0;
-    }
-  }
-  return result.join("") + value.slice(start2);
 }
 
 // node_modules/micromark-factory-space/index.js
@@ -24995,9 +25008,226 @@ function sameMarkdown(a, b) {
   if (a === b) return true;
   return isDeepStrictEqual(comparable(a), comparable(b));
 }
+function sameAsLinear(content4, body2) {
+  if (content4 === body2) return true;
+  const restored = linearMarkersAsText(content4, body2);
+  if (sameMarkdown(restored, body2)) return true;
+  return body2.includes("\\+++") && sameMarkdown(restored, linearSectionEnd(body2));
+}
+function linearSectionEnd(body2) {
+  const lines2 = body2.split(LINE_END);
+  const closing = /* @__PURE__ */ new Set();
+  visit2(parse2(body2), (node2) => {
+    if (node2.type !== "paragraph") return;
+    const first = line(node2) - 1;
+    const last = (node2.position?.end.line ?? first + 1) - 1;
+    const column = (node2.position?.start.column ?? 1) - 1;
+    if (last > first && lines2[first].slice(column).startsWith("\\+++ ") && linearLineText(lines2[last]) === "+++") {
+      closing.add(last);
+    }
+  });
+  return lines2.flatMap((row, index2) => closing.has(index2) ? [LINE_PREFIX.exec(row)[0].trimEnd(), row] : [row]).join("\n");
+}
+var NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
+var LINEAR_BLOCK_START = /^[ \t>]*(?:(?:[*+-]|\d{1,9}[.)])[ \t]+)*(?:\+{1,3}(?:[ \t\r]|$)|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
+var LINE_END = /\r\n?|\n/;
+var LINE_PREFIX = /^[ \t>]*/;
+var CONFLICT_START = /^<{7}(?: |$)/;
+var DIV_START = /^<div(?:[ \t][^>\n]*)?>/i;
+var DIV_END = /<\/div[ \t]*>/i;
+var DIV_END_START = /^<\/div[ \t]*>/i;
+var SECTION_TITLE = /^\+{3}[ \t]/;
+var ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3}(?:[ \t]|$))/;
+function linearLineText(row) {
+  return row.replace(LINE_PREFIX, "").trimEnd();
+}
+function tableKey(header, delimiter) {
+  const text6 = linearLineText(header).replace(/^(?:[*+-]|\d{1,9}[.)])[ \t]+/, "");
+  return text6 + "\n" + delimiter;
+}
+function tableRowsKey(lines2, from, to) {
+  const rows = [];
+  for (let index2 = from; index2 < to; index2++) {
+    const row = linearLineText(lines2[index2]);
+    if (!row.startsWith("|")) break;
+    rows.push(row);
+  }
+  return rows.join("\n");
+}
+function blockLineKey(text6, startsParagraph) {
+  return (startsParagraph ? "first:" : "next:") + text6;
+}
+function acceptedBlockStarts(previous3) {
+  const escapes = /* @__PURE__ */ new Set();
+  const tables = /* @__PURE__ */ new Set();
+  const tableHeaders = /* @__PURE__ */ new Set();
+  const html2 = /* @__PURE__ */ new Set();
+  if (!/\\[<|$+]|<div\b|^[ \t>]*\|/im.test(previous3)) return { escapes, tables, tableHeaders, html: html2 };
+  const lines2 = previous3.split(LINE_END);
+  visit2(parse2(previous3), (node2, ancestors) => {
+    const first = line(node2) - 1;
+    if (node2.type === "table") {
+      const key = tableKey(lines2[first], linearLineText(lines2[first + 1] ?? ""));
+      tableHeaders.add(key);
+      tables.add(key + "\n" + tableRowsKey(lines2, first + 2, node2.position?.end.line ?? first + 2));
+      return;
+    }
+    if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
+      html2.add(previous3.slice(start(node2), end(node2)));
+      return;
+    }
+    if (node2.type !== "text" || ancestors.at(-1)?.type !== "paragraph") return;
+    const column = (node2.position?.start.column ?? 1) - 1;
+    for (let index2 = first; index2 < (node2.position?.end.line ?? 0); index2++) {
+      const row = lines2[index2];
+      const raw = linearLineText(index2 === first ? row.slice(column) : row);
+      if (!ESCAPED_BLOCK_START.test(raw)) continue;
+      const literal = raw.slice(1);
+      const paragraph2 = ancestors.at(-1);
+      if (literal.startsWith("|")) {
+        const key = tableKey(lines2[index2 - 1] ?? "", literal);
+        escapes.add(key);
+        escapes.add(key + "\n" + tableRowsKey(lines2, index2 + 1, paragraph2.position?.end.line ?? index2 + 1));
+      } else {
+        escapes.add(blockLineKey(literal, index2 === line(paragraph2) - 1));
+        if (SECTION_TITLE.test(literal) && line(paragraph2) === index2 + 1 && paragraph2.position?.end.line === index2 + 1) {
+          escapes.add("section:" + literal);
+        }
+      }
+    }
+  });
+  return { escapes, tables, tableHeaders, html: html2 };
+}
+function divsClosedInAnotherBlock(tree, source) {
+  const paired = /* @__PURE__ */ new Set();
+  if (!DIV_END.test(source)) return paired;
+  const open3 = /* @__PURE__ */ new Map();
+  visit2(tree, (node2, ancestors) => {
+    if (node2.type !== "html") return;
+    const parent = ancestors.at(-1);
+    if (parent.type === "paragraph") return;
+    if (DIV_END_START.test(node2.value)) {
+      const opening = open3.get(parent)?.pop();
+      if (opening !== void 0) paired.add(opening);
+    } else if (DIV_START.test(node2.value) && !DIV_END.test(node2.value)) {
+      const siblings = open3.get(parent) ?? [];
+      siblings.push(node2);
+      open3.set(parent, siblings);
+    }
+  });
+  return paired;
+}
+function linearMarkersAsText(content4, previous3 = "") {
+  if (!LINEAR_BLOCK_START.test(content4)) return content4;
+  const accepted = acceptedBlockStarts(previous3);
+  let text6 = content4;
+  for (let pass = 0; pass <= MARKDOWN_MAX_DEPTH; pass++) {
+    const escapes = /* @__PURE__ */ new Set();
+    const escapedItems = /* @__PURE__ */ new Set();
+    const lines2 = text6.split(LINE_END);
+    const offsets = [0];
+    for (const match of text6.matchAll(/\r\n?|\n/g)) offsets.push(match.index + match[0].length);
+    const lineEnd = (index2) => offsets[index2] + lines2[index2].length;
+    const rowAt = (index2) => linearLineText(lines2[index2] ?? "");
+    const sections = /* @__PURE__ */ new Map();
+    const rowStart = (index2) => offsets[index2] + LINE_PREFIX.exec(lines2[index2])[0].length;
+    const tree = parse2(text6);
+    const pairedDivs = divsClosedInAnotherBlock(tree, text6);
+    visit2(tree, (node2, ancestors) => {
+      if (ancestors.some((ancestor) => escapedItems.has(ancestor))) return;
+      const at2 = start(node2);
+      const index2 = line(node2) - 1;
+      if (node2.type === "listItem") {
+        const marker = NOT_LINEAR_MARKER.exec(text6.slice(at2, at2 + 11));
+        if (marker === null) return;
+        escapedItems.add(node2);
+        escapes.add(at2 + marker[0].length - 1);
+      } else if (node2.type === "table") {
+        const delimiter = rowAt(index2 + 1);
+        if (!delimiter.startsWith("|")) return;
+        const canonical = /^\|(?: -- \|)+$/.test(delimiter);
+        const key = tableKey(lines2[index2], delimiter);
+        const table = key + "\n" + tableRowsKey(lines2, index2 + 2, node2.position?.end.line ?? index2 + 2);
+        if (accepted.tables.has(table)) return;
+        const knownLiteral = accepted.tableHeaders.has(key) ? accepted.escapes.has(table) : accepted.escapes.has(key);
+        const literal = knownLiteral || !canonical || end(node2) === text6.length || ancestors.at(-1)?.type === "listItem" && at2 > rowStart(index2);
+        if (literal) escapes.add(rowStart(index2 + 1));
+      } else if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
+        const raw = text6.slice(at2, end(node2));
+        const first = text6.slice(at2, lineEnd(index2)).trimEnd();
+        if (pairedDivs.has(node2) || accepted.html.has(raw) && !CONFLICT_START.test(raw)) return;
+        const completeDiv = DIV_START.test(first) && DIV_END.test(raw);
+        const literal = accepted.escapes.has(blockLineKey(first, true)) || accepted.escapes.has(blockLineKey(first, false));
+        const incompleteDiv = DIV_START.test(first) && !completeDiv;
+        if (CONFLICT_START.test(raw) || literal || incompleteDiv) {
+          escapes.add(at2);
+          const spans = codeSpans(text6, at2, end(node2));
+          let span = 0;
+          const last = (node2.position?.end.line ?? index2 + 1) - 1;
+          for (let row = index2 + 1; row <= last; row++) {
+            const offset = rowStart(row);
+            while (span < spans.length && spans[span][1] <= offset) span++;
+            if (span < spans.length && spans[span][0] <= offset) continue;
+            const rowText = rowAt(row);
+            if (accepted.escapes.has(blockLineKey(rowText, false)) || incompleteDiv && DIV_START.test(rowText)) escapes.add(offset);
+          }
+        }
+      } else if (node2.type === "paragraph") {
+        const rawFirst = text6.slice(at2, lineEnd(index2));
+        const first = rawFirst.trimEnd();
+        const last = (node2.position?.end.line ?? index2 + 1) - 1;
+        const literal = accepted.escapes.has(blockLineKey(first, true));
+        if (CONFLICT_START.test(first) || literal && first !== "+++" && !SECTION_TITLE.test(rawFirst)) escapes.add(at2);
+        if (first === "$$" && last > index2 + 1 && rowAt(last) === "$$") escapes.add(at2);
+        const parent = ancestors.at(-1);
+        if (SECTION_TITLE.test(rawFirst)) {
+          if (last > index2) {
+            escapes.add(at2);
+            if (rowAt(last) === "+++") escapes.add(rowStart(last));
+          } else {
+            const open3 = sections.get(parent) ?? [];
+            open3.push({ at: at2, literal: accepted.escapes.has("section:" + first) && accepted.escapes.has(blockLineKey("+++", true)) });
+            sections.set(parent, open3);
+          }
+        } else if (first === "+++" && last === index2) {
+          const open3 = sections.get(parent)?.pop();
+          if (open3?.literal) {
+            escapes.add(open3.at);
+            escapes.add(at2);
+          } else if (open3 === void 0 && literal) {
+            escapes.add(at2);
+          }
+        }
+      } else if (node2.type === "text" && ancestors.at(-1)?.type === "paragraph") {
+        for (let row = index2; row < (node2.position?.end.line ?? 0); row++) {
+          const offset = rowStart(row);
+          if (offset < at2 || offset >= end(node2)) continue;
+          const raw = rowAt(row);
+          if (row === line(ancestors.at(-1)) - 1) continue;
+          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false))) escapes.add(offset);
+        }
+      }
+    });
+    for (const open3 of sections.values()) for (const section of open3) escapes.add(section.at);
+    if (escapes.size === 0) return text6;
+    const parts = [];
+    let at = 0;
+    for (const escape2 of [...escapes].sort((a, b) => a - b)) {
+      parts.push(text6.slice(at, escape2), "\\");
+      at = escape2;
+    }
+    parts.push(text6.slice(at));
+    text6 = parts.join("");
+  }
+  throw new MarkdownLimitError("depth");
+}
 var LINEAR_SYNTAX_ESCAPES = { "\\$": "\uE000", "\\+": "\uE001" };
+function isLonePlus(text6, at) {
+  const after = text6[at + 2];
+  return text6[at - 1] !== "+" && (after === void 0 || after === " " || after === "	" || after === "\n");
+}
 function comparable(body2) {
-  const marked = nestedFileBlocksOnItemLine(body2).replace(/\\[$+]/g, (escape2) => LINEAR_SYNTAX_ESCAPES[escape2]).replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, "$1 \uE002");
+  const marked = nestedFileBlocksOnItemLine(body2).replace(/\\[$+]/g, (escape2, at, text6) => escape2 === "\\+" && isLonePlus(text6, at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]).replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, "$1 \uE002");
   const tree = parse2(marked);
   const strip = (node2) => {
     const { position: _position, ...rest } = node2;
@@ -25151,26 +25381,134 @@ function destination(url) {
   return url.replace(/ /g, "%20").replace(/\\(?=[!-/:-@[-`{-~])/g, "\\\\").replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, "&amp;");
 }
 function linkDestination(url) {
-  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`));
-  return `<${inner}${trailingBackslashes(inner) % 2 === 1 ? "\\" : ""}>`;
+  const cut = url.search(/[?#]/);
+  const path2 = cut === -1 ? url : url.slice(0, cut);
+  const rest = cut === -1 ? "" : url.slice(cut);
+  const literal = !/^[a-z][a-z0-9+.-]*:/i.test(url) && !decodes(path2);
+  const encode2 = (text6, percent) => text6.replace(new RegExp(`[<>\\r\\n\\\\|^{}]|${percent.source}`, "g"), (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
+  const lone = /%(?![0-9A-Fa-f]{2})/;
+  return `<${destination(encode2(path2, literal ? /%/ : lone) + encode2(rest, lone))}>`;
 }
-function trailingBackslashes(text6) {
-  let at = text6.length;
-  while (at > 0 && text6[at - 1] === "\\") at -= 1;
-  return text6.length - at;
+function decodes(text6) {
+  try {
+    decodeURIComponent(text6);
+    return true;
+  } catch {
+    return false;
+  }
 }
 function imageDestination(url) {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 function bracketedLabel(source, open3, limit) {
-  let depth2 = 0;
-  for (let at = open3; at < Math.min(limit, source.length); at++) {
-    const char = source[at];
-    if (char === "\\") at++;
-    else if (char === "[") depth2++;
-    else if (char === "]" && --depth2 === 0) return source.slice(open3 + 1, at);
+  const end2 = Math.min(limit, source.length);
+  const closing = (spans) => {
+    let depth2 = 0;
+    for (let at = open3; at < end2; at++) {
+      const char = source[at];
+      if (char === "\\") at++;
+      else if (spans.has(at)) at = spans.get(at) - 1;
+      else if (char === "[") depth2++;
+      else if (char === "]" && --depth2 === 0) return at;
+    }
+    return -1;
+  };
+  let close = closing(new Map(codeSpans(source, open3, end2)));
+  if (!(close !== -1 && (close === end2 - 1 || source[close + 1] === "(" || source[close + 1] === "["))) close = closing(/* @__PURE__ */ new Map());
+  return close === -1 ? "" : source.slice(open3 + 1, close);
+}
+function codeSpans(source, from, to) {
+  const htmlEnd = inlineHtmlEnds(source, from, to);
+  const runEnd = (at) => {
+    while (at < to && source[at] === "`") at++;
+    return at;
+  };
+  const runs = /* @__PURE__ */ new Map();
+  for (let at = from; at < to; ) {
+    if (source[at] !== "`") {
+      at++;
+      continue;
+    }
+    const after = runEnd(at);
+    const starts = runs.get(after - at) ?? [];
+    starts.push(at);
+    runs.set(after - at, starts);
+    at = after;
   }
-  return "";
+  const spans = [];
+  for (let at = from; at < to; ) {
+    if (source[at] === "\\") {
+      at += 2;
+      continue;
+    }
+    if (source[at] === "<") {
+      at = htmlEnd(at) ?? at + 1;
+      continue;
+    }
+    if (source[at] !== "`") {
+      at++;
+      continue;
+    }
+    const open3 = runEnd(at);
+    const width = open3 - at;
+    const close = firstAtOrAfter(runs.get(width) ?? [], open3);
+    if (close === void 0) {
+      at = open3;
+    } else {
+      spans.push([at, close + width]);
+      at = close + width;
+    }
+  }
+  return spans;
+}
+var AUTOLINK_OR_TAG = new RegExp([
+  /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/.source,
+  /<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>/.source,
+  /<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>/.source,
+  /<\/[A-Za-z][A-Za-z0-9-]*\s*>/.source
+].join("|"), "y");
+var HTML_UNTIL = [
+  [/<!--(?:-?>)?/y, "-->"],
+  [/<\?/y, "?>"],
+  [/<![A-Za-z]/y, ">"],
+  [/<!\[CDATA\[/y, "]]>"]
+];
+function inlineHtmlEnds(source, from, to) {
+  let text6;
+  const next = /* @__PURE__ */ new Map();
+  const closer = (marker, start2) => {
+    let found = next.get(marker);
+    if (found === void 0 || found !== -1 && found < start2) {
+      found = text6.indexOf(marker, start2);
+      next.set(marker, found);
+    }
+    return found;
+  };
+  return (at) => {
+    text6 ??= source.slice(from, to);
+    const offset = at - from;
+    for (const [open3, marker] of HTML_UNTIL) {
+      open3.lastIndex = offset;
+      const opened = open3.exec(text6);
+      if (!opened) continue;
+      if (opened[0].endsWith(">")) return at + opened[0].length;
+      const close = closer(marker, offset + opened[0].length);
+      return close === -1 ? void 0 : from + close + marker.length;
+    }
+    AUTOLINK_OR_TAG.lastIndex = offset;
+    const match = AUTOLINK_OR_TAG.exec(text6);
+    return match ? at + match[0].length : void 0;
+  };
+}
+function firstAtOrAfter(values, min) {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = low + high >>> 1;
+    if (values[middle] < min) low = middle + 1;
+    else high = middle;
+  }
+  return values[low];
 }
 
 // src/format/lint.ts
@@ -25188,7 +25526,8 @@ function linkedFileCheck(documentPath2, isFile) {
   };
 }
 function lintInTree(file, text6, files) {
-  return lintText(file, text6, { linkedFileExists: linkedFileCheck(file, (path2) => files.has(path2)) });
+  const findings = lintText(file, text6, { linkedFileExists: linkedFileCheck(file, (path2) => files.has(path2)) });
+  return findings.filter((finding) => finding.rule !== "hard-break-in-heading");
 }
 function lintText(file, text6, options = {}) {
   const { head, body: body2 } = splitFile(text6);
@@ -25325,10 +25664,16 @@ function lintTree(file, tree, body2, report, options) {
         break;
       case "break":
         if (body2[start(node2)] === "\\") report("hard-break-backslash", line(node2));
+        else if (ancestors.some((a) => a.type === "heading")) report("hard-break-in-heading", line(node2));
         break;
       case "listItem": {
         const [first] = node2.children;
         if (first !== void 0 && first.type !== "paragraph") report("block-first-in-list-item", line(first));
+        break;
+      }
+      case "list": {
+        const task = node2.ordered ? node2.children.find((item) => item.checked !== null && item.checked !== void 0) : void 0;
+        if (task !== void 0) report("ordered-task-list", line(task));
         break;
       }
       case "table":
@@ -25433,9 +25778,60 @@ function hasUrlOrLinkAttribute(html2) {
 
 // src/format/fix.ts
 function fixText(text6, options = {}) {
-  if (lintText("", text6).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text6;
+  if (lintText("", text6).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule))) return text6;
   const { head, body: body2 } = splitFile(text6);
-  return joinFile(head, fixBody(body2.replace(/\r\n?/g, "\n"), options));
+  const lf2 = body2.replace(/\r\n?/g, "\n");
+  const spaced = backslashBreaksAsSpaces(lf2);
+  if (spaced === void 0) return text6;
+  const fixed = fixBody(spaced, options);
+  if (spaced !== lf2 && breakCount(fixed) < breakCount(spaced)) return text6;
+  return joinFile(head, fixed);
+}
+function breakCount(body2) {
+  let count4 = 0;
+  visit2(parse2(body2), (node2) => {
+    if (node2.type === "break") count4++;
+  });
+  return count4;
+}
+function backslashBreaksAsSpaces(body2) {
+  if (!body2.includes("\\")) return body2;
+  const tree = parse2(body2);
+  const breaks = [];
+  let unwritable = false;
+  visit2(tree, (node2, ancestors) => {
+    if (node2.type !== "break" || body2[start(node2)] !== "\\") return;
+    const parent = ancestors.at(-1);
+    const siblings = parent !== void 0 && "children" in parent ? parent.children : [];
+    const leading = siblings.slice(0, siblings.indexOf(node2)).every((sibling) => sibling.type === "text" && sibling.value.trim() === "");
+    if (leading || ancestors.some((a) => a.type === "heading")) unwritable = true;
+    breaks.push(start(node2));
+  });
+  if (breaks.length === 0) return body2;
+  if (unwritable) return void 0;
+  let written = "";
+  let at = 0;
+  for (const backslash of breaks.sort((a, b) => a - b)) {
+    let from = backslash;
+    while (from > at && isSpaceOrTab(body2[from - 1])) from--;
+    written += `${body2.slice(at, from)}  `;
+    at = backslash + 1;
+  }
+  written += body2.slice(at);
+  return isDeepStrictEqual2(breakShape(parse2(written)), breakShape(tree)) ? written : void 0;
+}
+function breakShape(tree) {
+  const shape = (node2) => {
+    const { position: _position, ...rest } = node2;
+    if (!("children" in node2)) return rest;
+    const children = node2.children.flatMap((child, index2, all2) => {
+      if (child.type !== "text" || all2[index2 + 1]?.type !== "break") return [shape(child)];
+      const value = child.value.replace(/[ \t]+$/, "");
+      return value === "" ? [] : [{ type: "text", value }];
+    });
+    return { ...rest, children };
+  };
+  return shape(tree);
 }
 function fixBody(body2, options) {
   if (body2.trim() === "") return "";
@@ -25443,13 +25839,16 @@ function fixBody(body2, options) {
   for (let pass = 0; pass < 5; pass++) {
     const tree = parse2(current);
     if (pass > 0 && (paddingOverLimit(tree) !== void 0 || referencesOverLimit(tree, current) !== void 0)) throw new MarkdownLimitError("nodes");
+    if (hasUnplacedNode(tree)) return body2;
     const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
   }
   return current;
 }
-var BLOCK_START = /^(?:[>#*+\-=_`~|]|\d{1,9}[.)])/;
+var BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)])/;
+var MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
+var LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
 var Writer = class {
   definitions = /* @__PURE__ */ new Map();
   containers = [];
@@ -25458,6 +25857,12 @@ var Writer = class {
   options;
   /** Where the table cell being written starts its text: an escape there stays. */
   cellStart;
+  /** The indent of the file block whose label is being written: its later lines carry no prefix for it. */
+  fileBlockIndent = 0;
+  /** Whether the text being written is an autolink's, where a backslash escapes nothing. */
+  literal = false;
+  /** The paragraph that follows a task item's checkbox: it does not start its line. */
+  taskParagraph;
   constructor(source, tree, options) {
     this.source = source;
     this.tree = tree;
@@ -25511,7 +25916,8 @@ var Writer = class {
       case "thematicBreak":
         return ["---"];
       case "blockquote": {
-        this.containers.push({ kind: "quote" });
+        const marker = this.source.indexOf(">", start(node2));
+        this.containers.push({ kind: "quote", content: marker + (this.source[marker + 1] === " " ? 2 : 1) });
         const { text: text6, codeLines } = this.writtenBlocks(node2.children);
         this.containers.pop();
         return [quoteLines(text6, codeLines)];
@@ -25537,20 +25943,43 @@ ${node2.value}${node2.value === "" ? "" : "\n"}${fence}`];
   /** A paragraph; `$$` math becomes a `math` fence, and an image shares no paragraph with text. */
   paragraph(node2) {
     const raw = this.source.slice(start(node2), end(node2));
-    const math = /^\$\$\n([\s\S]*)\n\$\$$/.exec(raw);
+    const math = MATH_PARAGRAPH.exec(raw);
     if (math) return [`\`\`\`math
 ${math[1]}
 \`\`\``];
     const isImage = (child) => child.type === "image" || child.type === "imageReference";
     const images = node2.children.filter(isImage).length;
     const hasText = node2.children.some((child) => !isImage(child) && !(child.type === "text" && child.value.trim() === ""));
-    if (images === 0 || !hasText && images === 1) return [this.inline(node2.children)];
+    if (images === 0 || !hasText && images === 1) {
+      const text6 = node2 === this.taskParagraph ? this.inline(node2.children, "continuation") : this.paragraphText(node2.children);
+      return [escapeLiteralSectionEnd(text6)];
+    }
     const parts = [[]];
     for (const child of node2.children) {
       if (isImage(child)) parts.push([child], []);
       else parts.at(-1).push(child);
     }
-    return parts.map((part) => this.inline(part).trim()).filter((part) => part !== "");
+    return parts.map((part, index2) => {
+      const afterCheckbox = index2 === 0 && node2 === this.taskParagraph;
+      const text6 = afterCheckbox ? this.inline(part, "continuation").trim() : this.paragraphText(part, true);
+      return escapeLiteralSectionEnd(paragraphPart(text6, !afterCheckbox));
+    }).filter((part) => part !== "");
+  }
+  /**
+   * A paragraph's text, which starts a line. Text that starts like a list
+   * marker gets its marker escaped: it was text only because it could not
+   * interrupt a paragraph (`Note` / `1. 3. plum`, where `3. plum` stays the
+   * item's text), and the blank line `fix` writes before the list would
+   * make it a list; Linear reads it as one either way. `trim` drops the
+   * spaces around a part split off at an image.
+   */
+  paragraphText(children, trim = false) {
+    const text6 = trim ? this.inline(children, "all").trim() : this.inline(children, "all");
+    if (children[0]?.type !== "text") return text6;
+    const marker = LIST_MARKER_START.exec(text6);
+    if (marker === null) return text6;
+    const at = marker[0].length - 1;
+    return `${text6.slice(0, at)}\\${text6.slice(at)}`;
   }
   list(node2, interruptsParagraph = false) {
     return node2.children.map((item, index2) => {
@@ -25568,7 +25997,11 @@ ${math[1]}
       const task = item.checked != null;
       const inlineAudio = !task && MP3.test(path2) || bullet && WAV_OR_OGG.test(path2);
       if (!inlineAudio) {
+        this.fileBlockIndent = indent2.length;
+        this.containers.push(this.itemContainer(item));
         const label = this.inline(attachment.children);
+        this.containers.pop();
+        this.fileBlockIndent = 0;
         const destination2 = imageDestination(attachment.url);
         if (bullet && VIDEO.test(attachment.url.split(/[?#]/)[0])) return `${marker} [${label}](${destination2})`;
         if (!interruptsParagraph || marker.startsWith("- ")) {
@@ -25578,7 +26011,8 @@ ${indent2}[${label}](${destination2})`;
       }
     }
     if (first === void 0) return marker;
-    this.containers.push({ kind: "item", indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
+    this.containers.push(this.itemContainer(item));
+    if (item.checked !== null && item.checked !== void 0 && first.type === "paragraph") this.taskParagraph = first;
     let content4 = "";
     item.children.forEach((child, index2) => {
       const previous3 = item.children[index2 - 1];
@@ -25588,6 +26022,45 @@ ${indent2}[${label}](${destination2})`;
     });
     this.containers.pop();
     return `${marker} ${prefixLines(content4, indent2, "").slice(indent2.length)}`;
+  }
+  /**
+   * An item's container. A continuation line belongs to the item's content
+   * when indented past the parent's content by the item's own indentation
+   * and its content indent: in a code span, spaces beyond that are code text.
+   */
+  itemContainer(item) {
+    const line2 = lineStartOf(this.source, start(item));
+    const columnAt = (offset) => [...this.source.slice(line2, offset)].reduce(advanceColumn, 0);
+    let at = line2;
+    for (const container of this.containers) {
+      if (lineStartOf(this.source, container.content) === line2) at = container.content;
+      else if (container.kind === "quote") at += prefixOf(container, this.source.slice(at, start(item)))?.[0].length ?? 0;
+      else {
+        const end2 = columnAt(at) + container.indent;
+        while (at < start(item) && isSpaceOrTab(this.source[at]) && advanceColumn(columnAt(at), this.source[at]) <= end2) at++;
+      }
+    }
+    const content4 = this.contentIndent(item);
+    return { kind: "item", indent: Math.max(0, columnAt(start(item)) - columnAt(at)) + content4, content: start(item) + content4 };
+  }
+  /**
+   * The columns a line needs past the item's marker to belong to its
+   * content: where its first block starts. A task item's content starts at
+   * its checkbox, not at the text after it; an item whose first line holds
+   * only its marker takes its content one column past the marker.
+   */
+  contentIndent(item) {
+    const [first] = item.children;
+    if (item.checked !== null && item.checked !== void 0) {
+      const lineEnd = this.source.indexOf("\n", start(item));
+      const line2 = this.source.slice(start(item), lineEnd === -1 ? void 0 : lineEnd);
+      const [, marker = "", gap = "", rest = ""] = /^([*+-]|\d{1,9}[.)])([ \t]*)(.*)$/.exec(line2) ?? [];
+      if (marker !== "" && rest === "") return marker.length + 1;
+      const from = [...this.source.slice(lineStartOf(this.source, start(item)), start(item)) + marker].reduce(advanceColumn, 0);
+      const column = [...gap].reduce(advanceColumn, from);
+      if (marker !== "" && rest.startsWith("[") && column > from && column - from <= 4) return marker.length + column - from;
+    }
+    return (first?.position?.start.column ?? 1) - (item.position?.start.column ?? 1);
   }
   table(node2) {
     const width = node2.children[0]?.children.length ?? 0;
@@ -25611,21 +26084,47 @@ ${indent2}[${label}](${destination2})`;
    * prefixes of the containers (quote markers, list indentation) are dropped,
    * since the caller writes its own, and so is the insignificant indentation
    * of continuation lines outside code spans.
+   *
+   * In a paragraph Linear escapes a literal `-` or `*` that starts a line,
+   * as in `\--` or `\*note`: `lineStarts` says which lines start one, all
+   * of them or only the continuation lines (a task item's first line
+   * follows its checkbox).
    */
-  inline(children) {
+  inline(children, lineStarts = "none") {
     if (children.length === 0) return "";
     const from = start(children[0]);
     const to = end(children.at(-1));
     const edits = [];
     for (const child of children) this.inlineEdits(child, edits);
     const code4 = [];
+    const texts = [];
+    const html2 = [];
     for (const child of children) {
       visit2(child, (node2) => {
         if (node2.type === "inlineCode") code4.push([start(node2), end(node2)]);
+        if (node2.type === "text") texts.push([start(node2), end(node2)]);
+        if (node2.type === "html") html2.push([start(node2), end(node2)]);
       });
     }
+    if (lineStarts === "none") return this.rewritten(from, to, edits, code4);
+    return this.rewritten(from, to, edits, code4, { texts, html: html2, first: lineStarts === "all" });
+  }
+  /**
+   * The source from `from` to `to` with `edits` made and each continuation
+   * line's container prefixes removed; `code` holds the code spans, where a
+   * line keeps its indentation. In paragraph text, `paragraph` holds its text
+   * nodes, where a `-` or `*` that starts a line is escaped, its inline HTML,
+   * where nothing is escaped, and whether the text's first line starts one.
+   */
+  rewritten(from, to, edits, code4, paragraph2) {
+    const inside2 = (ranges, at2) => ranges.some(([a, b]) => a <= at2 && at2 < b);
+    if (paragraph2?.first) this.escapeLineStart(from, paragraph2.texts, edits);
     for (let at2 = this.source.indexOf("\n", from); at2 !== -1 && at2 < to; at2 = this.source.indexOf("\n", at2 + 1)) {
-      edits.push(this.continuation(at2 + 1, code4.some(([a, b]) => a <= at2 && at2 < b)));
+      const continuation = this.continuation(at2 + 1, inside2(code4, at2), paragraph2 !== void 0 && !inside2(paragraph2.html, at2));
+      edits.push(continuation);
+      if (paragraph2 === void 0 || continuation.text !== "") continue;
+      const content4 = continuation.to + /^[ \t]*/.exec(this.source.slice(continuation.to, to))[0].length;
+      if (this.escapeLineStart(content4, paragraph2.texts, edits)) continuation.to = content4;
     }
     let out = "";
     let at = from;
@@ -25637,15 +26136,33 @@ ${indent2}[${label}](${destination2})`;
     out += this.source.slice(at, to);
     return out;
   }
-  /** The edit that removes a continuation line's container prefixes, starting at `lineStart`. */
-  continuation(lineStart, inCode) {
+  /**
+   * Escapes a literal `-` or `*` at `at`, a line's first content character,
+   * as Linear does, and says whether it did. A `*` followed by another one
+   * is left alone: it shares a delimiter run with emphasis (`***(a)*`), and
+   * an escape would change which asterisks pair.
+   */
+  escapeLineStart(at, texts, edits) {
+    const char = this.source[at];
+    if (char !== "-" && (char !== "*" || this.source[at + 1] === "*")) return false;
+    if (!texts.some(([a, b]) => a <= at && at < b)) return false;
+    edits.push({ from: at, to: at, text: "\\" });
+    return true;
+  }
+  /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's text. */
+  continuation(lineStart, inCode, paragraph2 = false) {
     let at = lineStart;
     const line2 = this.source.slice(lineStart, this.source.indexOf("\n", lineStart) === -1 ? void 0 : this.source.indexOf("\n", lineStart));
     for (const container of this.containers) {
       const rest = this.source.slice(at, lineStart + line2.length);
-      const prefix = container.kind === "quote" ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
-      if (!prefix) break;
+      const prefix = prefixOf(container, rest);
+      if (!prefix || container.kind === "item" && prefix[0].length < container.indent) break;
       at += prefix[0].length;
+    }
+    const underline = /^([ \t]*)(?:-+|=+)[ \t]*$/.exec(this.source.slice(at, lineStart + line2.length));
+    if (underline && (this.containers.length > 0 || this.fileBlockIndent > 0)) {
+      if (inCode) return { from: lineStart - 1, to: at, text: " " };
+      return { from: lineStart, to: at + underline[1].length, text: paragraph2 ? "\\" : " ".repeat(4 + this.fileBlockIndent) };
     }
     if (!inCode) {
       const rest = this.source.slice(at, lineStart + line2.length);
@@ -25671,9 +26188,13 @@ ${indent2}[${label}](${destination2})`;
       case "delete":
         for (const child of node2.children) this.inlineEdits(child, edits);
         return;
-      case "link":
+      case "link": {
+        const autolink2 = this.source[from] !== "[";
+        this.literal = autolink2;
         edits.push({ from, to, text: this.link(node2.children, node2.url) });
+        this.literal = false;
         return;
+      }
       case "linkReference": {
         const definition3 = this.definitions.get(node2.identifier);
         if (definition3) edits.push({ from, to, text: this.link(node2.children, definition3.url) });
@@ -25688,7 +26209,7 @@ ${indent2}[${label}](${destination2})`;
         return;
       }
       case "text":
-        edits.push(...textEdits(this.source, from, to, this.cellStart));
+        edits.push(...this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, this.cellStart));
         return;
       default:
         return;
@@ -25698,24 +26219,30 @@ ${indent2}[${label}](${destination2})`;
   link(children, url) {
     return `[${this.inline(children)}](${linkDestination(url)})`;
   }
-  /** The bracketed label that opens at `open` (a `[`) and closes before `limit`, as written, without its brackets. */
+  /**
+   * The bracketed label that opens at `open` (a `[`) and closes before
+   * `limit`, without its brackets: as written, except that its continuation
+   * lines lose their container prefixes, as in `inline`.
+   */
   label(open3, limit) {
-    return bracketedLabel(this.source, open3, limit);
+    const from = open3 + 1;
+    const to = from + bracketedLabel(this.source, open3, limit).length;
+    return this.rewritten(from, to, [], codeSpans(this.source, from, to));
   }
 };
 function textEdits(source, from, to, keepAt) {
   const edits = [];
   const raw = source.slice(from, to);
-  for (const match of raw.matchAll(/&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g)) {
+  for (const match of raw.matchAll(CHARACTER_REFERENCE)) {
+    if (escaped(raw, match.index)) continue;
     const char = decodeEntity(match[0]);
     const after = raw.slice(match.index + match[0].length);
     if (char === void 0 || char.trim() === "") continue;
     if (char === "&" ? /^[A-Za-z0-9#]+;/.test(after) : char.codePointAt(0) < 128) continue;
     edits.push({ from: from + match.index, to: from + match.index + match[0].length, text: char });
   }
-  for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
-    const emoji = Object.hasOwn(nameToEmoji, match[1]) ? nameToEmoji[match[1]] : void 0;
-    if (emoji) edits.push({ from: from + match.index, to: from + match.index + match[0].length, text: emoji });
+  for (const { index: index2, length, emoji } of emojiShortcodes(raw)) {
+    if (!escaped(raw, index2)) edits.push({ from: from + index2, to: from + index2 + length, text: emoji });
   }
   for (const match of raw.matchAll(/\\(.)/g)) {
     const at = from + match.index;
@@ -25727,6 +26254,100 @@ function textEdits(source, from, to, keepAt) {
     }
   }
   return edits;
+}
+function literalEdits(source, from, to) {
+  const raw = source.slice(from, to);
+  const escape2 = /* @__PURE__ */ new Set();
+  for (let at = 0; at < raw.length; at++) if (LABEL_SYNTAX.has(raw[at])) escape2.add(at);
+  for (const match of raw.matchAll(CHARACTER_REFERENCE)) escape2.add(match.index);
+  const rawAt = [];
+  let label = "";
+  for (let at = 0; at < raw.length; at++) {
+    if (escape2.has(at)) label += "\\";
+    rawAt[label.length] = at;
+    label += raw[at];
+  }
+  for (const match of label.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
+    if (Object.hasOwn(nameToEmoji, match[1])) escape2.add(rawAt[match.index]);
+  }
+  const edits = [];
+  for (const at of [...escape2].sort((a, b) => a - b)) edits.push({ from: from + at, to: from + at + 1, text: `\\${raw[at]}` });
+  return edits;
+}
+var LABEL_SYNTAX = /* @__PURE__ */ new Set(["\\", "[", "]", "`", "*", "_", "~"]);
+var CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
+function* emojiShortcodes(raw) {
+  for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
+    const emoji = Object.hasOwn(nameToEmoji, match[1]) ? nameToEmoji[match[1]] : void 0;
+    if (emoji) yield { index: match.index, length: match[0].length, emoji };
+  }
+}
+function escaped(text6, at) {
+  let run = 0;
+  while (text6[at - 1 - run] === "\\") run++;
+  return run % 2 === 1;
+}
+function paragraphPart(text6, startsLine) {
+  for (let round = 0; round <= lineBreaks(text6) + 2; round++) {
+    const spans = codeSpans(text6, 0, text6.length);
+    const at = blockStartEscapes(text6, startsLine).filter((offset) => !spans.some(([from, to]) => from <= offset && offset < to));
+    if (at.length === 0) break;
+    for (const offset of [...at].sort((a, b) => b - a)) text6 = `${text6.slice(0, offset)}\\${text6.slice(offset)}`;
+  }
+  return text6;
+}
+function escapeLiteralSectionEnd(text6) {
+  if (!/^\\\+{3}(?:[ \t]|\n)/.test(text6)) return text6;
+  return text6.replace(/\n\+{3}$/, "\n\\+++");
+}
+function blockStartEscapes(text6, startsLine) {
+  if (startsLine && /^(?:\+\+\+|<{7}(?: |$))/.test(text6)) return [0];
+  const shift = startsLine ? 0 : 1;
+  const source = startsLine ? text6 : `x${text6}`;
+  const blocks = parse2(source).children;
+  const lineAfter = (at) => {
+    const row = source.indexOf("\n", at) + 1;
+    return row + /^[ \t]*/.exec(source.slice(row))[0].length - shift;
+  };
+  const tables = blocks.filter((block2) => block2.type === "table").map((table) => lineAfter(start(table)));
+  if (tables.length > 0) return tables;
+  const [block] = blocks;
+  if (block === void 0) return [];
+  const raw = source.slice(start(block), end(block));
+  switch (block.type) {
+    case "paragraph":
+      return MATH_PARAGRAPH.test(text6) ? [0] : [];
+    case "heading":
+      return [raw.includes("\n") ? lineAfter(start(block) + raw.lastIndexOf("\n")) : start(block)];
+    case "thematicBreak":
+      return raw[0] === "-" ? [start(block)] : [...raw].flatMap((char, index2) => char === raw[0] ? [start(block) + index2] : []);
+    case "blockquote":
+    case "html":
+      return [start(block)];
+    case "list": {
+      const ordered = /^\d{1,9}(?=[.)])/.exec(raw);
+      return [start(block) + (ordered?.[0].length ?? 0)];
+    }
+    case "code": {
+      const fence = /^(?:`{3,}|~{3,})/.exec(raw);
+      return fence === null ? [] : Array.from(fence[0], (_, index2) => start(block) + index2);
+    }
+    case "definition":
+    case "footnoteDefinition": {
+      let close = start(block) + 1;
+      while (close < text6.length && (text6[close] !== "]" || escaped(text6, close))) close++;
+      return [start(block), close];
+    }
+    default:
+      return [];
+  }
+}
+function hasUnplacedNode(tree) {
+  let unplaced = false;
+  visit2(tree, (node2) => {
+    if (node2.position === void 0) unplaced = true;
+  });
+  return unplaced;
 }
 function decodeEntity(reference) {
   const name = reference.slice(1, -1);
@@ -25745,15 +26366,17 @@ function insideLine(source, at) {
   const after = source.slice(at + 2, lineEnd);
   return before !== "" && !/^[ \t#]*$/.test(after);
 }
-function fixLinearText(linearText, content4, inRepository) {
+function fixLinearText(linearText, content4, inRepository, previousBody) {
   const split = splitFile(linearText);
-  const text6 = joinFile(split.head, nestedFileBlocksOnItemLine(split.body));
+  const text6 = joinFile(split.head, nestedFileBlocksOnItemLine(linearMarkersAsText(split.body, previousBody)));
   const notUploaded = relativeUrls(content4, /* @__PURE__ */ new Set(["link", "image"]));
-  const linear = { linkedFileExists: (url) => !notUploaded.has(url) };
+  const notUploadedUris = new Set([...notUploaded].map((url) => normalizeUri(url)));
+  const uploaded = (url) => !notUploadedUris.has(normalizeUri(url));
+  const linear = { linkedFileExists: uploaded };
   const fixed = fixText(text6, linear);
   if (fixed !== text6 && !sameMarkdown(splitFile(fixed).body, splitFile(text6).body)) return text6;
   if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]) && inRepository(url))) return fixed;
-  const hooked = fixText(text6, { linkedFileExists: (url) => !notUploaded.has(url) || inRepository(url) });
+  const hooked = fixText(text6, { linkedFileExists: (url) => uploaded(url) || inRepository(url) });
   return fixText(hooked, linear) === fixed ? hooked : fixed;
 }
 function relativeFileBlocksAsLinks(body2) {
@@ -25800,6 +26423,15 @@ function attachmentLink(paragraph2) {
   const url = only.url.split("#")[0];
   if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith("#") || /\.md$/i.test(url) || url === "") return void 0;
   return only;
+}
+function prefixOf(container, rest) {
+  return container.kind === "quote" ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
+}
+function advanceColumn(column, char) {
+  return char === "	" ? column + 4 - column % 4 : column + 1;
+}
+function lineStartOf(source, at) {
+  return source.lastIndexOf("\n", at - 1) + 1;
 }
 function prefixLines(text6, prefix, empty2) {
   return text6.split("\n").map((line2) => line2 === "" ? empty2 : prefix + line2).join("\n");
@@ -26022,7 +26654,7 @@ function fix2(paths, cwd) {
 ` };
   const files = markdownFiles(paths, cwd);
   const before = [...lintAll(files, cwd), ...refusedUploads(paths, cwd)];
-  const failing = new Set(before.map((finding) => finding.file));
+  const failing = new Set(before.filter((finding) => !FIXED_RULES.has(finding.rule)).map((finding) => finding.file));
   const changed2 = [];
   const moved = [];
   for (const file of files) {
@@ -26032,7 +26664,8 @@ function fix2(paths, cwd) {
     else if (outcome2 === "moved") moved.push(file);
     else if (outcome2 === "fixed") changed2.push(file);
   }
-  const findings = [...before, ...lintAll(changed2, cwd)];
+  const rewritten = new Set(changed2);
+  const findings = [...before.filter((finding) => !rewritten.has(finding.file)), ...lintAll(changed2, cwd)];
   const stdout = changed2.map((file) => `${lineText(file)}: fixed
 `).join("") + moved.map((file) => `${lineText(file)}: moved while fix ran; left unchanged
 `).join("") + describe(findings);
@@ -26099,7 +26732,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.0" : packageJson.version;
+var VERSION2 = true ? "1.0.1-rc.1" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -26490,11 +27123,25 @@ function baseName(path2) {
 
 // src/setup/linear.ts
 import { setTimeout as setTimeout4 } from "node:timers/promises";
+
+// src/sync/stable-id.ts
+import { createHash as createHash4 } from "node:crypto";
+function stableId(...parts) {
+  const hex = createHash4("sha256").update(parts.join("\0")).digest("hex");
+  const variant = (parseInt(hex[16], 16) & 3 | 8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+// src/setup/linear.ts
 var REQUIRED_SCOPES = ["read", "write"];
 var TEAM_REFS_PER_REQUEST = 125;
+var PROJECT_TEAMS_PAGE_SIZE = 20;
 var TEAMS_RETRY_DELAY_MS = 3e3;
 function projectKey(team, project) {
   return `${team}\0${project}`;
+}
+function pendingProject(targets, place) {
+  return place.kind === "project" && targets.pendingProjects?.has(projectKey(place.team, place.project)) === true;
 }
 function isCredentialError(error) {
   if (error instanceof LinearTokenError) return error.credentialsRefused;
@@ -26511,7 +27158,7 @@ function checkLinearScopes(scope) {
 function linearCredentialFailure(detail) {
   return failed("linear-credentials", "linear-credential-failed", detail);
 }
-async function resolveTargets(client, zones, retryDelayMs = TEAMS_RETRY_DELAY_MS) {
+async function resolveTargets(client, zones, { retryDelayMs = TEAMS_RETRY_DELAY_MS, createProjects = false, live = false } = {}) {
   const zoneList = [...zones];
   const teamRefs = /* @__PURE__ */ new Set();
   const projectRefs = /* @__PURE__ */ new Map();
@@ -26522,6 +27169,7 @@ async function resolveTargets(client, zones, retryDelayMs = TEAMS_RETRY_DELAY_MS
   if (teamRefs.size === 0) return { result: notChecked("annotation-targets", "no annotated folders") };
   const refs = [...teamRefs];
   const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
+  const query = live ? client.transport.queryLive.bind(client.transport) : client.transport.query.bind(client.transport);
   const lookUp = async () => {
     const teamNodes2 = [];
     let projectNodes2 = [];
@@ -26530,12 +27178,11 @@ async function resolveTargets(client, zones, retryDelayMs = TEAMS_RETRY_DELAY_MS
       const batch = refs.slice(start2, start2 + TEAM_REFS_PER_REQUEST);
       const first = start2 === 0;
       const withProjects = first && names.length > 0;
-      const data = await client.request(
+      const data = await query(
         "SetupTargets",
-        "query",
         `query SetupTargets($refs: [String!]!, $first: Int!${withProjects ? ", $names: [String!]!" : ""}) {
           teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
-          ${withProjects ? "projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } } } pageInfo { hasNextPage } }" : ""}
+          ${withProjects ? `projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: ${PROJECT_TEAMS_PAGE_SIZE}) { nodes { id } pageInfo { hasNextPage } } } pageInfo { hasNextPage } }` : ""}
           ${first ? "visible: teams(first: 1) { nodes { id } }" : ""}
         }`,
         withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 }
@@ -26585,10 +27232,27 @@ async function resolveTargets(client, zones, retryDelayMs = TEAMS_RETRY_DELAY_MS
   for (const [key, ref] of [...projectRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
     const team = targets.teams.get(ref.team);
     if (team === void 0) continue;
-    const matches = projectNodes.filter((project) => project.name === ref.project && project.teams.nodes.some((node2) => node2.id === team.id));
+    const matches = [];
+    for (const project of projectNodes) {
+      if (project.name !== ref.project) continue;
+      if (project.teams.nodes.some((node2) => node2.id === team.id)) {
+        matches.push(project);
+      } else if (project.teams.pageInfo.hasNextPage) {
+        const membership = await query(
+          "SetupProjectTeam",
+          "query SetupProjectTeam($project: String!, $team: ID!) { project(id: $project) { teams(first: 1, filter: { id: { eq: $team } }) { nodes { id } } } }",
+          { project: project.id, team: team.id }
+        );
+        if (membership.project.teams.nodes.some((node2) => node2.id === team.id)) matches.push(project);
+      }
+    }
     if (matches.length === 1) {
       const { id, name } = matches[0];
       targets.projects.set(key, { id, name });
+    } else if (matches.length === 0 && createProjects) {
+      const id = stableId("project", team.id, ref.project);
+      targets.pendingProjects ??= /* @__PURE__ */ new Map();
+      targets.pendingProjects.set(key, { id, name: ref.project, teamId: team.id, team: ref.team });
     } else {
       (matches.length === 0 ? missing : ambiguous).push(`project "${ref.project}" of team "${ref.team}"`);
     }
@@ -26604,15 +27268,69 @@ async function resolveTargets(client, zones, retryDelayMs = TEAMS_RETRY_DELAY_MS
     return { result: failed("annotation-targets", "annotation-target-shared", message("setup.target-shared", { targets: shared.join("; ") })) };
   }
   return {
-    result: passed("annotation-targets", `found in Linear: ${targets.teams.size} teams, ${targets.projects.size} projects`),
+    result: passed("annotation-targets", `found in Linear: ${targets.teams.size} teams, ${targets.projects.size} projects` + (targets.pendingProjects === void 0 ? "" : `; ${targets.pendingProjects.size} missing projects eligible for creation`)),
     targets
   };
 }
+async function createPendingProjects(client, targets) {
+  const pending = targets.pendingProjects;
+  if (!pending?.size) return false;
+  for (const [key, { id, name, teamId, team }] of pending) {
+    try {
+      targets.projects.set(key, await createProject(client, id, name, teamId));
+    } catch (error) {
+      if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
+      throw new ProjectCreationError(name, team, error);
+    }
+    pending.delete(key);
+  }
+  return true;
+}
+async function createProject(client, firstId, name, teamId) {
+  for (let id = firstId; ; id = stableId("project", id)) {
+    let failure;
+    try {
+      const { projectCreate } = await client.mutate(
+        "CreateProject",
+        "mutation CreateProject($input: ProjectCreateInput!) { projectCreate(input: $input) { success project { id name } } }",
+        { input: { id, name, teamIds: [teamId] } }
+      );
+      if (projectCreate.success && projectCreate.project?.id === id) {
+        client.stats.wrote("CreateProject");
+        if (projectCreate.project.name === name) return projectCreate.project;
+        throw new LinearError("CreateProject", message("setup.project-name-changed"));
+      }
+      failure = new LinearError("CreateProject", message("setup.project-create-failed"));
+    } catch (error) {
+      if (!(error instanceof LinearGraphQLError) || isCredentialError(error)) throw error;
+      failure = error;
+    }
+    const { projects } = await client.transport.queryLive(
+      "ProjectByCreationId",
+      "query ProjectByCreationId($id: ID!) { projects(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id name } } }",
+      { id }
+    );
+    const existing = projects.nodes.find((project) => project.id === id);
+    if (existing === void 0 || existing.name === name) throw failure;
+  }
+}
+var ProjectCreationError = class extends Error {
+  project;
+  team;
+  cause;
+  constructor(project, team, cause) {
+    super(message("setup.project-create-failed"), { cause });
+    this.project = project;
+    this.team = team;
+    this.cause = cause;
+  }
+};
 function sharedDestinations(zones, targets) {
   const folders = /* @__PURE__ */ new Map();
   for (const zone of zones) {
     const team = targets.teams.get(zone.team);
-    const [id, label, folder] = zone.project === void 0 ? [`team\0${team.id}`, `the documents of team "${team.name}"`, zone.teamFolder] : [`project\0${targets.projects.get(projectKey(zone.team, zone.project)).id}`, `project "${zone.project}"`, zone.projectFolder];
+    const key = zone.project === void 0 ? void 0 : projectKey(zone.team, zone.project);
+    const [id, label, folder] = zone.project === void 0 ? [`team\0${team.id}`, `the documents of team "${team.name}"`, zone.teamFolder] : [`project\0${(targets.projects.get(key) ?? targets.pendingProjects?.get(key)).id}`, `project "${zone.project}"`, zone.projectFolder];
     const entry = folders.get(id) ?? { label, folders: /* @__PURE__ */ new Set() };
     entry.folders.add(folder === "" ? "the repository root" : `${folder}/`);
     folders.set(id, entry);
@@ -26750,7 +27468,13 @@ async function runSetupCheck(input) {
   } else {
     credentials = checkLinearScopes(input.linear.scope);
     if (credentials.state === "passed" && annotations.state === "passed") {
-      const resolved = await resolveTargets(input.linear.client, input.mapping.zones.values());
+      const client = input.linear.client;
+      const zones = input.mapping.zones.values();
+      const createProjects = input.createProjects;
+      let resolved = await resolveTargets(client, zones, { createProjects });
+      if (client.transport.reads?.mode === "replay" && resolved.targets?.pendingProjects?.size) {
+        resolved = await resolveTargets(client, input.mapping.zones.values(), { createProjects, live: true });
+      }
       if (resolved.credentials !== void 0) credentials = resolved.credentials;
       targets = resolved;
     } else if (annotations.state !== "passed") {
@@ -26896,7 +27620,7 @@ function mark(dir, kind, name, count4) {
 }
 
 // src/initial-sync/uploads.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 import { posix as posix2 } from "node:path";
 
 // src/initial-sync/transform.ts
@@ -26948,11 +27672,11 @@ function sameLinkDestinations(content4, sent) {
   return actual.length === expected.length && actual.every((url, index2) => url === expected[index2]);
 }
 function restoreBody(transforms, path2, content4, sent, files) {
-  const kept = sameMarkdown(content4, sent);
+  const kept = sameAsLinear(content4, sent);
   let current = kept ? sent : content4;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path: path2, body: current, kept });
   if (kept) return current;
-  return fixLinearText(current, content4, linkedFileCheck(path2, (file) => files.has(file)));
+  return fixLinearText(current, content4, linkedFileCheck(path2, (file) => files.has(file)), sent);
 }
 
 // src/initial-sync/uploads.ts
@@ -27400,7 +28124,7 @@ function contentTypeOf(path2) {
   return CONTENT_TYPES[extension2] ?? "application/octet-stream";
 }
 function sha2562(content4) {
-  return createHash4("sha256").update(content4).digest("hex");
+  return createHash5("sha256").update(content4).digest("hex");
 }
 function compare2(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -27410,7 +28134,7 @@ function compare2(a, b) {
 import { posix as posix6 } from "node:path";
 
 // src/sync/pull-repairs.ts
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 
 // src/sync/head-check.ts
 var MERGED_MODES = /* @__PURE__ */ new Set(["100644", "100755", "000000"]);
@@ -27490,7 +28214,7 @@ import { spawn as spawn2 } from "node:child_process";
 import { lstat as lstat2, mkdtemp as mkdtemp3, mkdir as mkdir3, writeFile as writeFile3, readFile as readFile2, realpath as realpath2, rm as rm3, symlink } from "node:fs/promises";
 import { tmpdir as tmpdir4 } from "node:os";
 import { dirname as dirname2, join as join9, sep as sep3 } from "node:path";
-import { createHash as createHash5 } from "node:crypto";
+import { createHash as createHash6 } from "node:crypto";
 function runHooks(dir, args, env) {
   return new Promise((resolve4) => {
     const child = spawn2("pre-commit", args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: "never", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
@@ -27588,7 +28312,7 @@ async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
     const content4 = files.get(path2);
     if (pointer === null || content4 === void 0) return false;
     const bytes = contentBytes(content4);
-    if (pointer.size !== bytes.length || pointer.oid !== createHash5("sha256").update(bytes).digest("hex")) return false;
+    if (pointer.size !== bytes.length || pointer.oid !== createHash6("sha256").update(bytes).digest("hex")) return false;
     if (!(await readFile2(join9(dir, path2))).equals(bytes)) return false;
   }
   return true;
@@ -27701,8 +28425,8 @@ async function securityGate(git, tracked, options = {}) {
             if (batch) return [{ hook: SECURITY_ALIAS, line: 1 }];
             const failed2 = hooks.filter((id) => result.output.includes(`- hook id: ${id}
 `));
-            const escaped = [...files.keys()].map((path2) => path2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-            const located = new RegExp(`(?:${escaped.join("|")}):(\\d+)(?::|\\b)`, "g");
+            const escaped2 = [...files.keys()].map((path2) => path2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+            const located = new RegExp(`(?:${escaped2.join("|")}):(\\d+)(?::|\\b)`, "g");
             const matches = [...result.output.matchAll(located)];
             const lines2 = matches.map((match) => Number(match[1])).filter((line2) => Number.isSafeInteger(line2) && line2 > 0);
             for (const hook of failed2.length > 0 ? failed2 : [SECURITY_ALIAS]) findings.push({ hook, line: lines2[0] ?? 1 });
@@ -27739,7 +28463,7 @@ async function checkTitle(gate, path2, title) {
 }
 
 // src/sync/merge.ts
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 import { mkdtemp as mkdtemp5, rm as rm5 } from "node:fs/promises";
 import { tmpdir as tmpdir6 } from "node:os";
 import { join as join11 } from "node:path";
@@ -28364,7 +29088,7 @@ async function synchronizedFiles(git, treeish, facts, observedRepairs) {
     const rules = lintInTree(document4.path, blobs.get(document4.oid).toString("utf8"), mapping.files).map((finding) => finding.rule);
     if (lengthRefusal({ title: document4.title }, facts) !== void 0) rules.push("title-too-long");
     const repair = observedRepairs?.get(document4.path)?.pullRewrite;
-    const observed = repair !== void 0 && createHash6("sha256").update(blobs.get(document4.oid)).digest("hex") === repair.hash;
+    const observed = repair !== void 0 && createHash7("sha256").update(blobs.get(document4.oid)).digest("hex") === repair.hash;
     if (rules.length > 0 && !observed) leave(document4.path, rules);
     else files.set(document4.path, toSideFile(document4));
   }
@@ -28642,7 +29366,7 @@ async function pendingRepairs(git, linear, ids, zones, key, paths) {
     if (!documents.has(path2) || file === void 0 || !isSyncedChange(path2, file.mode, zones)) continue;
     const source = blobs.get(file.oid);
     const repair = entry.pullRewrite;
-    if (source === void 0 || createHash7("sha256").update(source).digest("hex") !== repair.hash) continue;
+    if (source === void 0 || createHash8("sha256").update(source).digest("hex") !== repair.hash) continue;
     if (source.toString("utf8") === repair.replacement) continue;
     if (signedRepair(key, path2, entry) === void 0) unsigned.add(path2);
     else repairs.set(path2, repair);
@@ -28704,13 +29428,13 @@ import { createHash as createHash12, randomUUID as randomUUID4 } from "node:cryp
 import { posix as posix5 } from "node:path";
 
 // src/sync/paths.ts
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 import { posix as posix3 } from "node:path";
 var PATH_RULE = "percent-encode-unsafe-segments";
 var escapeFirst = (text6) => text6 === "" ? "%00" : `%${text6.charCodeAt(0).toString(16).toUpperCase()}${text6.slice(1)}`;
 function shorten(name, source) {
   if (Buffer.byteLength(name) <= 180) return name;
-  const short = `${[...name].slice(0, 40).join("")}~${createHash8("sha256").update(source).digest("hex").slice(0, 16)}`;
+  const short = `${[...name].slice(0, 40).join("")}~${createHash9("sha256").update(source).digest("hex").slice(0, 16)}`;
   return isGitDirectoryName(short) ? escapeFirst(short) : short;
 }
 function titlePath(title) {
@@ -28755,7 +29479,7 @@ function documentPath(folder, documentTitle, id, occupied, previous3, invalid2 =
   let candidate = titleFile(folder, title);
   const raw = `${folder === "" ? "" : `${folder}/`}${title}.md`;
   if (previous3 === raw && !conflicts(previous3) && !unsafe2(folder, previous3)) return previous3;
-  const suffix = createHash8("sha256").update(id).digest("hex").slice(0, 12);
+  const suffix = createHash9("sha256").update(id).digest("hex").slice(0, 12);
   const flattened = titlePath(title).replaceAll("/", "%2F");
   const flat = shorten(flattened, title);
   if (previous3 !== void 0 && !conflicts(previous3)) {
@@ -29001,7 +29725,7 @@ async function nameFixingHooks(git, tracked, files) {
 }
 
 // src/sync/marks.ts
-import { createHash as createHash9, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash10, randomUUID as randomUUID2 } from "node:crypto";
 var MARKS = {
   conflict: { icon: "Alert", color: "#F2994A" },
   blocked: { icon: "Alert", color: "#EB5757" },
@@ -29049,7 +29773,7 @@ ${locations.join("\n")}`);
 function planMark(document4, entry, blocked) {
   const state = blocked.length > 0 ? "blocked" : detectConflicts(document4.content ?? "").length > 0 ? "conflict" : "clear";
   const body2 = state === "clear" ? "" : state === "conflict" ? CONFLICT_COMMENT : blockedComment(blocked);
-  const bodyHash = createHash9("sha256").update(body2).digest("hex");
+  const bodyHash = createHash10("sha256").update(body2).digest("hex");
   const previousNotice = entry.saved?.notice;
   const changesDecoration = state !== "clear" && (document4.icon !== MARKS[state].icon || document4.color !== MARKS[state].color);
   const resolvesNotice = previousNotice?.kind === "conflict" && state !== "conflict";
@@ -29124,14 +29848,6 @@ async function reconcileDocumentMark(options) {
   result.entry = posted;
   result.commented = comment.created;
   return result;
-}
-
-// src/sync/stable-id.ts
-import { createHash as createHash10 } from "node:crypto";
-function stableId(...parts) {
-  const hex = createHash10("sha256").update(parts.join("\0")).digest("hex");
-  const variant = (parseInt(hex[16], 16) & 3 | 8).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 // src/sync/suspended.ts
@@ -29827,6 +30543,7 @@ async function writeTrackedToLinear(context, options) {
       result.code = "container-cap";
       return result;
     }
+    result.changed = await createPendingProjects(linear, targets);
     result.complete = true;
     return result;
   }
@@ -29884,6 +30601,7 @@ async function writeTrackedToLinear(context, options) {
     result.notAttempted = merge.changes.map(changePath);
     return result;
   }
+  result.changed = await createPendingProjects(linear, targets);
   const taken = /* @__PURE__ */ new Set();
   const usingReserved = new Set(creates.filter((change) => !adoptable.has(change.path) && reserved.has(change.path)).map((change) => change.path));
   let unchecked;
@@ -29935,7 +30653,8 @@ async function writeTrackedToLinear(context, options) {
   for (const change of creates) if (!adoptable.has(change.path)) nextReserved.set(change.path, documentIds.get(change.path));
   const notDone = [];
   const leftOutNew = [];
-  const leftOutForGood = (change, error) => (error.rule === UPLOAD_TOO_LARGE || error.rule === UPLOAD_UNREADABLE && error.missingLfsObject) && change.kind === "create" && change.restore === void 0 && !adoptable.has(change.path) && change.path !== "README.md" && !change.path.endsWith("/README.md");
+  const leftOutForGood = (change, error) => (error.rule === UPLOAD_TOO_LARGE || error.rule === UPLOAD_UNREADABLE && error.missingLfsObject) && newDocument(change);
+  const newDocument = (change) => change.kind === "create" && change.restore === void 0 && !adoptable.has(change.path) && change.path !== "README.md" && !change.path.endsWith("/README.md");
   const tipUploads = cacheLost ? /* @__PURE__ */ new Map() : new Map(uploads);
   const movedTo = new Map([...merge.unchanged, ...merge.changes].flatMap((change) => change.kind === "keep" && change.from !== change.to ? [[change.from, change.to]] : []));
   const superseded = new Map(
@@ -30021,6 +30740,12 @@ async function writeTrackedToLinear(context, options) {
         if (error instanceof MarkdownLimitError) {
           result.leftOutAtWrite.push({ path: path2, rule: "markdown-complexity" });
           notDone.push(change);
+          continue;
+        }
+        if (error instanceof DocumentTooLongError && error.field === "content") {
+          result.leftOutAtWrite.push({ path: path2, rule: "content-too-long" });
+          if (newDocument(change)) leftOutNew.push(change);
+          else notDone.push(change);
           continue;
         }
         if (error instanceof LeaveOutError) {
@@ -30210,7 +30935,7 @@ async function writeTrackedToLinear(context, options) {
       if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
       return digest !== void 0 && digest === observedDigest(held);
     }
-    return sameMarkdown(document4.content ?? "", expected2);
+    return sameAsLinear(document4.content ?? "", expected2);
   }
   function resolves(place) {
     return place.kind === "project" ? targets.projects.has(projectKey(place.team, place.project)) : targets.teams.has(place.team);
@@ -30251,7 +30976,7 @@ async function writeTrackedToLinear(context, options) {
     const rereadAt = performance.now();
     if (document4 === null || document4.trashed || document4.archivedAt !== null) return skip(change.to, "missing-in-linear");
     if (movedSinceCapture(document4)) return skip(change.to, "edited-in-linear");
-    const holds = (patch.content === void 0 || document4.content != null && sameMarkdown(document4.content, patch.content)) && (patch.title === void 0 || document4.title.normalize("NFC") === patch.title) && (!resolves(file.place) || inPlace(document4, file.place));
+    const holds = (patch.content === void 0 || document4.content != null && sameAsLinear(document4.content, patch.content)) && (patch.title === void 0 || document4.title.normalize("NFC") === patch.title) && (!resolves(file.place) || inPlace(document4, file.place));
     if (holds) {
       if (patch.content !== void 0) {
         stored.set(change.to, { content: document4.content ?? "", sent: patch.content, document: document4 });
@@ -30302,7 +31027,7 @@ async function writeTrackedToLinear(context, options) {
       const adopted = existing;
       if (!inPlace(adopted, file.place) || adopted.title.normalize("NFC") !== file.title.normalize("NFC")) return skip(change.path, "edited-in-linear");
       const held = withCurrentIds(adopted);
-      if (!sameMarkdown(held.content ?? "", body2)) {
+      if (!sameAsLinear(held.content ?? "", body2)) {
         for (const { id: id2 } of supersededLinks(adopted.content ?? "")) keptSuperseded.add(id2);
         return skip(change.path, "edited-in-linear");
       }
@@ -30329,6 +31054,8 @@ async function writeTrackedToLinear(context, options) {
     if (before === void 0) return skip(change.path, "missing-in-linear");
     if (seen === void 0 && !removed.trashed && removed.archivedAt === null || !unchangedSince(removed, before)) return skip(change.path, "edited-in-linear");
     if (removed.trashed || removed.archivedAt !== null) {
+      const refusal = lengthRefusal({ content: body2 }, linear.facts);
+      if (refusal !== void 0) throw new DocumentTooLongError("UpdateDocument", refusal);
       await linear.restoreDocument(removed.id);
       const restored = await linear.getDocument(removed.id, { withContent: true });
       rereadAt = performance.now();
@@ -31784,6 +32511,7 @@ async function confirmInitialSync(context, options) {
     result.notAttempted = [...plan.create, ...plan.overwrite, ...plan.trash].map((entry) => entry.path).sort();
     return { plan, result };
   }
+  await createPendingProjects(linear, targets);
   const rememberedDocuments = /* @__PURE__ */ new Map();
   const remember = (path2, document4) => {
     const before = previous3.get(path2);
@@ -32083,7 +32811,7 @@ function sha2564(text6) {
   return createHash14("sha256").update(text6, "utf8").digest("hex");
 }
 function holdsBody(content4, body2) {
-  return sameMarkdown(content4, body2) || content4 === fixText(body2);
+  return sameAsLinear(content4, body2) || content4 === fixText(body2);
 }
 function compare5(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -32954,6 +33682,7 @@ async function confirmWithGate(context, options, gate) {
     result.code = "sync-branch-changed";
     return { plan, result };
   }
+  if (options.stageOnly !== true) await createPendingProjects(context.linear, context.targets);
   const work = [...plan.overwrite.map((entry) => ({ kind: "overwrite", entry })), ...plan.create.map((entry) => ({ kind: "create", entry }))].sort(
     (a, b) => compare6(a.entry.path, b.entry.path)
   );
@@ -33057,7 +33786,7 @@ async function confirmWithGate(context, options, gate) {
       const key = `${entry.path}\0${joined}`;
       let text6 = fixedTexts.get(key);
       if (text6 === void 0) {
-        text6 = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)));
+        text6 = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)), trackedBodies.get(entry.path));
         fixedTexts.set(key, text6);
       }
       return text6;
@@ -33538,6 +34267,11 @@ function readInputs(get, env = process.env, options = {}) {
     if (!/^[1-9][0-9]*$/.test(cap) || !Number.isSafeInteger(Number(cap))) throw new InputError(message("inputs.document-cap"));
     inputs.documentCap = Number(cap);
   }
+  const createProjects = value("create-projects");
+  if (createProjects !== "") {
+    if (createProjects !== "true" && createProjects !== "false") throw new InputError(message("inputs.create-projects"));
+    inputs.createProjects = createProjects === "true";
+  }
   const grace = value("merge-grace-seconds");
   if (grace !== "") {
     if (!/^(0|[1-9][0-9]*)$/.test(grace) || Number(grace) > 120) throw new InputError(message("inputs.merge-grace"));
@@ -33634,11 +34368,28 @@ async function runPreflight(operation, inputs, options, work) {
       const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context, ...reads ? { reads } : {} });
       let setup;
       try {
-        const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
+        const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope }, createProjects: inputs.createProjects });
         setup = report;
         if (report.ok && targets !== void 0 && work !== void 0) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY, pushedKey: pushedKey(inputs) });
         return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       } catch (error) {
+        if (error instanceof ProjectCreationError) {
+          const project = cell(placeLabel({ kind: "project", team: error.team, project: error.project }));
+          const detail = message("run.project-create-failed", { project, reason: cell(describeLinearError(error.cause)) });
+          const summary2 = setup === void 0 ? detail : `${renderSetupSummary(setup).trimEnd()}
+
+${detail}
+`;
+          return {
+            operation,
+            ok: false,
+            summary: summary2,
+            projectCreateFailed: true,
+            ...setup === void 0 ? {} : { setup },
+            writesAfterStop: stats.writesAfterStop,
+            linearWrites: stats.writes
+          };
+        }
         if (!(error instanceof LinearStoppedError)) throw error;
         return { ...stoppedOutcome(operation, error.reason, setup), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       }
@@ -33680,7 +34431,7 @@ function documentPlaceKey(place) {
   return JSON.stringify("projectId" in place ? { projectId: place.projectId } : { teamId: place.teamId });
 }
 async function readContainerDocuments(context) {
-  const places = [...new Map(annotatedPlaces(context.mapping.zones).map(({ place }) => [containerKey(context, place), placeId(context.targets, place)])).values()];
+  const places = [...new Map(annotatedPlaces(context.mapping.zones).filter(({ place }) => !pendingProject(context.targets, place)).map(({ place }) => [containerKey(context, place), placeId(context.targets, place)])).values()];
   return containersOf(context, await context.linear.listDocumentsInPlaces(places, { includeArchived: true }));
 }
 function containersOf(context, listed) {
@@ -33754,7 +34505,8 @@ function annotatedPlaces(zones) {
 }
 function placeId(targets, place) {
   if (place.kind === "project") {
-    const project = targets.projects.get(projectKey(place.team, place.project));
+    const key = projectKey(place.team, place.project);
+    const project = targets.projects.get(key) ?? targets.pendingProjects?.get(key);
     if (project === void 0) throw new Error(message("initial-sync.project-not-resolved", { project: place.project, team: place.team }));
     return { projectId: project.id };
   }
@@ -33917,7 +34669,8 @@ function renderStop(stop) {
   return lines2;
 }
 function renderStoppedBeforeWriting(stop, partial) {
-  const outcome2 = partial ? `Stopped before any write; ${PARTIAL}: the next run starts again.` : "Stopped before any write: run it again once the limit has reset.";
+  const when = stop.kind !== "test-threshold" && stop.operation === "CreateProject" ? "while creating projects" : "before any write";
+  const outcome2 = partial ? `Stopped ${when}; ${PARTIAL}: the next run starts again.` : `Stopped ${when}: run it again once the limit has reset.`;
   return ["## Linear stopped the run", "", outcome2, "", ...renderStop(stop)].join("\n");
 }
 
@@ -34054,6 +34807,12 @@ async function capture(context, options) {
     const blobBudget = new MappingBlobBudget();
     const entries = await listTree(git, base, MAPPING_TREE_BYTES);
     const recorded = await mapTree(git, entries, blobBudget);
+    for (const zone of recorded.zones.values()) {
+      const place = placeOf(zone);
+      if (place.kind === "project" && pendingProject(targets, place)) {
+        throw new Error(message("sync.recorded-project-missing", { project: lineText(place.project), team: lineText(place.team) }));
+      }
+    }
     const zones = new Map(mapping.zones);
     let changedPlace = false;
     for (const [folder, old] of recorded.zones) {
@@ -34066,9 +34825,10 @@ async function capture(context, options) {
     }
     if (changedPlace) {
       mapping = { ...mapping, zones };
-      const resolved = await resolveTargets(linear, zones.values());
+      const current2 = targets;
+      const resolved = await resolveTargets(linear, [...zones.values()].filter((zone) => !pendingProject(current2, placeOf(zone))));
       if (resolved.targets === void 0) throw new Error(message("sync.places-unresolved"));
-      targets = resolved.targets;
+      targets = { ...resolved.targets, ...current2.pendingProjects === void 0 ? {} : { pendingProjects: current2.pendingProjects } };
     }
     const allowedPlace = syncedPlaces(git, fetched.tracked, context.mapping.zones, zones, linear.facts);
     if (state.ids === null) {
@@ -34101,7 +34861,7 @@ async function capture(context, options) {
     };
     const listed = /* @__PURE__ */ new Map();
     const folders = /* @__PURE__ */ new Map();
-    const places = annotatedPlaces(mapping.zones).map(({ place, folder }) => {
+    const places = annotatedPlaces(mapping.zones).filter(({ place }) => !pendingProject(targets, place)).map(({ place, folder }) => {
       const resolved = placeId(targets, place);
       folders.set(placeKeyOf(resolved), folder);
       return resolved;
@@ -34395,8 +35155,8 @@ async function capture(context, options) {
         body2 = linksFromLinear(body2, candidate.path, map4, seen);
       }
       if (candidate.compared?.body !== body2) {
-        const unchanged = candidate.previousBody !== void 0 && sameMarkdown(candidate.previousBody, body2);
-        const text6 = unchanged ? joinFile(candidate.head, candidate.previousBody) : fixLinearText(joinFile(candidate.head, body2), candidate.doc.content ?? "", linkedFileCheck(candidate.path, (file) => mapping.files.has(file)));
+        const unchanged = candidate.previousBody !== void 0 && sameAsLinear(body2, candidate.previousBody);
+        const text6 = unchanged ? joinFile(candidate.head, candidate.previousBody) : fixLinearText(joinFile(candidate.head, body2), candidate.doc.content ?? "", linkedFileCheck(candidate.path, (file) => mapping.files.has(file)), candidate.previousBody);
         candidate.compared = { body: body2, text: text6 };
       }
       return candidate.compared.text;
@@ -35142,7 +35902,15 @@ ${result.summary}`;
     operation,
     inputs,
     refusePending ? { ...options, refusePendingInitialPullRequest: true } : options,
-    operation === "sync" ? syncCycle : initialSync === void 0 ? void 0 : (context) => (initialSync.direction === "git-to-linear" ? gitToLinear : linearToGit)(context, initialSync.confirm)
+    operation === "sync" ? syncCycle : initialSync === void 0 ? void 0 : async (context) => {
+      await (initialSync.direction === "git-to-linear" ? gitToLinear : linearToGit)(context, initialSync.confirm);
+      if (!initialSync.confirm && security?.step !== "stage" && context.targets.pendingProjects?.size) {
+        const projectsToCreate = [...context.targets.pendingProjects.values()].map(({ name, team }) => ({ name, team }));
+        if (plan !== void 0) plan.projectsToCreate = projectsToCreate;
+        const projects = projectsToCreate.map(({ name, team }) => `- would create ${cell(placeLabel({ kind: "project", team, project: name }))}`);
+        workSummary = [workSummary.trimEnd(), "", "### Projects", "", ...projects, ""].join("\n");
+      }
+    }
   );
   const refused = refusedPushes(options.git);
   const writes = {
@@ -35196,7 +35964,11 @@ function runEnding(outcome2) {
     return { status: "warning", exitCode: INCOMPLETE_EXIT_CODE, message: `${command}: ${PARTIAL} (${partial})`, code: partial };
   }
   if (outcome2.stopped !== void 0) {
-    return { status: "failure", exitCode: INCOMPLETE_EXIT_CODE, message: stoppedMessage(command), code: outcome2.code ?? "stopped" };
+    const key = outcome2.stopped.operation === "CreateProject" ? "run.project-create-stopped" : "run.stopped-by-linear";
+    return { status: "failure", exitCode: INCOMPLETE_EXIT_CODE, message: message(key, { command }), code: outcome2.code ?? "stopped" };
+  }
+  if (outcome2.projectCreateFailed) {
+    return { status: "failure", exitCode: INCOMPLETE_EXIT_CODE, message: unfinishedMessage(command, "write-failed"), code: "write-failed" };
   }
   if (!outcome2.ok) {
     const exitCode = outcome2.code === "initial-sync-required" || outcome2.code === "initial-pull-request-pending" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
@@ -35226,9 +35998,6 @@ function oneLine2(text6) {
   const last = lines2.length - 1;
   return lines2.map((line2, index2) => index2 === 0 ? line2.trimEnd() : index2 === last ? line2.trimStart() : line2.trim()).filter((line2, index2) => line2 !== "" || index2 === 0 || index2 === last).join(" ");
 }
-function stoppedMessage(command) {
-  return message("run.stopped-by-linear", { command });
-}
 function containerCapMessage(command) {
   return message("run.container-cap", { command });
 }
@@ -35241,6 +36010,7 @@ function unfinishedMessage(command, code4) {
 function linearPartialCode(outcome2) {
   if (outcome2.operation !== "sync") return void 0;
   if (outcome2.stopped !== void 0) return "stopped";
+  if (outcome2.projectCreateFailed) return "write-failed";
   if (outcome2.captured !== void 0 && !outcome2.captured.ok) return outcome2.captured.code ?? "stopped";
   const code4 = outcome2.sync?.write?.code;
   if (code4 !== void 0) return code4 === "container-cap" ? void 0 : code4;
@@ -35261,7 +36031,7 @@ function toRunReport(outcome2) {
     ...endingOf(outcome2),
     stop: outcome2.stopped ?? outcome2.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped ?? null,
     complete: outcome2.sync?.complete ?? confirmed?.complete ?? reverse?.complete ?? false,
-    changed: outcome2.sync?.changed ?? (confirmed !== void 0 && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true) || reverse !== void 0 && (reverse.record?.moved === true || reverse.progressPushes > 0 || reverse.pullRequest?.opened === true || reverse.pullRequest?.updated === true || reverse.closedPullRequest !== void 0)),
+    changed: (outcome2.writes.linear["CreateProject"] ?? 0) > 0 || (outcome2.sync?.changed ?? (confirmed !== void 0 && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true) || reverse !== void 0 && (reverse.record?.moved === true || reverse.progressPushes > 0 || reverse.pullRequest?.opened === true || reverse.pullRequest?.updated === true || reverse.closedPullRequest !== void 0))),
     setupChecks: (outcome2.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
     securityHooks: outcome2.setup?.securityHooks ?? null,
     notImplemented: outcome2.notImplemented,
@@ -35614,7 +36384,7 @@ jobs:
       # it ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's documents
         id: stage
-        uses: mdbisync/mdbisync@e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0 # v1.0.0-rc.1
+        uses: mdbisync/mdbisync@7931bd5f1d8b457fe1d51ddff8991e2c59f24503 # v1.0.0
         with:
           operation: initial-sync
           security-step: stage
@@ -35641,7 +36411,7 @@ jobs:
       # what the hooks saw; a document they have not seen (the hooks step did
       # not run) keeps the tracked branch's version and is listed as left out.
       - name: Initial sync
-        uses: mdbisync/mdbisync@e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0 # v1.0.0-rc.1
+        uses: mdbisync/mdbisync@7931bd5f1d8b457fe1d51ddff8991e2c59f24503 # v1.0.0
         with:
           operation: initial-sync
           security-step: apply
@@ -35814,7 +36584,7 @@ jobs:
       # ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's changes
         id: stage
-        uses: mdbisync/mdbisync@e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0 # v1.0.0-rc.1
+        uses: mdbisync/mdbisync@7931bd5f1d8b457fe1d51ddff8991e2c59f24503 # v1.0.0
         with:
           operation: sync
           security-step: stage
@@ -35839,7 +36609,7 @@ jobs:
       # so it pushes what the hooks saw; a later change in Linear waits for
       # the next run.
       - name: Sync
-        uses: mdbisync/mdbisync@e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0 # v1.0.0-rc.1
+        uses: mdbisync/mdbisync@7931bd5f1d8b457fe1d51ddff8991e2c59f24503 # v1.0.0
         with:
           operation: sync
           security-step: apply
@@ -36202,7 +36972,11 @@ var older_releases_default = {
   "2d8a131612d4f80a7a78dd2a474bb0c1a941f268": "v0.1.0-rc.17",
   "4049d1d167a12bc846f54a893eb2112d52917a4d": "v0.1.0-rc.18",
   "8feb2cc39fec965f3bb4212525d31c9a3472bf7d": "v0.1.0-rc.19",
-  "10dd5950c35457c5b102a0652ce831ba0d599742": "v0.1.0-rc.20"
+  "10dd5950c35457c5b102a0652ce831ba0d599742": "v0.1.0-rc.20",
+  e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0: "v1.0.0-rc.1",
+  "034afc218a2371d692be0a5e0639993ade5f6116": "v1.0.0-rc.2",
+  f7d44a3c3f55b824946eaa47e33502f37c94c4df: "v1.0.0-rc.3",
+  ccc41512d7d701b6c5a36b763b053f994a5980c0: "v1.0.0-rc.4"
 };
 
 // src/init/releases.ts
@@ -36215,12 +36989,14 @@ var OLDER_RELEASES = older_releases_default;
 var INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
   --security-hooks | --no-security-hooks   Optional examples (requires Docker)
   --lfs | --no-lfs                         Store embedded files in Git LFS (.gitattributes)
+  --create-projects                       Enable creation of missing Linear projects
 The release must be ${MINIMUM_RELEASE.version} or later: the workflows use its action inputs.
 Existing files are preserved; conflicting values must be resolved first.
 `;
 var INIT_VALUE_FLAGS = ["--release-sha", "--release-version"];
 var INIT_SECURITY_FLAGS = ["--security-hooks", "--no-security-hooks"];
 var INIT_LFS_FLAGS = ["--lfs", "--no-lfs"];
+var INIT_CREATE_PROJECTS_FLAG = "--create-projects";
 var GITATTRIBUTES = ".gitattributes";
 var LFS = "filter=lfs diff=lfs merge=lfs -text";
 var LFS_ATTRIBUTES = [
@@ -36233,6 +37009,11 @@ function parseArgs(args) {
   const settings = {};
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
+    if (flag === INIT_CREATE_PROJECTS_FLAG) {
+      if (settings.createProjects) throw new InitError(message("init.given-twice", { option: flag }));
+      settings.createProjects = true;
+      continue;
+    }
     if (INIT_SECURITY_FLAGS.includes(flag ?? "")) {
       if (settings.security !== void 0) throw new InitError(message("init.security-twice"));
       settings.security = flag === "--security-hooks";
@@ -36348,8 +37129,10 @@ function hookConfig(text6, settings) {
 function checkRelease(settings) {
   if (!/^[a-f0-9]{40}$/.test(settings.sha ?? "")) throw new InitError(message("init.release-sha"));
   if (settings.version !== void 0 && !/^v\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(settings.version)) throw new InitError(message("init.release-version"));
-  const older = Object.hasOwn(OLDER_RELEASES, settings.sha) ? OLDER_RELEASES[settings.sha] : Object.values(OLDER_RELEASES).find((version) => version === settings.version);
+  const older = Object.hasOwn(OLDER_RELEASES, settings.sha) ? OLDER_RELEASES[settings.sha] : Object.values(OLDER_RELEASES).find((version2) => version2 === settings.version);
   if (older !== void 0) throw new InitError(message("init.release-too-old", { version: older, minimum: MINIMUM_RELEASE.version }));
+  const version = settings.sha === MINIMUM_RELEASE.sha ? MINIMUM_RELEASE.version : settings.version;
+  if (settings.createProjects && version === "v1.0.0") throw new InitError(message("init.create-projects-release", { version }));
 }
 async function runInit(args, options = {}) {
   if (args.includes("--help") || args.includes("-h")) return { exitCode: 0, stdout: INIT_USAGE, stderr: "" };
@@ -36373,10 +37156,11 @@ async function runInit(args, options = {}) {
       if (before !== after) changes.set(target, after);
     };
     for (const [name, template] of Object.entries(workflows_default)) {
-      const content4 = template.replace(new RegExp(RELEASE_PIN, "g"), `mdbisync/mdbisync@${settings.sha}${settings.version ? ` # ${settings.version}` : ""}`);
+      const pinned2 = template.replace(new RegExp(RELEASE_PIN, "g"), `mdbisync/mdbisync@${settings.sha}${settings.version ? ` # ${settings.version}` : ""}`);
+      const optedIn = pinned2.replace(/^( +)security-step: (?:stage|apply)$/gm, "$&\n$1create-projects: true");
       await queue(`.github/workflows/${name}`, (before) => {
-        if (before !== void 0 && before !== content4) throw new InitError(message("init.workflow-differs", { name }));
-        return content4;
+        if (before !== void 0 && before !== pinned2 && before !== optedIn) throw new InitError(message("init.workflow-differs", { name }));
+        return settings.createProjects || before === optedIn ? optedIn : pinned2;
       });
     }
     await queue(PRE_COMMIT_CONFIG, (before) => hookConfig(before, settings));
@@ -36388,11 +37172,11 @@ async function runInit(args, options = {}) {
     const stdout = `${changes.size ? `Wrote ${changes.size} repository files.` : "Repository files are already initialized."}
 
 Remaining admin steps:
-1. In Settings \u2192 Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. If your plan lacks environments or you are moving existing repository secrets, follow ${QUICKSTART_URL}#sync-environment. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. After moving the secrets and updating the workflows, delete the old repository secrets.
+1. In Settings \u2192 Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. If you are moving existing repository secrets, follow ${QUICKSTART_URL}#sync-environment. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. After moving the secrets and updating the workflows, delete the old repository secrets.
 2. Create a Linear OAuth app with read,write client credentials. Set repository variable MDBISYNC_LINEAR_CLIENT_ID and add environment secret MDBISYNC_LINEAR_CLIENT_SECRET. Remove any old repository secret for this client ID once the updated workflows are in place.
 3. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID and add environment secret MDBISYNC_APP_PRIVATE_KEY.
 4. Allow merge commits.
-5. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}.
+5. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}. Teams must already exist.${settings.createProjects ? " Review the projects the dry run would create." : ""}
 6. Install Node.js 24.2 or later and pre-commit. Run pre-commit install --hook-type pre-commit --hook-type pre-push, then pre-commit run --all-files. If the hook rewrites files and fails, run it again. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
 7. If you track a branch other than main, set tracked-branch on the mdbisync action steps, update BRANCH in both sync workflows, and update the push trigger in mdbisync.yml. Commit the setup files except .github/workflows/mdbisync.yml and push them to the tracked branch or merge them through a pull request. Dispatch initial sync from the tracked branch with a direction and leave confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
 8. After initial sync finishes (for linear-to-git, merge its pull request with Create a merge commit), commit .github/workflows/mdbisync.yml and push it to the tracked branch or merge it through a pull request to start the first sync run. After that run, you can make pre-commit a required check. See ${QUICKSTART_URL}#two-layers-of-checks.
