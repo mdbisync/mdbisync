@@ -353,6 +353,25 @@ describe('codeSpans and bracketedLabel', () => {
     assert.deepEqual(spans('``a ` b'), []);
   });
 
+  it('leaves the backticks of an autolink or inline HTML that starts first', () => {
+    assert.deepEqual(spans('<https://a/`> b `c`'), ['`c`']);
+    assert.deepEqual(spans('<a@b.c> `d`'), ['`d`']);
+    assert.deepEqual(spans('<b title="`"> `c`'), ['`c`']);
+    assert.deepEqual(spans('</b> <!-- ` --> <? ` ?> <!X `> <![CDATA[ ` ]]> `c`'), ['`c`']);
+    assert.deepEqual(spans('<!--> `c` <!---> `d`'), ['`c`', '`d`']);
+    // A code span that starts first holds the `<`.
+    assert.deepEqual(spans('`a <https://b/` c`>'), ['`a <https://b/`']);
+    // A `<` that opens nothing, or an HTML comment that does not close in the range, is text.
+    assert.deepEqual(spans('a < `b` <!-- `c`'), ['`b`', '`c`']);
+  });
+
+  it('reads many unclosed HTML openings in about the time of their length', { timeout: 60_000 }, () => {
+    const text = '<!-- <? <!X <![CDATA[ <a b="'.repeat(20_000) + '`c`';
+    const started = performance.now();
+    assert.deepEqual(codeSpans(text, 0, text.length), [[text.length - 3, text.length]]);
+    assert.ok(performance.now() - started < 3_000, `${performance.now() - started} ms`);
+  });
+
   it('does not count a bracket in a code span of a label', () => {
     assert.equal(bracketedLabel('![a `]` b](x.png)', 1, 17), 'a `]` b');
     assert.equal(bracketedLabel('[a `[` b]', 0, 9), 'a `[` b');
@@ -360,6 +379,7 @@ describe('codeSpans and bracketedLabel', () => {
     // A backtick in an autolink and one in the destination open no code span.
     assert.equal(bracketedLabel('![a <urn:a`>](x`.png)', 1, 21), 'a <urn:a`>');
     assert.equal(bracketedLabel('![a <span title="`">](x.png "t`")', 1, 33), 'a <span title="`">');
+    assert.equal(bracketedLabel('![<https://a/`>](x`](y).png)', 1, 28), '<https://a/`>');
   });
 
   // Each label is searched up to its node's end, not to the next backtick

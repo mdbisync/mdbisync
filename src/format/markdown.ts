@@ -596,9 +596,9 @@ export function bracketedLabel(source: string, open: number, limit: number): str
     }
     return -1;
   };
-  // A backtick in an autolink, in HTML or in the destination opens no code
-  // span. When skipping the code spans found no bracket that the node goes
-  // on from (with its destination or reference, or at its end), every
+  // A backtick in the destination of a link inside the label opens no code
+  // span either. When skipping the code spans found no bracket that the node
+  // goes on from (with its destination or reference, or at its end), every
   // bracket counts.
   let close = closing(new Map(codeSpans(source, open, end)));
   if (!(close !== -1 && (close === end - 1 || source[close + 1] === '(' || source[close + 1] === '['))) close = closing(new Map());
@@ -608,11 +608,13 @@ export function bracketedLabel(source: string, open: number, limit: number): str
 /**
  * The code spans in `source` from `from` to `to`, as `[start, end)` pairs: a
  * run of backticks up to the next run of the same length. A backslash outside
- * a code span escapes the next character; inside one it is text. The runs are
- * indexed by length first, so each opening run finds its closing run by a
- * binary search instead of a scan.
+ * a code span escapes the next character; inside one it is text. An autolink
+ * or inline HTML that starts first holds its backticks: they open no code
+ * span. The runs are indexed by length first, so each opening run finds its
+ * closing run by a binary search instead of a scan.
  */
 export function codeSpans(source: string, from: number, to: number): Array<[number, number]> {
+  const htmlEnd = inlineHtmlEnds(source, from, to);
   const runEnd = (at: number): number => {
     while (at < to && source[at] === '`') at++;
     return at;
@@ -636,6 +638,10 @@ export function codeSpans(source: string, from: number, to: number): Array<[numb
       at += 2;
       continue;
     }
+    if (source[at] === '<') {
+      at = htmlEnd(at) ?? at + 1;
+      continue;
+    }
     if (source[at] !== '`') {
       at++;
       continue;
@@ -651,6 +657,60 @@ export function codeSpans(source: string, from: number, to: number): Array<[numb
     }
   }
   return spans;
+}
+
+// The autolinks and the inline HTML that has no closing marker to search
+// for, matched at a `<`: a URI or email autolink, an opening or closing tag.
+const AUTOLINK_OR_TAG = new RegExp([
+  /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/.source,
+  /<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>/.source,
+  /<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>/.source,
+  /<\/[A-Za-z][A-Za-z0-9-]*\s*>/.source,
+].join('|'), 'y');
+
+// Inline HTML that runs to a closing marker: a comment, a processing
+// instruction, a declaration and a CDATA section.
+const HTML_UNTIL: ReadonlyArray<readonly [RegExp, string]> = [
+  [/<!--(?:-?>)?/y, '-->'],
+  [/<\?/y, '?>'],
+  [/<![A-Za-z]/y, '>'],
+  [/<!\[CDATA\[/y, ']]>'],
+];
+
+/**
+ * Where the autolink or inline HTML that starts at a `<` of `source`
+ * between `from` and `to` ends, before `to`; undefined when none starts
+ * there. The search reads only that range, and each closing marker is
+ * searched for once per position it can be found from, so many openings
+ * before one marker, or with none, cost no rescans.
+ */
+function inlineHtmlEnds(source: string, from: number, to: number): (at: number) => number | undefined {
+  let text: string | undefined;
+  const next = new Map<string, number>();
+  const closer = (marker: string, start: number): number => {
+    let found = next.get(marker);
+    if (found === undefined || (found !== -1 && found < start)) {
+      found = text!.indexOf(marker, start);
+      next.set(marker, found);
+    }
+    return found;
+  };
+  return (at) => {
+    text ??= source.slice(from, to);
+    const offset = at - from;
+    for (const [open, marker] of HTML_UNTIL) {
+      open.lastIndex = offset;
+      const opened = open.exec(text);
+      if (!opened) continue;
+      // `<!-->` and `<!--->` are whole comments.
+      if (opened[0].endsWith('>')) return at + opened[0].length;
+      const close = closer(marker, offset + opened[0].length);
+      return close === -1 ? undefined : from + close + marker.length;
+    }
+    AUTOLINK_OR_TAG.lastIndex = offset;
+    const match = AUTOLINK_OR_TAG.exec(text);
+    return match ? at + match[0].length : undefined;
+  };
 }
 
 /** The first of the ascending `values` that is at least `min`. */

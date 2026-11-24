@@ -71,16 +71,16 @@ const cases: Array<[string, string, string]> = [
 ];
 
 /**
- * What Markdown reads: the node types, text, code and images. A line ending
- * in a code span reads as a space, also in an alt text, which keeps the text
- * of its code spans.
+ * What Markdown reads: the node types, text, code and images, their URLs
+ * decoded (`%28` is `(`). A line ending in a code span reads as a space,
+ * also in an alt text, which keeps the text of its code spans.
  */
 function readMarkdown(markdown: string): string[] {
   const out: string[] = [];
   visit(parse(markdown), (node) => {
     if (node.type === 'text') out.push(node.value);
     else if (node.type === 'inlineCode') out.push(`code ${node.value.replaceAll('\n', ' ')}`);
-    else if (node.type === 'image') out.push(`image ${node.url} ${node.alt?.replaceAll('\n', ' ')}`);
+    else if (node.type === 'image') out.push(`image ${decodeURI(node.url)} ${node.alt?.replaceAll('\n', ' ')}`);
     else out.push(node.type);
   });
   return out;
@@ -332,6 +332,8 @@ describe('what fix leaves alone', () => {
       ['![a ``x`]`` b](x.png)', '![a ``x`]`` b](x.png)'],
       // A backtick in an autolink or a destination opens no code span.
       ['![a <urn:a`>](x`.png)', '![a <urn:a`>](x`.png)'],
+      ['![<https://a/`>](x`](y).png)', '![<https://a/`>](x`]%28y%29.png)'],
+      ['![a <b title="`">](x`](y).png)', '![a <b title="`">](x`]%28y%29.png)'],
       // A line indented less than the item's content is lazy: in a code span its spaces are code.
       ['- ![a `x\n y` b](x.png)', '* ![a `x\n   y` b](x.png)'],
       ['> - ![a `x\n>  y` b](x.png)', '> * ![a `x\n>    y` b](x.png)'],
