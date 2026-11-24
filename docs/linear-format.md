@@ -175,7 +175,8 @@ Inline text:
   becomes `[a](<https://example.com/x>)`. A backslash, `|`, `^`, `{` and
   `}` in a destination are percent-encoded, as Linear writes them:
   `[a](https://example.com/a\b)` becomes
-  `[a](<https://example.com/a%5Cb>)`.
+  `[a](<https://example.com/a%5Cb>)`. A `%` that starts no escape becomes
+  `%25`.
 - Reference links and images are written inline, and their definitions go.
 - Autolinks and bare URLs become links: `See https://example.com now.`
   becomes `See [https://example.com](<https://example.com>) now.` The link

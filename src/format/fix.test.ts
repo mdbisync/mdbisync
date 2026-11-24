@@ -346,6 +346,13 @@ describe('what fix leaves alone', () => {
       ['First\n-- second\n-x third', 'First\n\\-- second\n\\-x third'],
       ['* item\n  -- remark', '* item\n  \\-- remark'],
       ['> words\n> -x remark', '> words\n> \\-x remark'],
+      // Indentation of a continuation line does not count: the marker is escaped and the indentation goes.
+      ['First\n  -x third', 'First\n\\-x third'],
+      ['First\n\t*x third', 'First\n\\*x third'],
+      ['> a\n>   -x', '> a\n> \\-x'],
+      // A `*` that shares a delimiter run with emphasis keeps the run as it is.
+      ['***(important)*', '***(important)*'],
+      ['**x', '**x'],
       // Already escaped, not a line start, or not text: nothing to add.
       ['\\-x and \\*y', '\\-x and \\*y'],
       ['a -x and *b', 'a -x and *b'],
@@ -360,6 +367,18 @@ describe('what fix leaves alone', () => {
       assert.equal(fixText(once), once, `${JSON.stringify(input)}: a second fix changes nothing`);
       assert.ok(sameMarkdown(once, input), `${JSON.stringify(input)}: the document stays`);
     }
+  });
+
+  it('adds no escape inside inline HTML: a lazy dash line there keeps its padding', () => {
+    const text = '> <span title="a\n--\nb">x</span>';
+    const once = fixText(text);
+    assert.equal(once, '> <span title="a\n>     --\n> b">x</span>');
+    assert.equal(fixText(once), once, 'a second fix changes nothing');
+  });
+
+  it('takes Linear\'s text with a relative link it did not upload whose destination fix encodes', () => {
+    const linear = '* [Report](<name|a.pdf>)';
+    assert.equal(fixLinearText(linear, linear, () => false), '* [Report](<name%7Ca.pdf>)');
   });
 
   it('joins a lazy line of dashes or equals signs in a code span in a container to the line before it', () => {

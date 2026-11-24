@@ -563,10 +563,12 @@ function destination(url: string): string {
 /**
  * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded. Linear also
  * percent-encodes a backslash, `|`, `^`, `{` and `}` (recorded in the fixture bank); so does every renderer that
- * writes the link as HTML, so the link goes to the same place.
+ * writes the link as HTML, so the link goes to the same place. A `%` that starts no escape is written `%25`, as those
+ * renderers write it, so the destination still decodes to the file it names next to the escapes.
  */
 export function linkDestination(url: string): string {
-  return `<${destination(url.replace(/[<>\r\n\\|^{}]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`))}>`;
+  const encoded = url.replace(/[<>\r\n\\|^{}]|%(?![0-9A-Fa-f]{2})/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+  return `<${destination(encoded)}>`;
 }
 
 /** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */

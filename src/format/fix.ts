@@ -8,6 +8,7 @@
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
+import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
 import { MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
@@ -313,33 +314,41 @@ class Writer {
     for (const child of children) this.inlineEdits(child, edits);
     const code: Array<[number, number]> = [];
     const texts: Array<[number, number]> = [];
+    const html: Array<[number, number]> = [];
     for (const child of children) {
       visit(child, (node) => {
         if (node.type === 'inlineCode') code.push([start(node), end(node)]);
         if (node.type === 'text') texts.push([start(node), end(node)]);
+        if (node.type === 'html') html.push([start(node), end(node)]);
       });
     }
     if (lineStarts === 'none') return this.rewritten(from, to, edits, code);
-    return this.rewritten(from, to, edits, code, { texts, first: lineStarts === 'all' });
+    return this.rewritten(from, to, edits, code, { texts, html, first: lineStarts === 'all' });
   }
 
   /**
    * The source from `from` to `to` with `edits` made and each continuation
    * line's container prefixes removed; `code` holds the code spans, where a
    * line keeps its indentation. In paragraph text, `paragraph` holds its text
-   * nodes, where a `-` or `*` that starts a line is escaped, and whether the
-   * text's first line starts one.
+   * nodes, where a `-` or `*` that starts a line is escaped, its inline HTML,
+   * where nothing is escaped, and whether the text's first line starts one.
    */
-  private rewritten(from: number, to: number, edits: Edit[], code: ReadonlyArray<readonly [number, number]>, paragraph?: { texts: ReadonlyArray<readonly [number, number]>; first: boolean }): string {
-    const lineStarts = paragraph?.first ? [from] : [];
+  private rewritten(
+    from: number,
+    to: number,
+    edits: Edit[],
+    code: ReadonlyArray<readonly [number, number]>,
+    paragraph?: { texts: ReadonlyArray<readonly [number, number]>; html: ReadonlyArray<readonly [number, number]>; first: boolean },
+  ): string {
+    const inside = (ranges: ReadonlyArray<readonly [number, number]>, at: number): boolean => ranges.some(([a, b]) => a <= at && at < b);
+    if (paragraph?.first) this.escapeLineStart(from, paragraph.texts, edits);
     for (let at = this.source.indexOf('\n', from); at !== -1 && at < to; at = this.source.indexOf('\n', at + 1)) {
-      const continuation = this.continuation(at + 1, code.some(([a, b]) => a <= at && at < b), paragraph !== undefined);
+      const continuation = this.continuation(at + 1, inside(code, at), paragraph !== undefined && !inside(paragraph.html, at));
       edits.push(continuation);
-      if (continuation.text === '') lineStarts.push(continuation.to);
-    }
-    for (const at of paragraph === undefined ? [] : lineStarts) {
-      const literal = paragraph!.texts.some(([a, b]) => a <= at && at < b);
-      if (literal && (this.source[at] === '-' || this.source[at] === '*')) edits.push({ from: at, to: at, text: '\\' });
+      if (paragraph === undefined || continuation.text !== '') continue;
+      // Indentation kept before a `-` or `*` is not needed once it is escaped.
+      const content = continuation.to + /^[ \t]*/.exec(this.source.slice(continuation.to, to))![0].length;
+      if (this.escapeLineStart(content, paragraph.texts, edits)) continuation.to = content;
     }
     let out = '';
     let at = from;
@@ -352,7 +361,21 @@ class Writer {
     return out;
   }
 
-  /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's. */
+  /**
+   * Escapes a literal `-` or `*` at `at`, a line's first content character,
+   * as Linear does, and says whether it did. A `*` followed by another one
+   * is left alone: it shares a delimiter run with emphasis (`***(a)*`), and
+   * an escape would change which asterisks pair.
+   */
+  private escapeLineStart(at: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[]): boolean {
+    const char = this.source[at];
+    if (char !== '-' && (char !== '*' || this.source[at + 1] === '*')) return false;
+    if (!texts.some(([a, b]) => a <= at && at < b)) return false;
+    edits.push({ from: at, to: at, text: '\\' });
+    return true;
+  }
+
+  /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's text. */
   private continuation(lineStart: number, inCode: boolean, paragraph = false): Edit {
     let at = lineStart;
     const line = this.source.slice(lineStart, this.source.indexOf('\n', lineStart) === -1 ? undefined : this.source.indexOf('\n', lineStart));
@@ -596,8 +619,11 @@ export function fixLinearText(linearText: string, content: string, inRepository:
   // A relative link or image still in Linear's content was not uploaded, so
   // its file is not there: Linear keeps such a link as a link, not as a file
   // block, and so does a repair that turns such an image into a link.
+  // Compared as renderers read them: a later pass sees a destination in fix's spelling (`a|b` as `a%7Cb`).
   const notUploaded = relativeUrls(content, new Set(['link', 'image']));
-  const linear = { linkedFileExists: (url: string) => !notUploaded.has(url) };
+  const notUploadedUris = new Set([...notUploaded].map((url) => normalizeUri(url)));
+  const uploaded = (url: string): boolean => !notUploadedUris.has(normalizeUri(url));
+  const linear = { linkedFileExists: uploaded };
   const fixed = fixText(text, linear);
   if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body)) return text;
   // The hook cannot tell which files were uploaded. It can write a list item
@@ -605,7 +631,7 @@ export function fixLinearText(linearText: string, content: string, inRepository:
   // such a block as a link if it holds no upload for the file. Take the
   // hook's form only if sending it back still yields Linear's form.
   if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]!) && inRepository(url))) return fixed;
-  const hooked = fixText(text, { linkedFileExists: (url) => !notUploaded.has(url) || inRepository(url) });
+  const hooked = fixText(text, { linkedFileExists: (url) => uploaded(url) || inRepository(url) });
   return fixText(hooked, linear) === fixed ? hooked : fixed;
 }
 

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { Nodes, Root } from 'mdast';
 import { EditMap } from 'micromark-util-edit-map';
-import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, decodedDestinationPath, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { lintText } from './lint.ts';
 import { fixText } from './fix.ts';
 
@@ -405,6 +405,10 @@ describe('linkDestination', () => {
     assert.equal(linkDestination('a\\x'), '<a%5Cx>');
     assert.equal(linkDestination('a|b^c{d}'), '<a%7Cb%5Ec%7Bd%7D>');
     assert.equal(linkDestination('a b<c>'), '<a%20b%3Cc%3E>');
+    // A `%` that starts no escape is written `%25`, so a file name holding one still decodes next to an encoded character.
+    assert.equal(linkDestination('100%|.pdf'), '<100%25%7C.pdf>');
+    assert.equal(decodedDestinationPath('100%25%7C.pdf'), '100%|.pdf');
+    assert.equal(linkDestination('a%7Cb%zz'), '<a%7Cb%25zz>');
     // Every short destination over these characters reads back as the same link.
     let urls = [''];
     for (let length = 1; length <= 6; length++) {
