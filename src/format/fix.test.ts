@@ -120,7 +120,7 @@ describe('text split off at an image', () => {
     ['a hash becomes \\#', 'Before ![a](x.png) # x', 'Before\n\n![a](x.png)\n\n\\# x'],
     ['an escaped hash keeps its escape', 'Before ![a](x.png) \\# x', 'Before\n\n![a](x.png)\n\n\\# x'],
     ['a quote marker', 'Before ![a](x.png) > x', 'Before\n\n![a](x.png)\n\n\\> x'],
-    ['a rule of stars', 'Before ![a](x.png) ***', 'Before\n\n![a](x.png)\n\n\\***'],
+    ['a rule of stars', 'Before ![a](x.png) ***', 'Before\n\n![a](x.png)\n\n\\*\\*\\*'],
     ['a plus bullet', 'Before ![a](x.png) + x', 'Before\n\n![a](x.png)\n\n\\+ x'],
     ['a numbered item keeps its number', 'Before ![a](x.png) 1. x', 'Before\n\n![a](x.png)\n\n1\\. x'],
     ['a parenthesis item keeps its number', 'Before ![a](x.png) 2) x', 'Before\n\n![a](x.png)\n\n2\\) x'],
@@ -131,6 +131,12 @@ describe('text split off at an image', () => {
     ['$$ math lines', 'Before ![a](x.png) $$\nx\n$$', 'Before\n\n![a](x.png)\n\n\\$$\nx\n$$'],
     ['a setext underline before the image', 'Title\n=== ![a](x.png)', 'Title\n\\===\n\n![a](x.png)'],
     ['an escaped quote that is then a heading', 'Before ![a](x.png) > # x', 'Before\n\n![a](x.png)\n\n\\> # x'],
+    ['a definition before the image', '[ref]: /dest ![a](x.png)', '\\[ref\\]: /dest\n\n![a](x.png)'],
+    ['a rule before the image', '*** ![a](x.png)', '\\*\\*\\*\n\n![a](x.png)'],
+    ['an underline after a task checkbox', '- [ ] # Before\n  === ![a](x.png)', '- [ ] # Before\n  \\===\n\n  ![a](x.png)'],
+    ['a task checkbox keeps the hash after it as text', '- [ ] # x ![a](x.png) y', '- [ ] # x\n\n  ![a](x.png)\n\n  y'],
+    ['a Linear collapsible section', 'Before ![a](x.png) +++ Details\nBody\n+++', 'Before\n\n![a](x.png)\n\n\\+++ Details\nBody\n+++'],
+    ['a Git conflict marker', 'Before ![a](x.png) <<<<<<< ours', 'Before\n\n![a](x.png)\n\n\\<<<<<<< ours'],
     ['in a quote', '> Before ![a](x.png) # x', '> Before\n>\n> ![a](x.png)\n>\n> \\# x'],
     ['in a list item', '* Before ![a](x.png) > x', '* Before\n\n  ![a](x.png)\n\n  \\> x'],
   ];
@@ -156,6 +162,13 @@ describe('text split off at an image', () => {
       assert.deepEqual(blocks, [], 'no block but paragraphs');
     });
   }
+
+  it('writes no backslash into a code span that opens like a fence', () => {
+    // Escaping its backticks would end the span; it keeps the block it reads as.
+    const once = fixText('Before ![a](x.png) ```js\nfoo``` y');
+    assert.equal(once, 'Before\n\n![a](x.png)\n\n````js\nfoo``` y\n````');
+    assert.equal(fixText(once), once, 'a second fix changes nothing');
+  });
 });
 
 describe('links to files that are not there', () => {
