@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { preCommitConfig } from '../test/corpus/tree.ts';
 import { stageRelease } from '../src/release/package.ts';
+import { CONTENT_LIMIT } from '../src/format/index.ts';
 
 const root = resolve(import.meta.dirname, '..');
 const temporary = await mkdtemp(join(tmpdir(), 'hook-integration-'));
@@ -78,6 +79,19 @@ try {
   assert.equal(await readFile(page, 'utf8'), linked);
   hooks(0);
   assert.equal(await readFile(page, 'utf8'), linked);
+
+  const url = 'https://example.com/garden';
+  const prefix = 'x'.repeat(CONTENT_LIMIT - url.length - 3) + '\n\n';
+  await writeFile(page, prefix + url);
+  const oversized = prefix + `[${url}](<${url}>)`;
+  const sizeFinding = /content-too-long: This document exceeds Linear's 250,000-character content limit\. The author must decide how to shorten or split it\./;
+  assert.match(hooks(1), sizeFinding);
+  assert.equal(await readFile(page, 'utf8'), oversized);
+  assert.match(hooks(1), sizeFinding);
+  assert.equal(await readFile(page, 'utf8'), oversized);
+  await writeFile(join(scratch, '.pre-commit-config.yaml'), config('linear-format-check'));
+  assert.match(hooks(1), sizeFinding);
+  assert.equal(await readFile(page, 'utf8'), oversized);
   console.log('L0-08: offline install, fix, second pass, check-only and lint refusal passed');
 
   const workflow = parse(await readFile(join(root, 'examples/pre-commit.yml'), 'utf8'));

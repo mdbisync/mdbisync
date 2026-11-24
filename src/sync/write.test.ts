@@ -13,7 +13,7 @@ import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git, commitTree, type IdEntry } from '../state/index.ts';
-import { fixText } from '../format/index.ts';
+import { CONTENT_LIMIT, fixText } from '../format/index.ts';
 import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture, fakeLfsServer, mergeOnGitHub, signTip } from '../state/test-helpers.ts';
@@ -177,6 +177,22 @@ describe('sync: the tracked branch to Linear', () => {
     assert.ok(report.sync?.leftOutAtWrite.some((entry) => entry.path === path && entry.rule === 'markdown-complexity'));
     assert.equal(document.content, nested);
     assert.equal((await documentOf('eng/notes/review.md')).content, '# Review\n\nValid update.\n');
+  });
+
+  it('leaves out a document whose rewritten links make it too long to send to Linear', async () => {
+    const path = 'eng/notes/plan.md';
+    const document = await documentOf(path);
+    const original = document.content;
+    const link = '\n\n[Review](<review.md>)';
+    const text = 'x'.repeat(CONTENT_LIMIT - link.length - 1) + link;
+    await commit({ [path]: text });
+
+    const { result, report, summary, writes } = await sync();
+    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE, result.stderr);
+    assert.deepEqual(report.sync?.leftOutAtWrite, [{ path, rule: 'content-too-long' }]);
+    assert.match(summary, /\| eng\/notes\/plan\.md \| content-too-long \|/);
+    assert.ok(!writes.includes('UpdateDocument'));
+    assert.equal(document.content, original);
   });
 
   it('leaves an over-nested merge conflict unresolved while updating a valid neighbor', async () => {

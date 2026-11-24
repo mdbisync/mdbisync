@@ -27,7 +27,7 @@ import { posix } from 'node:path';
 import { documentPath, isUntitled, keptPath } from './paths.ts';
 import { joinFile, sameMarkdown, splitFile } from '../format/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
-import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
+import { type DocumentPatch, type LinearClient, type LinearDocument, DocumentTooLongError, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
@@ -529,6 +529,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       } catch (error) {
         if (error instanceof MarkdownLimitError) {
           result.leftOutAtWrite.push({path, rule: 'markdown-complexity'});
+          notDone.push(change);
+          continue;
+        }
+        if (error instanceof DocumentTooLongError && error.field === 'content') {
+          result.leftOutAtWrite.push({ path, rule: 'content-too-long' });
           notDone.push(change);
           continue;
         }

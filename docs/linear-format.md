@@ -299,10 +299,11 @@ to the page instead.
 
 ### `content-too-long`
 
-Documents over 250,000 characters are rejected. Linear's API refuses the
-whole document. The limit counts Unicode code points of the text after the
-front matter. Such a document is not checked further, so
-`content-too-long` is its only finding: shorten it, then lint it again.
+Linear accepts up to 250,000 Unicode code points in the document body.
+`fix` leaves an already oversized file as it is. A valid rewrite can
+cross the limit, for example when `fix` expands a bare URL into a Markdown
+link. `fix` saves the rewrite and reports `content-too-long`. Both hooks
+and `lint` fail on the resulting file until the author shortens or splits it.
 
 ```text
 A 260 KB log pasted into one Markdown file.
