@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { duplicateTitles, fixLinearText, fixText, linkedFileResolver, lintText, sameAsLinear, sameMarkdown, splitFile } from '../../src/format/index.ts';
+import { FIXED_RULES, type LintRule } from '../../src/format/rules.ts';
 import { goldenMarkdownPath, loadBank, readOptional, sentForm, type BankFixture } from '../probe/bank.ts';
 
 const bank = loadBank();
@@ -39,6 +40,11 @@ describe('fix on the fixture bank', () => {
         } else {
           assert.equal(fixed, head + form, "L0-02: fix reaches Linear's recorded form");
         }
+      } else if (fixture.class === 'lint-error' && FIXED_RULES.has(fixture.rule as LintRule) && fixed !== source) {
+        // A rule fix writes in a form Linear keeps: the finding goes and the Markdown stays.
+        const after = lintText(fixture.file, fixed, options).map((finding) => finding.rule);
+        assert.deepEqual(after, [], 'lint reports nothing after fix');
+        assert.ok(sameMarkdown(splitFile(fixed).body, splitFile(source).body), 'fix keeps the Markdown');
       } else {
         assert.equal(fixed, source, 'L0-03: fix leaves it byte for byte');
         const form = golden(fixture);

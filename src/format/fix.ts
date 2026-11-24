@@ -3,14 +3,16 @@
 // writes it; inline text is copied from the source with a few targeted
 // rewrites. A text with a construct Linear would lose or alter is left as it
 // is: the author decides. The image place rules do not stop `fixText` (see
-// IMAGE_PLACE_RULES); the `fix` command leaves a file with any finding.
+// IMAGE_PLACE_RULES); the `fix` command leaves a file with any of their
+// findings. Neither stops at a rule whose construct `fix` writes in Linear's
+// form (FIXED_RULES).
 
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
-import { IMAGE_PLACE_RULES } from './rules.ts';
+import { FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
 import { MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
@@ -33,7 +35,7 @@ export interface FixOptions {
  * the source.
  */
 export function fixText(text: string, options: FixOptions = {}): string {
-  if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
+  if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
   return joinFile(head, fixBody(body.replace(/\r\n?/g, '\n'), options));
 }
@@ -55,6 +57,9 @@ function fixBody(body: string, options: FixOptions): string {
     // `"www.example.com"`) would make it copy the wrong text: leave the
     // body as it came.
     if (hasUnplacedNode(tree)) return body;
+    // Lint lets backslash breaks through for the ones `fix` writes as two
+    // spaces; one it cannot write leaves the body as it came.
+    if (unwritableBreak(tree, current)) return body;
     const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
@@ -514,6 +519,16 @@ class Writer {
       case 'text':
         edits.push(...(this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, this.cellStart)));
         return;
+      case 'break': {
+        // Linear reads a backslash break as a plain line break, but keeps a
+        // break written as two trailing spaces: the same break in Markdown.
+        // Spaces before the backslash are part of that break then.
+        if (this.source[from] !== '\\') return;
+        let spaces = from;
+        while (isSpaceOrTab(this.source[spaces - 1] ?? '')) spaces--;
+        edits.push({ from: spaces, to: from + 1, text: '  ' });
+        return;
+      }
       default:
         return;
     }
@@ -717,6 +732,26 @@ function blockStartEscapes(text: string, startsLine: boolean): number[] {
       return [];
   }
 }
+
+/**
+ * Whether a line break has no form `fix` can write: one in a heading, which
+ * is written on one line, or a backslash break with nothing but container
+ * prefixes before it on its line, where two spaces would leave a blank line
+ * that ends the paragraph.
+ */
+function unwritableBreak(tree: Root, source: string): boolean {
+  let found = false;
+  visit(tree, (node, ancestors) => {
+    if (node.type !== 'break') return;
+    const at = start(node);
+    if (ancestors.some((a) => a.type === 'heading')) found = true;
+    else if (source[at] === '\\' && PREFIXES_ONLY.test(source.slice(lineStartOf(source, at), at))) found = true;
+  });
+  return found;
+}
+
+/** A line start holding only quote markers, list markers and spaces. */
+const PREFIXES_ONLY = /^(?:[ \t]*(?:>|[*+-](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*$/;
 
 /** Whether a node below the root has no source position. */
 function hasUnplacedNode(tree: Root): boolean {

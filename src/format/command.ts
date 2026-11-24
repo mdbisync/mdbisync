@@ -6,7 +6,7 @@ import { basename, join, relative, resolve, sep } from 'node:path';
 import { fixText } from './fix.ts';
 import { duplicateTitles, linkedFileCheck, lintText } from './lint.ts';
 import { MarkdownLimitError } from './markdown.ts';
-import { LINT_RULES, type Finding } from './rules.ts';
+import { FIXED_RULES, LINT_RULES, type Finding } from './rules.ts';
 import { parseLfsPointer } from '../state/lfs.ts';
 import { lineText } from '../run/output.ts';
 import { admitsCapturedFile, isCaptureName } from '../sync/upload-type.ts';
@@ -170,9 +170,10 @@ function fix(paths: readonly string[], cwd: string): CommandResult {
   const problem = badPaths(paths, cwd);
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
-  // A file with a lint finding, a colliding title included, is left as it is: its author decides.
+  // A file with a lint finding, a colliding title included, is left as it is:
+  // its author decides. Only the findings `fix` writes in Linear's form do not stop it.
   const before = [...lintAll(files, cwd), ...refusedUploads(paths, cwd)];
-  const failing = new Set(before.map((finding) => finding.file));
+  const failing = new Set(before.filter((finding) => !FIXED_RULES.has(finding.rule)).map((finding) => finding.file));
   const changed: string[] = [];
   const moved: string[] = [];
   for (const file of files) {
@@ -182,8 +183,10 @@ function fix(paths: readonly string[], cwd: string): CommandResult {
     else if (outcome === 'moved') moved.push(file);
     else if (outcome === 'fixed') changed.push(file);
   }
-  // Only the rewritten files, which had no finding, are linted again.
-  const findings = [...before, ...lintAll(changed, cwd)];
+  // The rewritten files are linted again: their earlier findings were only
+  // ones `fix` writes in Linear's form, and what is left of them is reported.
+  const rewritten = new Set(changed);
+  const findings = [...before.filter((finding) => !rewritten.has(finding.file)), ...lintAll(changed, cwd)];
   const stdout = changed.map((file) => `${lineText(file)}: fixed\n`).join('')
     + moved.map((file) => `${lineText(file)}: moved while fix ran; left unchanged\n`).join('')
     + describe(findings);

@@ -96,6 +96,46 @@ describe('fix rules', () => {
   }
 });
 
+describe('a backslash line break', () => {
+  // [input, what fix writes]
+  const written: Array<[string, string]> = [
+    ['Rain on the roof\\\nand the kettle on', 'Rain on the roof  \nand the kettle on'],
+    ['> Quiet hours\\\n> begin at nine', '> Quiet hours  \n> begin at nine'],
+    ['> Quiet hours\\\nbegin at nine', '> Quiet hours  \n> begin at nine'],
+    ['- Pack the tent\\\n  and the stove\n- Leave early', '* Pack the tent  \n  and the stove\n* Leave early'],
+    ['- [ ] Water the fern\\\n  on Sunday', '- [ ] Water the fern  \n  on Sunday'],
+    ['**Bold start\\\nbold end** and [two\\\nlines](https://example.com)', '**Bold start  \nbold end** and [two  \nlines](<https://example.com>)'],
+    ['Tabs after\\\n\tthe break', 'Tabs after  \nthe break'],
+    ['Spaces before \\\nthe backslash', 'Spaces before  \nthe backslash'],
+    ['A break\\\n-- then a dash line', 'A break  \n\\-- then a dash line'],
+  ];
+  for (const [input, expected] of written) {
+    it(`is written as two trailing spaces: ${JSON.stringify(input)}`, () => {
+      assert.deepEqual([...new Set(lintText('doc.md', input).map((finding) => finding.rule))], ['hard-break-backslash']);
+      const fixed = fixText(input);
+      assert.equal(fixed, expected);
+      assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
+      assert.deepEqual(lintText('doc.md', fixed), [], 'lint reports nothing after fix');
+      // Spaces before a break do not render; past them, the Markdown is the same.
+      const breaks = (markdown: string) => readMarkdown(markdown).map((part) => part.replace(/[ \t]+$/, ''));
+      assert.deepEqual(breaks(fixed), breaks(input));
+      assert.ok(readMarkdown(fixed).includes('break'));
+    });
+  }
+
+  // A heading is written on one line; two spaces alone on a line would end the paragraph.
+  for (const input of ['Lanterns\\\nabove the gate\n===', 'Intro.\n\nLanterns\\\nabove\n---\n\nAnd a paragraph\\\nwith a break', 'Lanterns\n\\\nabove', '> Lanterns\n> \\\n> above', '- \\\n  above']) {
+    it(`is left to the author where two spaces cannot hold it: ${JSON.stringify(input)}`, () => {
+      assert.equal(fixText(input), input);
+      assert.ok(lintText('doc.md', input).some((finding) => finding.rule === 'hard-break-backslash'));
+    });
+  }
+
+  it('is not a break in a code span or at the end of a paragraph', () => {
+    for (const input of ['`code\\\nspan`', 'Ends with a backslash\\']) assert.equal(fixText(input), input);
+  });
+});
+
 describe('an empty first nested item after its parent’s text', () => {
   for (const input of ['- Parent\n\n  -\n  - Next\n', '1. Parent\n\n   1.\n   2. Next\n']) {
     it(`stays a list item with its following sibling, and a second run changes nothing: ${JSON.stringify(input)}`, () => {
