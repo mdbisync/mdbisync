@@ -16,6 +16,7 @@ export const LINT_RULES = {
   'image-title': 'An image title is dropped from the Markdown.',
   'code-in-emphasis': 'Bold or italic around inline code is dropped from the code.',
   'hard-break-backslash': 'A backslash line break becomes a plain line break.',
+  'hard-break-in-heading': 'A hard line break in a setext heading is lost when the heading is written as one line.',
   'git-conflict-marker': 'Git conflict marker lines are rewritten as headings, quotes or collapsible sections.',
   'url-in-html': 'A URL inside raw HTML is turned into a Markdown link.',
   'block-first-in-list-item': 'A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item.',

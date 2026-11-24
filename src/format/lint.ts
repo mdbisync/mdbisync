@@ -229,6 +229,7 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         break;
       case 'break':
         if (body[start(node)] === '\\') report('hard-break-backslash', line(node));
+        else if (ancestors.some((a) => a.type === 'heading')) report('hard-break-in-heading', line(node));
         break;
       case 'listItem': {
         const [first] = node.children;
