@@ -70,6 +70,22 @@ const cases: Array<[string, string, string]> = [
   ['an escaped # inside a line loses its escape', 'a \\# b', 'a # b'],
 ];
 
+/**
+ * What Markdown reads: the node types, text, code and images. A line ending
+ * in a code span reads as a space, also in an alt text, which keeps the text
+ * of its code spans.
+ */
+function readMarkdown(markdown: string): string[] {
+  const out: string[] = [];
+  visit(parse(markdown), (node) => {
+    if (node.type === 'text') out.push(node.value);
+    else if (node.type === 'inlineCode') out.push(`code ${node.value.replaceAll('\n', ' ')}`);
+    else if (node.type === 'image') out.push(`image ${node.url} ${node.alt?.replaceAll('\n', ' ')}`);
+    else out.push(node.type);
+  });
+  return out;
+}
+
 describe('fix rules', () => {
   for (const [name, input, expected] of cases) {
     it(name, () => {
@@ -250,19 +266,11 @@ describe('what fix leaves alone', () => {
       ['- [Report\n--\nsummary](report.pdf)', '* \n  [Report\n      --\nsummary](report.pdf)'],
       ['> - [Report\n--\nsummary](report.pdf)', '> * \n>   [Report\n>       --\n> summary](report.pdf)'],
     ];
-    // The text Markdown reads, line breaks included, and the node types around it.
-    const read = (markdown: string): string[] => {
-      const out: string[] = [];
-      visit(parse(markdown), (node) => {
-        out.push(node.type === 'text' ? node.value : node.type);
-      });
-      return out;
-    };
     for (const [text, expected] of lazy) {
       const fixed = fixText(text);
       assert.equal(fixed, expected, text);
       // `sameMarkdown` keeps a file block's empty marker line apart, so compare what Markdown reads.
-      assert.deepEqual(read(fixed), read(text), `same document: ${text}`);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
       assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
     }
@@ -276,16 +284,68 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('`a\n\t--\nb`'), '`a\n\t--\nb`');
   });
 
-  it('keeps a code span whose lazy line holds only dashes in a quote: the padding stops the underline', () => {
-    // Under a bare `> ` the line would underline `` `a `` as a heading and split the code span.
-    const fixed = fixText('> `a\n--\n> b`');
-    assert.equal(fixed, '> `a\n>     --\n> b`');
-    assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
-    const [quote] = parse(fixed).children;
-    assert.equal(quote?.type, 'blockquote');
+  it('joins a lazy line of dashes or equals signs in a code span in a container to the line before it', () => {
+    // Under a bare `> ` the line would underline `` `a `` as a heading and
+    // split the code span; padding it would put spaces into the code. A line
+    // ending in a code span reads as a space, so joining keeps the code.
+    const lazy: Array<[string, string]> = [
+      ['> `a\n--\n> b`', '> `a --\n> b`'],
+      ['- `a\n--\n  b`', '* `a --\n  b`'],
+      ['> text `a\n\t==\n> b` end', '> text `a \t==\n> b` end'],
+      ['> [`a\n--\nb`](https://example.com)', '> [`a --\n> b`](<https://example.com>)'],
+      ['- [`a\n--\nb`](report.pdf)', '* \n  [`a --\nb`](report.pdf)'],
+      // The item's own indent goes, also in a file block's label; the spaces of a lazy line stay.
+      ['- [`a\n      ==\n  b`](report.pdf)', '* \n  [`a     ==\nb`](report.pdf)'],
+      ['- [`a\n ==\n  b`](report.pdf)', '* \n  [`a  ==\nb`](report.pdf)'],
+      ['- `a\n --\n  b`', '* `a  --\n  b`'],
+    ];
+    for (const [text, expected] of lazy) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+    }
+    const [quote] = parse(fixText('> `a\n--\n> b`')).children;
     const [paragraph] = (quote as Blockquote).children;
-    assert.equal(paragraph?.type, 'paragraph');
     assert.deepEqual((paragraph as Paragraph).children.map((child) => child.type), ['inlineCode']);
+  });
+
+  it('writes an image alt text that runs over lines in a container without the container prefixes', () => {
+    const images: Array<[string, string]> = [
+      ['> ![a\n> b](x.png)', '> ![a\n> b](x.png)'],
+      ['> ![a\nb](x.png)', '> ![a\n> b](x.png)'],
+      ['> ![a\n>     b](x.png)', '> ![a\n> b](x.png)'],
+      ['- ![a\n  b](x.png)', '* ![a\n  b](x.png)'],
+      ['> - ![a\n>   b](x.png)', '> * ![a\n>   b](x.png)'],
+      ['> > ![a\n> b](x.png)', '> > ![a\n> > b](x.png)'],
+      // A lazy dash line in the alt text stays text, as in a paragraph.
+      ['- ![a\n--\n](x.png)', '* ![a\n      --\n  ](x.png)'],
+      ['> ![a\n--\nb](x.png)', '> ![a\n>     --\n> b](x.png)'],
+      // A code span in the alt text keeps its spaces; a lazy dash line in it joins the line before.
+      ['- ![a `x\n    y` b](x.png)', '* ![a `x\n    y` b](x.png)'],
+      ['> ![a `x\n--\n> y` b](x.png)', '> ![a `x --\n> y` b](x.png)'],
+      ['> ![a\n> b][r]\n\n[r]: x.png', '> ![a\n> b](x.png)'],
+      // A `]` in a code span does not close the alt text.
+      ['![a `]` b](x.png)', '![a `]` b](x.png)'],
+      ['> ![a `]`\n> b](x.png)', '> ![a `]`\n> b](x.png)'],
+      ['![a ``x`]`` b](x.png)', '![a ``x`]`` b](x.png)'],
+      // A backtick in an autolink or a destination opens no code span.
+      ['![a <urn:a`>](x`.png)', '![a <urn:a`>](x`.png)'],
+      // A line indented less than the item's content is lazy: in a code span its spaces are code.
+      ['- ![a `x\n y` b](x.png)', '* ![a `x\n   y` b](x.png)'],
+      ['> - ![a `x\n>  y` b](x.png)', '> * ![a `x\n>    y` b](x.png)'],
+      // Indentation that keeps HTML from opening a block stays.
+      ['![a\n    <div> b](x.png)', '![a\n    <div> b](x.png)'],
+      ['- ![a\n      <!-- c --> d](x.png)', '* ![a\n      <!-- c --> d](x.png)'],
+    ];
+    for (const [text, expected] of images) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text.replace(/\]\[r\]\n\n\[r\]: x\.png$/, '](x.png)')), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${text}`);
+    }
   });
 
   it('keeps spaces that belong to a code span across lines', () => {

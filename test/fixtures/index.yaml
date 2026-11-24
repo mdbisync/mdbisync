@@ -2775,3 +2775,30 @@ fixtures:
     corpus: false
     probe_pending: true
     note: "a lazy -- or == line continues an item or quote paragraph; it must not underline it as a heading"
+  - file: "construct-singles/image-alt-multiline-container.md"
+    group: construct-singles
+    construct: image-alt-multiline-container
+    class: fixable
+    basis: assumed
+    canary: kx-696a1cab
+    corpus: false
+    probe_pending: true
+    note: "an image's alt text runs over lines in a quote or list item, one of them a lazy -- line; the image, its alt text and its container must stay"
+  - file: "construct-singles/code-span-lazy-dash-line.md"
+    group: construct-singles
+    construct: code-span-lazy-dash-line
+    class: fixable
+    basis: assumed
+    canary: kx-cf6a2d71
+    corpus: false
+    probe_pending: true
+    note: "a lazy -- or == line inside a code span in a quote or list item joins the line before it, since a line ending in a code span reads as a space"
+  - file: "construct-singles/image-alt-code-bracket.md"
+    group: construct-singles
+    construct: image-alt-code-bracket
+    class: unchanged
+    basis: assumed
+    canary: kx-7aee425c
+    corpus: false
+    probe_pending: true
+    note: "a ] inside a code span of an image's alt text does not close the alt text"

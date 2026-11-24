@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { MarkdownLimitError, bracketedLabel, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -64,8 +64,8 @@ type Edit = { from: number; to: number; text: string };
 /** A container whose prefix starts each source line of its content: a quote, or a list item's indentation. */
 type Container = { kind: 'quote' } | { kind: 'item'; indent: number };
 
-// Characters that start a block when they open a line.
-const BLOCK_START = /^(?:[>#*+\-=_`~|]|\d{1,9}[.)])/;
+// Characters that start a block when they open a line (`<` an HTML block).
+const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)])/;
 
 class Writer {
   private readonly definitions = new Map<string, Definition>();
@@ -211,7 +211,9 @@ class Writer {
       const inlineAudio = (!task && MP3.test(path)) || (bullet && WAV_OR_OGG.test(path));
       if (!inlineAudio) {
         this.fileBlockIndent = indent.length;
+        this.containers.push({ kind: 'item', indent: (first?.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
         const label = this.inline(attachment.children);
+        this.containers.pop();
         this.fileBlockIndent = 0;
         const destination = imageDestination(attachment.url);
         if (bullet && VIDEO.test(attachment.url.split(/[?#]/)[0]!)) return `${marker} [${label}](${destination})`;
@@ -283,6 +285,15 @@ class Writer {
         if (node.type === 'inlineCode') code.push([start(node), end(node)]);
       });
     }
+    return this.rewritten(from, to, edits, code);
+  }
+
+  /**
+   * The source from `from` to `to` with `edits` made and each continuation
+   * line's container prefixes removed; `code` holds the code spans, where a
+   * line keeps its indentation.
+   */
+  private rewritten(from: number, to: number, edits: Edit[], code: ReadonlyArray<readonly [number, number]>): string {
     for (let at = this.source.indexOf('\n', from); at !== -1 && at < to; at = this.source.indexOf('\n', at + 1)) {
       edits.push(this.continuation(at + 1, code.some(([a, b]) => a <= at && at < b)));
     }
@@ -304,17 +315,22 @@ class Writer {
     for (const container of this.containers) {
       const rest = this.source.slice(at, lineStart + line.length);
       const prefix = container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
-      if (!prefix) break; // a lazy line carries no further prefixes
+      // A lazy line carries no further prefixes. In an item, that is a line
+      // indented less than the item's content: its spaces are its own, and
+      // in a code span they are code text.
+      if (!prefix || (container.kind === 'item' && prefix[0].length < container.indent)) break;
       at += prefix[0].length;
     }
     // A lazy line of only `-` or `=` continues the paragraph text. Under
     // the prefix the caller writes, it would underline the paragraph as a
     // setext heading; indented four spaces past the content's column, it
     // stays text. Its own indentation goes: a tab after the prefix may span
-    // fewer columns. Outside a container no prefix is written: the line
-    // stays as it is.
+    // fewer columns. In a code span the indentation would be code text, but
+    // a line ending there reads as a space: the line joins the one before.
+    // Outside a container no prefix is written: the line stays as it is.
     const underline = /^([ \t]*)(?:-+|=+)[ \t]*$/.exec(this.source.slice(at, lineStart + line.length));
     if (underline && (this.containers.length > 0 || this.fileBlockIndent > 0)) {
+      if (inCode) return { from: lineStart - 1, to: at, text: ' ' };
       return { from: lineStart, to: at + underline[1]!.length, text: ' '.repeat(4 + this.fileBlockIndent) };
     }
     if (!inCode) {
@@ -378,9 +394,15 @@ class Writer {
     return `[${this.inline(children)}](${linkDestination(url)})`;
   }
 
-  /** The bracketed label that opens at `open` (a `[`) and closes before `limit`, as written, without its brackets. */
+  /**
+   * The bracketed label that opens at `open` (a `[`) and closes before
+   * `limit`, without its brackets: as written, except that its continuation
+   * lines lose their container prefixes, as in `inline`.
+   */
   private label(open: number, limit: number): string {
-    return bracketedLabel(this.source, open, limit);
+    const from = open + 1;
+    const to = from + bracketedLabel(this.source, open, limit).length;
+    return this.rewritten(from, to, [], codeSpans(this.source, from, to));
   }
 }
 

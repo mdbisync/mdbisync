@@ -127,7 +127,10 @@ Blocks:
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
   quote or list item is indented four spaces after its `>` or indent, so it
-  stays text and does not turn the line above into a heading.
+  stays text and does not turn the line above into a heading. Inside a code
+  span, where a line ending reads as a space, such a line joins the line
+  above instead. The same holds for an image's alt text that runs over
+  lines.
 - Linear's color comment of a callout (`<!-- linear:callout color=... -->`)
   stays directly above its callout, with no blank line between them.
 - Tilde fences and indented code become backtick fences. A fence whose info

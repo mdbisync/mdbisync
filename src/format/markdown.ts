@@ -584,12 +584,83 @@ export function imageDestination(url: string): string {
  * would otherwise scan the rest of the document for every label.
  */
 export function bracketedLabel(source: string, open: number, limit: number): string {
-  let depth = 0;
-  for (let at = open; at < Math.min(limit, source.length); at++) {
-    const char = source[at];
-    if (char === '\\') at++;
-    else if (char === '[') depth++;
-    else if (char === ']' && --depth === 0) return source.slice(open + 1, at);
+  const end = Math.min(limit, source.length);
+  const closing = (spans: ReadonlyMap<number, number>): number => {
+    let depth = 0;
+    for (let at = open; at < end; at++) {
+      const char = source[at];
+      if (char === '\\') at++;
+      else if (spans.has(at)) at = spans.get(at)! - 1;
+      else if (char === '[') depth++;
+      else if (char === ']' && --depth === 0) return at;
+    }
+    return -1;
+  };
+  // A backtick in an autolink, in HTML or in the destination opens no code
+  // span. When skipping the code spans found no bracket that the node goes
+  // on from (with its destination or reference, or at its end), every
+  // bracket counts.
+  let close = closing(new Map(codeSpans(source, open, end)));
+  if (!(close !== -1 && (close === end - 1 || source[close + 1] === '(' || source[close + 1] === '['))) close = closing(new Map());
+  return close === -1 ? '' : source.slice(open + 1, close);
+}
+
+/**
+ * The code spans in `source` from `from` to `to`, as `[start, end)` pairs: a
+ * run of backticks up to the next run of the same length. A backslash outside
+ * a code span escapes the next character; inside one it is text. The runs are
+ * indexed by length first, so each opening run finds its closing run by a
+ * binary search instead of a scan.
+ */
+export function codeSpans(source: string, from: number, to: number): Array<[number, number]> {
+  const runEnd = (at: number): number => {
+    while (at < to && source[at] === '`') at++;
+    return at;
+  };
+  // The start of every run of backticks, by its length, in order.
+  const runs = new Map<number, number[]>();
+  for (let at = from; at < to;) {
+    if (source[at] !== '`') {
+      at++;
+      continue;
+    }
+    const after = runEnd(at);
+    const starts = runs.get(after - at) ?? [];
+    starts.push(at);
+    runs.set(after - at, starts);
+    at = after;
   }
-  return '';
+  const spans: Array<[number, number]> = [];
+  for (let at = from; at < to;) {
+    if (source[at] === '\\') {
+      at += 2;
+      continue;
+    }
+    if (source[at] !== '`') {
+      at++;
+      continue;
+    }
+    const open = runEnd(at);
+    const width = open - at;
+    const close = firstAtOrAfter(runs.get(width) ?? [], open);
+    if (close === undefined) {
+      at = open;
+    } else {
+      spans.push([at, close + width]);
+      at = close + width;
+    }
+  }
+  return spans;
+}
+
+/** The first of the ascending `values` that is at least `min`. */
+function firstAtOrAfter(values: readonly number[], min: number): number | undefined {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (values[middle]! < min) low = middle + 1;
+    else high = middle;
+  }
+  return values[low];
 }
