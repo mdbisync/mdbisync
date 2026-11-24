@@ -11,7 +11,7 @@ import { nameToEmoji } from 'gemoji';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -704,9 +704,10 @@ function insideLine(source: string, at: number): boolean {
  * hold what Linear holds, and the text stays as it is.
  */
 export function fixLinearText(linearText: string, content: string, inRepository: (url: string) => boolean): string {
-  // Read a nested file block as Linear holds it, not as the parent's text.
+  // Read a nested file block as Linear holds it, not as the parent's text,
+  // and text Linear wrote back without its escape as text.
   const split = splitFile(linearText);
-  const text = joinFile(split.head, nestedFileBlocksOnItemLine(split.body));
+  const text = joinFile(split.head, nestedFileBlocksOnItemLine(linearMarkersAsText(split.body)));
   // A relative link or image still in Linear's content was not uploaded, so
   // its file is not there: Linear keeps such a link as a link, not as a file
   // block, and so does a repair that turns such an image into a link.

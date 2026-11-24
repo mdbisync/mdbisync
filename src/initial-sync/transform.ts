@@ -7,7 +7,7 @@
 // A transform may make requests of its own (an upload); it must not write the
 // document itself.
 
-import { fixLinearText, fixText, linkedFileCheck, relativeFileBlocksAsLinks, sameMarkdown } from '../format/index.ts';
+import { fixLinearText, fixText, linkedFileCheck, relativeFileBlocksAsLinks, sameAsLinear } from '../format/index.ts';
 import { parse, visit } from '../format/markdown.ts';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { type LinearClient } from '../linear/index.ts';
@@ -153,7 +153,7 @@ export function sameLinkDestinations(content: string, sent: string): boolean {
  * comes back in the hook's form.
  */
 export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string, sent: string, files: ReadonlySet<string>): string {
-  const kept = sameMarkdown(content, sent);
+  const kept = sameAsLinear(content, sent);
   let current = kept ? sent : content;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
   if (kept) return current;

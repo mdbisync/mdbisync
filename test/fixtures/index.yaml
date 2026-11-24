@@ -267,6 +267,10 @@ known_constructs:
     class: lint-error
   - construct: ordered-item-number-escaped
     class: unchanged
+  - construct: item-text-block-starters
+    class: fixable
+  - construct: paragraph-block-starters
+    class: fixable
   - construct: task-in-quote
     class: fixable
   - construct: math-in-list
@@ -2882,6 +2886,24 @@ fixtures:
     canary: kx-f30fd3d5
     corpus: false
     note: "item text that starts like a list marker, escaped so it stays text"
+  - file: "list-items/item-text-block-starters.md"
+    group: list-items
+    construct: item-text-block-starters
+    class: fixable
+    basis: known
+    canary: kx-5af44b9a
+    corpus: false
+    git_form: captured
+    note: "item text that starts like a list marker or a block; Linear writes 4) and a lone + back without their escape, and capture puts it back"
+  - file: "construct-singles/paragraph-block-starters.md"
+    group: construct-singles
+    construct: paragraph-block-starters
+    class: fixable
+    basis: known
+    canary: kx-95881896
+    corpus: false
+    git_form: captured
+    note: "paragraph text that starts like a list marker or a block; Linear writes 4) and a lone + back without their escape, and capture puts it back"
   - file: "construct-singles/image-alt-multiline-container.md"
     group: construct-singles
     construct: image-alt-multiline-container

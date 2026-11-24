@@ -308,6 +308,56 @@ export function sameMarkdown(a: string, b: string): boolean {
   return isDeepStrictEqual(comparable(a), comparable(b));
 }
 
+/**
+ * Whether Linear's `content` is the same document as `body`, a text of the
+ * repository: `sameMarkdown` with Linear's content read as Linear holds it
+ * (`linearMarkersAsText`).
+ */
+export function sameAsLinear(content: string, body: string): boolean {
+  if (content === body) return true;
+  return sameMarkdown(linearMarkersAsText(content), body);
+}
+
+// A bullet or number marker Linear never writes for a list of its own.
+const NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
+
+/**
+ * Linear's content with the escapes it drops put back. Linear writes a list
+ * with `*` or `-` bullets and numbers with `.`, and holds text such as
+ * `4) pear` or a lone `+` at the start of a paragraph or an item as text,
+ * but writes it back without the escape `fix` gives it (`4\) pear`, `\+`).
+ * Markdown would read that text as a list: so every item of a list with a
+ * `+` bullet or a `)` number is Linear's text, and gets its escape back.
+ * Every other text stays as it is.
+ */
+export function linearMarkersAsText(content: string): string {
+  // Such a marker starts a line, after quote prefixes, indentation and other markers.
+  if (!/^[ \t>]*(?:(?:[*+-]|\d{1,9}[.)])[ \t]+)*(?:\+|\d{1,9}\))(?:[ \t\r]|$)/m.test(content)) return content;
+  let text = content;
+  for (;;) {
+    const escapes: number[] = [];
+    const escaped = new Set<Nodes>();
+    visit(parse(text), (node, ancestors) => {
+      if (node.type !== 'listItem' || ancestors.some((ancestor) => escaped.has(ancestor))) return;
+      const marker = NOT_LINEAR_MARKER.exec(text.slice(start(node), start(node) + 11));
+      if (marker === null) return;
+      escaped.add(node);
+      escapes.push(start(node) + marker[0].length - 1);
+    });
+    if (escapes.length === 0) return text;
+    // An escaped item becomes text, and the lines after it can read anew: read again until no such list is left.
+    // Each pass escapes at least one marker, so the passes end.
+    const parts: string[] = [];
+    let at = 0;
+    for (const escape of escapes) {
+      parts.push(text.slice(at, escape), '\\');
+      at = escape;
+    }
+    parts.push(text.slice(at));
+    text = parts.join('');
+  }
+}
+
 // Escapes of characters that open Linear's own syntax, which Markdown reads
 // as text either way: `$$` math and `+++` collapsible sections.
 const LINEAR_SYNTAX_ESCAPES: Readonly<Record<string, string>> = { '\\$': '', '\\+': '' };

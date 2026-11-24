@@ -25,7 +25,7 @@ import { createPendingProjects } from '../setup/linear.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { documentPath, isUntitled, keptPath } from './paths.ts';
-import { joinFile, sameMarkdown, splitFile } from '../format/index.ts';
+import { joinFile, sameAsLinear, splitFile } from '../format/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
@@ -782,7 +782,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
       return digest !== undefined && digest === observedDigest(held);
     }
-    return sameMarkdown(document.content ?? '', expected);
+    return sameAsLinear(document.content ?? '', expected);
   }
 
   function resolves(place: Place): boolean {
@@ -834,7 +834,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (document === null || document.trashed || document.archivedAt !== null) return skip(change.to, 'missing-in-linear');
     if (movedSinceCapture(document)) return skip(change.to, 'edited-in-linear');
     const holds =
-      (patch.content === undefined || (document.content != null && sameMarkdown(document.content, patch.content))) &&
+      (patch.content === undefined || (document.content != null && sameAsLinear(document.content, patch.content))) &&
       (patch.title === undefined || document.title.normalize('NFC') === patch.title) &&
       (!resolves(file.place) || inPlace(document, file.place));
     if (holds) {
@@ -895,7 +895,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       // text may be a person's edit made since an interrupted run created it: it is left for the next capture, which
       // takes it in as a new document at this path for the merge with git's file.
       const held = withCurrentIds(adopted);
-      if (!sameMarkdown(held.content ?? '', body)) {
+      if (!sameAsLinear(held.content ?? '', body)) {
         // The next capture reads its links by superseded ids as links to their paths only while those ids are kept.
         for (const { id } of supersededLinks(adopted.content ?? '')) keptSuperseded.add(id);
         return skip(change.path, 'edited-in-linear');

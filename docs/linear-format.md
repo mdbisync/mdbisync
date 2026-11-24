@@ -127,6 +127,9 @@ Blocks:
   escaped, so it stays text: in `Note` followed by `1. 3. plum`, the
   `3. plum` is text, and with the blank line `fix` writes before the list it
   becomes `1. 3\. plum`. Text split off at an image gets the same escape.
+  Linear keeps such text but returns `4\) pear` and a lone `\+` without
+  their escapes; the sync reads them as text and writes them back with the
+  escapes, so a pull leaves the file as it is.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a

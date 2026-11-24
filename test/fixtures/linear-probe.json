@@ -321,6 +321,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/paragraph-block-starters.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/paragraph-multiple.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -754,6 +758,10 @@
       "fixedPoint": true
     },
     "list-items/image-not-uploaded-in-cell.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/item-text-block-starters.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
