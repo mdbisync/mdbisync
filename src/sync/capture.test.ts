@@ -339,6 +339,34 @@ describe('capture from Linear', () => {
     assert.deepEqual(hookRun('docs/plan.md', file), {exitCode: 0, stdout: '', stderr: ''});
   });
 
+  it('keeps item text Linear writes back without its escape as text', async () => {
+    const escaped = 'Steps\n\n1. 4\\) pear\n2. \\+\n\n\\+';
+    const initial = await run();
+    const tracked = await commitTree(context.git, {parents: [initial.state.linear!], base: initial.state.linear, changes: new Map([['docs/plan.md', `---\ncategory: work\n---\n\n${escaped}`]]), message: 'Add steps', identity: IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const written = await writeTrackedToLinear(context, {config, state: initial.state});
+    assert.deepEqual(written.updated, ['docs/plan.md']);
+    // Linear holds the same text, but writes it back without the escapes, which Markdown alone reads as lists.
+    const stored = 'Steps\n\n1. 4) pear\n2. +\n\n+\n';
+    assert.ok(!sameMarkdown(escaped, stored), 'read alone, the readback is another document');
+    const doc = world.linear.documents[0]!;
+    Object.assign(doc, {content: stored, updatedAt: '2026-01-06T00:00:00Z'});
+    await refresh();
+    const unchanged = await run();
+    assert.equal(unchanged.ok, true);
+    assert.equal(unchanged.state.linear, written.state.linear, 'the readback makes no change in git');
+    // An edit elsewhere in Linear is captured with the text's escapes.
+    Object.assign(doc, {content: `${stored}\nChecked.\n`, updatedAt: '2026-01-07T00:00:00Z'});
+    await refresh();
+    const edited = await run();
+    assert.equal(edited.ok, true);
+    const file = await text('docs/plan.md');
+    assert.equal(file, `---\ncategory: work\n---\n\n${escaped}\n\nChecked.`);
+    assert.deepEqual(hookRun('docs/plan.md', file), {exitCode: 0, stdout: '', stderr: ''});
+  });
+
   it('writes a Linear body that opens with a rule in the hook\'s form, under the file\'s front matter', async () => {
     // Read alone, the text between the two rules would look like front matter; the hook reads it as body.
     const stored = '---\n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n\n---\n\nAfter.';

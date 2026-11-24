@@ -26,7 +26,7 @@
 
 import { assessCapacity, capacityBlocked } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import { fixText, joinFile, sameMarkdown, splitFile } from '../format/index.ts';
+import { fixText, joinFile, sameAsLinear, splitFile } from '../format/index.ts';
 import {
   DocumentTooLongError,
   type LinearDocument,
@@ -649,7 +649,7 @@ function sha256(text: string): string {
  * or the body in the form Linear stores (as the format module writes it).
  */
 export function holdsBody(content: string, body: string): boolean {
-  return sameMarkdown(content, body) || content === fixText(body);
+  return sameAsLinear(content, body) || content === fixText(body);
 }
 
 

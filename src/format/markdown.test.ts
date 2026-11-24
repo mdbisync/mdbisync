@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { Nodes, Root } from 'mdast';
 import { EditMap } from 'micromark-util-edit-map';
-import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { lintText } from './lint.ts';
 import { fixText } from './fix.ts';
 
@@ -293,6 +293,50 @@ describe('sameMarkdown', () => {
   it('compares a destination holding a lone surrogate without throwing', () => {
     assert.ok(!sameMarkdown('[a](x\uD800)', '[a](y\uD800)'));
     assert.ok(sameMarkdown('[a](x\uD800)', '[a](<x\uD800>)'));
+  });
+});
+
+describe('linearMarkersAsText', () => {
+  it('puts back the escape Linear drops from text that starts like a `)` number or a `+` bullet', () => {
+    const cases: Array<[string, string]> = [
+      ['1. 4) pear', '1. 4\\) pear'],
+      ['1. +', '1. \\+'],
+      ['* 1) fig\n* +', '* 1\\) fig\n* \\+'],
+      ['4) pear\n\n+\n\n1) fig', '4\\) pear\n\n\\+\n\n1\\) fig'],
+      ['> 4) pear\n\n> +', '> 4\\) pear\n\n> \\+'],
+      ['Note\n\n1. 4) pear\n2. Next\n\n   4) pear', 'Note\n\n1. 4\\) pear\n2. Next\n\n   4\\) pear'],
+      // Only the outer marker: the text after it is no list.
+      ['1. 4) + pear', '1. 4\\) + pear'],
+    ];
+    for (const [linear, file] of cases) {
+      assert.equal(linearMarkersAsText(linear), file, JSON.stringify(linear));
+      assert.ok(sameAsLinear(linear, file), JSON.stringify(linear));
+      assert.ok(!sameMarkdown(linear, file), `read alone, ${JSON.stringify(linear)} is another document`);
+      assert.equal(fixText(file), file, `fix keeps ${JSON.stringify(file)}`);
+    }
+  });
+
+  it('keeps Linear\'s own lists, code and other text as they are', () => {
+    for (const text of [
+      '* pear\n* fig',
+      '- [ ] pear\n- [X] fig',
+      '1. pear\n2. fig',
+      '1. \n   3. plum',
+      '- [ ] 4) pear',
+      '+++ Details\n\nHidden.\n\n+++',
+      '```\n+ pear\n4) fig\n```',
+      '    + pear',
+      'Pears + figs, 4) and more.',
+      '1. 4\\) pear\n2. \\+',
+      '+pear and 4)pear',
+    ]) assert.equal(linearMarkersAsText(text), text, JSON.stringify(text));
+  });
+
+  it('takes a text as the same as itself, and tells a changed document apart', () => {
+    // The initial import compares Linear's content with itself.
+    assert.ok(sameAsLinear('1. 4) pear\n2. +', '1. 4) pear\n2. +'));
+    assert.ok(!sameAsLinear('1. 4) pear', '1. 4\\) plum'));
+    assert.ok(!sameAsLinear('1. +', '1. \\-'));
   });
 });
 

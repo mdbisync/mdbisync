@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { duplicateTitles, fixLinearText, fixText, linkedFileResolver, lintText, sameMarkdown, splitFile } from '../../src/format/index.ts';
+import { duplicateTitles, fixLinearText, fixText, linkedFileResolver, lintText, sameAsLinear, sameMarkdown, splitFile } from '../../src/format/index.ts';
 import { goldenMarkdownPath, loadBank, readOptional, sentForm, type BankFixture } from '../probe/bank.ts';
 
 const bank = loadBank();
@@ -33,7 +33,7 @@ describe('fix on the fixture bank', () => {
           // The sync treats Linear's spelling as equivalent to fix's form
           // and captures the same bytes fix writes.
           assert.notEqual(fixed, head + form, 'git_form captured: fix does not reach the recorded form');
-          assert.ok(sameMarkdown(splitFile(fixed).body, form), "L0-02: Linear's recorded form is no change from fix's");
+          assert.ok(sameAsLinear(form, splitFile(fixed).body), "L0-02: Linear's recorded form is no change from fix's");
           const uploaded = form.replaceAll('../assets/', 'https://uploads.example/');
           assert.equal(fixLinearText(head + form, uploaded, options.linkedFileExists), fixed, "L0-02: capture writes Linear's form as fix's");
         } else {
@@ -41,6 +41,14 @@ describe('fix on the fixture bank', () => {
         }
       } else {
         assert.equal(fixed, source, 'L0-03: fix leaves it byte for byte');
+        const form = golden(fixture);
+        if (fixture.class === 'unchanged' && form !== undefined) {
+          // A pull of the document Linear holds reads as the same tree.
+          const { head, body } = splitFile(source);
+          assert.ok(sameAsLinear(form, body), "L0-02: Linear's recorded form is no change from the file");
+          const uploaded = form.replaceAll('../assets/', 'https://uploads.example/');
+          assert.ok(sameMarkdown(splitFile(fixLinearText(head + form, uploaded, options.linkedFileExists)).body, body), 'L0-02: capture keeps the tree');
+        }
       }
     });
   }
