@@ -312,13 +312,22 @@ export function sameMarkdown(a: string, b: string): boolean {
 // as text either way: `$$` math and `+++` collapsible sections.
 const LINEAR_SYNTAX_ESCAPES: Readonly<Record<string, string>> = { '\\$': '', '\\+': '' };
 
+/** Whether the `\+` at `at` stands alone: no `+` before it, and a space, a tab or the line's end after it. */
+function isLonePlus(text: string, at: number): boolean {
+  const after = text[at + 2];
+  return text[at - 1] !== '+' && (after === undefined || after === ' ' || after === '\t' || after === '\n');
+}
+
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
 function comparable(body: string): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
+  // A lone `\+` (no `+` before it, a space or the line's end after it), as
+  // `fix` writes for item text that is a bare `+`, cannot be part of `+++`:
+  // Markdown's own escape, kept as it is.
   // A list marker (with a task checkbox, if any) alone on its line opens a file block
   // in Linear (`* \n  [a](a.pdf)`), which Markdown reads as `* [a](a.pdf)`: keep that line apart too.
   const marked = nestedFileBlocksOnItemLine(body)
-    .replace(/\\[$+]/g, (escape) => LINEAR_SYNTAX_ESCAPES[escape]!)
+    .replace(/\\[$+]/g, (escape, at: number, text: string) => (escape === '\\+' && isLonePlus(text, at) ? escape : LINEAR_SYNTAX_ESCAPES[escape]!))
     .replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, '$1 ');
   const tree = parse(marked);
   const strip = (node: Nodes): unknown => {

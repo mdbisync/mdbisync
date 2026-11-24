@@ -235,6 +235,13 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (first !== undefined && first.type !== 'paragraph') report('block-first-in-list-item', line(first));
         break;
       }
+      case 'list': {
+        // Linear's task list has no numbers: a task item in an ordered list
+        // ends up in a bullet task list.
+        const task = node.ordered ? node.children.find((item) => item.checked !== null && item.checked !== undefined) : undefined;
+        if (task !== undefined) report('ordered-task-list', line(task));
+        break;
+      }
       case 'table':
         if (node.align?.some((align) => align !== null)) report('table-alignment', line(node));
         break;
