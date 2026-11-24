@@ -335,6 +335,28 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('keeps a task item\'s continuation line in the item from its checkbox column', () => {
+    // A task item's content starts at its checkbox. A line indented that far
+    // is not lazy: its indentation past the item's prefix is its own.
+    const continued: Array<[string, string]> = [
+      ['- [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3. pegs'],
+      ['- [ ] Pack the tent\n    3. pegs', '- [ ] Pack the tent\n    3. pegs'],
+      ['- [ ] Pack the tent\n      3. pegs', '- [ ] Pack the tent\n      3. pegs'],
+      ['* [x] Pack the tent\n  3. pegs', '- [X] Pack the tent\n  3. pegs'],
+      ['-   [ ] Pack the tent\n    3. pegs', '- [ ] Pack the tent\n  3. pegs'],
+      ['-\n  [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3. pegs'],
+      ['> - [ ] Pack the tent\n>   3. pegs', '> - [ ] Pack the tent\n>   3. pegs'],
+      ['- [ ] Pack\n  - [ ] the tent\n    3. pegs', '- [ ] Pack\n  - [ ] the tent\n    3. pegs'],
+    ];
+    for (const [text, expected] of continued) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+    }
+  });
+
   it('leaves an ordered task list to its author: Linear would drop its numbers', () => {
     for (const text of ['1. [ ] alpha\n2. [x] beta', '1. one\n2. [ ] two', '* a\n\n  3. [x] b']) {
       assert.equal(fixText(text), text, text);

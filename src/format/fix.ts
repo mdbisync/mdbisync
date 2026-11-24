@@ -246,7 +246,7 @@ class Writer {
       const inlineAudio = (!task && MP3.test(path)) || (bullet && WAV_OR_OGG.test(path));
       if (!inlineAudio) {
         this.fileBlockIndent = indent.length;
-        this.containers.push({ kind: 'item', indent: (first?.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
+        this.containers.push({ kind: 'item', indent: this.contentIndent(item) });
         const label = this.inline(attachment.children);
         this.containers.pop();
         this.fileBlockIndent = 0;
@@ -260,7 +260,7 @@ class Writer {
       }
     }
     if (first === undefined) return marker;
-    this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
+    this.containers.push({ kind: 'item', indent: this.contentIndent(item) });
     if (item.checked !== null && item.checked !== undefined && first.type === 'paragraph') this.taskParagraph = first;
     // Blocks of an item are a blank line apart, but a nested list follows
     // its paragraph on the next line when it can interrupt that paragraph.
@@ -280,6 +280,21 @@ class Writer {
     });
     this.containers.pop();
     return `${marker} ${prefixLines(content, indent, '').slice(indent.length)}`;
+  }
+
+  /**
+   * The columns a line needs past the item's own column to belong to its
+   * content: where its first block starts. A task item's content starts at
+   * its checkbox, not at the text after it; an item whose first line holds
+   * only its marker takes its content one column past the marker.
+   */
+  private contentIndent(item: ListItem): number {
+    const [first] = item.children;
+    if (item.checked !== null && item.checked !== undefined) {
+      const marker = /^([*+-]|\d{1,9}[.)])( {1,4}(?=\[)|[ \t]*\n)/.exec(this.source.slice(start(item), start(item) + 20));
+      if (marker) return marker[1]!.length + (marker[2]!.endsWith('\n') ? 1 : marker[2]!.length);
+    }
+    return (first?.position?.start.column ?? 1) - (item.position?.start.column ?? 1);
   }
 
   private table(node: Table): string {
