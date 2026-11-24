@@ -133,11 +133,12 @@ Blocks:
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
-  quote or list item is indented four spaces after its `>` or indent, so it
-  stays text and does not turn the line above into a heading. Inside a code
-  span, where a line ending reads as a space, such a line joins the line
-  above instead. The same holds for an image's alt text that runs over
-  lines.
+  quote or list item gets its `>` or indent and a backslash, as Linear
+  writes it (`> \--`), so it stays text and does not turn the line above
+  into a heading. In a link label or an image's alt text that runs over
+  lines, it is indented four spaces after its `>` or indent instead. Inside
+  a code span, where a line ending reads as a space, such a line joins the
+  line above.
 - Linear's color comment of a callout (`<!-- linear:callout color=... -->`)
   stays directly above its callout, with no blank line between them.
 - Tilde fences and indented code become backtick fences. A fence whose info
@@ -183,7 +184,12 @@ Inline text:
 - Underscore emphasis becomes asterisks: `__bold__ and _em_` becomes
   `**bold** and *em*`.
 - Link destinations go in angle brackets: `[a](https://example.com/x)`
-  becomes `[a](<https://example.com/x>)`.
+  becomes `[a](<https://example.com/x>)`. A backslash, `|`, `^`, `{` and
+  `}` in a destination are percent-encoded, as Linear writes them:
+  `[a](https://example.com/a\b)` becomes
+  `[a](<https://example.com/a%5Cb>)`. A `%` that starts no escape becomes
+  `%25`. In a relative path that is not valid percent-encoding, every `%` is
+  written `%25`, so the link still names the same file.
 - Reference links and images are written inline, and their definitions go.
 - Autolinks and bare URLs become links: `See https://example.com now.`
   becomes `See [https://example.com](<https://example.com>) now.` The link
@@ -203,6 +209,9 @@ Inline text:
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`.
 - An escaped `#` inside a line loses its escape: `a \# b` becomes `a # b`.
+- A `-` or `*` that starts a line of a paragraph as text gets a backslash,
+  as Linear writes it: `-- a remark` becomes `\-- a remark`, and `*note`
+  becomes `\*note`.
 
 ## How documents look in Linear
 

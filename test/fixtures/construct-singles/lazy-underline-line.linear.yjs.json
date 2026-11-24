@@ -1,0 +1,47 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Agenda item","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"--","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Next item","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {"text":"A quoted line","marks":{"attribution":"user"}},
+            {"type":"hard_break"},
+            {"text":"==","marks":{"attribution":"user"}}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"A paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"--","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-aafe6ed7","marks":{"attribution":"user"}}]}
+  ]
+}

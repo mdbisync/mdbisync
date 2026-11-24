@@ -73,6 +73,16 @@ rules:
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
+  - construct: autolink-literal-backslash
+    class: fixable
+  - construct: lazy-underline-line
+    class: fixable
+  - construct: dash-only-line
+    class: fixable
+  - construct: line-start-marker
+    class: fixable
+  - construct: link-destination-unsafe-characters
+    class: fixable
   - construct: sync-conflict-markers
     class: unchanged
   - construct: sync-conflict-callouts
@@ -1869,11 +1879,18 @@ fixtures:
     group: links
     construct: autolink-literal-backslash
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-6d25b0a1
     corpus: false
-    probe_pending: true
     note: "a bare URL ending in a backslash, then a line holding only --: fix writes one link and keeps the rest once"
+  - file: "links/destination-unsafe-characters.md"
+    group: links
+    construct: link-destination-unsafe-characters
+    class: fixable
+    basis: known
+    canary: kx-83bf6cca
+    corpus: false
+    note: "Linear percent-encodes a backslash, |, ^, { and } in a link destination, also a bare URL's"
   - file: "links/bare-url-inline-syntax.md"
     group: links
     construct: autolink-literal-inline-syntax
@@ -2827,14 +2844,29 @@ fixtures:
     basis: assumed
     canary: kx-e82370e6
     synced: false
+  - file: "construct-singles/dash-only-lines.md"
+    group: construct-singles
+    construct: dash-only-line
+    class: fixable
+    basis: known
+    canary: kx-63c5fe20
+    corpus: false
+    note: "Linear escapes a paragraph line that starts with -; a lone == or === line stays"
+  - file: "construct-singles/line-start-markers.md"
+    group: construct-singles
+    construct: line-start-marker
+    class: fixable
+    basis: known
+    canary: kx-cbd5160c
+    corpus: false
+    note: "Linear escapes a - or * that starts a paragraph line, also after a soft break, in an item or a quote; + stays"
   - file: "construct-singles/lazy-underline-line.md"
     group: construct-singles
     construct: lazy-underline-line
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-aafe6ed7
     corpus: false
-    probe_pending: true
     note: "a lazy -- or == line continues an item or quote paragraph; it must not underline it as a heading"
   - file: "list-items/task-list-ordered.md"
     group: list-items

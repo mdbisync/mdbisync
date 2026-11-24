@@ -812,23 +812,31 @@ function destination(url: string): string {
 }
 
 /**
- * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded, and a
- * backslash at its end doubled, so it cannot escape the closing bracket.
+ * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded. Linear also
+ * percent-encodes a backslash, `|`, `^`, `{` and `}` (recorded in the fixture bank); so does every renderer that
+ * writes the link as HTML, so the link goes to the same place. A `%` that starts no escape is written `%25`, as those
+ * renderers write it. A relative path that does not decode names its file as written (`decodedDestinationPath`), so
+ * there every `%` is written `%25`: the destination decodes to that same file name.
  */
 export function linkDestination(url: string): string {
-  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
-  return `<${inner}${trailingBackslashes(inner) % 2 === 1 ? '\\' : ''}>`;
+  const cut = url.search(/[?#]/);
+  const path = cut === -1 ? url : url.slice(0, cut);
+  const rest = cut === -1 ? '' : url.slice(cut);
+  const literal = !/^[a-z][a-z0-9+.-]*:/i.test(url) && !decodes(path);
+  const encode = (text: string, percent: RegExp): string =>
+    text.replace(new RegExp(`[<>\\r\\n\\\\|^{}]|${percent.source}`, 'g'), (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+  const lone = /%(?![0-9A-Fa-f]{2})/;
+  return `<${destination(encode(path, literal ? /%/ : lone) + encode(rest, lone))}>`;
 }
 
-/**
- * The number of backslashes that end `text`, counted from its end. A regular
- * expression for the run rescans it from each of its positions when another
- * character follows it.
- */
-function trailingBackslashes(text: string): number {
-  let at = text.length;
-  while (at > 0 && text[at - 1] === '\\') at -= 1;
-  return text.length - at;
+/** Whether `text` is valid percent-encoding: `decodeURIComponent` accepts it. */
+function decodes(text: string): boolean {
+  try {
+    decodeURIComponent(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { Nodes, Root } from 'mdast';
 import { EditMap } from 'micromark-util-edit-map';
-import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, decodedDestinationPath, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { lintText } from './lint.ts';
 import { fixText } from './fix.ts';
 
@@ -501,37 +501,41 @@ describe('codeSpans and bracketedLabel', () => {
 });
 
 describe('linkDestination', () => {
-  // The destination as it was written while a regular expression counted its
-  // trailing backslashes; a short destination keeps that output.
-  const previous = (url: string): string => {
-    const inner = url
-      .replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
-      .replace(/ /g, '%20')
-      .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
-      .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
-    return `<${inner}${/\\*$/.exec(inner)![0].length % 2 === 1 ? '\\' : ''}>`;
-  };
-
-  it('writes every short destination over backslashes, letters and parentheses as before', () => {
+  it('percent-encodes a backslash, |, ^, { and } as Linear writes them, and keeps where the link goes', () => {
+    assert.equal(linkDestination('a\\'), '<a%5C>');
+    assert.equal(linkDestination('a\\x'), '<a%5Cx>');
+    assert.equal(linkDestination('a|b^c{d}'), '<a%7Cb%5Ec%7Bd%7D>');
+    assert.equal(linkDestination('a b<c>'), '<a%20b%3Cc%3E>');
+    // A `%` that starts no escape is written `%25`, so a file name holding one still decodes next to an encoded character.
+    assert.equal(linkDestination('100%|.pdf'), '<100%25%7C.pdf>');
+    assert.equal(decodedDestinationPath('100%25%7C.pdf'), '100%|.pdf');
+    // A relative path that does not decode names its file as written: every `%` in it is literal.
+    assert.equal(linkDestination('a%20b%zz.pdf'), '<a%2520b%25zz.pdf>');
+    assert.equal(decodedDestinationPath('a%2520b%25zz.pdf'), 'a%20b%zz.pdf');
+    assert.equal(linkDestination('a%20b|c.pdf?q=1%zz'), '<a%20b%7Cc.pdf?q=1%25zz>');
+    assert.equal(decodedDestinationPath('a%20b%7Cc.pdf'), 'a b|c.pdf');
+    // An absolute URL keeps its escapes; only a `%` that starts none becomes `%25`, as renderers write it.
+    assert.equal(linkDestination('https://example.com/a%20b%zz'), '<https://example.com/a%20b%25zz>');
+    // Every relative destination still resolves to the file it named before.
+    for (const url of ['a%20b%zz.pdf', '100%|.pdf', 'a%20b.pdf', 'a|b.pdf', '%FF.pdf', 'x%2Fy%.md', 'n\\o{t}e.md?x=%zz']) {
+      const written = linkDestination(url).slice(1, -1).replace(/\\(.)/g, '$1');
+      assert.equal(decodedDestinationPath(written), decodedDestinationPath(url), url);
+    }
+    // Every short destination over these characters reads back as the same link.
     let urls = [''];
-    for (let length = 1; length <= 8; length++) {
-      urls = urls.flatMap((url) => ['\\', 'x', '('].map((char) => url + char));
-      for (const url of urls) assert.equal(linkDestination(url), previous(url), JSON.stringify(url));
+    for (let length = 1; length <= 6; length++) {
+      urls = urls.flatMap((url) => ['\\', 'x', '(', '|', '{'].map((char) => url + char));
+      for (const url of urls) {
+        assert.ok(sameMarkdown(`[a](${linkDestination(url)})`, `[a](<${url.replace(/\\/g, '\\\\')}>)`), JSON.stringify(url));
+      }
     }
   });
 
-  it('doubles the last backslash of an odd run that ends the destination, so it cannot escape the bracket', () => {
-    assert.equal(linkDestination('a\\'), '<a\\\\>');
-    assert.equal(linkDestination('\\\\\\'), '<\\\\\\\\\\\\>');
-    assert.equal(linkDestination('a\\x'), '<a\\x>');
-    for (const url of ['a\\', 'a\\\\\\', '\\(\\', 'x\\\\x\\']) {
-      assert.ok(sameMarkdown(`[a](${linkDestination(url)})`, `[a](<${url.replace(/\\/g, '\\\\')}>)`), JSON.stringify(url));
-    }
-  });
-
-  // The run of backslashes that ends a destination was counted by a regular
-  // expression that rescanned the run from each of its positions when another
-  // character followed it: a run of the content limit took minutes. fix
+  // The run of backslashes that ends a destination was once counted by a
+  // regular expression that rescanned the run from each of its positions
+  // when another character followed it: a run near the content limit took
+  // minutes. The run is half the limit, since each backslash it stands for
+  // is written as `%5C`, three characters. fix
   // writes every link destination; lint writes one only for a reference link,
   // to size its expansion. A child process runs lint and fix on an inline and
   // a reference link holding such a run, so the parent's timeout stops a stall
@@ -543,7 +547,7 @@ describe('linkDestination', () => {
       import { fixText } from ${JSON.stringify(new URL('./fix.ts', import.meta.url).href)};
       import { lintText } from ${JSON.stringify(new URL('./lint.ts', import.meta.url).href)};
       import { parse, sameMarkdown } from ${JSON.stringify(new URL('./markdown.ts', import.meta.url).href)};
-      const run = '\\\\'.repeat(CONTENT_LIMIT - 20);
+      const run = '\\\\'.repeat(Math.floor(CONTENT_LIMIT / 2));
       const cases = { inline: '[a](' + run + 'x)', reference: '[a][r]\\n\\n[r]: ' + run + 'x' };
       const result = {};
       for (const [name, text] of Object.entries(cases)) {

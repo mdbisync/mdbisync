@@ -1,0 +1,19 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"https://example.com/path/\\","marks":{"attribution":"user","link":{"href":"https://example.com/path/%5C","noEmbed":null}}},
+        {"type":"hard_break"},
+        {"text":"The line after the address.","marks":{"attribution":"user"}}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"--","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Closing paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-6d25b0a1","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -155,8 +155,8 @@ for (const [source, repaired] of [
   ['![x](https://example.com/a(1).png)', '[x](<https://example.com/a(1).png>)'],
   ['![x](<https://example.com/a\\>b.png>)', '[x](<https://example.com/a%3Eb.png>)'],
   ['![a *b* [c]](../chart.png)', '[a b \\[c\\]](<../chart.png>)'],
-  ['![x](https://example.com/a\\\\)', '[x](<https://example.com/a\\\\>)'],
-  ['![x](https://example.com/a\\\\\\\\)', '[x](<https://example.com/a\\\\\\\\>)'],
+  ['![x](https://example.com/a\\\\)', '[x](<https://example.com/a%5C>)'],
+  ['![x](https://example.com/a\\\\\\\\)', '[x](<https://example.com/a%5C%5C>)'],
   ['![x](<https://example.com/a&#10;b.png>)', '[x](<https://example.com/a%0Ab.png>)'],
 ] as const) test(`a repaired link is spelled as Linear and fix spell it: ${JSON.stringify(source)}`, () => {
   const body = imageLinks(source, new Set(['https://uploads.linear.app/w/dead.png'])).body;

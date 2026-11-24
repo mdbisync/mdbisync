@@ -3,6 +3,7 @@
 // recorded forms.
 
 import type { Blockquote, List, Paragraph } from 'mdast';
+import { normalizeUri } from 'micromark-util-sanitize-uri';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
@@ -310,17 +311,18 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('a\n    # b'), 'a\n    # b');
   });
 
-  it('keeps a lazy line of dashes or equals signs as text, not a heading underline', () => {
+  it('keeps a lazy line of dashes or equals signs as text, not a heading underline: escaped as Linear writes it', () => {
     const lazy: Array<[string, string]> = [
-      ['- item\n--', '* item\n      --'],
-      ['- item\n=', '* item\n      ='],
-      ['1. item\n==', '1. item\n       =='],
-      ['- [ ] task\n--', '- [ ] task\n      --'],
-      ['- a\n  - b\n--', '* a\n  * b\n        --'],
-      ['> quote\n--', '> quote\n>     --'],
-      ['> quote\n\t==', '> quote\n>     =='],
-      ['100. item\n\t--', '100. item\n         --'],
-      ['> - item\n  --', '> * item\n>       --'],
+      ['- item\n--', '* item\n  \\--'],
+      ['- item\n=', '* item\n  \\='],
+      ['1. item\n==', '1. item\n   \\=='],
+      ['- [ ] task\n--', '- [ ] task\n  \\--'],
+      ['- a\n  - b\n--', '* a\n  * b\n    \\--'],
+      ['> quote\n--', '> quote\n> \\--'],
+      ['> quote\n\t==', '> quote\n> \\=='],
+      ['100. item\n\t--', '100. item\n     \\--'],
+      ['> - item\n  --', '> * item\n>   \\--'],
+      // In a link label Linear's form is not recorded: four spaces of padding keep the line text.
       ['> [link\n--\n](https://example.com)', '> [link\n>     --\n> ](<https://example.com>)'],
       // A file block writes its label's later lines without the item's indent.
       ['- [Report\n--\nsummary](report.pdf)', '* \n  [Report\n      --\nsummary](report.pdf)'],
@@ -389,12 +391,54 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('- [ ] 1. Draft ![a](x.png) 2. more'), '- [ ] 1. Draft\n\n  ![a](x.png)\n\n  2\\. more');
   });
 
-  it('keeps a lone -- line between blank lines, and reads one under a paragraph as Markdown does: a heading', () => {
-    assert.equal(fixText('Text.\n\n--\n\nMore.'), 'Text.\n\n--\n\nMore.');
-    assert.equal(fixText('--'), '--');
+  it('escapes a lone -- line between blank lines, and reads one under a paragraph as Markdown does: a heading', () => {
+    assert.equal(fixText('Text.\n\n--\n\nMore.'), 'Text.\n\n\\--\n\nMore.');
+    assert.equal(fixText('--'), '\\--');
     assert.equal(fixText('Text\n--\n\nMore.'), '## Text\n\nMore.');
     // Outside a container nothing is written before the line: a code span keeps its tab.
     assert.equal(fixText('`a\n\t--\nb`'), '`a\n\t--\nb`');
+  });
+
+  it('escapes a literal - or * that starts a paragraph line, as Linear writes it', () => {
+    const cases: Array<[string, string]> = [
+      ['-x marks it', '\\-x marks it'],
+      ['*x star', '\\*x star'],
+      ['First\n-- second\n-x third', 'First\n\\-- second\n\\-x third'],
+      ['* item\n  -- remark', '* item\n  \\-- remark'],
+      ['> words\n> -x remark', '> words\n> \\-x remark'],
+      // Indentation of a continuation line does not count: the marker is escaped and the indentation goes.
+      ['First\n  -x third', 'First\n\\-x third'],
+      ['First\n\t*x third', 'First\n\\*x third'],
+      ['> a\n>   -x', '> a\n> \\-x'],
+      // A `*` that shares a delimiter run with emphasis keeps the run as it is.
+      ['***(important)*', '***(important)*'],
+      ['**x', '**x'],
+      // Already escaped, not a line start, or not text: nothing to add.
+      ['\\-x and \\*y', '\\-x and \\*y'],
+      ['a -x and *b', 'a -x and *b'],
+      ['+x plus', '+x plus'],
+      ['*x* emphasis', '*x* emphasis'],
+      ['`a\n-x`', '`a\n-x`'],
+      ['# -x heading', '# -x heading'],
+    ];
+    for (const [input, expected] of cases) {
+      const once = fixText(input);
+      assert.equal(once, expected, JSON.stringify(input));
+      assert.equal(fixText(once), once, `${JSON.stringify(input)}: a second fix changes nothing`);
+      assert.ok(sameMarkdown(once, input), `${JSON.stringify(input)}: the document stays`);
+    }
+  });
+
+  it('adds no escape inside inline HTML: a lazy dash line there keeps its padding', () => {
+    const text = '> <span title="a\n--\nb">x</span>';
+    const once = fixText(text);
+    assert.equal(once, '> <span title="a\n>     --\n> b">x</span>');
+    assert.equal(fixText(once), once, 'a second fix changes nothing');
+  });
+
+  it('takes Linear\'s text with a relative link it did not upload whose destination fix encodes', () => {
+    const linear = '* [Report](<name|a.pdf>)';
+    assert.equal(fixLinearText(linear, linear, () => false), '* [Report](<name%7Ca.pdf>)');
   });
 
   it('joins a lazy line of dashes or equals signs in a code span in a container to the line before it', () => {
@@ -543,20 +587,23 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('* [Report](<a)b.pdf>)'), '* \n  [Report](a%29b.pdf)');
   });
 
-  it('keeps what a destination means: references and escapes stay escaped', () => {
+  it('keeps what a destination means: references stay escaped, and a backslash is percent-encoded as Linear writes it', () => {
     const once = fixText('[a](<https://example.com/?q=&amp;copy;>)');
     assert.equal(once, '[a](<https://example.com/?q=&amp;copy;>)');
     assert.equal(fixText('[a](https://example.com/?a=1&b=2)'), '[a](<https://example.com/?a=1&b=2>)');
-    assert.equal(fixText('[a](<x\\\\*y>)'), '[a](<x\\\\*y>)');
+    assert.equal(fixText('[a](<x\\\\*y>)'), '[a](<x%5C*y>)');
+    assert.equal(fixText('[a](<https://example.com/a|b^c{d}>)'), '[a](<https://example.com/a%7Cb%5Ec%7Bd%7D>)');
+    assert.equal(fixText('[a](<https://example.com/a%5Cb>)'), '[a](<https://example.com/a%5Cb>)');
   });
 
   it('writes an autolink\'s backslashes and brackets literally in its label', () => {
     const cases: Array<[string, string]> = [
-      ['https://example.com/\\\nNext.', '[https://example.com/\\\\](<https://example.com/\\\\>)\nNext.'],
-      ['<https://example.com/\\>', '[https://example.com/\\\\](<https://example.com/\\\\>)'],
-      ['See https://example.com/\\* now.', 'See [https://example.com/\\\\](<https://example.com/\\\\>)* now.'],
+      ['https://example.com/\\\nNext.', '[https://example.com/\\\\](<https://example.com/%5C>)\nNext.'],
+      ['<https://example.com/\\>', '[https://example.com/\\\\](<https://example.com/%5C>)'],
+      ['See https://example.com/\\* now.', 'See [https://example.com/\\\\](<https://example.com/%5C>)* now.'],
+      ['See https://example.com/a\\b now.', 'See [https://example.com/a\\\\b](<https://example.com/a%5Cb>) now.'],
       ['<https://example.com/a]b[c>', '[https://example.com/a\\]b\\[c](<https://example.com/a]b[c>)'],
-      ['a <https://example.com/a\\`> b `c`', 'a [https://example.com/a\\\\\\`](<https://example.com/a\\\\`>) b `c`'],
+      ['a <https://example.com/a\\`> b `c`', 'a [https://example.com/a\\\\\\`](<https://example.com/a%5C`>) b `c`'],
     ];
     for (const [input, expected] of cases) {
       const once = fixText(input);
@@ -569,7 +616,7 @@ describe('what fix leaves alone', () => {
   it('writes an autolink\'s label so its text reads exactly as the URL', () => {
     const cases: Array<[string, string, string]> = [
       // Escaped underscores: the backslashes are literal, the underscores must not become emphasis.
-      ['https://example.org/p?k=1\\_2\\_\\_3&z=4', '[https://example.org/p?k=1\\\\\\_2\\\\\\_\\\\\\_3&z=4](<https://example.org/p?k=1\\\\_2\\\\_\\\\_3&z=4>)', 'https://example.org/p?k=1\\_2\\_\\_3&z=4'],
+      ['https://example.org/p?k=1\\_2\\_\\_3&z=4', '[https://example.org/p?k=1\\\\\\_2\\\\\\_\\\\\\_3&z=4](<https://example.org/p?k=1%5C_2%5C_%5C_3&z=4>)', 'https://example.org/p?k=1\\_2\\_\\_3&z=4'],
       // Plain underscores after punctuation must not become emphasis either.
       ['https://example.org/p?a=x._one_.two_three_.z', '[https://example.org/p?a=x.\\_one\\_.two\\_three\\_.z](<https://example.org/p?a=x._one_.two_three_.z>)', 'https://example.org/p?a=x._one_.two_three_.z'],
       // Tilde pairs must not become strikethrough (and a `subscript` finding).
@@ -594,7 +641,8 @@ describe('what fix leaves alone', () => {
       const link = paragraph.children[0];
       assert.ok(link?.type === 'link', `${JSON.stringify(input)}: a link`);
       assert.deepEqual(link.children.map((child) => [child.type, 'value' in child ? child.value : undefined]), [['text', text]], `${JSON.stringify(input)}: the link text is one text node equal to the URL`);
-      assert.equal(link.url, text);
+      // A backslash in the destination is percent-encoded, as Linear writes it: the link goes where the URL goes.
+      assert.equal(normalizeUri(link.url), normalizeUri(text));
     }
   });
 

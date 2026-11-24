@@ -1,6 +1,6 @@
 Garden shed inventory.
 
-Seed list: [https://example.org/p?k=1\\\_2\\\_\\\_3&z=4](<https://example.org/p?k=1\\_2\\_\\_3&z=4>)
+Seed list: [https://example.org/p?k=1\\\_2\\\_\\\_3&z=4](<https://example.org/p?k=1%5C_2%5C_%5C_3&z=4>)
 
 Rake tracking: [https://example.org/track?id=10\~20\~30&view=on](<https://example.org/track?id=10~20~30&view=on>)
 

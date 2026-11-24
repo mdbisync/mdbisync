@@ -1,9 +1,9 @@
 Opening paragraph.
 
-[https://example.com/path/\\](<https://example.com/path/\\>)
+[https://example.com/path/\\](<https://example.com/path/%5C>)
 The line after the address.
 
---
+\--
 
 Closing paragraph.
 
