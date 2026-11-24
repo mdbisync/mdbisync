@@ -1858,6 +1858,15 @@ fixtures:
     corpus: false
     probe_pending: true
     note: "a bare URL ending in a backslash, then a line holding only --: fix writes one link and keeps the rest once"
+  - file: "links/bare-url-inline-syntax.md"
+    group: links
+    construct: autolink-literal-inline-syntax
+    class: fixable
+    basis: assumed
+    canary: kx-c8a05149
+    corpus: false
+    probe_pending: true
+    note: "bare URLs holding escaped underscores, tilde pairs, asterisks and character references: the link text fix writes reads exactly as the URL"
   - file: "links/reference.md"
     group: links
     construct: link-reference

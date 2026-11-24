@@ -386,6 +386,42 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('writes an autolink\'s label so its text reads exactly as the URL', () => {
+    const cases: Array<[string, string, string]> = [
+      // Escaped underscores: the backslashes are literal, the underscores must not become emphasis.
+      ['https://example.org/p?k=1\\_2\\_\\_3&z=4', '[https://example.org/p?k=1\\\\\\_2\\\\\\_\\\\\\_3&z=4](<https://example.org/p?k=1\\\\_2\\\\_\\\\_3&z=4>)', 'https://example.org/p?k=1\\_2\\_\\_3&z=4'],
+      // Tilde pairs must not become strikethrough (and a `subscript` finding).
+      ['https://example.org/track?id=10~20~30&view=on', '[https://example.org/track?id=10\\~20\\~30&view=on](<https://example.org/track?id=10~20~30&view=on>)', 'https://example.org/track?id=10~20~30&view=on'],
+      ['<https://example.org/~~a~~>', '[https://example.org/\\~\\~a\\~\\~](<https://example.org/~~a~~>)', 'https://example.org/~~a~~'],
+      ['<https://example.org/a*b*/c_d_>', '[https://example.org/a\\*b\\*/c\\_d\\_](<https://example.org/a*b*/c_d_>)', 'https://example.org/a*b*/c_d_'],
+      // A character reference or an emoji shortcode in the URL stays as written.
+      ['https://example.org/x?a=1&amp;b=&#42;2', '[https://example.org/x?a=1\\&amp;b=\\&#42;2](<https://example.org/x?a=1&amp;amp;b=&amp;#42;2>)', 'https://example.org/x?a=1&amp;b=&#42;2'],
+      ['https://example.org/:tada:/x', '[https://example.org/\\:tada:/x](<https://example.org/:tada:/x>)', 'https://example.org/:tada:/x'],
+      // An escaped underscore ends a name, which exposes `:tada:` in the label.
+      ['https://example.org/:not_emoji:tada:/x', '[https://example.org/:not\\_emoji\\:tada:/x](<https://example.org/:not_emoji:tada:/x>)', 'https://example.org/:not_emoji:tada:/x'],
+      // Shortcodes that share a colon are each escaped.
+      ['https://example.org/:fire:tada:/x', '[https://example.org/\\:fire\\:tada:/x](<https://example.org/:fire:tada:/x>)', 'https://example.org/:fire:tada:/x'],
+    ];
+    for (const [input, expected, text] of cases) {
+      const once = fixText(input);
+      assert.equal(once, expected, JSON.stringify(input));
+      assert.equal(fixText(once), once, `${JSON.stringify(input)}: the result is a fixed point`);
+      assert.deepEqual(lintText('a.md', once), lintText('a.md', input), `${JSON.stringify(input)}: lint finds nothing new`);
+      const paragraph = parse(once).children[0] as Paragraph;
+      assert.equal(paragraph.children.length, 1, `${JSON.stringify(input)}: one link`);
+      const link = paragraph.children[0];
+      assert.ok(link?.type === 'link', `${JSON.stringify(input)}: a link`);
+      assert.deepEqual(link.children.map((child) => [child.type, 'value' in child ? child.value : undefined]), [['text', text]], `${JSON.stringify(input)}: the link text is one text node equal to the URL`);
+      assert.equal(link.url, text);
+    }
+  });
+
+  it('keeps an escaped character reference or emoji shortcode in text as written', () => {
+    for (const text of ['Plain \\&amp; text.', 'Plain \\:tada: text.']) assert.equal(fixText(text), text);
+    // After an escaped backslash, the reference and the shortcode are read and rewritten.
+    assert.equal(fixText('Plain \\\\&eacute; and \\\\:tada: text.'), 'Plain \\\\é and \\\\🎉 text.');
+  });
+
   it('keeps a document whose parse holds a node without a source position, rather than copying the wrong text', () => {
     // The bare-URL search inside this broken label yields a link with no position.
     const text = 'Before.\n\n[https://example.com/\\](<https://example.com/\\\\>)\nafter\n';

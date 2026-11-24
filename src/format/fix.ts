@@ -393,18 +393,19 @@ function textEdits(source: string, from: number, to: number, keepAt?: number): E
   const edits: Edit[] = [];
   const raw = source.slice(from, to);
   // Character references become the characters when that cannot make markup:
-  // characters outside ASCII, and `&` when no reference follows it.
-  for (const match of raw.matchAll(/&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g)) {
+  // characters outside ASCII, and `&` when no reference follows it. After an
+  // escaped `&` there is no reference: the text stays as written.
+  for (const match of raw.matchAll(CHARACTER_REFERENCE)) {
+    if (escaped(raw, match.index)) continue;
     const char = decodeEntity(match[0]);
     const after = raw.slice(match.index + match[0].length);
     if (char === undefined || char.trim() === '') continue;
     if (char === '&' ? /^[A-Za-z0-9#]+;/.test(after) : char.codePointAt(0)! < 0x80) continue;
     edits.push({ from: from + match.index, to: from + match.index + match[0].length, text: char });
   }
-  // `:name:` shortcodes Linear knows become the emoji.
-  for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
-    const emoji = Object.hasOwn(nameToEmoji, match[1]!) ? nameToEmoji[match[1]!] : undefined;
-    if (emoji) edits.push({ from: from + match.index, to: from + match.index + match[0].length, text: emoji });
+  // `:name:` shortcodes Linear knows become the emoji, unless the first colon is escaped.
+  for (const { index, length, emoji } of emojiShortcodes(raw)) {
+    if (!escaped(raw, index)) edits.push({ from: from + index, to: from + index + length, text: emoji });
   }
   // A backslash before a letter is a literal backslash; Linear doubles it.
   // An escaped `#` inside a line needs no escape and Linear drops it; at the
@@ -423,19 +424,58 @@ function textEdits(source: string, from: number, to: number, keepAt?: number): E
 }
 
 /**
- * Rewrites inside an autolink's text written as a link label: every
- * backslash is literal there, so each is doubled (as Linear doubles one
- * before a letter), and brackets and backticks are escaped. A backslash left
- * single at the label's end would escape its closing bracket, and a backtick
- * could open a code span that runs past it; either breaks the link.
+ * Rewrites inside an autolink's text written as a link label, so the label
+ * reads exactly as the URL. Every backslash is literal there, so each is
+ * doubled (as Linear doubles one before a letter). Every character that is
+ * inline syntax in a label is escaped: brackets and backticks (a backslash
+ * left single at the label's end would escape its closing bracket, and a
+ * backtick could open a code span that runs past it; either breaks the
+ * link); `*`, `_` and `~`, which would make emphasis or strikethrough; and
+ * the `&` of a character reference and the first colon of an emoji
+ * shortcode, which would turn into the character or the emoji.
  */
 function literalEdits(source: string, from: number, to: number): Edit[] {
-  const edits: Edit[] = [];
-  for (let at = from; at < to; at++) {
-    const char = source[at]!;
-    if (char === '\\' || char === '[' || char === ']' || char === '`') edits.push({ from: at, to: at + 1, text: `\\${char}` });
+  const raw = source.slice(from, to);
+  const escape = new Set<number>();
+  for (let at = 0; at < raw.length; at++) if (LABEL_SYNTAX.has(raw[at]!)) escape.add(at);
+  for (const match of raw.matchAll(CHARACTER_REFERENCE)) escape.add(match.index);
+  // Every colon that opens a shortcode is escaped, overlapping ones too
+  // (`:x:tada:`), as found in the label the next run reads: an escaped `_`
+  // ends a name, so `:a_b:tada:` holds `:tada:` there.
+  const rawAt: number[] = [];
+  let label = '';
+  for (let at = 0; at < raw.length; at++) {
+    if (escape.has(at)) label += '\\';
+    rawAt[label.length] = at;
+    label += raw[at];
   }
+  for (const match of label.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
+    if (Object.hasOwn(nameToEmoji, match[1]!)) escape.add(rawAt[match.index]!);
+  }
+  const edits: Edit[] = [];
+  for (const at of [...escape].sort((a, b) => a - b)) edits.push({ from: from + at, to: from + at + 1, text: `\\${raw[at]}` });
   return edits;
+}
+
+/** Characters an autolink's label escapes wherever they stand. */
+const LABEL_SYNTAX: ReadonlySet<string> = new Set(['\\', '[', ']', '`', '*', '_', '~']);
+
+/** A character reference as Markdown spells one; whether it names a character is decided apart. */
+const CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
+
+/** The `:name:` shortcodes in `raw` that name an emoji Linear knows, with their offsets. */
+function* emojiShortcodes(raw: string): Generator<{ index: number; length: number; emoji: string }> {
+  for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
+    const emoji = Object.hasOwn(nameToEmoji, match[1]!) ? nameToEmoji[match[1]!] : undefined;
+    if (emoji) yield { index: match.index, length: match[0].length, emoji };
+  }
+}
+
+/** Whether the character at `at` follows an odd run of backslashes, which escapes it. */
+function escaped(text: string, at: number): boolean {
+  let run = 0;
+  while (text[at - 1 - run] === '\\') run++;
+  return run % 2 === 1;
 }
 
 /** Whether a node below the root has no source position. */

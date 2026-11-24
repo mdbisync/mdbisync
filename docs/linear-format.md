@@ -167,14 +167,19 @@ Inline text:
   becomes `[a](<https://example.com/x>)`.
 - Reference links and images are written inline, and their definitions go.
 - Autolinks and bare URLs become links: `See https://example.com now.`
-  becomes `See [https://example.com](<https://example.com>) now.`
+  becomes `See [https://example.com](<https://example.com>) now.` The link
+  text reads exactly as the URL: backslashes are doubled, and characters
+  that would be markup there are escaped:
+  `https://example.com/a~b~c` becomes
+  `[https://example.com/a\~b\~c](<https://example.com/a~b~c>)`.
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
   `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`. Other
   references to ASCII characters stay, since some would make markup:
   `&lt;b&gt;`, `&quot;` and `&#65;` are kept.
 - Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes
-  `Done 🎉`.
+  `Done 🎉`. An escaped reference or shortcode (`\&amp;`, `\:tada:`) stays
+  as written.
 - A backslash before anything but ASCII punctuation (a letter, a digit, a
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`.
