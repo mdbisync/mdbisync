@@ -376,6 +376,10 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `image-file-missing` and `document-in-assets-folder`. Each is described,
 with its fix, in [linear-format.md](linear-format.md#lint-rules).
 
+`mdbisync lint` and `mdbisync fix` also report `hard-break-in-heading`
+when converting a setext heading to one line would lose a hard break.
+See [hard breaks in headings](linear-format.md#hard-break-in-heading).
+
 `mdbisync lint` run on a folder also reports `upload-file-refused` for a
 file an earlier sync captured from Linear (named `<sha256>.<ext>`) that the
 upload check now refuses. It leaves no file out; a document that links

@@ -56,6 +56,8 @@ rules:
     title: "Bold or italic around inline code is dropped from the code."
   - id: hard-break-backslash
     title: "A backslash line break becomes a plain line break."
+  - id: hard-break-in-heading
+    title: "A hard line break in a setext heading is lost when the heading is written as one line."
   - id: git-conflict-marker
     title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
   - id: url-in-html
@@ -2279,6 +2281,26 @@ fixtures:
     class: unchanged
     basis: known
     canary: kx-5c7f9462
+  - file: "lint-errors/heading-setext-break-spaces.md"
+    group: lint-errors
+    construct: heading-setext-hard-break
+    class: lint-error
+    rule: hard-break-in-heading
+    line: 2
+    basis: assumed
+    canary: kx-8b147c0e
+    corpus: false
+    probe_pending: true
+  - file: "lint-errors/heading-setext-break-backslash.md"
+    group: lint-errors
+    construct: heading-setext-hard-break
+    class: lint-error
+    rule: hard-break-backslash
+    line: 1
+    basis: assumed
+    canary: kx-8b147c1e
+    corpus: false
+    probe_pending: true
   - file: "lint-errors/footnote.md"
     group: lint-errors
     construct: footnote

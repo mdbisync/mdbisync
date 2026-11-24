@@ -148,6 +148,24 @@ describe('sync: the tracked branch to Linear', () => {
   };
   const body = (path: string, text: string) => text.slice(text.indexOf(`# `));
 
+  it('can update a synchronized document after correcting a setext heading with a hard break', async () => {
+    const path = 'eng/notes/review.md';
+    const document = await documentOf(path);
+    const setext = 'Paper lanterns  \nAbove the gate\n================\n';
+    document.content = setext;
+    touch(document);
+    await commit({ [path]: setext });
+    const recorded = await sync();
+    assert.equal(recorded.result.exitCode, 0, recorded.result.stderr);
+    assert.match(await show(`refs/mdbisync/linear:${path}`), /Paper lanterns {2}\nAbove the gate/);
+
+    const corrected = '# Paper lanterns above the gate\n';
+    await commit({ [path]: corrected });
+    const result = await sync();
+    assert.deepEqual(result.writes, ['UpdateDocument']);
+    assert.equal(document.content, corrected);
+  });
+
   it('keeps an over-nested Linear document out of writes while updating a valid neighbor', async () => {
     const path = 'eng/notes/plan.md';
     const nested = '> '.repeat(130) + CANARY;

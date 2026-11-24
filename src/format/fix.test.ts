@@ -362,7 +362,7 @@ describe('what fix leaves alone', () => {
   it('drops the spaces and tabs around each line break of a setext heading and keeps the others', () => {
     assert.equal(fixText('Title \t\n\t more\n====='), '# Title more');
     assert.equal(fixText('a\t\t\n\t\tb\n---'), '## a b');
-    assert.equal(fixText('a  \n  b\n==='), '# a b');
+    assert.equal(fixText('a \n  b\n==='), '# a b');
     assert.equal(fixText('# a     b'), '# a     b');
     assert.equal(fixText('a \t b\nc\n==='), '# a \t b c');
   });
@@ -381,11 +381,13 @@ describe('what fix leaves alone', () => {
       import { parse } from ${JSON.stringify(new URL('./markdown.ts', import.meta.url).href)};
       const spaces = ' '.repeat(CONTENT_LIMIT - 10);
       const tabs = '\\t'.repeat(CONTENT_LIMIT - 10);
+      const hardBreakHeading = 'a' + spaces + '\\nb\\n===';
       const cases = {
         'ATX, spaces': ['# a' + spaces + 'b', '# a' + spaces + 'b'],
         'ATX, tabs': ['# a' + tabs + 'b', '# a' + tabs + 'b'],
         'setext, run inside a line': ['a' + spaces + 'x\\nb\\n===', '# a' + spaces + 'x b'],
-        'setext, run before a line break': ['a' + spaces + '\\nb\\n===', '# a b'],
+        'setext, run before a soft break': ['a' + tabs + '\\nb\\n===', '# a b'],
+        'setext, run before a hard break': [hardBreakHeading, hardBreakHeading],
       };
       const result = {};
       for (const [name, [text, expected]] of Object.entries(cases)) {
@@ -402,9 +404,12 @@ describe('what fix leaves alone', () => {
     assert.equal(child.signal, null, 'fix did not finish within the parent timeout');
     assert.equal(child.status, 0, child.stderr);
     const result = JSON.parse(child.stdout) as Record<string, { parseMs: number; fixMs: number; expected: boolean }>;
-    assert.deepEqual(Object.keys(result), ['ATX, spaces', 'ATX, tabs', 'setext, run inside a line', 'setext, run before a line break']);
+    assert.deepEqual(Object.keys(result), [
+      'ATX, spaces', 'ATX, tabs', 'setext, run inside a line',
+      'setext, run before a soft break', 'setext, run before a hard break',
+    ]);
     for (const [name, { parseMs, fixMs, expected }] of Object.entries(result)) {
-      assert.ok(expected, `${name}: fix writes the heading on one line, the run kept inside it`);
+      assert.ok(expected, `${name}: fix produces the expected text`);
       const times = `${name}: parse ${Math.round(parseMs)} ms, fix ${Math.round(fixMs)} ms`;
       // fix lints and parses the text a few times; the join adds little beside that.
       assert.ok(fixMs < 10 * parseMs + 5_000, times);

@@ -440,8 +440,27 @@ First line\
 Second line
 ```
 
-Instead, end the line with two spaces or `<br>` (both kept as they are), or
-start a new paragraph.
+In a paragraph, end the line with two spaces or `<br>`, or start a new
+paragraph. For a break in a setext heading, see
+[`hard-break-in-heading`](#hard-break-in-heading).
+
+### `hard-break-in-heading`
+
+A hard line break in a setext heading is lost when the heading is written
+as one line.
+`lint` reports the break's line and `fix` leaves the file as written.
+Each `␠` below represents a trailing space.
+
+```text
+Paper lanterns␠␠
+Above the gate
+==============
+```
+
+A backslash break is reported as `hard-break-backslash`.
+
+To make the file pass lint, put the heading on one line or move the text
+after the break into a paragraph below the heading.
 
 ### `git-conflict-marker`
 
