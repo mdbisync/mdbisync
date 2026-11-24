@@ -108,6 +108,10 @@ describe('a backslash line break', () => {
     ['Tabs after\\\n\tthe break', 'Tabs after  \nthe break'],
     ['Spaces before \\\nthe backslash', 'Spaces before  \nthe backslash'],
     ['A break\\\n-- then a dash line', 'A break  \n\\-- then a dash line'],
+    // Inline HTML cannot interrupt a paragraph, so this line stays text.
+    ['Lanterns\n<b>\\\nabove', 'Lanterns\n<b>  \nabove'],
+    // A list starting at 2 cannot interrupt a paragraph: `2.` is text, not a prefix.
+    ['Lanterns\n2. \\\nabove', 'Lanterns\n2.  \nabove'],
   ];
   for (const [input, expected] of written) {
     it(`is written as two trailing spaces: ${JSON.stringify(input)}`, () => {
@@ -123,8 +127,30 @@ describe('a backslash line break', () => {
     });
   }
 
-  // A heading is written on one line; two spaces alone on a line would end the paragraph.
-  for (const input of ['Lanterns\\\nabove the gate\n===', 'Intro.\n\nLanterns\\\nabove\n---\n\nAnd a paragraph\\\nwith a break', 'Lanterns\n\\\nabove', '> Lanterns\n> \\\n> above', '- \\\n  above']) {
+  // A heading is written on one line; two spaces alone on a line would end
+  // the paragraph; without its backslash a line can open a block or a checkbox.
+  const left = [
+    'Lanterns\\\nabove the gate\n===',
+    'Intro.\n\nLanterns\\\nabove\n---\n\nAnd a paragraph\\\nwith a break',
+    'Lanterns\r\nabove\\\r\nthe gate\r\n===\r\n',
+    'Lanterns\n\\\nabove',
+    '> Lanterns\n> \\\n> above',
+    '- \\\n  above',
+    'Lanterns\n#\\\nabove',
+    'Lanterns\n=\\\nabove',
+    'Lanterns\n***\\\nabove',
+    '*\\\nabove*',
+    '- [ ]\\\n  above',
+    '- #\\\n  above',
+    '- ###\\\n  above',
+    '| x |\\\n| -- |',
+    'Lanterns\\\n![Lamp](lamp.png)',
+    '![Lamp](lamp.png)\\\nabove',
+    'Start **\\\nbold**',
+    '> Lanterns\\\n| x |\n| -- |\n| # Tag |',
+    '* [x] \\\n  above',
+  ];
+  for (const input of left) {
     it(`is left to the author where two spaces cannot hold it: ${JSON.stringify(input)}`, () => {
       assert.equal(fixText(input), input);
       assert.ok(lintText('doc.md', input).some((finding) => finding.rule === 'hard-break-backslash'));

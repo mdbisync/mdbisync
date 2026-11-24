@@ -7,7 +7,8 @@
 // findings. Neither stops at a rule whose construct `fix` writes in Linear's
 // form (FIXED_RULES).
 
-import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
+import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Nodes, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
+import { isDeepStrictEqual } from 'node:util';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
@@ -37,7 +38,78 @@ export interface FixOptions {
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
-  return joinFile(head, fixBody(body.replace(/\r\n?/g, '\n'), options));
+  const lf = body.replace(/\r\n?/g, '\n');
+  const spaced = backslashBreaksAsSpaces(lf);
+  if (spaced === undefined) return text;
+  const fixed = fixBody(spaced, options);
+  // The writer can still lose a break it now holds as two spaces (text split
+  // off at an image is trimmed, a lazy line given its prefix can open a
+  // block): such a file stays with its author.
+  if (spaced !== lf && breakCount(fixed) < breakCount(spaced)) return text;
+  return joinFile(head, fixed);
+}
+
+function breakCount(body: string): number {
+  let count = 0;
+  visit(parse(body), (node) => {
+    if (node.type === 'break') count++;
+  });
+  return count;
+}
+
+/**
+ * The body with each backslash line break written as two trailing spaces,
+ * the form Linear keeps for the same break; spaces before the backslash
+ * become part of the two. Undefined when that would change what the
+ * Markdown says, so the file stays with its author: a break in a heading,
+ * which `fix` writes on one line, or a line that reads differently without
+ * its backslash (`#\`, `=\`, `***\`, a backslash alone on its line).
+ */
+function backslashBreaksAsSpaces(body: string): string | undefined {
+  if (!body.includes('\\')) return body;
+  const tree = parse(body);
+  const breaks: number[] = [];
+  let unwritable = false;
+  visit(tree, (node, ancestors) => {
+    if (node.type !== 'break' || body[start(node)] !== '\\') return;
+    // A break that opens its paragraph (after a task checkbox) has no text for the spaces to follow.
+    const parent = ancestors.at(-1);
+    const siblings = parent !== undefined && 'children' in parent ? (parent.children as Nodes[]) : [];
+    const leading = siblings.slice(0, siblings.indexOf(node)).every((sibling) => sibling.type === 'text' && sibling.value.trim() === '');
+    if (leading || ancestors.some((a) => a.type === 'heading')) unwritable = true;
+    breaks.push(start(node));
+  });
+  if (breaks.length === 0) return body;
+  if (unwritable) return undefined;
+  let written = '';
+  let at = 0;
+  for (const backslash of breaks.sort((a, b) => a - b)) {
+    let from = backslash;
+    while (from > at && isSpaceOrTab(body[from - 1]!)) from--;
+    written += `${body.slice(at, from)}  `;
+    at = backslash + 1;
+  }
+  written += body.slice(at);
+  return isDeepStrictEqual(breakShape(parse(written)), breakShape(tree)) ? written : undefined;
+}
+
+/**
+ * A tree without positions, where text before a line break loses its
+ * trailing spaces and tabs (they do not render, and in the two-space form
+ * they belong to the break), and text left empty by that goes.
+ */
+function breakShape(tree: Root): unknown {
+  const shape = (node: Nodes): unknown => {
+    const { position: _position, ...rest } = node;
+    if (!('children' in node)) return rest;
+    const children = (node.children as Nodes[]).flatMap((child, index, all) => {
+      if (child.type !== 'text' || all[index + 1]?.type !== 'break') return [shape(child)];
+      const value = child.value.replace(/[ \t]+$/, '');
+      return value === '' ? [] : [{ type: 'text', value }];
+    });
+    return { ...rest, children };
+  };
+  return shape(tree);
 }
 
 function fixBody(body: string, options: FixOptions): string {
@@ -57,9 +129,6 @@ function fixBody(body: string, options: FixOptions): string {
     // `"www.example.com"`) would make it copy the wrong text: leave the
     // body as it came.
     if (hasUnplacedNode(tree)) return body;
-    // Lint lets backslash breaks through for the ones `fix` writes as two
-    // spaces; one it cannot write leaves the body as it came.
-    if (unwritableBreak(tree, current)) return body;
     const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
@@ -519,16 +588,6 @@ class Writer {
       case 'text':
         edits.push(...(this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, this.cellStart)));
         return;
-      case 'break': {
-        // Linear reads a backslash break as a plain line break, but keeps a
-        // break written as two trailing spaces: the same break in Markdown.
-        // Spaces before the backslash are part of that break then.
-        if (this.source[from] !== '\\') return;
-        let spaces = from;
-        while (isSpaceOrTab(this.source[spaces - 1] ?? '')) spaces--;
-        edits.push({ from: spaces, to: from + 1, text: '  ' });
-        return;
-      }
       default:
         return;
     }
@@ -732,26 +791,6 @@ function blockStartEscapes(text: string, startsLine: boolean): number[] {
       return [];
   }
 }
-
-/**
- * Whether a line break has no form `fix` can write: one in a heading, which
- * is written on one line, or a backslash break with nothing but container
- * prefixes before it on its line, where two spaces would leave a blank line
- * that ends the paragraph.
- */
-function unwritableBreak(tree: Root, source: string): boolean {
-  let found = false;
-  visit(tree, (node, ancestors) => {
-    if (node.type !== 'break') return;
-    const at = start(node);
-    if (ancestors.some((a) => a.type === 'heading')) found = true;
-    else if (source[at] === '\\' && PREFIXES_ONLY.test(source.slice(lineStartOf(source, at), at))) found = true;
-  });
-  return found;
-}
-
-/** A line start holding only quote markers, list markers and spaces. */
-const PREFIXES_ONLY = /^(?:[ \t]*(?:>|[*+-](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*$/;
 
 /** Whether a node below the root has no source position. */
 function hasUnplacedNode(tree: Root): boolean {

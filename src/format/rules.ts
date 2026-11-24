@@ -22,7 +22,7 @@ export const LINT_RULES = {
   'link-title': 'A link title is dropped. Remove the title, or move its text into the link text.',
   'image-title': 'An image title is dropped from the Markdown. Remove the title, or move its text into the alt text.',
   'code-in-emphasis': 'Bold or italic around inline code is dropped from the code. Write the code without emphasis, or emphasize the words around it.',
-  'hard-break-backslash': 'A backslash line break becomes a plain line break. Run fix to write it as two trailing spaces; in a heading, put the heading on one line.',
+  'hard-break-backslash': 'A backslash line break becomes a plain line break. Run fix to write it as two trailing spaces; where fix leaves it, put the text on one line or start a new paragraph.',
   'hard-break-in-heading': 'A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.',
   'git-conflict-marker': 'Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.',
   'url-in-html': 'A URL inside raw HTML is turned into a Markdown link.',
@@ -41,9 +41,9 @@ export type LintRule = keyof typeof LINT_RULES;
  * what the Markdown says: `lint` reports them until it has, and neither
  * `fixText` nor the `fix` command stops at them. The sync still leaves such
  * a file out until it is fixed. A backslash line break becomes a two-space
- * break, which Linear keeps; a heading has no such form, since `fix` writes
- * it on one line, so `fixText` leaves a text with a break in a heading as
- * it is.
+ * break, which Linear keeps; where that would change the document (a break
+ * in a heading, which `fix` writes on one line, or a line that reads
+ * differently without its backslash), `fixText` leaves the text as it is.
  */
 export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash']);
 

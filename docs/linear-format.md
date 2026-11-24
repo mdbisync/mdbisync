@@ -29,7 +29,8 @@ space (`| a  |`), which `fix` writes as `| a |`. The sync takes only such
 re-spellings: a text that `fix` would change into another document (a
 setext heading's two lines written as one) stays as Linear has it. A file
 whose text Linear only re-spells keeps its own text, and a text with a lint
-finding stays as it is, as with `fix` itself.
+finding that `fix` leaves to the author stays as it is, as with `fix`
+itself.
 
 `fix` runs as the `linear-format` pre-commit hook, which every
 synchronized repository needs, and `lint` as the optional
@@ -469,9 +470,9 @@ Run **`npm test`** first.
 ### `hard-break-backslash`
 
 A backslash line break becomes a plain line break. Run fix to write it as
-two trailing spaces; in a heading, put the heading on one line. Linear
-drops the backslash, and the two lines join into one; it keeps a break
-written as two spaces, the same break in Markdown.
+two trailing spaces; where fix leaves it, put the text on one line or start
+a new paragraph. Linear drops the backslash, and the two lines join into
+one; it keeps a break written as two spaces, the same break in Markdown.
 
 ```markdown
 First line\
@@ -479,13 +480,21 @@ Second line
 ```
 
 `fix` writes this as `First line` with two trailing spaces, then
-`Second line`. Spaces before the backslash become part of those two. `fix`
-leaves the file to you where two spaces cannot hold the break: in a setext
-heading, which it writes on one line (see
-[`hard-break-in-heading`](#hard-break-in-heading)), and where the backslash
-is alone on its line, since a line of only spaces would end the paragraph.
-There, put the text on one line, end the line with two spaces or `<br>`,
-or start a new paragraph.
+`Second line`. Spaces before the backslash become part of those two.
+
+`fix` leaves the file to you wherever two spaces would change the document:
+in a setext heading, which it writes on one line (see
+[`hard-break-in-heading`](#hard-break-in-heading)); where the backslash is
+alone on its line, or right after a task checkbox; where the line would
+read differently without its backslash (`#\`, `***\`, a `=` or `---`
+underline, a table row, emphasis that the backslash lets close); and where
+the break sits next to an image, which `fix` moves into a paragraph of its
+own. There you can also end the line with two spaces or `<br>` yourself,
+if the line still reads as you meant.
+
+A hook that trims trailing whitespace in Markdown files also removes the
+two spaces, and with them the break: exclude Markdown from it (see
+[Other fixing hooks](#other-fixing-hooks)).
 
 ### `hard-break-in-heading`
 
@@ -691,7 +700,9 @@ Markdown files:
 ```
 
 Otherwise every run changes the files again, and the CI example's check
-never passes.
+never passes. A backslash line break is the exception, and the worse case:
+`fix` writes it as two spaces, `trailing-whitespace` removes them, and both
+hooks then pass with the break gone.
 
 ### In CI
 

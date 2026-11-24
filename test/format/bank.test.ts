@@ -16,7 +16,9 @@ const bank = loadBank();
 const markdown = bank.fixtures.filter((fixture) => fixture.synced !== false && fixture.file.endsWith('.md'));
 const read = (fixture: BankFixture): string => readFileSync(join(bank.dir, fixture.file), 'utf8');
 const golden = (fixture: BankFixture): string | undefined => readOptional(join(bank.dir, goldenMarkdownPath(fixture.file)));
-const contentRules = (fixture: BankFixture): boolean => fixture.class === 'lint-error' && fixture.rule !== 'duplicate-title';
+/** Lint-error fixtures `fix` rewrites into Linear's form (FIXED_RULES); the others of those rules stay as they are. */
+const FIXED_BY_FIX: ReadonlySet<string> = new Set(['construct-singles/break-backslash.md']);
+const contentRules =(fixture: BankFixture): boolean => fixture.class === 'lint-error' && fixture.rule !== 'duplicate-title';
 
 describe('fix on the fixture bank', () => {
   for (const fixture of markdown) {
@@ -40,8 +42,10 @@ describe('fix on the fixture bank', () => {
         } else {
           assert.equal(fixed, head + form, "L0-02: fix reaches Linear's recorded form");
         }
-      } else if (fixture.class === 'lint-error' && FIXED_RULES.has(fixture.rule as LintRule) && fixed !== source) {
+      } else if (FIXED_BY_FIX.has(fixture.file)) {
         // A rule fix writes in a form Linear keeps: the finding goes and the Markdown stays.
+        assert.ok(fixture.class === 'lint-error' && FIXED_RULES.has(fixture.rule as LintRule), 'a fixture of a rule fix writes');
+        assert.notEqual(fixed, source, 'fix rewrites it');
         const after = lintText(fixture.file, fixed, options).map((finding) => finding.rule);
         assert.deepEqual(after, [], 'lint reports nothing after fix');
         assert.ok(sameMarkdown(splitFile(fixed).body, splitFile(source).body), 'fix keeps the Markdown');
