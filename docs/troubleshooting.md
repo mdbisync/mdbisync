@@ -370,10 +370,14 @@ the reason is fixed. The summaries list each with its rules:
 The `linear-format` hook's rules leave a file out too until it is fixed:
 `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
 `image-in-link`, `table-alignment`, `link-title`, `image-title`,
-`code-in-emphasis`, `hard-break-backslash`, `hard-break-in-heading`,
-`git-conflict-marker`, `url-in-html`, `block-first-in-list-item`,
-`image-not-in-repository`, `image-file-missing` and `document-in-assets-folder`.
-Each is described, with its fix, in [linear-format.md](linear-format.md#lint-rules).
+`code-in-emphasis`, `hard-break-backslash`, `git-conflict-marker`,
+`url-in-html`, `block-first-in-list-item`, `image-not-in-repository`,
+`image-file-missing` and `document-in-assets-folder`. Each is described,
+with its fix, in [linear-format.md](linear-format.md#lint-rules).
+
+`mdbisync lint` and `mdbisync fix` also report `hard-break-in-heading`
+when converting a setext heading to one line would lose a hard break.
+See [hard breaks in headings](linear-format.md#hard-break-in-heading).
 
 `mdbisync lint` run on a folder also reports `upload-file-refused` for a
 file an earlier sync captured from Linear (named `<sha256>.<ext>`) that the

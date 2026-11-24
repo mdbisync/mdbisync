@@ -1,4 +1,4 @@
-// `lint`: finds the Markdown that Linear would lose or alter, with file, line
+// `lint`: finds Markdown that formatting or sync would lose or alter, with file, line
 // and rule. Conflict markers written by the sync are one-line warning
 // callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
@@ -47,7 +47,10 @@ export function linkedFileCheck(documentPath: string, isFile: (path: string) => 
  * path. The sync lints every document it reads this way.
  */
 export function lintInTree(file: string, text: string, files: ReadonlySet<string>): Finding[] {
-  return lintText(file, text, { linkedFileExists: linkedFileCheck(file, (path) => files.has(path)) });
+  const findings = lintText(file, text, { linkedFileExists: linkedFileCheck(file, (path) => files.has(path)) });
+  // The heading rule guards the formatter's ATX conversion. The sync can
+  // preserve setext text and uses historical versions to verify writes.
+  return findings.filter((finding) => finding.rule !== 'hard-break-in-heading');
 }
 
 /** Lint findings for one file's text, ordered by line. */

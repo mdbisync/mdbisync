@@ -1,4 +1,4 @@
-// Lint rules: Markdown that Linear would lose or alter. `fix` never rewrites
+// Lint rules: Markdown that formatting or sync would lose or alter. `fix` never rewrites
 // a file with one of these; the author decides what to keep.
 
 export const LINT_RULES = {
