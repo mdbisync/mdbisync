@@ -29018,7 +29018,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.1-rc.1" : packageJson.version;
+var VERSION = true ? "1.0.1-rc.2" : packageJson.version;
 
 // src/linear/facts.ts
 var CONTENT_LIMIT = 25e4;
@@ -29065,6 +29065,7 @@ var LINT_RULES = {
   "hard-break-in-heading": "A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.",
   "git-conflict-marker": "Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.",
   "url-in-html": "A URL inside raw HTML is turned into a Markdown link.",
+  "unplaced-link": 'A web address Markdown finds inside other text, such as "www.example.com" in quotes, cannot be matched to its text in the source, for example because an escape or a character reference spells it, so fix cannot write it as a link. Write it in angle brackets or as a link.',
   "block-first-in-list-item": "A list item that starts with a heading, code, a quote, a list or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
   "ordered-task-list": "An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.",
   "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path.",
@@ -40298,11 +40299,121 @@ var MarkdownLimitError = class extends Error {
   }
 };
 function parse2(body2, mdastExtensions = []) {
-  const tree = fromMarkdown(body2, { extensions: [gfm(), inlineBudget(), lazyBudget()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
+  const gfmExtensions = gfmFromMarkdown();
+  const transforms = gfmExtensions.flatMap((extension2) => extension2.transforms ?? []);
+  const untransformed = gfmExtensions.map(({ transforms: _transforms, ...extension2 }) => extension2);
+  const tree = fromMarkdown(body2, { extensions: [gfm(), inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
+  placeTextLinks(tree, body2.startsWith("\uFEFF") ? body2.slice(1) : body2, transforms);
   visit2(tree, () => {
   });
   return tree;
 }
+var TEXT_LINK_HINT = /https?:\/\/|www\.|@/i;
+function placeTextLinks(tree, source, transforms) {
+  if (transforms.length === 0) return;
+  const found = /* @__PURE__ */ new Map();
+  visit2(tree, (node2, ancestors) => {
+    const parent = ancestors.at(-1);
+    if (node2.type !== "text" || parent === void 0 || !("children" in parent) || !TEXT_LINK_HINT.test(node2.value)) return;
+    if (ancestors.some((ancestor) => ancestor.type === "link" || ancestor.type === "linkReference")) return;
+    const texts = found.get(parent);
+    if (texts === void 0) found.set(parent, [node2]);
+    else texts.push(node2);
+  });
+  if (found.size === 0) return;
+  const points = new PointIndex(source);
+  for (const [parent, texts] of found) {
+    const replaced = /* @__PURE__ */ new Map();
+    for (const node2 of texts) {
+      const paragraph2 = { type: "paragraph", children: [{ type: "text", value: node2.value }] };
+      for (const transform of transforms) transform({ type: "root", children: [paragraph2] });
+      const parts = mergedText(paragraph2.children);
+      if (parts.length === 1 && parts[0].type === "text") continue;
+      placeParts(parts, node2, source, points);
+      replaced.set(node2, parts);
+    }
+    if (replaced.size > 0) parent.children = parent.children.flatMap((child2) => replaced.get(child2) ?? [child2]);
+  }
+}
+function mergedText(nodes) {
+  const merged = [];
+  for (const node2 of nodes) {
+    const last = merged.at(-1);
+    if (node2.type === "text" && last?.type === "text") last.value += node2.value;
+    else merged.push(node2);
+  }
+  return merged;
+}
+var DECODED = /\\[!-/:-@[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]{1,31}));/g;
+function placeParts(parts, text6, source, points) {
+  const from = start(text6);
+  const raw = source.slice(from, end(text6));
+  const decoded = new Uint32Array(raw.length + 1);
+  for (const match of raw.matchAll(DECODED)) {
+    if (match[1] !== void 0 && decodeNamedCharacterReference(match[1]) === false) continue;
+    decoded.fill(1, match.index + 1, match.index + match[0].length + 1);
+  }
+  for (let at2 = 1; at2 <= raw.length; at2++) decoded[at2] = decoded[at2 - 1] + decoded[at2];
+  const literal = (at2, length) => decoded[at2 + length] === decoded[at2];
+  const labels = /* @__PURE__ */ new Map();
+  const ranges = [];
+  let valueAt = 0;
+  for (const part of parts) {
+    if (part.type === "text") {
+      valueAt += part.value.length;
+      continue;
+    }
+    if (part.type !== "link" || part.children.length !== 1 || part.children[0].type !== "text") return;
+    const label = part.children[0].value;
+    let found = labels.get(label);
+    if (found === void 0) {
+      found = { value: occurrences(text6.value, label), source: occurrences(raw, label).filter((at3) => literal(at3, label.length)), next: 0 };
+      if (found.value.length !== found.source.length) return;
+      labels.set(label, found);
+    }
+    while (found.next < found.value.length && found.value[found.next] < valueAt) found.next++;
+    const at2 = found.source[found.next];
+    if (at2 === void 0 || at2 < (ranges.at(-1)?.[1] ?? 0)) return;
+    ranges.push([at2, at2 + label.length]);
+    valueAt += label.length;
+  }
+  const position2 = (a, b) => ({ start: points.at(from + a), end: points.at(from + b) });
+  let link2 = 0;
+  let at = 0;
+  for (const part of parts) {
+    if (part.type === "link") {
+      const [a, b] = ranges[link2++];
+      part.position = position2(a, b);
+      part.children[0].position = position2(a, b);
+      at = b;
+      continue;
+    }
+    const next = ranges[link2]?.[0] ?? raw.length;
+    part.position = position2(at, next);
+    at = next;
+  }
+}
+function occurrences(haystack, needle) {
+  const found = [];
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) found.push(at);
+  return found;
+}
+var PointIndex = class {
+  lineStarts = [0];
+  constructor(source) {
+    for (const match of source.matchAll(/\r\n?|\n/g)) this.lineStarts.push(match.index + match[0].length);
+  }
+  at(offset) {
+    let low = 0;
+    let high = this.lineStarts.length - 1;
+    while (low < high) {
+      const middle = low + high + 1 >> 1;
+      if (this.lineStarts[middle] <= offset) low = middle;
+      else high = middle - 1;
+    }
+    return { line: low + 1, column: offset - this.lineStarts[low] + 1, offset };
+  }
+};
 var isAsciiAlphanumeric = (code4) => code4 !== null && (code4 >= 48 && code4 <= 57 || code4 >= 65 && code4 <= 90 || code4 >= 97 && code4 <= 122);
 var SPLIT_CODES = [33, 38, 42, 60, 91, 92, 93, 95, 96, 126, -5, -4, -3];
 var WORD_CODES = [43, 45, 46];
@@ -46518,7 +46629,7 @@ function linkedFileCheck(documentPath2, isFile) {
 }
 function lintInTree(file, text6, files) {
   const findings = lintText(file, text6, { linkedFileExists: linkedFileCheck(file, (path7) => files.has(path7)) });
-  return findings.filter((finding) => finding.rule !== "hard-break-in-heading");
+  return findings.filter((finding) => finding.rule !== "hard-break-in-heading" && finding.rule !== "unplaced-link");
 }
 function lintText(file, text6, options = {}) {
   const { head, body: body2 } = splitFile(text6);
@@ -46638,6 +46749,7 @@ function lintTree(file, tree, body2, report, options) {
     return;
   }
   visit2(tree, (node2, ancestors) => {
+    if (node2.type === "link" && node2.position === void 0) report("unplaced-link", unplacedLine(node2, ancestors));
     switch (node2.type) {
       case "code":
       case "inlineCode":
@@ -46727,6 +46839,20 @@ function lintTree(file, tree, body2, report, options) {
       rest = rest.slice(prefix[0].length);
     }
   });
+}
+function unplacedLine(node2, ancestors) {
+  const parent = ancestors.at(-1);
+  let breaks = 0;
+  if (parent !== void 0 && "children" in parent) {
+    const siblings = parent.children;
+    for (let index2 = siblings.indexOf(node2) - 1; index2 >= 0; index2--) {
+      const sibling = siblings[index2];
+      if (sibling.position !== void 0) return sibling.position.end.line + breaks;
+      if (sibling.type === "text") breaks += sibling.value.split("\n").length - 1;
+    }
+  }
+  const placed = ancestors.findLast((ancestor) => ancestor.position !== void 0);
+  return (placed === void 0 ? 1 : line(placed)) + breaks;
 }
 function imageProblem(file, url, options) {
   const target = resolveTarget(file, url);
@@ -47162,6 +47288,7 @@ ${indent2}[${label}](${destination2})`;
         return;
       case "link": {
         const autolink2 = this.source[from] !== "[";
+        if (autolink2 && this.source[from - 1] === "!" && !escaped(this.source, from - 1)) edits.push({ from: from - 1, to: from, text: "\\!" });
         this.literal = autolink2;
         edits.push({ from, to, text: this.link(node2.children, node2.url) });
         this.literal = false;
@@ -54526,12 +54653,12 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
         spellings.get(key).push(previousPath !== path7 && link2.written.startsWith("<") ? `<${raw}>` : raw);
       }
     }
-    const occurrences = /* @__PURE__ */ new Map();
+    const occurrences2 = /* @__PURE__ */ new Map();
     const spelling = (key, opener) => {
       const choices = spellings.get(key);
       if (choices === void 0) return void 0;
-      const index3 = occurrences.get(key) ?? 0;
-      occurrences.set(key, index3 + 1);
+      const index3 = occurrences2.get(key) ?? 0;
+      occurrences2.set(key, index3 + 1);
       const written = choices[Math.min(index3, choices.length - 1)];
       const inner = written.startsWith("<") ? written.slice(1, -1) : written;
       if (/[<>]/.test(inner)) return written;
