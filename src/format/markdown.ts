@@ -344,6 +344,8 @@ const LINE_END = /\r\n?|\n/;
 const LINE_PREFIX = /^[ \t>]*/;
 const CONFLICT_START = /^<{7}(?: |$)/;
 const DIV_START = /^<div(?:[ \t][^>\n]*)?>/i;
+const DIV_END = /<\/div[ \t]*>/i;
+const DIV_END_START = /^<\/div[ \t]*>/i;
 const SECTION_TITLE = /^\+{3}[ \t]/;
 const ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3}(?:[ \t]|$))/;
 
@@ -413,6 +415,27 @@ function acceptedBlockStarts(previous: string) {
   return { escapes, tables, tableHeaders, html };
 }
 
+/** Blank lines can split an HTML div across sibling Markdown nodes. */
+function divsClosedInAnotherBlock(tree: Root, source: string): Set<Nodes> {
+  const paired = new Set<Nodes>();
+  if (!DIV_END.test(source)) return paired;
+  const open = new Map<Nodes, Nodes[]>();
+  visit(tree, (node, ancestors) => {
+    if (node.type !== 'html') return;
+    const parent = ancestors.at(-1)!;
+    if (parent.type === 'paragraph') return;
+    if (DIV_END_START.test(node.value)) {
+      const opening = open.get(parent)?.pop();
+      if (opening !== undefined) paired.add(opening);
+    } else if (DIV_START.test(node.value) && !DIV_END.test(node.value)) {
+      const siblings = open.get(parent) ?? [];
+      siblings.push(node);
+      open.set(parent, siblings);
+    }
+  });
+  return paired;
+}
+
 /**
  * Linear's content with the block-start escapes it drops put back. For
  * export forms shared by a block and literal text, an accepted body can
@@ -435,7 +458,9 @@ export function linearMarkersAsText(content: string, previous = ''): string {
     const rowAt = (index: number) => linearLineText(lines[index] ?? '');
     const sections = new Map<Nodes, Array<{ at: number; literal: boolean }>>();
     const rowStart = (index: number) => offsets[index]! + LINE_PREFIX.exec(lines[index]!)![0].length;
-    visit(parse(text), (node, ancestors) => {
+    const tree = parse(text);
+    const pairedDivs = divsClosedInAnotherBlock(tree, text);
+    visit(tree, (node, ancestors) => {
       if (ancestors.some((ancestor) => escapedItems.has(ancestor))) return;
       const at = start(node);
       const index = line(node) - 1;
@@ -463,8 +488,8 @@ export function linearMarkersAsText(content: string, previous = ''): string {
         // when the export and a file containing HTML share the same spelling.
         const raw = text.slice(at, end(node));
         const first = text.slice(at, lineEnd(index)).trimEnd();
-        if (accepted.html.has(raw) && !CONFLICT_START.test(raw)) return;
-        const completeDiv = DIV_START.test(first) && /<\/div>/i.test(raw);
+        if (pairedDivs.has(node) || accepted.html.has(raw) && !CONFLICT_START.test(raw)) return;
+        const completeDiv = DIV_START.test(first) && DIV_END.test(raw);
         const literal = accepted.escapes.has(blockLineKey(first, true)) || accepted.escapes.has(blockLineKey(first, false));
         const incompleteDiv = DIV_START.test(first) && !completeDiv;
         if (CONFLICT_START.test(raw) || literal || incompleteDiv) {

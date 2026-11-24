@@ -374,7 +374,7 @@ describe('capture from Linear', () => {
       '\\$$\na + b\n$$',
       '\\+++ Supplies\nPaper\n\\+++',
       '\\<<<<<<< draft',
-      '<div align="center">\n\nWorkshop schedule\n\n</div>',
+      '<div align="center">\nWorkshop schedule\n\n</div>',
     ].join('\n\n');
     const head = '---\ncategory: work\n---\n\n';
     const initial = await run();
@@ -393,11 +393,11 @@ describe('capture from Linear', () => {
     assert.equal(unchanged.ok, true);
     assert.equal(unchanged.state.linear, written.state.linear);
 
-    Object.assign(doc, {content: `Checked.\n\n${stored}`, updatedAt: '2026-01-07T00:00:00Z'});
+    Object.assign(doc, {content: `Checked.\n\n${stored.replace('Workshop schedule', 'Updated schedule')}`, updatedAt: '2026-01-07T00:00:00Z'});
     await refresh();
     assert.equal((await run()).ok, true);
     const file = await text('docs/plan.md');
-    assert.equal(file, `${head}Checked.\n\n${escaped}`);
+    assert.equal(file, `${head}Checked.\n\n${escaped.replace('Workshop schedule', 'Updated schedule')}`);
     assert.deepEqual(hookRun('docs/plan.md', file), {exitCode: 0, stdout: '', stderr: ''});
   });
 
