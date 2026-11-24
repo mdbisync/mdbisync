@@ -113,6 +113,65 @@ describe('an empty first nested item after its parent’s text', () => {
   }
 });
 
+describe('text split off at an image', () => {
+  // Each part becomes a paragraph of its own; the fixture bank holds the
+  // escapes Linear writes. Linear writes `<`, `2)`, a `|` row and `$$`
+  // there without an escape, which Markdown would read as a block.
+  const split: Array<[string, string, string]> = [
+    ['a hash becomes \\#', 'Before ![a](x.png) # x', 'Before\n\n![a](x.png)\n\n\\# x'],
+    ['an escaped hash keeps its escape', 'Before ![a](x.png) \\# x', 'Before\n\n![a](x.png)\n\n\\# x'],
+    ['a quote marker', 'Before ![a](x.png) > x', 'Before\n\n![a](x.png)\n\n\\> x'],
+    ['a rule of stars', 'Before ![a](x.png) ***', 'Before\n\n![a](x.png)\n\n\\*\\*\\*'],
+    ['a plus bullet', 'Before ![a](x.png) + x', 'Before\n\n![a](x.png)\n\n\\+ x'],
+    ['a numbered item keeps its number', 'Before ![a](x.png) 1. x', 'Before\n\n![a](x.png)\n\n1\\. x'],
+    ['a parenthesis item keeps its number', 'Before ![a](x.png) 2) x', 'Before\n\n![a](x.png)\n\n2\\) x'],
+    ['an HTML block start', 'Before ![a](x.png) <div> x', 'Before\n\n![a](x.png)\n\n\\<div> x'],
+    ['a fence of four backticks', 'Before ![a](x.png) ````', 'Before\n\n![a](x.png)\n\n\\`\\`\\`\\`'],
+    ['a table header and delimiter row', 'Before ![a](x.png) | a |\n| - |\n| 1 |', 'Before\n\n![a](x.png)\n\n| a |\n\\| - |\n| 1 |'],
+    ['a table after text, its delimiter row ending in the image', 'Before\n| a |\n| - | ![a](x.png)', 'Before\n| a |\n\\| - |\n\n![a](x.png)'],
+    ['$$ math lines', 'Before ![a](x.png) $$\nx\n$$', 'Before\n\n![a](x.png)\n\n\\$$\nx\n$$'],
+    ['a setext underline before the image', 'Title\n=== ![a](x.png)', 'Title\n\\===\n\n![a](x.png)'],
+    ['an escaped quote that is then a heading', 'Before ![a](x.png) > # x', 'Before\n\n![a](x.png)\n\n\\> # x'],
+    ['a definition before the image', '[ref]: /dest ![a](x.png)', '\\[ref\\]: /dest\n\n![a](x.png)'],
+    ['a rule before the image', '*** ![a](x.png)', '\\*\\*\\*\n\n![a](x.png)'],
+    ['an underline after a task checkbox', '- [ ] # Before\n  === ![a](x.png)', '- [ ] # Before\n  \\===\n\n  ![a](x.png)'],
+    ['a task checkbox keeps the hash after it as text', '- [ ] # x ![a](x.png) y', '- [ ] # x\n\n  ![a](x.png)\n\n  y'],
+    ['a Linear collapsible section', 'Before ![a](x.png) +++ Details\nBody\n+++', 'Before\n\n![a](x.png)\n\n\\+++ Details\nBody\n+++'],
+    ['a Git conflict marker', 'Before ![a](x.png) <<<<<<< ours', 'Before\n\n![a](x.png)\n\n\\<<<<<<< ours'],
+    ['in a quote', '> Before ![a](x.png) # x', '> Before\n>\n> ![a](x.png)\n>\n> \\# x'],
+    ['in a list item', '* Before ![a](x.png) > x', '* Before\n\n  ![a](x.png)\n\n  \\> x'],
+  ];
+  // The text and images in order. Inline HTML counts as its text: Linear stores `<div>` in a paragraph as text.
+  const texts = (markdown: string): string => {
+    const out: string[] = [];
+    visit(parse(markdown), (node) => {
+      if (node.type === 'text' || node.type === 'html') out.push(node.value.trim());
+      else if (node.type === 'image') out.push(`image ${node.url}`);
+    });
+    return out.filter((entry) => entry !== '').join(' ');
+  };
+  for (const [name, input, expected] of split) {
+    it(`stays a paragraph: ${name}`, () => {
+      const once = fixText(input);
+      assert.equal(once, expected);
+      assert.equal(fixText(once), once, 'a second fix changes nothing');
+      assert.equal(texts(once), texts(input), 'the same text and image');
+      const blocks: string[] = [];
+      visit(parse(once), (node) => {
+        if (['heading', 'thematicBreak', 'code', 'html', 'table', 'definition'].includes(node.type)) blocks.push(node.type);
+      });
+      assert.deepEqual(blocks, [], 'no block but paragraphs');
+    });
+  }
+
+  it('writes no backslash into a code span that opens like a fence', () => {
+    // Escaping its backticks would end the span; it keeps the block it reads as.
+    const once = fixText('Before ![a](x.png) ```js\nfoo``` y');
+    assert.equal(once, 'Before\n\n![a](x.png)\n\n````js\nfoo``` y\n````');
+    assert.equal(fixText(once), once, 'a second fix changes nothing');
+  });
+});
+
 describe('links to files that are not there', () => {
   const missing = { linkedFileExists: (url: string) => !url.includes('missing') };
   it('a list item with only a link to a missing file stays a link, as Linear keeps it', () => {
