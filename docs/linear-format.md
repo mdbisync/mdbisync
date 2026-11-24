@@ -131,7 +131,10 @@ Blocks:
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
   quote or list item is indented four spaces after its `>` or indent, so it
-  stays text and does not turn the line above into a heading.
+  stays text and does not turn the line above into a heading. Inside a code
+  span, where a line ending reads as a space, such a line joins the line
+  above instead. The same holds for an image's alt text that runs over
+  lines.
 - Linear's color comment of a callout (`<!-- linear:callout color=... -->`)
   stays directly above its callout, with no blank line between them.
 - Tilde fences and indented code become backtick fences. A fence whose info
@@ -171,14 +174,19 @@ Inline text:
   becomes `[a](<https://example.com/x>)`.
 - Reference links and images are written inline, and their definitions go.
 - Autolinks and bare URLs become links: `See https://example.com now.`
-  becomes `See [https://example.com](<https://example.com>) now.`
+  becomes `See [https://example.com](<https://example.com>) now.` The link
+  text reads exactly as the URL: backslashes are doubled, and characters
+  that would be markup there are escaped:
+  `https://example.com/a~b~c` becomes
+  `[https://example.com/a\~b\~c](<https://example.com/a~b~c>)`.
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
   `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`. Other
   references to ASCII characters stay, since some would make markup:
   `&lt;b&gt;`, `&quot;` and `&#65;` are kept.
 - Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes
-  `Done 🎉`.
+  `Done 🎉`. An escaped reference or shortcode (`\&amp;`, `\:tada:`) stays
+  as written.
 - A backslash before anything but ASCII punctuation (a letter, a digit, a
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`.
@@ -441,8 +449,27 @@ First line\
 Second line
 ```
 
-Instead, end the line with two spaces or `<br>` (both kept as they are), or
-start a new paragraph.
+In a paragraph, end the line with two spaces or `<br>`, or start a new
+paragraph. For a break in a setext heading, see
+[`hard-break-in-heading`](#hard-break-in-heading).
+
+### `hard-break-in-heading`
+
+A hard line break in a setext heading is lost when the heading is written
+as one line.
+`lint` reports the break's line and `fix` leaves the file as written.
+Each `␠` below represents a trailing space.
+
+```text
+Paper lanterns␠␠
+Above the gate
+==============
+```
+
+A backslash break is reported as `hard-break-backslash`.
+
+To make the file pass lint, put the heading on one line or move the text
+after the break into a paragraph below the heading.
 
 ### `git-conflict-marker`
 

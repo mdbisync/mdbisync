@@ -11,7 +11,7 @@ import { after, describe, it } from 'node:test';
 import { markdownFiles, runFix, runLint } from './command.ts';
 import { fixText } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
-import { MarkdownLimitError } from './markdown.ts';
+import { MarkdownLimitError, parse, visit } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
 const cases: Array<[LintRule, string, number]> = [
@@ -84,6 +84,10 @@ describe('lint rules', () => {
       assert.equal(findings.find((f) => f.rule === rule)?.message, LINT_RULES[rule]);
     });
   }
+
+  it('allows space breaks in paragraphs and trailing spaces inside heading code spans', () => {
+    assert.deepEqual(lintText('doc.md', 'One  \nTwo\n\n`Three  \nFour`\n==='), []);
+  });
 
   it('checks image files only through the existence check, and never plain links', () => {
     const text = '![Here](img/here.png)\n\n![Gone](img/gone.png)\n\n[Gone](img/gone.png) and [site](https://example.com).';
@@ -298,6 +302,35 @@ describe('lint and fix commands', () => {
     assert.equal(runLint([join(dir, 'docs', 'kept.md')], dir).exitCode, 0);
     assert.deepEqual(runLint(['--help'], dir), { exitCode: 2, stdout: '', stderr: 'unknown option: --help\n' });
     assert.deepEqual(runFix(['nowhere'], dir), { exitCode: 2, stdout: '', stderr: 'no such file or folder: nowhere\n' });
+  });
+
+  it('reports hard breaks in setext headings and keeps the file through two fixes', (t) => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), 'heading-hard-break-'));
+    t.after(() => rmSync(fixtureDir, { recursive: true, force: true }));
+    const cases = [
+      ['heading-setext-break-spaces.md', 'hard-break-in-heading', 2],
+      ['heading-setext-break-backslash.md', 'hard-break-backslash', 1],
+    ] as const;
+    for (const [file, rule, line] of cases) {
+      const source = readFileSync(new URL(`../../test/fixtures/lint-errors/${file}`, import.meta.url), 'utf8');
+      const path = join(fixtureDir, file);
+      writeFileSync(path, source);
+      const result = { exitCode: 1, stdout: `${file}:${line}: ${rule}: ${LINT_RULES[rule]}\n`, stderr: '' };
+      assert.deepEqual(runLint([file], fixtureDir), result);
+      assert.equal(fixText(source), source);
+      for (let pass = 0; pass < 2; pass++) {
+        assert.deepEqual(runFix([file], fixtureDir), result);
+        const fixed = readFileSync(path, 'utf8');
+        assert.equal(fixed, source);
+        const breaks: number[] = [];
+        visit(parse(fixed), (node, ancestors) => {
+          if (node.type === 'break' && ancestors.some((a) => a.type === 'heading')) {
+            breaks.push(node.position!.start.line);
+          }
+        });
+        assert.deepEqual(breaks, [line]);
+      }
+    }
   });
 
   it('lint and fix refuse a document inside an assets folder and leave it unchanged', () => {

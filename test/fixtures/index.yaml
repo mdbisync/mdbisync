@@ -56,6 +56,8 @@ rules:
     title: "Bold or italic around inline code is dropped from the code."
   - id: hard-break-backslash
     title: "A backslash line break becomes a plain line break."
+  - id: hard-break-in-heading
+    title: "A hard line break in a setext heading is lost when the heading is written as one line."
   - id: git-conflict-marker
     title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
   - id: url-in-html
@@ -1864,6 +1866,15 @@ fixtures:
     corpus: false
     probe_pending: true
     note: "a bare URL ending in a backslash, then a line holding only --: fix writes one link and keeps the rest once"
+  - file: "links/bare-url-inline-syntax.md"
+    group: links
+    construct: autolink-literal-inline-syntax
+    class: fixable
+    basis: assumed
+    canary: kx-c8a05149
+    corpus: false
+    probe_pending: true
+    note: "bare URLs holding escaped underscores, tilde pairs, asterisks and character references: the link text fix writes reads exactly as the URL"
   - file: "links/reference.md"
     group: links
     construct: link-reference
@@ -2285,6 +2296,26 @@ fixtures:
     class: unchanged
     basis: known
     canary: kx-5c7f9462
+  - file: "lint-errors/heading-setext-break-spaces.md"
+    group: lint-errors
+    construct: heading-setext-hard-break
+    class: lint-error
+    rule: hard-break-in-heading
+    line: 2
+    basis: assumed
+    canary: kx-8b147c0e
+    corpus: false
+    probe_pending: true
+  - file: "lint-errors/heading-setext-break-backslash.md"
+    group: lint-errors
+    construct: heading-setext-hard-break
+    class: lint-error
+    rule: hard-break-backslash
+    line: 1
+    basis: assumed
+    canary: kx-8b147c1e
+    corpus: false
+    probe_pending: true
   - file: "lint-errors/footnote.md"
     group: lint-errors
     construct: footnote
@@ -2799,3 +2830,30 @@ fixtures:
     canary: kx-f30fd3d5
     corpus: false
     note: "item text that starts like a list marker, escaped so it stays text"
+  - file: "construct-singles/image-alt-multiline-container.md"
+    group: construct-singles
+    construct: image-alt-multiline-container
+    class: fixable
+    basis: assumed
+    canary: kx-696a1cab
+    corpus: false
+    probe_pending: true
+    note: "an image's alt text runs over lines in a quote or list item, one of them a lazy -- line; the image, its alt text and its container must stay"
+  - file: "construct-singles/code-span-lazy-dash-line.md"
+    group: construct-singles
+    construct: code-span-lazy-dash-line
+    class: fixable
+    basis: assumed
+    canary: kx-cf6a2d71
+    corpus: false
+    probe_pending: true
+    note: "a lazy -- or == line inside a code span in a quote or list item joins the line before it, since a line ending in a code span reads as a space"
+  - file: "construct-singles/image-alt-code-bracket.md"
+    group: construct-singles
+    construct: image-alt-code-bracket
+    class: unchanged
+    basis: assumed
+    canary: kx-7aee425c
+    corpus: false
+    probe_pending: true
+    note: "a ] inside a code span of an image's alt text does not close the alt text"

@@ -70,6 +70,22 @@ const cases: Array<[string, string, string]> = [
   ['an escaped # inside a line loses its escape', 'a \\# b', 'a # b'],
 ];
 
+/**
+ * What Markdown reads: the node types, text, code and images, their URLs
+ * decoded (`%28` is `(`). A line ending in a code span reads as a space,
+ * also in an alt text, which keeps the text of its code spans.
+ */
+function readMarkdown(markdown: string): string[] {
+  const out: string[] = [];
+  visit(parse(markdown), (node) => {
+    if (node.type === 'text') out.push(node.value);
+    else if (node.type === 'inlineCode') out.push(`code ${node.value.replaceAll('\n', ' ')}`);
+    else if (node.type === 'image') out.push(`image ${decodeURI(node.url)} ${node.alt?.replaceAll('\n', ' ')}`);
+    else out.push(node.type);
+  });
+  return out;
+}
+
 describe('fix rules', () => {
   for (const [name, input, expected] of cases) {
     it(name, () => {
@@ -250,19 +266,11 @@ describe('what fix leaves alone', () => {
       ['- [Report\n--\nsummary](report.pdf)', '* \n  [Report\n      --\nsummary](report.pdf)'],
       ['> - [Report\n--\nsummary](report.pdf)', '> * \n>   [Report\n>       --\n> summary](report.pdf)'],
     ];
-    // The text Markdown reads, line breaks included, and the node types around it.
-    const read = (markdown: string): string[] => {
-      const out: string[] = [];
-      visit(parse(markdown), (node) => {
-        out.push(node.type === 'text' ? node.value : node.type);
-      });
-      return out;
-    };
     for (const [text, expected] of lazy) {
       const fixed = fixText(text);
       assert.equal(fixed, expected, text);
       // `sameMarkdown` keeps a file block's empty marker line apart, so compare what Markdown reads.
-      assert.deepEqual(read(fixed), read(text), `same document: ${text}`);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
       assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
     }
@@ -329,16 +337,70 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('`a\n\t--\nb`'), '`a\n\t--\nb`');
   });
 
-  it('keeps a code span whose lazy line holds only dashes in a quote: the padding stops the underline', () => {
-    // Under a bare `> ` the line would underline `` `a `` as a heading and split the code span.
-    const fixed = fixText('> `a\n--\n> b`');
-    assert.equal(fixed, '> `a\n>     --\n> b`');
-    assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
-    const [quote] = parse(fixed).children;
-    assert.equal(quote?.type, 'blockquote');
+  it('joins a lazy line of dashes or equals signs in a code span in a container to the line before it', () => {
+    // Under a bare `> ` the line would underline `` `a `` as a heading and
+    // split the code span; padding it would put spaces into the code. A line
+    // ending in a code span reads as a space, so joining keeps the code.
+    const lazy: Array<[string, string]> = [
+      ['> `a\n--\n> b`', '> `a --\n> b`'],
+      ['- `a\n--\n  b`', '* `a --\n  b`'],
+      ['> text `a\n\t==\n> b` end', '> text `a \t==\n> b` end'],
+      ['> [`a\n--\nb`](https://example.com)', '> [`a --\n> b`](<https://example.com>)'],
+      ['- [`a\n--\nb`](report.pdf)', '* \n  [`a --\nb`](report.pdf)'],
+      // The item's own indent goes, also in a file block's label; the spaces of a lazy line stay.
+      ['- [`a\n      ==\n  b`](report.pdf)', '* \n  [`a     ==\nb`](report.pdf)'],
+      ['- [`a\n ==\n  b`](report.pdf)', '* \n  [`a  ==\nb`](report.pdf)'],
+      ['- `a\n --\n  b`', '* `a  --\n  b`'],
+    ];
+    for (const [text, expected] of lazy) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+    }
+    const [quote] = parse(fixText('> `a\n--\n> b`')).children;
     const [paragraph] = (quote as Blockquote).children;
-    assert.equal(paragraph?.type, 'paragraph');
     assert.deepEqual((paragraph as Paragraph).children.map((child) => child.type), ['inlineCode']);
+  });
+
+  it('writes an image alt text that runs over lines in a container without the container prefixes', () => {
+    const images: Array<[string, string]> = [
+      ['> ![a\n> b](x.png)', '> ![a\n> b](x.png)'],
+      ['> ![a\nb](x.png)', '> ![a\n> b](x.png)'],
+      ['> ![a\n>     b](x.png)', '> ![a\n> b](x.png)'],
+      ['- ![a\n  b](x.png)', '* ![a\n  b](x.png)'],
+      ['> - ![a\n>   b](x.png)', '> * ![a\n>   b](x.png)'],
+      ['> > ![a\n> b](x.png)', '> > ![a\n> > b](x.png)'],
+      // A lazy dash line in the alt text stays text, as in a paragraph.
+      ['- ![a\n--\n](x.png)', '* ![a\n      --\n  ](x.png)'],
+      ['> ![a\n--\nb](x.png)', '> ![a\n>     --\n> b](x.png)'],
+      // A code span in the alt text keeps its spaces; a lazy dash line in it joins the line before.
+      ['- ![a `x\n    y` b](x.png)', '* ![a `x\n    y` b](x.png)'],
+      ['> ![a `x\n--\n> y` b](x.png)', '> ![a `x --\n> y` b](x.png)'],
+      ['> ![a\n> b][r]\n\n[r]: x.png', '> ![a\n> b](x.png)'],
+      // A `]` in a code span does not close the alt text.
+      ['![a `]` b](x.png)', '![a `]` b](x.png)'],
+      ['> ![a `]`\n> b](x.png)', '> ![a `]`\n> b](x.png)'],
+      ['![a ``x`]`` b](x.png)', '![a ``x`]`` b](x.png)'],
+      // A backtick in an autolink or a destination opens no code span.
+      ['![a <urn:a`>](x`.png)', '![a <urn:a`>](x`.png)'],
+      ['![<https://a/`>](x`](y).png)', '![<https://a/`>](x`]%28y%29.png)'],
+      ['![a <b title="`">](x`](y).png)', '![a <b title="`">](x`]%28y%29.png)'],
+      // A line indented less than the item's content is lazy: in a code span its spaces are code.
+      ['- ![a `x\n y` b](x.png)', '* ![a `x\n   y` b](x.png)'],
+      ['> - ![a `x\n>  y` b](x.png)', '> * ![a `x\n>    y` b](x.png)'],
+      // Indentation that keeps HTML from opening a block stays.
+      ['![a\n    <div> b](x.png)', '![a\n    <div> b](x.png)'],
+      ['- ![a\n      <!-- c --> d](x.png)', '* ![a\n      <!-- c --> d](x.png)'],
+    ];
+    for (const [text, expected] of images) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text.replace(/\]\[r\]\n\n\[r\]: x\.png$/, '](x.png)')), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${text}`);
+    }
   });
 
   it('keeps spaces that belong to a code span across lines', () => {
@@ -353,7 +415,7 @@ describe('what fix leaves alone', () => {
   it('drops the spaces and tabs around each line break of a setext heading and keeps the others', () => {
     assert.equal(fixText('Title \t\n\t more\n====='), '# Title more');
     assert.equal(fixText('a\t\t\n\t\tb\n---'), '## a b');
-    assert.equal(fixText('a  \n  b\n==='), '# a b');
+    assert.equal(fixText('a \n  b\n==='), '# a b');
     assert.equal(fixText('# a     b'), '# a     b');
     assert.equal(fixText('a \t b\nc\n==='), '# a \t b c');
   });
@@ -372,11 +434,13 @@ describe('what fix leaves alone', () => {
       import { parse } from ${JSON.stringify(new URL('./markdown.ts', import.meta.url).href)};
       const spaces = ' '.repeat(CONTENT_LIMIT - 10);
       const tabs = '\\t'.repeat(CONTENT_LIMIT - 10);
+      const hardBreakHeading = 'a' + spaces + '\\nb\\n===';
       const cases = {
         'ATX, spaces': ['# a' + spaces + 'b', '# a' + spaces + 'b'],
         'ATX, tabs': ['# a' + tabs + 'b', '# a' + tabs + 'b'],
         'setext, run inside a line': ['a' + spaces + 'x\\nb\\n===', '# a' + spaces + 'x b'],
-        'setext, run before a line break': ['a' + spaces + '\\nb\\n===', '# a b'],
+        'setext, run before a soft break': ['a' + tabs + '\\nb\\n===', '# a b'],
+        'setext, run before a hard break': [hardBreakHeading, hardBreakHeading],
       };
       const result = {};
       for (const [name, [text, expected]] of Object.entries(cases)) {
@@ -393,9 +457,12 @@ describe('what fix leaves alone', () => {
     assert.equal(child.signal, null, 'fix did not finish within the parent timeout');
     assert.equal(child.status, 0, child.stderr);
     const result = JSON.parse(child.stdout) as Record<string, { parseMs: number; fixMs: number; expected: boolean }>;
-    assert.deepEqual(Object.keys(result), ['ATX, spaces', 'ATX, tabs', 'setext, run inside a line', 'setext, run before a line break']);
+    assert.deepEqual(Object.keys(result), [
+      'ATX, spaces', 'ATX, tabs', 'setext, run inside a line',
+      'setext, run before a soft break', 'setext, run before a hard break',
+    ]);
     for (const [name, { parseMs, fixMs, expected }] of Object.entries(result)) {
-      assert.ok(expected, `${name}: fix writes the heading on one line, the run kept inside it`);
+      assert.ok(expected, `${name}: fix produces the expected text`);
       const times = `${name}: parse ${Math.round(parseMs)} ms, fix ${Math.round(fixMs)} ms`;
       // fix lints and parses the text a few times; the join adds little beside that.
       assert.ok(fixMs < 10 * parseMs + 5_000, times);
@@ -437,6 +504,44 @@ describe('what fix leaves alone', () => {
       assert.equal(fixText(once), once, `${JSON.stringify(input)}: the result is a fixed point`);
       assert.ok(sameMarkdown(once, input), `${JSON.stringify(input)}: the link and its text stay`);
     }
+  });
+
+  it('writes an autolink\'s label so its text reads exactly as the URL', () => {
+    const cases: Array<[string, string, string]> = [
+      // Escaped underscores: the backslashes are literal, the underscores must not become emphasis.
+      ['https://example.org/p?k=1\\_2\\_\\_3&z=4', '[https://example.org/p?k=1\\\\\\_2\\\\\\_\\\\\\_3&z=4](<https://example.org/p?k=1\\\\_2\\\\_\\\\_3&z=4>)', 'https://example.org/p?k=1\\_2\\_\\_3&z=4'],
+      // Plain underscores after punctuation must not become emphasis either.
+      ['https://example.org/p?a=x._one_.two_three_.z', '[https://example.org/p?a=x.\\_one\\_.two\\_three\\_.z](<https://example.org/p?a=x._one_.two_three_.z>)', 'https://example.org/p?a=x._one_.two_three_.z'],
+      // Tilde pairs must not become strikethrough (and a `subscript` finding).
+      ['https://example.org/track?id=10~20~30&view=on', '[https://example.org/track?id=10\\~20\\~30&view=on](<https://example.org/track?id=10~20~30&view=on>)', 'https://example.org/track?id=10~20~30&view=on'],
+      ['<https://example.org/~~a~~>', '[https://example.org/\\~\\~a\\~\\~](<https://example.org/~~a~~>)', 'https://example.org/~~a~~'],
+      ['<https://example.org/a*b*/c_d_>', '[https://example.org/a\\*b\\*/c\\_d\\_](<https://example.org/a*b*/c_d_>)', 'https://example.org/a*b*/c_d_'],
+      // A character reference or an emoji shortcode in the URL stays as written.
+      ['https://example.org/x?a=1&amp;b=&#42;2', '[https://example.org/x?a=1\\&amp;b=\\&#42;2](<https://example.org/x?a=1&amp;amp;b=&amp;#42;2>)', 'https://example.org/x?a=1&amp;b=&#42;2'],
+      ['https://example.org/:tada:/x', '[https://example.org/\\:tada:/x](<https://example.org/:tada:/x>)', 'https://example.org/:tada:/x'],
+      // An escaped underscore ends a name, which exposes `:tada:` in the label.
+      ['https://example.org/:not_emoji:tada:/x', '[https://example.org/:not\\_emoji\\:tada:/x](<https://example.org/:not_emoji:tada:/x>)', 'https://example.org/:not_emoji:tada:/x'],
+      // Shortcodes that share a colon are each escaped.
+      ['https://example.org/:fire:tada:/x', '[https://example.org/\\:fire\\:tada:/x](<https://example.org/:fire:tada:/x>)', 'https://example.org/:fire:tada:/x'],
+    ];
+    for (const [input, expected, text] of cases) {
+      const once = fixText(input);
+      assert.equal(once, expected, JSON.stringify(input));
+      assert.equal(fixText(once), once, `${JSON.stringify(input)}: the result is a fixed point`);
+      assert.deepEqual(lintText('a.md', once), lintText('a.md', input), `${JSON.stringify(input)}: lint finds nothing new`);
+      const paragraph = parse(once).children[0] as Paragraph;
+      assert.equal(paragraph.children.length, 1, `${JSON.stringify(input)}: one link`);
+      const link = paragraph.children[0];
+      assert.ok(link?.type === 'link', `${JSON.stringify(input)}: a link`);
+      assert.deepEqual(link.children.map((child) => [child.type, 'value' in child ? child.value : undefined]), [['text', text]], `${JSON.stringify(input)}: the link text is one text node equal to the URL`);
+      assert.equal(link.url, text);
+    }
+  });
+
+  it('keeps an escaped character reference or emoji shortcode in text as written', () => {
+    for (const text of ['Plain \\&amp; text.', 'Plain \\:tada: text.']) assert.equal(fixText(text), text);
+    // After an escaped backslash, the reference and the shortcode are read and rewritten.
+    assert.equal(fixText('Plain \\\\&eacute; and \\\\:tada: text.'), 'Plain \\\\é and \\\\🎉 text.');
   });
 
   it('keeps a document whose parse holds a node without a source position, rather than copying the wrong text', () => {

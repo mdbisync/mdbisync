@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { Nodes, Root } from 'mdast';
 import { EditMap } from 'micromark-util-edit-map';
-import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, joinFile, linkDestination, nestedFileBlocksOnItemLine, parse, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { lintText } from './lint.ts';
 import { fixText } from './fix.ts';
 
@@ -339,6 +339,63 @@ describe('joinFile', () => {
       const {head, body} = splitFile(text);
       assert.equal(joinFile(head, body), text, JSON.stringify(text));
     }
+  });
+});
+
+describe('codeSpans and bracketedLabel', () => {
+  const spans = (text: string): string[] => codeSpans(text, 0, text.length).map(([from, to]) => text.slice(from, to));
+
+  it('finds a run of backticks up to the next run of the same length', () => {
+    assert.deepEqual(spans('a `b` c ``d`e`` f'), ['`b`', '``d`e``']);
+    assert.deepEqual(spans('a ``b` c` d'), ['` c`']);
+    assert.deepEqual(spans('a \\`b` c`'), ['` c`']);
+    assert.deepEqual(spans('`a\\` b'), ['`a\\`']);
+    assert.deepEqual(spans('``a ` b'), []);
+  });
+
+  it('leaves the backticks of an autolink or inline HTML that starts first', () => {
+    assert.deepEqual(spans('<https://a/`> b `c`'), ['`c`']);
+    assert.deepEqual(spans('<a@b.c> `d`'), ['`d`']);
+    assert.deepEqual(spans('<b title="`"> `c`'), ['`c`']);
+    assert.deepEqual(spans('</b> <!-- ` --> <? ` ?> <!X `> <![CDATA[ ` ]]> `c`'), ['`c`']);
+    assert.deepEqual(spans('<!--> `c` <!---> `d`'), ['`c`', '`d`']);
+    // A code span that starts first holds the `<`.
+    assert.deepEqual(spans('`a <https://b/` c`>'), ['`a <https://b/`']);
+    // A `<` that opens nothing, or an HTML comment that does not close in the range, is text.
+    assert.deepEqual(spans('a < `b` <!-- `c`'), ['`b`', '`c`']);
+  });
+
+  it('reads many unclosed HTML openings in about the time of their length', { timeout: 60_000 }, () => {
+    const text = '<!-- <? <!X <![CDATA[ <a b="'.repeat(20_000) + '`c`';
+    const started = performance.now();
+    assert.deepEqual(codeSpans(text, 0, text.length), [[text.length - 3, text.length]]);
+    assert.ok(performance.now() - started < 3_000, `${performance.now() - started} ms`);
+  });
+
+  it('does not count a bracket in a code span of a label', () => {
+    assert.equal(bracketedLabel('![a `]` b](x.png)', 1, 17), 'a `]` b');
+    assert.equal(bracketedLabel('[a `[` b]', 0, 9), 'a `[` b');
+    assert.equal(bracketedLabel('[a ` b] c`', 0, 7), 'a ` b');
+    // A backtick in an autolink and one in the destination open no code span.
+    assert.equal(bracketedLabel('![a <urn:a`>](x`.png)', 1, 21), 'a <urn:a`>');
+    assert.equal(bracketedLabel('![a <span title="`">](x.png "t`")', 1, 33), 'a <span title="`">');
+    assert.equal(bracketedLabel('![<https://a/`>](x`](y).png)', 1, 28), '<https://a/`>');
+  });
+
+  // Each label is searched up to its node's end, not to the next backtick
+  // of the document: a scan to the end per label made many labels quadratic.
+  it('reads many labels before a long text in about the time of their length', { timeout: 60_000 }, () => {
+    const text = '![a `b`](x.png)' + 'c'.repeat(4_000_000) + '`';
+    const started = performance.now();
+    for (let count = 0; count < 200_000; count++) assert.equal(bracketedLabel(text, 1, 15), 'a `b`');
+    assert.ok(performance.now() - started < 3_000, `${performance.now() - started} ms`);
+  });
+
+  it('scans many unclosed runs of different lengths in linear time', { timeout: 60_000 }, () => {
+    const text = Array.from({ length: 2_000 }, (_, index) => '`'.repeat(index + 1)).join('a');
+    const started = performance.now();
+    assert.deepEqual(codeSpans(text, 0, text.length), []);
+    assert.ok(performance.now() - started < 5_000);
   });
 });
 
