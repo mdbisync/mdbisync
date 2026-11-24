@@ -390,6 +390,8 @@ describe('what fix leaves alone', () => {
     const cases: Array<[string, string, string]> = [
       // Escaped underscores: the backslashes are literal, the underscores must not become emphasis.
       ['https://example.org/p?k=1\\_2\\_\\_3&z=4', '[https://example.org/p?k=1\\\\\\_2\\\\\\_\\\\\\_3&z=4](<https://example.org/p?k=1\\\\_2\\\\_\\\\_3&z=4>)', 'https://example.org/p?k=1\\_2\\_\\_3&z=4'],
+      // Plain underscores after punctuation must not become emphasis either.
+      ['https://example.org/p?a=x._one_.two_three_.z', '[https://example.org/p?a=x.\\_one\\_.two\\_three\\_.z](<https://example.org/p?a=x._one_.two_three_.z>)', 'https://example.org/p?a=x._one_.two_three_.z'],
       // Tilde pairs must not become strikethrough (and a `subscript` finding).
       ['https://example.org/track?id=10~20~30&view=on', '[https://example.org/track?id=10\\~20\\~30&view=on](<https://example.org/track?id=10~20~30&view=on>)', 'https://example.org/track?id=10~20~30&view=on'],
       ['<https://example.org/~~a~~>', '[https://example.org/\\~\\~a\\~\\~](<https://example.org/~~a~~>)', 'https://example.org/~~a~~'],
