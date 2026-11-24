@@ -135,7 +135,7 @@ describe('text split off at an image', () => {
     ['a rule before the image', '*** ![a](x.png)', '\\*\\*\\*\n\n![a](x.png)'],
     ['an underline after a task checkbox', '- [ ] # Before\n  === ![a](x.png)', '- [ ] # Before\n  \\===\n\n  ![a](x.png)'],
     ['a task checkbox keeps the hash after it as text', '- [ ] # x ![a](x.png) y', '- [ ] # x\n\n  ![a](x.png)\n\n  y'],
-    ['a Linear collapsible section', 'Before ![a](x.png) +++ Details\nBody\n+++', 'Before\n\n![a](x.png)\n\n\\+++ Details\nBody\n+++'],
+    ['a Linear collapsible section', 'Before ![a](x.png) +++ Details\nBody\n+++', 'Before\n\n![a](x.png)\n\n\\+++ Details\nBody\n\\+++'],
     ['a Git conflict marker', 'Before ![a](x.png) <<<<<<< ours', 'Before\n\n![a](x.png)\n\n\\<<<<<<< ours'],
     ['in a quote', '> Before ![a](x.png) # x', '> Before\n>\n> ![a](x.png)\n>\n> \\# x'],
     ['in a list item', '* Before ![a](x.png) > x', '* Before\n\n  ![a](x.png)\n\n  \\> x'],
@@ -254,7 +254,8 @@ describe('links to files that are not there', () => {
   });
 
   it('text from Linear is only re-spelled: a rewrite that would change the document leaves the text as it is', () => {
-    const padded = '| Step | State |\n| -- | -- |\n| Draft  | tbd |';
+    // A table at the end of Linear's export includes a final newline.
+    const padded = '| Step | State |\n| -- | -- |\n| Draft  | tbd |\n';
     assert.equal(fixLinearText(padded, padded, () => false), '| Step | State |\n| -- | -- |\n| Draft | tbd |');
     // `fix` writes a setext heading on one line, joining its lines with a space: another text.
     const setext = 'Two\nlines\n---\n\nText.';

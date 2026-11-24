@@ -155,7 +155,11 @@ Blocks:
   `Before ![a](x.png) # x`, the text after the image is written as `\# x`.
   The same holds for a quote, rule, list marker, code fence, HTML tag,
   `[label]:` definition, `$$` or `+++` line, Git conflict marker, a `===`
-  or `---` underline and a table's delimiter row.
+  or `---` underline and a table's delimiter row. Linear drops some of
+  these escapes from its export. A pull puts the escapes back for literal
+  block starts. When a table or collapsible section exports the same Markdown
+  as paragraph text, the sync uses the accepted file's escapes to tell them
+  apart. A new document with the canonical block spelling keeps that block.
 - A list item holding only a link to a relative file other than Markdown
   takes the form Linear uses for the uploaded file. A video (`.mp4`,
   `.mov`, `.webm`) in a bullet item stays on the marker's line without

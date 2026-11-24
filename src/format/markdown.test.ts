@@ -316,6 +316,61 @@ describe('linearMarkersAsText', () => {
     }
   });
 
+  it('keeps block starts that Linear exports as paragraph text', () => {
+    const cases: Array<[string, string]> = [
+      ['<div> Shelf', '\\<div> Shelf'],
+      ['<<<<<<< draft', '\\<<<<<<< draft'],
+      ['Notes\n<<<<<<< draft', 'Notes\n\\<<<<<<< draft'],
+      ['$$\na + b\n$$', '\\$$\na + b\n$$'],
+      ['+++ Supplies', '\\+++ Supplies'],
+      ['+++\tSupplies', '\\+++\tSupplies'],
+      ['+++ Supplies\n\n```\n+++\n```', '\\+++ Supplies\n\n```\n+++\n```'],
+      ['+++ Supplies\nPaper\n+++', '\\+++ Supplies\nPaper\n\\+++'],
+      ['| Color | Size |\n| -- | -- |\n| Blue | Large |', '| Color | Size |\n\\| -- | -- |\n| Blue | Large |'],
+      ['> | Color | Size |\n> | --- | --- |\n> | Blue | Large |', '> | Color | Size |\n> \\| --- | --- |\n> | Blue | Large |'],
+    ];
+    for (const [linear, file] of cases) {
+      assert.equal(linearMarkersAsText(linear), file);
+      assert.ok(sameAsLinear(linear, file), JSON.stringify(linear));
+      assert.equal(fixText(file), file);
+    }
+    assert.ok(sameAsLinear('+++ Supplies\nPaper\n\n+++', '\\+++ Supplies\nPaper\n+++'));
+    assert.ok(sameAsLinear('$$\na + b\n$$', '\\$$\na + b\n\\$$'));
+    assert.ok(sameAsLinear('Intro\n\n<div> Shelf', 'Intro\r\r\\<div> Shelf'));
+    assert.equal(linearMarkersAsText('Intro\r\r<div> Shelf'), 'Intro\r\r\\<div> Shelf');
+  });
+
+  it('uses the accepted spelling for an ambiguous export', () => {
+    const rows = '| Color | Size |\n| -- | -- |\n| Blue | Large |';
+    const section = '+++ Supplies\n\nPaper\n\n+++';
+    const linear = `${rows}\n\n${section}`;
+    const literal = linear.replace('\n| --', '\n\\| --').replaceAll('+++', '\\+++');
+    assert.equal(linearMarkersAsText(linear), linear);
+    assert.equal(linearMarkersAsText(linear, literal), literal);
+    assert.ok(sameAsLinear(linear, literal));
+    assert.ok(!sameAsLinear(linear.replace('Large', 'Small'), literal));
+    assert.equal(linearMarkersAsText(section, '\\+++ Supplies\nPaper\n\\+++'), section);
+    assert.ok(sameAsLinear('<p> Shelf\n<p> Tray', '\\<p> Shelf\n\\<p> Tray'));
+    assert.ok(sameAsLinear('* <p> Shelf', '* \\<p> Shelf'));
+  });
+
+  it('keeps genuine blocks alongside examples with the same opening lines', () => {
+    const literal = [
+      '\\<div> Shelf\nSome notes',
+      '| Color | Size |\n\\| -- | -- |\n| Blue | Large |\n| Red | Large |',
+      '\\+++ Supplies\n\nPaper\n\n\\+++',
+    ].join('\n\n');
+    const blocks = [
+      '<div> Shelf\n</div>',
+      '| Color | Size |\n| -- | -- |\n| Blue | Large |\n| Green | Small |',
+      '+++ Purchase\n\nLabels\n\n+++',
+    ].join('\n\n');
+    const linear = `${literal.replaceAll('\\', '')}\n\n${blocks}`;
+    const file = `${literal}\n\n${blocks}`;
+    assert.equal(linearMarkersAsText(linear, file), file);
+    assert.ok(sameAsLinear(linear, file));
+  });
+
   it('keeps Linear\'s own lists, code and other text as they are', () => {
     for (const text of [
       '* pear\n* fig',
@@ -336,6 +391,8 @@ describe('linearMarkersAsText', () => {
     // The initial import compares Linear's content with itself.
     assert.ok(sameAsLinear('1. 4) pear\n2. +', '1. 4) pear\n2. +'));
     assert.ok(!sameAsLinear('1. 4) pear', '1. 4\\) plum'));
+    assert.ok(!sameAsLinear('4) pear', '4. pear'));
+    assert.ok(!sameAsLinear('+ pear', '* pear'));
     assert.ok(!sameAsLinear('1. +', '1. \\-'));
   });
 });

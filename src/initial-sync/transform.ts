@@ -157,5 +157,5 @@ export function restoreBody(transforms: readonly BodyTransform[], path: string, 
   let current = kept ? sent : content;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
   if (kept) return current;
-  return fixLinearText(current, content, linkedFileCheck(path, (file) => files.has(file)));
+  return fixLinearText(current, content, linkedFileCheck(path, (file) => files.has(file)), sent);
 }

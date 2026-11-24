@@ -573,7 +573,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
       const key = `${entry.path}\0${joined}`;
       let text = fixedTexts.get(key);
       if (text === undefined) {
-        text = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)));
+        text = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)), trackedBodies.get(entry.path));
         fixedTexts.set(key, text);
       }
       return text;

@@ -188,7 +188,10 @@ class Writer {
     const isImage = (child: PhrasingContent): boolean => child.type === 'image' || child.type === 'imageReference';
     const images = node.children.filter(isImage).length;
     const hasText = node.children.some((child) => !isImage(child) && !(child.type === 'text' && child.value.trim() === ''));
-    if (images === 0 || (!hasText && images === 1)) return [node === this.taskParagraph ? this.inline(node.children) : this.paragraphText(node.children)];
+    if (images === 0 || (!hasText && images === 1)) {
+      const text = node === this.taskParagraph ? this.inline(node.children) : this.paragraphText(node.children);
+      return [escapeLiteralSectionEnd(text)];
+    }
     // Linear holds images as blocks: text before and after an image becomes its own paragraph.
     const parts: PhrasingContent[][] = [[]];
     for (const child of node.children) {
@@ -200,7 +203,7 @@ class Writer {
       .map((part, index) => {
         const afterCheckbox = index === 0 && node === this.taskParagraph;
         const text = afterCheckbox ? this.inline(part).trim() : this.paragraphText(part, true);
-        return paragraphPart(text, !afterCheckbox);
+        return escapeLiteralSectionEnd(paragraphPart(text, !afterCheckbox));
       })
       .filter((part) => part !== '');
   }
@@ -564,6 +567,12 @@ function paragraphPart(text: string, startsLine: boolean): string {
   return text;
 }
 
+/** An unescaped closing marker can open a section after a literal title. */
+function escapeLiteralSectionEnd(text: string): string {
+  if (!/^\\\+{3}(?:[ \t]|\n)/.test(text)) return text;
+  return text.replace(/\n\+{3}$/, '\n\\+++');
+}
+
 /** Where `text` needs a backslash to stay a paragraph on its own; empty when it is one. */
 function blockStartEscapes(text: string, startsLine: boolean): number[] {
   // Linear's collapsible section, and a line `lint` reads as a Git conflict marker.
@@ -661,11 +670,11 @@ function insideLine(source: string, at: number): boolean {
  * (it writes a setext heading's two lines as one), the file would no longer
  * hold what Linear holds, and the text stays as it is.
  */
-export function fixLinearText(linearText: string, content: string, inRepository: (url: string) => boolean): string {
+export function fixLinearText(linearText: string, content: string, inRepository: (url: string) => boolean, previousBody?: string): string {
   // Read a nested file block as Linear holds it, not as the parent's text,
   // and text Linear wrote back without its escape as text.
   const split = splitFile(linearText);
-  const text = joinFile(split.head, nestedFileBlocksOnItemLine(linearMarkersAsText(split.body)));
+  const text = joinFile(split.head, nestedFileBlocksOnItemLine(linearMarkersAsText(split.body, previousBody)));
   // A relative link or image still in Linear's content was not uploaded, so
   // its file is not there: Linear keeps such a link as a link, not as a file
   // block, and so does a repair that turns such an image into a link.

@@ -575,7 +575,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // Compared again only when other link targets change the body.
       if (candidate.compared?.body !== body) {
         const unchanged = candidate.previousBody !== undefined && sameAsLinear(body, candidate.previousBody);
-        const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), candidate.doc.content ?? '', linkedFileCheck(candidate.path, (file) => mapping.files.has(file)));
+        const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), candidate.doc.content ?? '', linkedFileCheck(candidate.path, (file) => mapping.files.has(file)), candidate.previousBody);
         candidate.compared = {body, text};
       }
       return candidate.compared.text;

@@ -315,47 +315,223 @@ export function sameMarkdown(a: string, b: string): boolean {
  */
 export function sameAsLinear(content: string, body: string): boolean {
   if (content === body) return true;
-  return sameMarkdown(linearMarkersAsText(content), body);
+  const restored = linearMarkersAsText(content, body);
+  if (sameMarkdown(restored, body)) return true;
+  // A bare closing +++ after an escaped title can be exported as its own
+  // paragraph. Compare that legacy spelling with the blank line Linear added.
+  return body.includes('\\+++') && sameMarkdown(restored, linearSectionEnd(body));
+}
+
+function linearSectionEnd(body: string): string {
+  const lines = body.split(LINE_END);
+  const closing = new Set<number>();
+  visit(parse(body), (node) => {
+    if (node.type !== 'paragraph') return;
+    const first = line(node) - 1;
+    const last = (node.position?.end.line ?? first + 1) - 1;
+    const column = (node.position?.start.column ?? 1) - 1;
+    if (last > first && lines[first]!.slice(column).startsWith('\\+++ ') && linearLineText(lines[last]!) === '+++') {
+      closing.add(last);
+    }
+  });
+  return lines.flatMap((row, index) => closing.has(index) ? [LINE_PREFIX.exec(row)![0].trimEnd(), row] : [row]).join('\n');
 }
 
 // A bullet or number marker Linear never writes for a list of its own.
 const NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
+const LINEAR_BLOCK_START = /^[ \t>]*(?:(?:[*+-]|\d{1,9}[.)])[ \t]+)*(?:\+{1,3}(?:[ \t\r]|$)|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
+const LINE_END = /\r\n?|\n/;
+const LINE_PREFIX = /^[ \t>]*/;
+const CONFLICT_START = /^<{7}(?: |$)/;
+const DIV_START = /^<div(?:[ \t][^>\n]*)?>/i;
+const SECTION_TITLE = /^\+{3}[ \t]/;
+const ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3}(?:[ \t]|$))/;
+
+function linearLineText(row: string): string {
+  return row.replace(LINE_PREFIX, '').trimEnd();
+}
+
+function tableKey(header: string, delimiter: string): string {
+  const text = linearLineText(header).replace(/^(?:[*+-]|\d{1,9}[.)])[ \t]+/, '');
+  return text + '\n' + delimiter;
+}
+
+function tableRowsKey(lines: readonly string[], from: number, to: number): string {
+  const rows: string[] = [];
+  for (let index = from; index < to; index++) {
+    const row = linearLineText(lines[index]!);
+    if (!row.startsWith('|')) break;
+    rows.push(row);
+  }
+  return rows.join('\n');
+}
+
+function blockLineKey(text: string, startsParagraph: boolean): string {
+  return (startsParagraph ? 'first:' : 'next:') + text;
+}
+
+/** A line of literal text in the accepted body is evidence for an ambiguous export. */
+function acceptedBlockStarts(previous: string) {
+  const escapes = new Set<string>();
+  const tables = new Set<string>();
+  const tableHeaders = new Set<string>();
+  const html = new Set<string>();
+  if (!/\\[<|$+]|<div\b|^[ \t>]*\|/im.test(previous)) return { escapes, tables, tableHeaders, html };
+  const lines = previous.split(LINE_END);
+  visit(parse(previous), (node, ancestors) => {
+    const first = line(node) - 1;
+    if (node.type === 'table') {
+      const key = tableKey(lines[first]!, linearLineText(lines[first + 1] ?? ''));
+      tableHeaders.add(key);
+      tables.add(key + '\n' + tableRowsKey(lines, first + 2, node.position?.end.line ?? first + 2));
+      return;
+    }
+    if (node.type === 'html' && ancestors.at(-1)?.type !== 'paragraph') {
+      html.add(previous.slice(start(node), end(node)));
+      return;
+    }
+    if (node.type !== 'text' || ancestors.at(-1)?.type !== 'paragraph') return;
+    const column = (node.position?.start.column ?? 1) - 1;
+    for (let index = first; index < (node.position?.end.line ?? 0); index++) {
+      const row = lines[index]!;
+      const raw = linearLineText(index === first ? row.slice(column) : row);
+      if (!ESCAPED_BLOCK_START.test(raw)) continue;
+      const literal = raw.slice(1);
+      const paragraph = ancestors.at(-1)!;
+      if (literal.startsWith('|')) {
+        const key = tableKey(lines[index - 1] ?? '', literal);
+        escapes.add(key);
+        escapes.add(key + '\n' + tableRowsKey(lines, index + 1, paragraph.position?.end.line ?? index + 1));
+      } else {
+        escapes.add(blockLineKey(literal, index === line(paragraph) - 1));
+        if (SECTION_TITLE.test(literal) && line(paragraph) === index + 1 && paragraph.position?.end.line === index + 1) {
+          escapes.add('section:' + literal);
+        }
+      }
+    }
+  });
+  return { escapes, tables, tableHeaders, html };
+}
 
 /**
- * Linear's content with the escapes it drops put back. Linear writes a list
- * with `*` or `-` bullets and numbers with `.`, and holds text such as
- * `4) pear` or a lone `+` at the start of a paragraph or an item as text,
- * but writes it back without the escape `fix` gives it (`4\) pear`, `\+`).
- * Markdown would read that text as a list: so every item of a list with a
- * `+` bullet or a `)` number is Linear's text, and gets its escape back.
- * Every other text stays as it is.
+ * Linear's content with the block-start escapes it drops put back. For
+ * export forms shared by a block and literal text, an accepted body can
+ * supply the escape. A new document uses Linear's canonical block spelling
+ * to resolve those cases.
  */
-export function linearMarkersAsText(content: string): string {
-  // Such a marker starts a line, after quote prefixes, indentation and other markers.
-  if (!/^[ \t>]*(?:(?:[*+-]|\d{1,9}[.)])[ \t]+)*(?:\+|\d{1,9}\))(?:[ \t\r]|$)/m.test(content)) return content;
+export function linearMarkersAsText(content: string, previous = ''): string {
+  if (!LINEAR_BLOCK_START.test(content)) return content;
+  const accepted = acceptedBlockStarts(previous);
   let text = content;
-  for (;;) {
-    const escapes: number[] = [];
-    const escaped = new Set<Nodes>();
+  // Restoring an escape can expose another block. Bound the reparses as
+  // for Markdown's nested containers.
+  for (let pass = 0; pass <= MARKDOWN_MAX_DEPTH; pass++) {
+    const escapes = new Set<number>();
+    const escapedItems = new Set<Nodes>();
+    const lines = text.split(LINE_END);
+    const offsets = [0];
+    for (const match of text.matchAll(/\r\n?|\n/g)) offsets.push(match.index + match[0].length);
+    const lineEnd = (index: number) => offsets[index]! + lines[index]!.length;
+    const rowAt = (index: number) => linearLineText(lines[index] ?? '');
+    const sections = new Map<Nodes, Array<{ at: number; literal: boolean }>>();
+    const rowStart = (index: number) => offsets[index]! + LINE_PREFIX.exec(lines[index]!)![0].length;
     visit(parse(text), (node, ancestors) => {
-      if (node.type !== 'listItem' || ancestors.some((ancestor) => escaped.has(ancestor))) return;
-      const marker = NOT_LINEAR_MARKER.exec(text.slice(start(node), start(node) + 11));
-      if (marker === null) return;
-      escaped.add(node);
-      escapes.push(start(node) + marker[0].length - 1);
+      if (ancestors.some((ancestor) => escapedItems.has(ancestor))) return;
+      const at = start(node);
+      const index = line(node) - 1;
+      if (node.type === 'listItem') {
+        const marker = NOT_LINEAR_MARKER.exec(text.slice(at, at + 11));
+        if (marker === null) return;
+        escapedItems.add(node);
+        escapes.add(at + marker[0].length - 1);
+      } else if (node.type === 'table') {
+        const delimiter = rowAt(index + 1);
+        if (!delimiter.startsWith('|')) return;
+        // A real table gets a canonical delimiter and a final newline.
+        // Inside a document its export can also be identical to paragraph text.
+        const canonical = /^\|(?: -- \|)+$/.test(delimiter);
+        const key = tableKey(lines[index]!, delimiter);
+        const table = key + '\n' + tableRowsKey(lines, index + 2, node.position?.end.line ?? index + 2);
+        if (accepted.tables.has(table)) return;
+        const knownLiteral = accepted.tableHeaders.has(key) ? accepted.escapes.has(table) : accepted.escapes.has(key);
+        const literal = knownLiteral ||
+          !canonical || end(node) === text.length ||
+          ancestors.at(-1)?.type === 'listItem' && at > rowStart(index);
+        if (literal) escapes.add(rowStart(index + 1));
+      } else if (node.type === 'html' && ancestors.at(-1)?.type !== 'paragraph') {
+        // Linear can export an HTML block as text. Preserve complete HTML
+        // when the export and a file containing HTML share the same spelling.
+        const raw = text.slice(at, end(node));
+        const first = text.slice(at, lineEnd(index)).trimEnd();
+        if (accepted.html.has(raw) && !CONFLICT_START.test(raw)) return;
+        const completeDiv = DIV_START.test(first) && /<\/div>/i.test(raw);
+        const literal = accepted.escapes.has(blockLineKey(first, true)) || accepted.escapes.has(blockLineKey(first, false));
+        const incompleteDiv = DIV_START.test(first) && !completeDiv;
+        if (CONFLICT_START.test(raw) || literal || incompleteDiv) {
+          escapes.add(at);
+          // Several tag starts can be parsed as a single HTML node. Restore
+          // its literal starts together, skipping apparent starts in code.
+          const spans = codeSpans(text, at, end(node));
+          let span = 0;
+          const last = (node.position?.end.line ?? index + 1) - 1;
+          for (let row = index + 1; row <= last; row++) {
+            const offset = rowStart(row);
+            while (span < spans.length && spans[span]![1] <= offset) span++;
+            if (span < spans.length && spans[span]![0] <= offset) continue;
+            const rowText = rowAt(row);
+            if (accepted.escapes.has(blockLineKey(rowText, false)) || incompleteDiv && DIV_START.test(rowText)) escapes.add(offset);
+          }
+        }
+      } else if (node.type === 'paragraph') {
+        const rawFirst = text.slice(at, lineEnd(index));
+        const first = rawFirst.trimEnd();
+        const last = (node.position?.end.line ?? index + 1) - 1;
+        const literal = accepted.escapes.has(blockLineKey(first, true));
+        if (CONFLICT_START.test(first) || literal && first !== '+++' && !SECTION_TITLE.test(rawFirst)) escapes.add(at);
+        if (first === '$$' && last > index + 1 && rowAt(last) === '$$') escapes.add(at);
+        // Linear writes a blank line after a real section's title. Pair
+        // standalone markers within their container to keep its closer.
+        const parent = ancestors.at(-1)!;
+        if (SECTION_TITLE.test(rawFirst)) {
+          if (last > index) {
+            escapes.add(at);
+            if (rowAt(last) === '+++') escapes.add(rowStart(last));
+          } else {
+            const open = sections.get(parent) ?? [];
+            open.push({ at, literal: accepted.escapes.has('section:' + first) && accepted.escapes.has(blockLineKey('+++', true)) });
+            sections.set(parent, open);
+          }
+        } else if (first === '+++' && last === index) {
+          const open = sections.get(parent)?.pop();
+          if (open?.literal) {
+            escapes.add(open.at);
+            escapes.add(at);
+          } else if (open === undefined && literal) {
+            escapes.add(at);
+          }
+        }
+      } else if (node.type === 'text' && ancestors.at(-1)?.type === 'paragraph') {
+        for (let row = index; row < (node.position?.end.line ?? 0); row++) {
+          const offset = rowStart(row);
+          if (offset < at || offset >= end(node)) continue;
+          const raw = rowAt(row);
+          if (row === line(ancestors.at(-1)!) - 1) continue;
+          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false))) escapes.add(offset);
+        }
+      }
     });
-    if (escapes.length === 0) return text;
-    // An escaped item becomes text, and the lines after it can read anew: read again until no such list is left.
-    // Each pass escapes at least one marker, so the passes end.
+    for (const open of sections.values()) for (const section of open) escapes.add(section.at);
+    if (escapes.size === 0) return text;
     const parts: string[] = [];
     let at = 0;
-    for (const escape of escapes) {
+    for (const escape of [...escapes].sort((a, b) => a - b)) {
       parts.push(text.slice(at, escape), '\\');
       at = escape;
     }
     parts.push(text.slice(at));
     text = parts.join('');
   }
+  throw new MarkdownLimitError('depth');
 }
 
 // Escapes of characters that open Linear's own syntax, which Markdown reads

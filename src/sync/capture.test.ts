@@ -367,6 +367,47 @@ describe('capture from Linear', () => {
     assert.deepEqual(hookRun('docs/plan.md', file), {exitCode: 0, stdout: '', stderr: ''});
   });
 
+  it('keeps escaped block starts on a pull and when another paragraph changes', async () => {
+    const escaped = [
+      '\\<div> Shelf',
+      '| Color | Size |\n\\| -- | -- |\n| Blue | Large |',
+      '\\$$\na + b\n$$',
+      '\\+++ Supplies\nPaper\n\\+++',
+      '\\<<<<<<< draft',
+      '<div align="center">\n\nWorkshop schedule\n\n</div>',
+    ].join('\n\n');
+    const head = '---\ncategory: work\n---\n\n';
+    const initial = await run();
+    const tracked = await commitTree(context.git, {parents: [initial.state.linear!], base: initial.state.linear, changes: new Map([['docs/plan.md', head + escaped]]), message: 'Add workshop notes', identity: IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const written = await writeTrackedToLinear(context, {config, state: initial.state});
+    assert.deepEqual(written.updated, ['docs/plan.md']);
+
+    const stored = escaped.replaceAll('\\', '');
+    const doc = world.linear.documents[0]!;
+    Object.assign(doc, {content: stored, updatedAt: '2026-01-06T00:00:00Z'});
+    await refresh();
+    const unchanged = await run();
+    assert.equal(unchanged.ok, true);
+    assert.equal(unchanged.state.linear, written.state.linear);
+
+    Object.assign(doc, {content: `Checked.\n\n${stored}`, updatedAt: '2026-01-07T00:00:00Z'});
+    await refresh();
+    assert.equal((await run()).ok, true);
+    const file = await text('docs/plan.md');
+    assert.equal(file, `${head}Checked.\n\n${escaped}`);
+    assert.deepEqual(hookRun('docs/plan.md', file), {exitCode: 0, stdout: '', stderr: ''});
+  });
+
+  it('captures a terminal Linear table as a table', async () => {
+    const stored = 'Inventory.\n\n| Color | Size |\n| -- | -- |\n| Blue | Large |\n';
+    world.linear.documents.push({id: 'new', title: 'Inventory', content: stored, projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'});
+    assert.equal((await run()).ok, true);
+    assert.equal(splitFile(await text('docs/Inventory.md')).body, stored.trimEnd());
+  });
+
   it('writes a Linear body that opens with a rule in the hook\'s form, under the file\'s front matter', async () => {
     // Read alone, the text between the two rules would look like front matter; the hook reads it as body.
     const stored = '---\n\n| Step | State |\n| -- | -- |\n| Draft the outline  | tbd |\n\n---\n\nAfter.';
