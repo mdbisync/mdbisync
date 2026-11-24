@@ -70,6 +70,8 @@ class Writer {
   private readonly options: FixOptions;
   /** Where the table cell being written starts its text: an escape there stays. */
   private cellStart: number | undefined;
+  /** The indent of the file block whose label is being written: its later lines carry no prefix for it. */
+  private fileBlockIndent = 0;
 
   constructor(source: string, tree: Root, options: FixOptions) {
     this.source = source;
@@ -201,7 +203,9 @@ class Writer {
       // task checkbox. The WAV and Ogg inline forms are recorded for bullets.
       const inlineAudio = (!task && MP3.test(path)) || (bullet && WAV_OR_OGG.test(path));
       if (!inlineAudio) {
+        this.fileBlockIndent = indent.length;
         const label = this.inline(attachment.children);
+        this.fileBlockIndent = 0;
         const destination = imageDestination(attachment.url);
         if (bullet && VIDEO.test(attachment.url.split(/[?#]/)[0]!)) return `${marker} [${label}](${destination})`;
         // An empty marker cannot interrupt the parent paragraph. A task
@@ -295,6 +299,16 @@ class Writer {
       const prefix = container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
       if (!prefix) break; // a lazy line carries no further prefixes
       at += prefix[0].length;
+    }
+    // A lazy line of only `-` or `=` continues the paragraph text. Under
+    // the prefix the caller writes, it would underline the paragraph as a
+    // setext heading; indented four spaces past the content's column, it
+    // stays text. Its own indentation goes: a tab after the prefix may span
+    // fewer columns. Outside a container no prefix is written: the line
+    // stays as it is.
+    const underline = /^([ \t]*)(?:-+|=+)[ \t]*$/.exec(this.source.slice(at, lineStart + line.length));
+    if (underline && (this.containers.length > 0 || this.fileBlockIndent > 0)) {
+      return { from: lineStart, to: at + underline[1]!.length, text: ' '.repeat(4 + this.fileBlockIndent) };
     }
     if (!inCode) {
       const rest = this.source.slice(at, lineStart + line.length);

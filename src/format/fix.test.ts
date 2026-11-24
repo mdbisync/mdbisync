@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
-import { linkedFileCheck } from './lint.ts';
-import { parse, splitFile } from './markdown.ts';
+import { linkedFileCheck, lintText } from './lint.ts';
+import { parse, splitFile, visit } from './markdown.ts';
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],
@@ -232,6 +232,48 @@ describe('what fix leaves alone', () => {
   it('keeps a literal > or # at the start of a continuation line', () => {
     assert.equal(fixText('a\n    > b'), 'a\n    > b');
     assert.equal(fixText('a\n    # b'), 'a\n    # b');
+  });
+
+  it('keeps a lazy line of dashes or equals signs as text, not a heading underline', () => {
+    const lazy: Array<[string, string]> = [
+      ['- item\n--', '* item\n      --'],
+      ['- item\n=', '* item\n      ='],
+      ['1. item\n==', '1. item\n       =='],
+      ['- [ ] task\n--', '- [ ] task\n      --'],
+      ['- a\n  - b\n--', '* a\n  * b\n        --'],
+      ['> quote\n--', '> quote\n>     --'],
+      ['> quote\n\t==', '> quote\n>     =='],
+      ['100. item\n\t--', '100. item\n         --'],
+      ['> - item\n  --', '> * item\n>       --'],
+      ['> [link\n--\n](https://example.com)', '> [link\n>     --\n> ](<https://example.com>)'],
+      // A file block writes its label's later lines without the item's indent.
+      ['- [Report\n--\nsummary](report.pdf)', '* \n  [Report\n      --\nsummary](report.pdf)'],
+      ['> - [Report\n--\nsummary](report.pdf)', '> * \n>   [Report\n>       --\n> summary](report.pdf)'],
+    ];
+    // The text Markdown reads, line breaks included, and the node types around it.
+    const read = (markdown: string): string[] => {
+      const out: string[] = [];
+      visit(parse(markdown), (node) => {
+        out.push(node.type === 'text' ? node.value : node.type);
+      });
+      return out;
+    };
+    for (const [text, expected] of lazy) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      // `sameMarkdown` keeps a file block's empty marker line apart, so compare what Markdown reads.
+      assert.deepEqual(read(fixed), read(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+    }
+  });
+
+  it('keeps a lone -- line between blank lines, and reads one under a paragraph as Markdown does: a heading', () => {
+    assert.equal(fixText('Text.\n\n--\n\nMore.'), 'Text.\n\n--\n\nMore.');
+    assert.equal(fixText('--'), '--');
+    assert.equal(fixText('Text\n--\n\nMore.'), '## Text\n\nMore.');
+    // Outside a container nothing is written before the line: a code span keeps its tab.
+    assert.equal(fixText('`a\n\t--\nb`'), '`a\n\t--\nb`');
   });
 
   it('keeps spaces that belong to a code span across lines', () => {

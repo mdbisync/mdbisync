@@ -2757,3 +2757,12 @@ fixtures:
     basis: assumed
     canary: kx-e82370e6
     synced: false
+  - file: "construct-singles/lazy-underline-line.md"
+    group: construct-singles
+    construct: lazy-underline-line
+    class: fixable
+    basis: assumed
+    canary: kx-aafe6ed7
+    corpus: false
+    probe_pending: true
+    note: "a lazy -- or == line continues an item or quote paragraph; it must not underline it as a heading"
