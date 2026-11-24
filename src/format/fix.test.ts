@@ -25,6 +25,13 @@ const cases: Array<[string, string, string]> = [
   ['a + bullet becomes *', '+ a', '* a'],
   ['loose lists become tight', '* a\n\n* b', '* a\n* b'],
   ['ordered lists use dots and count up', '1) a\n1) b\n1) c', '1. a\n2. b\n3. c'],
+  ['an empty item keeps a space after its marker', '* a\n*\n\n1. b\n2.\n\n> -\n\n*', '* a\n* \n\n1. b\n2. \n\n> * \n\n* '],
+  ['a nested empty item keeps a space after its marker', '* a\n  * b\n  *\n\n1. c\n   1. d\n   2.', '* a\n  * b\n  * \n\n1. c\n   1. d\n   2. '],
+  ['an ordered list right-aligns its numbers to the widest one', '1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j', ' 1. a\n 2. b\n 3. c\n 4. d\n 5. e\n 6. f\n 7. g\n 8. h\n 9. i\n10. j'],
+  ['an aligned ordered list lines up every item\'s content past its widest number', '8. a\n   * b\n\n   c\n9. d\n10. e\n    * f', ' 8. a\n    * b\n\n    c\n 9. d\n10. e\n    * f'],
+  ['an empty item in an aligned ordered list keeps its space', '9.\n10. a', ' 9. \n10. a'],
+  ['an ordered list past 100 aligns to three digits', '99. a\n100. b\n     * c', ' 99. a\n100. b\n     * c'],
+  ['an aligned ordered list nests under a bullet, in a quote and in another one', '* a\n\n  9. b\n  10. c\n\n> 9. d\n> 10. e\n\n9. f\n10. g\n\n    9. h\n    10. i', '* a\n\n   9. b\n  10. c\n\n>  9. d\n> 10. e\n\n 9. f\n10. g\n\n     9. h\n    10. i'],
   ['an ordered list keeps its start', '3. a\n4. b', '3. a\n4. b'],
   ['task items use - and an uppercase X', '* [x] done\n* [ ] open', '- [X] done\n- [ ] open'],
   ['nested task items line up after the dash', '* [ ] a\n  * [x] b', '- [ ] a\n  - [X] b'],
@@ -49,7 +56,7 @@ const cases: Array<[string, string, string]> = [
   ['a nested numbered item after its parent’s text keeps the file link on the marker line', '* Parent\n  1. [Report](report.csv)', '* Parent\n  1. [Report](<report.csv>)'],
   ['a nested numbered list starting above one keeps its blank line and file block', '* Parent\n\n  3. [Report](report.csv)', '* Parent\n\n  3. \n     [Report](report.csv)'],
   ['a nested attachment after a sibling still becomes a file block', '* Parent\n  * First\n  * [Report](report.csv)', '* Parent\n  * First\n  * \n    [Report](report.csv)'],
-  ['a nested list starting with an empty item keeps its blank line after the parent', '* Parent\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next', '* Parent\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next'],
+  ['a nested list starting with an empty item keeps its blank line after the parent', '* Parent\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next', '* Parent\n\n  * \n  * Next\n\n1. Parent\n\n   1. \n   2. Next'],
   ['a nested file block keeps its existing blank line after the parent', '* Parent\n\n  * \n    [Report](report.csv)', '* Parent\n\n  * \n    [Report](report.csv)'],
   ['a task or numbered item with only a video link keeps the file block (the video form is recorded for bullets)', '- [ ] [Demo](demo.mp4)\n\n1. [Demo](demo.mp4)', '- [ ] \n  [Demo](demo.mp4)\n\n1. \n   [Demo](demo.mp4)'],
   ['a bullet item with only an MP3 link keeps the link on its line, in angle brackets', '* \n  [Voice note](media/note.mp3)\n* [Call](<call one.MP3>)\n* [Memo](memo.mp3?v=2)', '* [Voice note](<media/note.mp3>)\n* [Call](<call%20one.MP3>)\n* [Memo](<memo.mp3?v=2>)'],
@@ -439,6 +446,34 @@ describe('what fix leaves alone', () => {
       assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
       assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+    }
+  });
+
+  it('writes empty items and aligned numbers that lint finds nothing in', () => {
+    for (const text of ['* a\n*\n\n1. b\n2.', '9.\n10. a\n    * b', '* a\n\n  9. b\n  10. c', '> 99. a\n> 100.']) {
+      const fixed = fixText(text);
+      assert.notEqual(fixed, text, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${text}`);
+    }
+  });
+
+  it('leaves the numbers unaligned where the padding would change what Markdown reads', () => {
+    const items = (from: number, to: number): string => Array.from({ length: to - from + 1 }, (_, index) => `${from + index}. x`).join('\n');
+    // Two spaces put the first items into the bullet list written before; one does not.
+    const afterBullet = `* Intro\n\n${items(1, 100)}`;
+    assert.equal(fixText(afterBullet), afterBullet);
+    assert.equal(fixText(`* Intro\n\n${items(1, 10)}`), `* Intro\n\n${items(1, 10).replace(/^(\d\.)/gm, ' $1')}`);
+    // Four spaces would open indented code.
+    const long = items(1, 10000);
+    assert.equal(fixText(long), long);
+    // An item that starts with a list is lint's to report: fix leaves the file alone.
+    for (const text of ['* 9. a\n  10. b', '1. 9. a\n   10. b']) {
+      assert.equal(fixText(text), text, text);
+      assert.ok(lintText('a.md', text).some((finding) => finding.rule === 'block-first-in-list-item'), text);
+    }
+    for (const text of [afterBullet, `* Intro\n\n${items(1, 10)}`, `> - [ ] a\n\n${items(8, 10)}`]) {
+      assert.deepEqual(readMarkdown(fixText(text)), readMarkdown(text), `same document: ${text.slice(0, 20)}`);
     }
   });
 

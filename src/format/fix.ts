@@ -182,6 +182,8 @@ class Writer {
   private literal = false;
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
+  /** A list's sibling block written right before it, when that is a list. */
+  private readonly listBefore = new Map<List, List>();
 
   constructor(source: string, tree: Root, options: FixOptions, escapeBrackets = true) {
     this.source = source;
@@ -190,6 +192,13 @@ class Writer {
     this.escapeBrackets = escapeBrackets;
     visit(tree, (node) => {
       if (node.type === 'definition' && !this.definitions.has(node.identifier)) this.definitions.set(node.identifier, node);
+      if (!('children' in node)) return;
+      // Definitions are not written in place: the block before is the one written before.
+      const written = (node.children as Nodes[]).filter((child) => child.type !== 'definition');
+      written.forEach((child, index) => {
+        const before = written[index - 1];
+        if (child.type === 'list' && before?.type === 'list') this.listBefore.set(child, before);
+      });
     });
   }
 
@@ -340,10 +349,24 @@ class Writer {
     return `${text.slice(0, at)}\\${text.slice(at)}`;
   }
 
+  /**
+   * A list. Linear right-aligns the numbers of an ordered list to its
+   * widest one (` 9.` above `10.`), and every item's content lines up past
+   * that widest number. Where the padding would change what Markdown reads
+   * (four spaces open indented code; as many as the content indent of a
+   * list written just before put the item into that list), the numbers
+   * stay unaligned.
+   */
   private list(node: List, interruptsParagraph = false): string {
+    const first = node.start ?? 1;
+    const last = first + node.children.length - 1;
+    const padding = `${last}.`.length - `${first}.`.length;
+    const before = this.listBefore.get(node);
+    const beforeIndent = before === undefined ? Infinity : itemIndent(before);
+    const width = node.ordered && padding <= 3 && padding < beforeIndent ? `${last}.`.length : 0;
     return node.children
       .map((item, index) => {
-        const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${(node.start ?? 1) + index}.` : '*';
+        const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${(node.start ?? 1) + index}.`.padStart(width) : '*';
         return this.listItem(item, marker, interruptsParagraph && index === 0);
       })
       .join('\n');
@@ -351,7 +374,7 @@ class Writer {
 
   private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
     // Content lines line up after the bullet or number, not after a checkbox.
-    const indent = ' '.repeat(marker.split(' ')[0]!.length + 1);
+    const indent = ' '.repeat(/^ *[^ ]+/.exec(marker)![0].length + 1);
     const [first] = item.children;
     const bareCheckbox = item.checked == null && first?.type === 'paragraph' && first.children.length === 1 && first.children[0]?.type === 'text'
       && first.position!.start.line === item.position!.start.line
@@ -381,7 +404,8 @@ class Writer {
         }
       }
     }
-    if (first === undefined) return marker;
+    // Linear writes an empty item's marker with the space that would precede its text.
+    if (first === undefined) return `${marker} `;
     const container = this.itemContainer(item);
     if (bareCheckbox) container.markerBrackets = [start(first!), start(first!) + 2];
     this.containers.push(container);
@@ -1031,6 +1055,12 @@ const VIDEO = /\.(?:mp4|mov|webm)$/i;
 
 const MP3 = /\.mp3$/i;
 const WAV_OR_OGG = /\.(?:wav|ogg)$/i;
+
+/** The content indent `fix` writes for a list's last item: past its bullet, or past its widest number. */
+function itemIndent(list: List): number {
+  if (!list.ordered || list.children.at(-1)?.checked != null) return 2;
+  return `${(list.start ?? 1) + list.children.length - 1}.`.length + 1;
+}
 
 function startsWithFileBlock(list: List): boolean {
   const [item] = list.children;
