@@ -338,6 +338,44 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('keeps an item\'s continuation line in the item from its content column', () => {
+    // An item's content starts past its own indentation and its marker, and a
+    // task item's at its checkbox. A line indented that far is not lazy: its
+    // indentation past the item's prefix is its own.
+    const continued: Array<[string, string]> = [
+      ['- [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3. pegs'],
+      ['- [ ] Pack the tent\n    3. pegs', '- [ ] Pack the tent\n    3. pegs'],
+      ['- [ ] Pack the tent\n      3. pegs', '- [ ] Pack the tent\n      3. pegs'],
+      ['* [x] Pack the tent\n  3. pegs', '- [X] Pack the tent\n  3. pegs'],
+      ['-   [ ] Pack the tent\n    3. pegs', '- [ ] Pack the tent\n  3. pegs'],
+      ['-\n  [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3. pegs'],
+      ['> - [ ] Pack the tent\n>   3. pegs', '> - [ ] Pack the tent\n>   3. pegs'],
+      ['- [ ] Pack\n  - [ ] the tent\n    3. pegs', '- [ ] Pack\n  - [ ] the tent\n    3. pegs'],
+      ['- [ ] Pack the tent\n\n  and\n  3. pegs', '- [ ] Pack the tent\n\n  and\n  3. pegs'],
+      // Four columns past the content, `>` and `#` are paragraph text: they keep that distance.
+      ['- [ ] Pack the tent\n      > pegs', '- [ ] Pack the tent\n      > pegs'],
+      ['- [ ] Pack the tent\n      # pegs', '- [ ] Pack the tent\n      # pegs'],
+      ['-\t[ ] Pack the tent\n        > pegs', '- [ ] Pack the tent\n      > pegs'],
+      ['-\t[ ] Pack\n  \t-\t[ ] the tent\n            > pegs', '- [ ] Pack\n  - [ ] the tent\n        > pegs'],
+      // In a code span, spaces past the item's prefix are code text; the
+      // prefix counts the spaces before the marker.
+      ['  - [ ] Pack `the\n      tent`', '- [ ] Pack `the\n    tent`'],
+      ['  - Pack `the\n    tent`', '* Pack `the\n  tent`'],
+      ['  - Pack `the\n   tent`', '* Pack `the\n     tent`'],
+      ['> - [ ] Pack `the\n>     tent`', '> - [ ] Pack `the\n>     tent`'],
+      // A parent's prefix is measured on the item's own line, not on the parent's first line.
+      ['> Pack\n>\n  > - `the\n  >   tent`', '> Pack\n>\n> * `the\n>   tent`'],
+      ['- Pack\n\n    - [ ] `the\n      tent`', '* Pack\n  - [ ] `the\n    tent`'],
+    ];
+    for (const [text, expected] of continued) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+    }
+  });
+
   it('leaves an ordered task list to its author: Linear would drop its numbers', () => {
     for (const text of ['1. [ ] alpha\n2. [x] beta', '1. one\n2. [ ] two', '* a\n\n  3. [x] b']) {
       assert.equal(fixText(text), text, text);
