@@ -34,6 +34,8 @@ export interface ResolvedTargets {
 
 /** Half of Linear's largest page; see `resolveTargets`. */
 const TEAM_REFS_PER_REQUEST = 125;
+// Keep the nested teams connection within Linear's complexity limit. Check an incomplete page by team below.
+export const PROJECT_TEAMS_PAGE_SIZE = 20;
 
 /** The wait before asking again a token that saw no team at all. */
 export const TEAMS_RETRY_DELAY_MS = 3000;
@@ -122,7 +124,7 @@ export async function resolveTargets(
         'SetupTargets',
         `query SetupTargets($refs: [String!]!, $first: Int!${withProjects ? ', $names: [String!]!' : ''}) {
           teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
-          ${withProjects ? 'projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } pageInfo { hasNextPage } } } pageInfo { hasNextPage } }' : ''}
+          ${withProjects ? `projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: ${PROJECT_TEAMS_PAGE_SIZE}) { nodes { id } pageInfo { hasNextPage } } } pageInfo { hasNextPage } }` : ''}
           ${first ? 'visible: teams(first: 1) { nodes { id } }' : ''}
         }`,
         withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 },

@@ -4,6 +4,7 @@
 // request, and counts anything that would have written.
 
 import { PERMISSION_PROBES } from './github.ts';
+import { PROJECT_TEAMS_PAGE_SIZE } from './linear.ts';
 import { ACTIONS_APP } from '../pull-request/merge.ts';
 
 export const GITHUB_API = 'https://github.test/api';
@@ -554,8 +555,8 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     const nodes = (hidden ? [] : world.linear.projects)
       .filter((project) => names.includes(project.name))
       .map((project) => ({ id: project.id, name: project.name, teams: {
-        nodes: project.teamIds.slice(0, 50).map((id) => ({ id })),
-        pageInfo: { hasNextPage: project.teamIds.length > 50 },
+        nodes: project.teamIds.slice(0, PROJECT_TEAMS_PAGE_SIZE).map((id) => ({ id })),
+        pageInfo: { hasNextPage: project.teamIds.length > PROJECT_TEAMS_PAGE_SIZE },
       } }));
     return json(200, { data: { teams, projects: { nodes, pageInfo: { hasNextPage: false } }, ...visible } });
   }
