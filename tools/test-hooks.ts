@@ -71,6 +71,13 @@ try {
   await writeFile(join(scratch, '.pre-commit-config.yaml'), config('linear-format'));
   assert.match(hooks(1), /footnote/);
   assert.equal(await readFile(page, 'utf8'), '*one* and a note[^1].\n\n[^1]: Not supported.\n');
+  // A bare URL before a hard-break backslash once made the hook copy the page into the link on every run.
+  await writeFile(page, 'Opening.\n\nhttps://example.com/\\\nNext line.\n\n--\n\nClosing.\n');
+  hooks(1);
+  const linked = 'Opening.\n\n[https://example.com/\\\\](<https://example.com/\\\\>)\nNext line.\n\n--\n\nClosing.';
+  assert.equal(await readFile(page, 'utf8'), linked);
+  hooks(0);
+  assert.equal(await readFile(page, 'utf8'), linked);
   console.log('L0-08: offline install, fix, second pass, check-only and lint refusal passed');
 
   const workflow = parse(await readFile(join(root, 'examples/pre-commit.yml'), 'utf8'));

@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { linkedFileCheck } from './lint.ts';
-import { parse, splitFile } from './markdown.ts';
+import { parse, sameMarkdown, splitFile } from './markdown.ts';
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],
@@ -314,6 +314,31 @@ describe('what fix leaves alone', () => {
     assert.equal(once, '[a](<https://example.com/?q=&amp;copy;>)');
     assert.equal(fixText('[a](https://example.com/?a=1&b=2)'), '[a](<https://example.com/?a=1&b=2>)');
     assert.equal(fixText('[a](<x\\\\*y>)'), '[a](<x\\\\*y>)');
+  });
+
+  it('writes an autolink\'s backslashes and brackets literally in its label', () => {
+    const cases: Array<[string, string]> = [
+      ['https://example.com/\\\nNext.', '[https://example.com/\\\\](<https://example.com/\\\\>)\nNext.'],
+      ['<https://example.com/\\>', '[https://example.com/\\\\](<https://example.com/\\\\>)'],
+      ['See https://example.com/\\* now.', 'See [https://example.com/\\\\](<https://example.com/\\\\>)* now.'],
+      ['<https://example.com/a]b[c>', '[https://example.com/a\\]b\\[c](<https://example.com/a]b[c>)'],
+      ['a <https://example.com/a\\`> b `c`', 'a [https://example.com/a\\\\\\`](<https://example.com/a\\\\`>) b `c`'],
+    ];
+    for (const [input, expected] of cases) {
+      const once = fixText(input);
+      assert.equal(once, expected, JSON.stringify(input));
+      assert.equal(fixText(once), once, `${JSON.stringify(input)}: the result is a fixed point`);
+      assert.ok(sameMarkdown(once, input), `${JSON.stringify(input)}: the link and its text stay`);
+    }
+  });
+
+  it('keeps a document whose parse holds a node without a source position, rather than copying the wrong text', () => {
+    // The bare-URL search inside this broken label yields a link with no position.
+    const text = 'Before.\n\n[https://example.com/\\](<https://example.com/\\\\>)\nafter\n';
+    assert.equal(fixText(text), text);
+    // So does a quoted domain, which the parser does not link but the search does.
+    const quoted = 'Intro.\n\n"www.example.com" and _more_.\n\nEnd.\n';
+    assert.equal(fixText(quoted), quoted);
   });
 
   it('keeps a tilde fence whose info string holds a backtick', () => {

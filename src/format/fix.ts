@@ -47,6 +47,11 @@ function fixBody(body: string, options: FixOptions): string {
     const tree = parse(current);
     // Lint checked the source; a rewrite may expose a table or references it did not see.
     if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, current) !== undefined)) throw new MarkdownLimitError('nodes');
+    // The writer copies text by source offset. A node the parser left
+    // without one (the bare-URL search inside text can, as in
+    // `"www.example.com"`) would make it copy the wrong text: leave the
+    // body as it came.
+    if (hasUnplacedNode(tree)) return body;
     const next = new Writer(current, tree, options).root();
     if (next === current) return next;
     current = next;
@@ -70,6 +75,8 @@ class Writer {
   private readonly options: FixOptions;
   /** Where the table cell being written starts its text: an escape there stays. */
   private cellStart: number | undefined;
+  /** Whether the text being written is an autolink's, where a backslash escapes nothing. */
+  private literal = false;
 
   constructor(source: string, tree: Root, options: FixOptions) {
     this.source = source;
@@ -322,9 +329,15 @@ class Writer {
       case 'delete':
         for (const child of node.children) this.inlineEdits(child, edits);
         return;
-      case 'link':
+      case 'link': {
+        // An autolink (`<url>` or a bare URL) has no brackets in the source:
+        // its text becomes a label, where a backslash would escape.
+        const autolink = this.source[from] !== '[';
+        this.literal = autolink;
         edits.push({ from, to, text: this.link(node.children, node.url) });
+        this.literal = false;
         return;
+      }
       case 'linkReference': {
         const definition = this.definitions.get(node.identifier);
         if (definition) edits.push({ from, to, text: this.link(node.children, definition.url) });
@@ -339,7 +352,7 @@ class Writer {
         return;
       }
       case 'text':
-        edits.push(...textEdits(this.source, from, to, this.cellStart));
+        edits.push(...(this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, this.cellStart)));
         return;
       default:
         return;
@@ -393,6 +406,31 @@ function textEdits(source: string, from: number, to: number, keepAt?: number): E
     }
   }
   return edits;
+}
+
+/**
+ * Rewrites inside an autolink's text written as a link label: every
+ * backslash is literal there, so each is doubled (as Linear doubles one
+ * before a letter), and brackets and backticks are escaped. A backslash left
+ * single at the label's end would escape its closing bracket, and a backtick
+ * could open a code span that runs past it; either breaks the link.
+ */
+function literalEdits(source: string, from: number, to: number): Edit[] {
+  const edits: Edit[] = [];
+  for (let at = from; at < to; at++) {
+    const char = source[at]!;
+    if (char === '\\' || char === '[' || char === ']' || char === '`') edits.push({ from: at, to: at + 1, text: `\\${char}` });
+  }
+  return edits;
+}
+
+/** Whether a node below the root has no source position. */
+function hasUnplacedNode(tree: Root): boolean {
+  let unplaced = false;
+  visit(tree, (node) => {
+    if (node.position === undefined) unplaced = true;
+  });
+  return unplaced;
 }
 
 /** The character a reference stands for, or undefined when it names none. */
