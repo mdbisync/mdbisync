@@ -29,7 +29,8 @@ space (`| a  |`), which `fix` writes as `| a |`. The sync takes only such
 re-spellings: a text that `fix` would change into another document (a
 setext heading's two lines written as one) stays as Linear has it. A file
 whose text Linear only re-spells keeps its own text, and a text with a lint
-finding stays as it is, as with `fix` itself.
+finding that `fix` leaves to the author stays as it is, as with `fix`
+itself.
 
 `fix` runs as the `linear-format` pre-commit hook, which every
 synchronized repository needs, and `lint` as the optional
@@ -212,6 +213,9 @@ Inline text:
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`.
 - An escaped `#` inside a line loses its escape: `a \# b` becomes `a # b`.
+- A backslash line break (`\` at the end of a line) is written as two
+  trailing spaces, which Linear keeps as the same break (see
+  [`hard-break-backslash`](#hard-break-backslash)).
 - A `-` or `*` that starts a line of a paragraph as text gets a backslash,
   as Linear writes it: `-- a remark` becomes `\-- a remark`, and `*note`
   becomes `\*note`.
@@ -253,8 +257,11 @@ names a missing file, until the document or its image is fixed: see
 
 ## Lint rules
 
-Each rule is a construct Linear would lose or alter. `fix` never rewrites a
-file with a finding, so nothing is lost silently; change the file yourself.
+Each rule is a construct Linear would lose or alter, and its message says
+what to do. `fix` never rewrites a file with a finding, so nothing is lost
+silently; change the file yourself. The one exception is
+[`hard-break-backslash`](#hard-break-backslash), which `fix` writes in a
+form Linear keeps where it can.
 
 ### `footnote`
 
@@ -283,17 +290,16 @@ tildes, `~~strikethrough~~`, are fine.
 
 ### `table-escaped-pipe`
 
-An escaped pipe in a plain table cell splits the row. Linear drops the
-backslash, and the pipe starts a new cell.
+An escaped pipe in a plain table cell splits the row. Put the cell text in
+inline code, or rephrase it without the pipe. Linear drops the backslash,
+and the pipe starts a new cell; in inline code (`` `a \| b` ``) it is kept
+as it is.
 
 ```markdown
 | Expression | Meaning |
 | -- | -- |
 | a \| b | either |
 ```
-
-Instead, put the cell text in inline code (`` `a \| b` ``, kept as it is)
-or rephrase without the pipe.
 
 ### `table-hash-cell`
 
@@ -417,7 +423,8 @@ Instead, rename one of them.
 
 ### `table-alignment`
 
-Table column alignment is dropped.
+Table column alignment is dropped. Remove the colons from the separator row
+to accept that. The separators are then plain: `| -- | -- |`.
 
 ```markdown
 | Item | Price |
@@ -425,68 +432,78 @@ Table column alignment is dropped.
 | Tea | 3 |
 ```
 
-Instead, use plain separators (`| -- | -- |`).
-
 ### `link-scheme`
 
-Links must use http, https, mailto, a path or a fragment.
+Links must use http, https, mailto, a path or a fragment. Change the
+destination, or write the address as inline code. On pull, unsupported
+links are removed together with their text.
 
 ```markdown
 [Unsupported](javascript:alert%281%29)
 ```
 
-On pull, unsupported links are removed together with their text.
-
 ### `link-title`
 
-A link title is dropped. This holds for an inline link and for a reference
-definition.
+A link title is dropped. Remove the title, or move its text into the link
+text. This holds for an inline link and for a reference definition.
 
 ```markdown
 See [the guide](https://example.com/guide "Install guide").
 ```
 
-Instead, drop the title or put its text into the link text.
-
 ### `image-title`
 
-An image title is dropped from the Markdown.
+An image title is dropped from the Markdown. Remove the title, or move its
+text into the alt text.
 
 ```markdown
 ![Logo](logo.png "Company logo")
 ```
 
-Instead, drop the title or move its text into the alt text.
-
 ### `code-in-emphasis`
 
-Bold or italic around inline code is dropped from the code. Linear keeps the
-code and loses the emphasis around it.
+Bold or italic around inline code is dropped from the code. Write the code
+without emphasis, or emphasize the words around it. Linear keeps the code
+and loses the emphasis around it.
 
 ```markdown
 Run **`npm test`** first.
 ```
 
-Instead, write the code without emphasis, or emphasize the words around it.
-
 ### `hard-break-backslash`
 
-A backslash line break becomes a plain line break. Linear drops the
-backslash, and the two lines join into one.
+A backslash line break becomes a plain line break. Run fix to write it as
+two trailing spaces; where fix leaves it, put the text on one line or start
+a new paragraph. Linear drops the backslash, and the two lines join into
+one; it keeps a break written as two spaces, the same break in Markdown.
 
 ```markdown
 First line\
 Second line
 ```
 
-In a paragraph, end the line with two spaces or `<br>`, or start a new
-paragraph. For a break in a setext heading, see
-[`hard-break-in-heading`](#hard-break-in-heading).
+`fix` writes this as `First line` with two trailing spaces, then
+`Second line`. Spaces before the backslash become part of those two.
+
+`fix` leaves the file to you wherever two spaces would change the document:
+in a setext heading, which it writes on one line (see
+[`hard-break-in-heading`](#hard-break-in-heading)); where the backslash is
+alone on its line, or right after a task checkbox; where the line would
+read differently without its backslash (`#\`, `***\`, a `=` or `---`
+underline, a table row, emphasis that the backslash lets close); and where
+the break sits next to an image, which `fix` moves into a paragraph of its
+own. There you can also end the line with two spaces or `<br>` yourself,
+if the line still reads as you meant.
+
+A hook that trims trailing whitespace in Markdown files also removes the
+two spaces, and with them the break: exclude Markdown from it (see
+[Other fixing hooks](#other-fixing-hooks)).
 
 ### `hard-break-in-heading`
 
 A hard line break in a setext heading is lost when the heading is written
-as one line.
+as one line. Put the heading on one line, or move the text after the break
+below it. Below the heading, that text becomes a paragraph.
 `lint` reports the break's line and `fix` leaves the file as written.
 Each `␠` below represents a trailing space.
 
@@ -498,13 +515,12 @@ Above the gate
 
 A backslash break is reported as `hard-break-backslash`.
 
-To make the file pass lint, put the heading on one line or move the text
-after the break into a paragraph below the heading.
-
 ### `git-conflict-marker`
 
 Git conflict marker lines are rewritten as headings, quotes or collapsible
-sections. An unresolved merge would reach Linear mangled.
+sections. Resolve the conflict. An unresolved merge would reach Linear
+mangled. Marker lines inside code (fences, indented code and inline code)
+are text and pass.
 
 ```markdown
 <<<<<<< ours
@@ -513,9 +529,6 @@ The meeting is on Monday.
 The meeting is on Tuesday.
 >>>>>>> theirs
 ```
-
-Instead, resolve the conflict. Marker lines inside code (fences, indented
-code and inline code) are text and pass.
 
 ### `url-in-html`
 
@@ -535,46 +548,46 @@ Instead, use Markdown with an image file of the repository:
 A web address Markdown finds inside other text, such as "www.example.com" in
 quotes, cannot be matched to its text in the source, for example because an
 escape or a character reference spells it, so fix cannot write it as a link.
-`fix` leaves the file as it is; the sync sends it unchanged.
+Write it in angle brackets or as a link. For example,
+`<https://www.example.com/a_b>` is a link `fix` writes. Until then, `fix`
+leaves the file as it is; the sync sends it unchanged.
 
 ```markdown
 See "www.example.com/a\_b" for details.
 ```
 
-Instead, write it in angle brackets (`<https://www.example.com/a_b>`) or as a
-link.
-
 ### `block-first-in-list-item`
 
-A list item that starts with a heading, code or quote is written in a form
-Markdown reads as an empty item. Linear writes the marker, a blank line and
-the indented block, so the block falls out of the list.
+A list item that starts with a heading, code, a quote, a list or another
+block is written in a form Markdown reads as an empty item. Start the item
+with a line of text and put the block below it. Linear's list items always
+start with a paragraph: it adds an empty one and writes the marker, a blank
+line and the indented block, so the block falls out of the list. A list
+that starts an item (`* * a`, `1. 3. b`) counts too. `fix` cannot choose
+the text the item should start with, so it leaves the file to you.
 
 ```markdown
 * ## Step one
   Install the tools.
 ```
 
-Instead, start the item with a line of text and put the block below it.
-
 ### `ordered-task-list`
 
-An ordered task list becomes a bullet task list. Linear's task lists have no
-numbers, so the items lose their order numbers; a task item anywhere in an
-ordered list counts.
+An ordered task list becomes a bullet task list. Use a bullet task list, or
+an ordered list without checkboxes. Linear's task lists have no numbers, so
+the items lose their order numbers; a task item anywhere in an ordered list
+counts.
 
 ```markdown
 1. [ ] Draft the outline
 2. [x] Pick a date
 ```
 
-Instead, use a bullet task list (`- [ ] Draft the outline`), or an ordered
-list without checkboxes.
-
 ### `image-not-in-repository`
 
 An image must be a relative path to a file of the repository, not a URL,
-an absolute path or a path outside it. The sync uploads the files a
+an absolute path or a path outside it. Add the file to the repository and
+link it by its relative path. The sync uploads the files a
 document's images name; an image anywhere else would depend on the reader's
 network and on what Linear does with it. Linear has kept such an image,
 copied it to an upload of its own, and, most recently, kept only its alt
@@ -587,9 +600,9 @@ repository. Plain links to URLs are not affected.
 ![Revenue chart](https://example.com/charts/revenue.png)
 ```
 
-Instead, add the image file to the repository, in the same pull request,
-and link it by its relative path: `![Revenue chart](images/revenue.png)`.
-A file stored with Git LFS counts like any other.
+Add the file in the same pull request, for example as
+`![Revenue chart](images/revenue.png)`. A file stored with Git LFS counts
+like any other.
 
 ### `image-file-missing`
 
@@ -703,7 +716,9 @@ Markdown files:
 ```
 
 Otherwise every run changes the files again, and the CI example's check
-never passes.
+never passes. A backslash line break is the exception, and the worse case:
+`fix` writes it as two spaces, `trailing-whitespace` removes them, and both
+hooks then pass with the break gone.
 
 ### In CI
 

@@ -317,6 +317,27 @@ describe('lint and fix commands', () => {
     assert.deepEqual(runFix(['nowhere'], dir), { exitCode: 2, stdout: '', stderr: 'no such file or folder: nowhere\n' });
   });
 
+  it('fix writes a backslash break in a paragraph as two spaces and reports one it leaves', (t) => {
+    const folder = mkdtempSync(join(tmpdir(), 'backslash-break-'));
+    t.after(() => rmSync(folder, { recursive: true, force: true }));
+    writeFileSync(join(folder, 'walk.md'), '- Boots\\\n  and a map\n');
+    writeFileSync(join(folder, 'mixed.md'), 'Boots\\\nand a map\n\nH~2~O\n');
+    writeFileSync(join(folder, 'heading.md'), 'Boots\\\nand a map\n===\n');
+    const finding = (file: string, line: number, rule: LintRule) => `${file}:${line}: ${rule}: ${LINT_RULES[rule]}\n`;
+    const lintBefore = finding('heading.md', 1, 'hard-break-backslash')
+      + finding('mixed.md', 1, 'hard-break-backslash') + finding('mixed.md', 4, 'subscript')
+      + finding('walk.md', 1, 'hard-break-backslash');
+    assert.deepEqual(runLint([], folder), { exitCode: 1, stdout: lintBefore, stderr: '' });
+    // A file with another finding is left as it is; the heading has no form for the break.
+    const left = finding('heading.md', 1, 'hard-break-backslash') + finding('mixed.md', 1, 'hard-break-backslash') + finding('mixed.md', 4, 'subscript');
+    assert.deepEqual(runFix([], folder), { exitCode: 1, stdout: `walk.md: fixed\n${left}`, stderr: '' });
+    assert.equal(readFileSync(join(folder, 'walk.md'), 'utf8'), '* Boots  \n  and a map');
+    assert.equal(readFileSync(join(folder, 'mixed.md'), 'utf8'), 'Boots\\\nand a map\n\nH~2~O\n');
+    assert.equal(readFileSync(join(folder, 'heading.md'), 'utf8'), 'Boots\\\nand a map\n===\n');
+    assert.deepEqual(runFix([], folder), { exitCode: 1, stdout: left, stderr: '' });
+    assert.deepEqual(runLint(['walk.md'], folder), { exitCode: 0, stdout: '', stderr: '' });
+  });
+
   it('reports hard breaks in setext headings and keeps the file through two fixes', (t) => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'heading-hard-break-'));
     t.after(() => rmSync(fixtureDir, { recursive: true, force: true }));
