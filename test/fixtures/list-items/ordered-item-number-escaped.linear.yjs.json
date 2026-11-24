@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"3. plum","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"-","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"*","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-f30fd3d5","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -561,6 +561,14 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "images/split-text-after-image.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/split-text-before-image.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "images/svg.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -749,6 +757,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/ordered-item-number-escaped.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/release-notes.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -758,6 +770,10 @@
       "fixedPoint": true
     },
     "list-items/task-code.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/task-list-ordered.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

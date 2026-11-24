@@ -11,7 +11,7 @@ import { after, describe, it } from 'node:test';
 import { markdownFiles, runFix, runLint } from './command.ts';
 import { fixText } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
-import { MarkdownLimitError, parse, visit } from './markdown.ts';
+import { parse, visit } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
 const cases: Array<[LintRule, string, number]> = [
@@ -45,6 +45,9 @@ const cases: Array<[LintRule, string, number]> = [
   ['url-in-html', '<div>1git+ssh://host/repo</div>', 1],
   ['url-in-html', '<img SRC = "logo.png">', 1],
   ['block-first-in-list-item', '* ## Heading\n* Plain', 1],
+  ['ordered-task-list', '1. [ ] alpha\n2. [x] beta', 1],
+  ['ordered-task-list', '1. one\n2. [ ] two', 2],
+  ['ordered-task-list', '* a\n\n  3. [X] b', 3],
   ['image-not-in-repository', 'Intro.\n\n![Chart](https://example.com/chart.png)', 3],
   ['image-not-in-repository', '![Chart](https://uploads.linear.app/a/b/chart.png)', 1],
   ['image-not-in-repository', '![Dot](data:image/png;base64,iVBORw0KGgo=)', 1],
@@ -128,12 +131,15 @@ describe('lint rules', () => {
     assert.deepEqual(lintText('doc.md', tables).map((f) => [f.rule, f.line]), [['markdown-complexity', 347]]);
   });
 
-  it('refuses a table that only a rewrite exposes: fix throws instead of padding it', () => {
-    // The image makes the header one cell wider than the delimiter row, so the source has no table; once
-    // fix moves the image out of the paragraph, the rest is a 300-column table over 300 one-cell rows.
+  it('keeps the rows around an image text: moving the image out exposes no table to pad', () => {
+    // The image makes the header one cell wider than the delimiter row, so the source has no table. Without
+    // the image, the rest would be a 300-column table over 300 one-cell rows: fix escapes its delimiter row.
     const text = `![i](i.png) ${raggedTable(300, 300)}`;
     assert.deepEqual(lintText('doc.md', text), []);
-    assert.throws(() => fixText(text), MarkdownLimitError);
+    const fixed = fixText(text);
+    assert.ok(fixed.startsWith(`![i](i.png)\n\n${'|a'.repeat(300)}|\n\\${'|-'.repeat(300)}|\n`), 'the delimiter row is escaped');
+    assert.equal(fixText(fixed), fixed);
+    visit(parse(fixed), (node) => assert.notEqual(node.type, 'table'));
   });
 
   it('keeps padding a ragged table within the limits', () => {
@@ -158,12 +164,15 @@ describe('lint rules', () => {
     assert.deepEqual(lintText('doc.md', images).map((f) => f.rule), ['markdown-complexity']);
   });
 
-  it('refuses references that only a rewrite exposes: fix throws instead of expanding them', { timeout: 60_000 }, () => {
+  it('keeps a definition after an image text: moving the image out exposes no references to expand', { timeout: 60_000 }, () => {
     // The definition shares a paragraph with an image, so the source has none and the references are text;
-    // once fix moves the image out of the paragraph, the definition applies to all of them.
+    // fix escapes its label once the image leaves the paragraph, so they stay text.
     const text = `${'[a][r] '.repeat(100)}\n\n![i](i.png) [r]: https://example.com/${'x'.repeat(5_000)}\n`;
     assert.deepEqual(lintText('doc.md', text), []);
-    assert.throws(() => fixText(text), MarkdownLimitError);
+    const fixed = fixText(text);
+    assert.ok(fixed.includes('\n\n![i](i.png)\n\n\\[r\\]: '), 'the label is escaped');
+    assert.ok(fixed.length < 2 * text.length, 'no reference is expanded');
+    assert.equal(fixText(fixed), fixed);
   });
 
   it('counts the parentheses fix adds around a shortcut reference', () => {
@@ -402,16 +411,16 @@ describe('lint and fix commands', () => {
     }
   });
 
-  it('lint and fix report a table that only a rewrite exposes, and leave the file unchanged', () => {
+  it('lint and fix keep rows around an image text, without exposing a table', () => {
     const path = join(dir, 'exposed.md');
     const source = `![i](i.png) ${'|a'.repeat(300)}|\n${'|-'.repeat(300)}|\n${'|x|\n'.repeat(300)}`;
-    const message = `exposed.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
     try {
       writeFileSync(path, source);
       writeFileSync(join(dir, 'i.png'), 'png');
-      assert.deepEqual(runLint(['exposed.md'], dir), { exitCode: 1, stdout: message, stderr: '' });
-      assert.deepEqual(runFix(['exposed.md'], dir), { exitCode: 1, stdout: message, stderr: '' });
-      assert.equal(readFileSync(path, 'utf8'), source);
+      assert.deepEqual(runLint(['exposed.md'], dir), { exitCode: 1, stdout: "exposed.md: not in Linear's form; run fix\n", stderr: '' });
+      assert.deepEqual(runFix(['exposed.md'], dir), { exitCode: 1, stdout: 'exposed.md: fixed\n', stderr: '' });
+      assert.ok(readFileSync(path, 'utf8').includes(`\n\\${'|-'.repeat(300)}|\n`), 'the delimiter row is escaped');
+      assert.deepEqual(runLint(['exposed.md'], dir), { exitCode: 0, stdout: '', stderr: '' });
     } finally {
       rmSync(path, { force: true });
       rmSync(join(dir, 'i.png'), { force: true });

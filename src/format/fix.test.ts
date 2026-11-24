@@ -112,6 +112,65 @@ describe('an empty first nested item after its parent’s text', () => {
   }
 });
 
+describe('text split off at an image', () => {
+  // Each part becomes a paragraph of its own; the fixture bank holds the
+  // escapes Linear writes. Linear writes `<`, `2)`, a `|` row and `$$`
+  // there without an escape, which Markdown would read as a block.
+  const split: Array<[string, string, string]> = [
+    ['a hash becomes \\#', 'Before ![a](x.png) # x', 'Before\n\n![a](x.png)\n\n\\# x'],
+    ['an escaped hash keeps its escape', 'Before ![a](x.png) \\# x', 'Before\n\n![a](x.png)\n\n\\# x'],
+    ['a quote marker', 'Before ![a](x.png) > x', 'Before\n\n![a](x.png)\n\n\\> x'],
+    ['a rule of stars', 'Before ![a](x.png) ***', 'Before\n\n![a](x.png)\n\n\\*\\*\\*'],
+    ['a plus bullet', 'Before ![a](x.png) + x', 'Before\n\n![a](x.png)\n\n\\+ x'],
+    ['a numbered item keeps its number', 'Before ![a](x.png) 1. x', 'Before\n\n![a](x.png)\n\n1\\. x'],
+    ['a parenthesis item keeps its number', 'Before ![a](x.png) 2) x', 'Before\n\n![a](x.png)\n\n2\\) x'],
+    ['an HTML block start', 'Before ![a](x.png) <div> x', 'Before\n\n![a](x.png)\n\n\\<div> x'],
+    ['a fence of four backticks', 'Before ![a](x.png) ````', 'Before\n\n![a](x.png)\n\n\\`\\`\\`\\`'],
+    ['a table header and delimiter row', 'Before ![a](x.png) | a |\n| - |\n| 1 |', 'Before\n\n![a](x.png)\n\n| a |\n\\| - |\n| 1 |'],
+    ['a table after text, its delimiter row ending in the image', 'Before\n| a |\n| - | ![a](x.png)', 'Before\n| a |\n\\| - |\n\n![a](x.png)'],
+    ['$$ math lines', 'Before ![a](x.png) $$\nx\n$$', 'Before\n\n![a](x.png)\n\n\\$$\nx\n$$'],
+    ['a setext underline before the image', 'Title\n=== ![a](x.png)', 'Title\n\\===\n\n![a](x.png)'],
+    ['an escaped quote that is then a heading', 'Before ![a](x.png) > # x', 'Before\n\n![a](x.png)\n\n\\> # x'],
+    ['a definition before the image', '[ref]: /dest ![a](x.png)', '\\[ref\\]: /dest\n\n![a](x.png)'],
+    ['a rule before the image', '*** ![a](x.png)', '\\*\\*\\*\n\n![a](x.png)'],
+    ['an underline after a task checkbox', '- [ ] # Before\n  === ![a](x.png)', '- [ ] # Before\n  \\===\n\n  ![a](x.png)'],
+    ['a task checkbox keeps the hash after it as text', '- [ ] # x ![a](x.png) y', '- [ ] # x\n\n  ![a](x.png)\n\n  y'],
+    ['a Linear collapsible section', 'Before ![a](x.png) +++ Details\nBody\n+++', 'Before\n\n![a](x.png)\n\n\\+++ Details\nBody\n+++'],
+    ['a Git conflict marker', 'Before ![a](x.png) <<<<<<< ours', 'Before\n\n![a](x.png)\n\n\\<<<<<<< ours'],
+    ['in a quote', '> Before ![a](x.png) # x', '> Before\n>\n> ![a](x.png)\n>\n> \\# x'],
+    ['in a list item', '* Before ![a](x.png) > x', '* Before\n\n  ![a](x.png)\n\n  \\> x'],
+  ];
+  // The text and images in order. Inline HTML counts as its text: Linear stores `<div>` in a paragraph as text.
+  const texts = (markdown: string): string => {
+    const out: string[] = [];
+    visit(parse(markdown), (node) => {
+      if (node.type === 'text' || node.type === 'html') out.push(node.value.trim());
+      else if (node.type === 'image') out.push(`image ${node.url}`);
+    });
+    return out.filter((entry) => entry !== '').join(' ');
+  };
+  for (const [name, input, expected] of split) {
+    it(`stays a paragraph: ${name}`, () => {
+      const once = fixText(input);
+      assert.equal(once, expected);
+      assert.equal(fixText(once), once, 'a second fix changes nothing');
+      assert.equal(texts(once), texts(input), 'the same text and image');
+      const blocks: string[] = [];
+      visit(parse(once), (node) => {
+        if (['heading', 'thematicBreak', 'code', 'html', 'table', 'definition'].includes(node.type)) blocks.push(node.type);
+      });
+      assert.deepEqual(blocks, [], 'no block but paragraphs');
+    });
+  }
+
+  it('writes no backslash into a code span that opens like a fence', () => {
+    // Escaping its backticks would end the span; it keeps the block it reads as.
+    const once = fixText('Before ![a](x.png) ```js\nfoo``` y');
+    assert.equal(once, 'Before\n\n![a](x.png)\n\n````js\nfoo``` y\n````');
+    assert.equal(fixText(once), once, 'a second fix changes nothing');
+  });
+});
+
 describe('links to files that are not there', () => {
   const missing = { linkedFileExists: (url: string) => !url.includes('missing') };
   it('a list item with only a link to a missing file stays a link, as Linear keeps it', () => {
@@ -274,6 +333,59 @@ describe('what fix leaves alone', () => {
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
       assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
     }
+  });
+
+  it('leaves an ordered task list to its author: Linear would drop its numbers', () => {
+    for (const text of ['1. [ ] alpha\n2. [x] beta', '1. one\n2. [ ] two', '* a\n\n  3. [x] b']) {
+      assert.equal(fixText(text), text, text);
+      assert.ok(lintText('a.md', text).some((finding) => finding.rule === 'ordered-task-list'), text);
+    }
+  });
+
+  it('keeps item text that starts like a list marker as text when it writes the blank line before the list', () => {
+    // A list that interrupts a paragraph cannot open a nested list on its
+    // first line with a number other than 1 or an empty item: that stays
+    // the item's text, and needs an escape once the list stands apart.
+    const marked: Array<[string, string]> = [
+      ['Note\n1. 3. plum', 'Note\n\n1. 3\\. plum'],
+      ['Note\n1. 3) plum\n2. pear', 'Note\n\n1. 3\\) plum\n2. pear'],
+      ['Note\n1. -', 'Note\n\n1. \\-'],
+      ['Note\n1. *', 'Note\n\n1. \\*'],
+      ['Note\n- 2. fig', 'Note\n\n* 2\\. fig'],
+      ['> Note\n> 1. 3. plum', '> Note\n>\n> 1. 3\\. plum'],
+      // Inside an item the list still follows its paragraph; Linear reads the text as a list there too.
+      ['- Note\n  1. 3. plum', '* Note\n  1. 3\\. plum'],
+      // After a task checkbox the text does not start its line: no escape.
+      ['- [ ] 1. Draft\n- [x] - pear', '- [ ] 1. Draft\n- [X] - pear'],
+    ];
+    const read = (markdown: string): string[] => {
+      const out: string[] = [];
+      visit(parse(markdown), (node) => {
+        out.push(node.type === 'text' ? node.value : node.type);
+      });
+      return out;
+    };
+    for (const [text, expected] of marked) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(read(fixed), read(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${text}`);
+    }
+  });
+
+  it("takes the escaped marker when it captures Linear's text: a lone \\+ is no +++ delimiter", () => {
+    // Linear writes a bare `+` item text without the escape fix writes.
+    const linear = '* Note\n  1. +';
+    assert.equal(fixLinearText(linear, linear, () => false), '* Note\n  1. \\+');
+    assert.ok(!sameMarkdown('\\+++ Title', '+++ Title'), 'an escaped +++ delimiter stays apart');
+  });
+
+  it('keeps text split off at an image as text when it starts like a list marker', () => {
+    assert.equal(fixText('Before ![a](x.png) 3. plum'), 'Before\n\n![a](x.png)\n\n3\\. plum');
+    assert.equal(fixText('Before ![a](x.png) - pear'), 'Before\n\n![a](x.png)\n\n\\- pear');
+    // The part before the image still follows a task checkbox: no escape there.
+    assert.equal(fixText('- [ ] 1. Draft ![a](x.png) 2. more'), '- [ ] 1. Draft\n\n  ![a](x.png)\n\n  2\\. more');
   });
 
   it('keeps a lone -- line between blank lines, and reads one under a paragraph as Markdown does: a heading', () => {

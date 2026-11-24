@@ -29,8 +29,7 @@ export interface FixOptions {
  * Returns the text in Linear's form, or the text itself when lint finds a
  * construct Linear would lose or alter. Throws `MarkdownLimitError` when a
  * rewrite takes the text over the Markdown limits, which lint cannot see in
- * the source: an inline image that leaves its paragraph can expose a table
- * or reference links.
+ * the source.
  */
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
@@ -45,7 +44,10 @@ function fixBody(body: string, options: FixOptions): string {
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
     const tree = parse(current);
-    // Lint checked the source; a rewrite may expose a table or references it did not see.
+    // Lint checked the source; a rewrite may expose a table or references it
+    // did not see. Text split off at an image is escaped so it exposes none
+    // (a multi-line code span that opens like one is the exception): this
+    // guard keeps the limits for any rewrite that still does.
     if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, current) !== undefined)) throw new MarkdownLimitError('nodes');
     // The writer copies text by source offset. A node the parser left
     // without one (the bare-URL search inside text can, as in
@@ -67,6 +69,13 @@ type Container = { kind: 'quote' } | { kind: 'item'; indent: number };
 // Characters that start a block when they open a line (`<` an HTML block).
 const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)])/;
 
+// A paragraph of `$$` lines around math, which `fix` writes as a `math` fence.
+const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
+
+// A list marker that opens a text: a bullet or a number with its delimiter,
+// followed by a space, a tab or the end of the line.
+const LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
+
 class Writer {
   private readonly definitions = new Map<string, Definition>();
   private readonly containers: Container[] = [];
@@ -79,6 +88,8 @@ class Writer {
   private fileBlockIndent = 0;
   /** Whether the text being written is an autolink's, where a backslash escapes nothing. */
   private literal = false;
+  /** The paragraph that follows a task item's checkbox: it does not start its line. */
+  private taskParagraph: Paragraph | undefined;
 
   constructor(source: string, tree: Root, options: FixOptions) {
     this.source = source;
@@ -172,19 +183,43 @@ class Writer {
   /** A paragraph; `$$` math becomes a `math` fence, and an image shares no paragraph with text. */
   private paragraph(node: Paragraph): string[] {
     const raw = this.source.slice(start(node), end(node));
-    const math = /^\$\$\n([\s\S]*)\n\$\$$/.exec(raw);
+    const math = MATH_PARAGRAPH.exec(raw);
     if (math) return [`\`\`\`math\n${math[1]}\n\`\`\``];
     const isImage = (child: PhrasingContent): boolean => child.type === 'image' || child.type === 'imageReference';
     const images = node.children.filter(isImage).length;
     const hasText = node.children.some((child) => !isImage(child) && !(child.type === 'text' && child.value.trim() === ''));
-    if (images === 0 || (!hasText && images === 1)) return [this.inline(node.children)];
+    if (images === 0 || (!hasText && images === 1)) return [node === this.taskParagraph ? this.inline(node.children) : this.paragraphText(node.children)];
     // Linear holds images as blocks: text before and after an image becomes its own paragraph.
     const parts: PhrasingContent[][] = [[]];
     for (const child of node.children) {
       if (isImage(child)) parts.push([child], []);
       else parts.at(-1)!.push(child);
     }
-    return parts.map((part) => this.inline(part).trim()).filter((part) => part !== '');
+    // The first part of a task item's paragraph follows its checkbox: it does not start its line.
+    return parts
+      .map((part, index) => {
+        const afterCheckbox = index === 0 && node === this.taskParagraph;
+        const text = afterCheckbox ? this.inline(part).trim() : this.paragraphText(part, true);
+        return paragraphPart(text, !afterCheckbox);
+      })
+      .filter((part) => part !== '');
+  }
+
+  /**
+   * A paragraph's text, which starts a line. Text that starts like a list
+   * marker gets its marker escaped: it was text only because it could not
+   * interrupt a paragraph (`Note` / `1. 3. plum`, where `3. plum` stays the
+   * item's text), and the blank line `fix` writes before the list would
+   * make it a list; Linear reads it as one either way. `trim` drops the
+   * spaces around a part split off at an image.
+   */
+  private paragraphText(children: readonly PhrasingContent[], trim = false): string {
+    const text = trim ? this.inline(children).trim() : this.inline(children);
+    if (children[0]?.type !== 'text') return text;
+    const marker = LIST_MARKER_START.exec(text);
+    if (marker === null) return text;
+    const at = marker[0].length - 1;
+    return `${text.slice(0, at)}\\${text.slice(at)}`;
   }
 
   private list(node: List, interruptsParagraph = false): string {
@@ -226,6 +261,7 @@ class Writer {
     }
     if (first === undefined) return marker;
     this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
+    if (item.checked !== null && item.checked !== undefined && first.type === 'paragraph') this.taskParagraph = first;
     // Blocks of an item are a blank line apart, but a nested list follows
     // its paragraph on the next line when it can interrupt that paragraph.
     // Ordered lists starting above or below 1, lists starting with an empty
@@ -498,6 +534,88 @@ function escaped(text: string, at: number): boolean {
   let run = 0;
   while (text[at - 1 - run] === '\\') run++;
   return run % 2 === 1;
+}
+
+/**
+ * A part of a paragraph split off at an image, which becomes a paragraph of
+ * its own. Where it would read as another block alone (a heading, quote,
+ * rule, list, code fence, HTML block, definition, table, `$$` math, a
+ * `+++` collapsible section or a Git conflict marker), it gets the escape
+ * that keeps it text. The
+ * escapes are Linear's where Linear writes one: `\#`, `\>`, `\---`, `\-`,
+ * every fence character, `\[label\]:`, a setext underline's first character
+ * and a table delimiter row's. Linear writes `<`, `2)`, `|` and `$$` there
+ * without an escape, so those get the plain one. The first part of a task
+ * item's paragraph follows its checkbox (`startsLine` false): only its later
+ * lines can turn it into a block (a setext underline, a delimiter row).
+ */
+function paragraphPart(text: string, startsLine: boolean): string {
+  // An escape can expose another block (`> # x` once the quote is escaped
+  // is text; a heading with an underline needs two). Each round escapes a
+  // construct of its own line, so the lines bound the rounds.
+  for (let round = 0; round <= lineBreaks(text) + 2; round++) {
+    // A backslash in a code span is code text, and its backticks would end the span:
+    // such a part keeps that block (a multi-line code span that opens like a fence).
+    const spans = codeSpans(text, 0, text.length);
+    const at = blockStartEscapes(text, startsLine).filter((offset) => !spans.some(([from, to]) => from <= offset && offset < to));
+    if (at.length === 0) break;
+    for (const offset of [...at].sort((a, b) => b - a)) text = `${text.slice(0, offset)}\\${text.slice(offset)}`;
+  }
+  return text;
+}
+
+/** Where `text` needs a backslash to stay a paragraph on its own; empty when it is one. */
+function blockStartEscapes(text: string, startsLine: boolean): number[] {
+  // Linear's collapsible section, and a line `lint` reads as a Git conflict marker.
+  if (startsLine && /^(?:\+\+\+|<{7}(?: |$))/.test(text)) return [0];
+  // After a checkbox the first line is item text: a letter in the
+  // checkbox's place keeps that line from opening a block, as it does.
+  const shift = startsLine ? 0 : 1;
+  const source = startsLine ? text : `x${text}`;
+  const blocks = parse(source).children;
+  // Where the line after `at` starts its text, in `text`.
+  const lineAfter = (at: number): number => {
+    const row = source.indexOf('\n', at) + 1;
+    return row + /^[ \t]*/.exec(source.slice(row))![0].length - shift;
+  };
+  // A table can also interrupt the part's first lines: its delimiter row
+  // held the image, which kept it from being one.
+  const tables = blocks.filter((block) => block.type === 'table').map((table) => lineAfter(start(table)));
+  if (tables.length > 0) return tables;
+  const [block] = blocks;
+  if (block === undefined) return [];
+  const raw = source.slice(start(block), end(block));
+  // Past here only a part that starts its line opens a block on its first
+  // line; with the letter in front, `start(block)` is its offset in `text`.
+  switch (block.type) {
+    case 'paragraph':
+      return MATH_PARAGRAPH.test(text) ? [0] : [];
+    case 'heading':
+      // A setext underline, or an ATX heading's hash.
+      return [raw.includes('\n') ? lineAfter(start(block) + raw.lastIndexOf('\n')) : start(block)];
+    case 'thematicBreak':
+      // Linear escapes every star or underscore of a rule, and only the first dash.
+      return raw[0] === '-' ? [start(block)] : [...raw].flatMap((char, index) => (char === raw[0] ? [start(block) + index] : []));
+    case 'blockquote':
+    case 'html':
+      return [start(block)];
+    case 'list': {
+      const ordered = /^\d{1,9}(?=[.)])/.exec(raw);
+      return [start(block) + (ordered?.[0].length ?? 0)];
+    }
+    case 'code': {
+      const fence = /^(?:`{3,}|~{3,})/.exec(raw);
+      return fence === null ? [] : Array.from(fence[0], (_, index) => start(block) + index);
+    }
+    case 'definition':
+    case 'footnoteDefinition': {
+      let close = start(block) + 1;
+      while (close < text.length && (text[close] !== ']' || escaped(text, close))) close++;
+      return [start(block), close];
+    }
+    default:
+      return [];
+  }
 }
 
 /** Whether a node below the root has no source position. */

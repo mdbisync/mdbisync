@@ -64,6 +64,8 @@ rules:
     title: "A URL inside raw HTML is turned into a Markdown link."
   - id: block-first-in-list-item
     title: "A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item."
+  - id: ordered-task-list
+    title: "An ordered task list becomes a bullet task list."
   - id: table-hash-cell
     title: "A table body cell starting with # becomes a heading."
   - id: image-not-in-repository
@@ -251,6 +253,10 @@ known_constructs:
     class: fixable
   - construct: heading-in-list
     class: lint-error
+  - construct: task-list-ordered
+    class: lint-error
+  - construct: ordered-item-number-escaped
+    class: unchanged
   - construct: task-in-quote
     class: fixable
   - construct: math-in-list
@@ -584,6 +590,10 @@ known_constructs:
   - construct: image-path-spaces
     class: fixable
   - construct: image-inline-text
+    class: fixable
+  - construct: image-split-text-after
+    class: fixable
+  - construct: image-split-text-before
     class: fixable
   - construct: image-shared
     class: unchanged
@@ -2484,6 +2494,22 @@ fixtures:
     class: fixable
     basis: known
     canary: kx-72e3775f
+  - file: "images/split-text-after-image.md"
+    group: images
+    construct: image-split-text-after
+    class: fixable
+    basis: known
+    canary: kx-87ee206c
+    corpus: false
+    note: "text after an inline image that starts like a heading, quote, rule, list, fence or definition stays a paragraph"
+  - file: "images/split-text-before-image.md"
+    group: images
+    construct: image-split-text-before
+    class: fixable
+    basis: known
+    canary: kx-6968019d
+    corpus: false
+    note: "text before an inline image whose last line is a === or --- underline or a table delimiter row stays a paragraph"
   - file: "images/shared-a.md"
     group: images
     construct: image-shared
@@ -2806,6 +2832,24 @@ fixtures:
     corpus: false
     probe_pending: true
     note: "a lazy -- or == line continues an item or quote paragraph; it must not underline it as a heading"
+  - file: "list-items/task-list-ordered.md"
+    group: list-items
+    construct: task-list-ordered
+    class: lint-error
+    rule: ordered-task-list
+    line: 1
+    basis: known
+    canary: kx-6b20d845
+    corpus: false
+    note: "Linear stores an ordered task list as a bullet task list: the numbers go"
+  - file: "list-items/ordered-item-number-escaped.md"
+    group: list-items
+    construct: ordered-item-number-escaped
+    class: unchanged
+    basis: known
+    canary: kx-f30fd3d5
+    corpus: false
+    note: "item text that starts like a list marker, escaped so it stays text"
   - file: "construct-singles/image-alt-multiline-container.md"
     group: construct-singles
     construct: image-alt-multiline-container

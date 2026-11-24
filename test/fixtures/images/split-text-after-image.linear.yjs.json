@@ -1,0 +1,62 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"# Shelf","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"# Shelf","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"> Seed tray","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"---","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"- seed","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"```js","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"~~~","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"[shed]: ","marks":{"attribution":"user"}},{"text":"https://example.com/shed","marks":{"attribution":"user","link":{"href":"https://example.com/shed","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"===","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-87ee206c","marks":{"attribution":"user"}}]}
+  ]
+}
