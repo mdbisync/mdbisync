@@ -454,13 +454,50 @@ jobs:
         with:
           name: dependency-scan
           path: ${{ runner.temp }}/dependencies
+      # The draft's notes: the pull requests merged since the previous final release, as GitHub generates
+      # them between the two tags (with the categories of .github/release.yml), then the security files. The entry of
+      # the previous release's pins pull request, and bots named as new contributors, are left out. The first final release has nothing to
+      # collect, and notes that cannot be generated leave only the security sentence, with a warning,
+      # so the draft and its files are still created.
+      - name: Collect the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          notes="$RUNNER_TEMP/release-notes.md"
+          : > "$notes"
+          collect() {
+            local tags previous
+            tags=$(gh api "repos/$GH_REPO/git/matching-refs/tags/v" --paginate --jq '.[].ref | ltrimstr("refs/tags/")') || return 1
+            # The greatest final version below this one.
+            previous=$(printf '%s\n%s\n' "$tags" "$RELEASE_VERSION" | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -u -V \
+              | awk -v version="$RELEASE_VERSION" '$0 == version { print previous; exit } { previous = $0 }')
+            [ -n "$previous" ] || return 0
+            collected=$(gh api -X POST "repos/$GH_REPO/releases/generate-notes" -f tag_name="$RELEASE_VERSION" -f previous_tag_name="$previous" --jq .body) || return 1
+            [ -n "$collected" ] || return 1
+            # Errexit is off in a function called from `if`, so each write is checked.
+            # Bots are not new contributors; a New Contributors heading with no entry left is dropped.
+            printf '%s\n' "$collected" | awk '
+              /^\* Pin the workflow templates to v/ || /^\* @[^ ]+\[bot\] made their first contribution/ { next }
+              /^## New Contributors$/ { held = 1; next }
+              held && /^$/ { next }
+              held && /^\* / { print "## New Contributors" }
+              { held = 0; print }
+            ' > "$notes" || return 1
+            printf '\n## Security\n\n' >> "$notes" || return 1
+          }
+          if ! collect; then
+            : > "$notes"
+            echo '::warning::The release notes could not be collected; the draft carries only the security sentence.'
+          fi
+          echo 'The security report of this release is attached as security-report.md and its SPDX SBOM as sbom.spdx.json.' >> "$notes"
       - name: Create the draft release with the security report
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$RELEASE_VERSION" --draft --verify-tag --title "$RELEASE_VERSION" \
-            --notes 'The security report of this release is attached as security-report.md and its SPDX SBOM as sbom.spdx.json.' \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             "$RUNNER_TEMP/security/security-report.md" "$RUNNER_TEMP/security/security-summary.json" \
             "$RUNNER_TEMP/sbom/sbom.spdx.json" "$RUNNER_TEMP/dependencies/dependency-scan.json"
 
