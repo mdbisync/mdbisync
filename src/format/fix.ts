@@ -64,8 +64,8 @@ function fixBody(body: string, options: FixOptions): string {
 type Edit = { from: number; to: number; text: string };
 
 /** A container whose prefix starts each source line of its content: a quote, or a list item's indentation. */
-/** `column` is where the container's content starts on its first line, from the start of that line. */
-type Container = { kind: 'quote'; column: number } | { kind: 'item'; indent: number; column: number };
+/** `content` is the source offset where the container's content starts on its first line. */
+type Container = { kind: 'quote'; content: number } | { kind: 'item'; indent: number; content: number };
 
 // Characters that start a block when they open a line (`<` an HTML block).
 const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)])/;
@@ -157,8 +157,7 @@ class Writer {
         return ['---'];
       case 'blockquote': {
         const marker = this.source.indexOf('>', start(node));
-        const column = marker + (this.source[marker + 1] === ' ' ? 2 : 1) - lineStartOf(this.source, marker);
-        this.containers.push({ kind: 'quote', column });
+        this.containers.push({ kind: 'quote', content: marker + (this.source[marker + 1] === ' ' ? 2 : 1) });
         const { text, codeLines } = this.writtenBlocks(node.children);
         this.containers.pop();
         return [quoteLines(text, codeLines)];
@@ -291,10 +290,23 @@ class Writer {
    * and its content indent: in a code span, spaces beyond that are code text.
    */
   private itemContainer(item: ListItem): Container {
-    const marker = start(item) - lineStartOf(this.source, start(item));
+    // The parents' prefixes on the item's own line: a parent that starts on
+    // that line ends there at its content, any other at its prefix, which
+    // may be indented differently from the parent's first line.
+    // Columns count tabs to the next multiple of four.
+    const line = lineStartOf(this.source, start(item));
+    const columnAt = (offset: number): number => [...this.source.slice(line, offset)].reduce(advanceColumn, 0);
+    let at = line;
+    for (const container of this.containers) {
+      if (lineStartOf(this.source, container.content) === line) at = container.content;
+      else if (container.kind === 'quote') at += prefixOf(container, this.source.slice(at, start(item)))?.[0].length ?? 0;
+      else {
+        const end = columnAt(at) + container.indent;
+        while (at < start(item) && isSpaceOrTab(this.source[at]!) && advanceColumn(columnAt(at), this.source[at]!) <= end) at++;
+      }
+    }
     const content = this.contentIndent(item);
-    const parent = this.containers.at(-1)?.column ?? 0;
-    return { kind: 'item', indent: Math.max(0, marker - parent) + content, column: marker + content };
+    return { kind: 'item', indent: Math.max(0, columnAt(start(item)) - columnAt(at)) + content, content: start(item) + content };
   }
 
   /**
@@ -312,9 +324,8 @@ class Writer {
       if (marker !== '' && rest === '') return marker.length + 1;
       // A tab runs to the next multiple of four columns, counted from the
       // start of the source line: tabs before the marker move it too.
-      const advance = (column: number, char: string): number => (char === '\t' ? column + 4 - (column % 4) : column + 1);
-      const from = [...this.source.slice(lineStartOf(this.source, start(item)), start(item)) + marker].reduce(advance, 0);
-      const column = [...gap].reduce(advance, from);
+      const from = [...this.source.slice(lineStartOf(this.source, start(item)), start(item)) + marker].reduce(advanceColumn, 0);
+      const column = [...gap].reduce(advanceColumn, from);
       if (marker !== '' && rest.startsWith('[') && column > from && column - from <= 4) return marker.length + column - from;
     }
     return (first?.position?.start.column ?? 1) - (item.position?.start.column ?? 1);
@@ -388,7 +399,7 @@ class Writer {
     const line = this.source.slice(lineStart, this.source.indexOf('\n', lineStart) === -1 ? undefined : this.source.indexOf('\n', lineStart));
     for (const container of this.containers) {
       const rest = this.source.slice(at, lineStart + line.length);
-      const prefix = container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
+      const prefix = prefixOf(container, rest);
       // A lazy line carries no further prefixes. In an item, that is a line
       // indented less than the item's content: its spaces are its own, and
       // in a code span they are code text.
@@ -791,6 +802,16 @@ function attachmentLink(paragraph: Paragraph): Link | undefined {
 }
 
 /** Prefixes every line; empty lines get `empty` instead. */
+/** The prefix `container` takes at the start of `rest`: a quote marker or up to its item's indent in spaces. */
+function prefixOf(container: Container, rest: string): RegExpExecArray | null {
+  return container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
+}
+
+/** The column after `char`, from `column`: a tab runs to the next multiple of four. */
+function advanceColumn(column: number, char: string): number {
+  return char === '\t' ? column + 4 - (column % 4) : column + 1;
+}
+
 /** Where the line holding `at` starts. */
 function lineStartOf(source: string, at: number): number {
   return source.lastIndexOf('\n', at - 1) + 1;

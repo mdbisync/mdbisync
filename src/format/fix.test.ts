@@ -360,6 +360,9 @@ describe('what fix leaves alone', () => {
       ['  - Pack `the\n    tent`', '* Pack `the\n  tent`'],
       ['  - Pack `the\n   tent`', '* Pack `the\n     tent`'],
       ['> - [ ] Pack `the\n>     tent`', '> - [ ] Pack `the\n>     tent`'],
+      // A parent's prefix is measured on the item's own line, not on the parent's first line.
+      ['> Pack\n>\n  > - `the\n  >   tent`', '> Pack\n>\n> * `the\n>   tent`'],
+      ['- Pack\n\n    - [ ] `the\n      tent`', '* Pack\n  - [ ] `the\n    tent`'],
     ];
     for (const [text, expected] of continued) {
       const fixed = fixText(text);
