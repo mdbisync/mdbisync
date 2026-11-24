@@ -30,10 +30,13 @@ export interface LinearFacts {
   readonly teamFilterIncludesProjectDocuments: boolean;
 }
 
+/** Linear refuses content longer than this, counted in code points. */
+export const CONTENT_LIMIT = 250_000;
+
 export const LINEAR_FACTS: LinearFacts = Object.freeze({
   mutationsReturnStoredContent: true,
   maxTitleLength: 512,
-  maxContentLength: 250_000,
+  maxContentLength: CONTENT_LIMIT,
   teamFilterIncludesProjectDocuments: false,
 });
 
