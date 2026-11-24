@@ -188,7 +188,8 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ [path]: text });
 
     const { result, report, summary, writes } = await sync();
-    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE, result.stderr);
+    // A left-out file stays in git until it is fixed; the run itself succeeds.
+    assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.sync?.leftOutAtWrite, [{ path, rule: 'content-too-long' }]);
     assert.match(summary, /\| eng\/notes\/plan\.md \| content-too-long \|/);
     assert.ok(!writes.includes('UpdateDocument'));
