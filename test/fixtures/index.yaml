@@ -1899,7 +1899,7 @@ fixtures:
     canary: kx-c8a05149
     corpus: false
     probe_pending: true
-    note: "bare URLs holding escaped underscores, tilde pairs, asterisks and character references: the link text fix writes reads exactly as the URL"
+    note: "bare URLs with backslashes, plain intraword underscores, tilde pairs, asterisks and character references: the link text fix writes reads exactly as the URL"
   - file: "links/reference.md"
     group: links
     construct: link-reference

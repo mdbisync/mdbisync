@@ -201,6 +201,8 @@ Inline text:
   So do web addresses Markdown finds inside other text, where the bare URL
   rule does not apply: `Site: "www.example.com"` becomes
   `Site: "[www.example.com](<http://www.example.com>)"`.
+  In a URL label, underscores between letters or digits stay plain, as in
+  `[https://example.com/shelf_4](<https://example.com/shelf_4>)`.
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
   `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`. Other

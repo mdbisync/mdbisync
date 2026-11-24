@@ -597,7 +597,12 @@ class Writer {
 
   /** Linear writes every link destination in angle brackets, without a title. */
   private link(children: readonly PhrasingContent[], url: string): string {
-    return `[${this.inline(children)}](${linkDestination(url)})`;
+    let label = this.inline(children);
+    const [child] = children;
+    if (!this.literal && label.includes('\\_') && children.length === 1 && child?.type === 'text' && URL_LABEL.test(child.value)) {
+      label = plainUrlUnderscores(label);
+    }
+    return `[${label}](${linkDestination(url)})`;
   }
 
   /**
@@ -660,16 +665,19 @@ function textEdits(source: string, from: number, to: number, keepAt?: number): E
  * backtick could open a code span that runs past it; either breaks the
  * link); `*`, `_` and `~`, which would make emphasis or strikethrough; and
  * the `&` of a character reference and the first colon of an emoji
- * shortcode, which would turn into the character or the emoji.
+ * shortcode, which would turn into the character or the emoji. Underscore
+ * runs between letters or digits stay plain.
  */
 function literalEdits(source: string, from: number, to: number): Edit[] {
   const raw = source.slice(from, to);
   const escape = new Set<number>();
   for (let at = 0; at < raw.length; at++) if (LABEL_SYNTAX.has(raw[at]!)) escape.add(at);
+  // An underscore run between letters or digits cannot open or close emphasis.
+  for (const match of raw.matchAll(/(?<=[\p{L}\p{N}])_+(?=[\p{L}\p{N}])/gu)) {
+    for (let at = match.index; at < match.index + match[0].length; at++) escape.delete(at);
+  }
   for (const match of raw.matchAll(CHARACTER_REFERENCE)) escape.add(match.index);
-  // Every colon that opens a shortcode is escaped, overlapping ones too
-  // (`:x:tada:`), as found in the label the next run reads: an escaped `_`
-  // ends a name, so `:a_b:tada:` holds `:tada:` there.
+  // Find shortcodes in the label the next run reads, after the edits above.
   const rawAt: number[] = [];
   let label = '';
   for (let at = 0; at < raw.length; at++) {
@@ -677,16 +685,31 @@ function literalEdits(source: string, from: number, to: number): Edit[] {
     rawAt[label.length] = at;
     label += raw[at];
   }
-  for (const match of label.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
-    if (Object.hasOwn(nameToEmoji, match[1]!)) escape.add(rawAt[match.index]!);
-  }
+  for (const at of emojiShortcodeStarts(label)) escape.add(rawAt[at]!);
   const edits: Edit[] = [];
   for (const at of [...escape].sort((a, b) => a - b)) edits.push({ from: from + at, to: from + at + 1, text: `\\${raw[at]}` });
   return edits;
 }
 
-/** Characters an autolink's label escapes wherever they stand. */
+/** Characters that can be inline syntax in an autolink label. */
 const LABEL_SYNTAX: ReadonlySet<string> = new Set(['\\', '[', ']', '`', '*', '_', '~']);
+
+const URL_LABEL = /^(?:(?:https?:\/\/|www\.)\S+|[^\s@]+@[^.\s@]+(?:\.[^.\s@]+)+)$/i;
+
+/** Remove redundant escapes in an existing plain URL label. */
+function plainUrlUnderscores(label: string): string {
+  const plain = label.replace(/(?<=[\p{L}\p{N}])(?:\\?_)+(?=[\p{L}\p{N}])/gu, (run) => run.replaceAll('\\', ''));
+  if (plain === label) return label;
+  const shortcodes = new Set(emojiShortcodeStarts(plain));
+  return plain.replace(/:/g, (colon, at: number) => shortcodes.has(at) && !escaped(plain, at) ? '\\:' : colon);
+}
+
+/** Label shortcodes can share a colon, as in `:fire:tada:`. */
+function* emojiShortcodeStarts(label: string): Generator<number> {
+  for (const match of label.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
+    if (Object.hasOwn(nameToEmoji, match[1]!)) yield match.index;
+  }
+}
 
 /** A character reference as Markdown spells one; whether it names a character is decided apart. */
 const CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;

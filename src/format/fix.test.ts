@@ -722,16 +722,16 @@ describe('what fix leaves alone', () => {
       // Escaped underscores: the backslashes are literal, the underscores must not become emphasis.
       ['https://example.org/p?k=1\\_2\\_\\_3&z=4', '[https://example.org/p?k=1\\\\\\_2\\\\\\_\\\\\\_3&z=4](<https://example.org/p?k=1%5C_2%5C_%5C_3&z=4>)', 'https://example.org/p?k=1\\_2\\_\\_3&z=4'],
       // Plain underscores after punctuation must not become emphasis either.
-      ['https://example.org/p?a=x._one_.two_three_.z', '[https://example.org/p?a=x.\\_one\\_.two\\_three\\_.z](<https://example.org/p?a=x._one_.two_three_.z>)', 'https://example.org/p?a=x._one_.two_three_.z'],
+      ['https://example.org/p?a=x._one_.two_three_.z', '[https://example.org/p?a=x.\\_one\\_.two_three\\_.z](<https://example.org/p?a=x._one_.two_three_.z>)', 'https://example.org/p?a=x._one_.two_three_.z'],
       // Tilde pairs must not become strikethrough (and a `subscript` finding).
       ['https://example.org/track?id=10~20~30&view=on', '[https://example.org/track?id=10\\~20\\~30&view=on](<https://example.org/track?id=10~20~30&view=on>)', 'https://example.org/track?id=10~20~30&view=on'],
       ['<https://example.org/~~a~~>', '[https://example.org/\\~\\~a\\~\\~](<https://example.org/~~a~~>)', 'https://example.org/~~a~~'],
-      ['<https://example.org/a*b*/c_d_>', '[https://example.org/a\\*b\\*/c\\_d\\_](<https://example.org/a*b*/c_d_>)', 'https://example.org/a*b*/c_d_'],
+      ['<https://example.org/a*b*/c_d_>', '[https://example.org/a\\*b\\*/c_d\\_](<https://example.org/a*b*/c_d_>)', 'https://example.org/a*b*/c_d_'],
       // A character reference or an emoji shortcode in the URL stays as written.
       ['https://example.org/x?a=1&amp;b=&#42;2', '[https://example.org/x?a=1\\&amp;b=\\&#42;2](<https://example.org/x?a=1&amp;amp;b=&amp;#42;2>)', 'https://example.org/x?a=1&amp;b=&#42;2'],
       ['https://example.org/:tada:/x', '[https://example.org/\\:tada:/x](<https://example.org/:tada:/x>)', 'https://example.org/:tada:/x'],
-      // An escaped underscore ends a name, which exposes `:tada:` in the label.
-      ['https://example.org/:not_emoji:tada:/x', '[https://example.org/:not\\_emoji\\:tada:/x](<https://example.org/:not_emoji:tada:/x>)', 'https://example.org/:not_emoji:tada:/x'],
+      // A colon can also open a shortcode after an unknown name.
+      ['https://example.org/:not_emoji:tada:/x', '[https://example.org/:not_emoji\\:tada:/x](<https://example.org/:not_emoji:tada:/x>)', 'https://example.org/:not_emoji:tada:/x'],
       // Shortcodes that share a colon are each escaped.
       ['https://example.org/:fire:tada:/x', '[https://example.org/\\:fire\\:tada:/x](<https://example.org/:fire:tada:/x>)', 'https://example.org/:fire:tada:/x'],
     ];
@@ -750,6 +750,36 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('writes intraword underscores plain in URL labels', () => {
+    const url = 'https://example.org/blue__jars/café_menu/shelf_4';
+    const escapedUrl = 'https://example.org/blue\\_\\_jars/café\\_menu/shelf\\_4';
+    const inline = `[${escapedUrl}](${url})`;
+    const expected = `[${url}](<${url}>)`;
+    for (const input of [url, `<${url}>`, inline, `[${escapedUrl}][stock]\n\n[stock]: ${url}`]) {
+      const fixed = fixText(input);
+      assert.equal(fixed, expected, input);
+      assert.equal(fixText(fixed), fixed, input);
+      assert.deepEqual(lintText('stock.md', fixed), [], input);
+    }
+    assert.ok(sameMarkdown(expected, inline));
+    const label = '[blue\\_jars](<https://example.org>)';
+    assert.equal(fixText(label), label);
+  });
+
+  it('keeps shortcode names literal when unescaping URL underscores', () => {
+    for (const prefix of ['', ':unknown']) {
+      const url = `https://example.org/${prefix}:open_file_folder:/shelf_4`;
+      const oldLabel = `https://example.org/${prefix}:open\\_file\\_folder:/shelf\\_4`;
+      const label = `https://example.org/${prefix}\\:open_file_folder:/shelf_4`;
+      const expected = `[${label}](<${url}>)`;
+      for (const input of [`<${url}>`, `[${oldLabel}](<${url}>)`, expected]) {
+        assert.equal(fixText(input), expected, input);
+        assert.deepEqual(lintText('stock.md', expected), [], input);
+        assert.ok(sameMarkdown(expected, input), input);
+      }
+    }
+  });
+
   it('keeps an escaped character reference or emoji shortcode in text as written', () => {
     for (const text of ['Plain \\&amp; text.', 'Plain \\:tada: text.']) assert.equal(fixText(text), text);
     // After an escaped backslash, the reference and the shortcode are read and rewritten.
@@ -762,7 +792,7 @@ describe('what fix leaves alone', () => {
       ['Intro _a_.\n\nSee "www.example.com" and _more_.\n', 'Intro *a*.\n\nSee "[www.example.com](<http://www.example.com>)" and *more*.'],
       ['Host:www.example.com and _more_.\n', 'Host:[www.example.com](<http://www.example.com>) and *more*.'],
       ['Open [https://example.com] and _more_.\n', 'Open [[https://example.com](<https://example.com>)] and *more*.'],
-      ['> Quote "www.example.com/a_b".\n> _Next_ line\n', '> Quote "[www.example.com/a\\_b](<http://www.example.com/a_b>)".\n> *Next* line'],
+      ['> Quote "www.example.com/a_b".\n> _Next_ line\n', '> Quote "[www.example.com/a_b](<http://www.example.com/a_b>)".\n> *Next* line'],
       ['- Mail "team@example.com" or "www.example.com", "www.example.com".\n', '* Mail "[team@example.com](<mailto:team@example.com>)" or "[www.example.com](<http://www.example.com>)", "[www.example.com](<http://www.example.com>)".'],
       ['| Site | Note |\n| - | - |\n| "www.example.com" | _x_ |\n', '| Site | Note |\n| -- | -- |\n| "[www.example.com](<http://www.example.com>)" | *x* |'],
       ['# Notes on "www.example.com"\n', '# Notes on "[www.example.com](<http://www.example.com>)"'],
