@@ -455,7 +455,7 @@ jobs:
           name: dependency-scan
           path: ${{ runner.temp }}/dependencies
       # The draft's notes: the pull requests merged since the previous final release, as GitHub generates
-      # them between the two tags (grouped by .github/release.yml), then the security files. The entry of
+      # them between the two tags (with the categories of .github/release.yml), then the security files. The entry of
       # the previous release's pins pull request is left out. The first final release has nothing to
       # collect, and notes that cannot be generated leave only the security sentence, with a warning,
       # so the draft and its files are still created.
@@ -474,8 +474,10 @@ jobs:
               | awk -v version="$RELEASE_VERSION" '$0 == version { print previous; exit } { previous = $0 }')
             [ -n "$previous" ] || return 0
             collected=$(gh api -X POST "repos/$GH_REPO/releases/generate-notes" -f tag_name="$RELEASE_VERSION" -f previous_tag_name="$previous" --jq .body) || return 1
-            printf '%s\n' "$collected" | sed '/^\* Pin the workflow templates to v/d' > "$notes"
-            printf '\n## Security\n\n' >> "$notes"
+            [ -n "$collected" ] || return 1
+            # Errexit is off in a function called from `if`, so each write is checked.
+            printf '%s\n' "$collected" | sed '/^\* Pin the workflow templates to v/d' > "$notes" || return 1
+            printf '\n## Security\n\n' >> "$notes" || return 1
           }
           if ! collect; then
             : > "$notes"

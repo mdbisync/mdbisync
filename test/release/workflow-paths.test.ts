@@ -560,7 +560,7 @@ const GENERATED = [
   '**Full Changelog**: https://github.com/owner/repo/compare/v1.0.0...v1.0.1',
 ].join('\n');
 
-function collectNotes(options: { version: string; tags: string[]; tagsFail?: boolean; generateFails?: boolean }) {
+function collectNotes(options: { version: string; tags: string[]; tagsFail?: boolean; generateFails?: boolean; generated?: string }) {
   const step = jobs.publish!.steps.find((s) => s.name === 'Collect the release notes') ?? assert.fail('no notes step');
   const directory = mkdtempSync(join(tmpdir(), 'release-notes-'));
   try {
@@ -579,7 +579,7 @@ function collectNotes(options: { version: string; tags: string[]; tagsFail?: boo
     ].join('\n'), { mode: 0o755 });
     const env = {
       ...step.env, PATH: `${bin}:${process.env.PATH}`, STUB_LOG: log, RUNNER_TEMP: directory, GH_TOKEN: 'token', GH_REPO: 'owner/repo',
-      RELEASE_VERSION: options.version, STUB_TAGS: options.tags.join('\n'), STUB_GENERATED: GENERATED,
+      RELEASE_VERSION: options.version, STUB_TAGS: options.tags.join('\n'), STUB_GENERATED: options.generated ?? GENERATED,
       STUB_TAGS_FAIL: options.tagsFail ? '1' : '', STUB_GENERATE_FAIL: options.generateFails ? '1' : '',
     };
     const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', step.run!], { env, encoding: 'utf8' });
@@ -637,8 +637,8 @@ test('the first final release has nothing to collect and carries the security se
   assert.equal(notes, `${SECURITY}\n`);
 });
 
-test('notes that cannot be collected leave the security sentence with a warning, so the draft is still created', () => {
-  for (const failure of [{ tagsFail: true }, { generateFails: true }]) {
+test('notes that cannot be collected, or come back empty, leave the security sentence with a warning, so the draft is still created', () => {
+  for (const failure of [{ tagsFail: true }, { generateFails: true }, { generated: '' }]) {
     const { status, stdout, notes } = collectNotes({ version: 'v1.0.1', tags: ['v1.0.0', 'v1.0.1'], ...failure });
     assert.equal(status, 0);
     assert.match(stdout, /^::warning::The release notes could not be collected/m);
