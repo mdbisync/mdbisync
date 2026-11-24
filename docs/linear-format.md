@@ -123,7 +123,7 @@ Blocks:
 - Ordered lists use dots and count up from their start: `1) a` becomes
   `1. a`.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
-  `- [X] done`.
+  `- [X] done`. A checkbox without a label keeps one space after it.
 - A paragraph's text that starts like a list marker gets its marker
   escaped, so it stays text: in `Note` followed by `1. 3. plum`, the
   `3. plum` is text, and with the blank line `fix` writes before the list it
@@ -192,6 +192,10 @@ Inline text:
   `%25`. In a relative path that is not valid percent-encoding, every `%` is
   written `%25`, so the link still names the same file.
 - Reference links and images are written inline, and their definitions go.
+- Literal square brackets in text are escaped, including those written as
+  character references. For example, `# [Shelf] Inventory` becomes
+  `# \[Shelf\] Inventory`. Linear callout markers such as `> [!TIP]` keep
+  their brackets. A titled or folded Obsidian callout becomes an ordinary quote.
 - Autolinks and bare URLs become links: `See https://example.com now.`
   becomes `See [https://example.com](<https://example.com>) now.` The link
   text reads exactly as the URL: backslashes are doubled, and characters

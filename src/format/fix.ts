@@ -12,9 +12,10 @@ import { isDeepStrictEqual } from 'node:util';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
+import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
-import { MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -129,7 +130,14 @@ function fixBody(body: string, options: FixOptions): string {
     // not place, which lint reports as `unplaced-link`) would make it copy
     // the wrong text: leave the body as it came.
     if (hasUnplacedNode(tree)) return body;
-    const next = new Writer(current, tree, options).root();
+    const writer = new Writer(current, tree, options);
+    let next = writer.root();
+    if (writer.bracketsMayChangeLinks) {
+      const withOriginalBrackets = new Writer(current, tree, options, false).root();
+      // A bracket we could not escape can pair with a different bracket
+      // when an intervening one is escaped, even across inline nodes.
+      if (!sameMarkdown(next, withOriginalBrackets)) next = withOriginalBrackets;
+    }
     if (next === current) return next;
     current = next;
   }
@@ -140,7 +148,10 @@ type Edit = { from: number; to: number; text: string };
 
 /** A container whose prefix starts each source line of its content: a quote, or a list item's indentation. */
 /** `content` is the source offset where the container's content starts on its first line. */
-type Container = { kind: 'quote'; content: number } | { kind: 'item'; indent: number; content: number };
+type Container = (
+  | { kind: 'quote'; content: number }
+  | { kind: 'item'; indent: number; content: number }
+) & { markerBrackets?: readonly [number, number] };
 
 // Characters that start a block when they open a line (`<` an HTML block).
 const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)])/;
@@ -152,12 +163,17 @@ const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
 // followed by a space, a tab or the end of the line.
 const LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
 
+const LINEAR_ALERT = /^\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i;
+
 class Writer {
   private readonly definitions = new Map<string, Definition>();
   private readonly containers: Container[] = [];
   private readonly source: string;
   private readonly tree: Root;
   private readonly options: FixOptions;
+  private readonly escapeBrackets: boolean;
+  bracketsMayChangeLinks = false;
+  private conflictCallouts: Set<number> | undefined;
   /** Where the table cell being written starts its text: an escape there stays. */
   private cellStart: number | undefined;
   /** The indent of the file block whose label is being written: its later lines carry no prefix for it. */
@@ -167,10 +183,11 @@ class Writer {
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
 
-  constructor(source: string, tree: Root, options: FixOptions) {
+  constructor(source: string, tree: Root, options: FixOptions, escapeBrackets = true) {
     this.source = source;
     this.tree = tree;
     this.options = options;
+    this.escapeBrackets = escapeBrackets;
     visit(tree, (node) => {
       if (node.type === 'definition' && !this.definitions.has(node.identifier)) this.definitions.set(node.identifier, node);
     });
@@ -232,10 +249,25 @@ class Writer {
         return ['---'];
       case 'blockquote': {
         const marker = this.source.indexOf('>', start(node));
-        this.containers.push({ kind: 'quote', content: marker + (this.source[marker + 1] === ' ' ? 2 : 1) });
+        const content = marker + (this.source[marker + 1] === ' ' ? 2 : 1);
+        const container: Container = { kind: 'quote', content };
+        const first = node.children[0];
+        let canonicalAlert: string | undefined;
+        if (first?.type === 'paragraph' && first.children[0]?.type === 'text' && first.position!.start.line === node.position!.start.line) {
+          const alert = start(first);
+          const lineEnd = this.source.indexOf('\n', alert);
+          const firstLine = this.source.slice(alert, lineEnd === -1 ? undefined : lineEnd);
+          if (LINEAR_ALERT.test(firstLine)) {
+            canonicalAlert = firstLine.trimEnd().toUpperCase();
+            container.markerBrackets = [alert, alert + canonicalAlert.length - 1];
+          } else if (this.containers.length === 0 && ALERT.test(firstLine) && this.isConflictCallout(node.position!.start.line)) {
+            container.markerBrackets = [alert, alert + firstLine.indexOf(']')];
+          }
+        }
+        this.containers.push(container);
         const { text, codeLines } = this.writtenBlocks(node.children);
         this.containers.pop();
-        return [quoteLines(text, codeLines)];
+        return [quoteLines(canonicalAlert === undefined ? text : canonicalAlert + text.slice(canonicalAlert.length), codeLines)];
       }
       case 'list':
         return [this.list(node)];
@@ -255,6 +287,12 @@ class Writer {
         // Nodes lint refuses (footnote definitions) never reach here; keep any other as written.
         return [this.source.slice(start(node), end(node))];
     }
+  }
+
+  /** The merge detector accepts an edited alert kind on a sync conflict. */
+  private isConflictCallout(line: number): boolean {
+    this.conflictCallouts ??= new Set([...findMarkerLines(this.source).values()].flatMap((marker) => marker.calloutLine === undefined ? [] : [marker.calloutLine]));
+    return this.conflictCallouts.has(line);
   }
 
   /** A paragraph; `$$` math becomes a `math` fence, and an image shares no paragraph with text. */
@@ -315,6 +353,10 @@ class Writer {
     // Content lines line up after the bullet or number, not after a checkbox.
     const indent = ' '.repeat(marker.split(' ')[0]!.length + 1);
     const [first] = item.children;
+    const bareCheckbox = item.checked == null && first?.type === 'paragraph' && first.children.length === 1 && first.children[0]?.type === 'text'
+      && first.position!.start.line === item.position!.start.line
+      ? /^\[([ xX])\]$/.exec(this.source.slice(start(first), end(first.children[0]))) : null;
+    if (bareCheckbox && marker === '*' && item.children.length === 1) return `- [${bareCheckbox[1]!.toUpperCase()}] `;
     const attachment = itemAttachment(item);
     // A link to a file that does not exist is not uploaded: Linear keeps it as a link.
     if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
@@ -340,7 +382,9 @@ class Writer {
       }
     }
     if (first === undefined) return marker;
-    this.containers.push(this.itemContainer(item));
+    const container = this.itemContainer(item);
+    if (bareCheckbox) container.markerBrackets = [start(first!), start(first!) + 2];
+    this.containers.push(container);
     if (item.checked !== null && item.checked !== undefined && first.type === 'paragraph') this.taskParagraph = first;
     // Blocks of an item are a blank line apart, but a nested list follows
     // its paragraph on the next line when it can interrupt that paragraph.
@@ -587,12 +631,36 @@ class Writer {
         if (definition) edits.push({ from, to, text: `![${this.label(from + 1, to)}](${imageDestination(definition.url)})` });
         return;
       }
-      case 'text':
-        edits.push(...(this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, this.cellStart)));
+      case 'text': {
+        const text = this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, this.cellStart);
+        for (const edit of text) edits.push(edit);
+        if (!this.literal && this.escapeBrackets) this.escapeTextBrackets(from, to, edits);
         return;
+      }
       default:
         return;
     }
+  }
+
+  private escapeTextBrackets(from: number, to: number, edits: Edit[]): void {
+    const raw = this.source.slice(from, to);
+    const brackets = squareBracketEdits(raw, from, this.containers.at(-1)?.markerBrackets);
+    if (brackets.length !== 0 && /https?:\/\/|www\.|@/i.test(raw)) {
+      // Escaping a preceding bracket can expose a shorter autolink that
+      // the source treated as text, as in `[https://example.com_`.
+      let escaped = '';
+      let at = from;
+      for (const edit of brackets) {
+        escaped += this.source.slice(at, edit.from) + edit.text;
+        at = edit.to;
+      }
+      escaped += this.source.slice(at, to);
+      if (!sameMarkdown(raw, escaped)) {
+        this.bracketsMayChangeLinks = true;
+        return;
+      }
+    }
+    for (const edit of brackets) edits.push(edit);
   }
 
   /** Linear writes every link destination in angle brackets, without a title. */
@@ -613,7 +681,14 @@ class Writer {
   private label(open: number, limit: number): string {
     const from = open + 1;
     const to = from + bracketedLabel(this.source, open, limit).length;
-    return this.rewritten(from, to, [], codeSpans(this.source, from, to));
+    const code = codeSpans(this.source, from, to);
+    if (!this.escapeBrackets) return this.rewritten(from, to, [], code);
+    let span = 0;
+    const edits = squareBracketEdits(this.source.slice(from, to), from).filter(({ from: at }) => {
+      while (code[span] && code[span]![1] <= at) span++;
+      return code[span] === undefined || at < code[span]![0];
+    });
+    return this.rewritten(from, to, edits, code);
   }
 }
 
@@ -626,15 +701,15 @@ function textEdits(source: string, from: number, to: number, keepAt?: number): E
   const edits: Edit[] = [];
   const raw = source.slice(from, to);
   // Character references become the characters when that cannot make markup:
-  // characters outside ASCII, and `&` when no reference follows it. After an
-  // escaped `&` there is no reference: the text stays as written.
+  // characters outside ASCII and `&` when no reference follows it.
   for (const match of raw.matchAll(CHARACTER_REFERENCE)) {
     if (escaped(raw, match.index)) continue;
     const char = decodeEntity(match[0]);
+    const at = from + match.index;
     const after = raw.slice(match.index + match[0].length);
     if (char === undefined || char.trim() === '') continue;
     if (char === '&' ? /^[A-Za-z0-9#]+;/.test(after) : char.codePointAt(0)! < 0x80) continue;
-    edits.push({ from: from + match.index, to: from + match.index + match[0].length, text: char });
+    edits.push({ from: at, to: at + match[0].length, text: char });
   }
   // `:name:` shortcodes Linear knows become the emoji, unless the first colon is escaped.
   for (const { index, length, emoji } of emojiShortcodes(raw)) {
@@ -652,6 +727,19 @@ function textEdits(source: string, from: number, to: number, keepAt?: number): E
     } else {
       edits.push({ from: at, to: at + 1, text: '\\\\' });
     }
+  }
+  return edits;
+}
+
+/** Escape literal brackets, including character references, outside marker syntax. */
+function squareBracketEdits(raw: string, from: number, markerBrackets?: readonly [number, number]): Edit[] {
+  if (!/[\[\]&]/.test(raw)) return [];
+  const edits: Edit[] = [];
+  for (const match of raw.matchAll(/\\.|[\[\]]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g)) {
+    const at = from + match.index;
+    if (at === markerBrackets?.[0] || at === markerBrackets?.[1]) continue;
+    const char = match[0].startsWith('&') ? decodeEntity(match[0]) : match[0];
+    if (char === '[' || char === ']') edits.push({ from: at, to: at + match[0].length, text: `\\${char}` });
   }
   return edits;
 }

@@ -786,12 +786,67 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('Plain \\\\&eacute; and \\\\:tada: text.'), 'Plain \\\\é and \\\\🎉 text.');
   });
 
+  it('escapes literal brackets and keeps link, image, code, task and callout syntax', () => {
+    const cases: Array<[string, string]> = [
+      ['# [Shelf] Inventory', '# \\[Shelf\\] Inventory'],
+      ['Marked &#91;winter&rbrack; on the shelf.', 'Marked \\[winter\\] on the shelf.'],
+      ['![[Stock/diagram.png]]', '!\\[\\[Stock/diagram.png\\]\\]'],
+      ['* [ ] Check [blue] jars', '- [ ] Check \\[blue\\] jars'],
+      ['* [ ]\n* [x]\n* [ ] Wash the jars', '- [ ] \n- [X] \n- [ ] Wash the jars'],
+      ['See [[stock]] and [schedule](schedule.md)', 'See \\[\\[stock\\]\\] and [schedule](<schedule.md>)'],
+      ['[Read [later]](schedule.md)', '[Read \\[later\\]](<schedule.md>)'],
+      [String.raw`Keep \\[here] and \[there\].`, String.raw`Keep \\\[here\] and \[there\].`],
+      ['Use `items[0]`.', 'Use `items[0]`.'],
+      ['> [!TIP]\n> Check [blue] jars.', '> [!TIP]\n> Check \\[blue\\] jars.'],
+      ['>  [!TIP]\n> Check [blue] jars.', '> [!TIP]\n> Check \\[blue\\] jars.'],
+      ['> Inventory\n> [!TIP]', '> Inventory\n> \\[!TIP\\]'],
+      ['> > [!TIP]\n> > Check [blue] jars.', '> > [!TIP]\n> > Check \\[blue\\] jars.'],
+      ['* Supplies\n\n  > [!NOTE]\n  > Count [blue] jars.', '* Supplies\n\n  > [!NOTE]\n  > Count \\[blue\\] jars.'],
+      ['> [!BARN]\n> Check the crates.', '> \\[!BARN\\]\n> Check the crates.'],
+      ['> [!NOTE] Spare shelf\n> Check the crates.', '> \\[!NOTE\\] Spare shelf\n> Check the crates.'],
+      ['> [!TIP]-\n> Check the crates.', '> \\[!TIP\\]-\n> Check the crates.'],
+      ['> &#91;!TIP&#93;\n> Check the crates.', '> \\[!TIP\\]\n> Check the crates.'],
+      ['> [!TIP]\n> ---', '> ## \\[!TIP\\]'],
+    ];
+    for (const [input, expected] of cases) {
+      const fixed = fixText(input);
+      assert.equal(fixed, expected, input);
+      assert.equal(fixText(fixed), fixed, input);
+      assert.deepEqual(lintText('stock.md', fixed), [], input);
+      assert.ok(sameMarkdown(input, fixed), input);
+    }
+    const image = '![Rack [west] and `x]`](rack.png)';
+    const fixedImage = '![Rack \\[west\\] and `x]`](rack.png)';
+    assert.equal(fixText(image), fixedImage);
+    assert.equal(fixText(fixedImage), fixedImage);
+    assert.ok(sameMarkdown(fixedImage, image));
+    assert.equal(fixText('> [!tip]\n> Check the crates.'), '> [!TIP]\n> Check the crates.');
+    assert.equal(fixText('> [!tip]\n\n[!tip]: https://example.com/tips'), '> [!tip](<https://example.com/tips>)');
+    const conflict = '> [!CUSTOM]\n> **Sync conflict: git version**';
+    assert.equal(fixText(conflict), conflict);
+  });
+
+  it('keeps brackets where escaping them would create a link from plain text', () => {
+    for (const input of [
+      '[https://example.com_',
+      '&#91;www.example.com_',
+      '[https://example.com_ *shelf* blue] *jars* ](stock.md) [https://example.com_',
+    ]) {
+      const body = `# Supplies ###\n\n${input}`;
+      const fixed = fixText(body);
+      assert.equal(fixed, `# Supplies\n\n${input}`);
+      assert.equal(fixText(fixed), fixed);
+      assert.deepEqual(lintText('stock.md', fixed), []);
+      assert.ok(sameMarkdown(body, fixed));
+    }
+  });
+
   it('writes the links the bare-URL search finds inside text, and formats the rest of the file', () => {
     // The parser links none of these; Markdown's search for URLs inside text does.
     const cases: Array<[string, string]> = [
       ['Intro _a_.\n\nSee "www.example.com" and _more_.\n', 'Intro *a*.\n\nSee "[www.example.com](<http://www.example.com>)" and *more*.'],
       ['Host:www.example.com and _more_.\n', 'Host:[www.example.com](<http://www.example.com>) and *more*.'],
-      ['Open [https://example.com] and _more_.\n', 'Open [[https://example.com](<https://example.com>)] and *more*.'],
+      ['Open [https://example.com] and _more_.\n', 'Open \\[[https://example.com](<https://example.com>)\\] and *more*.'],
       ['> Quote "www.example.com/a_b".\n> _Next_ line\n', '> Quote "[www.example.com/a_b](<http://www.example.com/a_b>)".\n> *Next* line'],
       ['- Mail "team@example.com" or "www.example.com", "www.example.com".\n', '* Mail "[team@example.com](<mailto:team@example.com>)" or "[www.example.com](<http://www.example.com>)", "[www.example.com](<http://www.example.com>)".'],
       ['| Site | Note |\n| - | - |\n| "www.example.com" | _x_ |\n', '| Site | Note |\n| -- | -- |\n| "[www.example.com](<http://www.example.com>)" | *x* |'],

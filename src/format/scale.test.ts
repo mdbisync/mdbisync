@@ -45,8 +45,11 @@ describe('image labels', () => {
   // A code span in a label holds a bracket Markdown does not count; the label
   // search counted it, so it never closed and read the rest of the document
   // for every label.
-  it('take the label as written when it closes inside the image', () => {
-    assert.equal(fixText('![a [b] c](x.png)\n'), '![a [b] c](x.png)');
+  it('keep the full label when escaping literal brackets inside the image', () => {
+    const source = '![a [b] c](x.png)\n';
+    const fixed = fixText(source);
+    assert.equal(fixed, '![a \\[b\\] c](x.png)');
+    assert.ok(sameMarkdown(fixed, source));
     assert.deepEqual(lintText('a.md', '![a [b] c][r]\n\n[r]: x.png\n'), []);
   });
 
