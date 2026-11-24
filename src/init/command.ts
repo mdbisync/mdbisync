@@ -16,6 +16,7 @@ import { ASSETS_FOLDER, UPLOAD_EXTENSIONS } from '../sync/upload-type.ts';
 export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
   --security-hooks | --no-security-hooks   Optional examples (requires Docker)
   --lfs | --no-lfs                         Store embedded files in Git LFS (.gitattributes)
+  --create-projects                       Enable creation of missing Linear projects
 The release must be ${MINIMUM_RELEASE.version} or later: the workflows use its action inputs.
 Existing files are preserved; conflicting values must be resolved first.
 `;
@@ -24,6 +25,7 @@ Existing files are preserved; conflicting values must be resolved first.
 export const INIT_VALUE_FLAGS = ['--release-sha', '--release-version'] as const;
 export const INIT_SECURITY_FLAGS = ['--security-hooks', '--no-security-hooks'] as const;
 export const INIT_LFS_FLAGS = ['--lfs', '--no-lfs'] as const;
+export const INIT_CREATE_PROJECTS_FLAG = '--create-projects';
 
 export const GITATTRIBUTES = '.gitattributes';
 const LFS = 'filter=lfs diff=lfs merge=lfs -text';
@@ -37,7 +39,7 @@ export const LFS_ATTRIBUTES: readonly string[] = [
   `**/${ASSETS_FOLDER}/** ${LFS}`,
 ];
 
-interface Settings { sha?: string; version?: string; security?: boolean; lfs?: boolean }
+interface Settings { sha?: string; version?: string; security?: boolean; lfs?: boolean; createProjects?: boolean }
 export interface InitOptions { cwd?: string; prompt?: (question: string) => Promise<string> }
 class InitError extends Error {}
 
@@ -45,6 +47,11 @@ function parseArgs(args: readonly string[]): Settings {
   const settings: Settings = {};
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
+    if (flag === INIT_CREATE_PROJECTS_FLAG) {
+      if (settings.createProjects) throw new InitError(message('init.given-twice', { option: flag }));
+      settings.createProjects = true;
+      continue;
+    }
     if ((INIT_SECURITY_FLAGS as readonly string[]).includes(flag ?? '')) {
       if (settings.security !== undefined) throw new InitError(message('init.security-twice'));
       settings.security = flag === '--security-hooks';
@@ -176,6 +183,8 @@ function checkRelease(settings: Settings): void {
   if (settings.version !== undefined && !/^v\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(settings.version)) throw new InitError(message('init.release-version'));
   const older = Object.hasOwn(OLDER_RELEASES, settings.sha!) ? OLDER_RELEASES[settings.sha!] : Object.values(OLDER_RELEASES).find((version) => version === settings.version);
   if (older !== undefined) throw new InitError(message('init.release-too-old', { version: older, minimum: MINIMUM_RELEASE.version }));
+  const version = settings.sha === MINIMUM_RELEASE.sha ? MINIMUM_RELEASE.version : settings.version;
+  if (settings.createProjects && version === 'v1.0.0') throw new InitError(message('init.create-projects-release', { version }));
 }
 
 export async function runInit(args: readonly string[], options: InitOptions = {}): Promise<CliResult> {
@@ -201,10 +210,11 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       if (before !== after) changes.set(target, after);
     };
     for (const [name, template] of Object.entries(templates)) {
-      const content = template.replace(new RegExp(RELEASE_PIN, 'g'), `mdbisync/mdbisync@${settings.sha}${settings.version ? ` # ${settings.version}` : ''}`);
+      const pinned = template.replace(new RegExp(RELEASE_PIN, 'g'), `mdbisync/mdbisync@${settings.sha}${settings.version ? ` # ${settings.version}` : ''}`);
+      const optedIn = pinned.replace(/^( +)security-step: (?:stage|apply)$/gm, '$&\n$1create-projects: true');
       await queue(`.github/workflows/${name}`, (before) => {
-        if (before !== undefined && before !== content) throw new InitError(message('init.workflow-differs', { name }));
-        return content;
+        if (before !== undefined && before !== pinned && before !== optedIn) throw new InitError(message('init.workflow-differs', { name }));
+        return settings.createProjects || before === optedIn ? optedIn : pinned;
       });
     }
     await queue(PRE_COMMIT_CONFIG, (before) => hookConfig(before, settings));
@@ -220,7 +230,7 @@ Remaining admin steps:
 2. Create a Linear OAuth app with read,write client credentials. Set repository variable MDBISYNC_LINEAR_CLIENT_ID and add environment secret MDBISYNC_LINEAR_CLIENT_SECRET. Remove any old repository secret for this client ID once the updated workflows are in place.
 3. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID and add environment secret MDBISYNC_APP_PRIVATE_KEY.
 4. Allow merge commits.
-5. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}.
+5. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}. Teams must already exist.${settings.createProjects ? ' Review the projects the dry run would create.' : ''}
 6. Install Node.js 24.2 or later and pre-commit. Run pre-commit install --hook-type pre-commit --hook-type pre-push, then pre-commit run --all-files. If the hook rewrites files and fails, run it again. Security scanner examples also need Docker.${settings.lfs ? ' Install Git LFS and run git lfs install.' : ''}
 7. If you track a branch other than main, set tracked-branch on the mdbisync action steps, update BRANCH in both sync workflows, and update the push trigger in mdbisync.yml. Commit the setup files except .github/workflows/mdbisync.yml and push them to the tracked branch or merge them through a pull request. Dispatch initial sync from the tracked branch with a direction and leave confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.
 8. After initial sync finishes (for linear-to-git, merge its pull request with Create a merge commit), commit .github/workflows/mdbisync.yml and push it to the tracked branch or merge it through a pull request to start the first sync run. After that run, you can make pre-commit a required check. See ${QUICKSTART_URL}#two-layers-of-checks.

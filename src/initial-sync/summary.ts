@@ -13,6 +13,7 @@ export type Direction = (typeof DIRECTIONS)[number];
 
 /** The plan in the run report; every path list is sorted. */
 export interface PlanReport {
+  projectsToCreate?: Array<{ name: string; team: string }>;
   capacity: ContainerCapacity[];
   direction: Direction;
   confirm: boolean;

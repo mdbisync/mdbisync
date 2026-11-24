@@ -16,7 +16,7 @@ const REFS = {
 } as const;
 
 /** The Linear mutations that write a document or a comment; uploads are compared by the bytes storage took. */
-const DOCUMENT_WRITES = new Set(['CreateDocument', 'UpdateDocument', 'TrashDocument', 'RestoreDocument', 'CommentOnDocument', 'UpdateDocumentComment', 'ResolveComment']);
+const LINEAR_WRITES = new Set(['CreateProject', 'CreateDocument', 'UpdateDocument', 'TrashDocument', 'RestoreDocument', 'CommentOnDocument', 'UpdateDocumentComment', 'ResolveComment']);
 const PULL_REQUEST_WRITE = /^(POST \/pulls|PATCH \/pulls\/\d+|PUT \/pulls\/\d+\/merge)$/;
 
 export interface WorldMark {
@@ -57,7 +57,7 @@ export async function assertWritesMatchWorld(
   const seen = world.writes.slice(mark.writes);
   const linear = { ...writes.linear };
   delete linear['FileUpload'];
-  assert.deepEqual(linear, countBy(seen.filter((write) => DOCUMENT_WRITES.has(write))), 'reported Linear writes against the fake');
+  assert.deepEqual(linear, countBy(seen.filter((write) => LINEAR_WRITES.has(write))), 'reported Linear writes against the fake');
   assert.equal(writes.linear['FileUpload'] ?? 0, stored(world) - mark.stored, 'reported uploads against the files storage took');
   const pullRequests = Object.values(writes.pullRequests).reduce((sum, count) => sum + count, 0);
   assert.equal(pullRequests, seen.filter((write) => PULL_REQUEST_WRITE.test(write)).length, 'reported pull request writes against the fake');

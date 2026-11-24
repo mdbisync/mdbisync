@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { parseOperation } from '../../src/action/main.ts';
 import { COMMANDS } from '../../src/commands.ts';
-import { INIT_LFS_FLAGS, INIT_SECURITY_FLAGS, INIT_USAGE, INIT_VALUE_FLAGS } from '../../src/init/command.ts';
+import { INIT_CREATE_PROJECTS_FLAG, INIT_LFS_FLAGS, INIT_SECURITY_FLAGS, INIT_USAGE, INIT_VALUE_FLAGS } from '../../src/init/command.ts';
 import { MINIMUM_RELEASE } from '../../src/init/releases.ts';
 import templates from '../../src/init/workflows.json' with { type: 'json' };
 import { PROJECT_KEY, TEAM_KEY } from '../../src/mapping/annotations.ts';
@@ -61,6 +61,7 @@ const CODE_DEFAULTS: Record<string, string> = {
   'sync-branch': DEFAULT_STATE_CONFIG.syncBranch,
   'state-ref-prefix': DEFAULT_STATE_CONFIG.refPrefix,
   'document-cap': String(DEFAULT_DOCUMENT_CAP),
+  'create-projects': 'false',
   'merge-grace-seconds': String(DEFAULT_MERGE_GRACE_SECONDS),
   'check-deadline-minutes': String(DEFAULT_CHECK_DEADLINE_MINUTES),
   'cleanup-tokens': 'false',
@@ -115,7 +116,7 @@ describe('configuration reference', () => {
   });
 
   it('lists every init flag, as init accepts and its help shows them', () => {
-    const accepted = [...INIT_VALUE_FLAGS, ...INIT_SECURITY_FLAGS, ...INIT_LFS_FLAGS].sort();
+    const accepted = [...INIT_VALUE_FLAGS, ...INIT_SECURITY_FLAGS, ...INIT_LFS_FLAGS, INIT_CREATE_PROJECTS_FLAG].sort();
     assert.deepEqual([...byName(table(PAGE, 'init')).keys()].sort(), accepted);
     assert.deepEqual([...new Set(INIT_USAGE.match(/--[a-z][a-z-]+/g))].sort(), accepted, 'init --help');
   });

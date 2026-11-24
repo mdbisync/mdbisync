@@ -21,6 +21,7 @@ export interface SetupInput {
   /** The run's Linear client and its token's scopes, or why no token could be had. */
   linear: { client: LinearClient; scope?: readonly string[] | undefined } | { error: string };
   github: GitHubCheck;
+  createProjects?: boolean | undefined;
 }
 
 export interface SetupResult {
@@ -39,7 +40,14 @@ export async function runSetupCheck(input: SetupInput): Promise<SetupResult> {
   } else {
     credentials = checkLinearScopes(input.linear.scope);
     if (credentials.state === 'passed' && annotations.state === 'passed') {
-      const resolved = await resolveTargets(input.linear.client, input.mapping.zones.values());
+      const client = input.linear.client;
+      const zones = input.mapping.zones.values();
+      const createProjects = input.createProjects;
+      let resolved = await resolveTargets(client, zones, { createProjects });
+      // A project may have appeared between stage and apply. Recheck before planning any creation.
+      if (client.transport.reads?.mode === 'replay' && resolved.targets?.pendingProjects?.size) {
+        resolved = await resolveTargets(client, input.mapping.zones.values(), { createProjects, live: true });
+      }
       if (resolved.credentials !== undefined) credentials = resolved.credentials;
       targets = resolved;
     } else if (annotations.state !== 'passed') {

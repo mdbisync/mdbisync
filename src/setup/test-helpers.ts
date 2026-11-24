@@ -553,8 +553,20 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     const names = variables.names as string[];
     const nodes = (hidden ? [] : world.linear.projects)
       .filter((project) => names.includes(project.name))
-      .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
+      .map((project) => ({ id: project.id, name: project.name, teams: {
+        nodes: project.teamIds.slice(0, 50).map((id) => ({ id })),
+        pageInfo: { hasNextPage: project.teamIds.length > 50 },
+      } }));
     return json(200, { data: { teams, projects: { nodes, pageInfo: { hasNextPage: false } }, ...visible } });
+  }
+  if (operationName === 'SetupProjectTeam') {
+    const project = world.linear.projects.find((entry) => entry.id === variables.project);
+    const nodes = project?.teamIds.filter((id) => id === variables.team).map((id) => ({ id })) ?? [];
+    return json(200, { data: { project: { teams: { nodes } } } });
+  }
+  if (operationName === 'ProjectByCreationId') {
+    const nodes = world.linear.projects.filter((project) => project.id === variables.id).map(({ id, name }) => ({ id, name }));
+    return json(200, { data: { projects: { nodes } } });
   }
   if (operationName === 'UploadAccess') {
     const status = world.linear.uploadAccessStatus;
@@ -674,10 +686,11 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     return { commentUpdate: { success: comment !== undefined, comment: comment === undefined ? null : { id: variables.id } } };
   }
   if (operation === 'CreateProject') {
-    const input = variables.input as { name: string; teamIds: string[] };
-    const project: FakeProject = { id: `project-${world.linear.projects.length + (world.linear.deletedProjects?.length ?? 0) + 1}`, name: input.name, teamIds: input.teamIds };
+    const input = variables.input as { id?: string; name: string; teamIds: string[] };
+    if (world.linear.projects.some((project) => project.id === input.id)) return { projectCreate: { success: false, project: null } };
+    const project: FakeProject = { id: input.id ?? `project-${world.linear.projects.length + (world.linear.deletedProjects?.length ?? 0) + 1}`, name: input.name, teamIds: input.teamIds };
     world.linear.projects.push(project);
-    return { projectCreate: { project: { id: project.id } } };
+    return { projectCreate: { success: true, project: { id: project.id, name: project.name } } };
   }
   if (operation === 'DeleteProject') {
     const index = world.linear.projects.findIndex((p) => p.id === variables.id);

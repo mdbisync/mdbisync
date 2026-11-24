@@ -28,6 +28,7 @@ test('init creates usable workflows and matching hook pins, and leaves folder an
     assert.ok(workflow.jobs);
     if (name !== 'pre-commit.yml') {
       assert.equal(workflow.concurrency.group, 'mdbisync');
+      assert.doesNotMatch(text, /create-projects:/);
       assert.equal((text.match(new RegExp(`mdbisync/mdbisync@${sha} # v1.2.3`, 'g')) ?? []).length, 2);
     }
   }
@@ -49,7 +50,7 @@ test('init creates usable workflows and matching hook pins, and leaves folder an
   assert.match(steps[2] ?? '', /^3\. Create a GitHub App/);
   assert.deepEqual(steps.slice(3), [
     '4. Allow merge commits.',
-    "5. Mark each folder to synchronize in its README.md front matter: linear-team names the Linear team, and linear-project a project for that folder's documents. A folder inside a team's folder takes that team and leaves out linear-team.",
+    "5. Mark each folder to synchronize in its README.md front matter: linear-team names the Linear team, and linear-project a project for that folder's documents. A folder inside a team's folder takes that team and leaves out linear-team. Teams must already exist.",
     '6. Install Node.js 24.2 or later and pre-commit. Run pre-commit install --hook-type pre-commit --hook-type pre-push, then pre-commit run --all-files. If the hook rewrites files and fails, run it again. Security scanner examples also need Docker.',
     '7. If you track a branch other than main, set tracked-branch on the mdbisync action steps, update BRANCH in both sync workflows, and update the push trigger in mdbisync.yml. Commit the setup files except .github/workflows/mdbisync.yml and push them to the tracked branch or merge them through a pull request. Dispatch initial sync from the tracked branch with a direction and leave confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.',
     '8. After initial sync finishes (for linear-to-git, merge its pull request with Create a merge commit), commit .github/workflows/mdbisync.yml and push it to the tracked branch or merge it through a pull request to start the first sync run. After that run, you can make pre-commit a required check. See ' + QUICKSTART_URL + '#two-layers-of-checks.',
@@ -59,6 +60,29 @@ test('init creates usable workflows and matching hook pins, and leaves folder an
   assert.equal(again.exitCode, 0, again.stderr);
   assert.match(again.stdout, /already initialized/);
   assert.equal((await stat(join(cwd, '.github/workflows/mdbisync.yml'))).mtimeMs, before.mtimeMs);
+});
+
+test('init opts in to project creation on both stages of both sync workflows', async (t) => {
+  const cwd = await fixture(t);
+  assert.equal((await runCli(flags, { cwd })).exitCode, 0);
+  const result = await runCli([...flags, '--create-projects'], { cwd });
+  assert.equal(result.exitCode, 0, result.stderr);
+  for (const name of ['mdbisync.yml', 'mdbisync-initial-sync.yml']) {
+    const workflow = parse(await readFile(join(cwd, '.github/workflows', name), 'utf8'));
+    const inputs = Object.values(workflow.jobs).flatMap((job: any) => job.steps)
+      .filter((step) => step.with?.['security-step']).map((step) => step.with);
+    assert.deepEqual(inputs.map((input) => [input['security-step'], input['create-projects']]), [['stage', true], ['apply', true]]);
+  }
+  assert.match((await runCli([...flags, '--create-projects'], { cwd })).stdout, /already initialized/);
+  assert.match((await runCli(flags, { cwd })).stdout, /already initialized/);
+});
+
+test('init refuses to enable project creation on a known release that lacks the action input', async (t) => {
+  const cwd = await fixture(t);
+  const result = await runCli(['init', '--release-sha', '7931bd5f1d8b457fe1d51ddff8991e2c59f24503', '--create-projects'], { cwd });
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /requires a release that supports|is older than/);
+  assert.deepEqual(await readdir(cwd), ['.git']);
 });
 
 test('init keeps README annotations and custom hooks as they are, and adds optional pinned security examples', async (t) => {

@@ -516,7 +516,7 @@ describe('setup check', () => {
   it('asks again a token that saw no team, and tells no team access from a missing team', async () => {
     const lookups = (world: ReturnType<typeof fakeWorld>) => world.requests.filter((request) => request.startsWith(`POST ${LINEAR_API}/graphql`)).length;
     const resolve = (world: ReturnType<typeof fakeWorld>) =>
-      resolveTargets(new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fakeFetch(world) }), MINI.zones.values(), 0);
+      resolveTargets(new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fakeFetch(world) }), MINI.zones.values(), { retryDelayMs: 0 });
 
     const once = fakeWorld();
     once.linear.teamsHidden = 1;

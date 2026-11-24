@@ -32,6 +32,7 @@ export function renderStop(stop: WriteStop): string[] {
  * again by hand.
  */
 export function renderStoppedBeforeWriting(stop: WriteStop, partial: boolean): string {
-  const outcome = partial ? `Stopped before any write; ${PARTIAL}: the next run starts again.` : 'Stopped before any write: run it again once the limit has reset.';
+  const when = stop.kind !== 'test-threshold' && stop.operation === 'CreateProject' ? 'while creating projects' : 'before any write';
+  const outcome = partial ? `Stopped ${when}; ${PARTIAL}: the next run starts again.` : `Stopped ${when}: run it again once the limit has reset.`;
   return ['## Linear stopped the run', '', outcome, '', ...renderStop(stop)].join('\n');
 }

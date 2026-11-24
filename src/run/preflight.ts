@@ -2,7 +2,7 @@
 // its state, and every operation checks the setup. The run's Linear token
 // is minted here and revoked when the run's work is done, also on failure.
 
-import { type AuthContext, LinearClient, type LinearReads, LinearStoppedError, RequestStats, withDeferredRunToken, withRunToken, type LogEntry, type StopReason, type TokenLifecycle } from '../linear/index.ts';
+import { type AuthContext, LinearClient, type LinearReads, LinearStoppedError, RequestStats, describeLinearError, withDeferredRunToken, withRunToken, type LogEntry, type StopReason, type TokenLifecycle } from '../linear/index.ts';
 import { type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
   type FailureCode,
@@ -23,6 +23,8 @@ import { type CheckClock } from '../pull-request/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 import { renderStoppedBeforeWriting } from './stop.ts';
+import { ProjectCreationError } from '../setup/linear.ts';
+import { cell, placeLabel } from './summary.ts';
 import { message } from '../messages.ts';
 
 /** The operations that start with the preflight. */
@@ -56,6 +58,8 @@ export interface PreflightOutcome {
    * partial, and the next run starts again.
    */
   stopped?: StopReason;
+  /** Linear failed or refused a project creation. Earlier accepted writes stay in the report. */
+  projectCreateFailed?: true;
   /** Writes the run tried after Linear stopped its client; each was refused without a request. */
   writesAfterStop?: number;
   /** Writes Linear accepted from the run's client, by operation; absent when the run made no client. */
@@ -149,11 +153,18 @@ export async function runPreflight(
       const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context, ...(reads ? { reads } : {}) });
       let setup: SetupReport | undefined;
       try {
-        const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
+        const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope }, createProjects: inputs.createProjects });
         setup = report;
         if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY, pushedKey: pushedKey(inputs) });
         return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       } catch (error) {
+        if (error instanceof ProjectCreationError) {
+          const project = cell(placeLabel({ kind: 'project', team: error.team, project: error.project }));
+          const detail = message('run.project-create-failed', { project, reason: cell(describeLinearError(error.cause)) });
+          const summary = setup === undefined ? detail : `${renderSetupSummary(setup).trimEnd()}\n\n${detail}\n`;
+          return { operation, ok: false, summary, projectCreateFailed: true, ...(setup === undefined ? {} : { setup }),
+            writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
+        }
         // Linear stopped the client (a rate limit, a budget running low) outside the steps that record their progress.
         if (!(error instanceof LinearStoppedError)) throw error;
         return { ...stoppedOutcome(operation, error.reason, setup), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };

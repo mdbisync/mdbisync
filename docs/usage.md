@@ -122,7 +122,8 @@ Before it writes anything, every run checks that the Linear token works and
 may write, that the GitHub token has contents, pull requests and workflows
 write and checks and commit statuses read, that merge commits are allowed,
 that `.pre-commit-config.yaml` has the `linear-format` hook, that every
-annotation is valid and its team and project exist in Linear, and
+annotation is valid and its targets resolve in Linear (a missing project
+can be created with [`create-projects`](configuration.md#action-inputs)), and
 whether pre-commit hooks marked `alias: security` exist (without them the run
 goes on and says that content is pushed unchecked). Files left out by a title
 collision are listed too, without stopping the run. The result goes to the

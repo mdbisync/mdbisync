@@ -29,6 +29,7 @@ only" has no command-line form.
 | `sync-branch` | no | `mdbisync/linear` | `MDBISYNC_SYNC_BRANCH` | The branch of the sync pull request; its suspended lane is named after it ([the sync pull request](usage.md#the-sync-pull-request)). |
 | `state-ref-prefix` | no | `refs/mdbisync` | `MDBISYNC_STATE_REF_PREFIX` | Prefix of the refs that hold the sync's state. |
 | `document-cap` | no | `1000` | `MDBISYNC_DOCUMENT_CAP` | Maximum documents per Linear project or team, trash included. A run warns at 90% and stops before writing above it. |
+| `create-projects` | no | `false` | `MDBISYNC_CREATE_PROJECTS` | `true` creates a missing project under the existing team mapped by the folder. The project uses the exact `linear-project` name in the folder's `README.md` front matter. An initial sync dry run lists each project it would create. |
 | `merge-grace-seconds` | no | `60` | `MDBISYNC_MERGE_GRACE_SECONDS` | Seconds, 0 to 120, a run waits for checks after it opens or moves the sync pull request; 0 leaves the merge to a later run. |
 | `check-deadline-minutes` | no | `60` | `MDBISYNC_CHECK_DEADLINE_MINUTES` | Minutes, 10 to 1440, the sync pull request's checks may stay pending before its batch is suspended. |
 | `required-checks` | no | none | `MDBISYNC_REQUIRED_CHECKS` | Checks, one per line, that every sync pull request head must pass before it merges, each with the publisher it must come from: `<name> @ actions`, `<name> @ app:<App id>` or `<name> @ status:<account id>` ([required checks](usage.md#required-checks)). From `v0.1.0-rc.13`; this form of the lines from `v0.1.0-rc.18` (`v0.1.0-rc.13` and `rc.14` take bare names, `rc.15` to `rc.17` write `<name> @ actions:<workflow file>` for a GitHub Actions job). |
@@ -37,6 +38,9 @@ only" has no command-line form.
 | `direction` | no | none | `MDBISYNC_DIRECTION` | Initial sync only, and required there: `git-to-linear` or `linear-to-git`. |
 | `confirm` | no | none | `MDBISYNC_CONFIRM` | Initial sync only: `true` writes; anything else is a dry run that writes nothing. |
 | `security-step` | no | none | action only | `stage` or `apply`: runs the security hooks in a step of their own, between the two ([workflows](usage.md#workflows)). Empty runs them inside this step. |
+
+If a previously synchronized project disappears, recurring sync stops so you
+can check its name and the app's access before continuing.
 
 ## Action outputs
 
@@ -147,6 +151,7 @@ environment variables; secrets never go in arguments.
 | `--no-security-hooks` | on | Adds none; give one of the two to make the choice explicit. |
 | `--lfs` | off | Adds to `.gitattributes` the Git LFS lines for embedded files: one per image and document type the sync takes from Linear (`*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp`, `*.avif`, `*.pdf`, `*.mp4`, `*.webm`, `*.svg`) and `**/assets/** filter=lfs diff=lfs merge=lfs -text` for every `assets/` folder. That line covers every folder named `assets` in the repository, a website's own included; leave out `--lfs` and write your own lines if one must stay out of LFS. Lines already there are kept and not repeated. |
 | `--no-lfs` | on | Leaves `.gitattributes` as it is: your own attributes decide what goes to LFS. |
+| `--create-projects` | off | Sets `create-projects: true` on the action steps in both sync workflows. Pin a release that supports the input. |
 
 With a terminal attached, `init` asks for the release SHA when it is
 missing, and whether to add the security hook examples and the Git LFS

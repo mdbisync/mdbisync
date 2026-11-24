@@ -5,6 +5,7 @@ import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { cell, placeLabel } from './summary.ts';
 import { type RunContext } from './preflight.ts';
 import { message } from '../messages.ts';
+import { pendingProject } from '../setup/linear.ts';
 
 export const DEFAULT_DOCUMENT_CAP = 1000;
 
@@ -30,7 +31,9 @@ function documentPlaceKey(place: { projectId: string } | { teamId: string }): st
 
 /** Every annotated container's documents, trash included, listed together (one request per page). */
 export async function readContainerDocuments(context: RunContext): Promise<Map<string, LinearDocument[]>> {
-  const places = [...new Map(annotatedPlaces(context.mapping.zones).map(({ place }) => [containerKey(context, place), placeId(context.targets, place)])).values()];
+  const places = [...new Map(annotatedPlaces(context.mapping.zones)
+    .filter(({ place }) => !pendingProject(context.targets, place))
+    .map(({ place }) => [containerKey(context, place), placeId(context.targets, place)])).values()];
   return containersOf(context, await context.linear.listDocumentsInPlaces(places, { includeArchived: true }));
 }
 
