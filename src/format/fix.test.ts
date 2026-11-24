@@ -409,15 +409,15 @@ describe('what fix leaves alone', () => {
     // task item's at its checkbox. A line indented that far is not lazy: its
     // indentation past the item's prefix is its own.
     const continued: Array<[string, string]> = [
-      ['- [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3. pegs'],
-      ['- [ ] Pack the tent\n    3. pegs', '- [ ] Pack the tent\n    3. pegs'],
-      ['- [ ] Pack the tent\n      3. pegs', '- [ ] Pack the tent\n      3. pegs'],
-      ['* [x] Pack the tent\n  3. pegs', '- [X] Pack the tent\n  3. pegs'],
-      ['-   [ ] Pack the tent\n    3. pegs', '- [ ] Pack the tent\n  3. pegs'],
-      ['-\n  [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3. pegs'],
-      ['> - [ ] Pack the tent\n>   3. pegs', '> - [ ] Pack the tent\n>   3. pegs'],
-      ['- [ ] Pack\n  - [ ] the tent\n    3. pegs', '- [ ] Pack\n  - [ ] the tent\n    3. pegs'],
-      ['- [ ] Pack the tent\n\n  and\n  3. pegs', '- [ ] Pack the tent\n\n  and\n  3. pegs'],
+      ['- [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3\\. pegs'],
+      ['- [ ] Pack the tent\n    3. pegs', '- [ ] Pack the tent\n    3\\. pegs'],
+      ['- [ ] Pack the tent\n      3. pegs', '- [ ] Pack the tent\n      3\\. pegs'],
+      ['* [x] Pack the tent\n  3. pegs', '- [X] Pack the tent\n  3\\. pegs'],
+      ['-   [ ] Pack the tent\n    3. pegs', '- [ ] Pack the tent\n  3\\. pegs'],
+      ['-\n  [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3\\. pegs'],
+      ['> - [ ] Pack the tent\n>   3. pegs', '> - [ ] Pack the tent\n>   3\\. pegs'],
+      ['- [ ] Pack\n  - [ ] the tent\n    3. pegs', '- [ ] Pack\n  - [ ] the tent\n    3\\. pegs'],
+      ['- [ ] Pack the tent\n\n  and\n  3. pegs', '- [ ] Pack the tent\n\n  and\n  3\\. pegs'],
       // Four columns past the content, `>` and `#` are paragraph text: they keep that distance.
       ['- [ ] Pack the tent\n      > pegs', '- [ ] Pack the tent\n      > pegs'],
       ['- [ ] Pack the tent\n      # pegs', '- [ ] Pack the tent\n      # pegs'],
@@ -531,6 +531,87 @@ describe('what fix leaves alone', () => {
       assert.equal(fixText(once), once, `${JSON.stringify(input)}: a second fix changes nothing`);
       assert.ok(sameMarkdown(once, input), `${JSON.stringify(input)}: the document stays`);
     }
+  });
+
+  it('removes redundant line escapes while keeping escapes that protect blocks', () => {
+    for (const [input, expected] of [
+      ['**\\-44 jars**', '**-44 jars**'],
+      ['**\\=====**', '**=====**'],
+      ['*\\-44 jars*', '*-44 jars*'],
+      ['**\\> shelf**', '**> shelf**'],
+      ['**\\+ shelf**', '**+ shelf**'],
+      ['**\\* shelf**', '**\\* shelf**'],
+      ['Mark :\\+1:, :\\-1:, :e\\-mail: and &\\#65;.', 'Mark :\\+1:, :\\-1:, :e\\-mail: and &\\#65;.'],
+      ['Write &amp;\\#65; literally.', 'Write &\\#65; literally.'],
+      ['Guide <rack data\\=blue> and <rack\\-label\\>.', 'Guide <rack data\\=blue> and <rack\\-label\\>.'],
+      ['Guide <rack\ndata\\=blue>.', 'Guide <rack\ndata\\=blue>.'],
+      ['Guide <rack title="*blue*"\ndata="wide"\\> ends.', 'Guide <rack title="*blue*"\ndata="wide"\\> ends.'],
+      ['Plan\n\\+spare', 'Plan\n+spare'],
+      ['Plan\n\\+\u00a0spare', 'Plan\n+\u00a0spare'],
+      ['Plan\n\\##shelf', 'Plan\n##shelf'],
+      ['Plan\n\\+ spare', 'Plan\n\\+ spare'],
+      ['Plan\n\\>spare', 'Plan\n\\>spare'],
+      ['Plan\n\\# spare', 'Plan\n\\# spare'],
+      ['Plan\n\\+++ shelf', 'Plan\n\\+++ shelf'],
+      ['\\+\\+\\+ shelf', '\\+\\+\\+ shelf'],
+      ['\\#\\# Shelf', '\\#\\# Shelf'],
+      ['#\\# Shelf', '#\\# Shelf'],
+      ['Plan\n\\=====', 'Plan\n\\====='],
+      ['Plan\n=\\==', 'Plan\n=\\=='],
+      ['| A | B |\n| \\--- | --- |', '| A | B |\n| \\--- | --- |'],
+    ] as const) {
+      assert.equal(fixText(input), expected, input);
+      assert.equal(fixText(expected), expected, input);
+      assert.ok(sameMarkdown(input, expected), input);
+      assert.deepEqual(lintText('inventory.md', expected), [], input);
+    }
+  });
+
+  it('writes a bare plus on a paragraph continuation without creating an item', () => {
+    for (const output of ['Plan\n+', '* Plan\n  +', '> Plan\n> +']) {
+      const input = output.slice(0, -1) + '\\+';
+      assert.equal(fixText(input), output);
+      assert.equal(fixText(output), output);
+      assert.deepEqual(lintText('inventory.md', output), []);
+      assert.ok(sameMarkdown(input, output));
+      assert.equal(fixLinearText(input, input, () => false), output);
+    }
+    const withLink = 'Plan\n\\+\n  [Inventory](inventory.csv)';
+    assert.ok(sameMarkdown(withLink, fixText(withLink)));
+    assert.ok(!sameMarkdown('+ \n  [Inventory](inventory.csv)', '+ [Inventory](inventory.csv)'));
+  });
+
+  it('escapes dots of literal numbers at the start of a paragraph line', () => {
+    for (const [input, expected] of [
+      ['20.\u00a0Jars', '20\\. Jars'],
+      ['1.\u00a0Jars', '1\\. Jars'],
+      ['Plan\n4. Jars', 'Plan\n4\\. Jars'],
+      ['Plan\n4.\tJars', 'Plan\n4\\. Jars'],
+      ['Plan\n4\\.\tJars', 'Plan\n4\\. Jars'],
+      ['Plan\n4\\.\u00a0Jars', 'Plan\n4\\. Jars'],
+      ['Plan\n4.    Jars', 'Plan\n4\\.    Jars'],
+      ['Plan\n\t2. Jars', 'Plan\n\t2\\. Jars'],
+      ['Plan\n    5. Jars', 'Plan\n    5\\. Jars'],
+      ['Plan\n1234567890. Jars', 'Plan\n1234567890\\. Jars'],
+      ['> Plan\n> 12. Jars', '> Plan\n> 12\\. Jars'],
+      ['* Plan\n  13. Jars', '* Plan\n  13\\. Jars'],
+      ['Plan\n4.', 'Plan\n4.'],
+      ['Plan\n7.5 Jars', 'Plan\n7.5 Jars'],
+      ['## 10. Jars', '## 10. Jars'],
+      ['**11. Jars**', '**11. Jars**'],
+      ['Plan\n1. Jars', 'Plan\n\n1. Jars'],
+    ] as const) {
+      assert.equal(fixText(input), expected, input);
+      assert.equal(fixText(expected), expected, input);
+      assert.deepEqual(lintText('inventory.md', expected), [], input);
+    }
+  });
+
+  it('keeps captured literal numbers in hook form and skips a number alone before an image', () => {
+    for (const text of ['4.\u00a0Jars', 'Plan\n4.\tJars', 'Plan\n4\\.\u00a0Jars', 'Plan  \n4.\tJars']) {
+      assert.equal(fixLinearText(text, text, () => false), fixText(text), text);
+    }
+    assert.equal(fixText('Plan\n4. ![Rack](rack.png)'), 'Plan\n4.\n\n![Rack](rack.png)');
   });
 
   it('adds no escape inside inline HTML: a lazy dash line there keeps its padding', () => {

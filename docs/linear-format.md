@@ -128,9 +128,12 @@ Blocks:
   escaped, so it stays text: in `Note` followed by `1. 3. plum`, the
   `3. plum` is text, and with the blank line `fix` writes before the list it
   becomes `1. 3\. plum`. Text split off at an image gets the same escape.
-  Linear keeps such text but returns `4\) pear` and a lone `\+` without
-  their escapes; the sync reads them as text and writes them back with the
-  escapes, so a pull leaves the file as it is.
+  A literal number followed by a dot and whitespace also gets its dot
+  escaped when it starts a paragraph line. A tab or nonbreaking space
+  immediately after that dot becomes a space.
+  Linear keeps such text but can return `4\) pear` and a lone `\+` without
+  their escapes. The sync restores an escape where the text would read as
+  a block. A lone `+` on a paragraph continuation line stays plain.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
@@ -218,7 +221,10 @@ Inline text:
 - A backslash before anything but ASCII punctuation (a letter, a digit, a
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`.
-- An escaped `#` inside a line loses its escape: `a \# b` becomes `a # b`.
+- Redundant escapes inside a line go. `a \# b` becomes `a # b`, and
+  `**\-10**` becomes `**-10**`.
+  Text such as `\#tag` and `\+value` loses the escape when it cannot open a block.
+  Escapes that keep text from becoming Markdown syntax or an emoji stay.
 - A backslash line break (`\` at the end of a line) is written as two
   trailing spaces, which Linear keeps as the same break (see
   [`hard-break-backslash`](#hard-break-backslash)).
