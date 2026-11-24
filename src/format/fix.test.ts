@@ -347,7 +347,11 @@ describe('what fix leaves alone', () => {
       ['-\n  [ ] Pack the tent\n  3. pegs', '- [ ] Pack the tent\n  3. pegs'],
       ['> - [ ] Pack the tent\n>   3. pegs', '> - [ ] Pack the tent\n>   3. pegs'],
       ['- [ ] Pack\n  - [ ] the tent\n    3. pegs', '- [ ] Pack\n  - [ ] the tent\n    3. pegs'],
-    ];
+      ['- [ ] Pack the tent\n\n  and\n  3. pegs', '- [ ] Pack the tent\n\n  and\n  3. pegs'],
+      // Four columns past the content, `>` and `#` are paragraph text: they keep that distance.
+      ['- [ ] Pack the tent\n      > pegs', '- [ ] Pack the tent\n      > pegs'],
+      ['- [ ] Pack the tent\n      # pegs', '- [ ] Pack the tent\n      # pegs'],
+      ['-\t[ ] Pack the tent\n        > pegs', '- [ ] Pack the tent\n      > pegs'],    ];
     for (const [text, expected] of continued) {
       const fixed = fixText(text);
       assert.equal(fixed, expected, text);

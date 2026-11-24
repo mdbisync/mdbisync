@@ -291,8 +291,15 @@ class Writer {
   private contentIndent(item: ListItem): number {
     const [first] = item.children;
     if (item.checked !== null && item.checked !== undefined) {
-      const marker = /^([*+-]|\d{1,9}[.)])( {1,4}(?=\[)|[ \t]*\n)/.exec(this.source.slice(start(item), start(item) + 20));
-      if (marker) return marker[1]!.length + (marker[2]!.endsWith('\n') ? 1 : marker[2]!.length);
+      const lineEnd = this.source.indexOf('\n', start(item));
+      const line = this.source.slice(start(item), lineEnd === -1 ? undefined : lineEnd);
+      const [, marker = '', gap = '', rest = ''] = /^([*+-]|\d{1,9}[.)])([ \t]*)(.*)$/.exec(line) ?? [];
+      if (marker !== '' && rest === '') return marker.length + 1;
+      // A tab after the marker runs to the next multiple of four columns.
+      const from = (item.position?.start.column ?? 1) - 1 + marker.length;
+      let column = from;
+      for (const char of gap) column = char === '\t' ? column + 4 - (column % 4) : column + 1;
+      if (marker !== '' && rest.startsWith('[') && column > from && column - from <= 4) return marker.length + column - from;
     }
     return (first?.position?.start.column ?? 1) - (item.position?.start.column ?? 1);
   }
