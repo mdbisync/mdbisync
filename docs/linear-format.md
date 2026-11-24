@@ -123,6 +123,10 @@ Blocks:
   `1. a`.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
   `- [X] done`.
+- A paragraph's text that starts like a list marker gets its marker
+  escaped, so it stays text: in `Note` followed by `1. 3. plum`, the
+  `3. plum` is text, and with the blank line `fix` writes before the list it
+  becomes `1. 3\. plum`. Text split off at an image gets the same escape.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
@@ -513,6 +517,20 @@ the indented block, so the block falls out of the list.
 ```
 
 Instead, start the item with a line of text and put the block below it.
+
+### `ordered-task-list`
+
+An ordered task list becomes a bullet task list. Linear's task lists have no
+numbers, so the items lose their order numbers; a task item anywhere in an
+ordered list counts.
+
+```markdown
+1. [ ] Draft the outline
+2. [x] Pick a date
+```
+
+Instead, use a bullet task list (`- [ ] Draft the outline`), or an ordered
+list without checkboxes.
 
 ### `image-not-in-repository`
 

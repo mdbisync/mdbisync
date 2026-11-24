@@ -322,6 +322,59 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('leaves an ordered task list to its author: Linear would drop its numbers', () => {
+    for (const text of ['1. [ ] alpha\n2. [x] beta', '1. one\n2. [ ] two', '* a\n\n  3. [x] b']) {
+      assert.equal(fixText(text), text, text);
+      assert.ok(lintText('a.md', text).some((finding) => finding.rule === 'ordered-task-list'), text);
+    }
+  });
+
+  it('keeps item text that starts like a list marker as text when it writes the blank line before the list', () => {
+    // A list that interrupts a paragraph cannot open a nested list on its
+    // first line with a number other than 1 or an empty item: that stays
+    // the item's text, and needs an escape once the list stands apart.
+    const marked: Array<[string, string]> = [
+      ['Note\n1. 3. plum', 'Note\n\n1. 3\\. plum'],
+      ['Note\n1. 3) plum\n2. pear', 'Note\n\n1. 3\\) plum\n2. pear'],
+      ['Note\n1. -', 'Note\n\n1. \\-'],
+      ['Note\n1. *', 'Note\n\n1. \\*'],
+      ['Note\n- 2. fig', 'Note\n\n* 2\\. fig'],
+      ['> Note\n> 1. 3. plum', '> Note\n>\n> 1. 3\\. plum'],
+      // Inside an item the list still follows its paragraph; Linear reads the text as a list there too.
+      ['- Note\n  1. 3. plum', '* Note\n  1. 3\\. plum'],
+      // After a task checkbox the text does not start its line: no escape.
+      ['- [ ] 1. Draft\n- [x] - pear', '- [ ] 1. Draft\n- [X] - pear'],
+    ];
+    const read = (markdown: string): string[] => {
+      const out: string[] = [];
+      visit(parse(markdown), (node) => {
+        out.push(node.type === 'text' ? node.value : node.type);
+      });
+      return out;
+    };
+    for (const [text, expected] of marked) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(read(fixed), read(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${text}`);
+    }
+  });
+
+  it("takes the escaped marker when it captures Linear's text: a lone \\+ is no +++ delimiter", () => {
+    // Linear writes a bare `+` item text without the escape fix writes.
+    const linear = '* Note\n  1. +';
+    assert.equal(fixLinearText(linear, linear, () => false), '* Note\n  1. \\+');
+    assert.ok(!sameMarkdown('\\+++ Title', '+++ Title'), 'an escaped +++ delimiter stays apart');
+  });
+
+  it('keeps text split off at an image as text when it starts like a list marker', () => {
+    assert.equal(fixText('Before ![a](x.png) 3. plum'), 'Before\n\n![a](x.png)\n\n3\\. plum');
+    assert.equal(fixText('Before ![a](x.png) - pear'), 'Before\n\n![a](x.png)\n\n\\- pear');
+    // The part before the image still follows a task checkbox: no escape there.
+    assert.equal(fixText('- [ ] 1. Draft ![a](x.png) 2. more'), '- [ ] 1. Draft\n\n  ![a](x.png)\n\n  2\\. more');
+  });
+
   it('keeps a lone -- line between blank lines, and reads one under a paragraph as Markdown does: a heading', () => {
     assert.equal(fixText('Text.\n\n--\n\nMore.'), 'Text.\n\n--\n\nMore.');
     assert.equal(fixText('--'), '--');

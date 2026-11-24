@@ -69,6 +69,10 @@ const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)])/;
 // A paragraph of `$$` lines around math, which `fix` writes as a `math` fence.
 const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
 
+// A list marker that opens a text: a bullet or a number with its delimiter,
+// followed by a space, a tab or the end of the line.
+const LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
+
 class Writer {
   private readonly definitions = new Map<string, Definition>();
   private readonly containers: Container[] = [];
@@ -81,6 +85,8 @@ class Writer {
   private fileBlockIndent = 0;
   /** Whether the text being written is an autolink's, where a backslash escapes nothing. */
   private literal = false;
+  /** The paragraph that follows a task item's checkbox: it does not start its line. */
+  private taskParagraph: Paragraph | undefined;
 
   constructor(source: string, tree: Root, options: FixOptions) {
     this.source = source;
@@ -179,14 +185,34 @@ class Writer {
     const isImage = (child: PhrasingContent): boolean => child.type === 'image' || child.type === 'imageReference';
     const images = node.children.filter(isImage).length;
     const hasText = node.children.some((child) => !isImage(child) && !(child.type === 'text' && child.value.trim() === ''));
-    if (images === 0 || (!hasText && images === 1)) return [this.inline(node.children)];
+    if (images === 0 || (!hasText && images === 1)) return [node === this.taskParagraph ? this.inline(node.children) : this.paragraphText(node.children)];
     // Linear holds images as blocks: text before and after an image becomes its own paragraph.
     const parts: PhrasingContent[][] = [[]];
     for (const child of node.children) {
       if (isImage(child)) parts.push([child], []);
       else parts.at(-1)!.push(child);
     }
-    return parts.map((part, index) => paragraphPart(this.inline(part).trim(), index > 0)).filter((part) => part !== '');
+    // The first part of a task item's paragraph follows its checkbox: it does not start its line.
+    return parts
+      .map((part, index) => paragraphPart(index === 0 && node === this.taskParagraph ? this.inline(part).trim() : this.paragraphText(part, true), index > 0))
+      .filter((part) => part !== '');
+  }
+
+  /**
+   * A paragraph's text, which starts a line. Text that starts like a list
+   * marker gets its marker escaped: it was text only because it could not
+   * interrupt a paragraph (`Note` / `1. 3. plum`, where `3. plum` stays the
+   * item's text), and the blank line `fix` writes before the list would
+   * make it a list; Linear reads it as one either way. `trim` drops the
+   * spaces around a part split off at an image.
+   */
+  private paragraphText(children: readonly PhrasingContent[], trim = false): string {
+    const text = trim ? this.inline(children).trim() : this.inline(children);
+    if (children[0]?.type !== 'text') return text;
+    const marker = LIST_MARKER_START.exec(text);
+    if (marker === null) return text;
+    const at = marker[0].length - 1;
+    return `${text.slice(0, at)}\\${text.slice(at)}`;
   }
 
   private list(node: List, interruptsParagraph = false): string {
@@ -228,6 +254,7 @@ class Writer {
     }
     if (first === undefined) return marker;
     this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
+    if (item.checked !== null && item.checked !== undefined && first.type === 'paragraph') this.taskParagraph = first;
     // Blocks of an item are a blank line apart, but a nested list follows
     // its paragraph on the next line when it can interrupt that paragraph.
     // Ordered lists starting above or below 1, lists starting with an empty
