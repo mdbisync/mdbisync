@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { fakeFetch, touch } from '../setup/test-helpers.ts';
-import { sameMarkdown, splitFile } from '../format/index.ts';
+import { relativeLinkUrls, sameMarkdown, splitFile } from '../format/index.ts';
 import { hookRun } from '../format/test-helpers.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
 
@@ -223,7 +223,7 @@ describe('image repairs through the sync pull request', () => {
   for (const [form, image, repaired] of [
     ['inline', 'Look !![Report](../../records.csv) here.', 'Look \\![Report](<../../records.csv>) here.'],
     ['reference', 'Look !![Report][file] here.\n\n[file]: ../../records.csv', 'Look \\![Report](<../../records.csv>) here.'],
-    ['joined by a removed link', 'Look [Report][x](javascript:void%280%29)(../../records.csv) here.', 'Look \\[Report](../../records.csv) here.'],
+    ['joined by a removed link', 'Look [Report][x](javascript:void%280%29)(../../records.csv) here.', 'Look \\[Report\\](../../records.csv) here.'],
   ]) it(`never lets a repair upload a repository file Linear's text did not name (${form})`, async () => {
     const path = 'eng/notes/plan.md';
     await h.editRef('refs/heads/main', 'records.csv', 'name,value\nExample,42\n');
@@ -233,10 +233,14 @@ describe('image repairs through the sync pull request', () => {
     assert.deepEqual(opened.report.capture?.blocked, []);
     const branch = await h.show(`${SYNC_BRANCH}:${path}`);
     assert.ok(branch.includes(repaired!), branch);
+    // An apparent path formed by joining text after a repair must remain text.
+    const namesRepositoryFile = form !== 'joined by a removed link';
+    assert.equal(relativeLinkUrls(branch).has('../../records.csv'), namesRepositoryFile, branch);
     await h.settle();
     assert.equal(h.world.linear.uploads.length, before, 'a repair uploaded a repository file');
     const document = await h.documentOf(path);
     assert.doesNotMatch(document.content!, /uploads\.linear\.app/);
+    assert.equal(relativeLinkUrls(document.content!).has('../../records.csv'), namesRepositoryFile, document.content);
     await h.editInLinear(path, document.content + '\nAnother paragraph.\n');
     await h.settle();
     assert.equal(h.world.linear.uploads.length, before);

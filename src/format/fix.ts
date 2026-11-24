@@ -624,11 +624,11 @@ class Writer {
         return;
       }
       case 'image':
-        edits.push({ from, to, text: `![${this.label(from + 1, to)}](${imageDestination(node.url)})` });
+        edits.push({ from, to, text: `![${this.imageLabel(from + 1, to, node.alt)}](${imageDestination(node.url)})` });
         return;
       case 'imageReference': {
         const definition = this.definitions.get(node.identifier);
-        if (definition) edits.push({ from, to, text: `![${this.label(from + 1, to)}](${imageDestination(definition.url)})` });
+        if (definition) edits.push({ from, to, text: `![${this.imageLabel(from + 1, to, node.alt)}](${imageDestination(definition.url)})` });
         return;
       }
       case 'text': {
@@ -675,10 +675,10 @@ class Writer {
 
   /**
    * The bracketed label that opens at `open` (a `[`) and closes before
-   * `limit`, without its brackets: as written, except that its continuation
-   * lines lose their container prefixes, as in `inline`.
+   * `limit`, without its brackets. Continuation lines lose their container
+   * prefixes. Literal brackets are escaped when the alt text stays the same.
    */
-  private label(open: number, limit: number): string {
+  private imageLabel(open: number, limit: number, alt: string | null | undefined): string {
     const from = open + 1;
     const to = from + bracketedLabel(this.source, open, limit).length;
     const code = codeSpans(this.source, from, to);
@@ -688,7 +688,18 @@ class Writer {
       while (code[span] && code[span]![1] <= at) span++;
       return code[span] === undefined || at < code[span]![0];
     });
-    return this.rewritten(from, to, edits, code);
+    if (edits.length > 0) {
+      const label = this.rewritten(from, to, edits, code);
+      // An image node exposes its flattened alt text, so brackets in its
+      // source can still belong to a nested link or image.
+      const blocks = parse(`![${label}](image.png)`).children;
+      const [paragraph] = blocks;
+      if (blocks.length === 1 && paragraph?.type === 'paragraph' && paragraph.children.length === 1) {
+        const [image] = paragraph.children;
+        if (image?.type === 'image' && image.alt === alt) return label;
+      }
+    }
+    return this.rewritten(from, to, [], code);
   }
 }
 

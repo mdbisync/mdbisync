@@ -841,6 +841,18 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('keeps the alt text of an image whose label has a link or image', () => {
+    const images = [
+      '![Stock [schedule](https://example.com/stock)](rack.png)',
+      '![Stock ![diagram](diagram.png)](rack.png)',
+    ];
+    for (const image of images) {
+      const reference = image.replace('(rack.png)', '[rack]') + '\n\n[rack]: rack.png';
+      assert.equal(fixText(reference), image);
+      assert.equal(fixText(image), image);
+    }
+  });
+
   it('writes the links the bare-URL search finds inside text, and formats the rest of the file', () => {
     // The parser links none of these; Markdown's search for URLs inside text does.
     const cases: Array<[string, string]> = [
