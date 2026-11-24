@@ -557,6 +557,9 @@ const GENERATED = [
   '### Dependency updates',
   '* Bump a package by @dependabot[bot] in https://github.com/owner/repo/pull/13',
   '',
+  '## New Contributors',
+  '* @release-pins[bot] made their first contribution in https://github.com/owner/repo/pull/11',
+  '',
   '**Full Changelog**: https://github.com/owner/repo/compare/v1.0.0...v1.0.1',
 ].join('\n');
 
@@ -598,7 +601,34 @@ const TAGS_CALL = 'api repos/owner/repo/git/matching-refs/tags/v --paginate --jq
 const generateCall = (version: string, previous: string) =>
   `api -X POST repos/owner/repo/releases/generate-notes -f tag_name=${version} -f previous_tag_name=${previous} --jq .body`;
 
-test('a final release\'s notes are generated since the previous final release, without the pins entry, before the security sentence', () => {
+test('a person\'s first contribution stays among the new contributors, a bot\'s does not', () => {
+  const generated = [
+    '* MDS-1: Keep a list stable by @someone in https://github.com/owner/repo/pull/12',
+    '',
+    '## New Contributors',
+    '* @release-pins[bot] made their first contribution in https://github.com/owner/repo/pull/11',
+    '* @newcomer made their first contribution in https://github.com/owner/repo/pull/14',
+    '',
+    '**Full Changelog**: https://github.com/owner/repo/compare/v1.0.0...v1.0.1',
+  ].join('\n');
+  const { status, notes } = collectNotes({ version: 'v1.0.1', tags: ['v1.0.0', 'v1.0.1'], generated });
+  assert.equal(status, 0);
+  assert.equal(notes, [
+    '* MDS-1: Keep a list stable by @someone in https://github.com/owner/repo/pull/12',
+    '',
+    '## New Contributors',
+    '* @newcomer made their first contribution in https://github.com/owner/repo/pull/14',
+    '',
+    '**Full Changelog**: https://github.com/owner/repo/compare/v1.0.0...v1.0.1',
+    '',
+    '## Security',
+    '',
+    SECURITY,
+    '',
+  ].join('\n'));
+});
+
+test('a final release\'s notes are generated since the previous final release, without the pins entry or bots as new contributors, before the security sentence', () => {
   const { status, calls, notes } = collectNotes({ version: 'v1.0.1', tags: ['v1.0.0-rc.1', 'v1.0.0', 'v1.0.1-rc.1', 'v1.0.1'] });
   assert.equal(status, 0);
   assert.deepEqual(calls, [TAGS_CALL, generateCall('v1.0.1', 'v1.0.0')]);
