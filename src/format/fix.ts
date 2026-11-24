@@ -177,14 +177,14 @@ class Writer {
     const isImage = (child: PhrasingContent): boolean => child.type === 'image' || child.type === 'imageReference';
     const images = node.children.filter(isImage).length;
     const hasText = node.children.some((child) => !isImage(child) && !(child.type === 'text' && child.value.trim() === ''));
-    if (images === 0 || (!hasText && images === 1)) return [this.inline(node.children)];
+    if (images === 0 || (!hasText && images === 1)) return [this.inline(node.children, start(node))];
     // Linear holds images as blocks: text before and after an image becomes its own paragraph.
     const parts: PhrasingContent[][] = [[]];
     for (const child of node.children) {
       if (isImage(child)) parts.push([child], []);
       else parts.at(-1)!.push(child);
     }
-    return parts.map((part) => this.inline(part).trim()).filter((part) => part !== '');
+    return parts.map((part) => this.inline(part, start(node)).trim()).filter((part) => part !== '');
   }
 
   private list(node: List, interruptsParagraph = false): string {
@@ -270,21 +270,34 @@ class Writer {
    * prefixes of the containers (quote markers, list indentation) are dropped,
    * since the caller writes its own, and so is the insignificant indentation
    * of continuation lines outside code spans.
+   *
+   * In a paragraph (`paragraphStart` given), Linear escapes a literal `-`
+   * or `*` that starts a line, as in `\--` or `\*note`.
    */
-  private inline(children: readonly PhrasingContent[]): string {
+  private inline(children: readonly PhrasingContent[], paragraphStart?: number): string {
     if (children.length === 0) return '';
     const from = start(children[0]!);
     const to = end(children.at(-1)!);
     const edits: Edit[] = [];
     for (const child of children) this.inlineEdits(child, edits);
     const code: Array<[number, number]> = [];
+    const texts: Array<[number, number]> = [];
     for (const child of children) {
       visit(child, (node) => {
         if (node.type === 'inlineCode') code.push([start(node), end(node)]);
+        if (node.type === 'text') texts.push([start(node), end(node)]);
       });
     }
+    const paragraph = paragraphStart !== undefined;
+    const lineStarts = from === paragraphStart ? [from] : [];
     for (let at = this.source.indexOf('\n', from); at !== -1 && at < to; at = this.source.indexOf('\n', at + 1)) {
-      edits.push(this.continuation(at + 1, code.some(([a, b]) => a <= at && at < b)));
+      const continuation = this.continuation(at + 1, code.some(([a, b]) => a <= at && at < b), paragraph);
+      edits.push(continuation);
+      if (paragraph && continuation.text === '') lineStarts.push(continuation.to);
+    }
+    for (const at of lineStarts) {
+      const literal = texts.some(([a, b]) => a <= at && at < b);
+      if (literal && (this.source[at] === '-' || this.source[at] === '*')) edits.push({ from: at, to: at, text: '\\' });
     }
     let out = '';
     let at = from;
@@ -297,8 +310,8 @@ class Writer {
     return out;
   }
 
-  /** The edit that removes a continuation line's container prefixes, starting at `lineStart`. */
-  private continuation(lineStart: number, inCode: boolean): Edit {
+  /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's. */
+  private continuation(lineStart: number, inCode: boolean, paragraph: boolean): Edit {
     let at = lineStart;
     const line = this.source.slice(lineStart, this.source.indexOf('\n', lineStart) === -1 ? undefined : this.source.indexOf('\n', lineStart));
     for (const container of this.containers) {
@@ -309,13 +322,15 @@ class Writer {
     }
     // A lazy line of only `-` or `=` continues the paragraph text. Under
     // the prefix the caller writes, it would underline the paragraph as a
-    // setext heading; indented four spaces past the content's column, it
-    // stays text. Its own indentation goes: a tab after the prefix may span
-    // fewer columns. Outside a container no prefix is written: the line
-    // stays as it is.
+    // setext heading. In paragraph text Linear escapes it (`\--`, `\==`).
+    // In a code span a backslash would be code, and in a link label Linear's
+    // form is not recorded: there, indented four spaces past the content's
+    // column, it stays text. Its own indentation goes: a tab after the
+    // prefix may span fewer columns. Outside a container no prefix is
+    // written: the line stays as it is.
     const underline = /^([ \t]*)(?:-+|=+)[ \t]*$/.exec(this.source.slice(at, lineStart + line.length));
     if (underline && (this.containers.length > 0 || this.fileBlockIndent > 0)) {
-      return { from: lineStart, to: at + underline[1]!.length, text: ' '.repeat(4 + this.fileBlockIndent) };
+      return { from: lineStart, to: at + underline[1]!.length, text: paragraph && !inCode ? '\\' : ' '.repeat(4 + this.fileBlockIndent) };
     }
     if (!inCode) {
       const rest = this.source.slice(at, lineStart + line.length);

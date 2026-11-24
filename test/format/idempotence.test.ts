@@ -15,7 +15,7 @@ const paths = new Set(corpus.files.map((file) => file.path));
 const markdown = corpus.files.filter((file) => file.synced && file.kind === 'markdown');
 
 const URL_LINE = 'https://example.com/a\\\nNext line.';
-const LINKED = '[https://example.com/a\\\\](<https://example.com/a\\\\>)\nNext line.';
+const LINKED = '[https://example.com/a\\\\](<https://example.com/a%5C>)\nNext line.';
 
 describe('fix is idempotent over the corpus', () => {
   it(`holds for ${markdown.length} corpus files, each also with a bare URL ending in a backslash`, () => {

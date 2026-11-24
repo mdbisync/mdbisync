@@ -1,0 +1,45 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"--","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"==","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"----x","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"-- a short remark","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"=== a heading-like remark","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"An item","marks":{"attribution":"user"}}]},
+            {"type":"paragraph","children":[{"text":"--","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"--","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Step","marks":{"attribution":"user"}}]},
+            {"type":"paragraph","children":[{"text":"==","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-63c5fe20","marks":{"attribution":"user"}}]}
+  ]
+}

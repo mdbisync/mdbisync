@@ -234,17 +234,18 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('a\n    # b'), 'a\n    # b');
   });
 
-  it('keeps a lazy line of dashes or equals signs as text, not a heading underline', () => {
+  it('keeps a lazy line of dashes or equals signs as text, not a heading underline: escaped as Linear writes it', () => {
     const lazy: Array<[string, string]> = [
-      ['- item\n--', '* item\n      --'],
-      ['- item\n=', '* item\n      ='],
-      ['1. item\n==', '1. item\n       =='],
-      ['- [ ] task\n--', '- [ ] task\n      --'],
-      ['- a\n  - b\n--', '* a\n  * b\n        --'],
-      ['> quote\n--', '> quote\n>     --'],
-      ['> quote\n\t==', '> quote\n>     =='],
-      ['100. item\n\t--', '100. item\n         --'],
-      ['> - item\n  --', '> * item\n>       --'],
+      ['- item\n--', '* item\n  \\--'],
+      ['- item\n=', '* item\n  \\='],
+      ['1. item\n==', '1. item\n   \\=='],
+      ['- [ ] task\n--', '- [ ] task\n  \\--'],
+      ['- a\n  - b\n--', '* a\n  * b\n    \\--'],
+      ['> quote\n--', '> quote\n> \\--'],
+      ['> quote\n\t==', '> quote\n> \\=='],
+      ['100. item\n\t--', '100. item\n     \\--'],
+      ['> - item\n  --', '> * item\n>   \\--'],
+      // In a link label Linear's form is not recorded: four spaces of padding keep the line text.
       ['> [link\n--\n](https://example.com)', '> [link\n>     --\n> ](<https://example.com>)'],
       // A file block writes its label's later lines without the item's indent.
       ['- [Report\n--\nsummary](report.pdf)', '* \n  [Report\n      --\nsummary](report.pdf)'],
@@ -268,12 +269,35 @@ describe('what fix leaves alone', () => {
     }
   });
 
-  it('keeps a lone -- line between blank lines, and reads one under a paragraph as Markdown does: a heading', () => {
-    assert.equal(fixText('Text.\n\n--\n\nMore.'), 'Text.\n\n--\n\nMore.');
-    assert.equal(fixText('--'), '--');
+  it('escapes a lone -- line between blank lines, and reads one under a paragraph as Markdown does: a heading', () => {
+    assert.equal(fixText('Text.\n\n--\n\nMore.'), 'Text.\n\n\\--\n\nMore.');
+    assert.equal(fixText('--'), '\\--');
     assert.equal(fixText('Text\n--\n\nMore.'), '## Text\n\nMore.');
     // Outside a container nothing is written before the line: a code span keeps its tab.
     assert.equal(fixText('`a\n\t--\nb`'), '`a\n\t--\nb`');
+  });
+
+  it('escapes a literal - or * that starts a paragraph line, as Linear writes it', () => {
+    const cases: Array<[string, string]> = [
+      ['-x marks it', '\\-x marks it'],
+      ['*x star', '\\*x star'],
+      ['First\n-- second\n-x third', 'First\n\\-- second\n\\-x third'],
+      ['* item\n  -- remark', '* item\n  \\-- remark'],
+      ['> words\n> -x remark', '> words\n> \\-x remark'],
+      // Already escaped, not a line start, or not text: nothing to add.
+      ['\\-x and \\*y', '\\-x and \\*y'],
+      ['a -x and *b', 'a -x and *b'],
+      ['+x plus', '+x plus'],
+      ['*x* emphasis', '*x* emphasis'],
+      ['`a\n-x`', '`a\n-x`'],
+      ['# -x heading', '# -x heading'],
+    ];
+    for (const [input, expected] of cases) {
+      const once = fixText(input);
+      assert.equal(once, expected, JSON.stringify(input));
+      assert.equal(fixText(once), once, `${JSON.stringify(input)}: a second fix changes nothing`);
+      assert.ok(sameMarkdown(once, input), `${JSON.stringify(input)}: the document stays`);
+    }
   });
 
   it('keeps a code span whose lazy line holds only dashes in a quote: the padding stops the underline', () => {
@@ -368,20 +392,23 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('* [Report](<a)b.pdf>)'), '* \n  [Report](a%29b.pdf)');
   });
 
-  it('keeps what a destination means: references and escapes stay escaped', () => {
+  it('keeps what a destination means: references stay escaped, and a backslash is percent-encoded as Linear writes it', () => {
     const once = fixText('[a](<https://example.com/?q=&amp;copy;>)');
     assert.equal(once, '[a](<https://example.com/?q=&amp;copy;>)');
     assert.equal(fixText('[a](https://example.com/?a=1&b=2)'), '[a](<https://example.com/?a=1&b=2>)');
-    assert.equal(fixText('[a](<x\\\\*y>)'), '[a](<x\\\\*y>)');
+    assert.equal(fixText('[a](<x\\\\*y>)'), '[a](<x%5C*y>)');
+    assert.equal(fixText('[a](<https://example.com/a|b^c{d}>)'), '[a](<https://example.com/a%7Cb%5Ec%7Bd%7D>)');
+    assert.equal(fixText('[a](<https://example.com/a%5Cb>)'), '[a](<https://example.com/a%5Cb>)');
   });
 
   it('writes an autolink\'s backslashes and brackets literally in its label', () => {
     const cases: Array<[string, string]> = [
-      ['https://example.com/\\\nNext.', '[https://example.com/\\\\](<https://example.com/\\\\>)\nNext.'],
-      ['<https://example.com/\\>', '[https://example.com/\\\\](<https://example.com/\\\\>)'],
-      ['See https://example.com/\\* now.', 'See [https://example.com/\\\\](<https://example.com/\\\\>)* now.'],
+      ['https://example.com/\\\nNext.', '[https://example.com/\\\\](<https://example.com/%5C>)\nNext.'],
+      ['<https://example.com/\\>', '[https://example.com/\\\\](<https://example.com/%5C>)'],
+      ['See https://example.com/\\* now.', 'See [https://example.com/\\\\](<https://example.com/%5C>)* now.'],
+      ['See https://example.com/a\\b now.', 'See [https://example.com/a\\\\b](<https://example.com/a%5Cb>) now.'],
       ['<https://example.com/a]b[c>', '[https://example.com/a\\]b\\[c](<https://example.com/a]b[c>)'],
-      ['a <https://example.com/a\\`> b `c`', 'a [https://example.com/a\\\\\\`](<https://example.com/a\\\\`>) b `c`'],
+      ['a <https://example.com/a\\`> b `c`', 'a [https://example.com/a\\\\\\`](<https://example.com/a%5C`>) b `c`'],
     ];
     for (const [input, expected] of cases) {
       const once = fixText(input);

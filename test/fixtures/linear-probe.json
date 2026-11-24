@@ -153,6 +153,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/dash-only-lines.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/emoji-literal.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -258,6 +262,14 @@
       "fixedPoint": true
     },
     "construct-singles/hr-underscores.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/lazy-underline-line.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/line-start-markers.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -581,7 +593,15 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "links/bare-url-backslash.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "links/bare-url.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/destination-unsafe-characters.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

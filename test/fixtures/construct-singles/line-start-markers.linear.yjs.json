@@ -1,0 +1,54 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"-x marks the spot","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"-5 degrees outside","marks":{"attribution":"user"}}]},
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"First line of a paragraph","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"-- second line with a remark","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"-x third line","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"An item","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"-- a remark under it","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {"text":"Quoted words","marks":{"attribution":"user"}},
+            {"type":"hard_break"},
+            {"text":"-x quoted remark","marks":{"attribution":"user"}}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"+x plus sign","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"*x star sign","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-cbd5160c","marks":{"attribution":"user"}}]}
+  ]
+}

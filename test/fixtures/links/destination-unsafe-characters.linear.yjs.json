@@ -1,0 +1,15 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Middle","marks":{"attribution":"user","link":{"href":"https://example.com/a%5Cb","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"End","marks":{"attribution":"user","link":{"href":"https://example.com/path/%5C","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"See ","marks":{"attribution":"user"}},{"text":"https://example.com/a\\b","marks":{"attribution":"user","link":{"href":"https://example.com/a%5Cb","noEmbed":null}}},{"text":" for details.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Read ","marks":{"attribution":"user"}},{"text":"https://example.com/path/\\","marks":{"attribution":"user","link":{"href":"https://example.com/path/%5C","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"Pipe","marks":{"attribution":"user","link":{"href":"https://example.com/a%7Cb%5Ec%7Bd%7D","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"https://example.com/path/\\","marks":{"attribution":"user","link":{"href":"https://example.com/path/%5C","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-83bf6cca","marks":{"attribution":"user"}}]}
+  ]
+}

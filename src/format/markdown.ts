@@ -552,23 +552,12 @@ function destination(url: string): string {
 }
 
 /**
- * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded, and a
- * backslash at its end doubled, so it cannot escape the closing bracket.
+ * A link destination as Linear writes it: in angle brackets, with characters that would end it encoded. Linear also
+ * percent-encodes a backslash, `|`, `^`, `{` and `}` (recorded in the fixture bank); so does every renderer that
+ * writes the link as HTML, so the link goes to the same place.
  */
 export function linkDestination(url: string): string {
-  const inner = destination(url.replace(/[<>\r\n]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`));
-  return `<${inner}${trailingBackslashes(inner) % 2 === 1 ? '\\' : ''}>`;
-}
-
-/**
- * The number of backslashes that end `text`, counted from its end. A regular
- * expression for the run rescans it from each of its positions when another
- * character follows it.
- */
-function trailingBackslashes(text: string): number {
-  let at = text.length;
-  while (at > 0 && text[at - 1] === '\\') at -= 1;
-  return text.length - at;
+  return `<${destination(url.replace(/[<>\r\n\\|^{}]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`))}>`;
 }
 
 /** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */
