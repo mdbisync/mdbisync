@@ -1,0 +1,11 @@
+# How GitHub groups the release notes it generates for a final release's draft
+# (the publish job of workflows/release.yml). Dependabot labels its pull
+# requests `dependencies`; every other pull request is a change.
+changelog:
+  categories:
+    - title: Changes
+      labels: ['*']
+      exclude:
+        labels: [dependencies]
+    - title: Dependency updates
+      labels: [dependencies]

@@ -533,6 +533,8 @@ test('the publish job only drafts a release from the existing tag, with the repo
   assert.ok(job.steps.every((step) => !step.uses?.startsWith('actions/checkout@') && !/\bnode\b|\bnpm\b/.test(step.run ?? '')));
   const create = job.steps.find((step) => step.name === 'Create the draft release with the security report')!;
   assert.match(create.run!, /^gh release create "\$RELEASE_VERSION" --draft --verify-tag /);
+  assert.match(create.run!, /--notes-file "\$RUNNER_TEMP\/release-notes\.md"/, 'the notes the step before collected');
+  assert.equal(job.steps.indexOf(create), job.steps.findIndex((step) => step.name === 'Collect the release notes') + 1);
   assert.match(create.run!, /"\$RUNNER_TEMP\/security\/security-report\.md" "\$RUNNER_TEMP\/security\/security-summary\.json" \\\n\s*"\$RUNNER_TEMP\/sbom\/sbom\.spdx\.json" "\$RUNNER_TEMP\/dependencies\/dependency-scan\.json"\s*$/);
   const downloads = job.steps.filter((step) => step.uses?.startsWith('actions/download-artifact@')).map((step) => [step.with!.name, step.with!.path]);
   assert.deepEqual(downloads, [
@@ -543,4 +545,103 @@ test('the publish job only drafts a release from the existing tag, with the repo
   // The SBOM is attached as the very file the attest job signed.
   const sbom = jobs.build!.steps.find((step) => step.with?.name === 'release-sbom')!;
   assert.equal(sbom.with!.path, '${{ runner.temp }}/sbom.spdx.json');
+});
+
+// The notes step's script, run against a stand-in for gh that answers the tag list and the generated notes.
+const SECURITY = 'The security report of this release is attached as security-report.md and its SPDX SBOM as sbom.spdx.json.';
+const GENERATED = [
+  "## What's Changed",
+  '### Changes',
+  '* MDS-1: Keep a list stable by @someone in https://github.com/owner/repo/pull/12',
+  '* Pin the workflow templates to v1.0.0 by @release-pins[bot] in https://github.com/owner/repo/pull/11',
+  '### Dependency updates',
+  '* Bump a package by @dependabot[bot] in https://github.com/owner/repo/pull/13',
+  '',
+  '**Full Changelog**: https://github.com/owner/repo/compare/v1.0.0...v1.0.1',
+].join('\n');
+
+function collectNotes(options: { version: string; tags: string[]; tagsFail?: boolean; generateFails?: boolean }) {
+  const step = jobs.publish!.steps.find((s) => s.name === 'Collect the release notes') ?? assert.fail('no notes step');
+  const directory = mkdtempSync(join(tmpdir(), 'release-notes-'));
+  try {
+    const bin = join(directory, 'bin');
+    mkdirSync(bin);
+    const log = join(directory, 'log');
+    writeFileSync(log, '');
+    writeFileSync(join(bin, 'gh'), [
+      '#!/bin/sh',
+      'printf \'%s\\n\' "$*" >> "$STUB_LOG"',
+      'case "$*" in',
+      '  *matching-refs*) [ -z "$STUB_TAGS_FAIL" ] || exit 1; printf \'%s\\n\' "$STUB_TAGS" ;;',
+      '  *generate-notes*) [ -z "$STUB_GENERATE_FAIL" ] || exit 1; printf \'%s\\n\' "$STUB_GENERATED" ;;',
+      '  *) exit 2 ;;',
+      'esac',
+    ].join('\n'), { mode: 0o755 });
+    const env = {
+      ...step.env, PATH: `${bin}:${process.env.PATH}`, STUB_LOG: log, RUNNER_TEMP: directory, GH_TOKEN: 'token', GH_REPO: 'owner/repo',
+      RELEASE_VERSION: options.version, STUB_TAGS: options.tags.join('\n'), STUB_GENERATED: GENERATED,
+      STUB_TAGS_FAIL: options.tagsFail ? '1' : '', STUB_GENERATE_FAIL: options.generateFails ? '1' : '',
+    };
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', step.run!], { env, encoding: 'utf8' });
+    return {
+      status: result.status,
+      stdout: result.stdout,
+      calls: readFileSync(log, 'utf8').split('\n').filter(Boolean),
+      notes: readFileSync(join(directory, 'release-notes.md'), 'utf8'),
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const TAGS_CALL = 'api repos/owner/repo/git/matching-refs/tags/v --paginate --jq .[].ref | ltrimstr("refs/tags/")';
+const generateCall = (version: string, previous: string) =>
+  `api -X POST repos/owner/repo/releases/generate-notes -f tag_name=${version} -f previous_tag_name=${previous} --jq .body`;
+
+test('a final release\'s notes are generated since the previous final release, without the pins entry, before the security sentence', () => {
+  const { status, calls, notes } = collectNotes({ version: 'v1.0.1', tags: ['v1.0.0-rc.1', 'v1.0.0', 'v1.0.1-rc.1', 'v1.0.1'] });
+  assert.equal(status, 0);
+  assert.deepEqual(calls, [TAGS_CALL, generateCall('v1.0.1', 'v1.0.0')]);
+  assert.equal(notes, [
+    "## What's Changed",
+    '### Changes',
+    '* MDS-1: Keep a list stable by @someone in https://github.com/owner/repo/pull/12',
+    '### Dependency updates',
+    '* Bump a package by @dependabot[bot] in https://github.com/owner/repo/pull/13',
+    '',
+    '**Full Changelog**: https://github.com/owner/repo/compare/v1.0.0...v1.0.1',
+    '',
+    '## Security',
+    '',
+    SECURITY,
+    '',
+  ].join('\n'));
+});
+
+test('the previous final release is the greatest final version below the new one, in version order', () => {
+  for (const [version, tags, previous] of [
+    ['v1.0.2', ['v1.0.0', 'v1.0.1', 'v1.1.0', 'v1.0.2'], 'v1.0.1'],
+    ['v1.10.0', ['v1.2.0', 'v1.9.0', 'v1.10.0-rc.1', 'v1.10.0'], 'v1.9.0'],
+    ['v2.0.0', ['v1.0.0', 'v1.10.0', 'v1.9.0', 'v2.0.0'], 'v1.10.0'],
+  ] as const) {
+    const { status, calls } = collectNotes({ version, tags: [...tags] });
+    assert.equal(status, 0);
+    assert.equal(calls[1], generateCall(version, previous), version);
+  }
+});
+
+test('the first final release has nothing to collect and carries the security sentence only', () => {
+  const { status, calls, notes } = collectNotes({ version: 'v1.0.0', tags: ['v1.0.0-rc.1', 'v1.0.0-rc.2', 'v1.0.0'] });
+  assert.equal(status, 0);
+  assert.deepEqual(calls, [TAGS_CALL], 'no notes are generated');
+  assert.equal(notes, `${SECURITY}\n`);
+});
+
+test('notes that cannot be collected leave the security sentence with a warning, so the draft is still created', () => {
+  for (const failure of [{ tagsFail: true }, { generateFails: true }]) {
+    const { status, stdout, notes } = collectNotes({ version: 'v1.0.1', tags: ['v1.0.0', 'v1.0.1'], ...failure });
+    assert.equal(status, 0);
+    assert.match(stdout, /^::warning::The release notes could not be collected/m);
+    assert.equal(notes, `${SECURITY}\n`);
+  }
 });
