@@ -29,8 +29,7 @@ export interface FixOptions {
  * Returns the text in Linear's form, or the text itself when lint finds a
  * construct Linear would lose or alter. Throws `MarkdownLimitError` when a
  * rewrite takes the text over the Markdown limits, which lint cannot see in
- * the source: an inline image that leaves its paragraph can expose a table
- * or reference links.
+ * the source.
  */
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
@@ -66,6 +65,9 @@ type Container = { kind: 'quote' } | { kind: 'item'; indent: number };
 
 // Characters that start a block when they open a line (`<` an HTML block).
 const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)])/;
+
+// A paragraph of `$$` lines around math, which `fix` writes as a `math` fence.
+const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
 
 class Writer {
   private readonly definitions = new Map<string, Definition>();
@@ -172,7 +174,7 @@ class Writer {
   /** A paragraph; `$$` math becomes a `math` fence, and an image shares no paragraph with text. */
   private paragraph(node: Paragraph): string[] {
     const raw = this.source.slice(start(node), end(node));
-    const math = /^\$\$\n([\s\S]*)\n\$\$$/.exec(raw);
+    const math = MATH_PARAGRAPH.exec(raw);
     if (math) return [`\`\`\`math\n${math[1]}\n\`\`\``];
     const isImage = (child: PhrasingContent): boolean => child.type === 'image' || child.type === 'imageReference';
     const images = node.children.filter(isImage).length;
@@ -184,7 +186,7 @@ class Writer {
       if (isImage(child)) parts.push([child], []);
       else parts.at(-1)!.push(child);
     }
-    return parts.map((part) => this.inline(part).trim()).filter((part) => part !== '');
+    return parts.map((part, index) => paragraphPart(this.inline(part).trim(), index > 0)).filter((part) => part !== '');
   }
 
   private list(node: List, interruptsParagraph = false): string {
@@ -498,6 +500,80 @@ function escaped(text: string, at: number): boolean {
   let run = 0;
   while (text[at - 1 - run] === '\\') run++;
   return run % 2 === 1;
+}
+
+/**
+ * A part of a paragraph split off at an image, which becomes a paragraph of
+ * its own. Where it would read as another block alone (a heading, quote,
+ * rule, list, code fence, HTML block, definition, table or `$$` math), it
+ * gets the escape that keeps it text. The escapes are Linear's where Linear
+ * writes one: `\#`, `\>`, `\---`, `\-`, every fence character, `\[label\]:`,
+ * a setext underline's first character and a table delimiter row's. Linear
+ * writes `<`, `2)`, `|` and `$$` there without an escape, so those get the
+ * plain one. Text after an image starts its line. The text before the first
+ * image already opened the paragraph, so only its later lines can turn it
+ * into a block (a setext underline, a delimiter row, a closing `$$`).
+ */
+function paragraphPart(text: string, startsLine: boolean): string {
+  // An escape can expose another block (`> # x` once the quote is escaped
+  // is text; a heading with an underline needs two).
+  for (let round = 0; round < 3; round++) {
+    const at = blockStartEscapes(text, startsLine);
+    if (at.length === 0) break;
+    for (const offset of [...at].sort((a, b) => b - a)) text = `${text.slice(0, offset)}\\${text.slice(offset)}`;
+  }
+  return text;
+}
+
+/** Where `text` needs a backslash to stay a paragraph on its own; empty when it is one. */
+function blockStartEscapes(text: string, startsLine: boolean): number[] {
+  const blocks = parse(text).children;
+  // A table can also interrupt the part's first lines: its delimiter row
+  // held the image, which kept it from being one.
+  const tables = blocks.filter((block) => block.type === 'table').map((table) => {
+    const row = text.indexOf('\n', start(table)) + 1;
+    return row + /^[ \t]*/.exec(text.slice(row))![0].length;
+  });
+  if (tables.length > 0) return tables;
+  const [block] = blocks;
+  if (block === undefined) return [];
+  switch (block.type) {
+    case 'paragraph':
+      return MATH_PARAGRAPH.test(text) ? [0] : [];
+    case 'heading': {
+      const raw = text.slice(start(block), end(block));
+      if (raw.includes('\n')) {
+        const underline = raw.lastIndexOf('\n') + 1;
+        return [start(block) + underline + /^[ \t]*/.exec(raw.slice(underline))![0].length];
+      }
+      return startsLine ? [start(block)] : [];
+    }
+    default:
+      break;
+  }
+  if (!startsLine) return [];
+  switch (block.type) {
+    case 'blockquote':
+    case 'thematicBreak':
+    case 'html':
+      return [start(block)];
+    case 'list': {
+      const ordered = /^\d{1,9}(?=[.)])/.exec(text.slice(start(block)));
+      return [start(block) + (ordered?.[0].length ?? 0)];
+    }
+    case 'code': {
+      const fence = /^(?:`{3,}|~{3,})/.exec(text.slice(start(block)));
+      return fence === null ? [] : Array.from(fence[0], (_, index) => start(block) + index);
+    }
+    case 'definition':
+    case 'footnoteDefinition': {
+      let close = start(block) + 1;
+      while (close < text.length && (text[close] !== ']' || escaped(text, close))) close++;
+      return [start(block), close];
+    }
+    default:
+      return [];
+  }
 }
 
 /** Whether a node below the root has no source position. */

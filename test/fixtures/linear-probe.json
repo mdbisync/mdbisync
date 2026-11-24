@@ -561,6 +561,14 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "images/split-text-after-image.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/split-text-before-image.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "images/svg.md": {
       "yjs": "recorded",
       "fixedPoint": true

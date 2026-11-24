@@ -143,7 +143,12 @@ Blocks:
   its escape (a bare one in a body cell is the
   [`table-hash-cell`](#table-hash-cell) rule).
 - An image does not share a paragraph with text: the text before and after
-  it becomes its own paragraph.
+  it becomes its own paragraph. Where that text would start another block,
+  a backslash escape keeps it text: in
+  `Before ![a](x.png) # x`, the text after the image is written as `\# x`.
+  The same holds for a quote, rule, list marker, code fence, HTML tag,
+  `[label]:` definition, `$$` line, a `===` or `---` underline and a
+  table's delimiter row.
 - A list item holding only a link to a relative file other than Markdown
   takes the form Linear uses for the uploaded file. A video (`.mp4`,
   `.mov`, `.webm`) in a bullet item stays on the marker's line without
