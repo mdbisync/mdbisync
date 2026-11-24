@@ -769,6 +769,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/ordered-item-number-escaped.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/release-notes.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -778,6 +782,10 @@
       "fixedPoint": true
     },
     "list-items/task-code.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/task-list-ordered.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

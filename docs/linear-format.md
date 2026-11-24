@@ -123,12 +123,19 @@ Blocks:
   `1. a`.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
   `- [X] done`.
+- A paragraph's text that starts like a list marker gets its marker
+  escaped, so it stays text: in `Note` followed by `1. 3. plum`, the
+  `3. plum` is text, and with the blank line `fix` writes before the list it
+  becomes `1. 3\. plum`. Text split off at an image gets the same escape.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
   quote or list item gets its `>` or indent and a backslash, as Linear
   writes it (`> \--`), so it stays text and does not turn the line above
-  into a heading.
+  into a heading. In a link label or an image's alt text that runs over
+  lines, it is indented four spaces after its `>` or indent instead. Inside
+  a code span, where a line ending reads as a space, such a line joins the
+  line above.
 - Linear's color comment of a callout (`<!-- linear:callout color=... -->`)
   stays directly above its callout, with no blank line between them.
 - Tilde fences and indented code become backtick fences. A fence whose info
@@ -171,14 +178,19 @@ Inline text:
   `[a](<https://example.com/a%5Cb>)`.
 - Reference links and images are written inline, and their definitions go.
 - Autolinks and bare URLs become links: `See https://example.com now.`
-  becomes `See [https://example.com](<https://example.com>) now.`
+  becomes `See [https://example.com](<https://example.com>) now.` The link
+  text reads exactly as the URL: backslashes are doubled, and characters
+  that would be markup there are escaped:
+  `https://example.com/a~b~c` becomes
+  `[https://example.com/a\~b\~c](<https://example.com/a~b~c>)`.
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
   `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`. Other
   references to ASCII characters stay, since some would make markup:
   `&lt;b&gt;`, `&quot;` and `&#65;` are kept.
 - Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes
-  `Done 🎉`.
+  `Done 🎉`. An escaped reference or shortcode (`\&amp;`, `\:tada:`) stays
+  as written.
 - A backslash before anything but ASCII punctuation (a letter, a digit, a
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`.
@@ -507,6 +519,20 @@ the indented block, so the block falls out of the list.
 ```
 
 Instead, start the item with a line of text and put the block below it.
+
+### `ordered-task-list`
+
+An ordered task list becomes a bullet task list. Linear's task lists have no
+numbers, so the items lose their order numbers; a task item anywhere in an
+ordered list counts.
+
+```markdown
+1. [ ] Draft the outline
+2. [x] Pick a date
+```
+
+Instead, use a bullet task list (`- [ ] Draft the outline`), or an ordered
+list without checkboxes.
 
 ### `image-not-in-repository`
 
