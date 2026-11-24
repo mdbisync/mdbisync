@@ -77,6 +77,7 @@ import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync, touchedTitles } from './plan.ts';
 import { readPlanSources } from './run.ts';
+import { createPendingProjects } from '../setup/linear.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
 import { message } from '../messages.ts';
@@ -448,6 +449,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     result.code = 'sync-branch-changed';
     return { plan, result };
   }
+  if (options.stageOnly !== true) await createPendingProjects(context.linear, context.targets);
 
   // Take the documents in path order. Each needs no request now; the order
   // and the progress commits are what a resumed run relies on.

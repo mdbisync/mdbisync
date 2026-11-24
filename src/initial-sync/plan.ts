@@ -101,7 +101,8 @@ export function annotatedPlaces(zones: ReadonlyMap<string, Zone>): Array<{ place
 /** The Linear id of a place, from the setup check's resolved targets. */
 export function placeId(targets: ResolvedTargets, place: Place): { projectId: string } | { teamId: string } {
   if (place.kind === 'project') {
-    const project = targets.projects.get(projectKey(place.team, place.project));
+    const key = projectKey(place.team, place.project);
+    const project = targets.projects.get(key) ?? targets.pendingProjects?.get(key);
     if (project === undefined) throw new Error(message('initial-sync.project-not-resolved', { project: place.project, team: place.team }));
     return { projectId: project.id };
   }

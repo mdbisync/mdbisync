@@ -54,6 +54,9 @@ Its job summary lists, by path and never with document content:
 | Kept | A folder's annotation `README.md` without a document. It stays, since the folder's mapping depends on it. Shown only when there is one. |
 | Left out | A file or document the run cannot take, with the rule that stops it. |
 
+With [`create-projects`](configuration.md#action-inputs) enabled, the dry run also lists missing
+projects. Each starts empty, so review which files the pull request would remove from those folders.
+
 When the repository has security hooks (marked `alias: security`), the dry
 run shows them the title of each document without a file, as a confirmed
 run does. A document whose title they reject is listed under **Left out**
@@ -88,8 +91,7 @@ What it writes to git:
   check as in every sync: a document with an image that is not an upload of
   the workspace (an external URL, a `data:` URI, a path), or with an upload
   that is gone, over 10 MB, redirected or not a supported type, stays out of
-  the pull request (`image-blocked` below). The initial sync writes nothing to
-  Linear; the first sync after it (after its pull request is merged) reads
+  the pull request (`image-blocked` below). The first sync after the pull request is merged reads
   that document again, marks it red and comments which images to fix;
 - a link to another synchronized document's Linear URL becomes a relative
   link to that document's file;

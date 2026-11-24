@@ -98,7 +98,11 @@ export function runEnding(outcome: OperationOutcome): RunEnding {
     return { status: 'warning', exitCode: INCOMPLETE_EXIT_CODE, message: `${command}: ${PARTIAL} (${partial})`, code: partial };
   }
   if (outcome.stopped !== undefined) {
-    return { status: 'failure', exitCode: INCOMPLETE_EXIT_CODE, message: stoppedMessage(command), code: outcome.code ?? 'stopped' };
+    const key = outcome.stopped.operation === 'CreateProject' ? 'run.project-create-stopped' : 'run.stopped-by-linear';
+    return { status: 'failure', exitCode: INCOMPLETE_EXIT_CODE, message: message(key, { command }), code: outcome.code ?? 'stopped' };
+  }
+  if (outcome.projectCreateFailed) {
+    return { status: 'failure', exitCode: INCOMPLETE_EXIT_CODE, message: unfinishedMessage(command, 'write-failed'), code: 'write-failed' };
   }
   if (!outcome.ok) {
     const exitCode = outcome.code === 'initial-sync-required' || outcome.code === 'initial-pull-request-pending' ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
@@ -151,11 +155,6 @@ function oneLine(text: string): string {
     .join(' ');
 }
 
-/** The message of a run that is not a sync, stopped by Linear before any write. */
-function stoppedMessage(command: string): string {
-  return message('run.stopped-by-linear', { command });
-}
-
 /** The message of a run whose container would go over its document cap. */
 function containerCapMessage(command: string): string {
   return message('run.container-cap', { command });
@@ -173,6 +172,7 @@ export function unfinishedMessage(command: string, code: string | undefined): st
 function linearPartialCode(outcome: OperationOutcome): PartialCode | undefined {
   if (outcome.operation !== 'sync') return undefined;
   if (outcome.stopped !== undefined) return 'stopped';
+  if (outcome.projectCreateFailed) return 'write-failed';
   // Every way a capture ends unfinished (a stop, a failed request, a moved ref) leaves its state for the next run.
   if (outcome.captured !== undefined && !outcome.captured.ok) return outcome.captured.code ?? 'stopped';
   const code = outcome.sync?.write?.code;

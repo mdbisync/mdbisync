@@ -20,6 +20,7 @@ export const INPUT_NAMES = [
   'state-ref-prefix',
   'report-file',
   'document-cap',
+  'create-projects',
   'merge-grace-seconds',
   'check-deadline-minutes',
   'required-checks',
@@ -40,6 +41,7 @@ export interface RunInputs {
   /** Where to write the run's report as JSON; for tests and tooling. */
   reportFile?: string;
   documentCap?: number;
+  createProjects?: boolean;
   mergeGraceSeconds?: number;
   /** Minutes a head's checks may stay pending before its batch is suspended. */
   checkDeadlineMinutes?: number;
@@ -113,6 +115,11 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   if (cap !== '') {
     if (!/^[1-9][0-9]*$/.test(cap) || !Number.isSafeInteger(Number(cap))) throw new InputError(message('inputs.document-cap'));
     inputs.documentCap = Number(cap);
+  }
+  const createProjects = value('create-projects');
+  if (createProjects !== '') {
+    if (createProjects !== 'true' && createProjects !== 'false') throw new InputError(message('inputs.create-projects'));
+    inputs.createProjects = createProjects === 'true';
   }
   const grace = value('merge-grace-seconds');
   if (grace !== '') {

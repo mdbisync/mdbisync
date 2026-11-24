@@ -32,6 +32,7 @@ import { type RefRole, type RefusedPush, movedRefs, refusedPushes } from '../sta
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, type RunContext, runPreflight } from './preflight.ts';
 import { message } from '../messages.ts';
+import { cell, placeLabel } from './summary.ts';
 
 export interface OperationOutcome extends PreflightOutcome {
   /** The preflight passed, but the operation is not built yet; nothing was written. */
@@ -226,7 +227,16 @@ async function runWithSecurity(
       ? syncCycle
       : initialSync === undefined
         ? undefined
-        : (context) => (initialSync.direction === 'git-to-linear' ? gitToLinear : linearToGit)(context, initialSync.confirm),
+        : async (context) => {
+          await (initialSync.direction === 'git-to-linear' ? gitToLinear : linearToGit)(context, initialSync.confirm);
+          if (!initialSync.confirm && security?.step !== 'stage' && context.targets.pendingProjects?.size) {
+            const projectsToCreate = [...context.targets.pendingProjects.values()].map(({ name, team }) => ({ name, team }));
+            if (plan !== undefined) plan.projectsToCreate = projectsToCreate;
+            const projects = projectsToCreate.map(({ name, team }) =>
+              `- would create ${cell(placeLabel({ kind: 'project', team, project: name }))}`);
+            workSummary = [workSummary.trimEnd(), '', '### Projects', '', ...projects, ''].join('\n');
+          }
+        },
   );
   const refused = refusedPushes(options.git);
   const writes: RunWrites = {

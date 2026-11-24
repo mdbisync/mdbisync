@@ -60,6 +60,14 @@ it('validates a configurable document cap before contacting services', () => {
   assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r', 'document-cap': '42' }), {}).documentCap, 42);
 });
 
+it('accepts only explicit true or false for project creation', () => {
+  const env = { GITHUB_REPOSITORY: 'owner/repo' };
+  assert.equal(readInputs(given(REQUIRED), env).createProjects, undefined);
+  assert.equal(readInputs(given({ ...REQUIRED, 'create-projects': 'false' }), env).createProjects, false);
+  assert.equal(readInputs(given({ ...REQUIRED, 'create-projects': 'true' }), env).createProjects, true);
+  assert.throws(() => readInputs(given({ ...REQUIRED, 'create-projects': 'yes' }), env), /create-projects must be true or false/);
+});
+
 it('validates the bounded merge grace, including zero for deferred merging', () => {
   for (const grace of ['-1', '1.5', 'NaN', 'Infinity', '121', '999999999999999999']) {
     assert.throws(() => readInputs(given({ ...REQUIRED, repository: 'o/r', 'merge-grace-seconds': grace }), {}), InputError);

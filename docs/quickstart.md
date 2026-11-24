@@ -385,10 +385,12 @@ A folder syncs when the front matter of its `README.md` maps it to Linear
 ([folder mapping](usage.md#folder-mapping)). Name a team in the top folder
 and a project of that team in the same `README.md` or in a folder below
 it; deeper folders inherit both. Files under the team folder but outside
-every project folder are the team's own documents. The team and the
-project must already exist in Linear: create them there before the dry
-run, as the sync creates neither. For example, `docs/README.md` names
-the team:
+every project folder are the team's own documents. Teams must already exist
+in Linear. To create missing projects, run `mdbisync init --create-projects`
+with your release pin, or set `create-projects: true` on the action steps in
+both sync workflows. Review the project names in the initial sync dry run
+before confirming. See [configuration](configuration.md#action-inputs).
+For example, `docs/README.md` names the team:
 
 ```yaml
 ---
@@ -405,9 +407,9 @@ linear-project: Handbook
 ```
 
 The run stops here when no folder is annotated, an annotation is invalid,
-a team or project is not found in Linear (also a team the app does not
-reach, see [Linear OAuth app](#linear-oauth-app)) or matches more than one, or two
-folders map to the same project or team documents. The message names the
+a team is missing or inaccessible (see [Linear OAuth app](#linear-oauth-app)),
+a project is missing with `create-projects` off, a name matches more than one
+destination, or two folders map to the same project or team documents. The message names the
 folder, team or project. A team matches by key or by name, a project by its
 exact name within that team; after a rename in Linear, update the
 annotation.

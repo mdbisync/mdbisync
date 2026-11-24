@@ -21,6 +21,7 @@
 // adopted by its title.
 
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
+import { createPendingProjects } from '../setup/linear.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { documentPath, isUntitled, keptPath } from './paths.ts';
@@ -252,6 +253,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       result.code = 'container-cap';
       return result;
     }
+    result.changed = await createPendingProjects(linear, targets);
     result.complete = true;
     return result;
   }
@@ -326,6 +328,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     result.notAttempted = merge.changes.map(changePath);
     return result;
   }
+  result.changed = await createPendingProjects(linear, targets);
   /** Reserved ids that a document in Linear already has (archived, trashed or retitled since): Linear refuses to create a second one. */
   const taken = new Set<string>();
   /** The new documents that would use a reserved id. */

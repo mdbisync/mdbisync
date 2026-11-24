@@ -123,6 +123,122 @@ describe('preflight', () => {
     assert.equal(world.revoked, 1);
   });
 
+  it('lists missing projects in both initial sync dry runs without creating them', async () => {
+    const world = fakeWorld();
+    world.linear.projects = [];
+    for (const direction of ['git-to-linear', 'linear-to-git']) {
+      const { result, report } = await run('initial-sync', world, {
+        MDBISYNC_DIRECTION: direction, MDBISYNC_CREATE_PROJECTS: 'true',
+      });
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /would create project "Field notes" of team "ENG"/);
+      assert.match(result.stdout, /would create project "Handbook" of team "Docs"/);
+      assert.deepEqual(report.summary?.projectsToCreate, [
+        { name: 'Handbook', team: 'Docs' }, { name: 'Field notes', team: 'ENG' },
+      ]);
+    }
+    assert.deepEqual(world.linear.projects, []);
+  });
+
+  it('reuses an existing project whose mapped team is beyond the first page of memberships', async () => {
+    const world = fakeWorld();
+    world.linear.projects[0]!.teamIds.unshift(...Array.from({ length: 50 }, (_, i) => `other-team-${i}`));
+    const { result, report } = await run('initial-sync', world, { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CREATE_PROJECTS: 'true' });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(report.summary?.projectsToCreate, undefined);
+    assert.doesNotMatch(result.stdout, /would create project/);
+  });
+
+  it('creates a missing project in its mapped team before writing documents and reuses it on rerun', async (t) => {
+    const world = fakeWorld();
+    world.linear.projects[0]!.teamIds = ['team-docs'];
+    const extra = { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' };
+    const off = await run('initial-sync', world, extra);
+    assert.equal(off.report.code, 'annotation-target-not-found');
+    const capped = await run('initial-sync', world, { ...extra, MDBISYNC_CREATE_PROJECTS: 'true', MDBISYNC_DOCUMENT_CAP: '1' });
+    assert.equal(capped.report.code, 'container-cap');
+    const isolated = await createFixture();
+    t.after(() => isolated.cleanup());
+    await isolated.seed(MINI);
+    const work = (await isolated.clone('work')).dir;
+    const configure = env({ ...extra, MDBISYNC_CREATE_PROJECTS: 'true' });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await runCli(['initial-sync'], { env: configure, cwd: work, fetch: fakeFetch(world) });
+      assert.equal(result.exitCode, 0, result.stderr);
+    }
+    const project = world.linear.projects.find((entry) => entry.name === 'Field notes' && entry.teamIds.includes('team-eng'));
+    assert.ok(project);
+    assert.deepEqual(project.teamIds, ['team-eng']);
+    assert.equal(world.writes.filter((write) => write === 'CreateProject').length, 1);
+    assert.equal(world.writes[0], 'CreateProject');
+    assert.ok(world.linear.documents.some((document) => document.title === 'plan' && document.projectId === project.id));
+    assert.equal(world.linear.projects.length, 3);
+
+    await isolated.seed({
+      ...MINI,
+      'eng/studio/README.md': '---\nlinear-project: Studio handbook\n---\n\n# Studio handbook\n',
+      'eng/studio/schedule.md': '# Schedule\n',
+    });
+    const recurring = await runCli(['sync'], { env: configure, cwd: work, fetch: fakeFetch(world) });
+    assert.equal(recurring.exitCode, 0, recurring.stderr);
+    const studio = world.linear.projects.find((entry) => entry.name === 'Studio handbook');
+    assert.ok(studio);
+    assert.deepEqual(studio.teamIds, ['team-eng']);
+    assert.ok(world.linear.documents.some((document) => document.title === 'schedule' && document.projectId === studio.id));
+
+    studio.name = 'Workshop handbook';
+    const writes = world.writes.length;
+    await assert.rejects(runCli(['sync'], { env: configure, cwd: work, fetch: fakeFetch(world) }), /previously synchronized project "Studio handbook"/);
+    assert.equal(world.writes.length, writes);
+    const reinitialize = await runCli(['initial-sync'], { env: configure, cwd: work, fetch: fakeFetch(world) });
+    assert.equal(reinitialize.exitCode, 0, reinitialize.stderr);
+    const replacement = world.linear.projects.find((entry) => entry.name === 'Studio handbook');
+    assert.ok(replacement && replacement.id !== studio.id);
+    assert.equal(studio.name, 'Workshop handbook');
+  });
+
+  it('refuses the write when the project team is missing or the destination is ambiguous', async () => {
+    const missing = fakeWorld();
+    missing.linear.projects = [];
+    missing.linear.teams.pop();
+    const extra = { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true', MDBISYNC_CREATE_PROJECTS: 'true' };
+    assert.equal((await run('initial-sync', missing, extra)).report.code, 'annotation-target-not-found');
+    const ambiguous = fakeWorld();
+    ambiguous.linear.projects.push({ ...ambiguous.linear.projects[0]!, id: 'project-duplicate' });
+    ambiguous.linear.projects.splice(1, 1);
+    assert.equal((await run('initial-sync', ambiguous, extra)).report.code, 'annotation-target-ambiguous');
+  });
+
+  for (const status of [429, 403]) it(`reports a partial project batch stopped by HTTP ${status} and resumes without duplicates`, async (t) => {
+    const isolated = await createFixture();
+    t.after(() => isolated.cleanup());
+    await isolated.seed(MINI);
+    const work = (await isolated.clone('work')).dir;
+    const world = fakeWorld();
+    world.linear.projects = [];
+    const request = fakeFetch(world);
+    let creates = 0;
+    const fetch: typeof globalThis.fetch = (input, init) => {
+      if (String(input) === `${LINEAR_API}/graphql` &&
+          JSON.parse(String(init?.body)).operationName === 'CreateProject' && ++creates === 2) {
+        return Promise.resolve(new Response('{}', { status, headers: { 'retry-after': '600' } }));
+      }
+      return request(input, init);
+    };
+    const configure = env({ MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true', MDBISYNC_CREATE_PROJECTS: 'true' });
+    const stopped = await runCli(['initial-sync'], { env: configure, cwd: work, fetch });
+    assert.match(stopped.stdout, status === 429 ? /Stopped while creating projects/ : /Could not create project "Field notes"/);
+    const report = JSON.parse(await readFile(configure.MDBISYNC_REPORT_FILE, 'utf8')) as RunReport;
+    assert.equal(report.code, status === 429 ? 'stopped' : 'write-failed');
+    assert.equal(report.changed, true);
+    assert.deepEqual(report.writes.linear, { CreateProject: 1 });
+    assert.deepEqual(world.writes, ['CreateProject']);
+    const resumed = await runCli(['initial-sync'], { env: configure, cwd: work, fetch: request });
+    assert.equal(resumed.exitCode, 0, resumed.stderr);
+    assert.equal(world.writes.filter((write) => write === 'CreateProject').length, 2);
+    assert.equal(world.linear.projects.length, 2);
+  });
+
   it('a Linear outage while minting is an error of the run, not a credential failure', async () => {
     const world = fakeWorld();
     world.linear.unavailable = true;

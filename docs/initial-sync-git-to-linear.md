@@ -69,6 +69,7 @@ action. Every input of the action, and what it means for this run:
 | `sync-branch` | `mdbisync/linear` | A confirmed run checks it for an initial sync from Linear that waits to be merged ([a run that stops](#a-run-that-stops)); the sync opens its pull request from it later. |
 | `state-ref-prefix` | `refs/mdbisync` | Where the run records the state refs `ids`, `linear` and `uploads`. |
 | `document-cap` | `1000` | Documents a Linear team or project may hold, trash included ([capacity](#container-document-capacity)). |
+| `create-projects` | `false` | With `true`, the dry run lists missing projects and the confirmed run creates them in their mapped teams. |
 | `merge-grace-seconds` | `60` | Not used by the initial sync. |
 | `check-deadline-minutes` | `60` | Not used by the initial sync. |
 | `required-checks` | empty | Not used by the initial sync, but a line without a publisher is still an input error. |
