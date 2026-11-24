@@ -51,9 +51,9 @@ function fixBody(body: string, options: FixOptions): string {
     // guard keeps the limits for any rewrite that still does.
     if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, current) !== undefined)) throw new MarkdownLimitError('nodes');
     // The writer copies text by source offset. A node the parser left
-    // without one (the bare-URL search inside text can, as in
-    // `"www.example.com"`) would make it copy the wrong text: leave the
-    // body as it came.
+    // without one (a link the bare-URL search inside text found but could
+    // not place, which lint reports as `unplaced-link`) would make it copy
+    // the wrong text: leave the body as it came.
     if (hasUnplacedNode(tree)) return body;
     const next = new Writer(current, tree, options).root();
     if (next === current) return next;
@@ -493,6 +493,8 @@ class Writer {
         // An autolink (`<url>` or a bare URL) has no brackets in the source:
         // its text becomes a label, where a backslash would escape.
         const autolink = this.source[from] !== '[';
+        // A `!` right before it would turn the written link into an image.
+        if (autolink && this.source[from - 1] === '!' && !escaped(this.source, from - 1)) edits.push({ from: from - 1, to: from, text: '\\!' });
         this.literal = autolink;
         edits.push({ from, to, text: this.link(node.children, node.url) });
         this.literal = false;

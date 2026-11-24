@@ -3,7 +3,7 @@
 // callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
-import type { Definition, ImageReference, LinkReference, Root, Table } from 'mdast';
+import type { Definition, ImageReference, LinkReference, Nodes, Root, Table } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, bracketedLabel, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
@@ -50,7 +50,8 @@ export function lintInTree(file: string, text: string, files: ReadonlySet<string
   const findings = lintText(file, text, { linkedFileExists: linkedFileCheck(file, (path) => files.has(path)) });
   // The heading rule guards the formatter's ATX conversion. The sync can
   // preserve setext text and uses historical versions to verify writes.
-  return findings.filter((finding) => finding.rule !== 'hard-break-in-heading');
+  // `unplaced-link` stops only `fix`: the sync sends the text as it is.
+  return findings.filter((finding) => finding.rule !== 'hard-break-in-heading' && finding.rule !== 'unplaced-link');
 }
 
 /** Lint findings for one file's text, ordered by line. */
@@ -215,6 +216,8 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
     return;
   }
   visit(tree, (node, ancestors) => {
+    // The bare-URL search inside text left a link it could not place in the source (`parse`).
+    if (node.type === 'link' && node.position === undefined) report('unplaced-link', unplacedLine(node, ancestors));
     switch (node.type) {
       case 'code':
       case 'inlineCode':
@@ -317,6 +320,27 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
       rest = rest.slice(prefix[0].length);
     }
   });
+}
+
+/**
+ * The line of a link the bare-URL search could not place. The text it came
+ * from starts at the end of the placed sibling before it, or else at the
+ * start of its parent; each line break in the text before the link is one
+ * line further.
+ */
+function unplacedLine(node: Nodes, ancestors: readonly Nodes[]): number {
+  const parent = ancestors.at(-1);
+  let breaks = 0;
+  if (parent !== undefined && 'children' in parent) {
+    const siblings: readonly Nodes[] = parent.children;
+    for (let index = siblings.indexOf(node) - 1; index >= 0; index--) {
+      const sibling = siblings[index]!;
+      if (sibling.position !== undefined) return sibling.position.end.line + breaks;
+      if (sibling.type === 'text') breaks += sibling.value.split('\n').length - 1;
+    }
+  }
+  const placed = ancestors.findLast((ancestor) => ancestor.position !== undefined);
+  return (placed === undefined ? 1 : line(placed)) + breaks;
 }
 
 /**

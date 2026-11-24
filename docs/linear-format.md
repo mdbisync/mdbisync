@@ -197,6 +197,9 @@ Inline text:
   that would be markup there are escaped:
   `https://example.com/a~b~c` becomes
   `[https://example.com/a\~b\~c](<https://example.com/a~b~c>)`.
+  So do web addresses Markdown finds inside other text, where the bare URL
+  rule does not apply: `Site: "www.example.com"` becomes
+  `Site: "[www.example.com](<http://www.example.com>)"`.
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
   `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`. Other
@@ -526,6 +529,20 @@ any URL and any `src` or `href` attribute in an HTML block or tag.
 
 Instead, use Markdown with an image file of the repository:
 `![Banner](images/banner.png)`.
+
+### `unplaced-link`
+
+A web address Markdown finds inside other text, such as "www.example.com" in
+quotes, cannot be matched to its text in the source, for example because an
+escape or a character reference spells it, so fix cannot write it as a link.
+`fix` leaves the file as it is; the sync sends it unchanged.
+
+```markdown
+See "www.example.com/a\_b" for details.
+```
+
+Instead, write it in angle brackets (`<https://www.example.com/a_b>`) or as a
+link.
 
 ### `block-first-in-list-item`
 

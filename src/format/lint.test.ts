@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { after, describe, it } from 'node:test';
 import { markdownFiles, runFix, runLint } from './command.ts';
 import { fixText } from './fix.ts';
-import { duplicateTitles, lintText } from './lint.ts';
+import { duplicateTitles, lintInTree, lintText } from './lint.ts';
 import { parse, visit } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
@@ -44,6 +44,9 @@ const cases: Array<[LintRule, string, number]> = [
   ['url-in-html', '<div>See HTTPS://example.com</div>', 1],
   ['url-in-html', '<div>1git+ssh://host/repo</div>', 1],
   ['url-in-html', '<img SRC = "logo.png">', 1],
+  ['unplaced-link', 'See "www.example.com/a\\_b" now.', 1],
+  ['unplaced-link', 'Intro.\n\n> Read "www.example.com/a&amp;b" now.', 3],
+  ['unplaced-link', 'Intro.\n\nLine *one*\nline two "www.example.com/a\\_b" end.', 4],
   ['block-first-in-list-item', '* ## Heading\n* Plain', 1],
   ['ordered-task-list', '1. [ ] alpha\n2. [x] beta', 1],
   ['ordered-task-list', '1. one\n2. [ ] two', 2],
@@ -84,6 +87,10 @@ describe('lint rules', () => {
       assert.equal(findings.find((f) => f.rule === rule)?.message, LINT_RULES[rule]);
     });
   }
+
+  it('leaves unplaced-link out of the sync, which sends the text as it is', () => {
+    assert.deepEqual(lintInTree('doc.md', 'See "www.example.com/a\\_b" now.', new Set()), []);
+  });
 
   it('allows space breaks in paragraphs and trailing spaces inside heading code spans', () => {
     assert.deepEqual(lintText('doc.md', 'One  \nTwo\n\n`Three  \nFour`\n==='), []);

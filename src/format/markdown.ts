@@ -2,8 +2,8 @@
 // positions, and the split between front matter and the body.
 
 import { isDeepStrictEqual } from 'node:util';
-import type { Nodes, Root } from 'mdast';
-import { fromMarkdown, type Extension } from 'mdast-util-from-markdown';
+import type { Nodes, Paragraph, Parent, PhrasingContent, Root, Text } from 'mdast';
+import { fromMarkdown, type Extension, type Transform } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
 import { EditMap } from 'micromark-util-edit-map';
@@ -142,10 +142,161 @@ export class MarkdownLimitError extends Error {
 }
 
 export function parse(body: string, mdastExtensions: Extension[] = []): Root {
-  const tree = fromMarkdown(body, { extensions: [gfm(), inlineBudget(), lazyBudget()], mdastExtensions: [gfmFromMarkdown(), ...mdastExtensions] });
+  // GFM's tree transforms (its search for bare URLs inside text) run here,
+  // after the parse, so the nodes they make get source positions.
+  const gfmExtensions = gfmFromMarkdown();
+  const transforms = gfmExtensions.flatMap((extension) => extension.transforms ?? []);
+  const untransformed = gfmExtensions.map(({ transforms: _transforms, ...extension }) => extension);
+  const tree = fromMarkdown(body, { extensions: [gfm(), inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
+  // The parser counts source offsets after one leading BOM.
+  placeTextLinks(tree, body.startsWith('\uFEFF') ? body.slice(1) : body, transforms);
   // Validate before returning the tree to any recursive renderer or comparer.
   visit(tree, () => {});
   return tree;
+}
+
+/** What the bare-URL search can find in a text: a URL with a scheme, `www.`, or an email address. */
+const TEXT_LINK_HINT = /https?:\/\/|www\.|@/i;
+
+/**
+ * Runs `transforms`, the GFM search for bare URLs that the parser did not
+ * link (`"www.example.com"` in quotes, `[https://example.com]`), on each text
+ * node, and gives the links it makes and the text around them the source
+ * offsets they come from. The writer copies text by those offsets; the search
+ * itself leaves its nodes without positions. A link that cannot be placed for
+ * certain (its URL spelled with an escape or a character reference) keeps its
+ * nodes without positions, and lint reports it (`unplaced-link`).
+ *
+ * The search works on one text node at a time, never inside a link, so
+ * running it per node gives the tree it gives on the whole document; text
+ * nodes next to each other are merged.
+ */
+function placeTextLinks(tree: Root, source: string, transforms: readonly Transform[]): void {
+  if (transforms.length === 0) return;
+  const found = new Map<Parent, Text[]>();
+  visit(tree, (node, ancestors) => {
+    const parent = ancestors.at(-1);
+    if (node.type !== 'text' || parent === undefined || !('children' in parent) || !TEXT_LINK_HINT.test(node.value)) return;
+    if (ancestors.some((ancestor) => ancestor.type === 'link' || ancestor.type === 'linkReference')) return;
+    const texts = found.get(parent);
+    if (texts === undefined) found.set(parent, [node]);
+    else texts.push(node);
+  });
+  if (found.size === 0) return;
+  const points = new PointIndex(source);
+  for (const [parent, texts] of found) {
+    const replaced = new Map<Nodes, PhrasingContent[]>();
+    for (const node of texts) {
+      const paragraph: Paragraph = { type: 'paragraph', children: [{ type: 'text', value: node.value }] };
+      for (const transform of transforms) transform({ type: 'root', children: [paragraph] });
+      const parts = mergedText(paragraph.children);
+      if (parts.length === 1 && parts[0]!.type === 'text') continue;
+      placeParts(parts, node, source, points);
+      replaced.set(node, parts);
+    }
+    if (replaced.size > 0) parent.children = parent.children.flatMap((child) => replaced.get(child) ?? [child]) as Parent['children'];
+  }
+}
+
+/** Adjacent text nodes as one: the search can return a URL's trailing punctuation as a text node of its own. */
+function mergedText(nodes: readonly PhrasingContent[]): PhrasingContent[] {
+  const merged: PhrasingContent[] = [];
+  for (const node of nodes) {
+    const last = merged.at(-1);
+    if (node.type === 'text' && last?.type === 'text') last.value += node.value;
+    else merged.push(node);
+  }
+  return merged;
+}
+
+/** A backslash escape or a character reference: source that reads as other characters. */
+const DECODED = /\\[!-/:-@[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
+
+/**
+ * Gives `parts`, the search's split of `text`, the source offsets they come
+ * from, or leaves them all without positions when that is not certain.
+ *
+ * A link's text is a slice of the text node's value. An occurrence of it in
+ * the source that touches no escape or character reference (a literal one)
+ * reads as the same characters in the value, in the same order; a link's
+ * text holds no line break, so no container prefix falls inside it. When the
+ * value holds the text as often as the source holds it literally, the n-th
+ * occurrence in the value is therefore the n-th literal one in the source.
+ */
+function placeParts(parts: PhrasingContent[], text: Text, source: string, points: PointIndex): void {
+  const from = start(text);
+  const raw = source.slice(from, end(text));
+  // decoded[i]: how many of the first i source characters belong to an escape or a reference.
+  const decoded = new Uint32Array(raw.length + 1);
+  for (const match of raw.matchAll(DECODED)) decoded.fill(1, match.index + 1, match.index + match[0].length + 1);
+  for (let at = 1; at <= raw.length; at++) decoded[at] = decoded[at - 1]! + decoded[at]!;
+  const literal = (at: number, length: number): boolean => decoded[at + length] === decoded[at];
+  const labels = new Map<string, { value: number[]; source: number[]; next: number }>();
+  const ranges: Array<[number, number]> = [];
+  let valueAt = 0;
+  for (const part of parts) {
+    if (part.type === 'text') {
+      valueAt += part.value.length;
+      continue;
+    }
+    if (part.type !== 'link' || part.children.length !== 1 || part.children[0]!.type !== 'text') return;
+    const label = part.children[0].value;
+    let found = labels.get(label);
+    if (found === undefined) {
+      found = { value: occurrences(text.value, label), source: occurrences(raw, label).filter((at) => literal(at, label.length)), next: 0 };
+      if (found.value.length !== found.source.length) return;
+      labels.set(label, found);
+    }
+    while (found.next < found.value.length && found.value[found.next]! < valueAt) found.next++;
+    const at = found.source[found.next];
+    if (at === undefined || at < (ranges.at(-1)?.[1] ?? 0)) return;
+    ranges.push([at, at + label.length]);
+    valueAt += label.length;
+  }
+  const position = (a: number, b: number) => ({ start: points.at(from + a), end: points.at(from + b) });
+  let link = 0;
+  let at = 0;
+  for (const part of parts) {
+    if (part.type === 'link') {
+      const [a, b] = ranges[link++]!;
+      part.position = position(a, b);
+      part.children[0]!.position = position(a, b);
+      at = b;
+      continue;
+    }
+    const next = ranges[link]?.[0] ?? raw.length;
+    part.position = position(at, next);
+    at = next;
+  }
+}
+
+/** Where `needle` starts in `haystack`, overlapping occurrences included. */
+function occurrences(haystack: string, needle: string): number[] {
+  const found: number[] = [];
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) found.push(at);
+  return found;
+}
+
+type Point = NonNullable<Text['position']>['start'];
+
+/** Line and column of source offsets, as the parser counts them: a line ends at CR LF, CR or LF. */
+class PointIndex {
+  private readonly lineStarts: number[] = [0];
+
+  constructor(source: string) {
+    for (const match of source.matchAll(/\r\n?|\n/g)) this.lineStarts.push(match.index + match[0].length);
+  }
+
+  at(offset: number): Point {
+    let low = 0;
+    let high = this.lineStarts.length - 1;
+    while (low < high) {
+      const middle = (low + high + 1) >> 1;
+      if (this.lineStarts[middle]! <= offset) low = middle;
+      else high = middle - 1;
+    }
+    return { line: low + 1, column: offset - this.lineStarts[low]! + 1, offset };
+  }
 }
 
 // Parser extension types, from the GFM extension's own.

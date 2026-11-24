@@ -380,6 +380,9 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `mdbisync lint` and `mdbisync fix` also report `hard-break-in-heading`
 when converting a setext heading to one line would lose a hard break.
 See [hard breaks in headings](linear-format.md#hard-break-in-heading).
+They also report `unplaced-link` when `fix` cannot write a web address found
+inside other text as a link; the sync sends such a file as it is. See
+[unplaced links](linear-format.md#unplaced-link).
 
 `mdbisync lint` run on a folder also reports `upload-file-refused` for a
 file an earlier sync captured from Linear (named `<sha256>.<ext>`) that the

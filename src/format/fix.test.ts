@@ -690,13 +690,47 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('Plain \\\\&eacute; and \\\\:tada: text.'), 'Plain \\\\é and \\\\🎉 text.');
   });
 
-  it('keeps a document whose parse holds a node without a source position, rather than copying the wrong text', () => {
-    // The bare-URL search inside this broken label yields a link with no position.
-    const text = 'Before.\n\n[https://example.com/\\](<https://example.com/\\\\>)\nafter\n';
-    assert.equal(fixText(text), text);
-    // So does a quoted domain, which the parser does not link but the search does.
-    const quoted = 'Intro.\n\n"www.example.com" and _more_.\n\nEnd.\n';
-    assert.equal(fixText(quoted), quoted);
+  it('writes the links the bare-URL search finds inside text, and formats the rest of the file', () => {
+    // The parser links none of these; Markdown's search for URLs inside text does.
+    const cases: Array<[string, string]> = [
+      ['Intro _a_.\n\nSee "www.example.com" and _more_.\n', 'Intro *a*.\n\nSee "[www.example.com](<http://www.example.com>)" and *more*.'],
+      ['Host:www.example.com and _more_.\n', 'Host:[www.example.com](<http://www.example.com>) and *more*.'],
+      ['Open [https://example.com] and _more_.\n', 'Open [[https://example.com](<https://example.com>)] and *more*.'],
+      ['> Quote "www.example.com/a_b".\n> _Next_ line\n', '> Quote "[www.example.com/a\\_b](<http://www.example.com/a_b>)".\n> *Next* line'],
+      ['- Mail "team@example.com" or "www.example.com", "www.example.com".\n', '* Mail "[team@example.com](<mailto:team@example.com>)" or "[www.example.com](<http://www.example.com>)", "[www.example.com](<http://www.example.com>)".'],
+      ['| Site | Note |\n| - | - |\n| "www.example.com" | _x_ |\n', '| Site | Note |\n| -- | -- |\n| "[www.example.com](<http://www.example.com>)" | *x* |'],
+      ['# Notes on "www.example.com"\n', '# Notes on "[www.example.com](<http://www.example.com>)"'],
+      ['Skip xwww.example.com, then "www.example.com".\n', 'Skip xwww.example.com, then "[www.example.com](<http://www.example.com>)".'],
+      ['Mail "&amp;team@example.com" now.\n', 'Mail "&[team@example.com](<mailto:team@example.com>)" now.'],
+      // A `!` before the address stays text: written as is, it would make an image.
+      ['See "!www.example.com" and _more_.\n', 'See "\\![www.example.com](<http://www.example.com>)" and *more*.'],
+      ['See !https://example.com and _more_.\n', 'See \\![https://example.com](<https://example.com>) and *more*.'],
+    ];
+    for (const [text, expected] of cases) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, JSON.stringify(text));
+      assert.ok(sameMarkdown(text, fixed), `meaning of ${JSON.stringify(text)}`);
+      assert.equal(fixText(fixed), fixed, `second fix of ${JSON.stringify(text)}`);
+      assert.deepEqual(lintText('', fixed), [], `lint of ${JSON.stringify(fixed)}`);
+    }
+  });
+
+  it('keeps a document with a link the bare-URL search finds but the source spells differently', () => {
+    // An escape or a reference inside the URL: lint reports it, and fix leaves the file to its author.
+    for (const text of [
+      'Intro _a_.\n\nSee "www.example.com/a\\_b" now.\n',
+      'See "www.example.com/a&amp;b" and _x_.\n',
+      // The match would start after an escape, or end inside a reference.
+      'Mail "\\+first@example.com" and _x_.\n',
+      'See "www.example.com/&amp;amp" and _x_.\n',
+      // A broken label, where the search once returned a link that made fix copy the document into it.
+      'Before.\n\n[https://example.com/\\](<https://example.com/\\\\>)\nafter\n',
+      // The source holds the text literally only in an address the search does not link.
+      'See "www.example.com/a&amp;amp;b" xwww.example.com/a&amp;b and _x_.\n',
+    ]) {
+      assert.deepEqual(lintText('', text).map((finding) => finding.rule), ['unplaced-link']);
+      assert.equal(fixText(text), text);
+    }
   });
 
   it('keeps a tilde fence whose info string holds a backtick', () => {

@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
-import type { Nodes, Root } from 'mdast';
+import type { Nodes, Paragraph, Root } from 'mdast';
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import { gfmFromMarkdown } from 'mdast-util-gfm';
+import { gfm } from 'micromark-extension-gfm';
 import { EditMap } from 'micromark-util-edit-map';
 import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, decodedDestinationPath, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { lintText } from './lint.ts';
@@ -155,6 +158,86 @@ describe('the parser edit map', () => {
       };
       assert.deepEqual(apply(new EditMap()), apply(new Original()), `round ${round}`);
     }
+  });
+});
+
+describe('the bare-URL search inside text', () => {
+  const withoutPositions = (tree: Root): unknown => JSON.parse(JSON.stringify(tree, (key, value: unknown) => (key === 'position' ? undefined : value)));
+  const upstream = (text: string): Root => fromMarkdown(text, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+  const unplaced = (tree: Root): Nodes[] => {
+    const found: Nodes[] = [];
+    visit(tree, (node) => {
+      if (node.position === undefined) found.push(node);
+    });
+    return found;
+  };
+
+  it('is the one tree transform of GFM, the one parse runs per text node', () => {
+    const transforms = gfmFromMarkdown().flatMap((extension) => extension.transforms ?? []);
+    assert.equal(transforms.length, 1);
+    const tree = upstream('"www.example.com"');
+    assert.equal((tree.children[0] as Paragraph).children[1]?.type, 'link');
+  });
+
+  it('gives the tree GFM gives, with a source position on every node it can place', () => {
+    const texts = [
+      'See "www.example.com" now.',
+      'Host:www.example.com and [https://example.com] and "team@example.com".',
+      '> Quote "www.example.com/a_b".\n> *Next* "https://example.com/x." line',
+      '- a "www.example.com", "www.example.com" www.example.com\n  b (www.example.com).',
+      '| a | b |\n| - | - |\n| "www.example.com" | x |',
+      '# Notes on "www.example.com"\n\n**"www.example.com"** ~~"www.example.com"~~ *"www.example.com/*x*"*',
+      'Skip xwww.example.com, then "www.example.com". Mail "a&#46;b@example.com".',
+      '[a "www.example.com"](https://example.com) [b][r]\n\n[r]: https://example.com',
+      '\uFEFFSee "www.example.com" now.\n\n\uFEFF"www.example.com"',
+    ];
+    const fixtures = new URL('../../test/fixtures/', import.meta.url);
+    for (const file of readdirSync(fixtures, { recursive: true, encoding: 'utf8' })) {
+      if (file.endsWith('.md')) texts.push(readFileSync(new URL(file, fixtures), 'utf8'));
+    }
+    for (const text of texts) {
+      const tree = parse(text);
+      assert.deepEqual(withoutPositions(tree), withoutPositions(upstream(text)), JSON.stringify(text.slice(0, 80)));
+      assert.deepEqual(unplaced(tree), [], JSON.stringify(text.slice(0, 80)));
+    }
+  });
+
+  it('places each link at the text it comes from', () => {
+    const text = 'Skip xwww.example.com, then\n> "www.example.com" and (www.example.com/a).';
+    const links: string[] = [];
+    visit(parse(text), (node) => {
+      if (node.type === 'link') links.push(`${text.slice(node.position!.start.offset, node.position!.end.offset)}@${node.position!.start.line}:${node.position!.start.column}`);
+    });
+    assert.deepEqual(links, ['www.example.com@2:4', 'www.example.com/a@2:26']);
+    // A line ends at CR LF, CR or LF, as the parser counts lines.
+    const lines = (body: string): number[] => {
+      const found: number[] = [];
+      visit(parse(body), (node) => {
+        if (node.type === 'link') found.push(node.position!.start.line);
+      });
+      return found;
+    };
+    assert.deepEqual(lines('First\rThen <https://example.com> and "www.example.com"'), [2, 2]);
+    assert.deepEqual(lines('First\r\nThen\r\n"www.example.com"'), [3]);
+    // The parser counts offsets after a leading BOM.
+    const [link] = (parse('\uFEFF"www.example.com"').children[0] as Paragraph).children.filter((node) => node.type === 'link');
+    assert.deepEqual([link?.position?.start.offset, link?.position?.start.column], [1, 2]);
+  });
+
+  it('leaves a link without a position when the source spells its text differently', () => {
+    for (const text of ['See "www.example.com/a\\_b" now.', 'See "www.example.com/a&amp;b" now.', 'Mail "\\+first@example.com".', 'See "www.example.com/&amp;amp".']) {
+      const tree = parse(text);
+      assert.deepEqual(withoutPositions(tree), withoutPositions(upstream(text)));
+      assert.deepEqual(unplaced(tree).map((node) => node.type), ['text', 'link', 'text', 'text'], text);
+    }
+  });
+
+  it('places many links in one text in time that grows with the text', () => {
+    const text = '"www.example.com" '.repeat(13_000);
+    const started = performance.now();
+    const tree = parse(text);
+    assert.ok(performance.now() - started < 10_000, `took ${Math.round(performance.now() - started)} ms`);
+    assert.deepEqual(unplaced(tree), []);
   });
 });
 
