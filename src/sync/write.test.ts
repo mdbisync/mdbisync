@@ -13,7 +13,7 @@ import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git, commitTree, type IdEntry } from '../state/index.ts';
-import { fixText } from '../format/index.ts';
+import { CONTENT_LIMIT, fixText } from '../format/index.ts';
 import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture, fakeLfsServer, mergeOnGitHub, signTip } from '../state/test-helpers.ts';
@@ -177,6 +177,56 @@ describe('sync: the tracked branch to Linear', () => {
     assert.ok(report.sync?.leftOutAtWrite.some((entry) => entry.path === path && entry.rule === 'markdown-complexity'));
     assert.equal(document.content, nested);
     assert.equal((await documentOf('eng/notes/review.md')).content, '# Review\n\nValid update.\n');
+  });
+
+  it('leaves out a document whose rewritten links make it too long to send to Linear', async () => {
+    const path = 'eng/notes/plan.md';
+    const document = await documentOf(path);
+    const original = document.content;
+    const link = '\n\n[Review](<review.md>)';
+    const text = 'x'.repeat(CONTENT_LIMIT - link.length - 1) + link;
+    await commit({ [path]: text });
+
+    const { result, report, summary, writes } = await sync();
+    // A left-out file stays in git until it is fixed; the run itself succeeds.
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.leftOutAtWrite, [{ path, rule: 'content-too-long' }]);
+    assert.match(summary, /\| eng\/notes\/plan\.md \| content-too-long \|/);
+    assert.ok(!writes.includes('UpdateDocument'));
+    assert.equal(document.content, original);
+  });
+
+  it('leaves out a new document whose rewritten links make it too long until git changes it', async () => {
+    const path = 'eng/notes/big.md';
+    const link = '\n\n[Review](<review.md>)';
+    await commit({ [path]: 'x'.repeat(CONTENT_LIMIT - link.length - 1) + link });
+
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.leftOutAtWrite, [{ path, rule: 'content-too-long' }]);
+    assert.deepEqual(report.sync?.created, []);
+    assert.ok(!writes.includes('CreateDocument'));
+    // No later run can write it either, so it does not keep the run from completing.
+    assert.equal(report.sync?.complete, true);
+    const again = await sync();
+    assert.deepEqual(again.report.sync?.leftOutAtWrite, []);
+    assert.deepEqual(again.writes, []);
+  });
+
+  it('leaves a trashed document in the trash when its edited body is too long to send', async () => {
+    const path = 'eng/notes/plan.md';
+    const document = await documentOf(path);
+    document.trashed = true;
+    touch(document);
+    const link = '\n\n[Review](<review.md>)';
+    await commit({ [path]: 'x'.repeat(CONTENT_LIMIT - link.length - 1) + link });
+
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.leftOutAtWrite, [{ path, rule: 'content-too-long' }]);
+    assert.deepEqual(report.sync?.restored, []);
+    assert.deepEqual(writes, []);
+    assert.equal(document.trashed, true);
   });
 
   it('leaves an over-nested merge conflict unresolved while updating a valid neighbor', async () => {
