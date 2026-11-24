@@ -87,7 +87,8 @@ Linear → Settings → Administration → API → OAuth applications → New
 | --- | --- |
 | Application name | any |
 | Developer name | any |
-| Redirect URIs | `https://localhost:18327/callback` (required by the form, never used) |
+| Developer URL | `https://mdbisync.com` (required by the form; any URL works) |
+| Redirect URIs | leave empty |
 | Other URLs | leave empty |
 | Public | Off |
 | Client credentials | On |
