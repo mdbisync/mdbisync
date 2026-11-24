@@ -198,7 +198,7 @@ test('the bundled CLI initializes a repository with no dependency installation',
   assert.match(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), new RegExp(sha));
   assert.match(result.stdout, /Remaining admin steps/);
   assert.match(result.stdout, /create mdbisync.*only the tracked branch.*Leave required reviewers off/);
-  assert.match(result.stdout, /If your plan lacks environments or you are moving existing repository secrets/);
+  assert.match(result.stdout, /If you are moving existing repository secrets, follow/);
   assert.match(result.stdout, /jobs still read repository secrets.*branch rule does not protect those secrets/);
   assert.match(result.stdout, /Set repository variable MDBISYNC_LINEAR_CLIENT_ID and add environment secret MDBISYNC_LINEAR_CLIENT_SECRET/);
   assert.match(result.stdout, /Set repository variable MDBISYNC_APP_CLIENT_ID and add environment secret MDBISYNC_APP_PRIVATE_KEY/);

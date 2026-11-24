@@ -51,16 +51,9 @@ between `refs/tags/` and `^{}` is the version, for example `v1.0.0`
 
 ## Sync environment
 
-GitHub supports environment secrets and branch rules in public
-repositories and in private repositories on Pro, Team or Enterprise
-([GitHub environment availability](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)).
-If your repository's plan lacks this support, skip this section: add the
-two secrets of the sections below (`MDBISYNC_LINEAR_CLIENT_SECRET` and
-`MDBISYNC_APP_PRIVATE_KEY`) as repository secrets instead, under Settings
-→ Secrets and variables → Actions → Secrets, and remove the line
-`environment: mdbisync` from the jobs of both sync workflows. Repository secrets are readable from a workflow run on any branch,
-not only the tracked one; move them to the environment once your plan
-supports it.
+The sync's two secrets live in a GitHub environment named `mdbisync`. Only
+jobs that declare the environment can read them, and its branch rule
+limits those jobs to the tracked branch.
 
 In your docs repository, go to Settings → Environments and create
 `mdbisync`. Under **Deployment branches and tags**, choose **Selected
@@ -102,9 +95,8 @@ Every team your folders name must be one the app reaches.
 
 In your docs repository, add the client ID under Settings → Secrets
 and variables → Actions → Variables. Add the client secret under
-Settings → Environments → `mdbisync` → Environment secrets (a
-repository secret on a plan without environments, see
-[Sync environment](#sync-environment)).
+Settings → Environments → `mdbisync` → Environment secrets
+([Sync environment](#sync-environment)).
 
 | Kind | Name | Value |
 | --- | --- | --- |
@@ -162,9 +154,8 @@ repositories → your docs repository → Install.
 
 In your docs repository, add the client ID under Settings → Secrets and
 variables → Actions → Variables → New repository variable. Add the key
-under Settings → Environments → `mdbisync` → Environment secrets (a
-repository secret on a plan without environments, see
-[Sync environment](#sync-environment)).
+under Settings → Environments → `mdbisync` → Environment secrets
+([Sync environment](#sync-environment)).
 
 | Kind | Name | Value |
 | --- | --- | --- |

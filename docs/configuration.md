@@ -53,10 +53,8 @@ Environments, set its deployment branches to **Selected branches and
 tags** with a single **Branch** rule for the tracked branch (`main` by
 default) and no required reviewers. Add the secrets below there. Set
 repository variables under Settings → Secrets and variables → Actions.
-See the [sync environment setup](quickstart.md#sync-environment) for
-GitHub plan requirements, and
-[below](#moving-an-existing-installation-to-the-environment) for an
-installation that keeps them as repository secrets.
+See [below](#moving-an-existing-installation-to-the-environment) for an
+installation that keeps its secrets as repository secrets.
 
 | Kind | Name | Holds | Set in |
 | --- | --- | --- | --- |
