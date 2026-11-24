@@ -74,7 +74,7 @@ try {
   // A bare URL before a hard-break backslash once made the hook copy the page into the link on every run.
   await writeFile(page, 'Opening.\n\nhttps://example.com/\\\nNext line.\n\n--\n\nClosing.\n');
   hooks(1);
-  const linked = 'Opening.\n\n[https://example.com/\\\\](<https://example.com/\\\\>)\nNext line.\n\n--\n\nClosing.';
+  const linked = 'Opening.\n\n[https://example.com/\\\\](<https://example.com/%5C>)\nNext line.\n\n\\--\n\nClosing.';
   assert.equal(await readFile(page, 'utf8'), linked);
   hooks(0);
   assert.equal(await readFile(page, 'utf8'), linked);

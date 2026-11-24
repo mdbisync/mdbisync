@@ -408,7 +408,18 @@ describe('linkDestination', () => {
     // A `%` that starts no escape is written `%25`, so a file name holding one still decodes next to an encoded character.
     assert.equal(linkDestination('100%|.pdf'), '<100%25%7C.pdf>');
     assert.equal(decodedDestinationPath('100%25%7C.pdf'), '100%|.pdf');
-    assert.equal(linkDestination('a%7Cb%zz'), '<a%7Cb%25zz>');
+    // A relative path that does not decode names its file as written: every `%` in it is literal.
+    assert.equal(linkDestination('a%20b%zz.pdf'), '<a%2520b%25zz.pdf>');
+    assert.equal(decodedDestinationPath('a%2520b%25zz.pdf'), 'a%20b%zz.pdf');
+    assert.equal(linkDestination('a%20b|c.pdf?q=1%zz'), '<a%20b%7Cc.pdf?q=1%25zz>');
+    assert.equal(decodedDestinationPath('a%20b%7Cc.pdf'), 'a b|c.pdf');
+    // An absolute URL keeps its escapes; only a `%` that starts none becomes `%25`, as renderers write it.
+    assert.equal(linkDestination('https://example.com/a%20b%zz'), '<https://example.com/a%20b%25zz>');
+    // Every relative destination still resolves to the file it named before.
+    for (const url of ['a%20b%zz.pdf', '100%|.pdf', 'a%20b.pdf', 'a|b.pdf', '%FF.pdf', 'x%2Fy%.md', 'n\\o{t}e.md?x=%zz']) {
+      const written = linkDestination(url).slice(1, -1).replace(/\\(.)/g, '$1');
+      assert.equal(decodedDestinationPath(written), decodedDestinationPath(url), url);
+    }
     // Every short destination over these characters reads back as the same link.
     let urls = [''];
     for (let length = 1; length <= 6; length++) {
