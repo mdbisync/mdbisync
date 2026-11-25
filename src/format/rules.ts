@@ -28,6 +28,7 @@ export const LINT_RULES = {
   'table-header-pipe': 'A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |.',
   'hard-break-in-heading': 'A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.',
   'tab-reference-layout': 'Linear writes tab character references as literal tabs. Fix leaves this document as-is because a tab would change how Markdown reads it. Reword the text or use ordinary spacing.',
+  'space-reference-edge': 'Linear stores a space character reference at the start or end of a paragraph, heading, list item or table cell as a space, and drops that space the next time the document is written, so no form of this text stays the same in Linear. Fix leaves this document as-is. Remove the reference, or keep the space inside the text.',
   'git-conflict-marker': 'Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.',
   'section-opener': 'A line starting with >>> opens a collapsible section in Linear, which fix cannot write here: the file also has lines starting with +++, which Linear pairs with it, or the section would end inside code. Write the section with +++ lines, or start the line with \\>.',
   'url-in-html': 'A URL inside raw HTML is turned into a Markdown link.',

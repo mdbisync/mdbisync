@@ -223,6 +223,17 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
       || ancestors.some((parent) => parent.type === 'strong' || parent.type === 'emphasis')) return;
     if (body.slice(start(node), start(node) + 2) !== '**') return;
     const [first, ...rest] = node.children;
+    // `****Plan it**.**`: Linear reads an empty bold run, bolds the text up
+    // to the next `**` and leaves the rest plain (`**Plan it**.`).
+    if (first?.type === 'strong' && rest.length > 0 && rest.every((part) => part.type === 'text')
+      && first.children.every((child) => child.type === 'text')
+      && body.slice(start(node), start(node) + 4) === '****' && start(first) === start(node) + 2) {
+      const block = ancestors[1] ?? node;
+      const edits = groups.get(block) ?? [];
+      edits.push({ from: start(node), to: start(node) + 2, text: '' }, { from: end(node) - 2, to: end(node), text: '' });
+      groups.set(block, edits);
+      return;
+    }
     if (first?.type !== 'text' || rest.at(-1)?.type !== 'text') return;
     // Linear joins the opening punctuation's span to the next bold text
     // and leaves the closing punctuation outside it.
@@ -1113,6 +1124,10 @@ class Writer {
     }
     const marker = lineStart + /^[ \t]*/.exec(line)![0].length;
     const edits: Edit[] = [{ from: lineStart, to: marker, text: '' }, { from: marker + bare[1]!.length, to: lineEnd, text: ' ' }];
+    // The item's text now ends before Linear's empty item: Linear drops the
+    // spaces or tabs at its end, a two-space break among them.
+    const trailing = /[ \t]+$/.exec(this.source.slice(from, lineStart - 1));
+    if (trailing !== null) edits.push({ from: lineStart - 1 - trailing[0].length, to: lineStart - 1, text: '' });
     if (lineEnd < to) {
       const numbered = this.numberedLines(item, marker, bare[1]!, lineEnd, to, texts);
       if (numbered === undefined) return undefined;
@@ -1132,8 +1147,9 @@ class Writer {
   /**
    * The edits for the lines after a bare marker line (`bareMarkerLine`:
    * the marker `bare` at offset `marker`, its line ending at `lineEnd`) up
-   * to the paragraph's end `to`, when each is a number, a dot, one space
-   * and a word: Linear reads them as the items of a list, nested in the
+   * to the paragraph's end `to`, when each is a number and a dot, alone
+   * (an empty item, written with one space after it) or with one space and
+   * text that opens no block: Linear reads them as the items of a list, nested in the
    * empty item where the lines reach its content (`1. Trip` / `   1. ` /
    * `      2. step`), else after it in its list (`   2. ` / `   3. Pack`),
    * and writes their numbers unescaped. Written so, a line still continues
@@ -1161,8 +1177,12 @@ class Writer {
       const start = newline + 1;
       const nextNewline = this.source.indexOf('\n', start);
       const end = nextNewline === -1 || nextNewline > to ? to : nextNewline;
-      const numbered = /^([ \t]*)(\d{1,9})\. (?=[\p{L}\p{N}])(?:.*[^ \t])?$/u.exec(this.source.slice(start, end));
+      // A line of only the number is Linear's empty item, written with one
+      // space after the dot. Text after it must read as a paragraph by
+      // itself: a dash, a heading or a quote there opens a block in Linear.
+      const numbered = /^([ \t]*)(\d{1,9})\.(?:([ \t]*)|( (?![ \t]).*[^ \t]))$/.exec(this.source.slice(start, end));
       if (numbered === null || this.prefixEnd(start, this.source.slice(start, end)).lazy) return undefined;
+      if (numbered[4] !== undefined && !readsAsParagraph(numbered[4].slice(1))) return undefined;
       const numberColumn = column(start + numbered[1]!.length);
       const inside = numberColumn >= emptyContent;
       if ((nested !== undefined && inside !== nested) || (bare === '*' && !inside)) return undefined;
@@ -1173,6 +1193,7 @@ class Writer {
       if (Number(numbered[2]) !== expected || expected < 2 || numbered[2]!.length !== digits) return undefined;
       expected++;
       edits.push({ from: start, to: start + numbered[1]!.length, text: nested ? ' '.repeat(bare.length + 1) : '' });
+      if (numbered[3] !== undefined && numbered[3] !== ' ') edits.push({ from: end - numbered[3].length, to: end, text: ' ' });
     }
     return edits;
   }
@@ -2217,6 +2238,12 @@ function blockStartEscapes(text: string, startsLine: boolean): number[] {
     default:
       return [];
   }
+}
+
+/** Whether `text` by itself is one paragraph: it opens no other block. */
+function readsAsParagraph(text: string): boolean {
+  const blocks = parse(text).children;
+  return blocks.length === 1 && blocks[0]!.type === 'paragraph';
 }
 
 /** Whether a node below the root has no source position. */

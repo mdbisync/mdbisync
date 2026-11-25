@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
-import { linkedFileCheck, lintText } from './lint.ts';
+import { linkedFileCheck, lintInTree, lintText } from './lint.ts';
 import { parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 
 const cases: Array<[string, string, string]> = [
@@ -230,8 +230,6 @@ describe('space references, adjacent links and lone backticks as Linear stores t
     ['also in a link label, at its edge too', 'x [&#32;a](https://a.test) and [b&#32;](https://a.test) y', 'x [ a](<https://a.test>) and [b ](<https://a.test>) y'],
     ['one at a mark\'s inner edge moves out of it', 'x **&#32;mid** y, *b&#32;* c and ~~&#32;d~~', 'x  **mid** y, *b*  c and  ~~d~~'],
     ['out of every mark around it', 'x ***&#32;both*** y', 'x  ***both*** y'],
-    ['one at a block\'s start or end goes', '&#32;Leading\n\n**&#32;Tip** one\n\nTail **bold&#32;**\n\nEnd&#32;', 'Leading\n\n**Tip** one\n\nTail **bold**\n\nEnd'],
-    ['also in an item, heading, quote and cell', '* &#32;item\n\n# **&#32;Head**\n\n> &#32;quote\n\n| Col |\n| --- |\n| &#32;cell |', '* item\n\n# **Head**\n\n> quote\n\n| Col |\n| -- |\n| cell |\n'],
     ['a continuation line keeps it before a word', 'first\n&#32;second\n**&#32;b** c', 'first\n second\n **b** c'],
     ['adjacent links to one destination become one', '[Shop](https://a.test)[More](https://a.test)[Last](https://a.test)', '[ShopMoreLast](<https://a.test>)'],
     ['with the marks around a part inside it', '[a](https://a.test)**[b](https://a.test)***[c](https://a.test)*~~[d](https://a.test)~~', '[a**b***c*~~d~~](<https://a.test>)'],
@@ -265,10 +263,29 @@ describe('space references, adjacent links and lone backticks as Linear stores t
 
   it('checks the space edits of a block together', () => {
     // Each edit alone keeps the paragraph; both would make it a heading.
-    const fixed = fixText('&#32;#&#32;heading');
-    assert.equal(fixed, '#&#32;heading');
+    const fixed = fixText('Intro\n&#32;#&#32;heading');
+    assert.equal(fixed, 'Intro\n #&#32;heading');
     assert.equal(parse(fixed).children[0]?.type, 'paragraph');
     assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
+  });
+
+  it('leaves a space reference at a block\'s start or end to the author', () => {
+    // Linear stores the space on its first write and drops it on the next:
+    // no form reads back the same in both, so lint reports it and fix stops.
+    const cases: Array<[string, number]> = [
+      ['&#32;Leading', 1], ['**&#32;Tip** one', 1], ['Intro\n\nTail **bold&#32;**', 3], ['End&#x20;', 1], ['&#32;', 1],
+      ['* &#32;item', 1], ['1. Plan\n   1. Pack the bags&#32;\n2. Next', 2], ['# **&#32;Head**', 1], ['> &#32;quote', 1],
+      ['| Col |\n| --- |\n| &#32;cell |', 3], ['**&#32;&#32;Seeds:** buy them\n\nMore', 1], ['Ask the host.\nBring the map.&#32;', 2],
+    ];
+    for (const [text, line] of cases) {
+      assert.deepEqual(lintText('doc.md', text).map((finding) => [finding.rule, finding.line]), [['space-reference-edge', line]], text);
+      assert.deepEqual(lintInTree('doc.md', text, new Set()), [], `the sync sends it: ${text}`);
+      assert.equal(fixText(text), text, text);
+    }
+    // Inside the text, at a line's start or end, it is no block edge.
+    for (const text of ['first\n&#32;second', 'a&#32;\nb', 'x **&#32;mid** y', '[&#32;a](https://a.test) b']) {
+      assert.deepEqual(lintText('doc.md', text), [], text);
+    }
   });
 
   it('moves a space reference out of a mark at a line ending, as Linear does', () => {
@@ -507,6 +524,10 @@ describe('Linear bold forms', () => {
     ['spaces next to four-star boundaries', '**Note: ****important**** text**', '**Note: important** text'],
     ['adjacent stars that would expose a URL', '**https:****//example.test****end**', '**https:****//example.test****end**'],
     ['adjacent stars that would expose strikethrough', '**a~~****b~~****c**', '**a\\~\\~b\\~\\~c**'],
+    // An empty bold run first: Linear bolds the text up to the next `**` and leaves the rest plain.
+    ['an empty bold run before a bold run', '****Plan it**.**', '**Plan it**.'],
+    ['an empty bold run inside a paragraph', 'Intro ****Plan it**, more** end', 'Intro **Plan it**, more end'],
+    ['an empty bold run after literal stars', '**Lead ****Plan it**!**', '\\*\\*Lead **Plan it**!'],
     ['file label in a list item', '* **[Trail map](trail.pdf)**', '* [**Trail map**](<trail.pdf>)'],
     ['soft breaks', '**Birch\nCedar\nMaple**', '**Birch**\n**Cedar**\n**Maple**'],
     ['hard break', '**Birch  \nCedar**', '**Birch**  \n**Cedar**'],
@@ -1065,6 +1086,21 @@ describe('what fix leaves alone', () => {
       ['1. Trip\n\t1. \n\t\t1. step', '1. Trip\n    1\\. \n    \t1\\. step'],
       ['1. Trip\n\t1. \n\t\t2. step\n\t\t4. pack', '1. Trip\n    1\\. \n    \t2\\. step\n    \t4\\. pack'],
       ['1. Trip\n\t1. \n\t\t- step', '1. Trip\n    1\\. \n    \t- step'],
+      // A numbered line that is only its number is Linear's empty item, and
+      // one whose text starts with other marks is Linear's item too.
+      ['1. Trip\n\t1. \n\t2. **Tip**\n\t3. ', '1. Trip\n   1. \n   2. **Tip**\n   3. '],
+      ['1. Trip\n\t1. \n\t\t2.\n\t\t3.\t', '1. Trip\n   1. \n      2. \n      3. '],
+      ['1. Trip\n\t2. \n\t3. \n\t4. Pack', '1. Trip\n   2. \n   3. \n   4. Pack'],
+      ['1. Trip\n\t1. \n\t\t2. *soft* (step) `code` [Map](https://a.test)', '1. Trip\n   1. \n      2. *soft* (step) `code` [Map](<https://a.test>)'],
+      ['1. Pump\n\t1. \n\t2. Rinse:\u00a0 Fill it\u00a0', '1. Pump\n   1. \n   2. Rinse:\u00a0 Fill it\u00a0'],
+      // A heading or a quote there would open a block in Linear's item.
+      ['1. Trip\n\t1. \n\t\t2. # Heading', '1. Trip\n    1\\. \n    \t2\\. # Heading'],
+      ['1. Trip\n\t1. \n\t\t2. > quoted', '1. Trip\n    1\\. \n    \t2\\. > quoted'],
+      // The item's text ends before Linear's empty item: Linear drops the spaces or tab there.
+      ['1. Plan 2 \n   1.', '1. Plan 2\n   1. '],
+      ['* Plan\t\n  *', '* Plan\n  * '],
+      ['1. Plan\n   1. Step 2 \n      1. ', '1. Plan\n   1. Step 2\n      1. '],
+      ['1. Plan 2 \n\t\t1. \n', '1. Plan 2\n   1. '],
       // Not when a line ending falls inside markup, a number has a leading
       // zero, a line is four columns past its content (code in Linear) or
       // the lines follow a hard break.
@@ -1084,6 +1120,15 @@ describe('what fix leaves alone', () => {
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${JSON.stringify(text)}`);
       assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${JSON.stringify(text)}`);
     }
+  });
+
+  it('drops a two-space break before Linear\'s empty item, as Linear does', () => {
+    // Linear reads the empty item there and drops the break: Markdown's
+    // paragraph keeps the same words, without the break before the marker.
+    const fixed = fixText('1. Plan 2  \n   1.');
+    assert.equal(fixed, '1. Plan 2\n   1. ');
+    assert.equal(fixText(fixed), fixed);
+    assert.deepEqual(lintText('a.md', fixed), []);
   });
 
   it('keeps a literal asterisk before an image on an item\'s second line', () => {

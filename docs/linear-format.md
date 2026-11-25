@@ -146,12 +146,16 @@ Blocks:
   text, since an empty marker cannot interrupt a paragraph, but Linear reads
   it as an empty item nested in that item. `fix` writes it at the item's
   content with a space after it, as Linear does: `1. Plan` followed by
-  `        2.` is written `1. Plan` and `   2. `. Indented four or more
-  columns past the content, the line reads as indented code in Linear;
+  `        2.` is written `1. Plan` and `   2. `. Spaces or a tab at the end of
+  the item's first line go, as Linear drops them there. Indented four or
+  more columns past the content, the line reads as indented code in Linear;
   `fix` writes the same form there. Numbered lines after it (`2. step`,
   `3. pack`, not `1.`) become the items of a list in Linear, nested in the
   empty item where they reach its content: `fix` writes them that way,
-  unescaped, which still reads as the paragraph's text. Linear reads the
+  unescaped, which still reads as the paragraph's text. A line of only its
+  number becomes an empty item (`3. `), and text that starts with marks
+  (`2. **Tip**`) stays an item's text; a heading or quote there would open
+  a block in Linear's item, so such a line stays escaped text. Linear reads the
   line as text under a quote, after more lines of the paragraph, before
   other text or an ordered list in the item, and with `)` or `+`: there it
   stays as it is.
@@ -268,6 +272,8 @@ Inline text:
   Bold immediately inside another bold span is folded into the outer span.
   In a chain of four-asterisk boundaries such as `**a****b****c**`,
   Linear writes `**ab**c`.
+  An empty bold run before a bold run, as in `****Plan**.**`, bolds only
+  the text up to the next `**` in Linear: it becomes `**Plan**.`.
   In `**(**notes**)**`, Linear joins the first two bold runs and leaves
   the closing punctuation outside, as `**(notes**)`. A pair of stars
   enclosing italic spans separated by spaces goes, so `**a* *b**`
@@ -342,11 +348,11 @@ Inline text:
 - A space reference (`&#32;`, `&#x20;`) becomes a space, as Linear stores
   it; in a link label too. At the inner edge of bold, italic or
   strikethrough the space moves out of it: `x **&#32;Tip** y` becomes
-  `x  **Tip** y`. At the start or end of a paragraph, heading, item, quote
-  or cell the space goes, since Linear drops it on its next write:
-  `**&#32;Tip** one` becomes `**Tip** one`. Where a space would change
-  what the text says (make a line break, a list item or HTML, or close a
-  heading), the reference stays.
+  `x  **Tip** y`. Where a space would change what the text says (make a
+  line break, a list item or HTML, or close a heading), the reference
+  stays. At the start or end of a paragraph, heading, item, quote or cell
+  `fix` leaves the file to its author: see
+  [`space-reference-edge`](#space-reference-edge).
 - A tab reference (`&#9;`, `&#x9;`) becomes a literal tab in inline
   text. At the inner edge of an emphasis mark it moves outside the mark.
   Where the tab would change how Markdown reads the text, `fix` leaves
@@ -765,6 +771,18 @@ The sync sends the file as written.
 
 ```markdown
 1. &#9;Collect the seeds.
+```
+
+### `space-reference-edge`
+
+Linear stores a space character reference at the start or end of
+a paragraph, heading, list item or table cell as a space, and drops that
+space the next time the document is written, so no form of this text stays
+the same in Linear. Fix leaves this document as-is. Remove the reference,
+or keep the space inside the text. The sync sends the file as written.
+
+```markdown
+1. Book the train&#32;
 ```
 
 ### `git-conflict-marker`

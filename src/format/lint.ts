@@ -13,7 +13,7 @@ import { tabReferences } from './tab-reference.ts';
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'space-reference-edge', 'unplaced-link']);
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
@@ -94,8 +94,36 @@ export function lintText(file: string, text: string, options: LintOptions = {}):
   lintTree(file, tree, content, report, options);
   const { unsafeLine } = tabReferences(content);
   if (unsafeLine !== undefined) report('tab-reference-layout', unsafeLine);
+  for (const at of spaceReferenceEdges(tree, content)) report('space-reference-edge', at);
   return sorted();
 }
+
+/**
+ * The lines of space references (`&#32;`) at the start or end of a block's
+ * text, also just inside bold, italic or strikethrough there. Linear stores
+ * the space on its first write and drops it on the next: no text `fix`
+ * writes reads back the same in both, so `fix` leaves the file to its author.
+ */
+function spaceReferenceEdges(tree: Root, body: string): number[] {
+  const lines: number[] = [];
+  const edgeText = (children: PhrasingContent[], side: 'first' | 'last'): PhrasingContent | undefined => {
+    let child = side === 'first' ? children[0] : children.at(-1);
+    while (child !== undefined && (child.type === 'strong' || child.type === 'emphasis' || child.type === 'delete')) child = side === 'first' ? child.children[0] : child.children.at(-1);
+    return child?.type === 'text' && child.position !== undefined ? child : undefined;
+  };
+  visit(tree, (node) => {
+    if (node.type !== 'paragraph' && node.type !== 'heading' && node.type !== 'tableCell') return;
+    const first = edgeText(node.children, 'first');
+    if (first?.type === 'text' && first.value.startsWith(' ') && SPACE_REFERENCE_START.test(body.slice(start(first), start(first) + 16))) lines.push(line(first));
+    const last = edgeText(node.children, 'last');
+    if (last?.type === 'text' && last.value.endsWith(' ') && SPACE_REFERENCE_END.test(body.slice(Math.max(0, end(last) - 16), end(last)))) lines.push(last.position!.end.line);
+  });
+  return lines;
+}
+
+/** A decimal or hexadecimal space reference starting, or ending, a text. */
+const SPACE_REFERENCE_START = /^&#(?:0*32|[xX]0*20);/;
+const SPACE_REFERENCE_END = /&#(?:0*32|[xX]0*20);$/;
 
 /**
  * The empty cells `fix` adds to a table: it writes every row with as many

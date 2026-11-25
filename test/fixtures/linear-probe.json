@@ -109,6 +109,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/bold-empty-run.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/bold-italic-boundaries.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -1018,6 +1022,14 @@
       "fixedPoint": true
     },
     "list-items/list-form-empty-item-numbered-lines.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-form-empty-item-numbered-marks.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-form-empty-item-trailing-space.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
