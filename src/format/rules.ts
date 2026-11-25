@@ -11,7 +11,7 @@ export { CONTENT_LIMIT };
 export const LINT_RULES = {
   footnote: 'Footnotes are dropped.',
   subscript: 'Tilde subscript is dropped.',
-  'table-escaped-pipe': 'An escaped pipe in a plain table cell splits the row. Put the cell text in inline code, or rephrase it without the pipe.',
+  'table-escaped-pipe': 'A pipe in a plain table cell, escaped or written as a character reference, comes back from Linear unescaped, which splits the row. Put the cell text in inline code, or rephrase it without the pipe.',
   'table-hash-cell': 'A table body cell starting with # becomes a heading.',
   'table-list-cell': 'A table body cell starting with -, + or * and a space, or with a number and ), becomes a list, which Linear writes with * or a number and a dot. Put a backslash before the -, + or *, or reword the cell.',
   'image-in-link': 'The link around an image is dropped.',
@@ -29,7 +29,7 @@ export const LINT_RULES = {
   'hard-break-in-heading': 'A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.',
   'tab-reference-layout': 'Linear writes tab character references as literal tabs. Fix leaves this document as-is because a tab would change how Markdown reads it. Reword the text or use ordinary spacing.',
   'git-conflict-marker': 'Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.',
-  'section-opener': 'A line starting with >>> opens a collapsible section in Linear, which fix cannot write here: the file also has lines starting with +++, which Linear pairs with it, or the section would end inside code. Write the section with +++ lines, or start the line with \\>.',
+  'section-opener': 'A line starting with >>> opens a collapsible section in Linear, which fix cannot write here: a section line without a title would open a section inside another one, or a >>> line without a title follows a +++ line that closed its sections, or a ++++ line, code or HTML would take in a closing line. Close a >>> section with a >>> line and a +++ section with a +++ line, or start the line with \\>.',
   'url-in-html': 'A URL inside raw HTML is turned into a Markdown link.',
   'unplaced-link': 'A web address Markdown finds inside other text, such as "www.example.com" in quotes, cannot be matched to its text in the source, for example because an escape or a character reference spells it, so fix cannot write it as a link. Write it in angle brackets or as a link.',
   'list-after-item-text': 'In a list item, Linear writes a list on the line right below the text or the list of another kind before it. When its first item is empty, starts with a list, or is numbered other than 1, Markdown reads that marker as part of the text above. Start the list with an item of text, numbered 1 in a numbered list.',

@@ -181,8 +181,14 @@ Blocks:
   `>>>` line without a title closes every section still open there; with
   none open, it opens one without a title (`+++` and a space). With spaces
   between the signs (`> > >`), or when the first sign continues a quote
-  above, it stays a quote. A file that also has a `+++` line is left to
-  you, since Linear would pair that line with the section.
+  above, it stays a quote. In a file that also has `+++` lines, Linear
+  pairs the two kinds apart: a `+++` line without a title closes the
+  innermost `+++` section, a `>>>` line without a title every `>>>`
+  section, and closing a section closes the sections inside it. `fix`
+  writes them so, with one `+++` line for each section closed. A section
+  line without a title that would open a section inside another one, or a
+  `>>>` line without a title after a `+++` line closed its sections, is
+  left to you (`section-opener`).
 - A bare `+++` opens an untitled section when it has a body or a closing
   marker and there is no section open in the same document, list item or
   quote. `fix` writes that opener with one trailing space, as Linear does.
@@ -480,10 +486,11 @@ tildes, `~~strikethrough~~`, are fine.
 
 ### `table-escaped-pipe`
 
-An escaped pipe in a plain table cell splits the row. Put the cell text in
-inline code, or rephrase it without the pipe. Linear drops the backslash,
-and the pipe starts a new cell; in inline code (`` `a \| b` ``) it is kept
-as it is.
+A pipe in a plain table cell, escaped or written as a character reference,
+comes back from Linear unescaped, which splits the row. Put the cell text in
+inline code, or rephrase it without the pipe. Linear keeps `\|`, `&#124;`
+and `&#x7C;` in the cell, but writes each back as a bare `|`. In inline code
+(`` `a \| b` ``) the pipe is kept as it is.
 
 ```markdown
 | Expression | Meaning |
@@ -785,9 +792,12 @@ The meeting is on Tuesday.
 ### `section-opener`
 
 A line starting with >>> opens a collapsible section in Linear, which fix
-cannot write here: the file also has lines starting with +++, which Linear
-pairs with it, or the section would end inside code. Write the section with
-+++ lines, or start the line with \>.
+cannot write here: a section line without a title would open a section
+inside another one, or a >>> line without a title follows a +++ line that
+closed its sections, or a ++++ line, code or HTML would take in a closing
+line. Close a >>> section with a >>> line and a +++ section with a +++
+line, or start the line with \>. Linear writes a section without a title
+as `+++ `, which reads as a closing line when a section is open.
 
 Elsewhere `fix` writes a `>>>` line as Linear's section (see
 [What `fix` changes](#what-fix-changes)).
@@ -797,11 +807,11 @@ Elsewhere `fix` writes a `>>>` line as Linear's section (see
 
 Kept from last week.
 
-+++
-
->>> New notes
+>>>
 
 Added today.
+
++++
 ```
 
 ### `url-in-html`

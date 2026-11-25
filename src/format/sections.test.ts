@@ -86,10 +86,19 @@ describe('a line opening with >>>', () => {
     assert.equal(fixText(fixed), fixed);
   });
 
-  // Linear would pair a +++ line with the section, or the closing line would land in code: the author decides.
+  // A title-less section line inside a section (Linear writes `+++ `, which
+  // reads as a closing line), a title-less >>> line after a +++ line closed
+  // its sections, a wider marker, or the closing line would land in code:
+  // the author decides.
   const left = [
     '>>> Plum notes\n\nAfter\n\n+++\n\nTail',
-    '+++ Earlier\n\nKept.\n\n+++\n\n>>> New\n\n- item',
+    '+++ Plum notes\n\nAfter\n\n>>>\n\nTail\n\n+++\n\nEnd',
+    '>>> Plum notes\n\nAfter\n\n+++\n\nTail\n\n>>>\n\nEnd',
+    '+++ Plum notes\n\nAfter\n\n>>> Pears\n\nTail\n\n+++\n\n>>>\n\nEnd',
+    '>>> Plum notes\n\nAfter\n\n++++ Pears\n\nTail',
+    '+++ Plum\n\nAfter\n\n>>> Pears\n\n+++ Figs\n\nTail\n\n>>>\n\nEnd\n\n<pre>\nq',
+    '> +++ Plum\n> >>> Pears\n> +++\nOutside',
+    '>>> Plum notes\n\nAfter\n\n+++ Pears',
     '>>> Notes\n\n```\ncode',
     '* a\n\n  >>> Notes\n\n  ```\n  code\n* b',
     '>>> Notes\n\n<pre>\nx',
@@ -102,9 +111,43 @@ describe('a line opening with >>>', () => {
   }
 
   it('is reported on the line of the first section line', () => {
-    const findings = lintText('doc.md', '+++ Earlier\n\nKept.\n\n+++\n\n>>> New\n\nToday.').filter((finding) => finding.rule === 'section-opener');
-    assert.deepEqual(findings.map((finding) => finding.line), [7]);
+    const findings = lintText('doc.md', '+++ Earlier\n\nKept.\n\n>>>\n\nToday.\n\n+++').filter((finding) => finding.rule === 'section-opener');
+    assert.deepEqual(findings.map((finding) => finding.line), [5]);
   });
+});
+
+// Linear pairs >>> lines and +++ lines apart: a title-less line closes the
+// innermost +++ section, or every >>> section, with the sections nested in it.
+describe('>>> and +++ section lines in one file', () => {
+  const cases = [
+    ['a >>> section after a closed +++ section', '+++ Earlier\n\nKept.\n\n+++\n\n>>> New\n\nToday.',
+      '+++ Earlier\n\nKept.\n\n+++\n\n+++ New\n\nToday.\n\n+++'],
+    ['a +++ section after a closed >>> section', '>>> First\n\nKept.\n\n>>>\n\n+++ Second\n\nToday.\n\n+++\n\nAfter',
+      '+++ First\n\nKept.\n\n+++\n\n+++ Second\n\nToday.\n\n+++\n\nAfter'],
+    ['a +++ section inside a >>> section', '>>> Outer\n\nKept.\n\n+++ Inner\n\nToday.\n\n+++\n\nLater\n\n>>>\n\nAfter',
+      '+++ Outer\n\nKept.\n\n+++ Inner\n\nToday.\n\n+++\n\nLater\n\n+++\n\nAfter'],
+    ['a +++ line closes the >>> section inside its section', '+++ Outer\n\nKept.\n\n>>> Inner\n\nToday.\n\n+++\n\nAfter',
+      '+++ Outer\n\nKept.\n\n+++ Inner\n\nToday.\n\n+++\n\n+++\n\nAfter'],
+    ['a >>> line closes the +++ sections inside its sections', '>>> First\n\nKept.\n\n>>> Second\n\n+++ Third\n\n+++ Fourth\n\nToday.\n\n>>>\n\nAfter',
+      '+++ First\n\nKept.\n\n+++ Second\n\n+++ Third\n\n+++ Fourth\n\nToday.\n\n+++\n\n+++\n\n+++\n\n+++\n\nAfter'],
+    ['both kinds open at the end', '+++ Outer\n\nKept.\n\n>>> Inner\n\nToday.', '+++ Outer\n\nKept.\n\n+++ Inner\n\nToday.\n\n+++\n\n+++'],
+    ['an empty >>> section at the end of a +++ section', '+++ Outer\n\nKept.\n\n>>> Inner', '+++ Outer\n\nKept.\n\n+++ Inner\n\n+++\n\n+++'],
+    ['a +++ section open inside an open >>> section', '>>> Outer\n\nKept.\n\n+++ Inner\n\nToday.', '+++ Outer\n\nKept.\n\n+++ Inner\n\nToday.\n\n+++\n\n+++'],
+    ['lines without blank lines', '>>> Outer\nKept.\n+++ Inner\nToday.\n+++\nAfter', '+++ Outer\n\nKept.\n\n+++ Inner\n\nToday.\n\n+++\n\nAfter\n\n+++'],
+    ['a title-less >>> line after a closed +++ section', '+++ Earlier\n\nKept.\n\n+++\n\n>>>\n\nToday.', '+++ Earlier\n\nKept.\n\n+++\n\n+++ \n\nToday.\n\n+++'],
+    ['in a list item', '* Tray\n\n  +++ Outer\n\n  Kept.\n\n  >>> Inner\n\n  Today.\n\n  +++\n\n  After\n* Tools',
+      '* Tray\n\n  +++ Outer\n\n  Kept.\n\n  +++ Inner\n\n  Today.\n\n  +++\n\n  +++\n\n  After\n* Tools'],
+    ['in a quote', '> +++ Earlier\n>\n> Kept.\n>\n> +++\n>\n> >>> New\n>\n> Today.',
+      '> +++ Earlier\n>\n> Kept.\n>\n> +++\n>\n> +++ New\n>\n> Today.\n>\n> +++'],
+  ] as const;
+  for (const [label, input, expected] of cases) {
+    it(label, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected);
+      assert.deepEqual(lintText('doc.md', input).filter((finding) => finding.rule === 'section-opener'), []);
+      assert.deepEqual(lintText('doc.md', expected), []);
+    });
+  }
 });
 
 describe('triple-plus section markers', () => {

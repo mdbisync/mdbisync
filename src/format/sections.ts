@@ -12,9 +12,15 @@
 import type { Blockquote, Code, ListItem, Nodes, Root } from 'mdast';
 import { advanceColumn, end, parse, start, visit, type MicromarkExtension } from './markdown.ts';
 
-/** `lines`: the section lines the edit writes. */
-type Edit = { from: number; to: number; text: string; depth: number; lines?: number };
+/** `lines`: the section lines the edit writes; `marks`: where each starts in `text`, and what it is. */
+type Edit = { from: number; to: number; text: string; depth: number; lines?: number; marks?: { at: number[]; role: OpenerLine['role'] } };
 type Opener = { node: Nodes; parent: Nodes; depth: number };
+/**
+ * A triple-plus line `fix` wrote for a `>>>` section: an opening line, one
+ * of the closing lines of a title-less `>>>` line, or one of the closing
+ * lines at its container's end. `run`: the `>>>` line or end it stands for.
+ */
+type OpenerLine = { role: 'open' | 'close' | 'end'; run: number };
 
 /** Rounds of splitting: each makes the section lines that nest in quotes the round before split off visible. */
 const SPLIT_ROUNDS = 8;
@@ -77,13 +83,35 @@ function parseForSections(body: string): Root {
  * one if the container has a body or a closing line for it.
  */
 export function plusSectionsAsLinear(body: string): string {
+  return pairSections(body, new Map())!;
+}
+
+/**
+ * `plusSectionsAsLinear` for a body in which `fix` wrote `>>>` section
+ * lines as triple-plus lines (`fromOpeners`: where each written line
+ * starts). Linear pairs the two kinds apart: a title-less `+++` line closes
+ * the innermost open `+++` section, a title-less `>>>` line every open
+ * `>>>` section, and closing a section closes the sections nested in it.
+ * The `>>>` pass counted only its own sections, so each of its closing
+ * lines and each run of closing lines at a container's end is written
+ * again here. Undefined where Linear's form reads differently: a title-less
+ * section opened inside a section (Linear writes `+++ `, which reads as a
+ * closing line), or a title-less `>>>` line after a `+++` line closed its
+ * sections (Linear opens a section there).
+ */
+function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>): string | undefined {
   if (!body.includes('+++')) return body;
   let tree = parseForSections(body);
-  const joined = joinSectionItemLines(body, tree);
+  const joins: Edit[] = [];
+  const joined = joinSectionItemLines(body, tree, joins);
   if (joined !== body) {
+    const lines = [...fromOpeners];
+    const moved = applyTrackedEdits(body, joins, lines.map(([at]) => at)).points;
+    fromOpeners = new Map(lines.map(([, line], index) => [moved[index]!, line]));
     body = joined;
     tree = parseForSections(body);
   }
+  let unwritable = false;
   const edits: Edit[] = [];
   // Where each paragraph of the ordinary parse ends, by its start: a marker
   // whose paragraph runs past its line has a lazy line after it.
@@ -102,26 +130,81 @@ export function plusSectionsAsLinear(body: string): string {
     const blocks = parent.children;
     const markers = blocks.map((node) => node.type === 'thematicBreak' ? PLUS_MARKER.exec(body.slice(start(node), end(node))) : null);
     if (markers.every((marker) => marker === null)) return;
+    const opener = (index: number) => fromOpeners.get(start(blocks[index]!));
+    const mixed = markers.some((marker, index) => marker !== null && opener(index) !== undefined);
     // Longer delimiters pair by their own width. Their stored spelling
     // also uses three signs, so leave mixed-width containers to the author.
-    if (blocks.some((node) => node.type === 'paragraph' && /(?:^|\n)[ \t>]*\+{4}/.test(body.slice(start(node), end(node))))) return;
+    if (blocks.some((node) => node.type === 'paragraph' && /(?:^|\n)[ \t>]*\+{4}/.test(body.slice(start(node), end(node))))) {
+      unwritable ||= mixed;
+      return;
+    }
     const depth = ancestors.length;
     const lastContent = markers.findLastIndex((marker, index) => marker === null && blocks[index]!.type !== 'definition');
     const open: number[] = [];
     const roles = new Map<number, string>();
+    // Closing lines that also close the sections nested in the one they close.
+    const alsoCloses = new Map<number, number>();
+    // Closing lines of the `>>>` pass that Linear does not write: the run's
+    // other lines, or the whole run when a `+++` line closed its sections.
+    const dropped = new Set<number>();
+    const closingRuns = new Set<number>();
     let closedAfterContent = 0;
+    const close = (index: number, from: number) => {
+      const closed = open.splice(from);
+      for (const other of closed) {
+        // Only a +++ line of the text can be a final title-like paragraph.
+        if (other > lastContent && opener(other) === undefined) closedAfterContent++;
+        roles.set(other, `+++ ${markers[other]![1]!.trim()}`);
+      }
+      roles.set(index, '+++');
+      if (closed.length > 1) alsoCloses.set(index, closed.length - 1);
+    };
     for (const [index, marker] of markers.entries()) {
       if (marker === null) continue;
       const title = marker[1]!.trim();
-      if (title === '' && open.length > 0) {
-        const opener = open.pop()!;
-        if (opener > lastContent) closedAfterContent++;
-        roles.set(opener, `+++ ${markers[opener]![1]!.trim()}`);
-        roles.set(index, '+++');
+      const line = opener(index);
+      if (line !== undefined && line.role !== 'open') {
+        if (closingRuns.has(line.run)) {
+          dropped.add(index);
+          continue;
+        }
+        // The pairing parse can end a container elsewhere than the one the
+        // `>>>` pass read (a lazy line): leave such a file to its author.
+        if (index === 0) {
+          unwritable = true;
+          return;
+        }
+        closingRuns.add(line.run);
+        const outermost = open.findIndex((other) => opener(other) !== undefined);
+        if (outermost !== -1) close(index, outermost);
+        else if (line.role === 'end') dropped.add(index);
+        else {
+          unwritable = true;
+          return;
+        }
+      } else if (title === '' && open.length > 0) {
+        const innermost = mixed ? open.findLastIndex((other) => opener(other) === undefined) : open.length - 1;
+        if (line !== undefined || innermost === -1) {
+          unwritable = true;
+          return;
+        }
+        close(index, innermost);
       } else if (index < blocks.length - 1) {
+        // A final +++ title with only the `>>>` pass's closing lines after
+        // it has no body: Linear's form would not tell it from text.
+        if (mixed && line === undefined && blocks.slice(index + 1).every((_, after) => opener(index + 1 + after)?.role === 'end')) {
+          unwritable = true;
+          return;
+        }
         open.push(index);
       }
     }
+    // Each `>>>` section has its closing line: one still open is in another container.
+    if (open.some((index) => opener(index) !== undefined)) {
+      unwritable = true;
+      return;
+    }
+    const lastKept = blocks.findLastIndex((_, index) => !dropped.has(index));
     // An opener with blocks after it in its container opens a section
     // there, also as the first line of a list item or quote with the next
     // line right below it.
@@ -142,13 +225,22 @@ export function plusSectionsAsLinear(body: string): string {
       closedAfterContent--;
       return false;
     });
-    const last = blocks.at(-1)!;
-    if (closes.length > 0 && last.type === 'html' && parse(`${last.value}\n\n+++`).children.at(-1)?.type !== 'paragraph') return;
+    const last = blocks[lastKept]!;
+    if (closes.length > 0 && last.type === 'html' && parse(`${last.value}\n\n+++`).children.at(-1)?.type !== 'paragraph') {
+      unwritable ||= mixed;
+      return;
+    }
 
     for (const [index, marker] of markers.entries()) {
       if (marker === null) continue;
       const node = blocks[index]!;
       const at = start(node);
+      if (dropped.has(index)) {
+        // From the end of the block before it: that block is kept, or dropped with it.
+        const previous = blocks[index - 1]!;
+        edits.push({ from: lineEndAt(body, Math.max(start(previous), end(previous) - 1)), to: lineEndAt(body, at), text: '', depth });
+        continue;
+      }
       if (!roles.has(index) && parent.type !== 'root' && index === 0 && index === blocks.length - 1) continue;
       const previous = blocks[index - 1];
       // The image writer can split off a literal section title and escape
@@ -160,12 +252,12 @@ export function plusSectionsAsLinear(body: string): string {
       const line = prefixes(body, at);
       const blank = line.prefix.trimEnd();
       const before = index > 0 || line.linePrefix === line.prefix && parent.type === 'root' && line.lineStart > 0;
-      const written = roles.get(index) ?? marker[0].trimEnd();
+      const written = [roles.get(index) ?? marker[0].trimEnd(), ...Array<string>(alsoCloses.get(index) ?? 0).fill('+++')].join(`\n${blank}\n${line.prefix}`);
       const to = lineEndAt(body, at);
       // The marker ends a paragraph even when the next line is lazy.
       // Keep any enclosing quote that the next line continues.
       const next = body.slice(to + 1, lineEndAt(body, to + 1));
-      const after = index < blocks.length - 1 ? `\n${blank}`
+      const after = index < lastKept ? `\n${blank}`
         : next.trim() === '' ? '' : `\n${sharedQuotePrefix(blank, next)}`;
       edits.push({
         from: line.lineStart, to,
@@ -184,7 +276,7 @@ export function plusSectionsAsLinear(body: string): string {
       edits.push({ from: at, to: at, text: (fence === '' ? '' : `\n${prefix}${fence}`) + markers, depth });
     }
   });
-  return applyEdits(body, edits);
+  return unwritable ? undefined : applyEdits(body, edits);
 }
 
 /** The explicit quote markers the two lines share, through the last `>`. */
@@ -197,9 +289,8 @@ function sharedQuotePrefix(first: string, next: string): string {
 }
 
 /** Read Linear's empty item paragraph and section below it as a single list item. */
-function joinSectionItemLines(body: string, tree: Nodes): string {
+function joinSectionItemLines(body: string, tree: Nodes, edits: Edit[]): string {
   if (!/(?:[*+.-]|\)) \n[ >]*\n[ >]*\+{3} /.test(body)) return body;
-  const edits: Edit[] = [];
   visit(tree, (node, ancestors) => {
     if (node.type !== 'thematicBreak' || !body.startsWith('+++ ', start(node))) return;
     const { lineStart, linePrefix } = prefixes(body, start(node));
@@ -243,16 +334,17 @@ function unclosedFence(body: string, code: Code): string {
 
 /**
  * The body with each `>>>` section line written as Linear writes the
- * section, or undefined when `fix` cannot write it so: Linear would pair a
- * `+++` line of the text with the section, or a block at the end of the
- * container (an open code fence) would take in the closing line. The file
- * then stays with its author.
+ * section, or undefined when `fix` cannot write it so: a title-less
+ * section line opens a section inside one of the other kind (`>>>` and
+ * `+++` lines pair apart), or a block at the end of the container (an open
+ * code fence) would take in the closing line. The file then stays with its
+ * author. With `+++` lines in the body, they are written as Linear writes
+ * them too.
  */
 export function sectionOpenersAsLinear(body: string): string | undefined {
   if (!body.includes('>>>')) return body;
   let openers = sectionOpeners(body);
   if (openers.length === 0) return body;
-  if (hasSectionLine(body, openers)) return undefined;
   // Linear reads a section line alone: the lines after it are blocks of
   // their own, though Markdown reads them as part of the quote it opens.
   for (let round = 0; ; round++) {
@@ -265,10 +357,12 @@ export function sectionOpenersAsLinear(body: string): string | undefined {
   const containers = new Map<Nodes, Opener[]>();
   for (const opener of openers) containers.set(opener.parent, [...(containers.get(opener.parent) ?? []), opener]);
   const edits = [...containers.values()].flatMap((group) => containerEdits(body, group));
-  const written = applyEdits(body, edits);
+  const { body: written, marks } = applyTrackedEdits(body, edits);
   // Each section line must stay a line of its own, not code or HTML of the block before it.
   const lines = edits.reduce((count, edit) => count + (edit.lines ?? 0), 0);
-  return sectionLineCount(written) === lines ? written : undefined;
+  const plusLines = plusLineCount(body, openers);
+  if (sectionLineCount(written) !== lines + plusLines) return undefined;
+  return plusLines === 0 ? written : pairSections(written, marks);
 }
 
 /** The line (1-based) of the first `>>>` section line when `fix` cannot write the sections, else undefined. */
@@ -337,17 +431,21 @@ function containerEdits(body: string, openers: readonly Opener[]): Edit[] {
     const before = line.lineStart > 0 && prefix === line.linePrefix ? `${blank}\n` : '';
     const lineEnd = lineEndAt(body, at);
     const title = body.slice(at, lineEnd).replace(/^>+/, '').trim();
+    const lead = `${before}${line.linePrefix}`;
+    const between = `\n${blank}\n${prefix}`;
     let written: string;
     let lines = 1;
     if (title === '' && open > 0) {
-      written = Array.from({ length: open }, () => '+++').join(`\n${blank}\n${prefix}`);
+      written = Array.from({ length: open }, () => '+++').join(between);
       lines = open;
       open = 0;
     } else {
       open++;
       written = `+++ ${title}`;
     }
-    edits.push({ from: line.lineStart, to: lineEnd, text: `${before}${line.linePrefix}${written}\n${blank}`, depth, lines });
+    const starts = Array.from({ length: lines }, (_, index) => lead.length + index * ('+++'.length + between.length));
+    const role = written.startsWith('+++ ') ? 'open' : 'close';
+    edits.push({ from: line.lineStart, to: lineEnd, text: `${lead}${written}\n${blank}`, depth, lines, marks: { at: starts, role } });
   }
   if (open > 0) {
     const parent = openers[0]!.parent;
@@ -357,7 +455,9 @@ function containerEdits(body: string, openers: readonly Opener[]): Edit[] {
     const last = 'children' in parent ? (parent.children as Nodes[]).at(-1) : undefined;
     let containerEnd = parent.type === 'root' ? body.length : end(last ?? parent);
     while (body[containerEnd] === ' ' || body[containerEnd] === '\t') containerEnd++;
-    edits.push({ from: containerEnd, to: containerEnd, text: `\n${prefix.trimEnd()}\n${prefix}+++`.repeat(open), depth, lines: open });
+    const closer = `\n${prefix.trimEnd()}\n${prefix}+++`;
+    const starts = Array.from({ length: open }, (_, index) => (index + 1) * closer.length - '+++'.length);
+    edits.push({ from: containerEnd, to: containerEnd, text: closer.repeat(open), depth, lines: open, marks: { at: starts, role: 'end' } });
   }
   return edits;
 }
@@ -372,6 +472,30 @@ function applyEdits(body: string, edits: readonly Edit[]): string {
   return body;
 }
 
+/**
+ * `applyEdits`, also giving where the edits' marks start in the result and
+ * where the given points of the body moved to (a point at the end of an
+ * edit, or where one inserts, moves past its text). The edits must not overlap.
+ */
+function applyTrackedEdits(body: string, edits: readonly Edit[], points: readonly number[] = []): { body: string; marks: Map<number, OpenerLine>; points: number[] } {
+  // The order `applyEdits` leaves them in: of two at one place, the inner one's text first.
+  const sorted = [...edits].sort((a, b) => a.from - b.from || b.depth - a.depth);
+  let result = '';
+  let cursor = 0;
+  const marks = new Map<number, OpenerLine>();
+  const moved: Array<{ to: number; shift: number }> = [];
+  for (const [run, edit] of sorted.entries()) {
+    result += body.slice(cursor, edit.from);
+    for (const at of edit.marks?.at ?? []) marks.set(result.length + at, { role: edit.marks!.role, run });
+    result += edit.text;
+    cursor = edit.to;
+    moved.push({ to: edit.to, shift: result.length - edit.to });
+  }
+  result += body.slice(cursor);
+  const shifted = points.map((point) => point + (moved.findLast((edit) => edit.to <= point)?.shift ?? 0));
+  return { body: result, marks, points: shifted };
+}
+
 /** The paragraph lines that start with `+++`: the section lines Linear reads. */
 function sectionLineCount(body: string, skip: (at: number) => boolean = () => false): number {
   let count = 0;
@@ -383,8 +507,8 @@ function sectionLineCount(body: string, skip: (at: number) => boolean = () => fa
   return count;
 }
 
-/** Whether a paragraph has a line starting with `+++` other than a `>>>` line's title. */
-function hasSectionLine(body: string, openers: readonly Opener[]): boolean {
+/** The paragraph lines that start with `+++`, other than a `>>>` line's title. */
+function plusLineCount(body: string, openers: readonly Opener[]): number {
   const titles = openers.map(({ node }) => [start(node), lineEndAt(body, start(node))] as const);
-  return sectionLineCount(body, (at) => titles.some(([from, to]) => from <= at && at <= to)) > 0;
+  return sectionLineCount(body, (at) => titles.some(([from, to]) => from <= at && at <= to));
 }
