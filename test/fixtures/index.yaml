@@ -62,6 +62,8 @@ rules:
     title: "A hard line break in a setext heading is lost when the heading is written as one line."
   - id: tab-reference-layout
     title: "A literal tab would change how Markdown reads the document."
+  - id: space-reference-edge
+    title: "A space reference at a block's start or end reads back as a space once, then goes."
   - id: git-conflict-marker
     title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
   - id: section-opener
@@ -144,6 +146,8 @@ known_constructs:
   - construct: tab-reference
     class: fixable
   - construct: tab-reference-layout
+    class: lint-error
+  - construct: space-reference-edge
     class: lint-error
   - construct: lone-backtick
     class: fixable
@@ -3167,6 +3171,22 @@ fixtures:
     canary: kx-066b2922
     corpus: false
     note: "numbered lines after a bare marker on an item's second line: Linear reads the empty item and a list nested in it, or after it in its list, and writes the numbers unescaped"
+  - file: "list-items/list-form-empty-item-numbered-marks.md"
+    group: list-items
+    construct: empty-list-item
+    class: fixable
+    basis: known
+    canary: kx-90e319f0
+    corpus: false
+    note: "numbered lines after a bare marker that are only their number or start with marks: Linear reads them as items too"
+  - file: "list-items/list-form-empty-item-trailing-space.md"
+    group: list-items
+    construct: empty-list-item
+    class: fixable
+    basis: known
+    canary: kx-0294a0da
+    corpus: false
+    note: "spaces or a tab at the end of an item's text before Linear's nested empty item: Linear drops them"
   - file: "list-items/list-form-ordered-ten.md"
     group: list-items
     construct: ordered-list-aligned-numbers
@@ -3651,13 +3671,22 @@ fixtures:
     note: "Linear stores &#32; and &#x20; as a space outside code, moves one at a mark's inner edge out of the mark and keeps one in a link label"
   - file: "construct-singles/space-reference-edges.md"
     group: construct-singles
-    construct: space-reference
-    class: fixable
+    construct: space-reference-edge
+    class: lint-error
     basis: known
-    git_form: captured
+    rule: space-reference-edge
+    line: 1
     canary: kx-9c2d5e17
     corpus: false
-    note: "Linear keeps a space reference at a block's start or end as a space, which its next write drops; fix writes the form without it"
+    note: "Linear keeps a space reference at a block's start or end as a space, which its next write drops: no form reads back the same in both, so fix leaves the file"
+  - file: "construct-singles/bold-empty-run.md"
+    group: construct-singles
+    construct: adjacent-bold-boundaries
+    class: fixable
+    basis: known
+    canary: kx-507bbf82
+    corpus: false
+    note: "an empty bold run before a bold run: Linear bolds the text up to the next ** and leaves the rest plain"
   - file: "construct-singles/lone-backtick.md"
     group: construct-singles
     construct: lone-backtick

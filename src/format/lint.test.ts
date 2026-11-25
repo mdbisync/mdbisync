@@ -22,6 +22,7 @@ const cases: Array<[LintRule, string, number]> = [
   // A quote's tab Linear keeps inside the code leaves its outer spaces unsafe.
   ['code-span-padding', '> `  a\n>\tb  `', 1],
   ['tab-reference-layout', 'Seed&#9;order\n\n1. &#9;Collect', 3],
+  ['space-reference-edge', 'Intro\n\n1. Seed order&#32;', 3],
   ['footnote', 'Text.\n\nA claim.[^1]\n\n[^1]: Source.', 3],
   ['footnote', 'An inline note.^[Text.]', 1],
   ['subscript', 'H~2~O', 1],
