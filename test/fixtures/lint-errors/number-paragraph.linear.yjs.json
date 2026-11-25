@@ -1,0 +1,17 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Steps","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"7.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"More.","marks":{"attribution":"user"}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"12)","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-e9d93dc0","marks":{"attribution":"user"}}]}
+  ]
+}
