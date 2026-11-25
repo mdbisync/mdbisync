@@ -1,0 +1,98 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"heading","attrs":{"id":"<id>","level":3},"children":[{"text":"Totals ","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":3},"children":[{"text":"Rates","marks":{"attribution":"user","strong":{}}},{"text":" ","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Plain line ","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Two words, a b and c d","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ends with a reference ","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":3},"children":[{"text":"Heading reference ","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Item tail ","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"Quote tail ","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"a b","marks":{"attribution":"user","link":{"href":"https://a.test","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"**Bold **after and ","marks":{"attribution":"user"}},{"text":"x","marks":{"attribution":"user","strong":{}}},{"text":" y","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"x** y** and a ","marks":{"attribution":"user"}},{"text":"b","marks":{"attribution":"user","strong":{}}}]},
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Col a","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"b","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"x y","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"z ","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"p ","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":" q","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"code&nbsp;span","marks":{"attribution":"user","code":{}}},{"text":" stays","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-3e71d00f","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -592,8 +592,8 @@ export function markdownBaseline(body: string | undefined): string | undefined {
  * Whether two bodies are the same document: equal text, or text that
  * Markdown reads as the same tree. Linear can return a body it stored in a
  * spelling of its own (a final newline, `\-6` for `-6` at the start of a
- * table cell, `*` for `_`), which changes nothing in the document; the sync
- * keeps the file's spelling for those.
+ * table cell, `*` for `_`, a code span on one line), which changes nothing
+ * in the document; the sync keeps the file's spelling for those.
  */
 export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean; linearBoldForms?: boolean } = {}): boolean {
   if (a === b) return true;
@@ -993,6 +993,8 @@ function comparable(body: string, { linearNumberSpacing, linearBoldForms }: { li
   const strip = (node: Nodes, paragraphLine?: boolean): ComparableNode => {
     const { position: _position, ...rest } = node;
     if ('url' in rest) rest.url = normalizeUri(rest.url);
+    // A line ending in a code span reads as a space; Linear writes the span on one line.
+    if (node.type === 'inlineCode') return { ...rest, value: node.value.replace(/\r\n?|\n/g, ' ') };
     if (linearNumberSpacing && node.type === 'text' && paragraphLine !== undefined) {
       // Linear substitutes one space after a literal number's dot. This is
       // only a re-spelling in a paragraph, after the parser resolved blocks.

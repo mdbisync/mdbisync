@@ -130,6 +130,107 @@ describe('blank lines, the final line break and cell breaks as Linear writes the
   }
 });
 
+describe('NBSP as Linear stores it', () => {
+  const written: Array<[string, string, string]> = [
+    ['a heading keeps a trailing NBSP', '### Totals \n\n### **Rates** \n\n## Two  ', '### Totals \n\n### **Rates** \n\n## Two  '],
+    ['spaces after it still go', '### Totals  \t', '### Totals '],
+    ['a paragraph, item and quote keep one too', 'Plain line \n\n* Item tail \n\n> Quote tail ', 'Plain line \n\n* Item tail \n\n> Quote tail '],
+    ['a reference becomes the character', 'Two&nbsp;words, a&#160;b and c&#xA0;d', 'Two words, a b and c d'],
+    ['also at the end of a heading or a line, and in a link label', '### Heading&nbsp;\n\nEnds&nbsp;\n\n[a&nbsp;b](https://a.test)', '### Heading \n\nEnds \n\n[a b](<https://a.test>)'],
+    ['a reference in a code span or after a backslash stays', '`code&nbsp;span` and \\&nbsp;', '`code&nbsp;span` and \\&nbsp;'],
+    ['a body cell keeps an NBSP around its text, in every row', '| x | z |\n| --- | --- |\n| c&nbsp;d | e  |\n| p  |  q |', '| x | z |\n| -- | -- |\n| c d | e  |\n| p  |  q |\n'],
+    ['literal asterisks next to it are escaped', 'x**&nbsp;y** and **Bold&nbsp;**after', 'x\\*\\* y\\*\\* and \\*\\*Bold \\*\\*after'],
+    ['also next to another decoded character', '**a&eacute;**b', '\\*\\*aé\\*\\*b'],
+    ['next to bold whose reading the character keeps', 'a&nbsp;**b** and **c**&nbsp;d', 'a **b** and **c** d'],
+  ];
+  for (const [name, input, expected] of written) {
+    it(name, () => {
+      assert.equal(fixText(input), expected);
+      assert.ok(sameMarkdown(input, expected), 'the same document');
+      assert.equal(fixText(expected), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected), [], 'lint is clean on the result');
+    });
+  }
+
+  it('a header cell drops an NBSP around its text, as Linear does', () => {
+    assert.equal(fixText('| x | z  |\n| --- | --- |\n| p | q |'), '| x | z |\n| -- | -- |\n| p | q |\n');
+  });
+
+  it('a number the character follows is escaped, and the NBSP becomes a space', () => {
+    assert.equal(fixText('20.&nbsp;Jars'), '20\\. Jars');
+    assert.ok(sameMarkdown('20.&nbsp;Jars', '20\\. Jars', { linearNumberSpacing: true }));
+  });
+
+  it('keeps a reference whose character would change what a delimiter run does', () => {
+    // As the character, the NBSP would keep the run from opening bold.
+    for (const text of ['**&nbsp;a**', '**&nbsp;a** and b&nbsp;c']) {
+      const fixed = fixText(text);
+      assert.ok(sameMarkdown(fixed, text), text);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+    }
+    assert.equal(fixText('**&nbsp;a**'), '**&nbsp;a**');
+  });
+
+  it('text split off at an image keeps one at its edge', () => {
+    assert.equal(fixText('Before&nbsp; ![a](x.png)&nbsp;after'), 'Before \n\n![a](x.png)\n\n after');
+  });
+
+  it('other whitespace at a heading\'s or body cell\'s end still goes', () => {
+    assert.equal(fixText('### Title　\n\n| a |\n| -- |\n| b  |'), '### Title\n\n| a |\n| -- |\n| b |\n');
+  });
+
+  it('keeps a body that is only an NBSP', () => {
+    const once = fixText('&nbsp;');
+    assert.equal(once, ' ');
+    assert.equal(fixText(once), once, 'a second fix keeps it');
+  });
+});
+
+describe('a code span over lines, as Linear writes it', () => {
+  const joined: Array<[string, string, string]> = [
+    ['joins its lines with a space', 'See `alpha\nbeta` here.', 'See `alpha beta` here.'],
+    ['also three lines', 'Three `alpha\nbeta\ngamma` lines.', 'Three `alpha beta gamma` lines.'],
+    ['keeps the spaces at a line end and the next line\'s indentation', 'Spaces `alpha  \n   beta` end.', 'Spaces `alpha      beta` end.'],
+    ['and a tab', 'Tab `alpha\n\tbeta` end.', 'Tab `alpha \tbeta` end.'],
+    ['keeps a longer fence', 'Double `` `alpha\nbeta` `` end.', 'Double `` `alpha beta` `` end.'],
+    ['drops an item\'s prefix', '* Item `alpha\n  beta` end', '* Item `alpha beta` end'],
+    ['and keeps the indentation past it', '* Item `alpha\n    beta` end', '* Item `alpha   beta` end'],
+    ['also a number\'s', '1. Number `alpha\n   beta` end', '1. Number `alpha beta` end'],
+    ['drops a quote\'s prefix, also on a lazy line', '> Quote `alpha\n> beta` end\n\n> Quote `alpha\nbeta` lazy', '> Quote `alpha beta` end\n\n> Quote `alpha beta` lazy'],
+    ['in a heading written on one line', 'Title `alpha\n  beta`\n===', '# Title `alpha   beta`'],
+    ['in a link label', '[Link `alpha\nbeta`](https://a.test)', '[Link `alpha beta`](<https://a.test>)'],
+  ];
+  for (const [name, input, expected] of joined) {
+    it(name, () => {
+      assert.equal(fixText(input), expected);
+      assert.ok(sameMarkdown(input, expected), 'the same document: a line ending in a code span reads as a space');
+      assert.equal(fixText(expected), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected), [], 'lint is clean on the result');
+    });
+  }
+
+  it('keeps the columns of a tab an item\'s prefix takes in part as spaces', () => {
+    // The item takes two of the tab's four columns: two stay code text.
+    assert.equal(fixText('* Item `alpha\n\tbeta` end'), '* Item `alpha   beta` end');
+    assert.equal(fixText('- [`a\n\tb`](report.pdf)'), '* \n  [`a   b`](report.pdf)');
+  });
+
+  it('keeps the lines when a joined line would hold a pipe, which could make it a table\'s head row', () => {
+    for (const text of ['x | `a\nb`\n|--|--|', '> x | `a\n> b`\n> |--|--|']) {
+      assert.equal(fixText(text), text);
+      assert.ok(sameMarkdown(fixText(text), text), text);
+    }
+  });
+
+  it('the comparison reads any line ending in a code span as a space', () => {
+    for (const ending of ['\n', '\r\n', '\r']) assert.ok(sameMarkdown(`\`a${ending}b\``, '`a b`'), JSON.stringify(ending));
+  });
+
+  it('an image\'s alt text keeps its lines', () => {
+    assert.equal(fixText('* ![a `x\n  y` b](x.png)'), '* ![a `x\n  y` b](x.png)');
+  });
+});
+
 describe('a backslash line break', () => {
   // [input, what fix writes]
   const written: Array<[string, string]> = [
@@ -192,7 +293,9 @@ describe('a backslash line break', () => {
   }
 
   it('is not a break in a code span or at the end of a paragraph', () => {
-    for (const input of ['`code\\\nspan`', 'Ends with a backslash\\']) assert.equal(fixText(input), input);
+    // The code span is written on one line, as Linear writes it.
+    assert.equal(fixText('`code\\\nspan`'), '`code\\ span`');
+    assert.equal(fixText('Ends with a backslash\\'), 'Ends with a backslash\\');
   });
 });
 
@@ -312,10 +415,10 @@ describe('text split off at an image', () => {
     });
   }
 
-  it('writes no backslash into a code span that opens like a fence', () => {
-    // Escaping its backticks would end the span; it keeps the block it reads as.
+  it('writes a code span that would open a fence on one line, without a backslash', () => {
+    // Escaping its backticks would end the span; on one line it opens no fence.
     const once = fixText('Before ![a](x.png) ```js\nfoo``` y');
-    assert.equal(once, 'Before\n\n![a](x.png)\n\n````js\nfoo``` y\n````');
+    assert.equal(once, 'Before\n\n![a](x.png)\n\n```js foo``` y');
     assert.equal(fixText(once), once, 'a second fix changes nothing');
   });
 });
@@ -554,15 +657,16 @@ describe('what fix leaves alone', () => {
       ['- [ ] Pack the tent\n      # pegs', '- [ ] Pack the tent\n      \\# pegs'],
       ['-\t[ ] Pack the tent\n        > pegs', '- [ ] Pack the tent\n      > pegs'],
       ['-\t[ ] Pack\n  \t-\t[ ] the tent\n            > pegs', '- [ ] Pack\n  - [ ] the tent\n        > pegs'],
-      // In a code span, spaces past the item's prefix are code text; the
-      // prefix counts the spaces before the marker.
-      ['  - [ ] Pack `the\n      tent`', '- [ ] Pack `the\n    tent`'],
-      ['  - Pack `the\n    tent`', '* Pack `the\n  tent`'],
-      ['  - Pack `the\n   tent`', '* Pack `the\n     tent`'],
-      ['> - [ ] Pack `the\n>     tent`', '> - [ ] Pack `the\n>     tent`'],
+      // In a code span, spaces past the item's prefix are code text, kept
+      // when the line joins the one before; the prefix counts the spaces
+      // before the marker.
+      ['  - [ ] Pack `the\n      tent`', '- [ ] Pack `the   tent`'],
+      ['  - Pack `the\n    tent`', '* Pack `the tent`'],
+      ['  - Pack `the\n   tent`', '* Pack `the    tent`'],
+      ['> - [ ] Pack `the\n>     tent`', '> - [ ] Pack `the   tent`'],
       // A parent's prefix is measured on the item's own line, not on the parent's first line.
-      ['> Pack\n>\n  > - `the\n  >   tent`', '> Pack\n>\n> * `the\n>   tent`'],
-      ['- Pack\n\n    - [ ] `the\n      tent`', '* Pack\n  - [ ] `the\n    tent`'],
+      ['> Pack\n>\n  > - `the\n  >   tent`', '> Pack\n>\n> * `the tent`'],
+      ['- Pack\n\n    - [ ] `the\n      tent`', '* Pack\n  - [ ] `the tent`'],
     ];
     for (const [text, expected] of continued) {
       const fixed = fixText(text);
@@ -765,8 +869,8 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('Text.\n\n--\n\nMore.'), 'Text.\n\n\\--\n\nMore.');
     assert.equal(fixText('--'), '\\--');
     assert.equal(fixText('Text\n--\n\nMore.'), '## Text\n\nMore.');
-    // Outside a container nothing is written before the line: a code span keeps its tab.
-    assert.equal(fixText('`a\n\t--\nb`'), '`a\n\t--\nb`');
+    // In a code span the line joins the one before and keeps its tab.
+    assert.equal(fixText('`a\n\t--\nb`'), '`a \t-- b`');
   });
 
   it('escapes a literal - or * that starts a paragraph line, as Linear writes it', () => {
@@ -789,7 +893,7 @@ describe('what fix leaves alone', () => {
       ['a -x and *b', 'a -x and \\*b'],
       ['+x plus', '+x plus'],
       ['*x* emphasis', '*x* emphasis'],
-      ['`a\n-x`', '`a\n-x`'],
+      ['`a\n-x`', '`a -x`'],
       ['# -x heading', '# -x heading'],
     ];
     for (const [input, expected] of cases) {
@@ -944,15 +1048,15 @@ describe('what fix leaves alone', () => {
     // split the code span; padding it would put spaces into the code. A line
     // ending in a code span reads as a space, so joining keeps the code.
     const lazy: Array<[string, string]> = [
-      ['> `a\n--\n> b`', '> `a --\n> b`'],
-      ['- `a\n--\n  b`', '* `a --\n  b`'],
-      ['> text `a\n\t==\n> b` end', '> text `a \t==\n> b` end'],
-      ['> [`a\n--\nb`](https://example.com)', '> [`a --\n> b`](<https://example.com>)'],
-      ['- [`a\n--\nb`](report.pdf)', '* \n  [`a --\nb`](report.pdf)'],
+      ['> `a\n--\n> b`', '> `a -- b`'],
+      ['- `a\n--\n  b`', '* `a -- b`'],
+      ['> text `a\n\t==\n> b` end', '> text `a \t== b` end'],
+      ['> [`a\n--\nb`](https://example.com)', '> [`a -- b`](<https://example.com>)'],
+      ['- [`a\n--\nb`](report.pdf)', '* \n  [`a -- b`](report.pdf)'],
       // The item's own indent goes, also in a file block's label; the spaces of a lazy line stay.
-      ['- [`a\n      ==\n  b`](report.pdf)', '* \n  [`a     ==\nb`](report.pdf)'],
-      ['- [`a\n ==\n  b`](report.pdf)', '* \n  [`a  ==\nb`](report.pdf)'],
-      ['- `a\n --\n  b`', '* `a  --\n  b`'],
+      ['- [`a\n      ==\n  b`](report.pdf)', '* \n  [`a     == b`](report.pdf)'],
+      ['- [`a\n ==\n  b`](report.pdf)', '* \n  [`a  == b`](report.pdf)'],
+      ['- `a\n --\n  b`', '* `a  -- b`'],
     ];
     for (const [text, expected] of lazy) {
       const fixed = fixText(text);
@@ -1005,9 +1109,9 @@ describe('what fix leaves alone', () => {
     }
   });
 
-  it('keeps spaces that belong to a code span across lines', () => {
-    assert.equal(fixText('`a\n  b`'), '`a\n  b`');
-    assert.equal(fixText('> `a\n>   b`'), '> `a\n>   b`');
+  it('keeps spaces that belong to a code span across lines when it joins them', () => {
+    assert.equal(fixText('`a\n  b`'), '`a   b`');
+    assert.equal(fixText('> `a\n>   b`'), '> `a   b`');
   });
 
   it('writes a setext heading of two lines as one ATX line', () => {

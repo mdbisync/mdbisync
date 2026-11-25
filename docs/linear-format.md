@@ -146,8 +146,7 @@ Blocks:
   writes it (`> \--`), so it stays text and does not turn the line above
   into a heading. In a link label or an image's alt text that runs over
   lines, it is indented four spaces after its `>` or indent instead. Inside
-  a code span, where a line ending reads as a space, such a line joins the
-  line above.
+  a code span it joins the line above, like every line of a code span.
 - Linear's color comment of a callout (`<!-- linear:callout color=... -->`)
   stays directly above its callout, with no blank line between them.
 - Tilde fences and indented code become backtick fences. A fence whose info
@@ -166,7 +165,9 @@ Blocks:
   its escape (a bare one in a body cell is the
   [`table-hash-cell`](#table-hash-cell) rule). A line break tag in a cell
   (`<br>`, `<br/>`, `<br />`) is written as `&#10;`, as Linear writes it.
-  Linear shows it as a line break; GitHub shows it as a space.
+  Linear shows it as a line break; GitHub shows it as a space. A body cell
+  keeps a nonbreaking space around its text; a header cell loses it, as
+  Linear writes them.
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph. Where that text would start another block,
   a backslash escape keeps it text: in
@@ -214,6 +215,13 @@ Inline text:
   `[a](<https://example.com/a%5Cb>)`. A `%` that starts no escape becomes
   `%25`. In a relative path that is not valid percent-encoding, every `%` is
   written `%25`, so the link still names the same file.
+- A code span that runs over lines is written on one line, as Linear
+  writes it: each line ending becomes a space, and the next line's
+  indentation past its quote or list prefix stays code text (a tab the prefix
+  takes in part leaves its other columns as spaces). `` `make `` on
+  one line and `` all` `` on the next becomes `` `make all` ``. A code span
+  in an image's alt text keeps its lines, and so does one whose joined line
+  would hold a `|`, which could make it a table's head row.
 - Reference links and images are written inline, and their definitions go.
 - Literal square brackets in text are escaped, including those written as
   character references. For example, `# [Shelf] Inventory` becomes
@@ -238,6 +246,10 @@ Inline text:
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
   `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`.
+  `&nbsp;` becomes the nonbreaking space Linear stores for it. Next to `*`,
+  `_` or `~`, a reference stays when its character would change what they
+  mark. A nonbreaking space at the end of a heading stays, as Linear keeps
+  it; spaces and tabs there go.
   Asterisk references such as `&#42;` become `\*`. Other ASCII references,
   such as `&lt;b&gt;`, `&quot;` and `&#65;`, stay as written.
 - Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes

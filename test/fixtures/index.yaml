@@ -73,6 +73,12 @@ rules:
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
+  - construct: code-span-lazy-dash-line
+    class: fixable
+  - construct: nbsp
+    class: fixable
+  - construct: code-span-lines
+    class: fixable
   - construct: table-document-end
     class: fixable
   - construct: code-blank-lines-before-fence
@@ -2941,10 +2947,9 @@ fixtures:
     group: construct-singles
     construct: code-span-lazy-dash-line
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-cf6a2d71
     corpus: false
-    probe_pending: true
     note: "a lazy -- or == line inside a code span in a quote or list item joins the line before it, since a line ending in a code span reads as a space"
   - file: "construct-singles/image-alt-code-bracket.md"
     group: construct-singles
@@ -3099,3 +3104,19 @@ fixtures:
     canary: kx-bb890607
     corpus: false
     note: "Linear escapes a # at a continuation line's start before a no-break space, with or without indentation"
+  - file: "construct-singles/nbsp-forms.md"
+    group: construct-singles
+    construct: nbsp
+    class: fixable
+    basis: known
+    canary: kx-3e71d00f
+    corpus: false
+    note: "Linear keeps a trailing NBSP after a heading's or a body cell's text, drops one around a header cell's, and stores &nbsp;, &#160; and &#xA0; as the character outside code"
+  - file: "construct-singles/code-span-lines.md"
+    group: construct-singles
+    construct: code-span-lines
+    class: fixable
+    basis: known
+    canary: kx-58a3f733
+    corpus: false
+    note: "Linear writes a code span that runs over lines on one line: each line ending becomes a space, container prefixes go, the line's own indentation stays"

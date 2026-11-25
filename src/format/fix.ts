@@ -114,16 +114,15 @@ function breakShape(tree: Root): unknown {
 }
 
 function fixBody(body: string, options: FixOptions): string {
-  if (body.trim() === '') return '';
+  if (body.trim() === '' && !body.includes(NBSP)) return '';
   let current = body;
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
     const tree = parse(current, [], true);
     // Lint checked the source; a rewrite may expose a table or references it
-    // did not see. Text split off at an image is escaped so it exposes none
-    // (a multi-line code span that opens like one is the exception): this
-    // guard keeps the limits for any rewrite that still does.
+    // did not see. Text split off at an image is escaped so it exposes none:
+    // this guard keeps the limits for any rewrite that still does.
     if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, current) !== undefined)) throw new MarkdownLimitError('nodes');
     // The writer copies text by source offset. A node the parser left
     // without one (a link the bare-URL search inside text found but could
@@ -435,7 +434,8 @@ class Writer {
         return this.paragraph(node);
       case 'heading':
         // A setext heading can span lines; an ATX heading is one line.
-        return [`${'#'.repeat(node.depth)} ${joinLines(this.inline(node.children))}`.trimEnd()];
+        // Linear keeps a trailing NBSP.
+        return [trimEndKeepingNbsp(`${'#'.repeat(node.depth)} ${joinLines(this.inline(node.children))}`)];
       case 'thematicBreak':
         return ['---'];
       case 'blockquote': {
@@ -513,7 +513,7 @@ class Writer {
     return parts
       .map((part, index) => {
         const afterCheckbox = index === 0 && node === this.taskParagraph;
-        const text = afterCheckbox ? this.inline(part, 'continuation').trim() : this.paragraphText(part, true);
+        const text = afterCheckbox ? trimKeepingNbsp(this.inline(part, 'continuation')) : this.paragraphText(part, true);
         return escapeLiteralSectionEnd(paragraphPart(text, !afterCheckbox));
       })
       .filter((part) => part !== '');
@@ -528,7 +528,7 @@ class Writer {
    * spaces around a part split off at an image.
    */
   private paragraphText(children: readonly PhrasingContent[], trim = false): string {
-    const text = trim ? this.inline(children, 'all').trim() : this.inline(children, 'all');
+    const text = trim ? trimKeepingNbsp(this.inline(children, 'all')) : this.inline(children, 'all');
     if (children[0]?.type !== 'text') return text;
     const marker = LIST_MARKER_START.exec(text);
     if (marker === null) return text;
@@ -685,7 +685,8 @@ class Writer {
 
   private table(node: Table): string {
     const width = node.children[0]?.children.length ?? 0;
-    const row = (cells: TableRow): string => {
+    // Linear drops an NBSP around a header cell's text but keeps one around a body cell's.
+    const row = (cells: TableRow, header = false): string => {
       const texts = Array.from({ length: width }, (_, index) => {
         const cell = cells.children[index];
         // Linear reads a hash that starts a body cell as heading syntax, so
@@ -693,7 +694,8 @@ class Writer {
         const first = cell?.children[0];
         this.cellStart = first ? start(first) : undefined;
         this.inCell = true;
-        const text = cell ? this.inline(cell.children).trim() : '';
+        const inline = cell ? this.inline(cell.children) : '';
+        const text = header ? inline.trim() : trimKeepingNbsp(inline);
         this.inCell = false;
         this.cellStart = undefined;
         // Linear writes a header cell containing only a hash as `\#`.
@@ -703,7 +705,7 @@ class Writer {
     };
     const [header, ...rows] = node.children;
     if (!header) return '';
-    return [row(header), `| ${Array.from({ length: width }, () => '--').join(' | ')} |`, ...rows.map(row)].join('\n');
+    return [row(header, true), `| ${Array.from({ length: width }, () => '--').join(' | ')} |`, ...rows.map((cells) => row(cells))].join('\n');
   }
 
   /**
@@ -917,6 +919,29 @@ class Writer {
   }
 
   /**
+   * The code span from `from` to `to` on one line, as Linear writes one that
+   * runs over lines: each line ending becomes a space, and a line's
+   * container prefixes go. The indentation past them is code text and
+   * stays; the columns of a tab a prefix takes in part stay as spaces.
+   */
+  private codeSpanOnOneLine(from: number, to: number): string {
+    let out = '';
+    let at = from;
+    for (let lineEnd = this.source.indexOf('\n', from); lineEnd !== -1 && lineEnd < to; lineEnd = this.source.indexOf('\n', lineEnd + 1)) {
+      out += this.source.slice(at, lineEnd);
+      const lineStart = lineEnd + 1;
+      const next = this.source.indexOf('\n', lineStart);
+      const line = this.source.slice(lineStart, next === -1 ? undefined : next);
+      const prefix = this.prefixEnd(lineStart, line);
+      // A lazy line carries no further prefixes and keeps its spaces.
+      const rest = prefix.lazy ? { at: this.codePrefixEnd(lineStart, line), pad: 0 } : prefix;
+      out += ' '.repeat(1 + rest.pad);
+      at = rest.at;
+    }
+    return out + this.source.slice(at, to);
+  }
+
+  /**
    * Where a continuation line's container prefixes end inside a code span,
    * where spaces are code text: a lazy line (no `>`, or indented less than
    * its item's content) carries no further prefixes, and keeps its spaces.
@@ -1022,6 +1047,18 @@ class Writer {
         if (!this.literal && this.rewriteEscapes) this.escapeTextBrackets(from, to, edits);
         return;
       }
+      case 'inlineCode':
+        // Linear writes a code span that runs over lines on one line. A
+        // joined line that holds a `|` could become a table's head row: such
+        // a span keeps its lines.
+        if (this.source.slice(from, to).includes('\n')) {
+          const joined = this.codeSpanOnOneLine(from, to);
+          const before = this.source.slice(lineStartOf(this.source, from), from);
+          const lineEnd = this.source.indexOf('\n', to);
+          const after = this.source.slice(to, lineEnd === -1 ? undefined : lineEnd);
+          if (!`${before}${joined}${after}`.includes('|')) edits.push({ from, to, text: joined });
+        }
+        return;
       case 'html':
         // Linear writes a line break in a table cell as a character reference.
         if (this.inCell && CELL_BREAK.test(node.value)) edits.push({ from, to, text: '&#10;' });
@@ -1131,14 +1168,18 @@ function textEdits(source: string, from: number, to: number, redundantEscape: (a
   const edits: Edit[] = [];
   const raw = source.slice(from, to);
   // Character references become the characters when that cannot make markup:
-  // characters outside ASCII and `&` when no reference follows it.
+  // characters outside ASCII (NBSP among them, as Linear stores `&nbsp;`)
+  // and `&` when no reference follows it. Other whitespace stays a reference.
   for (const match of raw.matchAll(CHARACTER_REFERENCE)) {
     if (escaped(raw, match.index)) continue;
     const char = decodeEntity(match[0]);
     const at = from + match.index;
     const after = raw.slice(match.index + match[0].length);
-    if (char === undefined || char.trim() === '') continue;
+    if (char === undefined || (char.trim() === '' && char !== NBSP)) continue;
     if (char === '&' ? /^[A-Za-z0-9#]+;/.test(after) : char.codePointAt(0)! < 0x80) continue;
+    // Next to a delimiter run, the character could decide whether the run
+    // opens or closes emphasis where the reference's `;` or `&` did not.
+    if (!sameFlanking(source, at, at + match[0].length, char)) continue;
     edits.push({ from: at, to: at + match[0].length, text: char });
   }
   // `:name:` shortcodes Linear knows become the emoji, unless the first colon is escaped.
@@ -1289,6 +1330,40 @@ function* emojiShortcodeStarts(label: string): Generator<number> {
   }
 }
 
+const NBSP = '\u00a0';
+const DELIMITER = /^[*_~]$/;
+const UNICODE_WHITESPACE = /^[\t\n\f\r\p{Zs}]$/u;
+const UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
+
+/**
+ * Whether the delimiter runs right before `from` and right after `to` (a
+ * reference) can open and close the same way when the reference is `char`.
+ */
+function sameFlanking(source: string, from: number, to: number, char: string): boolean {
+  const kind = (c: string | undefined) => (c === undefined || UNICODE_WHITESPACE.test(c) ? 'space' : UNICODE_PUNCTUATION.test(c) ? 'punctuation' : 'other');
+  // Whether a run of `delimiter` between `before` and `after` can open and close.
+  const reads = (delimiter: string, before: string | undefined, after: string | undefined): string => {
+    const b = kind(before);
+    const a = kind(after);
+    const left = a !== 'space' && (a !== 'punctuation' || b !== 'other');
+    const right = b !== 'space' && (b !== 'punctuation' || a !== 'other');
+    if (delimiter !== '_') return `${left} ${right}`;
+    return `${left && (!right || b === 'punctuation')} ${right && (!left || a === 'punctuation')}`;
+  };
+  const delimiterBefore = source[from - 1];
+  if (delimiterBefore !== undefined && DELIMITER.test(delimiterBefore)) {
+    let start = from - 1;
+    while (start > 0 && source[start - 1] === delimiterBefore) start--;
+    if (reads(delimiterBefore, source[start - 1], source[from]) !== reads(delimiterBefore, source[start - 1], char)) return false;
+  }
+  const delimiterAfter = source[to];
+  if (delimiterAfter !== undefined && DELIMITER.test(delimiterAfter)) {
+    let end = to + 1;
+    while (end < source.length && source[end] === delimiterAfter) end++;
+    if (reads(delimiterAfter, source[to - 1], source[end]) !== reads(delimiterAfter, char, source[end])) return false;
+  }
+  return true;
+}
 /** A character reference as Markdown spells one; whether it names a character is decided apart. */
 const CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
 const ASTERISK_SPELLING = new RegExp(String.raw`\\.|[*]|` + CHARACTER_REFERENCE.source, 'g');
@@ -1326,8 +1401,7 @@ function paragraphPart(text: string, startsLine: boolean): string {
   // is text; a heading with an underline needs two). Each round escapes a
   // construct of its own line, so the lines bound the rounds.
   for (let round = 0; round <= lineBreaks(text) + 2; round++) {
-    // A backslash in a code span is code text, and its backticks would end the span:
-    // such a part keeps that block (a multi-line code span that opens like a fence).
+    // A backslash in a code span is code text, and its backticks would end the span.
     const spans = codeSpans(text, 0, text.length);
     const at = blockStartEscapes(text, startsLine).filter((offset) => !spans.some(([from, to]) => from <= offset && offset < to));
     if (at.length === 0) break;
@@ -1578,6 +1652,24 @@ function joinLines(text: string): string {
       return line.slice(start, end);
     })
     .join(' ');
+}
+
+/** `text.trim()`, except that an NBSP stays: Linear keeps one around a paragraph's, heading's or body cell's text. */
+function trimKeepingNbsp(text: string): string {
+  let start = 0;
+  while (start < text.length && trimmed(text[start]!)) start += 1;
+  return trimEndKeepingNbsp(text.slice(start));
+}
+
+/** `text.trimEnd()`, except that an NBSP stays; one scan (a regular expression rescans a long run from each position). */
+function trimEndKeepingNbsp(text: string): string {
+  let end = text.length;
+  while (end > 0 && trimmed(text[end - 1]!)) end -= 1;
+  return text.slice(0, end);
+}
+
+function trimmed(char: string): boolean {
+  return char !== NBSP && char.trim() === '';
 }
 
 /** The number of line breaks in the text. */
