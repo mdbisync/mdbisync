@@ -765,6 +765,22 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/list-form-empty-items.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-form-ordered-hundred.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-form-ordered-nested.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-form-ordered-ten.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/nested-attachment-csv-numbered.md": {
       "yjs": "recorded",
       "fixedPoint": true

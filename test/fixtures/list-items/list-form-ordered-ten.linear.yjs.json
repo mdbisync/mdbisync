@@ -1,0 +1,128 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"alpha","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph"}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"beta","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"nested under beta","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"gamma","marks":{"attribution":"user"}}]},
+            {"type":"paragraph","children":[{"text":"second paragraph of gamma","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"delta","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"epsilon","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"zeta","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"eta","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"theta","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"iota","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"nested under iota","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"kappa","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Between the lists.","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":8},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"eight","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"nine","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"ten","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-942738f3","marks":{"attribution":"user"}}]}
+  ]
+}

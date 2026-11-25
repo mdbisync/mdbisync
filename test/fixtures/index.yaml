@@ -73,6 +73,10 @@ rules:
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
+  - construct: empty-list-item
+    class: fixable
+  - construct: ordered-list-aligned-numbers
+    class: fixable
   - construct: autolink-literal-backslash
     class: fixable
   - construct: lazy-underline-line
@@ -2931,3 +2935,35 @@ fixtures:
     corpus: false
     probe_pending: true
     note: "a ] inside a code span of an image's alt text does not close the alt text"
+  - file: "list-items/list-form-empty-items.md"
+    group: list-items
+    construct: empty-list-item
+    class: fixable
+    basis: known
+    canary: kx-711fd64a
+    corpus: false
+    note: "Linear writes an empty bullet or numbered item with a space after its marker, also nested and in a quote"
+  - file: "list-items/list-form-ordered-ten.md"
+    group: list-items
+    construct: ordered-list-aligned-numbers
+    class: fixable
+    basis: known
+    canary: kx-942738f3
+    corpus: false
+    note: "Linear right-aligns the numbers of an ordered list to its widest one and lines up every item's content past it"
+  - file: "list-items/list-form-ordered-nested.md"
+    group: list-items
+    construct: ordered-list-aligned-numbers
+    class: fixable
+    basis: known
+    canary: kx-1d870ac8
+    corpus: false
+    note: "aligned numbers of an ordered list of ten items under a bullet, in a quote and under another such list"
+  - file: "list-items/list-form-ordered-hundred.md"
+    group: list-items
+    construct: ordered-list-aligned-numbers
+    class: fixable
+    basis: known
+    canary: kx-a649dff0
+    corpus: false
+    note: "an ordered list that passes 100 aligns its numbers to three digits"

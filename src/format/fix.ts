@@ -132,18 +132,20 @@ function fixBody(body: string, options: FixOptions): string {
     if (hasUnplacedNode(tree)) return body;
     let writer = new Writer(current, tree, options);
     let next = writer.root();
-    let escapeBrackets = true;
-    if (writer.bracketsMayChangeLinks) {
+    let rewriteEscapes = true;
+    if (writer.compareEscapes) {
       const fallback = new Writer(current, tree, options, false);
-      const withOriginalBrackets = fallback.root();
-      if (!sameMarkdown(next, withOriginalBrackets)) {
-        escapeBrackets = false;
-        next = withOriginalBrackets;
+      const withOriginalEscapes = fallback.root();
+      // Edits can expose syntax across inline nodes even when an edited
+      // character would be safe in its own node or on its own line.
+      if (!sameMarkdown(next, withOriginalEscapes)) {
+        rewriteEscapes = false;
+        next = withOriginalEscapes;
         writer = fallback;
       }
     }
     if (writer.rewroteAsterisks) {
-      const withOriginalAsterisks = new Writer(current, tree, options, escapeBrackets, false).root();
+      const withOriginalAsterisks = new Writer(current, tree, options, rewriteEscapes, false).root();
       // A locally equivalent edit can still affect a surrounding block.
       if (!sameMarkdown(next, withOriginalAsterisks)) next = withOriginalAsterisks;
     }
@@ -164,7 +166,7 @@ type Container = (
 ) & { markerBrackets?: readonly [number, number] };
 
 // Characters that start a block when they open a line (`<` an HTML block).
-const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)])/;
+const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t\u00a0]))/;
 
 // A paragraph of `$$` lines around math, which `fix` writes as a `math` fence.
 const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
@@ -181,11 +183,12 @@ class Writer {
   private readonly source: string;
   private readonly tree: Root;
   private readonly options: FixOptions;
-  private readonly escapeBrackets: boolean;
+  private readonly rewriteEscapes: boolean;
   private readonly rewriteAsterisks: boolean;
-  bracketsMayChangeLinks = false;
+  compareEscapes = false;
   rewroteAsterisks = false;
   private conflictCallouts: Set<number> | undefined;
+  private textLine: { from: number; to: number; first: number; last: number; delimiter: boolean } | undefined;
   /** Where the table cell being written starts its text: an escape there stays. */
   private cellStart: number | undefined;
   /** The indent of the file block whose label is being written: its later lines carry no prefix for it. */
@@ -194,15 +197,24 @@ class Writer {
   private literal = false;
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
+  /** A list's sibling block written right before it, when that is a list. */
+  private readonly listBefore = new Map<List, List>();
 
-  constructor(source: string, tree: Root, options: FixOptions, escapeBrackets = true, rewriteAsterisks = true) {
+  constructor(source: string, tree: Root, options: FixOptions, rewriteEscapes = true, rewriteAsterisks = true) {
     this.source = source;
     this.tree = tree;
     this.options = options;
-    this.escapeBrackets = escapeBrackets;
+    this.rewriteEscapes = rewriteEscapes;
     this.rewriteAsterisks = rewriteAsterisks;
     visit(tree, (node) => {
       if (node.type === 'definition' && !this.definitions.has(node.identifier)) this.definitions.set(node.identifier, node);
+      if (!('children' in node)) return;
+      // Definitions are not written in place: the block before is the one written before.
+      const written = (node.children as Nodes[]).filter((child) => child.type !== 'definition');
+      written.forEach((child, index) => {
+        const before = written[index - 1];
+        if (child.type === 'list' && before?.type === 'list') this.listBefore.set(child, before);
+      });
     });
   }
 
@@ -353,10 +365,24 @@ class Writer {
     return `${text.slice(0, at)}\\${text.slice(at)}`;
   }
 
+  /**
+   * A list. Linear right-aligns the numbers of an ordered list to its
+   * widest one (` 9.` above `10.`), and every item's content lines up past
+   * that widest number. Where the padding would change what Markdown reads
+   * (four spaces open indented code; as many as the content indent of a
+   * list written just before put the item into that list), the numbers
+   * stay unaligned.
+   */
   private list(node: List, interruptsParagraph = false): string {
+    const first = node.start ?? 1;
+    const last = first + node.children.length - 1;
+    const padding = `${last}.`.length - `${first}.`.length;
+    const before = this.listBefore.get(node);
+    const beforeIndent = before === undefined ? Infinity : itemIndent(before);
+    const width = node.ordered && padding <= 3 && padding < beforeIndent ? `${last}.`.length : 0;
     return node.children
       .map((item, index) => {
-        const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${(node.start ?? 1) + index}.` : '*';
+        const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${(node.start ?? 1) + index}.`.padStart(width) : '*';
         return this.listItem(item, marker, interruptsParagraph && index === 0);
       })
       .join('\n');
@@ -364,7 +390,7 @@ class Writer {
 
   private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
     // Content lines line up after the bullet or number, not after a checkbox.
-    const indent = ' '.repeat(marker.split(' ')[0]!.length + 1);
+    const indent = ' '.repeat(/^ *[^ ]+/.exec(marker)![0].length + 1);
     const [first] = item.children;
     const bareCheckbox = item.checked == null && first?.type === 'paragraph' && first.children.length === 1 && first.children[0]?.type === 'text'
       && first.position!.start.line === item.position!.start.line
@@ -394,7 +420,8 @@ class Writer {
         }
       }
     }
-    if (first === undefined) return marker;
+    // Linear writes an empty item's marker with the space that would precede its text.
+    if (first === undefined) return `${marker} `;
     const container = this.itemContainer(item);
     if (bareCheckbox) container.markerBrackets = [start(first!), start(first!) + 2];
     this.containers.push(container);
@@ -543,14 +570,14 @@ class Writer {
     paragraph?: { texts: ReadonlyArray<readonly [number, number]>; html: ReadonlyArray<readonly [number, number]>; first: boolean },
   ): string {
     const inside = (ranges: ReadonlyArray<readonly [number, number]>, at: number): boolean => ranges.some(([a, b]) => a <= at && at < b);
-    if (paragraph?.first) this.escapeLineStart(from, paragraph.texts, edits);
+    if (paragraph?.first) this.escapeLineStart(from, to, paragraph.texts, edits);
     for (let at = this.source.indexOf('\n', from); at !== -1 && at < to; at = this.source.indexOf('\n', at + 1)) {
       const continuation = this.continuation(at + 1, inside(code, at), paragraph !== undefined && !inside(paragraph.html, at));
       edits.push(continuation);
       if (paragraph === undefined || continuation.text !== '') continue;
       // Indentation kept before a `-` or `*` is not needed once it is escaped.
       const content = continuation.to + /^[ \t]*/.exec(this.source.slice(continuation.to, to))![0].length;
-      if (this.escapeLineStart(content, paragraph.texts, edits)) continuation.to = content;
+      if (this.escapeLineStart(content, to, paragraph.texts, edits, true)) continuation.to = content;
     }
     let out = '';
     let at = from;
@@ -564,12 +591,32 @@ class Writer {
   }
 
   /**
-   * Escapes a literal `-` or `*` at `at`, a line's first content character,
-   * as Linear does, and says whether it did. Inline edits handle a run of
-   * asterisks because it can include both literal text and delimiters.
+   * Rewrites the first content of a paragraph line and returns whether to
+   * drop indentation before an escaped '-' or '*'. Inline edits handle runs
+   * of asterisks because they can include both literal text and delimiters.
    */
-  private escapeLineStart(at: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[]): boolean {
+  private escapeLineStart(at: number, limit: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[], continuation = false): boolean {
     const char = this.source[at];
+    if (this.rewriteEscapes && continuation && char === '\\' && this.source[at + 1] === '+'
+      && /^[ \t]*$/.test(this.source.slice(at + 2, this.textLineAt(at).to))
+      && texts.some(([a, b]) => a <= at && at + 1 < b)) {
+      // A bare plus without item text cannot interrupt a paragraph.
+      edits.push({ from: at, to: at + 1, text: '' });
+      this.compareEscapes = true;
+      return false;
+    }
+    if (char !== undefined && char >= '0' && char <= '9') {
+      const end = Math.min(limit, this.textLineAt(at).to);
+      const number = /^(\d+)(\\?)\.([ \t\u00a0])(?=[ \t\u00a0]*[^ \t\u00a0])/.exec(this.source.slice(at, end));
+      if (number) {
+        const from = at + number[1]!.length;
+        const dot = from + number[2]!.length;
+        if ((from === dot || number[3] !== ' ') && texts.some(([a, b]) => a <= at && dot < b)) {
+          edits.push({ from, to: dot + 2, text: '\\. ' });
+        }
+      }
+      return false; // Preserve the indentation Linear keeps before a literal number.
+    }
     if (char !== '-' && (char !== '*' || this.source[at + 1] === '*')) return false;
     if (!texts.some(([a, b]) => a <= at && at < b)) return false;
     edits.push({ from: at, to: at, text: '\\' });
@@ -683,19 +730,53 @@ class Writer {
         return;
       }
       case 'text': {
-        const text = this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, this.cellStart);
+        const text = this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, (at, char) => {
+          if (!this.rewriteEscapes || !this.redundantLineEscape(at, char)) return false;
+          this.compareEscapes = true;
+          return true;
+        });
         for (const edit of text) edits.push(edit);
         if (!this.literal && rewriteAsterisks) {
           const asterisks = literalAsteriskEdits(this.source.slice(from, to), from);
           for (const edit of asterisks) edits.push(edit);
           if (asterisks.length > 0) inline.changedAsterisks = true;
         }
-        if (!this.literal && this.escapeBrackets) this.escapeTextBrackets(from, to, edits);
+        if (!this.literal && this.rewriteEscapes) this.escapeTextBrackets(from, to, edits);
         return;
       }
       default:
         return;
     }
+  }
+
+  private redundantLineEscape(at: number, char: string): boolean {
+    if (at === this.cellStart || !'#-=+>'.includes(char)) return false;
+    if (char === '#' && this.source[at - 1] === '&') return false;
+    // Removing several escapes must not assemble a heading or section opener.
+    if ((char === '#' || char === '+') && (this.source[at - 1] === char || this.source.startsWith(`\\${char}`, at + 2))) return false;
+    if (char === '+' && this.source[at + 2] === '+') return false;
+    const line = this.textLineAt(at);
+    if (line.delimiter && (char === '-' || char === '=')) return false;
+    if (line.first < at && at + 2 <= line.last) return true;
+    // Hashtags and +words cannot open blocks. A plus sign before whitespace
+    // or a run of plus signs can still need its escape at a block boundary.
+    if (char === '#') return /^#{1,6}[^# \t\r\n]/.test(this.source.slice(at + 1, at + 8));
+    return char === '+' && /^\+[^+ \t\r\n]/.test(this.source.slice(at + 1, at + 3));
+  }
+
+  /** Significant line bounds, cached so many escapes do not rescan the line. */
+  private textLineAt(at: number): NonNullable<Writer['textLine']> {
+    if (this.textLine && at >= this.textLine.from && at < this.textLine.to) return this.textLine;
+    const from = lineStartOf(this.source, at);
+    const newline = this.source.indexOf('\n', at);
+    const to = newline === -1 ? this.source.length : newline;
+    const line = this.source.slice(from, to);
+    const prefix = /^(?:[ \t]*(?:>|[*+-](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*/.exec(line)![0];
+    let last = to - 1;
+    while (last >= from && /[ \t#]/.test(this.source[last]!)) last--;
+    // A delimiter line may still need its escape to stay paragraph text.
+    const delimiter = /^[ \t|:\\=-]+$/.test(line.slice(prefix.length));
+    return this.textLine = { from, to, first: from + prefix.length, last, delimiter };
   }
 
   private escapeTextBrackets(from: number, to: number, edits: Edit[]): void {
@@ -712,7 +793,7 @@ class Writer {
       }
       escaped += this.source.slice(at, to);
       if (!sameMarkdown(raw, escaped)) {
-        this.bracketsMayChangeLinks = true;
+        this.compareEscapes = true;
         return;
       }
     }
@@ -738,7 +819,7 @@ class Writer {
     const from = open + 1;
     const to = from + bracketedLabel(this.source, open, limit).length;
     const code = codeSpans(this.source, from, to);
-    if (!this.escapeBrackets) return this.rewritten(from, to, [], code);
+    if (!this.rewriteEscapes) return this.rewritten(from, to, [], code);
     let span = 0;
     const edits = squareBracketEdits(this.source.slice(from, to), from).filter(({ from: at }) => {
       while (code[span] && code[span]![1] <= at) span++;
@@ -761,10 +842,9 @@ class Writer {
 
 /**
  * Rewrites inside plain text: entities, emoji shortcodes and backslashes
- * Linear spells differently. `keepAt` marks the start of a table cell, where
- * an escaped hash stays.
+ * Linear spells differently. The writer decides which line escapes can go.
  */
-function textEdits(source: string, from: number, to: number, keepAt?: number): Edit[] {
+function textEdits(source: string, from: number, to: number, redundantEscape: (at: number, char: string) => boolean): Edit[] {
   const edits: Edit[] = [];
   const raw = source.slice(from, to);
   // Character references become the characters when that cannot make markup:
@@ -782,15 +862,19 @@ function textEdits(source: string, from: number, to: number, keepAt?: number): E
   for (const { index, length, emoji } of emojiShortcodes(raw)) {
     if (!escaped(raw, index)) edits.push({ from: from + index, to: from + index + length, text: emoji });
   }
+  // Keep escapes that would expose a shortcode on the next formatting pass.
+  const shortcodeEscapes = new Set<number>();
+  for (const match of raw.matchAll(/:(?=([a-z0-9_+-]*)\\([+-][a-z0-9_+-]*):)/g)) {
+    if (Object.hasOwn(nameToEmoji, match[1]! + match[2]!)) shortcodeEscapes.add(match.index + 1 + match[1]!.length);
+  }
   // A backslash before a letter is a literal backslash; Linear doubles it.
-  // An escaped `#` inside a line needs no escape and Linear drops it; at the
-  // start of a line's content or a table cell, or at the line's end, it
-  // stays (heading syntax).
   for (const match of raw.matchAll(/\\(.)/g)) {
     const at = from + match.index;
     const next = match[1]!;
     if (/[!-/:-@[-`{-~]/.test(next)) {
-      if (next === '#' && at !== keepAt && insideLine(source, at)) edits.push({ from: at, to: at + 1, text: '' });
+      if (!shortcodeEscapes.has(match.index) && redundantEscape(at, next)) {
+        edits.push({ from: at, to: at + 1, text: '' });
+      }
     } else {
       edits.push({ from: at, to: at + 1, text: '\\\\' });
     }
@@ -1008,15 +1092,6 @@ function decodeEntity(reference: string): string | undefined {
   return String.fromCodePoint(code);
 }
 
-/** Whether the character at `at` has line content before it and after it, ignoring container prefixes. */
-function insideLine(source: string, at: number): boolean {
-  const lineStart = source.lastIndexOf('\n', at - 1) + 1;
-  const lineEnd = source.indexOf('\n', at) === -1 ? source.length : source.indexOf('\n', at);
-  const before = source.slice(lineStart, at).replace(/^(?:[ \t]*(?:>|[*+-](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*/, '');
-  const after = source.slice(at + 2, lineEnd);
-  return before !== '' && !/^[ \t#]*$/.test(after);
-}
-
 /**
  * A text made from a Linear document's `content`, in the form `fix` (and so
  * the `linear-format` hook) leaves unchanged. Linear's own text is not always
@@ -1043,7 +1118,7 @@ export function fixLinearText(linearText: string, content: string, inRepository:
   const uploaded = (url: string): boolean => !notUploadedUris.has(normalizeUri(url));
   const linear = { linkedFileExists: uploaded };
   const fixed = fixText(text, linear);
-  if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body)) return text;
+  if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body, { linearNumberSpacing: true })) return text;
   // The hook cannot tell which files were uploaded. It can write a list item
   // holding only a link to a repository file as a file block. Linear stores
   // such a block as a link if it holds no upload for the file. Take the
@@ -1101,6 +1176,12 @@ const VIDEO = /\.(?:mp4|mov|webm)$/i;
 
 const MP3 = /\.mp3$/i;
 const WAV_OR_OGG = /\.(?:wav|ogg)$/i;
+
+/** The content indent `fix` writes for a list's last item: past its bullet, or past its widest number. */
+function itemIndent(list: List): number {
+  if (!list.ordered || list.children.at(-1)?.checked != null) return 2;
+  return `${(list.start ?? 1) + list.children.length - 1}.`.length + 1;
+}
 
 function startsWithFileBlock(list: List): boolean {
   const [item] = list.children;
