@@ -1437,6 +1437,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "tables/table-cell-start-dash.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "tables/table-code-pipe.md": {
       "yjs": "recorded",
       "fixedPoint": true

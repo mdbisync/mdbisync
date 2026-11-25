@@ -1006,8 +1006,11 @@ class Writer {
         let text = header ? inline.trim() : trimKeepingWideSpace(inline);
         // The trim can take leading whitespace past which Linear escapes: look past what is left.
         const lead = text.length - text.trimStart().length;
-        const escape = header || unicodeSpaceLead(inline.replace(/^[ \t]+/, '')) === 0 ? undefined : headingOrNumberEscape(text.slice(lead));
+        const escape = header ? headerCellEscape(text) : unicodeSpaceLead(inline.replace(/^[ \t]+/, '')) === 0 ? undefined : headingOrNumberEscape(text.slice(lead));
         if (escape !== undefined) text = `${text.slice(0, lead + escape)}\\${text.slice(lead + escape)}`;
+        // Linear escapes a dash that starts a cell's text (`\-1.5`); a dash
+        // before a space is a list there, which lint reports.
+        else if (text.startsWith('-')) text = `\\${text}`;
         // Linear holds a body cell of only a number and a dot as an empty
         // ordered list and writes the space after its marker.
         if (!header && /^\d{1,9}\.$/.test(text)) text += ' ';
@@ -1753,7 +1756,11 @@ class Writer {
   }
 
   private redundantLineEscape(at: number, char: string): boolean {
-    if (at === this.cellStart || !'#-=+>'.includes(char)) return false;
+    if (!'#-=+>'.includes(char)) return false;
+    // A cell's first escape stays, except before a plus sign that opens no
+    // list: Linear writes `\+1` there as `+1`. A character reference after
+    // it can decode to a space (`\+&#32;a`), so the escape stays before one.
+    if (at === this.cellStart) return char === '+' && /^\+[^+ \t\r\n|\\&]/.test(this.source.slice(at + 1, at + 3));
     if (char === '#' && this.source[at - 1] === '&') return false;
     if (char === '#') {
       // Past a no-break space at the line's start Linear escapes a heading-like run.
@@ -2742,6 +2749,17 @@ function unicodeSpaceLead(line: string): number {
 function headingOrNumberEscape(rest: string): number | undefined {
   if (/^#{1,6}(?:\s|$)/.test(rest)) return 0;
   const number = /^\d+(?=\.\s+\S)/.exec(rest);
+  return number === null ? undefined : number[0].length;
+}
+
+/**
+ * Where Linear escapes the start of a header cell's text: any `>`, a `+`
+ * before a space and more text (0), or a number's dot (`1\. a`). A `#`, a
+ * lone `+`, a `+` before a tab and a number with `)` stay plain there.
+ */
+function headerCellEscape(text: string): number | undefined {
+  if (text.startsWith('>') || /^\+ +\S/.test(text)) return 0;
+  const number = /^\d+(?=\.[ \t]+\S)/.exec(text);
   return number === null ? undefined : number[0].length;
 }
 

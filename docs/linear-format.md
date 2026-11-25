@@ -260,7 +260,13 @@ Blocks:
   row has no `|`, `fix` leaves the file to you. A cell containing only `#` is written
   as `\#`, preserving its text, and an escaped `#` that starts a cell keeps
   its escape (a bare one in a body cell is the
-  [`table-hash-cell`](#table-hash-cell) rule). A line break tag in a cell
+  [`table-hash-cell`](#table-hash-cell) rule). A `-` that starts a cell's
+  text gets a backslash (`| \-1.5 |`), and an escaped `+` that starts a
+  cell loses it unless a space, a tab, a backslash, a character reference,
+  another `+` or the cell's end follows (`| +1 |`), as Linear writes them. In a header cell, a
+  starting `>` gets a backslash too, and so do a `+` that a space and text
+  follow and a number's dot that whitespace and text follow
+  (`| \+ Plan | 1\. Step |`). A line break tag in a cell
   (`<br>`, `<br/>`, `<br />`) is written as `&#10;`, as Linear writes it.
   Linear shows it as a line break; GitHub shows it as a space. A body cell
   keeps a nonbreaking space around its text; a header cell loses it, as

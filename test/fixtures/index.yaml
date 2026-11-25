@@ -133,6 +133,8 @@ known_constructs:
     class: lint-error
   - construct: table-cell-escaped-markers
     class: fixable
+  - construct: table-cell-start-dash
+    class: fixable
   - construct: list-kinds
     class: fixable
   - construct: list-first-in-item
@@ -3665,6 +3667,14 @@ fixtures:
     canary: kx-38d519db
     corpus: false
     note: "escaped list markers at a body cell's start stay text; a cell of only a number and a dot is written with a space after it"
+  - file: "tables/table-cell-start-dash.md"
+    group: tables
+    construct: table-cell-start-dash
+    class: fixable
+    basis: known
+    canary: kx-9bbd184a
+    corpus: false
+    note: "Linear escapes a dash that starts a header or body cell's text, a +, > or number dot before a space and text in a header cell, and drops the escape of a plus sign at a cell's start that opens no list"
   - file: "list-items/list-kinds-in-item.md"
     group: list-items
     construct: list-kinds
