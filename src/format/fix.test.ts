@@ -2085,6 +2085,21 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('keeps a list right below a quote in an item apart from the quote: no marker after a quote is a lazy line', () => {
+    // CommonMark reads a list marker after a quote's paragraph as a list, even one that cannot interrupt a paragraph.
+    for (const [marker, start] of [['2. Pear', 2], ['* ', null], ['1. ', 1]] as const) {
+      const written = fixText(`* Note\n\n  > quote\n\n  ${marker.trim()}`);
+      assert.equal(written, `* Note\n\n  > quote\n  ${marker}`);
+      const [list] = parse(written).children;
+      const blocks = list?.type === 'list' ? list.children[0]!.children : [];
+      assert.deepEqual(blocks.map((block) => block.type), ['paragraph', 'blockquote', 'list'], marker);
+      const nested = blocks[2];
+      assert.equal(nested?.type === 'list' ? nested.start ?? null : undefined, start, marker);
+      const quote = blocks[1];
+      assert.equal(quote?.type === 'blockquote' ? quote.children.length : 0, 1, marker);
+    }
+  });
+
   it('leaves an ordered list numbered past nine digits to its author', () => {
     for (const text of ['999999999. Pear\n999999999. Plum', '999999998. Pear\n999999998. Plum\n999999998. Fig']) {
       assert.equal(fixText(text), text);
