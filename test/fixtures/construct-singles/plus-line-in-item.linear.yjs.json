@@ -1,0 +1,60 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Plan","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"+ ","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"Call the team","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Week","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "children": [
+                        {"text":"Plan","marks":{"attribution":"user"}},
+                        {"type":"hard_break"},
+                        {"text":"+ ","marks":{"attribution":"user"}},
+                        {"type":"hard_break"},
+                        {"text":"Send the notes","marks":{"attribution":"user"}}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-a7c4190e","marks":{"attribution":"user"}}]}
+  ]
+}

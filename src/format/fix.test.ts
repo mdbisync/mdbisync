@@ -10,6 +10,7 @@ import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { linkedFileCheck, lintText } from './lint.ts';
 import { parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { CONTENT_LIMIT } from './rules.ts';
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],
@@ -1517,14 +1518,9 @@ describe('what fix leaves alone', () => {
       ['Plan\n   \\====', 'Plan\n   \\===='],
       ['Plan\n\\=\\=\\=', 'Plan\n\\=\\=\\='],
       ['* Plan\n  \\===', '* Plan\n  \\==='],
-      ['Plan\n  \\- spare', 'Plan\n  \\- spare'],
-      ['Plan\n  \\+ spare', 'Plan\n  \\+ spare'],
-      ['* Plan\n    \\- spare', '* Plan\n    \\- spare'],
       ['Plan\n\\-x spare', 'Plan\n\\-x spare'],
       ['Plan\n  \\---', 'Plan\n  \\---'],
       ['* Plan\n \\- spare', '* Plan\n  \\- spare'],
-      // A tab can span fewer columns under the shorter prefix fix writes.
-      ['-   Plan\n    \t\\- spare', '* Plan\n  \t\\- spare'],
       ['1.  Plan\n    \t\\=====', '1. Plan\n   \t\\====='],
       ['* Plan\n\t  ====', '* Plan\n  \\===='],
     ] as const) {
@@ -1533,6 +1529,89 @@ describe('what fix leaves alone', () => {
       assert.ok(sameMarkdown(input, expected), input);
       assert.deepEqual(lintText('inventory.md', expected), [], input);
     }
+  });
+
+  it('writes an escaped - or + one to three columns past the content at the content, where Linear keeps the escape', () => {
+    // Linear drops the escape there, and the line becomes a list item.
+    for (const [input, expected] of [
+      ['1. Plan:\n\t\\- step', '1. Plan:\n   \\- step'],
+      ['1. Plan:\n    \\+ step', '1. Plan:\n   \\+ step'],
+      ['* Plan:\n     \\- step', '* Plan:\n  \\- step'],
+      ['* Week\n  * Plan:\n     \\- step', '* Week\n  * Plan:\n    \\- step'],
+      ['> * Plan:\n>    \\- step', '> * Plan:\n>   \\- step'],
+      ['Plan:\n \\- step', 'Plan:\n\\- step'],
+      ['1. Plan:  \n\t\\- step', '1. Plan:  \n   \\- step'],
+      ['1. Plan:\n\n   Steps:\n    \\- step', '1. Plan:\n\n   Steps:\n   \\- step'],
+      ['1. Plan:\n\t\\-\tstep', '1. Plan:\n   \\-\tstep'],
+      ['1. Plan:\n\t\\-\n   More', '1. Plan:\n   \\-\n   More'],
+      ['1. Plan:\n    first\n    \\- step', '1. Plan:\n    first\n   \\- step'],
+      ['Plan\n  \\- spare', 'Plan\n\\- spare'],
+      ['Plan\n  \\+ spare', 'Plan\n\\+ spare'],
+      ['* Plan\n    \\- spare', '* Plan\n  \\- spare'],
+      // A tab can span fewer columns under the shorter prefix fix writes:
+      // there it would end two columns past the content.
+      ['-   Plan\n    \t\\- spare', '* Plan\n  \\- spare'],
+      // Kept: at the content, past it four columns or more (no item starts
+      // there, and the escape goes), \* and a dash before text.
+      ['1. Plan:\n   \\- step', '1. Plan:\n   \\- step'],
+      ['* Plan:\n      \\- step', '* Plan:\n      - step'],
+      ['1. Plan:\n\t\\* step', '1. Plan:\n    \\* step'],
+      ['1. Plan:\n\t\\-step', '1. Plan:\n    -step'],
+      // In a code span the line is code: Linear joins it with a space.
+      ['1. Plan:\n    `a\n    \\- b`', '1. Plan:\n    `a  \\- b`'],
+      // Columns count after the prefixes fix writes: `> ` for a quote, and
+      // a shorter item prefix, after which a tab spans fewer columns.
+      ['> Plan\n \\- step', '> Plan\n> \\- step'],
+      ['>    1. Plan:\n>       \t\\- x', '> 1. Plan:\n>    \\- x'],
+      ['>  * Plan:\n>    \t\\- step', '> * Plan:\n>   \t\\- step'],
+      // A task item's text starts two columns in, after `- ` (probed).
+      ['- [ ] Plan:\n    \\- x', '- [ ] Plan:\n  \\- x'],
+      // A no-break space after the space is text, not a separator.
+      ['* Plan\n   \\+ \u00a0step', '* Plan\n  \\+ \u00a0step'],
+    ] as const) {
+      assert.equal(fixText(input), expected, JSON.stringify(input));
+      assert.equal(fixText(expected), expected, JSON.stringify(input));
+      assert.ok(sameMarkdown(input, expected), JSON.stringify(input));
+      assert.deepEqual(lintText('a.md', expected), [], JSON.stringify(input));
+    }
+  });
+
+  it('writes a lone + or \\+ right below an item\'s first line, before more text, with a no-break space, as Linear keeps it', () => {
+    // Linear reads a lone `+` there as an empty item (code four or more
+    // columns past the item's text) and drops the escape of `\+`; a no-break
+    // space after it keeps it text.
+    const nbsp = '\u00a0';
+    for (const [input, expected] of [
+      ['1. Plan\n   +\n   More', `1. Plan\n   +${nbsp}\n   More`],
+      ['1. Plan\n\t\\+\nMore', `1. Plan\n   +${nbsp}\n   More`],
+      ['1. Plan\n       +\n   More', `1. Plan\n   +${nbsp}\n   More`],
+      ['1. Plan  \n   +\n   More', `1. Plan  \n   +${nbsp}\n   More`],
+      ['* Week\n  * Plan\n    +\n    More', `* Week\n  * Plan\n    +${nbsp}\n    More`],
+      ['10. Plan\n    +\n    More', `10. Plan\n    +${nbsp}\n    More`],
+      // A task item's text column is past `- `, not past its checkbox.
+      ['- [ ] Plan\n  +\n  More', `- [ ] Plan\n  +${nbsp}\n  More`],
+      // Text that fix moves onto the marker's line, or a code span it joins,
+      // brings the plus sign up to the second line.
+      ['1.\n   Plan\n   +\n   More', `1. Plan\n   +${nbsp}\n   More`],
+      ['* `A\n  B`\n  +\n  More', `* \`A B\`\n  +${nbsp}\n  More`],
+      // A hard break after the sign stays.
+      ['* Plan\n  +  \n  More', `* Plan\n  +${nbsp}  \n  More`],
+      // Kept: the paragraph's last line, a later line, a quote, the top level and a plus before text.
+      ['1. Plan\n   +', '1. Plan\n   +'],
+      ['1. Plan\n   Note\n   +\n   More', '1. Plan\n   Note\n   +\n   More'],
+      ['> 1. Plan\n>    +\n>    More', '> 1. Plan\n>    +\n>    More'],
+      ['Plan\n+\nMore', 'Plan\n+\nMore'],
+      ['1. Plan\n   +x\n   More', '1. Plan\n   +x\n   More'],
+    ] as const) {
+      assert.equal(fixText(input), expected, JSON.stringify(input));
+      assert.equal(fixText(expected), expected, JSON.stringify(input));
+      assert.deepEqual(lintText('a.md', expected), [], JSON.stringify(input));
+    }
+    // Not when the added characters would take the text over Linear's content limit.
+    const full = '* Plan\n  +\n  ' + 'a'.repeat(CONTENT_LIMIT - 13);
+    assert.equal(fixText(full), full);
+    // Linear's own export is captured as it is: no character is added there.
+    assert.equal(fixText('1. Plan\n   +\n   More', { linearExport: true }), '1. Plan\n   +\n   More');
   });
 
   it('writes a bare plus on a paragraph continuation without creating an item', () => {

@@ -123,6 +123,10 @@ known_constructs:
     class: fixable
   - construct: list-after-item-text
     class: lint-error
+  - construct: plus-line-in-item
+    class: unchanged
+  - construct: escaped-marker-content-column
+    class: unchanged
   - construct: space-reference
     class: fixable
   - construct: tab-reference
@@ -3632,6 +3636,22 @@ fixtures:
     canary: kx-e9d93dc0
     corpus: false
     note: "Linear writes a paragraph of only a number and a dot without its escape"
+  - file: "construct-singles/plus-line-in-item.md"
+    group: construct-singles
+    construct: plus-line-in-item
+    class: unchanged
+    basis: known
+    canary: kx-a7c4190e
+    corpus: false
+    note: "a lone + below an item's first line, before more text, written by fix with a no-break space after it; Linear reads a plain + there as an empty item and drops the escape of \\+"
+  - file: "construct-singles/escaped-marker-content-column.md"
+    group: construct-singles
+    construct: escaped-marker-content-column
+    class: unchanged
+    basis: known
+    canary: kx-5d2e81a4
+    corpus: false
+    note: "Linear keeps \\- and \\+ that start a continuation line at the column where the item's or quote's text starts; one to three columns past it, it drops the escape, so fix writes them there"
   - file: "construct-singles/bold-punctuation-boundaries.md"
     group: construct-singles
     construct: adjacent-bold-boundaries

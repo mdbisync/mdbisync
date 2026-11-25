@@ -180,6 +180,12 @@ Blocks:
   Linear keeps such text but can return `4\) pear` and a lone `\+` without
   their escapes. The sync restores an escape where the text would read as
   a block. A lone `+` on a paragraph continuation line stays plain.
+  As the second line of a list item's text, with more of that paragraph
+  after it, Linear reads a lone `+` as an empty item (four or more columns
+  past the item's text, as code) and drops the backslash of `\+`: there
+  `fix` writes `+` and a no-break space at the column of the item's text,
+  which Linear keeps as text. Under a quote, and on later lines, the `+`
+  stays as it is.
 - A line that opens with three or more `>` signs is a collapsible section
   in Linear, not a nested quote, and `fix` writes it as Linear does: the
   rest of the line becomes the title of a `+++` line, and the section holds
@@ -385,6 +391,13 @@ Inline text:
   underline the paragraph above, and a `\-` or `\+` on a continuation
   line indented four or more columns past its list item or quote (`\-x`
   after any indentation).
+  A `\-` before a space, a tab or the line's end, or a `\+` before a space
+  or tab and text, that starts a continuation line one to three columns
+  past where its list item's or quote's text starts (the line's start
+  outside them) loses its escape in Linear and becomes a list item. `fix`
+  writes that line at the column where that text starts, where Linear
+  keeps the escape: under `1. Plan:`, a tab-indented `\- step` is written
+  as `   \- step`.
   Escapes that keep text from becoming Markdown syntax or an emoji stay.
 - A backslash line break (`\` at the end of a line) loses its backslash,
   as Linear writes it; spaces or a tab before it stay. Linear holds every

@@ -1,0 +1,78 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Plan:","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"- check the list","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"+ add the dates","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Week:","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"- send the notes","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "bullet_list",
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {"text":"Steps:","marks":{"attribution":"user"}},
+                    {"type":"hard_break"},
+                    {"text":"- review","marks":{"attribution":"user"}}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Totals:","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"- none yet","marks":{"attribution":"user"}}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-5d2e81a4","marks":{"attribution":"user"}}]}
+  ]
+}

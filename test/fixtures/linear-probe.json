@@ -277,6 +277,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/escaped-marker-content-column.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/escapes.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -494,6 +498,10 @@
       "fixedPoint": true
     },
     "construct-singles/paragraph-trailing-spaces.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/plus-line-in-item.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
