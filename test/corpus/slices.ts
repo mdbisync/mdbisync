@@ -24,7 +24,10 @@ export const MID_DOCUMENTS = 200;
  *   its own paragraph in the item;
  * - kitewing-4-28-2: a link to a video alone in a bullet item;
  * - kitewing-4-22-0: no list construct of its own any more; kept because
- *   those checks name it.
+ *   those checks name it;
+ * - the-life-of-an-order and the-life-of-an-order-2: the Mermaid documents
+ *   with an invalid diagram that L1-09 checks; without them its subject
+ *   is vacuous, and a larger bank can shift the random picks past them.
  * Each replaces the last random pick of its group; its linked files come
  * with it through the slice's closure. Another seed writes other paths, so
  * it pins nothing.
@@ -34,6 +37,8 @@ export const MID_REGRESSIONS: Readonly<Record<string, readonly string[]>> = {
     "eng/edge-cases/formatting/task-code-3.md",
     "docs/release notes/releases/2025/kitewing-4-28-2.md",
     "docs/release notes/releases/2025/kitewing-4-22-0.md",
+    "eng/edge-cases/diagrams/the-life-of-an-order.md",
+    "eng/edge-cases/diagrams/the-life-of-an-order-2.md",
   ],
 };
 
