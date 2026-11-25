@@ -217,6 +217,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/collapsible-opener-mixed.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/collapsible-opener.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -1002,6 +1006,10 @@
       "fixedPoint": true
     },
     "lint-errors/table-escaped-pipe.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/table-pipe-reference.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

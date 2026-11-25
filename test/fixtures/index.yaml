@@ -39,7 +39,7 @@ rules:
   - id: subscript
     title: "Tilde subscript is dropped."
   - id: table-escaped-pipe
-    title: "An escaped pipe in a plain table cell splits the row."
+    title: "A pipe in a plain table cell, escaped or written as a character reference, splits the row."
   - id: image-in-link
     title: "The link around an image is dropped."
   - id: content-too-long
@@ -65,7 +65,7 @@ rules:
   - id: git-conflict-marker
     title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
   - id: section-opener
-    title: "A line starting with >>> opens a collapsible section that fix cannot write next to +++ lines."
+    title: "A line starting with >>> opens a collapsible section that fix cannot write here."
   - id: url-in-html
     title: "A URL inside raw HTML is turned into a Markdown link."
   - id: block-first-in-list-item
@@ -2538,6 +2538,16 @@ fixtures:
     line: 3
     basis: known
     canary: kx-d1b9730f
+  - file: "lint-errors/table-pipe-reference.md"
+    group: lint-errors
+    construct: table-escaped-pipe-plain-cell
+    class: lint-error
+    rule: table-escaped-pipe
+    line: 3
+    basis: known
+    canary: kx-2215b3ab
+    corpus: false
+    note: "Linear keeps a pipe written &#124; in the cell, but writes it back bare, which splits the row"
   - file: "lint-errors/image-in-link.md"
     group: lint-errors
     construct: image-in-link
@@ -3271,6 +3281,14 @@ fixtures:
     canary: kx-c27a9f15
     corpus: false
     note: "a line opening with >>> is a collapsible section: the line is its title, a paragraph it interrupts gets a blank line, and a >>> line without a title closes it"
+  - file: "construct-singles/collapsible-opener-mixed.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-ae592b3b
+    corpus: false
+    note: ">>> and +++ lines pair apart: a title-less +++ closes the innermost +++ section, a title-less >>> every >>> section, each with the sections nested in it"
   - file: "construct-singles/collapsible-opener-containers.md"
     group: construct-singles
     construct: collapsible-section-opener
@@ -3300,11 +3318,11 @@ fixtures:
     construct: section-opener-with-section-lines
     class: lint-error
     rule: section-opener
-    line: 7
+    line: 5
     basis: known
     canary: kx-6d2e8b41
     corpus: false
-    note: "a >>> line in a file that also has +++ section lines: Linear pairs them, so fix leaves the file"
+    note: "a >>> line without a title inside a +++ section opens a section there, which Linear writes as +++ with a space, a closing line when read again, so fix leaves the file"
   - file: "construct-singles/literal-tilde.md"
     group: construct-singles
     construct: literal-tilde

@@ -26,6 +26,11 @@ const cases: Array<[LintRule, string, number]> = [
   ['footnote', 'An inline note.^[Text.]', 1],
   ['subscript', 'H~2~O', 1],
   ['table-escaped-pipe', '| A |\n| -- |\n| a \\| b |', 3],
+  ['table-escaped-pipe', '| A | B |\n| -- | -- |\n| a &#124; b | 1 |', 3],
+  ['table-escaped-pipe', '| A |\n| -- |\n| a&#x7C;b |', 3],
+  ['table-escaped-pipe', '| Left &#124; right |\n| -- |\n| a |', 1],
+  ['table-escaped-pipe', '| A |\n| -- |\n| **a &#124; b** |', 3],
+  ['table-escaped-pipe', '| A |\n| -- |\n| [a &#124; b](https://example.com) |', 3],
   ['table-hash-cell', '| A | B |\n| -- | -- |\n| 1 | 2 |\n| # | 3 |', 4],
   ['table-hash-cell', 'Intro.\n\n> | Name | No. |\n> | -- | -- |\n> | Example |  # |', 5],
   ['table-hash-cell', '| A |\n| -- |\n| ## |', 3],
@@ -337,6 +342,7 @@ describe('lint rules', () => {
       '**Sync conflict: git version**\n\nText.\n\n**Sync conflict: end**',
       '[`code`](https://example.com)',
       '| `a \\| b` | c |\n| -- | -- |\n| 1 | 2 |',
+      'Pick a &#124; b, or c \\| d.',
       '<details>\n<summary>More</summary>\n\nText.\n\n</details>',
     ]) {
       assert.deepEqual(lintText('doc.md', text), [], text);

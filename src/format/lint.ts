@@ -390,7 +390,10 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         const cellAt = ancestors.findIndex((a) => a.type === 'tableCell');
         const table = ancestors[cellAt - 2];
         const inCell = cellAt !== -1 && !(table?.type === 'table' && endedBefore(body, table, ancestors[cellAt - 1]!));
-        if (inCell && body.slice(start(node), end(node)).includes('\\|')) {
+        // Linear keeps a pipe in a cell's text (escaped, or a character
+        // reference) but writes it back bare, which splits the row. Inline
+        // code keeps its escaped pipe.
+        if (inCell && node.value.includes('|')) {
           report('table-escaped-pipe', line(node));
         }
         if (body.slice(start(node), end(node)).includes('^[')) report('footnote', line(node));
