@@ -60,6 +60,8 @@ rules:
     title: "A hard line break in a setext heading is lost when the heading is written as one line."
   - id: git-conflict-marker
     title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
+  - id: section-opener
+    title: "A line starting with >>> opens a collapsible section that fix cannot write next to +++ lines."
   - id: url-in-html
     title: "A URL inside raw HTML is turned into a Markdown link."
   - id: block-first-in-list-item
@@ -103,6 +105,14 @@ known_constructs:
     class: fixable
   - construct: link-destination-unsafe-characters
     class: fixable
+  - construct: link-destination-non-ascii
+    class: fixable
+  - construct: collapsible-section-opener
+    class: fixable
+  - construct: backslash-block-end
+    class: fixable
+  - construct: section-opener-with-section-lines
+    class: lint-error
   - construct: sync-conflict-markers
     class: unchanged
   - construct: sync-conflict-callouts
@@ -3093,6 +3103,48 @@ fixtures:
     canary: kx-b3c45fd3
     corpus: false
     note: "a lazy line keeps its indentation for a quote and loses what an item's content indent takes"
+  - file: "construct-singles/collapsible-opener.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-c27a9f15
+    corpus: false
+    note: "a line opening with >>> is a collapsible section: the line is its title, a paragraph it interrupts gets a blank line, and a >>> line without a title closes it"
+  - file: "construct-singles/collapsible-opener-containers.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-5e1c3a07
+    corpus: false
+    note: "a >>> section in a list item or a quote closes where its container ends; two signs or spaced signs stay quotes"
+  - file: "links/destination-non-ascii.md"
+    group: links
+    construct: link-destination-non-ascii
+    class: fixable
+    basis: known
+    canary: kx-3b9d0e64
+    corpus: false
+    note: "Linear percent-encodes characters outside ASCII in a link destination as UTF-8, also an autolink's, and writes the host in Punycode"
+  - file: "construct-singles/backslash-block-end.md"
+    group: construct-singles
+    construct: backslash-block-end
+    class: fixable
+    basis: known
+    canary: kx-81f4c2d9
+    corpus: false
+    note: "a backslash that ends a paragraph, heading, item or quote breaks no line; Linear doubles it"
+  - file: "lint-errors/section-opener.md"
+    group: lint-errors
+    construct: section-opener-with-section-lines
+    class: lint-error
+    rule: section-opener
+    line: 7
+    basis: known
+    canary: kx-6d2e8b41
+    corpus: false
+    note: "a >>> line in a file that also has +++ section lines: Linear pairs them, so fix leaves the file"
   - file: "construct-singles/literal-tilde.md"
     group: construct-singles
     construct: literal-tilde
