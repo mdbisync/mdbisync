@@ -82,7 +82,7 @@ function stopsFix(finding: Finding): boolean {
   return !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule);
 }
 
-const NUMBER_PARAGRAPH_LINE = /(?:^|\n)[ \t>]*\d{1,9}\\[.)][ \t]*(?:\n|$)/;
+const NUMBER_PARAGRAPH_LINE = /(?:^|\n)[ \t>]*\d{1,9}\\[.)][^\S\n]*(?:\n|$)/;
 
 /**
  * The line endings inside paragraphs: hard breaks and the line endings of
@@ -196,7 +196,7 @@ function breakShape(tree: Root): unknown {
 }
 
 function fixBody(body: string, bodyOptions: WriterOptions): string | undefined {
-  if (body.trim() === '' && !body.includes(NBSP)) return '';
+  if (/^[ \t\n\v\f\r]*$/.test(body)) return '';
   let current = body;
   let rewroteSections = false;
   // A rewrite can expose another (an inline image leaves its paragraph):
@@ -491,11 +491,17 @@ type Container = (
   | { kind: 'item'; indent: number; content: number; written?: number }
 ) & { markerBrackets?: readonly [number, number] };
 
+// The spaces outside ASCII (Unicode's space separators). Linear writes a
+// number's dot before one as an escaped dot and a space, as before an NBSP.
+const WIDE_SPACE = String.raw`\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000`;
+const NUMBER_WITH_SPACE = new RegExp(String.raw`^(\d+)(\\?)\.([ \t${WIDE_SPACE}])(?=[ \t${WIDE_SPACE}]*[^ \t${WIDE_SPACE}])`);
+const GLUED_NUMBER = new RegExp(String.raw`^\d{1,9}[.)][^ \t${WIDE_SPACE}]`);
+
 // Characters that start a block when they open a line (`<` an HTML block).
-const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t\u00a0]))/;
+const BLOCK_START = new RegExp(String.raw`^(?:[<>#*+\-=_\`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t${WIDE_SPACE}]))`);
 
 // A number with a dot and text after it, which `fix` escapes where it starts a paragraph line.
-const NUMBER_TEXT = /^\d+\\?\.[ \t\u00a0]+[^ \t\u00a0]/;
+const NUMBER_TEXT = new RegExp(String.raw`^\d+\\?\.[ \t${WIDE_SPACE}]+[^ \t${WIDE_SPACE}]`);
 
 // Block starts that `fix` escapes as Linear does where a line after a
 // former hard break starts without its indentation: a dash, a heading
@@ -635,7 +641,7 @@ class Writer {
         // A setext heading can span lines; an ATX heading is one line.
         // Linear keeps a trailing NBSP, and the space after an empty heading's hashes.
         const hashes = '#'.repeat(node.depth);
-        const heading = trimEndKeepingNbsp(`${hashes} ${joinLines(this.inline(node.children))}`);
+        const heading = trimEndKeepingWideSpace(`${hashes} ${joinLines(this.inline(node.children))}`);
         return [heading === hashes ? `${hashes} ` : heading];
       }
       case 'thematicBreak':
@@ -727,8 +733,8 @@ class Writer {
         const afterCheckbox = index === 0 && node === this.taskParagraph;
         // The first part of a nested list's text keeps its marker.
         const nestedList = index === 0 && this.nestedLists.has(node);
-        const text = afterCheckbox ? taskTextAsLinear(trimKeepingNbsp(this.inline(part, 'continuation')))
-          : nestedList ? trimKeepingNbsp(this.inline(part, 'continuation')) : this.paragraphText(part, true);
+        const text = afterCheckbox ? taskTextAsLinear(trimKeepingWideSpace(this.inline(part, 'continuation')))
+          : nestedList ? trimKeepingWideSpace(this.inline(part, 'continuation')) : this.paragraphText(part, true);
         return escapeLiteralSectionEnd(paragraphPart(text, !afterCheckbox && !nestedList));
       })
       .filter((part) => part !== '');
@@ -743,7 +749,7 @@ class Writer {
    * spaces around a part split off at an image.
    */
   private paragraphText(children: readonly PhrasingContent[], trim = false): string {
-    const text = trim ? trimKeepingNbsp(this.inline(children, 'all')) : this.inline(children, 'all');
+    const text = trim ? trimKeepingWideSpace(this.inline(children, 'all')) : this.inline(children, 'all');
     if (children[0]?.type !== 'text') return text;
     const marker = LIST_MARKER_START.exec(text);
     if (marker === null) return text;
@@ -959,7 +965,9 @@ class Writer {
 
   private table(node: Table): string {
     const width = node.children[0]?.children.length ?? 0;
-    // Linear drops an NBSP around a header cell's text but keeps one around a body cell's.
+    // Linear keeps an NBSP around a body cell's text. Around a header cell's
+    // it keeps one written as a reference, but drops it when the character
+    // is read again: `fix` drops it, Linear's form on the next write.
     const row = (cells: TableRow, header = false): string => {
       const texts = Array.from({ length: width }, (_, index) => {
         const cell = cells.children[index];
@@ -969,7 +977,7 @@ class Writer {
         this.cellStart = first ? start(first) : undefined;
         this.inCell = true;
         const inline = cell ? this.inline(cell.children) : '';
-        let text = header ? inline.trim() : trimKeepingNbsp(inline);
+        let text = header ? inline.trim() : trimKeepingWideSpace(inline);
         // The trim can take leading whitespace past which Linear escapes: look past what is left.
         const lead = text.length - text.trimStart().length;
         const escape = header || unicodeSpaceLead(inline.replace(/^[ \t]+/, '')) === 0 ? undefined : headingOrNumberEscape(text.slice(lead));
@@ -1125,7 +1133,7 @@ class Writer {
     if (char !== undefined && char >= '0' && char <= '9') {
       if (continuation) this.escapeLoneNumber(at, limit, texts, edits);
       const end = Math.min(limit, this.textLineAt(at).to);
-      const number = /^(\d+)(\\?)\.([ \t\u00a0])(?=[ \t\u00a0]*[^ \t\u00a0])/.exec(this.source.slice(at, end));
+      const number = NUMBER_WITH_SPACE.exec(this.source.slice(at, end));
       if (number) {
         const from = at + number[1]!.length;
         const dot = from + number[2]!.length;
@@ -1294,7 +1302,7 @@ class Writer {
     // content, and no escape is written).
     const inText = paragraph && texts.some(([a, b]) => a <= ownText && ownText < b);
     const escapedNumber = inText && NUMBER_TEXT.test(this.source.slice(ownText, lineEnd));
-    const glued = inText && /^\d{1,9}[.)][^ \t\u00a0]/.test(this.source.slice(ownText, lineEnd));
+    const glued = inText && GLUED_NUMBER.test(this.source.slice(ownText, lineEnd));
     // A lazy line's indentation can be what keeps its text from opening a
     // block (four spaces before `#`), and so can a file block label's,
     // whose later lines carry no prefix for their item: such a line keeps
@@ -1778,27 +1786,37 @@ class Writer {
   /**
    * Linear moves a space at the inner edge of bold, italic or strikethrough
    * out of it: `**&#32;Tip**` is ` **Tip**`. At the start or end of a
-   * block's text the space then goes, as `spaceReferenceEdits` says.
+   * block's text the space then goes, as `spaceReferenceEdits` says. It
+   * moves whitespace outside ASCII the same way, as the character, which
+   * stays at a block's edge: `**&nbsp;Tip**` is an NBSP and `**Tip**`.
    */
   private edgeSpaceEdits(node: Emphasis | Strong | Delete, edits: Edit[]): void {
     const [blockFrom, blockTo] = this.blockInline ?? [-1, -1];
-    const edge = (side: 'first' | 'last'): Text | undefined => {
+    // The node at each edge inside the marks: text, or another inline node such as a link.
+    const inner = (side: 'first' | 'last'): PhrasingContent | undefined => {
       let child: PhrasingContent | undefined = node;
       while (child !== undefined && (child.type === 'strong' || child.type === 'emphasis' || child.type === 'delete')) child = side === 'first' ? child.children[0] : child.children.at(-1);
+      return child;
+    };
+    const edge = (side: 'first' | 'last'): Text | undefined => {
+      const child = inner(side);
       return child?.type === 'text' ? child : undefined;
     };
+    // The run moves only when the marks hold more than it.
+    const contentStart = start(inner('first') ?? node);
+    const contentEnd = end(inner('last') ?? node);
     const groups: Edit[][] = [];
     const first = edge('first');
-    const lead = first && spaceReferenceRuns(this.source, start(first), end(first)).find((run) => run.from === start(first));
-    if (lead && !this.movedSpaces.has(lead.from) && lead.to < end(first) && !/\s/u.test(this.source[lead.to]!)) {
+    const lead = first && spaceReferenceRuns(this.source, start(first), end(first), true).find((run) => run.from === start(first));
+    if (lead && !this.movedSpaces.has(lead.from) && lead.to < contentEnd && !/\s/u.test(this.source[lead.to]!)) {
       this.movedSpaces.add(lead.from);
-      groups.push([{ from: start(node), to: start(node), text: start(node) === blockFrom ? '' : ' '.repeat(lead.count) }, { from: lead.from, to: lead.to, text: '' }]);
+      groups.push([{ from: start(node), to: start(node), text: start(node) === blockFrom ? trimKeepingWideSpace(lead.text) : lead.text }, { from: lead.from, to: lead.to, text: '' }]);
     }
     const last = edge('last');
-    const tail = last && spaceReferenceRuns(this.source, start(last), end(last)).find((run) => run.to === end(last));
-    if (tail && !this.movedSpaces.has(tail.from) && tail.from > start(last) && !/\s/u.test(this.source[tail.from - 1]!)) {
+    const tail = last && spaceReferenceRuns(this.source, start(last), end(last), true).find((run) => run.to === end(last));
+    if (tail && !this.movedSpaces.has(tail.from) && tail.from > contentStart && !/\s/u.test(this.source[tail.from - 1]!)) {
       this.movedSpaces.add(tail.from);
-      groups.push([{ from: tail.from, to: tail.to, text: '' }, { from: end(node), to: end(node), text: end(node) === blockTo ? '' : ' '.repeat(tail.count) }]);
+      groups.push([{ from: tail.from, to: tail.to, text: '' }, { from: end(node), to: end(node), text: end(node) === blockTo ? trimKeepingWideSpace(tail.text) : tail.text }]);
     }
     this.pushIfKept(groups, edits);
   }
@@ -1897,14 +1915,15 @@ function textEdits(source: string, from: number, to: number, redundantEscape: (a
   const edits: Edit[] = [];
   const raw = source.slice(from, to);
   // Character references become the characters when that cannot make markup:
-  // characters outside ASCII (NBSP among them, as Linear stores `&nbsp;`)
-  // and `&` when no reference follows it. Other whitespace stays a reference.
+  // characters outside ASCII (whitespace among them: Linear stores `&nbsp;`
+  // or `&ensp;` as the character) and `&` when no reference follows it.
+  // ASCII whitespace stays a reference.
   for (const match of raw.matchAll(CHARACTER_REFERENCE)) {
     if (escaped(raw, match.index)) continue;
     const char = decodeEntity(match[0]);
     const at = from + match.index;
     const after = raw.slice(match.index + match[0].length);
-    if (char === undefined || (char.trim() === '' && char !== NBSP)) continue;
+    if (char === undefined || (char.trim() === '' && !isWideSpace(char))) continue;
     if (char === '&' ? /^[A-Za-z0-9#]+;/.test(after) : char.codePointAt(0)! < 0x80) continue;
     // Next to a delimiter run, the character could decide whether the run
     // opens or closes emphasis where the reference's `;` or `&` did not.
@@ -2063,7 +2082,6 @@ function* emojiShortcodeStarts(label: string): Generator<number> {
   }
 }
 
-const NBSP = '\u00a0';
 /**
  * The offsets of the backticks in the text from `from` to `to` that open no
  * code span. The parser leaves only those in text, except in the tail it
@@ -2118,8 +2136,8 @@ function spaceShape(tree: Root): Shape {
         text(child.value);
       } else if (child.type === 'strong' || child.type === 'emphasis' || child.type === 'delete') {
         const inner = phrasing(child.children);
-        const lead = trimSpaces(inner, 'start');
-        const tail = trimSpaces(inner, 'end');
+        const lead = trimSpaces(inner, 'start', true);
+        const tail = trimSpaces(inner, 'end', true);
         text(lead);
         out.push({ type: child.type, children: inner });
         text(tail);
@@ -2146,39 +2164,47 @@ function spaceShape(tree: Root): Shape {
   return shape(tree);
 }
 
-/** Removes the spaces at one edge of `shapes` (and a text left empty) and returns them. */
-function trimSpaces(shapes: Shape[], side: 'start' | 'end'): string {
+/** Removes the spaces (with `wide`, also whitespace outside ASCII) at one edge of `shapes` (and a text left empty) and returns them. */
+function trimSpaces(shapes: Shape[], side: 'start' | 'end', wide = false): string {
   const index = side === 'start' ? 0 : shapes.length - 1;
   const edge = shapes[index];
   if (edge?.type !== 'text') return '';
   const value = edge.value!;
   let at = side === 'start' ? 0 : value.length;
-  if (side === 'start') while (value[at] === ' ') at++;
-  else while (value[at - 1] === ' ') at--;
+  const space = (char: string | undefined) => char === ' ' || (wide && char !== undefined && isWideSpace(char));
+  if (side === 'start') while (space(value[at])) at++;
+  else while (space(value[at - 1])) at--;
   edge.value = side === 'start' ? value.slice(at) : value.slice(0, at);
   if (edge.value === '') shapes.splice(index, 1);
   return side === 'start' ? value.slice(0, at) : value.slice(at);
 }
 
-/** The runs of space references (`&#32;`, `&#x20;`) in the text from `from` to `to`, with how many each holds. */
-function spaceReferenceRuns(source: string, from: number, to: number): Array<{ from: number; to: number; count: number }> {
-  const runs: Array<{ from: number; to: number; count: number }> = [];
-  if (!source.slice(from, to).includes('&#')) return runs;
+/**
+ * The runs of space references (`&#32;`, `&#x20;`) in the text from `from`
+ * to `to`, with how many each holds and the text they stand for; with
+ * `wide`, also references to whitespace outside ASCII (`&nbsp;`, `&ensp;`).
+ */
+function spaceReferenceRuns(source: string, from: number, to: number, wide = false): Array<{ from: number; to: number; count: number; text: string }> {
+  const runs: Array<{ from: number; to: number; count: number; text: string }> = [];
+  if (!source.slice(from, to).includes('&')) return runs;
   for (const match of source.slice(from, to).matchAll(CHARACTER_REFERENCE)) {
     const at = from + match.index;
-    if (escaped(source, at) || decodeEntity(match[0]) !== ' ') continue;
+    const char = decodeEntity(match[0]);
+    if (escaped(source, at) || char === undefined || (char !== ' ' && !(wide && isWideSpace(char)))) continue;
     const last = runs.at(-1);
     if (last?.to === at) {
       last.to += match[0].length;
       last.count++;
+      last.text += char;
     } else {
-      runs.push({ from: at, to: at + match[0].length, count: 1 });
+      runs.push({ from: at, to: at + match[0].length, count: 1, text: char });
     }
   }
   return runs;
 }
 const DELIMITER = /^[*_~]$/;
-const UNICODE_WHITESPACE = /^[\t\n\f\r\p{Zs}]$/u;
+// As the parser reads it: a line or paragraph separator and a byte order mark count too.
+const UNICODE_WHITESPACE = /^\s$/u;
 const UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
 
 /**
@@ -2570,22 +2596,31 @@ function joinLines(text: string): string {
     .join(' ');
 }
 
-/** `text.trim()`, except that an NBSP stays: Linear keeps one around a paragraph's, heading's or body cell's text. */
-function trimKeepingNbsp(text: string): string {
+/** `text.trim()`, except that whitespace outside ASCII stays: Linear keeps an NBSP or an en space around a paragraph's, heading's or body cell's text. */
+function trimKeepingWideSpace(text: string): string {
   let start = 0;
   while (start < text.length && trimmed(text[start]!)) start += 1;
-  return trimEndKeepingNbsp(text.slice(start));
+  return trimEndKeepingWideSpace(text.slice(start));
 }
 
-/** `text.trimEnd()`, except that an NBSP stays; one scan (a regular expression rescans a long run from each position). */
-function trimEndKeepingNbsp(text: string): string {
+/** `text.trimEnd()`, except that whitespace outside ASCII stays; one scan (a regular expression rescans a long run from each position). */
+function trimEndKeepingWideSpace(text: string): string {
   let end = text.length;
   while (end > 0 && trimmed(text[end - 1]!)) end -= 1;
   return text.slice(0, end);
 }
 
 function trimmed(char: string): boolean {
-  return char !== NBSP && char.trim() === '';
+  return char.trim() === '' && !isWideSpace(char);
+}
+
+/**
+ * Whitespace outside ASCII: an NBSP, an en space, an ideographic space and
+ * the like. Not a byte order mark: as the first character of the text it
+ * would be read as the file's mark and dropped, so its reference stays.
+ */
+function isWideSpace(char: string): boolean {
+  return char.charCodeAt(0) > 0x7f && char !== '\ufeff' && char.trim() === '';
 }
 
 /**

@@ -84,7 +84,7 @@ try {
   const prefix = 'x'.repeat(CONTENT_LIMIT - url.length - 3) + '\n\n';
   await writeFile(page, prefix + url);
   const oversized = prefix + `[${url}](<${url}>)`;
-  const sizeFinding = /content-too-long: This document exceeds Linear's 250,000-character content limit\. The author must decide how to shorten or split it\./;
+  const sizeFinding = /content-too-long: This document exceeds Linear's 250,000-character content limit\. Linear refuses the whole document, so the sync leaves the file out until it fits\. The author must decide how to shorten or split it\./;
   assert.match(hooks(1), sizeFinding);
   assert.equal(await readFile(page, 'utf8'), oversized);
   assert.match(hooks(1), sizeFinding);
