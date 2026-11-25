@@ -84,6 +84,8 @@ rules:
     title: "A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |."
   - id: number-paragraph
     title: "A paragraph that is only a number and a dot or parenthesis comes back from Linear without the backslash, which reads as an empty numbered list item."
+  - id: list-after-item-text
+    title: "In a list item, Linear writes a list on the line right below the text or the list of another kind before it, where Markdown reads a first marker that cannot interrupt a paragraph as text."
 known_constructs:
   - construct: item-section-long-run
     class: fixable
@@ -119,6 +121,8 @@ known_constructs:
     class: fixable
   - construct: list-first-in-item
     class: fixable
+  - construct: list-after-item-text
+    class: lint-error
   - construct: space-reference
     class: fixable
   - construct: tab-reference
@@ -1195,6 +1199,15 @@ fixtures:
     line: 1
     basis: known
     canary: kx-0d10d55c
+  - file: "construct-singles/break-backslash-indented.md"
+    group: construct-singles
+    construct: hard-break-backslash
+    class: lint-error
+    rule: hard-break-backslash
+    line: 1
+    basis: known
+    canary: kx-5a6d18c5
+    note: "the line after a backslash break loses its own indentation in Linear, and its start is escaped as at a line's start"
   - file: "construct-singles/break-html.md"
     group: construct-singles
     construct: hard-break-html
@@ -3110,6 +3123,14 @@ fixtures:
     canary: kx-3c5e81a2
     corpus: false
     note: "a paragraph's last line of only a number and dot, or a bullet, under an item at or past its content is text; Linear writes it as an empty item at the innermost item's content, with a space after it"
+  - file: "list-items/list-form-empty-item-numbered-lines.md"
+    group: list-items
+    construct: empty-list-item
+    class: fixable
+    basis: known
+    canary: kx-066b2922
+    corpus: false
+    note: "numbered lines after a bare marker on an item's second line: Linear reads the empty item and a list nested in it, or after it in its list, and writes the numbers unescaped"
   - file: "list-items/list-form-ordered-ten.md"
     group: list-items
     construct: ordered-list-aligned-numbers
@@ -3214,6 +3235,22 @@ fixtures:
     canary: kx-b3c45fd3
     corpus: false
     note: "a lazy line keeps its indentation for a quote and loses what an item's content indent takes"
+  - file: "construct-singles/continuation-indent-glued-numbers.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-13cbfd09
+    corpus: false
+    note: "a number with a dot or parenthesis and no space after it keeps the tabs after the columns an item's prefix takes; a lazy line of a number is written under its prefix alone"
+  - file: "construct-singles/continuation-bare-number.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-aefaaff0
+    corpus: false
+    note: "a paragraph line of only a number and dot before the paragraph's last line: Linear escapes it after spaces, and keeps an escaped number with a space after it in an item"
   - file: "construct-singles/collapsible-opener.md"
     group: construct-singles
     construct: collapsible-section-opener
@@ -3493,7 +3530,7 @@ fixtures:
     basis: known
     canary: kx-ae019ab3
     corpus: false
-    note: "Two or more blank lines after an empty item end the list in Linear, which writes two blank lines there"
+    note: "Two or more blank lines after an empty item end the list in Linear, which writes two blank lines there and starts the list after them at its first item's number"
   - file: "list-items/list-first-in-item.md"
     group: list-items
     construct: list-first-in-item
@@ -3502,6 +3539,16 @@ fixtures:
     canary: kx-51459ba8
     corpus: false
     note: "Linear writes a list that starts an item below an empty marker line, nested in the item"
+  - file: "list-items/list-after-item-text.md"
+    group: list-items
+    construct: list-after-item-text
+    class: lint-error
+    rule: list-after-item-text
+    line: 3
+    basis: known
+    canary: kx-3eca5c15
+    corpus: false
+    note: "In an item, Linear writes a list whose first marker cannot interrupt a paragraph right below the text or list before it"
   - file: "construct-singles/space-reference.md"
     group: construct-singles
     construct: space-reference

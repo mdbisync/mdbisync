@@ -48,4 +48,22 @@ Text.
 10. Tenth
 11. Eleventh
 
+Text.
+
+1. Open
+2.
+
+
+1. Again
+2. Close
+
+Text.
+
+3. Three
+4.
+
+
+9. Nine
+10. Ten
+
 Ref kx-ae019ab3

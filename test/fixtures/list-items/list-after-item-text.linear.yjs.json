@@ -1,0 +1,113 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Plan","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":2},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "bullet_list",
+                      "children": [
+                        {
+                          "type": "list_item",
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"Call the team","marks":{"attribution":"user"}}]}
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Book a room","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph"}
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Water the beds","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Review","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Draft","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "ordered_list",
+              "attrs": {"order":3},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Send","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-3eca5c15","marks":{"attribution":"user"}}]}
+  ]
+}

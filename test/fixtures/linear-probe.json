@@ -117,6 +117,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/break-backslash-indented.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/break-backslash.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -201,7 +205,15 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/continuation-bare-number.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/continuation-hash.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/continuation-indent-glued-numbers.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -1009,7 +1021,15 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/list-after-item-text.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/list-first-in-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-form-empty-item-numbered-lines.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

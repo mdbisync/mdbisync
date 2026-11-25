@@ -33,6 +33,8 @@ const cases: Array<[LintRule, string, number]> = [
   ['number-paragraph', 'Text.\n\n7\\.', 3],
   ['number-paragraph', '> 12\\)', 1],
   ['number-paragraph', '* a\n\n  7\\.', 3],
+  ['list-after-item-text', '1. Plan\n\n   2.\n      * step', 3],
+  ['list-after-item-text', '* Plan\n  * one\n\n  3. two', 4],
   ['setext-heading-lines', 'Intro.\n\nPlan\nfor May\n===', 3],
   ['setext-heading-lines', '> Plan\n> for May\n> ---', 1],
   ['image-in-link', '[![a](x.png)](https://example.com)', 1],

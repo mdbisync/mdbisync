@@ -8,7 +8,7 @@ import { join, posix } from "node:path";
 import { fitScene, gifFrames, PLAN } from "./assets.ts";
 import { linkTargets, rewrite, targetPath } from "./bank.ts";
 import { checkCorpus } from "./check.ts";
-import { longTitle } from "./documents.ts";
+import { INVALID_DIAGRAM_NOTE, longTitle } from "./documents.ts";
 import { buildCorpus, DEFAULT_SEED, writeCorpus } from "./generate.ts";
 import { parse } from "yaml";
 import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
@@ -202,15 +202,17 @@ test("the mid slice holds the shared image and every document that embeds it", (
   assert.deepEqual(users.filter((f) => !mid.has(f.path)).map((f) => f.path), []);
 });
 
-test("the mid slice keeps the named list-construct documents with their linked files", () => {
+test("the mid slice keeps the named list-construct and invalid-diagram documents with their linked files", () => {
   const built = corpus();
   const pinned = MID_REGRESSIONS[DEFAULT_SEED];
   assert.ok(pinned, "the default seed pins its mid regressions");
-  const [taskCode, video, named] = pinned;
+  const [taskCode, video, named, ...diagrams] = pinned;
   assert.deepEqual(pinned, [
     "eng/edge-cases/formatting/task-code-3.md",
     "docs/release notes/releases/2025/kitewing-4-28-2.md",
     "docs/release notes/releases/2025/kitewing-4-22-0.md",
+    "eng/edge-cases/diagrams/the-life-of-an-order.md",
+    "eng/edge-cases/diagrams/the-life-of-an-order-2.md",
   ], "the paths the live checks name");
   const mid = new Set(built.slices.mid);
   const byPath = new Map(built.files.map((f) => [f.path, f]));
@@ -230,6 +232,12 @@ test("the mid slice keeps the named list-construct documents with their linked f
   assert.match(text(video!), /^\* \[[^\]]+\]\(\.\.\/\.\.\/media\/screen-recording-397\.mp4\)$/m);
   assert.deepEqual(byPath.get(video!)!.links, ["docs/release notes/media/screen-recording-397.mp4"]);
   assert.ok(byPath.get(named!)!.synced, named);
+  // L1-09 needs a Mermaid document with an invalid diagram in the slice.
+  for (const path of diagrams) {
+    const file = byPath.get(path)!;
+    assert.equal(file.group, "mermaid", path);
+    assert.ok(file.note?.includes(INVALID_DIAGRAM_NOTE), `${path} holds an invalid diagram`);
+  }
 });
 
 test("a pinned document replaces one random pick of its group, and mid refuses a path it cannot take", () => {

@@ -6,14 +6,14 @@
 import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table, TableRow } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, bracketedLabel, endingRow, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, bracketedLabel, listKind, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link', 'number-paragraph']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link', 'number-paragraph']);
 const NUMBER_ONLY = /^\d{1,9}\\[.)]$/;
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
@@ -32,6 +32,12 @@ export interface LintOptions {
    * Markdown document.
    */
   linkedFileExists?: (url: string) => boolean;
+  /**
+   * The text is Linear's export, which writes a list that starts an item
+   * below the marker line: item text that starts with a marker is text
+   * (`fix`'s option of the same name).
+   */
+  linearExport?: boolean;
 }
 
 /**
@@ -186,9 +192,18 @@ function childrenLength(reference: LinkReference, length: (from: number, to: num
 
 /** Whether Linear ends the table at this row or a row above it (`endingRow`). */
 function endedBefore(body: string, table: Table, row: Nodes): boolean {
-  const ending = endingRow(body, table);
-  return ending !== undefined && table.children.indexOf(row as TableRow) >= table.children.indexOf(ending);
+  let ended = endedRows.get(table);
+  if (ended === undefined) {
+    // Once per table: a large table has a cell rule check for every cell.
+    const ending = endingRow(body, table);
+    ended = new Set(ending === undefined ? [] : table.children.slice(table.children.indexOf(ending)));
+    endedRows.set(table, ended);
+  }
+  return ended.has(row as TableRow);
 }
+
+/** The rows of each table that Linear reads as a paragraph (`endedBefore`). */
+const endedRows = new WeakMap<Table, ReadonlySet<TableRow>>();
 
 function codePoints(text: string): number {
   let count = 0;
@@ -257,6 +272,29 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         // `fix` writes a list that starts an item on the next line, as Linear does.
         const [first] = node.children;
         if (first !== undefined && first.type !== 'paragraph' && first.type !== 'list') report('block-first-in-list-item', line(first));
+        // In an item, Linear writes a list on the line below the text or the
+        // list of another kind before it. Markdown reads its first marker
+        // there as text when it cannot interrupt a paragraph.
+        // A first item that starts with another block is block-first-in-list-item.
+        node.children.forEach((child, index) => {
+          const previous = node.children[index - 1];
+          // Text that starts with a marker is a nested list there too (`1. 2. a`).
+          if (child.type !== 'list' || (opensWithText(child) && (options.linearExport === true || !nestsMarkerText(body, child.children[0]!))) || !['paragraph', 'list'].includes(child.children[0]?.children[0]?.type ?? 'paragraph')) return;
+          const below = previous?.type === 'paragraph'
+            || (previous?.type === 'list' && listKind(previous, previous.children.at(-1)) !== listKind(child, child.children[0]));
+          if (below && endsWithParagraph(previous)) report('list-after-item-text', line(child));
+        });
+        // Markdown can hold a task item and a bullet item in one list, which
+        // Linear (and `fix`) writes as two lists, the second on the next line.
+        for (const list of node.children) {
+          if (list.type !== 'list') continue;
+          list.children.forEach((item, index) => {
+            const previous = list.children[index - 1];
+            if (previous === undefined || listKind(list, previous) === listKind(list, item)) return;
+            if (item.children[0] !== undefined && item.children[0].type !== 'list') return;
+            if (endsWithParagraph(previous)) report('list-after-item-text', line(item));
+          });
+        }
         break;
       }
       case 'list': {
@@ -467,4 +505,13 @@ function hasUrlOrLinkAttribute(html: string): boolean {
 function softBreakInText(node: PhrasingContent, body: string): boolean {
   if (node.type === 'text') return body.slice(start(node), end(node)).includes('\n');
   return 'children' in node && (node.children as PhrasingContent[]).some((child) => softBreakInText(child, body));
+}
+
+/**
+ * Whether a paragraph ends the block: the last block, through lists, items
+ * and quotes, a marker on the next line would continue as text.
+ */
+function endsWithParagraph(node: Nodes | undefined): boolean {
+  while (node !== undefined && (node.type === 'list' || node.type === 'listItem' || node.type === 'blockquote')) node = node.children.at(-1);
+  return node?.type === 'paragraph';
 }
