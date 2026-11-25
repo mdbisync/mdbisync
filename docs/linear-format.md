@@ -217,6 +217,11 @@ Blocks:
   writes it with three: `++++ Tip` and a closing `++++` become `+++ Tip`
   and `+++`. A closing marker pairs only with an opener of its own width,
   so a list item, quote or document that mixes widths is left to you.
+  Where such a run starts a list item or quote whose text goes on in a
+  line below without its indentation (`* ++++Tip` / `lazy words`), Linear
+  keeps it as text; `fix` escapes it (`* \++++Tip` / `  lazy words`).
+  Linear writes that text back without the backslash, and the sync puts
+  the backslash back, since a new document would read it as a section.
 - A bare `+++` opens an untitled section when it has a body or a closing
   marker and there is no section open in the same document, list item or
   quote. `fix` writes that opener with one trailing space, as Linear does.
@@ -313,8 +318,11 @@ Inline text:
   Linear writes `**ab**c`.
   An empty bold run before a bold run, as in `****Plan**.**`, bolds only
   the text up to the next `**` in Linear: it becomes `**Plan**.`.
-  In `**(**notes**)**`, Linear joins the first two bold runs and leaves
-  the closing punctuation outside, as `**(notes**)`. A pair of stars
+  Bold opened again inside bold ends at the first closing `**` in Linear;
+  later bold runs inside stay bold and the outer closing `**` goes:
+  `**Pack **tent** rope **map** food** water` becomes
+  `**Pack tent** rope **map** food water`. So in `**(**notes**)**`, Linear
+  leaves the closing punctuation outside, as `**(notes**)`. A pair of stars
   enclosing italic spans separated by spaces goes, so `**a* *b**`
   becomes `*a* *b*`.
 - Adjacent links to the same destination become one link, since Linear

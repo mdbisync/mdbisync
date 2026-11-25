@@ -796,7 +796,7 @@ function linearSectionEnd(body: string): string {
 
 // A bullet or number marker Linear never writes for a list of its own.
 const NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
-const LINEAR_BLOCK_START = /^[ \t>]*(?:(?:[*+-]|\d{1,9}[.)])[ \t]+)*(?:\+{1,3}(?:[ \t\r]|$)|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
+const LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,3}(?:[ \t\r]|$)|\+{4}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
 const LINE_END = /\r\n?|\n/;
 const LINE_PREFIX = /^[ \t>]*/;
 const CONFLICT_START = /^<{7}(?: |$)/;
@@ -804,6 +804,7 @@ const DIV_START = /^<div(?:[ \t][^>\n]*)?>/i;
 const DIV_END = /<\/div[ \t]*>/i;
 const DIV_END_START = /^<\/div[ \t]*>/i;
 const SECTION_TITLE = /^\+{3}[ \t]/;
+const LONG_PLUS_RUN = /^\+{4}/;
 const ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3}(?:[ \t]|$))/;
 
 function linearLineText(row: string): string {
@@ -970,6 +971,10 @@ export function linearMarkersAsText(content: string, previous = ''): string {
         const last = (node.position?.end.line ?? index + 1) - 1;
         const literal = accepted.escapes.has(blockLineKey(first, true));
         if (CONFLICT_START.test(first) || literal && first !== '+++' && !SECTION_TITLE.test(rawFirst)) escapes.add(at);
+        // Linear writes a section's title line with three signs. A longer
+        // run is text it holds, with the paragraph's next lines after a
+        // break; without its escape, it would open a section.
+        if (LONG_PLUS_RUN.test(first) && last > index) escapes.add(at);
         if (first === '$$' && last > index + 1 && rowAt(last) === '$$') escapes.add(at);
         // Linear writes a blank line after a real section's title. Pair
         // standalone markers within their container to keep its closer.
@@ -998,7 +1003,7 @@ export function linearMarkersAsText(content: string, previous = ''): string {
           if (offset < at || offset >= end(node)) continue;
           const raw = rowAt(row);
           if (row === line(ancestors.at(-1)!) - 1) continue;
-          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false))) escapes.add(offset);
+          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false)) || LONG_PLUS_RUN.test(raw)) escapes.add(offset);
         }
       }
     });

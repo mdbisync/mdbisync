@@ -654,6 +654,20 @@ describe('Linear bold forms', () => {
     ['an empty bold run before a bold run', '****Plan it**.**', '**Plan it**.'],
     ['an empty bold run inside a paragraph', 'Intro ****Plan it**, more** end', 'Intro **Plan it**, more end'],
     ['an empty bold run after literal stars', '**Lead ****Plan it**!**', '\\*\\*Lead **Plan it**!'],
+    // Bold opened again inside bold: Linear's bold ends at the first closing `**`; later pairs stay bold.
+    ['bold opened again inside bold', '**Pack (**tent, rope**), map (**compass**), food,** water', '**Pack (tent, rope**), map (**compass**), food, water'],
+    ['one bold run opened again inside bold', '**Pack **tent** and rope** today', '**Pack tent** and rope today'],
+    ['bold opened again inside bold mid-paragraph', 'Then **pack **tent** rope **map** food** water', 'Then **pack tent** rope **map** food water'],
+    ['bold opened again at the end of bold', '**Pack **tent****', '**Pack tent**'],
+    ['bold opened again before a letter', '**Pack **tent** rope**s', '**Pack tent** ropes'],
+    ['bold opened again with italic inside', '**Pack **tent *and* rope** map** water', '**Pack tent *and* rope** map water'],
+    ['bold opened again in a list item', '- **Pack **tent** rope** water', '* **Pack tent** rope water'],
+    ['bold opened again in a heading', '# **Pack **tent** rope** water', '# **Pack tent** rope water'],
+    ['bold opened again after leading italic', '**_Pack_ **tent** rope** water', '***Pack* tent** rope water'],
+    // A `#` left at a heading's end would close the heading: that run stays as on `main`, the other rewrite still applies.
+    ['bold opened again before a heading\'s final hash', '# **(**notes**)** and **Pack **tent** #**', '# **(notes**) and **Pack tent #**'],
+    // Linear's older spelling of a bold link in bold text reads as one bold run, for a reference link too.
+    ['a bold reference link inside bold text', '**Use the **[map][m]** today**\n\n[m]: https://example.com/map', '**Use the [map](<https://example.com/map>) today**'],
     ['file label in a list item', '* **[Trail map](trail.pdf)**', '* [**Trail map**](<trail.pdf>)'],
     ['soft breaks', '**Birch\nCedar\nMaple**', '**Birch**\n**Cedar**\n**Maple**'],
     ['hard break', '**Birch  \nCedar**', '**Birch**  \n**Cedar**'],

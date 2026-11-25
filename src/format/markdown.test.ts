@@ -11,7 +11,7 @@ import { gfm } from 'micromark-extension-gfm';
 import { EditMap } from 'micromark-util-edit-map';
 import { MarkdownLimitError, MARKDOWN_MAX_DEPTH, MARKDOWN_MAX_NODES, bracketedLabel, codeSpans, decodedDestinationPath, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { lintText } from './lint.ts';
-import { fixText } from './fix.ts';
+import { fixLinearText, fixText } from './fix.ts';
 
 describe('Markdown traversal limits', () => {
   it('refuses inline runs that take the parser minutes, counting their work as it goes', () => {
@@ -460,6 +460,29 @@ describe('linearMarkersAsText', () => {
     assert.ok(sameAsLinear('$$\na + b\n$$', '\\$$\na + b\n\\$$'));
     assert.ok(sameAsLinear('Intro\n\n<div> Shelf', 'Intro\r\r\\<div> Shelf'));
     assert.equal(linearMarkersAsText('Intro\r\r<div> Shelf'), 'Intro\r\r\\<div> Shelf');
+  });
+
+  // Linear writes a section's title with three signs; a longer run starting
+  // a paragraph that runs on after a break is text it holds.
+  it('puts back the escape of a longer plus run with more lines after it', () => {
+    const cases: Array<[string, string]> = [
+      ['1. ++++Tip (note )\n   more words', '1. \\++++Tip (note )\n   more words'],
+      ['1. Week\n   1. Days\n      1. One\n      2. Two\n      3. ++++Tip (note )\n         more words', '1. Week\n   1. Days\n      1. One\n      2. Two\n      3. \\++++Tip (note )\n         more words'],
+      ['* a\n  * ++++Tip\n    more words', '* a\n  * \\++++Tip\n    more words'],
+      ['> ++++Tip\n> more words', '> \\++++Tip\n> more words'],
+      ['* > ++++Tip\n  > more words', '* > \\++++Tip\n  > more words'],
+      ['++++Tip\n++++Other\nmore words', '\\++++Tip\n\\++++Other\nmore words'],
+    ];
+    for (const [linear, file] of cases) {
+      assert.equal(linearMarkersAsText(linear), file, JSON.stringify(linear));
+      assert.ok(sameAsLinear(linear, file), JSON.stringify(linear));
+      assert.equal(fixText(file), file, `fix keeps ${JSON.stringify(file)}`);
+      assert.equal(fixLinearText(linear, linear, () => false), file, JSON.stringify(linear));
+    }
+    // Alone on its line, the run stays text in Linear and in `fix`.
+    for (const alone of ['1. ++++Tip (note )', '1. ++++Tip (note )\n2. Next', '++++++++']) {
+      assert.equal(linearMarkersAsText(alone), alone);
+    }
   });
 
   it('uses the accepted spelling for an ambiguous export', () => {

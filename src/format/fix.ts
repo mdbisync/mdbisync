@@ -289,6 +289,27 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
       groups.set(block, edits);
       return;
     }
+    // Bold opened again inside bold (`**a **b** c** d`): Linear holds bold
+    // as a mark, which the first closing `**` ends, so the reopened opening
+    // and the outer closing marks drop (`**a b** c d`); later reopened runs
+    // stay bold. Only runs of `**` directly inside, holding no bold. A run
+    // that holds just a link is Linear's older spelling of a bold link in
+    // bold text (`**Use the **[map](u)** today**`), read as one bold run.
+    // In a heading, a `#` left at the line's end would close it.
+    const reopened = node.children.filter((child) => child.type === 'strong');
+    const container = ancestors.at(-1)?.type;
+    const exposesCloser = container === 'heading'
+      && /[ \t]#+$/.test(body.slice(start(node), end(node) - 2)) && body.slice(end(node), end(ancestors.at(-1)!)).trim() === '';
+    if (reopened.length > 0 && first !== undefined && first.type !== 'strong' && (container === 'paragraph' || container === 'heading') && !exposesCloser
+      && reopened.every((part) => body.slice(start(part), start(part) + 2) === '**' && body.slice(end(part) - 2, end(part)) === '**'
+        && !holdsStrong(part) && !(part.children.length === 1 && (part.children[0]!.type === 'link' || part.children[0]!.type === 'linkReference')))
+      && node.children.every((child) => child.type === 'strong' || !holdsStrong(child))) {
+      const block = ancestors[1] ?? node;
+      const edits = groups.get(block) ?? [];
+      edits.push({ from: start(reopened[0]!), to: start(reopened[0]!) + 2, text: '' }, { from: end(node) - 2, to: end(node), text: '' });
+      groups.set(block, edits);
+      return;
+    }
     if (first?.type !== 'text' || rest.at(-1)?.type !== 'text') return;
     // Linear joins the opening punctuation's span to the next bold text
     // and leaves the closing punctuation outside it.
@@ -322,6 +343,13 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
   });
   // Changing these bold marks must leave links, other styles and text intact.
   return reSpellBold(body, groups, true) ?? body;
+}
+
+/** Whether a bold run is inside the node. */
+function holdsStrong(node: Nodes): boolean {
+  let found = false;
+  visit(node, (child) => { found ||= child !== node && child.type === 'strong'; });
+  return found;
 }
 
 /** Re-spell bold across line breaks and around a single link in the written body. */
