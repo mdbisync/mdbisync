@@ -373,7 +373,15 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/item-section-after-empty-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/item-section-long-run.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/item-section-nested.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -550,6 +558,10 @@
       "fixedPoint": true
     },
     "construct-singles/section-marker-nested.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/section-marker-quote.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

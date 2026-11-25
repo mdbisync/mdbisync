@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { fixText } from './fix.ts';
+import { fixLinearText, fixText } from './fix.ts';
 import { lintText } from './lint.ts';
 
 describe('a line opening with >>>', () => {
@@ -157,12 +157,9 @@ describe('triple-plus section markers', () => {
     ['longer markers pair by their width', '++++ Tip\n\nSeeds\n\n++++', '+++ Tip\n\nSeeds\n\n+++'],
     ['a longer titled marker interrupts a paragraph', 'Intro\n++++Tip\n\nSeeds', 'Intro\n\n+++ Tip\n\nSeeds\n\n+++'],
     ['a longer bare marker opens an untitled section', 'Intro\n\n++++++++++\n\nSeeds', 'Intro\n\n+++ \n\nSeeds\n\n+++'],
-    ['a longer marker starting an item with more of it', '1. ++++Tip\n   Seeds', '1. \n\n   +++ Tip\n\n   Seeds\n\n   +++'],
-    ['a longer marker starting a nested item', '* a\n  * ++++Tip\n\n    Seeds', '* a\n  * \n\n    +++ Tip\n\n    Seeds\n\n    +++'],
     ['a longer marker starting a quote', '> ++++Tip\n>\n> Seeds', '> +++ Tip\n>\n> Seeds\n>\n> +++'],
     ['a longer marker that is the item\'s only text stays text', '1. ++++Tip\n2. Next', '1. ++++Tip\n2. Next'],
     // Markers of other widths do not pair in Linear: the container stays as written.
-    ['mixed widths stay as written', '1. ++++Tip\n\n   Seeds\n\n   +++', '1. ++++Tip\n\n   Seeds\n\n   +++'],
     ['titled opener', '+++ Garden\n\nSeeds\n\n+++', '+++ Garden\n\nSeeds\n\n+++'],
     ['titled opener with a padded closer', '+++ Garden\n\nSeeds\n\n+++ \t', '+++ Garden\n\nSeeds\n\n+++'],
     ['nesting and successive sections', '+++\n\n+++ Tray\n\nSeeds\n\n+++\n\nWater daily\n\n+++\n\n+++\n\nTools\n\n+++',
@@ -182,7 +179,6 @@ describe('triple-plus section markers', () => {
       '1. Tray\n\n   +++ \n\n   Seeds\n\n   +++'],
     ['tab after a bullet inside a quote', '>  *\tTray\n>\n> \t\t+++\n>\n> \t\tSeeds',
       '> * Tray\n>\n>   +++ \n>\n>   Seeds\n>\n>   +++'],
-    ['section first in item', '* +++\n\n  Seeds\n\n  +++\n* Tools', '* \n\n  +++ \n\n  Seeds\n\n  +++\n* Tools'],
     ['lazy list continuation', '* Tray\n+++\nSeeds\n+++', '* Tray\n\n+++ \n\nSeeds\n\n+++'],
     // Linear keeps a marker over a lazy line as text. Written with the
     // line's prefix it would read as a section: the marker is escaped.
@@ -190,9 +186,7 @@ describe('triple-plus section markers', () => {
     ['marker over a lazy item line', '* +++\nSeeds', '* \\+++\n  Seeds'],
     ['titled marker over a lazy item line', '* +++Plan\nlazy words', '* \\+++Plan\n  lazy words'],
     ['marker over a sibling item stays text', '* +++\n* b', '* +++\n* b'],
-    ['titled marker first in an item, the next line right below it', '1. +++Plan\n   first step', '1. \n\n   +++ Plan\n\n   first step\n\n   +++'],
     ['titled marker first in a quote, the next line right below it', '> +++Plan\n> first step', '> +++ Plan\n>\n> first step\n>\n> +++'],
-    ['titled section first in an item', '* +++ Tray\n\n  Seeds\n\n  +++\n* Tools', '* \n\n  +++ Tray\n\n  Seeds\n\n  +++\n* Tools'],
     ['titled marker alone in an item stays text', '1. +++Plan\n2. Next', '1. +++Plan\n2. Next'],
     ['indent at the document root does not move the closer into a list', '  +++\n\n* Seeds', '+++ \n\n* Seeds\n\n+++'],
     ['indent in a quote does not move the closer into a list', '>   +++\n>\n> * Seeds',
@@ -219,4 +213,86 @@ describe('triple-plus section markers', () => {
       assert.deepEqual(lintText('doc.md', expected), []);
     });
   }
+});
+
+// Linear writes a section that starts a list item as the item's marker, a
+// blank line and the section at the item's text column, and reads that form
+// back as an empty item with the section after it, outside the item (MDS-029-88).
+describe('a section that starts a list item', () => {
+  const left: Array<[string, string, number]> = [
+    ['an untitled section', '* +++\n\n  Seeds\n\n  +++\n* Tools', 1],
+    ['a titled section', '* +++ Tray\n\n  Seeds\n\n  +++\n* Tools', 1],
+    ['a titled marker with the next line right below it', '1. +++Plan\n   first step', 1],
+    ['a longer marker with more of the item', '1. ++++Tip\n   Seeds', 1],
+    ['a longer marker in a nested item', '* a\n  * ++++Tip\n\n    Seeds', 2],
+    ['a marker over a nested item, tab-indented', '1. Spring\n\t1. +++Seed notes\n\t\t1. **Water**\n\t2. Plant', 2],
+    ['a nested item after a list of another kind', '* Plan\n  1. one\n\n  * +++ \n\n    words\n\n    +++', 4],
+    ['an item in a quote', '> 1. +++ Plan\n>    first step\n>\n>    +++', 1],
+    ['a >>> line', '* >>> Tray\n\n  Seeds\n* Tools', 1],
+    ['a >>> line in a nested item', '1. Spring\n   1. >>> Seed notes\n      Keep moist.\n   2. Plant', 2],
+    ['an item with mixed widths', '1. ++++Tip\n\n   Seeds\n\n   +++', 1],
+    ['a section with a closer of another width', '* +++ Tip\n\n  Seeds\n\n  ++++\n* Tools', 1],
+    ['a section before one with a closer of another width', '* +++ Tray\n\n  Seeds\n\n  +++\n\n  ++++ Tip\n\n  Soil\n\n  +++\n* Tools', 1],
+  ];
+  for (const [label, input, line] of left) {
+    it(`is left to the author and reported: ${label}`, () => {
+      assert.equal(fixText(input), input);
+      const findings = lintText('doc.md', input).filter((finding) => finding.rule === 'block-first-in-list-item');
+      assert.deepEqual(findings.map((finding) => finding.line), [line]);
+    });
+  }
+
+  const linearForms = [
+    ['a bullet item', '* \n\n  +++ Tray\n\n  Seeds\n\n  +++\n* Tools', '* \n\n+++ Tray\n\nSeeds\n\n+++\n\n* Tools'],
+    ['an ordered item', '1. \n\n   +++ Plan\n\n   first step\n\n   +++', '1. \n\n+++ Plan\n\nfirst step\n\n+++'],
+    ['an item in a quote', '> 1. \n>\n>    +++ Plan\n>\n>    first step\n>\n>    +++', '> 1. \n>\n> +++ Plan\n>\n> first step\n>\n> +++'],
+    // Linear writes the list going on right below the closing line, where
+    // Markdown reads a marker numbered other than 1 as text: left as it is.
+    ['a nested item, its list going on', '1. Spring\n   1. \n\n      +++ Seed notes\n\n      Keep moist.\n\n      +++\n   2. Plant',
+      '1. Spring\n   1. \n\n      +++ Seed notes\n\n      Keep moist.\n\n      +++\n   2. Plant'],
+  ] as const;
+  for (const [label, input, expected] of linearForms) {
+    it(`in Linear's form is an empty item and a section outside it: ${label}`, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected);
+      assert.deepEqual(lintText('doc.md', expected), []);
+    });
+  }
+
+  // Linear writes the list going on right below the closing line, where
+  // Markdown reads its marker as text of the `+++` paragraph: a capture
+  // still reads the section, not a title to escape.
+  const captured = [
+    ['in the section\'s list', '1. Spring\n   1. \n\n   +++ Seed notes\n\n   Keep moist.\n\n   +++\n   2. Plant'],
+    ['in the list around it', '1. Spring\n   1. \n\n      +++ Seed notes\n      1. **Water**\n\n      +++\n   2. Plant'],
+    ['in an empty bullet item', '* Tools\n  * \n\n  +++ Shed\n\n  Rake.\n\n  +++\n  * \n  * Gloves'],
+  ] as const;
+  for (const [label, form] of captured) {
+    it(`a capture keeps Linear's form of a section with a list going on ${label}`, () => {
+      assert.equal(fixLinearText(form, form, () => false), form);
+    });
+  }
+
+  it('reports a section scan past the parser\'s limits as markdown-complexity', () => {
+    const chain = Array.from({ length: 80 }, () => '2.').join(' ');
+    const input = `* +++ Notes\n  ${chain} a\n\n  +++`;
+    assert.deepEqual(lintText('doc.md', input).map((finding) => finding.rule), ['markdown-complexity']);
+  });
+
+  it('a capture escapes a title above a list Linear does not write', () => {
+    const form = '+++ Supplies\n\nBeans.\n\n+++ Rake\n2) Pear';
+    assert.equal(fixLinearText(form, form, () => false).includes('\\+++ Supplies'), true);
+  });
+
+  it('is not reported for a marker fix keeps as text', () => {
+    const input = '* +++ Tray\n\n  [ref]: /notes';
+    assert.equal(fixText(input), input);
+    assert.deepEqual(lintText('doc.md', input).filter((finding) => finding.rule === 'block-first-in-list-item'), []);
+  });
+
+  it('after the item\'s text stays in the item', () => {
+    const input = '1. Spring\n   1. Notes\n\n      +++ Seed notes\n\n      Keep moist.\n\n      +++\n   2. Plant';
+    assert.equal(fixText(input), input);
+    assert.deepEqual(lintText('doc.md', input), []);
+  });
 });

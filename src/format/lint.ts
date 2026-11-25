@@ -7,7 +7,7 @@ import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent,
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, bracketedLabel, codeSpanText, linearDropsCodeSpaces, listKind, listParts, MAX_LIST_NUMBER, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
-import { unwritableSectionLine } from './sections.ts';
+import { sectionsFirstInItem, unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
@@ -467,6 +467,20 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
   });
   const section = unwritableSectionLine(body);
   if (section !== undefined) report('section-opener', section);
+  // A section is a block too: Linear writes it below an empty marker line,
+  // which it reads back as an empty item and the section outside it.
+  if (body.includes('+++') || body.includes('>>>')) {
+    // The section parse splits lines the ordinary parse reads as one
+    // paragraph, so it can pass the parser's limits where that one did not.
+    let firstInItem: number[] = [];
+    try {
+      firstInItem = sectionsFirstInItem(body);
+    } catch (error) {
+      if (!(error instanceof MarkdownLimitError)) throw error;
+      report('markdown-complexity', 1);
+    }
+    for (const at of firstInItem) report('block-first-in-list-item', body.slice(0, at).split('\n').length);
+  }
 }
 
 /**

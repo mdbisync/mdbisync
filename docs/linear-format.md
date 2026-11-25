@@ -215,9 +215,11 @@ Blocks:
 - A section marker that starts a list item or quote opens a section when
   more of the item or quote follows it, also on the next line: Linear reads
   `1. +++Plan` followed by `   first step` as a section titled `Plan`. In a
-  list item `fix` writes it as Linear does: the marker alone on its line
-  with a space (`1. `), a blank line, then the section. A marker that is
+  quote `fix` writes it as Linear does. In a list item it is
+  [`block-first-in-list-item`](#block-first-in-list-item). A marker that is
   the item's only text stays text.
+- An empty list item followed by a blank line and a section is an empty
+  item with the section after it, outside the item, as Linear reads it.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
@@ -939,18 +941,23 @@ is.
 
 ### `block-first-in-list-item`
 
-A list item that starts with a heading, code, a quote or another block is
-written in a form Markdown reads as an empty item. Start the item with a
-line of text and put the block below it. Before such a block Linear adds
-an empty paragraph and writes the marker, a blank line and the indented
-block, so the block falls out of the list. `fix` cannot
-choose the text the item should start with, so it leaves the file to you.
-A list that starts an item (`* * a`, `1. 2.`) is no finding: `fix` writes
-it below the marker line, as Linear does.
+A list item that starts with a heading, code, a quote, a collapsible
+section or another block is written in a form Markdown reads as an empty
+item. Start the item with a line of text and put the block below it.
+Before such a block Linear adds an empty paragraph and writes the marker,
+a blank line and the indented block, so the block falls out of the list.
+Linear reads that form of a section the same way: the section moves out
+of the item, and the rest of the item's list starts a new list after it.
+`fix` cannot choose the text the item should start with, so it leaves the
+file to you. A list that starts an item (`* * a`, `1. 2.`) is no finding:
+`fix` writes it below the marker line, as Linear does.
 
 ```markdown
 * ## Step one
   Install the tools.
+1. +++ Notes
+   Water daily.
+   +++
 ```
 
 ### `ordered-task-list`

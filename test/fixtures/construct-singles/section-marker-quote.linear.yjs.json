@@ -1,0 +1,26 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "collapsible_section",
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+          "children": [
+            {
+              "type": "collapsible_heading",
+              "children": [
+                {"type":"paragraph"}
+              ]
+            },
+            {"type":"paragraph","children":[{"text":"Cover the pots.","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-9c7ac9d9","marks":{"attribution":"user"}}]}
+  ]
+}

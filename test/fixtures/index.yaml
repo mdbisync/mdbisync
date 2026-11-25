@@ -69,7 +69,7 @@ rules:
   - id: url-in-html
     title: "A URL inside raw HTML is turned into a Markdown link."
   - id: block-first-in-list-item
-    title: "A list item that starts with a heading, code, a quote or another block is written in a form Markdown reads as an empty item."
+    title: "A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item."
   - id: ordered-task-list
     title: "An ordered task list becomes a bullet task list."
   - id: table-hash-cell
@@ -100,7 +100,7 @@ known_constructs:
   - construct: list-number-too-long
     class: lint-error
   - construct: item-section-long-run
-    class: fixable
+    class: lint-error
   - construct: section-long-run
     class: fixable
   - construct: table-line-without-pipe
@@ -120,7 +120,9 @@ known_constructs:
   - construct: setext-heading-lines
     class: lint-error
   - construct: item-section-run
-    class: fixable
+    class: lint-error
+  - construct: item-section-after-empty-item
+    class: unchanged
   - construct: table-one-column
     class: fixable
   - construct: table-header-no-pipe
@@ -3399,12 +3401,22 @@ fixtures:
     note: "A section with a body closes at the end of its container."
   - file: "construct-singles/section-marker-containers.md"
     group: construct-singles
-    construct: collapsible-section-opener
-    class: fixable
+    construct: item-section-run
+    class: lint-error
+    rule: block-first-in-list-item
+    line: 1
     basis: known
     canary: kx-681bd3ea
     corpus: false
-    note: "Section pairing is local to each list item or quote."
+    note: "a section starting a list item; Linear writes the marker, a blank line and the section, which it reads back as an empty item and the section outside it. Section pairing is local to each list item or quote."
+  - file: "construct-singles/section-marker-quote.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-9c7ac9d9
+    corpus: false
+    note: "A bare opener that starts a quote opens a section there; fix writes it as Linear does."
   - file: "construct-singles/section-marker-standalone.md"
     group: construct-singles
     construct: collapsible-section-opener
@@ -3530,7 +3542,9 @@ fixtures:
   - file: "construct-singles/item-section-run.md"
     group: construct-singles
     construct: item-section-run
-    class: fixable
+    class: lint-error
+    rule: block-first-in-list-item
+    line: 11
     basis: known
     canary: kx-84ea78d6
     corpus: false
@@ -3538,15 +3552,37 @@ fixtures:
   - file: "construct-singles/item-section-run-more.md"
     group: construct-singles
     construct: item-section-run
-    class: fixable
+    class: lint-error
+    rule: block-first-in-list-item
+    line: 3
     basis: known
     canary: kx-059880be
     corpus: false
     note: "a section starting a list item, with blank lines or empty; Linear writes an empty first line and the section below it"
+  - file: "construct-singles/item-section-nested.md"
+    group: construct-singles
+    construct: item-section-run
+    class: lint-error
+    rule: block-first-in-list-item
+    line: 4
+    basis: known
+    canary: kx-c0acae56
+    corpus: false
+    note: "a section starting a nested item (tab-indented, or with a blank line); Linear writes the marker, a blank line and the section at the item's column, which it reads back as an empty item and the section in the parent item"
+  - file: "construct-singles/item-section-after-empty-item.md"
+    group: construct-singles
+    construct: item-section-after-empty-item
+    class: unchanged
+    basis: known
+    canary: kx-c2513bbc
+    corpus: false
+    note: "Linear's form of an empty item with a section after it, outside the item: in a nested list that goes on below the section, and at the end of a list"
   - file: "construct-singles/item-section-run-outside.md"
     group: construct-singles
     construct: item-section-run
-    class: fixable
+    class: lint-error
+    rule: block-first-in-list-item
+    line: 10
     basis: known
     canary: kx-28e5300f
     corpus: false
@@ -3554,7 +3590,9 @@ fixtures:
   - file: "construct-singles/item-section-run-tight.md"
     group: construct-singles
     construct: item-section-run
-    class: fixable
+    class: lint-error
+    rule: block-first-in-list-item
+    line: 3
     basis: known
     canary: kx-65eb6a08
     corpus: false
@@ -3673,7 +3711,9 @@ fixtures:
   - file: "construct-singles/item-section-long-run.md"
     group: construct-singles
     construct: item-section-long-run
-    class: fixable
+    class: lint-error
+    rule: block-first-in-list-item
+    line: 1
     basis: known
     canary: kx-750c916e
     corpus: false
