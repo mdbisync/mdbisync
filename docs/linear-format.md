@@ -241,7 +241,13 @@ Inline text:
   [`hard-break-backslash`](#hard-break-backslash)).
 - A `-` or `*` that starts a line of a paragraph as text gets a backslash,
   as Linear writes it: `-- a remark` becomes `\-- a remark`, and `*note`
-  becomes `\*note`.
+  becomes `\*note`. After a continuation line's own indentation only the
+  `*` gets one.
+- A continuation line of a paragraph keeps its own indentation, as Linear
+  does: the quote's `>` or the item's indent is written in place of the
+  source's, and spaces or tabs past it stay. A tab that the item's indent
+  covers only in part leaves its other columns as spaces: under `* item`, a
+  line indented with one tab is written with four spaces.
 
 ## How documents look in Linear
 

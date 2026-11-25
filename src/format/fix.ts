@@ -459,16 +459,26 @@ class Writer {
     const line = lineStartOf(this.source, start(item));
     const columnAt = (offset: number): number => [...this.source.slice(line, offset)].reduce(advanceColumn, 0);
     let at = line;
+    // Where a parent's prefix ends inside a tab it takes only in part: an
+    // item's indent, or the one column a quote's `>` takes of a tab after it.
+    let partial: number | undefined;
     for (const container of this.containers) {
-      if (lineStartOf(this.source, container.content) === line) at = container.content;
-      else if (container.kind === 'quote') at += prefixOf(container, this.source.slice(at, start(item)))?.[0].length ?? 0;
-      else {
-        const end = columnAt(at) + container.indent;
+      if (container.kind === 'item' && lineStartOf(this.source, container.content) !== line) {
+        const end = (partial ?? columnAt(at)) + container.indent;
         while (at < start(item) && isSpaceOrTab(this.source[at]!) && advanceColumn(columnAt(at), this.source[at]!) <= end) at++;
+        partial = at < start(item) && this.source[at] === '\t' && columnAt(at) < end ? end : undefined;
+        continue;
       }
+      if (lineStartOf(this.source, container.content) === line) at = container.content;
+      else at += prefixOf(container, this.source.slice(at, start(item)))?.[0].length ?? 0;
+      partial = container.kind === 'quote' && this.source[at - 1] === '>' && this.source[at] === '\t' ? columnAt(at) + 1 : undefined;
     }
     const content = this.contentIndent(item);
-    return { kind: 'item', indent: Math.max(0, columnAt(start(item)) - columnAt(at)) + content, content: start(item) + content };
+    // Past the marker the indent counts columns: a tab after it runs to the next multiple of four.
+    const [first] = item.children;
+    const sameLine = first !== undefined && item.checked == null && lineStartOf(this.source, start(first)) === line;
+    const columns = sameLine ? columnAt(start(first)) - columnAt(start(item)) : content;
+    return { kind: 'item', indent: Math.max(0, columnAt(start(item)) - (partial ?? columnAt(at))) + columns, content: start(item) + content };
   }
 
   /**
@@ -517,8 +527,8 @@ class Writer {
   /**
    * Inline content copied from the source with targeted rewrites. The line
    * prefixes of the containers (quote markers, list indentation) are dropped,
-   * since the caller writes its own, and so is the insignificant indentation
-   * of continuation lines outside code spans.
+   * since the caller writes its own; a continuation line keeps the rest of
+   * its indentation, as Linear does.
    *
    * In a paragraph Linear escapes a literal `-` or `*` that starts a line,
    * as in `\--` or `\*note`: `lineStarts` says which lines start one, all
@@ -574,10 +584,11 @@ class Writer {
     for (let at = this.source.indexOf('\n', from); at !== -1 && at < to; at = this.source.indexOf('\n', at + 1)) {
       const continuation = this.continuation(at + 1, inside(code, at), paragraph !== undefined && !inside(paragraph.html, at));
       edits.push(continuation);
-      if (paragraph === undefined || continuation.text !== '') continue;
-      // Indentation kept before a `-` or `*` is not needed once it is escaped.
+      if (paragraph === undefined || continuation.underline) continue;
+      // After indentation Linear escapes a `*` but leaves a `-` plain.
+      const indented = continuation.text !== '' || /^[ \t]/.test(this.source.slice(continuation.to, to));
       const content = continuation.to + /^[ \t]*/.exec(this.source.slice(continuation.to, to))![0].length;
-      if (this.escapeLineStart(content, to, paragraph.texts, edits, true)) continuation.to = content;
+      this.escapeLineStart(content, to, paragraph.texts, edits, true, indented);
     }
     let out = '';
     let at = from;
@@ -591,11 +602,12 @@ class Writer {
   }
 
   /**
-   * Rewrites the first content of a paragraph line and returns whether to
-   * drop indentation before an escaped '-' or '*'. Inline edits handle runs
-   * of asterisks because they can include both literal text and delimiters.
+   * Rewrites the first content of a paragraph line as Linear writes it,
+   * and says whether it escaped a `-` or `*`. Inline edits handle runs of
+   * asterisks because they can include both literal text and delimiters.
+   * After the line's own indentation (`indented`) Linear leaves a `-` plain.
    */
-  private escapeLineStart(at: number, limit: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[], continuation = false): boolean {
+  private escapeLineStart(at: number, limit: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[], continuation = false, indented = false): boolean {
     const char = this.source[at];
     if (this.rewriteEscapes && continuation && char === '\\' && this.source[at + 1] === '+'
       && /^[ \t]*$/.test(this.source.slice(at + 2, this.textLineAt(at).to))
@@ -617,25 +629,26 @@ class Writer {
       }
       return false; // Preserve the indentation Linear keeps before a literal number.
     }
-    if (char !== '-' && (char !== '*' || this.source[at + 1] === '*')) return false;
+    if ((char !== '-' || indented) && (char !== '*' || this.source[at + 1] === '*')) return false;
     if (!texts.some(([a, b]) => a <= at && at < b)) return false;
     edits.push({ from: at, to: at, text: '\\' });
     return true;
   }
 
   /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's text. */
-  private continuation(lineStart: number, inCode: boolean, paragraph = false): Edit {
-    let at = lineStart;
+  private continuation(lineStart: number, inCode: boolean, paragraph = false): Edit & { underline?: true } {
     const line = this.source.slice(lineStart, this.source.indexOf('\n', lineStart) === -1 ? undefined : this.source.indexOf('\n', lineStart));
-    for (const container of this.containers) {
-      const rest = this.source.slice(at, lineStart + line.length);
-      const prefix = prefixOf(container, rest);
-      // A lazy line carries no further prefixes. In an item, that is a line
-      // indented less than the item's content: its spaces are its own, and
-      // in a code span they are code text.
-      if (!prefix || (container.kind === 'item' && prefix[0].length < container.indent)) break;
-      at += prefix[0].length;
-    }
+    const lineEnd = lineStart + line.length;
+    // Up to the first container the line does not match: where a lazy line's own text starts.
+    const matched = this.codePrefixEnd(lineStart, line);
+    const ownText = matched + /^[ \t]*/.exec(this.source.slice(matched, lineEnd))![0].length;
+    const startsBlock = BLOCK_START.test(this.source.slice(ownText, lineEnd));
+    let { at, pad, lazy } = inCode ? { at: matched, pad: 0, lazy: false } : this.prefixEnd(lineStart, line);
+    // A lazy line's indentation can be what keeps its text from opening a
+    // block (four spaces before `#`), and so can a file block label's,
+    // whose later lines carry no prefix for their item: such a line keeps
+    // all of its indentation past the prefixes it matches.
+    if (!inCode && (lazy || this.fileBlockIndent > 0) && startsBlock) ({ at, pad } = { at: matched, pad: 0 });
     // A lazy line of only `-` or `=` continues the paragraph text. Under
     // the prefix the caller writes, it would underline the paragraph as a
     // setext heading. In paragraph text Linear escapes it (`\--`, `\==`);
@@ -647,16 +660,87 @@ class Writer {
     // is written: the line stays as it is.
     const underline = /^([ \t]*)(?:-+|=+)[ \t]*$/.exec(this.source.slice(at, lineStart + line.length));
     if (underline && (this.containers.length > 0 || this.fileBlockIndent > 0)) {
-      if (inCode) return { from: lineStart - 1, to: at, text: ' ' };
-      return { from: lineStart, to: at + underline[1]!.length, text: paragraph ? '\\' : ' '.repeat(4 + this.fileBlockIndent) };
+      if (inCode) return { from: lineStart - 1, to: at, text: ' ', underline: true };
+      return { from: lineStart, to: at + underline[1]!.length, text: paragraph ? '\\' : ' '.repeat(4 + this.fileBlockIndent), underline: true };
     }
-    if (!inCode) {
-      const rest = this.source.slice(at, lineStart + line.length);
-      const space = /^[ \t]*/.exec(rest)![0];
-      // Indentation that keeps `>` or `#` literal stays, so the text does not turn into a block.
-      if (!BLOCK_START.test(rest.slice(space.length)) || space.length === 0) at += space.length;
+    // A file block label's later lines are written without the item's
+    // prefix: their indentation goes, as before.
+    if (!inCode && this.fileBlockIndent > 0 && !startsBlock) return { from: lineStart, to: ownText, text: '' };
+    // The rest of the line's indentation is its own: Linear keeps it, and
+    // the columns of a tab the prefixes took only in part stay as spaces.
+    // Under a written prefix a tab can span other columns than in the
+    // source; before text that could open a block it becomes the spaces it
+    // spanned there.
+    if (!inCode && startsBlock && this.containers.length > 0 && this.source.slice(at, ownText).includes('\t')) {
+      const column = (offset: number): number => [...this.source.slice(lineStart, offset)].reduce(advanceColumn, 0);
+      return { from: lineStart, to: ownText, text: ' '.repeat(pad + column(ownText) - column(at)) };
     }
-    return { from: lineStart, to: at, text: '' };
+    return { from: lineStart, to: at, text: ' '.repeat(pad) };
+  }
+
+  /**
+   * Where a continuation line's container prefixes end, outside a code
+   * span, as Linear reads them: a quote takes its `>` and one space, and
+   * a line without one (a lazy line) keeps its indentation for the quote;
+   * an item takes up to its content indent in columns, so a lazy line
+   * indented less loses all of it. A tab counts to the next multiple of
+   * four columns; `pad` is the columns of a tab past the last prefix, and
+   * `lazy` whether a container found no prefix of its own on the line.
+   */
+  private prefixEnd(lineStart: number, line: string): { at: number; pad: number; lazy: boolean } {
+    const lineEnd = lineStart + line.length;
+    let at = lineStart;
+    let column = 0;
+    let pad = 0;
+    let lazy = false;
+    const take = (): number => {
+      const before = column;
+      column = advanceColumn(column, this.source[at]!);
+      at++;
+      return column - before;
+    };
+    for (const container of this.containers) {
+      if (container.kind === 'quote') {
+        // Columns left of a tab count as indentation before the `>`.
+        const marker = pad <= 3 ? new RegExp(`^ {0,${3 - pad}}>`).exec(this.source.slice(at, lineEnd)) : null;
+        if (marker === null) {
+          lazy = true;
+          continue;
+        }
+        pad = 0;
+        for (let index = 0; index < marker[0].length; index++) take();
+        // The `>` takes one space after it, or one column of a tab.
+        if (this.source[at] === ' ') take();
+        else if (this.source[at] === '\t') pad = take() - 1;
+        continue;
+      }
+      let need = container.indent;
+      const taken = Math.min(pad, need);
+      pad -= taken;
+      need -= taken;
+      while (need > 0 && at < lineEnd && isSpaceOrTab(this.source[at]!)) {
+        const width = take();
+        if (width > need) pad = width - need;
+        need = Math.max(0, need - width);
+      }
+      if (need > 0) lazy = true;
+    }
+    return { at, pad, lazy };
+  }
+
+  /**
+   * Where a continuation line's container prefixes end inside a code span,
+   * where spaces are code text: a lazy line (no `>`, or indented less than
+   * its item's content) carries no further prefixes, and keeps its spaces.
+   */
+  private codePrefixEnd(lineStart: number, line: string): number {
+    let at = lineStart;
+    for (const container of this.containers) {
+      const prefix = prefixOf(container, this.source.slice(at, lineStart + line.length));
+      if (!prefix || (container.kind === 'item' && prefix[0].length < container.indent)) break;
+      at += prefix[0].length;
+    }
+    return at;
   }
 
   private inlineChildrenEdits(children: readonly PhrasingContent[], inline: InlineEdits, insideStrong = false): void {

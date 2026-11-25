@@ -73,6 +73,8 @@ rules:
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
+  - construct: continuation-indent
+    class: fixable
   - construct: empty-list-item
     class: fixable
   - construct: ordered-list-aligned-numbers
@@ -2975,3 +2977,27 @@ fixtures:
     canary: kx-a649dff0
     corpus: false
     note: "an ordered list that passes 100 aligns its numbers to three digits"
+  - file: "construct-singles/continuation-indent-paragraph.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-f7065a0f
+    corpus: false
+    note: "Linear keeps a paragraph continuation line's spaces or tab, in a quote after its marker too; after them it escapes a * but not a -"
+  - file: "construct-singles/continuation-indent-items.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-b134e62a
+    corpus: false
+    note: "an item's continuation line keeps its indentation past the item's content indent; a tab the item takes in part leaves its other columns as spaces"
+  - file: "construct-singles/continuation-indent-lazy.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-b3c45fd3
+    corpus: false
+    note: "a lazy line keeps its indentation for a quote and loses what an item's content indent takes"

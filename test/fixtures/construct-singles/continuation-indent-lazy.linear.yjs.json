@@ -1,0 +1,111 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {"text":"Quoted line","marks":{"attribution":"user"}},
+            {"type":"hard_break"},
+            {"text":"  lazy with two spaces","marks":{"attribution":"user"}}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "bullet_list",
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {"text":"a","marks":{"attribution":"user"}},
+                    {"type":"hard_break"},
+                    {"text":"lazy two","marks":{"attribution":"user"}}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "bullet_list",
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {"text":"b","marks":{"attribution":"user"}},
+                    {"type":"hard_break"},
+                    {"text":"lazy zero","marks":{"attribution":"user"}}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {"text":"quote","marks":{"attribution":"user"}},
+            {"type":"hard_break"},
+            {"text":"\tlazy tab","marks":{"attribution":"user"}}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"outer","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "children": [
+                        {"text":"inner","marks":{"attribution":"user"}},
+                        {"type":"hard_break"},
+                        {"text":"  inner continued with six","marks":{"attribution":"user"}},
+                        {"type":"hard_break"},
+                        {"text":"lazy for inner","marks":{"attribution":"user"}}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-b3c45fd3","marks":{"attribution":"user"}}]}
+  ]
+}

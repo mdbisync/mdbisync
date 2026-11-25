@@ -153,6 +153,18 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/continuation-indent-items.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/continuation-indent-lazy.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/continuation-indent-paragraph.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/dash-only-lines.md": {
       "yjs": "recorded",
       "fixedPoint": true
