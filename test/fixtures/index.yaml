@@ -74,7 +74,31 @@ rules:
     title: "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it."
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
+  - id: table-list-cell
+    title: "A table body cell starting with -, + or * and a space, or with a number and ), becomes a list, which Linear writes with * or a number and a dot. Put a backslash before the -, + or *, or reword the cell."
+  - id: setext-heading-lines
+    title: "Linear keeps only the first line of a heading underlined with = or - as the heading; the lines after it become a paragraph. Put the heading text on one line."
+  - id: table-header-pipe
+    title: "A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |."
 known_constructs:
+  - construct: heading-empty
+    class: fixable
+  - construct: quote-empty
+    class: fixable
+  - construct: nbsp-space-number
+    class: fixable
+  - construct: setext-heading-lines
+    class: lint-error
+  - construct: item-section-run
+    class: fixable
+  - construct: table-one-column
+    class: fixable
+  - construct: table-header-no-pipe
+    class: lint-error
+  - construct: table-cell-markers
+    class: lint-error
+  - construct: table-cell-escaped-markers
+    class: fixable
   - construct: line-start-escape
     class: fixable
   - construct: code-span-lazy-dash-line
@@ -3246,3 +3270,129 @@ fixtures:
     canary: kx-58a3f733
     corpus: false
     note: "Linear writes a code span that runs over lines on one line: each line ending becomes a space, container prefixes go, the line's own indentation stays"
+  - file: "construct-singles/heading-empty-levels.md"
+    group: construct-singles
+    construct: heading-empty
+    class: fixable
+    basis: known
+    canary: kx-f4f96677
+    corpus: false
+    note: "Linear writes an empty heading of every level with a space after its hashes, also with a closing sequence or in a quote"
+  - file: "construct-singles/quote-empty-nested.md"
+    group: construct-singles
+    construct: quote-empty
+    class: fixable
+    basis: known
+    canary: kx-54dcf365
+    corpus: false
+    note: "Linear writes an empty quote, nested or not, with a space after its last sign; a blank line between a quote's blocks stays a bare sign"
+  - file: "construct-singles/nbsp-space-number.md"
+    group: construct-singles
+    construct: nbsp-space-number
+    class: fixable
+    basis: known
+    canary: kx-c35a525c
+    corpus: false
+    note: "past a no-break space at a line's start, also with spaces, Linear escapes the dot of a number before a space; N) stays"
+  - file: "construct-singles/nbsp-space-marker.md"
+    group: construct-singles
+    construct: nbsp-space-number
+    class: fixable
+    basis: known
+    canary: kx-845a4479
+    corpus: false
+    note: "past a no-break space Linear escapes a heading-like hash run and a number's dot; -, +, > and a number without a space or text stay"
+  - file: "construct-singles/nbsp-space-containers.md"
+    group: construct-singles
+    construct: nbsp-space-number
+    class: fixable
+    basis: known
+    canary: kx-f3096a01
+    corpus: false
+    note: "the no-break space escapes in a list item, a quote and a body cell; a heading's text keeps its number plain"
+  - file: "construct-singles/setext-heading-lines.md"
+    group: construct-singles
+    construct: setext-heading-lines
+    class: lint-error
+    rule: setext-heading-lines
+    line: 3
+    basis: known
+    canary: kx-8e951f4f
+    corpus: false
+    note: "Linear keeps a setext heading's first line as the heading and the other lines as a paragraph"
+  - file: "construct-singles/item-section-run.md"
+    group: construct-singles
+    construct: item-section-run
+    class: fixable
+    basis: known
+    canary: kx-84ea78d6
+    corpus: false
+    note: "+++ starting a list item: text when it is the item's only line, a section when a closing marker follows in the item"
+  - file: "construct-singles/item-section-run-more.md"
+    group: construct-singles
+    construct: item-section-run
+    class: fixable
+    basis: known
+    canary: kx-059880be
+    corpus: false
+    note: "a section starting a list item, with blank lines or empty; Linear writes an empty first line and the section below it"
+  - file: "construct-singles/item-section-run-outside.md"
+    group: construct-singles
+    construct: item-section-run
+    class: fixable
+    basis: known
+    canary: kx-28e5300f
+    corpus: false
+    note: "a +++ item followed by a +++ line after the list stays text; a titled marker with an indented line below it opens a section"
+  - file: "construct-singles/item-section-run-tight.md"
+    group: construct-singles
+    construct: item-section-run
+    class: fixable
+    basis: known
+    canary: kx-65eb6a08
+    corpus: false
+    note: "a marker starting a list item or quote with the next line right below it opens a section, titled or not"
+  - file: "tables/table-one-column.md"
+    group: tables
+    construct: table-one-column
+    class: fixable
+    basis: known
+    canary: kx-c6edf344
+    corpus: false
+    note: "one-column tables with body rows and header only stay tables; a pipe line with no delimiter row stays text"
+  - file: "tables/table-one-column-forms.md"
+    group: tables
+    construct: table-one-column
+    class: fixable
+    basis: known
+    canary: kx-9208ce58
+    corpus: false
+    note: "one-column tables with outer pipes left out on one side, without spaces, in a list item and a quote"
+  - file: "tables/table-header-no-pipe.md"
+    group: tables
+    construct: table-header-no-pipe
+    class: lint-error
+    rule: table-header-pipe
+    line: 3
+    basis: known
+    canary: kx-2e5e0e34
+    corpus: false
+    note: "Linear keeps a one-column table whose header line has no pipe as text"
+  - file: "tables/table-cell-markers.md"
+    group: tables
+    construct: table-cell-markers
+    class: lint-error
+    rule: table-list-cell
+    line: 5
+    basis: known
+    canary: kx-9b15a1b9
+    corpus: false
+    note: "Linear holds a body cell starting with a list marker as a list and writes it with * or N.; a number and a dot gets a space"
+  - file: "tables/table-cell-escaped-markers.md"
+    group: tables
+    construct: table-cell-escaped-markers
+    class: fixable
+    basis: known
+    canary: kx-38d519db
+    corpus: false
+    note: "escaped list markers at a body cell's start stay text; a cell of only a number and a dot is written with a space after it"

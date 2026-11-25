@@ -131,8 +131,16 @@ describe('triple-plus section markers', () => {
       '> * Tray\n>\n>   +++ \n>\n>   Seeds\n>\n>   +++'],
     ['section first in item', '* +++\n\n  Seeds\n\n  +++\n* Tools', '* \n\n  +++ \n\n  Seeds\n\n  +++\n* Tools'],
     ['lazy list continuation', '* Tray\n+++\nSeeds\n+++', '* Tray\n\n+++ \n\nSeeds\n\n+++'],
-    ['literal marker in a lazy quote', '> +++\nSeeds', '> +++\n> Seeds'],
-    ['literal marker in a lazy item', '* +++\nSeeds', '* +++\n  Seeds'],
+    // Linear keeps a marker over a lazy line as text. Written with the
+    // line's prefix it would read as a section: the marker is escaped.
+    ['marker over a lazy quote line', '> +++\nSeeds', '> \\+++\n> Seeds'],
+    ['marker over a lazy item line', '* +++\nSeeds', '* \\+++\n  Seeds'],
+    ['titled marker over a lazy item line', '* +++Plan\nlazy words', '* \\+++Plan\n  lazy words'],
+    ['marker over a sibling item stays text', '* +++\n* b', '* +++\n* b'],
+    ['titled marker first in an item, the next line right below it', '1. +++Plan\n   first step', '1. \n\n   +++ Plan\n\n   first step\n\n   +++'],
+    ['titled marker first in a quote, the next line right below it', '> +++Plan\n> first step', '> +++ Plan\n>\n> first step\n>\n> +++'],
+    ['titled section first in an item', '* +++ Tray\n\n  Seeds\n\n  +++\n* Tools', '* \n\n  +++ Tray\n\n  Seeds\n\n  +++\n* Tools'],
+    ['titled marker alone in an item stays text', '1. +++Plan\n2. Next', '1. +++Plan\n2. Next'],
     ['indent at the document root does not move the closer into a list', '  +++\n\n* Seeds', '+++ \n\n* Seeds\n\n+++'],
     ['indent in a quote does not move the closer into a list', '>   +++\n>\n> * Seeds',
       '> +++ \n>\n> * Seeds\n>\n> +++'],

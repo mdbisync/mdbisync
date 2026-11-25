@@ -1,0 +1,114 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph"},
+            {
+              "type": "collapsible_section",
+              "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+              "children": [
+                {
+                  "type": "collapsible_heading",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Plan","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {"type":"paragraph","children":[{"text":"first step","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph"},
+            {
+              "type": "collapsible_section",
+              "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+              "children": [
+                {
+                  "type": "collapsible_heading",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Topic","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {"type":"paragraph","children":[{"text":"notes here","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph"},
+            {
+              "type": "collapsible_section",
+              "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+              "children": [
+                {
+                  "type": "collapsible_heading",
+                  "children": [
+                    {"type":"paragraph"}
+                  ]
+                },
+                {"type":"paragraph","children":[{"text":"untitled notes","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"A paragraph between.","marks":{"attribution":"user"}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "collapsible_section",
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+          "children": [
+            {
+              "type": "collapsible_heading",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Quoted","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {"type":"paragraph","children":[{"text":"quoted notes","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "collapsible_section",
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+          "children": [
+            {
+              "type": "collapsible_heading",
+              "children": [
+                {"type":"paragraph"}
+              ]
+            },
+            {"type":"paragraph","children":[{"text":"untitled quoted notes","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-65eb6a08","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph"}
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "blockquote",
+          "children": [
+            {"type":"paragraph"}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "blockquote",
+          "children": [
+            {
+              "type": "blockquote",
+              "children": [
+                {"type":"paragraph"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "blockquote",
+          "children": [
+            {"type":"paragraph"}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"First line","marks":{"attribution":"user"}}]},
+        {
+          "type": "blockquote",
+          "children": [
+            {"type":"paragraph"}
+          ]
+        },
+        {"type":"paragraph","children":[{"text":"Last line","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-54dcf365","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -30,6 +30,16 @@ const cases: Array<[string, string, string]> = [
   ['an ordered list right-aligns its numbers to the widest one', '1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j', ' 1. a\n 2. b\n 3. c\n 4. d\n 5. e\n 6. f\n 7. g\n 8. h\n 9. i\n10. j'],
   ['an aligned ordered list lines up every item\'s content past its widest number', '8. a\n   * b\n\n   c\n9. d\n10. e\n    * f', ' 8. a\n    * b\n\n    c\n 9. d\n10. e\n    * f'],
   ['an empty item in an aligned ordered list keeps its space', '9.\n10. a', ' 9. \n10. a'],
+  ['an empty heading keeps a space after its hashes', '#\n\n###\n\n######\n\n## ##\n\n###   \n\n> ##', '# \n\n### \n\n###### \n\n## \n\n### \n\n> ## '],
+  ['an empty quote keeps a space after its last sign', '>\n\n> >\n\n>>\n\n> > >\n\n> a\n> >\n> b', '> \n\n> > \n\n> > \n\n> > > \n\n> a\n>\n> > \n>\n> b'],
+  ['past a no-break space at a line start, a number\'s dot and a heading-like hash get a backslash', '\u00a0 4. Rest\n\n\u00a0\u00a010. Rest\n\n\u00a0 # Rest\n\n\u00a0 ###### Rest\n\n\u00a0 #\n\na\n\u00a0 2. b', '\u00a0 4\\. Rest\n\n\u00a0\u00a010\\. Rest\n\n\u00a0 \\# Rest\n\n\u00a0 \\###### Rest\n\n\u00a0 \\#\n\na\n\u00a0 2\\. b'],
+  ['past a no-break space in an item, a quote and a body cell too', '1. \u00a0 4. Rest\n\n> \u00a0 # Rest\n\n| A |\n| -- |\n| \u00a0 4. x |', '1. \u00a0 4\\. Rest\n\n> \u00a0 \\# Rest\n\n| A |\n| -- |\n| \u00a0 4\\. x |\n'],
+  ['past a no-break space other markers, a number without a space and seven hashes stay', '\u00a0 - a\n\n\u00a0 + a\n\n\u00a0 > a\n\n\u00a0 4) a\n\n\u00a0 4.\n\n\u00a04.a\n\n\u00a0 ####### a\n\n# \u00a0 4. a', '\u00a0 - a\n\n\u00a0 + a\n\n\u00a0 > a\n\n\u00a0 4) a\n\n\u00a0 4.\n\n\u00a04.a\n\n\u00a0 ####### a\n\n# \u00a0 4. a'],
+  ['a body cell whose leading em space goes keeps the escape Linear writes past it', '| A |\n| -- |\n| \u2003# Notes |\n| \u2003 4. x |', '| A |\n| -- |\n| \\# Notes |\n| 4\\. x |\n'],
+  ['an escaped hash far from a leading no-break space loses its escape', '\u00a0 # a \\# b \\# c', '\u00a0 \\# a # b # c'],
+  ['a number and a dot with only whitespace after it stays plain past a no-break space', '\u00a0 4.  \nnext', '\u00a0 4.  \nnext'],
+  ['an escape past a no-break space stays', '\u00a0 \\# a\n\n\u00a0 4\\. a\n\n| A |\n| -- |\n| \u00a0 \\# b |', '\u00a0 \\# a\n\n\u00a0 4\\. a\n\n| A |\n| -- |\n| \u00a0 \\# b |\n'],
+  ['a body cell of only a number and a dot gets a space after the dot', '| A | B |\n| -- | -- |\n| 12. | 7. x |\n| 3.5 | x 1. |\n\n| 1. |\n| -- |\n| a |', '| A | B |\n| -- | -- |\n| 12.  | 7. x |\n| 3.5 | x 1. |\n\n| 1. |\n| -- |\n| a |\n'],
   ['an ordered list past 100 aligns to three digits', '99. a\n100. b\n     * c', ' 99. a\n100. b\n     * c'],
   ['an aligned ordered list nests under a bullet, in a quote and in another one', '* a\n\n  9. b\n  10. c\n\n> 9. d\n> 10. e\n\n9. f\n10. g\n\n    9. h\n    10. i', '* a\n\n   9. b\n  10. c\n\n>  9. d\n> 10. e\n\n 9. f\n10. g\n\n     9. h\n    10. i'],
   ['an ordered list keeps its start', '3. a\n4. b', '3. a\n4. b'],
@@ -276,8 +286,8 @@ describe('a backslash line break', () => {
     });
   }
 
-  it('is written next to a setext heading that fix writes on one line', () => {
-    assert.equal(fixText('Garden\nplan\n===\n\nRain\\\nand tea'), '# Garden plan\n\nRain\nand tea');
+  it('is written next to a setext heading that fix writes as an ATX heading', () => {
+    assert.equal(fixText('Garden plan\n===\n\nRain\\\nand tea'), '# Garden plan\n\nRain\nand tea');
   });
 
   it('keeps a break written with two spaces, as Linear does', () => {
@@ -566,9 +576,9 @@ describe('links to files that are not there', () => {
     assert.equal(sameAsLinear(fenced, 'Run:\n\n```sh\nmake now\n```'), false, 'a real code difference is still one');
     // In a quote they are content.
     assert.equal(sameAsLinear('> ```\n> make\n> \n> ```', '> ```\n> make\n> ```'), false);
-    // `fix` writes a setext heading on one line, joining its lines with a space: another text.
+    // A setext heading over two lines is the author's: Linear would split it.
     const setext = 'Two\nlines\n---\n\nText.';
-    assert.notEqual(fixText(setext), setext);
+    assert.equal(fixText(setext), setext);
     assert.equal(fixLinearText(setext, setext, () => false), setext);
   });
 });
@@ -1212,16 +1222,21 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('> `a\n>   b`'), '> `a   b`');
   });
 
-  it('writes a setext heading of two lines as one ATX line', () => {
-    assert.equal(fixText('Title\nmore\n====='), '# Title more');
+  // Linear keeps a setext heading's first text line as the heading and
+  // the others as a paragraph: lint reports it, and fix leaves the file.
+  it('leaves a setext heading of several text lines to its author', () => {
+    for (const input of ['Title\nmore\n=====', 'Title \t\n\t more\n=====', 'a\t\t\n\t\tb\n---', '> a\n> b\n> ===', 'a **b\nc**\n===']) {
+      assert.equal(fixText(input), input);
+      assert.deepEqual(lintText('doc.md', input).map(({ rule }) => rule), ['setext-heading-lines']);
+    }
   });
 
-  it('drops the spaces and tabs around each line break of a setext heading and keeps the others', () => {
-    assert.equal(fixText('Title \t\n\t more\n====='), '# Title more');
-    assert.equal(fixText('a\t\t\n\t\tb\n---'), '## a b');
-    assert.equal(fixText('a \n  b\n==='), '# a b');
+  it('writes a setext heading of one text line as one ATX line and keeps the spaces inside it', () => {
+    assert.equal(fixText('Title  more\n====='), '# Title  more');
+    assert.equal(fixText('a \t b\n---'), '## a \t b');
     assert.equal(fixText('# a     b'), '# a     b');
-    assert.equal(fixText('a \t b\nc\n==='), '# a \t b c');
+    // A line break in a code span is a space: Linear keeps one heading.
+    assert.equal(fixText('Title `a\n  b`\n==='), '# Title `a   b`');
   });
 
   // The heading's lines were joined by a regular expression that rescanned a
@@ -1242,8 +1257,8 @@ describe('what fix leaves alone', () => {
       const cases = {
         'ATX, spaces': ['# a' + spaces + 'b', '# a' + spaces + 'b'],
         'ATX, tabs': ['# a' + tabs + 'b', '# a' + tabs + 'b'],
-        'setext, run inside a line': ['a' + spaces + 'x\\nb\\n===', '# a' + spaces + 'x b'],
-        'setext, run before a soft break': ['a' + tabs + '\\nb\\n===', '# a b'],
+        'setext, run inside a line': ['a' + spaces + 'x\\n===', '# a' + spaces + 'x'],
+        'setext, run before a soft break': ['a' + tabs + '\\nb\\n===', 'a' + tabs + '\\nb\\n==='],
         'setext, run before a hard break': [hardBreakHeading, hardBreakHeading],
       };
       const result = {};

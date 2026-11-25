@@ -3,7 +3,7 @@
 // callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
-import type { Definition, ImageReference, LinkReference, Nodes, Root, Table } from 'mdast';
+import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, bracketedLabel, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
@@ -12,6 +12,8 @@ import { unwritableSectionLine } from './sections.ts';
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'unplaced-link']);
+const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
 const LETTER = /[a-z]/i;
@@ -49,10 +51,13 @@ export function linkedFileCheck(documentPath: string, isFile: (path: string) => 
  */
 export function lintInTree(file: string, text: string, files: ReadonlySet<string>): Finding[] {
   const findings = lintText(file, text, { linkedFileExists: linkedFileCheck(file, (path) => files.has(path)) });
-  // The heading rule guards the formatter's ATX conversion. The sync can
+  // The heading rules guard the formatter's ATX conversion. The sync can
   // preserve setext text and uses historical versions to verify writes.
+  // The setext and table rules report text Linear reads differently from
+  // Markdown, but Linear's own export can hold it (a rule, text lines and a
+  // rule; a list in a table cell): a document Linear wrote is not left out.
   // `unplaced-link` stops only `fix`: the sync sends the text as it is.
-  return findings.filter((finding) => finding.rule !== 'hard-break-in-heading' && finding.rule !== 'unplaced-link');
+  return findings.filter((finding) => !FIX_ONLY_RULES.has(finding.rule));
 }
 
 /** Lint findings for one file's text, ordered by line. */
@@ -250,9 +255,21 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (task !== undefined) report('ordered-task-list', line(task));
         break;
       }
-      case 'table':
-        if (node.align?.some((align) => align !== null)) report('table-alignment', line(node));
+      case 'heading': {
+        // Linear keeps a setext heading's text up to its first line break
+        // in text as the heading and reads the rest as a paragraph below
+        // it. A line break in a code span is a space there: such a heading
+        // stays one heading.
+        if (node.children.some((child) => softBreakInText(child, body))) report('setext-heading-lines', line(node));
         break;
+      }
+      case 'table': {
+        if (node.align?.some((align) => align !== null)) report('table-alignment', line(node));
+        // Linear needs a pipe in the header row: without one the table is text.
+        const lineEnd = body.indexOf('\n', start(node));
+        if (!body.slice(start(node), lineEnd === -1 ? undefined : lineEnd).includes('|')) report('table-header-pipe', line(node));
+        break;
+      }
       case 'tableCell': {
         // Linear reads heading syntax that starts a body cell as a heading:
         // a lone `#` or `##` becomes an empty one, and `# Total` one holding
@@ -267,6 +284,11 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (heading && table?.type === 'table' && table.children[0] !== row) {
           report('table-hash-cell', line(node));
         }
+        // Linear also reads a list marker that starts a body cell as a
+        // list, and writes it as `*` or `N.`: `+ fee` comes back `* fee`.
+        // A number and a dot keep their text; an escaped marker stays text.
+        const list = first?.type === 'text' && last !== undefined && LIST_CELL.test(body.slice(start(first), end(last)));
+        if (list && table?.type === 'table' && table.children[0] !== row) report('table-list-cell', line(node));
         break;
       }
       case 'text':
@@ -411,4 +433,10 @@ function hasUrlOrLinkAttribute(html: string): boolean {
     }
   }
   return false;
+}
+
+/** Whether the phrasing content's text runs over a line ending of the source, not in code or HTML (`&#10;` is no line ending). */
+function softBreakInText(node: PhrasingContent, body: string): boolean {
+  if (node.type === 'text') return body.slice(start(node), end(node)).includes('\n');
+  return 'children' in node && (node.children as PhrasingContent[]).some((child) => softBreakInText(child, body));
 }

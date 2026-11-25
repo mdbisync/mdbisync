@@ -85,6 +85,18 @@ export function plusSectionsAsLinear(body: string): string {
     tree = parseForSections(body);
   }
   const edits: Edit[] = [];
+  // Where each paragraph of the ordinary parse ends, by its start: a marker
+  // whose paragraph runs past its line has a lazy line after it.
+  let paragraphEnds: Map<number, number> | undefined;
+  const lazyAfter = (marker: Nodes): boolean => {
+    if (paragraphEnds === undefined) {
+      const ends = new Map<number, number>();
+      visit(parse(body), (node) => { if (node.type === 'paragraph') ends.set(start(node), end(node)); });
+      paragraphEnds = ends;
+    }
+    const paragraphEnd = paragraphEnds.get(start(marker));
+    return paragraphEnd !== undefined && paragraphEnd > lineEndAt(body, start(marker));
+  };
   visit(tree, (parent, ancestors) => {
     if (parent.type !== 'root' && parent.type !== 'blockquote' && parent.type !== 'listItem') return;
     const blocks = parent.children;
@@ -110,13 +122,18 @@ export function plusSectionsAsLinear(body: string): string {
         open.push(index);
       }
     }
-    // A lazy line after a final marker in a quote or item is ordinary
-    // paragraph text in Linear. Its readback carries the missing prefix,
-    // so it is indistinguishable from a tight, unpaired opener there.
-    const tightFirstBlock = (index: number): boolean => parent.type !== 'root' && index === 0
-      && blocks[index + 1] !== undefined
-      && blocks[index + 1]!.position!.start.line === blocks[index]!.position!.end.line + 1;
-    const implicit = open.filter((index) => index < lastContent && !tightFirstBlock(index));
+    // An opener with blocks after it in its container opens a section
+    // there, also as the first line of a list item or quote with the next
+    // line right below it.
+    const implicit = open.filter((index) => index < lastContent);
+    // Linear keeps a marker that a lazy line continues (no prefix) as
+    // text. This parse ends the container at that line, but the writer
+    // gives the line its prefix, which reads as a section: escape the
+    // marker so it stays text.
+    if (parent.type !== 'root' && blocks.length === 1 && markers[0] !== null && lazyAfter(blocks[0]!)) {
+      edits.push({ from: start(blocks[0]!), to: start(blocks[0]!), text: '\\', depth: ancestors.length });
+      return;
+    }
     for (const index of implicit) roles.set(index, `+++ ${markers[index]![1]!.trim()}`);
     // A final title-like paragraph exports just like the header of an empty
     // inner section. Keep an already written outer opener in that case.
@@ -132,8 +149,7 @@ export function plusSectionsAsLinear(body: string): string {
       if (marker === null) continue;
       const node = blocks[index]!;
       const at = start(node);
-      if (!roles.has(index) && parent.type !== 'root' && index === 0
-        && (index === blocks.length - 1 || tightFirstBlock(index))) continue;
+      if (!roles.has(index) && parent.type !== 'root' && index === 0 && index === blocks.length - 1) continue;
       const previous = blocks[index - 1];
       // The image writer can split off a literal section title and escape
       // its final marker. Keep those lines together for that rewrite.

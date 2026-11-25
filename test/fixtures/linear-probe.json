@@ -289,6 +289,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/heading-empty-levels.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/heading-no-space.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -314,6 +318,22 @@
       "fixedPoint": true
     },
     "construct-singles/hr-underscores.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/item-section-run-more.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/item-section-run-outside.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/item-section-run-tight.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/item-section-run.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -405,6 +425,18 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/nbsp-space-containers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/nbsp-space-marker.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/nbsp-space-number.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/paragraph-block-starters.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -422,6 +454,10 @@
       "fixedPoint": true
     },
     "construct-singles/paragraph-trailing-spaces.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/quote-empty-nested.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -458,6 +494,10 @@
       "fixedPoint": true
     },
     "construct-singles/section-marker-unpaired.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/setext-heading-lines.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -1173,6 +1213,14 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "tables/table-cell-escaped-markers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-cell-markers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "tables/table-code-pipe.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -1213,6 +1261,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "tables/table-header-no-pipe.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "tables/table-header-only.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -1230,6 +1282,14 @@
       "fixedPoint": true
     },
     "tables/table-no-outer-pipes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-one-column-forms.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-one-column.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

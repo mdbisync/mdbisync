@@ -23,6 +23,14 @@ const cases: Array<[LintRule, string, number]> = [
   ['table-hash-cell', 'Intro.\n\n> | Name | No. |\n> | -- | -- |\n> | Example |  # |', 5],
   ['table-hash-cell', '| A |\n| -- |\n| ## |', 3],
   ['table-hash-cell', '| A |\n| -- |\n| # Total **12** |', 3],
+  ['table-list-cell', '| A | B |\n| -- | -- |\n| 1 | 2 |\n| + fee | 3 |', 4],
+  ['table-list-cell', '| A |\n| -- |\n| - |', 3],
+  ['table-list-cell', '| A |\n| -- |\n| * fee |', 3],
+  ['table-list-cell', '> | A | B |\n> | -- | -- |\n> | x | 3) |', 3],
+  ['table-header-pipe', 'Intro.\n\nTotal\n| --- |\n| 5 |', 3],
+  ['table-header-pipe', '* Item\n\n  Total\n  |---|\n  |5|', 3],
+  ['setext-heading-lines', 'Intro.\n\nPlan\nfor May\n===', 3],
+  ['setext-heading-lines', '> Plan\n> for May\n> ---', 1],
   ['image-in-link', '[![a](x.png)](https://example.com)', 1],
   ['table-alignment', '| A | B |\n| :-- | --: |\n| 1 | 2 |', 1],
   ['link-scheme', '[Remove](javascript:alert%281%29)', 1],
@@ -72,6 +80,22 @@ describe('lint rules', () => {
   it('table-hash-cell spares a header hash, an escaped hash and a hash that is no heading', () => {
     const text = '| # | `#` |\n| -- | -- |\n| \\# | **#** |\n| Issue # | #5 |\n| \\## | ####### |';
     assert.deepEqual(lintText('doc.md', text), []);
+  });
+
+  it('table-list-cell spares the header row, escaped markers, markers without a space and a number with a dot', () => {
+    const text = '| + head | 1) |\n| -- | -- |\n| \\+ fee | \\- fee |\n| \\* fee | +fee |\n| -5 | 12. |\n| 3. x | **- x** |';
+    assert.deepEqual(lintText('doc.md', text), []);
+  });
+
+  it('table-header-pipe spares a table whose header row has a pipe', () => {
+    for (const text of ['| Total |\n| --- |\n| 5 |', 'Total |\n--- |\n5 |', '| Total\n| ---\n| 5', '|Total|\n|-|\n|5|']) {
+      assert.deepEqual(lintText('doc.md', text), [], text);
+    }
+  });
+
+  it('setext-heading-lines spares a heading of one text line and a line break inside a code span', () => {
+    // A character reference for a line feed is no line ending in the source.
+    for (const text of ['Plan for May\n===', 'Plan `for\nMay`\n---', '# Plan\nfor May', '# One&#10;Two', 'One&#10;Two\n===']) assert.deepEqual(lintText('doc.md', text), [], text);
   });
 
   it('table-hash-cell spares a hash followed by markup in the same cell', () => {
@@ -345,15 +369,18 @@ describe('lint and fix commands', () => {
   it('reports hard breaks in setext headings and keeps the file through two fixes', (t) => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'heading-hard-break-'));
     t.after(() => rmSync(fixtureDir, { recursive: true, force: true }));
+    // The first also breaks its heading's text with a soft break, which Linear splits off.
     const cases = [
-      ['heading-setext-break-spaces.md', 'hard-break-in-heading', 2],
-      ['heading-setext-break-backslash.md', 'hard-break-backslash', 1],
+      ['heading-setext-break-spaces.md', 'hard-break-in-heading', 2, [[1, 'setext-heading-lines']]],
+      ['heading-setext-break-backslash.md', 'hard-break-backslash', 1, []],
     ] as const;
-    for (const [file, rule, line] of cases) {
+    for (const [file, rule, line, others] of cases) {
       const source = readFileSync(new URL(`../../test/fixtures/lint-errors/${file}`, import.meta.url), 'utf8');
       const path = join(fixtureDir, file);
       writeFileSync(path, source);
-      const result = { exitCode: 1, stdout: `${file}:${line}: ${rule}: ${LINT_RULES[rule]}\n`, stderr: '' };
+      const findings: Array<readonly [number, LintRule]> = [...others, [line, rule]];
+      const stdout = findings.map(([at, name]) => `${file}:${at}: ${name}: ${LINT_RULES[name]}\n`).join('');
+      const result = { exitCode: 1, stdout, stderr: '' };
       assert.deepEqual(runLint([file], fixtureDir), result);
       assert.equal(fixText(source), source);
       for (let pass = 0; pass < 2; pass++) {

@@ -118,6 +118,10 @@ Blocks:
   Linear writes it.
 - Setext headings (text underlined with `===` or `---`) become `#`
   headings, and closing hashes go: `## Summary ##` becomes `## Summary`.
+  A setext heading whose text runs over several lines is left to you
+  ([`setext-heading-lines`](#setext-heading-lines)).
+- An empty heading or quote keeps a space after its marker, as Linear
+  writes it: `##` becomes `## `, and `> >` becomes `> > `.
 - Thematic breaks become `---`: `***` becomes `---`.
 - Bullets become `*`: `- item` becomes `* item`.
 - Loose lists become tight: the blank lines between items go, and a nested
@@ -156,8 +160,13 @@ Blocks:
   quote. `fix` writes that opener with one trailing space, as Linear does.
   A bare marker inside a section closes the innermost section and is written
   without trailing whitespace. A final bare marker with no section to close
-  stays plain text. A blank line after an unpaired opener at the start of a
-  list item or quote distinguishes it from a continued paragraph.
+  stays plain text.
+- A section marker that starts a list item or quote opens a section when
+  more of the item or quote follows it, also on the next line: Linear reads
+  `1. +++Plan` followed by `   first step` as a section titled `Plan`. In a
+  list item `fix` writes it as Linear does: the marker alone on its line
+  with a space (`1. `), a blank line, then the section. A marker that is
+  the item's only text stays text.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
@@ -186,7 +195,11 @@ Blocks:
   (`<br>`, `<br/>`, `<br />`) is written as `&#10;`, as Linear writes it.
   Linear shows it as a line break; GitHub shows it as a space. A body cell
   keeps a nonbreaking space around its text; a header cell loses it, as
-  Linear writes them.
+  Linear writes them. A body cell of only a number and a dot gets a
+  space after the dot (`| 12.  |`): Linear holds it as an empty numbered
+  list. A body cell that starts with another list marker is the
+  [`table-list-cell`](#table-list-cell) rule, and a table whose header row
+  has no `|` the [`table-header-pipe`](#table-header-pipe) rule.
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph. Where that text would start another block,
   a backslash escape keeps it text: in
@@ -302,6 +315,12 @@ Inline text:
   `*` gets one, and so does a `#` that would start a heading there: a
   continuation line `    # note` is written `    \# note`, and so is a
   `#` before a no-break space.
+- A line whose text starts with a no-break space (or other whitespace
+  outside ASCII) gets a backslash where Linear looks past that space: before
+  a run of one to six `#` followed by whitespace or the line's end, and
+  before the dot of a number followed by whitespace. A no-break space and
+  `4. Rest` is written with `4\. Rest`. This holds in list items, quotes and
+  body cells too; `-`, `+`, `>` and `4)` stay plain there.
 - A literal `~` gets a backslash, as Linear writes it: `~$5` becomes
   `\~$5`. So does a literal `_`, unless the characters on both sides of it
   are ASCII letters, digits or `_`: `snake_case` and `a__b` stay, while
@@ -411,6 +430,23 @@ space (`Issue #`, `#5`), is not affected.
 ```
 
 Instead, escape the first hash as `\#`, which keeps the text.
+
+### `table-list-cell`
+
+A table body cell starting with -, + or * and a space, or with a number and
+), becomes a list, which Linear writes with * or a number and a dot. Put a
+backslash before the -, + or *, or reword the cell. Linear holds the cell
+as a list: `+ fee` comes back `* fee`, and `3)` comes back `3.`. A header
+cell, an escaped marker (`\+ fee`), a marker without a space after it
+(`+fee`) and a number with a dot (`12.`, `3. x`) keep their text. The rule
+stops only `fix`: a list that someone adds to a cell in Linear is written
+the same way, and the sync keeps such a document.
+
+```markdown
+| Item | Count |
+| -- | -- |
+| + fee | 3) |
+```
 
 ### `image-in-link`
 
@@ -594,6 +630,37 @@ own. There you can also end the line with two spaces or `<br>` yourself,
 if the line still reads as you meant. A hook that trims trailing
 whitespace in Markdown files removes those spaces, and with them the
 break: exclude Markdown from it (see [Other fixing hooks](#other-fixing-hooks)).
+
+### `setext-heading-lines`
+
+Linear keeps only the first line of a heading underlined with = or - as the
+heading; the lines after it become a paragraph. Put the heading text on one
+line. `fix` would otherwise write the heading on one line, which is not what
+Linear makes of it, so it leaves the file to you. Like
+[`hard-break-in-heading`](#hard-break-in-heading), the rule stops only `fix`:
+the sync sends such a file as it is, since Linear's own export of a rule,
+text lines and another rule reads as such a heading. A line break inside a
+code span is a space and keeps one heading.
+
+```markdown
+Plan
+for May
+========
+```
+
+### `table-header-pipe`
+
+A table whose header row has no | is plain text in Linear. Write the header
+row between pipes, as | Total |. Markdown reads a one-column table from a
+header line without pipes over a delimiter row with them, but Linear keeps
+all of its lines as text. The rule stops only `fix`; the sync sends such a
+file as it is.
+
+```markdown
+Total
+| --- |
+| 5 |
+```
 
 ### `hard-break-in-heading`
 

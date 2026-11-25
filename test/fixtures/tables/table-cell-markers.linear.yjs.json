@@ -1,0 +1,184 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Item","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Count","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {
+                  "type": "bullet_list",
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"fee","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {
+                  "type": "ordered_list",
+                  "attrs": {"order":12},
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph"}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {
+                  "type": "bullet_list",
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"fee","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {
+                  "type": "ordered_list",
+                  "attrs": {"order":3},
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph"}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {
+                  "type": "bullet_list",
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"fee","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {
+                  "type": "ordered_list",
+                  "attrs": {"order":12},
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"x","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"+fee","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {
+                  "type": "ordered_list",
+                  "attrs": {"order":7},
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph"}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-9b15a1b9","marks":{"attribution":"user"}}]}
+  ]
+}

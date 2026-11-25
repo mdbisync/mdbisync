@@ -57,7 +57,8 @@ export function fixText(text: string, options: FixOptions = {}): string {
 
 /**
  * The line endings inside paragraphs: hard breaks and the line endings of
- * text. A heading's are left out: `fix` writes a setext heading on one line.
+ * text. A heading's are left out: `fix` writes a heading on one line (lint
+ * reports one whose text runs over lines; a code span's line ending is a space).
  */
 function lineEndings(body: string): number {
   let count = 0;
@@ -373,7 +374,7 @@ class Writer {
   compareEscapes = false;
   rewroteAsterisks = false;
   private conflictCallouts: Set<number> | undefined;
-  private textLine: { from: number; to: number; first: number; last: number; delimiter: boolean; equalsOnly: boolean; indent?: number } | undefined;
+  private textLine: { from: number; to: number; first: number; last: number; delimiter: boolean; equalsOnly: boolean; indent?: number; unicodeLead?: number } | undefined;
   /** Where the table cell being written starts its text: an escape there stays. */
   private cellStart: number | undefined;
   /** Whether the text being written is a table cell's. */
@@ -459,13 +460,18 @@ class Writer {
     switch (node.type) {
       case 'paragraph':
         return this.paragraph(node);
-      case 'heading':
+      case 'heading': {
         // A setext heading can span lines; an ATX heading is one line.
-        // Linear keeps a trailing NBSP.
-        return [trimEndKeepingNbsp(`${'#'.repeat(node.depth)} ${joinLines(this.inline(node.children))}`)];
+        // Linear keeps a trailing NBSP, and the space after an empty heading's hashes.
+        const hashes = '#'.repeat(node.depth);
+        const heading = trimEndKeepingNbsp(`${hashes} ${joinLines(this.inline(node.children))}`);
+        return [heading === hashes ? `${hashes} ` : heading];
+      }
       case 'thematicBreak':
         return ['---'];
       case 'blockquote': {
+        // Linear writes an empty quote with the space after its sign.
+        if (node.children.length === 0) return ['> '];
         const marker = this.source.indexOf('>', start(node));
         const content = marker + (this.source[marker + 1] === ' ' ? 2 : 1);
         const container: Container = { kind: 'quote', content };
@@ -655,7 +661,7 @@ class Writer {
     // A section can be the first block of an item. Linear keeps an empty
     // paragraph on the marker line and puts the section on its own line.
     if (item.checked == null && first?.type === 'paragraph'
-      && this.source.slice(start(first), end(first)) === '+++ '
+      && /^\+{3} [^\n]*$/.test(this.source.slice(start(first), end(first)))
       && item.children.slice(1).some((child) => child.type === 'paragraph' && this.source.slice(start(child), end(child)) === '+++')
       && !/(?:^|\n)[ \t>]*\+{4}/.test(this.source.slice(start(first), end(item)))) {
       return `${marker} \n\n${lines.join('\n')}`;
@@ -732,7 +738,14 @@ class Writer {
         this.cellStart = first ? start(first) : undefined;
         this.inCell = true;
         const inline = cell ? this.inline(cell.children) : '';
-        const text = header ? inline.trim() : trimKeepingNbsp(inline);
+        let text = header ? inline.trim() : trimKeepingNbsp(inline);
+        // The trim can take leading whitespace past which Linear escapes: look past what is left.
+        const lead = text.length - text.trimStart().length;
+        const escape = header || unicodeSpaceLead(inline.replace(/^[ \t]+/, '')) === 0 ? undefined : headingOrNumberEscape(text.slice(lead));
+        if (escape !== undefined) text = `${text.slice(0, lead + escape)}\\${text.slice(lead + escape)}`;
+        // Linear holds a body cell of only a number and a dot as an empty
+        // ordered list and writes the space after its marker.
+        if (!header && /^\d{1,9}\.$/.test(text)) text += ' ';
         this.inCell = false;
         this.cellStart = undefined;
         // Linear writes a header cell containing only a hash as `\#`.
@@ -833,6 +846,10 @@ class Writer {
    */
   private escapeLineStart(at: number, limit: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[], continuation = false, indented = false): boolean {
     const char = this.source[at];
+    if (char !== undefined && char !== ' ' && char !== '\t' && /\s/.test(char)) {
+      this.escapeAfterUnicodeSpace(at, limit, texts, edits);
+      return false;
+    }
     if (this.rewriteEscapes && continuation && char === '\\' && this.source[at + 1] === '+'
       && /^[ \t]*$/.test(this.source.slice(at + 2, this.textLineAt(at).to))
       && texts.some(([a, b]) => a <= at && at + 1 < b)) {
@@ -863,6 +880,12 @@ class Writer {
     if (!texts.some(([a, b]) => a <= at && at < b)) return false;
     edits.push({ from: at, to: at, text: '\\' });
     return true;
+  }
+
+  /** Linear's escape in a paragraph line that starts with whitespace outside ASCII (`unicodeSpaceEscape`). */
+  private escapeAfterUnicodeSpace(at: number, limit: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[]): void {
+    const offset = unicodeSpaceEscape(this.source.slice(at, Math.min(limit, this.textLineAt(at).to)));
+    if (offset !== undefined && texts.some(([a, b]) => a <= at + offset && at + offset < b)) edits.push({ from: at + offset, to: at + offset, text: '\\' });
   }
 
   /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's text. */
@@ -1114,6 +1137,12 @@ class Writer {
   private redundantLineEscape(at: number, char: string): boolean {
     if (at === this.cellStart || !'#-=+>'.includes(char)) return false;
     if (char === '#' && this.source[at - 1] === '&') return false;
+    if (char === '#') {
+      // Past a no-break space at the line's start Linear escapes a heading-like run.
+      const line = this.textLineAt(at);
+      line.unicodeLead ??= unicodeSpaceLead(this.source.slice(line.first, line.to));
+      if (at === line.first + line.unicodeLead && headingOrNumberEscape(this.source.slice(at + 1, line.to)) === 0) return false;
+    }
     // Removing several escapes must not assemble a heading or section opener.
     if ((char === '#' || char === '+') && (this.source[at - 1] === char || this.source.startsWith(`\\${char}`, at + 2))) return false;
     if (char === '+' && this.source[at + 2] === '+') return false;
@@ -1594,9 +1623,9 @@ function decodeEntity(reference: string): string | undefined {
  * `inRepository`, whether a relative destination names a file of the
  * repository the file is written to (`linkedFileCheck`), as the hook checks it.
  *
- * Only a re-spelling is taken: when `fix` would change the document itself
- * (it writes a setext heading's two lines as one), the file would no longer
- * hold what Linear holds, and the text stays as it is.
+ * Only a re-spelling is taken: when `fix` would change the document itself,
+ * the file would no longer hold what Linear holds, and the text stays as it
+ * is.
  */
 export function fixLinearText(linearText: string, content: string, inRepository: (url: string) => boolean, previousBody?: string): string {
   // Read a nested file block as Linear holds it, not as the parent's text,
@@ -1759,6 +1788,33 @@ function trimEndKeepingNbsp(text: string): string {
 
 function trimmed(char: string): boolean {
   return char !== NBSP && char.trim() === '';
+}
+
+/**
+ * Where Linear puts a backslash in a line of text that starts with a
+ * no-break space or other whitespace outside ASCII: it looks past all the
+ * whitespace and escapes a `#` run that reads as a heading (one to six
+ * signs before whitespace or the line end) and the dot of a number before
+ * whitespace. Markdown opens no block there; `-`, `+`, `>` and `N)` stay
+ * plain.
+ */
+function unicodeSpaceEscape(line: string): number | undefined {
+  const lead = unicodeSpaceLead(line);
+  if (lead === 0) return undefined;
+  const escape = headingOrNumberEscape(line.slice(lead));
+  return escape === undefined ? undefined : lead + escape;
+}
+
+/** The length of the whitespace that starts the line when it starts with whitespace outside ASCII, else 0. */
+function unicodeSpaceLead(line: string): number {
+  return line === '' || line[0] === ' ' || line[0] === '\t' || !/^\s/.test(line) ? 0 : /^\s*/.exec(line)![0].length;
+}
+
+/** Where Linear escapes the start of text past that whitespace: a heading-like `#` run (0) or a number's dot. */
+function headingOrNumberEscape(rest: string): number | undefined {
+  if (/^#{1,6}(?:\s|$)/.test(rest)) return 0;
+  const number = /^\d+(?=\.\s+\S)/.exec(rest);
+  return number === null ? undefined : number[0].length;
 }
 
 /** The number of line breaks in the text. */

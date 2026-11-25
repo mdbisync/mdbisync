@@ -1,0 +1,70 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"+++Plan","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Next step","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"+++ Topic","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Other topic","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"A paragraph between.","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph"},
+            {
+              "type": "collapsible_section",
+              "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+              "children": [
+                {
+                  "type": "collapsible_heading",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Plan","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {"type":"paragraph","children":[{"text":"body","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-84ea78d6","marks":{"attribution":"user"}}]}
+  ]
+}

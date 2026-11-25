@@ -1,0 +1,19 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Total","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"| --- |","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"| 5 |","marks":{"attribution":"user"}}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-2e5e0e34","marks":{"attribution":"user"}}]}
+  ]
+}

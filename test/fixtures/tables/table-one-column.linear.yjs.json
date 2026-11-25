@@ -1,0 +1,70 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Total","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"5","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"6","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Only header","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"| Total |","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-c6edf344","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"  4. Rest","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":" 4. Rest","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"  4. Rest","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"   4. Rest","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"  4. Rest","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"  4. Rest","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"  4) Rest","marks":{"attribution":"user"}}]},
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"A paragraph line","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"  4. Rest","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Step","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  2. Rest","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-c35a525c","marks":{"attribution":"user"}}]}
+  ]
+}

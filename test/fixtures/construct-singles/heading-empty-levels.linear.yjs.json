@@ -1,0 +1,23 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":1}},
+    {"type":"heading","attrs":{"id":"<id>","level":2}},
+    {"type":"heading","attrs":{"id":"<id>","level":3}},
+    {"type":"heading","attrs":{"id":"<id>","level":4}},
+    {"type":"heading","attrs":{"id":"<id>","level":5}},
+    {"type":"heading","attrs":{"id":"<id>","level":6}},
+    {"type":"heading","attrs":{"id":"<id>","level":2}},
+    {"type":"heading","attrs":{"id":"<id>","level":3}},
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"heading","attrs":{"id":"<id>","level":2}}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-f4f96677","marks":{"attribution":"user"}}]}
+  ]
+}
