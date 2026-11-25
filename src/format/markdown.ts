@@ -10,6 +10,7 @@ import { gfm } from 'micromark-extension-gfm';
 import { EditMap } from 'micromark-util-edit-map';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { posix } from 'node:path';
+import { domainToASCII } from 'node:url';
 import { bareDomains } from './bare-domain.ts';
 
 type ParserEvent = Parameters<EditMap['consume']>[0][number];
@@ -1250,13 +1251,26 @@ function destination(url: string): string {
  */
 export function linkDestination(url: string): string {
   const cut = url.search(/[?#]/);
-  const path = cut === -1 ? url : url.slice(0, cut);
+  const path = asciiHost(cut === -1 ? url : url.slice(0, cut));
   const rest = cut === -1 ? '' : url.slice(cut);
   const literal = !/^[a-z][a-z0-9+.-]*:/i.test(url) && !decodes(path);
   const encode = (text: string, percent: RegExp): string =>
-    text.replace(new RegExp(`[<>\\r\\n\\\\|^{}]|${percent.source}`, 'g'), (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+    text
+      .replace(new RegExp(`[<>\\r\\n\\\\|^{}]|${percent.source}`, 'g'), (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+      .replace(/[^\0-\x7f]/gu, (char) => [...UTF8.encode(char)].map((byte) => `%${byte.toString(16).toUpperCase()}`).join(''));
   const lone = /%(?![0-9A-Fa-f]{2})/;
   return `<${destination(encode(path, literal ? /%/ : lone) + encode(rest, lone))}>`;
+}
+
+const UTF8 = new TextEncoder();
+
+/** A URL whose host has characters outside ASCII, with the host in its ASCII (Punycode) form, as Linear writes it. */
+function asciiHost(path: string): string {
+  // The host ends where a port, a path or a backslash (a path separator to a browser) begins.
+  const match = /^([a-z][a-z0-9+.-]*:\/\/(?:[^/\\@]*@)?)([^/\\:]*)/i.exec(path);
+  if (match === null || /^[\0-\x7f]*$/.test(match[2]!)) return path;
+  const host = domainToASCII(match[2]!);
+  return host === '' ? path : match[1]! + host + path.slice(match[0].length);
 }
 
 /** Whether `text` is valid percent-encoding: `decodeURIComponent` accepts it. */

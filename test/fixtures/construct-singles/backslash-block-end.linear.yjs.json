@@ -1,0 +1,27 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"The path ends in a backslash \\","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Folder names \\","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"An item with one \\","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"A quote with one \\","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-81f4c2d9","marks":{"attribution":"user"}}]}
+  ]
+}

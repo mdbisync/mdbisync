@@ -228,11 +228,12 @@ describe('lint rules', () => {
     assert.ok(fixed !== text && fixed.length < CONTENT_LIMIT, 'fix writes them inline within the limit');
   });
 
-  it('counts destinations in code points, as the content limit is counted', () => {
-    // 236,000 code points written, though over 400,000 UTF-16 code units.
-    const text = `${'[a][r] '.repeat(2_000)}\n\n[r]: https://example.com/${'\u{1F600}'.repeat(90)}\n`;
-    assert.deepEqual(lintText('doc.md', text), []);
-    assert.notEqual(fixText(text), text);
+  it('counts destinations as Linear writes them, with characters outside ASCII percent-encoded', () => {
+    // Each emoji is written as 12 characters: 2,000 copies of 5 stay under the limit, of 90 they do not.
+    const text = (emoji: number) => `${'[a][r] '.repeat(2_000)}\n\n[r]: https://example.com/${'\u{1F600}'.repeat(emoji)}\n`;
+    assert.deepEqual(lintText('doc.md', text(5)), []);
+    assert.notEqual(fixText(text(5)), text(5));
+    assert.deepEqual(lintText('doc.md', text(90)).map((finding) => finding.rule), ['markdown-complexity']);
   });
 
   it('keeps writing reference links inline within the limit', () => {
@@ -320,7 +321,7 @@ describe('lint and fix commands', () => {
     assert.deepEqual(runFix(['nowhere'], dir), { exitCode: 2, stdout: '', stderr: 'no such file or folder: nowhere\n' });
   });
 
-  it('fix writes a backslash break in a paragraph as two spaces and reports one it leaves', (t) => {
+  it('fix writes a backslash break in a paragraph as Linear does and reports one it leaves', (t) => {
     const folder = mkdtempSync(join(tmpdir(), 'backslash-break-'));
     t.after(() => rmSync(folder, { recursive: true, force: true }));
     writeFileSync(join(folder, 'walk.md'), '- Boots\\\n  and a map\n');
@@ -334,7 +335,7 @@ describe('lint and fix commands', () => {
     // A file with another finding is left as it is; the heading has no form for the break.
     const left = finding('heading.md', 1, 'hard-break-backslash') + finding('mixed.md', 1, 'hard-break-backslash') + finding('mixed.md', 4, 'subscript');
     assert.deepEqual(runFix([], folder), { exitCode: 1, stdout: `walk.md: fixed\n${left}`, stderr: '' });
-    assert.equal(readFileSync(join(folder, 'walk.md'), 'utf8'), '* Boots  \n  and a map');
+    assert.equal(readFileSync(join(folder, 'walk.md'), 'utf8'), '* Boots\n  and a map');
     assert.equal(readFileSync(join(folder, 'mixed.md'), 'utf8'), 'Boots\\\nand a map\n\nH~2~O\n');
     assert.equal(readFileSync(join(folder, 'heading.md'), 'utf8'), 'Boots\\\nand a map\n===\n');
     assert.deepEqual(runFix([], folder), { exitCode: 1, stdout: left, stderr: '' });
