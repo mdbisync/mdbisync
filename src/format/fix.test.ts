@@ -208,6 +208,90 @@ describe('NBSP as Linear stores it', () => {
   });
 });
 
+describe('space references, adjacent links and lone backticks as Linear stores them', () => {
+  const written: Array<[string, string, string]> = [
+    ['a space reference becomes a space', 'Word&#32;word, hex&#x20;form and two&#32;&#32;refs', 'Word word, hex form and two  refs'],
+    ['also in a link label, at its edge too', 'x [&#32;a](https://a.test) and [b&#32;](https://a.test) y', 'x [ a](<https://a.test>) and [b ](<https://a.test>) y'],
+    ['one at a mark\'s inner edge moves out of it', 'x **&#32;mid** y, *b&#32;* c and ~~&#32;d~~', 'x  **mid** y, *b*  c and  ~~d~~'],
+    ['out of every mark around it', 'x ***&#32;both*** y', 'x  ***both*** y'],
+    ['one at a block\'s start or end goes', '&#32;Leading\n\n**&#32;Tip** one\n\nTail **bold&#32;**\n\nEnd&#32;', 'Leading\n\n**Tip** one\n\nTail **bold**\n\nEnd'],
+    ['also in an item, heading, quote and cell', '* &#32;item\n\n# **&#32;Head**\n\n> &#32;quote\n\n| Col |\n| --- |\n| &#32;cell |', '* item\n\n# **Head**\n\n> quote\n\n| Col |\n| -- |\n| cell |\n'],
+    ['a continuation line keeps it before a word', 'first\n&#32;second\n**&#32;b** c', 'first\n second\n **b** c'],
+    ['adjacent links to one destination become one', '[Shop](https://a.test)[More](https://a.test)[Last](https://a.test)', '[ShopMoreLast](<https://a.test>)'],
+    ['with the marks around a part inside it', '[a](https://a.test)**[b](https://a.test)***[c](https://a.test)*~~[d](https://a.test)~~', '[a**b***c*~~d~~](<https://a.test>)'],
+    ['a code span and a link reference join too', '[a](https://a.test)[`b`](https://a.test)[c][r]\n\n[r]: https://a.test', '[a`b`c](<https://a.test>)'],
+    ['in an item, heading and cell', '* [a](https://a.test)[b](https://a.test) x\n\n# [a](https://a.test)[b](https://a.test)\n\n| Col |\n| --- |\n| [a](https://a.test)[b](https://a.test) |', '* [ab](<https://a.test>) x\n\n# [ab](<https://a.test>)\n\n| Col |\n| -- |\n| [ab](<https://a.test>) |\n'],
+    ['a lone backtick is escaped', 'a ` b\n\na `` b\n\nx`y', 'a \\` b\n\na \\`\\` b\n\nx\\`y'],
+    ['at a line\'s start or end, in a code span\'s company, a link label and marks', '` start\n\nend `\n\npair `x` and lone ` here\n\n[a ` b](https://a.test)\n\n**c ` d**', '\\` start\n\nend \\`\n\npair `x` and lone \\` here\n\n[a \\` b](<https://a.test>)\n\n**c \\` d**'],
+    ['in a heading, item, quote and cell', '# a ` b\n\n* c ` d\n\n> e ` f\n\n| Col |\n| --- |\n| g ` h |', '# a \\` b\n\n* c \\` d\n\n> e \\` f\n\n| Col |\n| -- |\n| g \\` h |\n'],
+  ];
+  for (const [name, input, expected] of written) {
+    it(name, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected), [], 'lint is clean on the result');
+    });
+  }
+
+  it('keeps a space reference where a space would change what the text says', () => {
+    const kept = [
+      'a&#32;&#32;\nb', '&#32;# not a heading', 'first\n&#32;- not an item', '**a&#32;&#32;**\nb', '&#32;',
+      'first\n&#32;1. x', '> first\n> &#32;1. x', '&#32;1. x', 'Note\n1.&#32;Item', 'Note\n===&#32;', '# Notes on C&#32;#',
+      'a <b&#32;c="d"> e', 'x **a&#32;** \nb',
+    ];
+    for (const text of kept) {
+      const fixed = fixText(text);
+      assert.ok(fixed.includes('&#32;'), `${JSON.stringify(text)} became ${JSON.stringify(fixed)}`);
+      assert.ok(sameMarkdown(fixed, text), text);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+    }
+  });
+
+  it('checks the space edits of a block together', () => {
+    // Each edit alone keeps the paragraph; both would make it a heading.
+    const fixed = fixText('&#32;#&#32;heading');
+    assert.equal(fixed, '#&#32;heading');
+    assert.equal(parse(fixed).children[0]?.type, 'paragraph');
+    assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
+  });
+
+  it('moves a space reference out of a mark at a line ending, as Linear does', () => {
+    assert.equal(fixText('**a&#32;**\nb'), '**a** \nb');
+    assert.equal(fixText('a&#32;\nb'), 'a \nb');
+  });
+
+  it('moves a space reference out of a mark in a link next to another link', () => {
+    assert.equal(fixText('x [**&#32;a**](https://a.test) and [b](https://a.test) y'), 'x [ **a**](<https://a.test>) and [b](<https://a.test>) y');
+    assert.equal(fixText('x [**&#32;a** b](https://a.test)[c](https://a.test) y'), 'x [ **a** bc](<https://a.test>) y');
+  });
+
+  it('joins autolinks too, in one fix', () => {
+    const fixed = fixText('[a](https://a.test)<https://a.test>');
+    assert.equal(fixed, '[ahttps://a.test](<https://a.test>)');
+    assert.equal(fixText('<https://a.test><https://a.test>'), fixText(fixText('<https://a.test><https://a.test>')));
+  });
+
+  it('keeps links apart where the joined link would read differently', () => {
+    // A `!` before it would make an image; joined labels would spell a shortcode.
+    for (const text of ['!**[a](<https://a.test>)**[b](<https://a.test>)', '[:ta](<https://a.test>)[da:](<https://a.test>)']) {
+      const fixed = fixText(text);
+      assert.equal(fixText(fixed), fixed, text);
+      assert.ok(sameMarkdown(fixed, text) || fixed === text, `${text} became ${fixed}`);
+      assert.deepEqual(lintText('doc.md', fixed).map((finding) => finding.rule), [], text);
+    }
+  });
+
+  it('keeps links apart that are not adjacent or lead elsewhere', () => {
+    for (const text of ['[a](<https://a.test>) [b](<https://a.test>)', '[a](<https://a.test>)[b](<https://b.test>)', '[a](<https://a.test>)[b](<https://a.test/>)', '[a](<https://a.test>)\n[b](<https://a.test>)']) {
+      assert.equal(fixText(text), text, text);
+    }
+  });
+
+  it('keeps an escaped backtick and a code span', () => {
+    assert.equal(fixText('a \\` b and `c`'), 'a \\` b and `c`');
+  });
+});
+
 describe('a code span over lines, as Linear writes it', () => {
   const joined: Array<[string, string, string]> = [
     ['joins its lines with a space', 'See `alpha\nbeta` here.', 'See `alpha beta` here.'],
@@ -370,6 +454,26 @@ describe('Linear bold forms', () => {
     ['bold around an italic link', '**_[trail map](https://example.com/trails)_**', '[***trail map***](<https://example.com/trails>)'],
     ['italic around a link with a bold label', '*[**trail map**](https://example.com/trails)*', '[***trail map***](<https://example.com/trails>)'],
     ['mixed link and prose', '**Use the [trail map](https://example.com/trails)**', '**Use the [trail map](<https://example.com/trails>)**'],
+    ['ordered item link', '1. **[Guide](https://example.test)**', '1. [**Guide**](<https://example.test>)'],
+    ['bullet item link with colon', '* **[Guide](https://example.test):**', '* [**Guide**](<https://example.test>)**:**'],
+    ['punctuation and prose after a bold link', '**[Guide](https://example.test): Ready**', '[**Guide**](<https://example.test>)**: Ready**'],
+    ['spaced prose after a bold link', '**[Guide](https://example.test) now**', '**[Guide](<https://example.test>) now**'],
+    ['spaced prose after a bold italic link', '***[Guide](https://example.test) now***', '[***Guide***](<https://example.test>)*** now***'],
+    ['escaped punctuation in a spaced bold italic suffix', '***[Guide](https://example.test) a\\*b***', '[***Guide***](<https://example.test>)*** a\\*b***'],
+    ['italic suffix does not inherit bold from its link label', '**_guide_** and *[**Guide**](https://example.test) now*', '***guide*** and *[**Guide**](<https://example.test>) now*'],
+    ['strong outside a coextensive underscore italic link', '**_[Guide](https://example.test) now_**', '[***Guide***](<https://example.test>)*** now***'],
+    ['italic underscore inside bold', '**_guide_**', '***guide***'],
+    ['bold inside italic underscore', '_**guide**_', '***guide***'],
+    ['bold underscore inside italic', '*__guide__*', '***guide***'],
+    ['italic inside bold underscore', '__*guide*__', '***guide***'],
+    ['coextensive nested bold and italic', '**_**guide**_**', '***guide***'],
+    ['ordinary closing punctuation stays bold', '**(tip)** and **Tip.**', '**(tip)** and **Tip.**'],
+    ['three nominally adjacent bold runs', '**a****b****c**', '**ab**c'],
+    ['four nominally adjacent bold runs', '**a****b****c****d**', '**ab**c\\*\\*\\*\\*d'],
+    ['five nominally adjacent bold runs', '**a****b****c****d****e**', '**ab**c**d**e'],
+    ['spaces next to four-star boundaries', '**Note: ****important**** text**', '**Note: important** text'],
+    ['adjacent stars that would expose a URL', '**https:****//example.test****end**', '**https:****//example.test****end**'],
+    ['adjacent stars that would expose strikethrough', '**a~~****b~~****c**', '**a\\~\\~b\\~\\~c**'],
     ['file label in a list item', '* **[Trail map](trail.pdf)**', '* [**Trail map**](<trail.pdf>)'],
     ['soft breaks', '**Birch\nCedar\nMaple**', '**Birch**\n**Cedar**\n**Maple**'],
     ['hard break', '**Birch  \nCedar**', '**Birch**  \n**Cedar**'],
@@ -791,6 +895,91 @@ describe('what fix leaves alone', () => {
       assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
       assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${text}`);
+    }
+  });
+
+  it('writes a bare number or bullet on an item\'s second line as the empty item Linear reads there', () => {
+    // An empty marker cannot interrupt a paragraph: it is the item's text.
+    // Linear reads an empty item nested in the item and writes it at the
+    // item's content with a space after it; four or more columns past the
+    // content Linear reads indented code, and `fix` writes the same form.
+    const cases: Array<[string, string]> = [
+      ['1. Plan\n   2.', '1. Plan\n   2. '],
+      ['1. Plan\n   1. Sub\n      2.', '1. Plan\n   1. Sub\n      2. '],
+      ['1. Trip\n    1. Plan\n        2.', '1. Trip\n   1. Plan\n      2. '],
+      ['* Trip\n    1. Plan\n        2.', '* Trip\n  1. Plan\n     2. '],
+      ['1. Trip\n   1. Plan\n      1. Pack\n         2.', '1. Trip\n   1. Plan\n      1. Pack\n         2. '],
+      ['1. Trip\n   1. Plan\n         2.', '1. Trip\n   1. Plan\n      2. '],
+      ['1. Trip\n   * Plan\n     2.', '1. Trip\n   * Plan\n     2. '],
+      ['* Trip\n  * Plan\n    *', '* Trip\n  * Plan\n    * '],
+      ['1. Plan\n\t2.', '1. Plan\n   2. '],
+      ['1. Trip\n   1. Plan\n\t\t2.', '1. Trip\n   1. Plan\n      2. '],
+      ['- [ ] Pack\n  2.', '- [ ] Pack\n  2. '],
+      ['10. Plan\n    2.', '10. Plan\n    2. '],
+      ['1. Plan\n   2.\n\n   Note', '1. Plan\n   2. \n\n   Note'],
+      // Past the content Linear makes the line indented code.
+      ['1. Plan\n\t\t2.', '1. Plan\n   2. '],
+      ['1. Plan\n        2.', '1. Plan\n   2. '],
+      ['1. Plan\n\t\t\t2.', '1. Plan\n   2. '],
+      ['- [ ] Pack\n      2.', '- [ ] Pack\n  2. '],
+      // Linear reads text: under a quote, after other lines, before more text,
+      // or with a delimiter or bullet Linear would write another way.
+      ['> 1. Plan\n>    2.', '> 1. Plan\n>    2.'],
+      ['1. Plan\n   Note\n   2.', '1. Plan\n   Note\n   2.'],
+      ['1. Plan\n\n   Note\n   2.', '1. Plan\n\n   Note\n   2.'],
+      ['1. Plan\n   2.\n   more', '1. Plan\n   2.\n   more'],
+      ['* Plan\n  Note\n  *', '* Plan\n  Note\n  \\*'],
+      ['1. Trip\n   1. Plan\n      3)', '1. Trip\n   1. Plan\n      3)'],
+      ['1. Plan\n   +', '1. Plan\n   +'],
+      // An ordered list after it would continue Linear's empty item and be renumbered; a bullet list does not.
+      ['1. Plan\n   2.\n   1. x', '1. Plan\n   2.\n   1. x'],
+      ['* Plan\n  *\n  * x', '* Plan\n  * \n  * x'],
+    ];
+    for (const [text, expected] of cases) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, JSON.stringify(text));
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${JSON.stringify(text)}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${JSON.stringify(text)}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${JSON.stringify(text)}`);
+    }
+  });
+
+  it('keeps a literal asterisk before an image on an item\'s second line', () => {
+    const text = '1. Plan\n   *![Diagram](d.png)';
+    const fixed = fixText(text, { linkedFileExists: () => true });
+    assert.equal(fixed, '1. Plan\n   \\*\n\n   ![Diagram](d.png)');
+    assert.equal(fixText(fixed, { linkedFileExists: () => true }), fixed);
+  });
+
+  it('keeps the tabs of a numbered continuation line after the columns its item takes, as Linear does', () => {
+    // The item's prefix takes its columns of the first tab; the others stay
+    // as spaces and the later tabs stay tabs. Escaped, the number is text
+    // at any column, also where the written prefix is shorter than the source's.
+    const cases: Array<[string, string]> = [
+      ['1. Plan\n\t\t2. step', '1. Plan\n    \t2\\. step'],
+      ['1. Plan\n\t\t2\\. step', '1. Plan\n    \t2\\. step'],
+      ['1. Plan\n\t\t\t2. step', '1. Plan\n    \t\t2\\. step'],
+      ['1. Plan\n\t\t\t\t2. step', '1. Plan\n    \t\t\t2\\. step'],
+      ['* Plan\n\t\t2. step', '* Plan\n    \t2\\. step'],
+      ['1. Plan\n\t\t- step', '1. Plan\n    \t- step'],
+      ['1. Trip\n   1. Plan\n\t\t\t2. step', '1. Trip\n   1. Plan\n        \t2\\. step'],
+      ['-   Plan\n    \t2. step', '* Plan\n  \t2\\. step'],
+      ['1. Trip\n    1. Plan\n\t\t\t2. step', '1. Trip\n   1. Plan\n       \t2\\. step'],
+      // Where the written prefix ends at the source's column, tabs before other block starts stay too.
+      ['* a\n  \t\t# b', '* a\n  \t\t\\# b'],
+      ['* a\n\t\t> b', '* a\n    \t> b'],
+      // Spaces stay as they are.
+      ['1. Plan\n        2. step', '1. Plan\n        2\\. step'],
+      ['1. Trip\n    1. Plan\n            2. step', '1. Trip\n   1. Plan\n           2\\. step'],
+      // Before other text that could open a block, a tab under a shorter prefix still becomes spaces.
+      ['-   a\n    \t- b', '* a\n      - b'],
+    ];
+    for (const [text, expected] of cases) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, JSON.stringify(text));
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${JSON.stringify(text)}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${JSON.stringify(text)}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${JSON.stringify(text)}`);
     }
   });
 
@@ -1358,6 +1547,34 @@ describe('what fix leaves alone', () => {
       assert.deepEqual(link.children.map((child) => [child.type, 'value' in child ? child.value : undefined]), [['text', text]], `${JSON.stringify(input)}: the link text is one text node equal to the URL`);
       // A backslash in the destination is percent-encoded, as Linear writes it: the link goes where the URL goes.
       assert.equal(normalizeUri(link.url), normalizeUri(text));
+    }
+  });
+
+  it("puts bare URL punctuation on Linear's side of the link boundary", () => {
+    const cases = [
+      ['https://example.test/p#tip_', '[https://example.test/p#tip\\_](<https://example.test/p#tip_>)'],
+      ['https://example.test?_', '[https://example.test?\\_](<https://example.test?_>)'],
+      ['https://example.test/p__~', '[https://example.test/p_\\_\\~](<https://example.test/p__~>)'],
+      ['https://example.test/p(foo', '[https://example.test/p](<https://example.test/p>)(foo'],
+      ['https://example.test/p(x~y~z', '[https://example.test/p](<https://example.test/p>)(x\\~y\\~z'],
+      ['https://example.test/p(x~~y~~z', '[https://example.test/p](<https://example.test/p>)(x~~y~~z'],
+      ["https://example.test/o'reilly/notes", "[https://example.test/o'reilly/notes](<https://example.test/o'reilly/notes>)"],
+      ["https://example.test/p'", "[https://example.test/p](<https://example.test/p>)'"],
+      ['https://example.test/p(foo)more', '[https://example.test/p(foo)more](<https://example.test/p(foo)more>)'],
+      ['(https://example.test/p)', '([https://example.test/p](<https://example.test/p>))'],
+      ['https://example.test/p(a(b)c)d', '[https://example.test/p(a(b)c](<https://example.test/p(a(b)c>))d'],
+      ['https://example.test/p[2]', '[https://example.test/p\\[2\\]](<https://example.test/p%5B2%5D>)'],
+      ['https://example.test/p?!', '[https://example.test/p?](<https://example.test/p?>)!'],
+      ['https://example.test/p:', '[https://example.test/p:](<https://example.test/p:>)'],
+      ['https://example.com_', 'https://example.com\\_'],
+      ['**https://example.test/p_**', '[**https://example.test/p\\_**](<https://example.test/p_>)'],
+      ['[Guide](<https://example.test/p(foo>)', '[Guide](<https://example.test/p(foo>)'],
+      ['`https://example.test/p_`', '`https://example.test/p_`'],
+    ] as const;
+    for (const [input, expected] of cases) {
+      assert.equal(fixText(input), expected, input);
+      assert.equal(fixText(expected), expected, input);
+      assert.deepEqual(lintText('guide.md', expected), [], input);
     }
   });
 

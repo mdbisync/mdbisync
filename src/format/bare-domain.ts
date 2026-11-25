@@ -14,9 +14,11 @@ interface BareDomain {
 const HOST_RUN = /[.\p{L}\p{M}\p{N}\p{Extended_Pictographic}_+=-]+/gu;
 const INVALID_LABEL = /(?:^|\.)-|-(?:\.|$)|\.\.|_/;
 const TAIL_BOUNDARY = /[\s\p{Cc}<>"'“”‘’«»\\]/u;
+const HTTP_TAIL_BOUNDARY = /[\s\p{Cc}<>"]/u;
 const TAIL_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]{1,31}));/y;
 const PORT = /^:(0|[1-9]\d{0,4})(?=$|[/?#\s.,;!()[\]{}<>"'“”‘’«»])/u;
 const NON_ASCII = /[^\x00-\x7F]/;
+const URL_AUTHORITY = /^https?:\/\/[^/?#()[\]{}]+/i;
 
 export function* bareDomains(value: string): Iterable<BareDomain> {
   let used = 0;
@@ -65,24 +67,39 @@ function domainTail(value: string, hostEnd: number): { end: number; scanned: num
     at += port[0].length;
   }
   if (!'/?#'.includes(value[at] ?? ' ')) return { end: at, scanned: at };
+  return scanTail(value, at, false);
+}
 
+/** Linear's boundary within an HTTP URL already located by the Markdown parser. */
+export function httpUrlEnd(value: string): number {
+  const authority = URL_AUTHORITY.exec(value)?.[0];
+  if (authority === undefined || authority.length === value.length) return value.length;
+  if (!'/?#'.includes(value[authority.length]!)) return value.length;
+  return scanTail(value, authority.length, true).end;
+}
+
+function scanTail(value: string, at: number, withScheme: boolean): { end: number; scanned: number } {
   const open: Array<{ at: number; end: string; nested: boolean }> = [];
   let end = at;
   for (; end < value.length; end++) {
     const char = value[end]!;
-    if (TAIL_BOUNDARY.test(char) || (char === '&' && beginsReference(value, end))) break;
-    if (char === '(' || char === '[') {
+    if (withScheme ? HTTP_TAIL_BOUNDARY.test(char)
+      : TAIL_BOUNDARY.test(char) || (char === '&' && beginsReference(value, end))) break;
+    if (char === '(' || char === '[' || (withScheme && char === '{')) {
       const parent = open.at(-1);
       if (parent) parent.nested = true;
-      open.push({ at: end, end: char === '(' ? ')' : ']', nested: false });
-    } else if (char === ')' || char === ']') {
+      open.push({ at: end, end: char === '(' ? ')' : char === '[' ? ']' : '}', nested: false });
+    } else if (char === ')' || char === ']' || (withScheme && char === '}')) {
       if (open.at(-1)?.end !== char) break;
       if (open.pop()!.nested) break;
     }
   }
   const scanned = end;
   end = open[0]?.at ?? end;
-  if (end > at && '.,;!?'.includes(value[end - 1]!)) end--;
+  if (end > at && (withScheme ? ".,;!?'" : '.,;!?').includes(value[end - 1]!)) {
+    const punctuation = value[--end];
+    if (withScheme) while (end > at && value[end - 1] === punctuation) end--;
+  }
   // A # separates a fragment, once there is text beyond the host.
   if (end === at + 1 && value[at] === '#') end = at;
   return { end, scanned };

@@ -97,6 +97,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/adjacent-bold-boundaries.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/backslash-block-end.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -177,6 +181,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/coextensive-bold-italic.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/collapsible-opener-containers.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -198,6 +206,10 @@
       "fixedPoint": true
     },
     "construct-singles/continuation-indent-paragraph.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/continuation-indent-tabs.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -421,6 +433,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/lone-backtick.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/nbsp-forms.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -498,6 +514,14 @@
       "fixedPoint": true
     },
     "construct-singles/setext-heading-lines.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/space-reference-edges.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/space-reference.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -741,6 +765,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "links/adjacent-links.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "links/anchor-only.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -757,7 +785,15 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "links/bare-url-endings.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "links/bare-url.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/bold-link-suffix.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -922,6 +958,10 @@
       "fixedPoint": true
     },
     "list-items/list-form-empty-items.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-form-empty-nested-items.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

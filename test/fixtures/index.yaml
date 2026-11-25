@@ -99,6 +99,20 @@ known_constructs:
     class: lint-error
   - construct: table-cell-escaped-markers
     class: fixable
+  - construct: space-reference
+    class: fixable
+  - construct: lone-backtick
+    class: fixable
+  - construct: adjacent-links
+    class: fixable
+  - construct: bare-url-endings
+    class: fixable
+  - construct: bold-link-suffix
+    class: fixable
+  - construct: adjacent-bold-boundaries
+    class: fixable
+  - construct: coextensive-bold-italic
+    class: fixable
   - construct: line-start-escape
     class: fixable
   - construct: code-span-lazy-dash-line
@@ -779,6 +793,34 @@ assets:
     kind: ogg
     corpus: false
 fixtures:
+  - file: links/bare-url-endings.md
+    group: links
+    construct: bare-url-endings
+    class: fixable
+    basis: known
+    canary: kx-73d145bc
+    corpus: false
+  - file: links/bold-link-suffix.md
+    group: links
+    construct: bold-link-suffix
+    class: fixable
+    basis: known
+    canary: kx-614f27ab
+    corpus: false
+  - file: construct-singles/adjacent-bold-boundaries.md
+    group: construct-singles
+    construct: adjacent-bold-boundaries
+    class: fixable
+    basis: known
+    canary: kx-0fac73b9
+    corpus: false
+  - file: construct-singles/coextensive-bold-italic.md
+    group: construct-singles
+    construct: coextensive-bold-italic
+    class: fixable
+    basis: known
+    canary: kx-ca327165
+    corpus: false
   - file: "construct-singles/heading-atx-h1.md"
     group: construct-singles
     construct: heading-atx-h1
@@ -3036,6 +3078,14 @@ fixtures:
     canary: kx-711fd64a
     corpus: false
     note: "Linear writes an empty bullet or numbered item with a space after its marker, also nested and in a quote"
+  - file: "list-items/list-form-empty-nested-items.md"
+    group: list-items
+    construct: empty-list-item
+    class: fixable
+    basis: known
+    canary: kx-3c5e81a2
+    corpus: false
+    note: "a paragraph's last line of only a number and dot, or a bullet, under an item at or past its content is text; Linear writes it as an empty item at the innermost item's content, with a space after it"
   - file: "list-items/list-form-ordered-ten.md"
     group: list-items
     construct: ordered-list-aligned-numbers
@@ -3124,6 +3174,14 @@ fixtures:
     canary: kx-b134e62a
     corpus: false
     note: "an item's continuation line keeps its indentation past the item's content indent; a tab the item takes in part leaves its other columns as spaces"
+  - file: "construct-singles/continuation-indent-tabs.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-9d2f47b6
+    corpus: false
+    note: "tabs after the columns an item's prefix takes keep their place before text that reads like a list marker when the written prefix ends at the source's column"
   - file: "construct-singles/continuation-indent-lazy.md"
     group: construct-singles
     construct: continuation-indent
@@ -3396,3 +3454,36 @@ fixtures:
     canary: kx-38d519db
     corpus: false
     note: "escaped list markers at a body cell's start stay text; a cell of only a number and a dot is written with a space after it"
+  - file: "construct-singles/space-reference.md"
+    group: construct-singles
+    construct: space-reference
+    class: fixable
+    basis: known
+    canary: kx-41710cf6
+    corpus: false
+    note: "Linear stores &#32; and &#x20; as a space outside code, moves one at a mark's inner edge out of the mark and keeps one in a link label"
+  - file: "construct-singles/space-reference-edges.md"
+    group: construct-singles
+    construct: space-reference
+    class: fixable
+    basis: known
+    git_form: captured
+    canary: kx-9c2d5e17
+    corpus: false
+    note: "Linear keeps a space reference at a block's start or end as a space, which its next write drops; fix writes the form without it"
+  - file: "construct-singles/lone-backtick.md"
+    group: construct-singles
+    construct: lone-backtick
+    class: fixable
+    basis: known
+    canary: kx-f3eef474
+    corpus: false
+    note: "Linear escapes a backtick that opens no code span, in every block"
+  - file: "links/adjacent-links.md"
+    group: links
+    construct: adjacent-links
+    class: fixable
+    basis: known
+    canary: kx-4eec1c8c
+    corpus: false
+    note: "Linear joins adjacent links to the same destination into one, with the marks around each part inside it; a space, another destination or a line ending keeps them apart"

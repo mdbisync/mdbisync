@@ -1,0 +1,119 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Two tabs","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Plan","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" \t2. step","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Three tabs","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Plan","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" \t\t2. step","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Under a bullet","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Plan","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  \t2. step","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"A dash","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Plan","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" \t- step","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Nested","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Trip","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "children": [
+                        {"text":"Plan","marks":{"attribution":"user"}},
+                        {"type":"hard_break"},
+                        {"text":"  \t2. step","marks":{"attribution":"user"}}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-9d2f47b6","marks":{"attribution":"user"}}]}
+  ]
+}

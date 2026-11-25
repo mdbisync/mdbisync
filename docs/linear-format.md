@@ -131,6 +131,15 @@ Blocks:
   content lines up past it: in a list of ten items, the first is written
   ` 1. a` above `10. j`.
 - An empty item keeps a space after its marker: `*` becomes `* `.
+- A lone `2.` or `*` on the line after an item's first line is the item's
+  text, since an empty marker cannot interrupt a paragraph, but Linear reads
+  it as an empty item nested in that item. `fix` writes it at the item's
+  content with a space after it, as Linear does: `1. Plan` followed by
+  `        2.` is written `1. Plan` and `   2. `. Indented four or more
+  columns past the content, the line reads as indented code in Linear;
+  `fix` writes the same form there. Linear reads the line as text under a
+  quote, after more lines of the paragraph, before more text or an ordered
+  list in the item, and with `)` or `+`: there it stays as it is.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
   `- [X] done`. A checkbox without a label keeps one space after it.
 - A paragraph's text that starts like a list marker gets its marker
@@ -232,13 +241,26 @@ Blocks:
 Inline text:
 
 - Underscore emphasis becomes asterisks: `__bold__ and _em_` becomes
-  `**bold** and *em*`.
+  `**bold** and *em*`. Text that is both bold and italic throughout a
+  span uses three asterisks, as in `***note***`.
 - Asterisks that read as text are escaped. `**Birch****Pine**` becomes
   `**Birch\*\*\*\*Pine**`, and `**Inventory` becomes `\*\*Inventory`.
   Consecutive bold spans join when they can keep their formatting.
   Bold immediately inside another bold span is folded into the outer span.
+  In a chain of four-asterisk boundaries such as `**a****b****c**`,
+  Linear writes `**ab**c`.
+- Adjacent links to the same destination become one link, since Linear
+  holds a link as a mark on its text. Bold, italic or strikethrough around
+  a part goes inside the label: `[Shop](https://a.test)**[Sale](https://a.test)**`
+  becomes `[Shop**Sale**](<https://a.test>)`. A space, a line ending or
+  another destination keeps links apart, and so does a `!` before them.
 - Bold around a single link moves into the link label. For example,
   `**[Map](https://example.com)**` becomes `[**Map**](<https://example.com>)`.
+  When the bold link is followed immediately by punctuation inside the
+  same span, the punctuation gets its own bold marks. A leading bold italic
+  link likewise carries its marks in the label, with separate marks for the
+  text that follows it. When the text starts with a space, Linear writes
+  `*** text***`. CommonMark renders those asterisks literally.
   When bold spans multiple lines, `fix` closes it and reopens it on each line.
 - Link destinations go in angle brackets: `[a](https://example.com/x)`
   becomes `[a](<https://example.com/x>)`. A backslash, `|`, `^`, `{` and
@@ -275,6 +297,9 @@ Inline text:
   In a URL label, underscores between ASCII letters, digits or underscores
   stay plain, as in
   `[https://example.com/shelf_4](<https://example.com/shelf_4>)`.
+  A trailing underscore in a URL path, query or fragment stays in the link.
+  Matched parentheses can be part of the URL. An unmatched opening or
+  closing parenthesis ends it.
 - Bare addresses with recognized domain suffixes become HTTP links.
   `example.com/guide` becomes `[example.com/guide](<http://example.com/guide>)`.
   Relative paths, standalone Markdown filenames, and suffixes such as
@@ -288,6 +313,14 @@ Inline text:
   it; spaces and tabs there go.
   Asterisk references such as `&#42;` become `\*`. Other ASCII references,
   such as `&lt;b&gt;`, `&quot;` and `&#65;`, stay as written.
+- A space reference (`&#32;`, `&#x20;`) becomes a space, as Linear stores
+  it; in a link label too. At the inner edge of bold, italic or
+  strikethrough the space moves out of it: `x **&#32;Tip** y` becomes
+  `x  **Tip** y`. At the start or end of a paragraph, heading, item, quote
+  or cell the space goes, since Linear drops it on its next write:
+  `**&#32;Tip** one` becomes `**Tip** one`. Where a space would change
+  what the text says (make a line break, a list item or HTML, or close a
+  heading), the reference stays.
 - Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes
   `Done 🎉`. An escaped reference or shortcode (`\&amp;`, `\:tada:`) stays
   as written.
@@ -328,11 +361,17 @@ Inline text:
   `é_é` becomes `é\_é`. An escape the rule does not need goes:
   `file\_name` becomes `file_name`. Link text follows the same rule;
   strikethrough and code keep their characters.
+- A backtick that opens no code span gets a backslash, as Linear writes it:
+  ``a ` b`` becomes ``a \` b``.
 - A continuation line of a paragraph keeps its own indentation, as Linear
   does: the quote's `>` or the item's indent is written in place of the
   source's, and spaces or tabs past it stay. A tab that the item's indent
   covers only in part leaves its other columns as spaces: under `* item`, a
-  line indented with one tab is written with four spaces.
+  line indented with one tab is written with four spaces. Later tabs stay
+  tabs: under `1. Plan`, two tabs before `2. step` become four spaces and a
+  tab before `2\. step`. Where `fix` writes a shorter prefix than the
+  source's, a tab before text that could open a block becomes the spaces it
+  spanned, except before an escaped number, which reads as text anywhere.
 
 ## How documents look in Linear
 
