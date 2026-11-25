@@ -271,7 +271,8 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
     const [first, ...rest] = node.children;
     // `****Plan it**.**`: Linear reads an empty bold run, bolds the text up
     // to the next `**` and leaves the rest plain (`**Plan it**.`).
-    if (first?.type === 'strong' && rest.length > 0 && rest.every((part) => part.type === 'text')
+    // Probed in paragraphs only: a heading's text can end in hashes.
+    if (first?.type === 'strong' && ancestors.at(-1)?.type === 'paragraph' && rest.length > 0 && rest.every((part) => part.type === 'text')
       && first.children.every((child) => child.type === 'text')
       && body.slice(start(node), start(node) + 4) === '****' && start(first) === start(node) + 2) {
       const block = ancestors[1] ?? node;
@@ -507,6 +508,9 @@ const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t\u00a0]))/;
 
 // A number with a dot and text after it, which `fix` escapes where it starts a paragraph line.
 const NUMBER_TEXT = /^\d+\\?\.[ \t\u00a0]+[^ \t\u00a0]/;
+
+// A space or tab reference ending the text before it.
+const SPACE_REFERENCE_BEFORE = /&#(?:0*(?:32|9)|[xX]0*(?:20|9));$/;
 
 // Block starts that `fix` escapes as Linear does where a line after a
 // former hard break starts without its indentation: a dash, a heading
@@ -1203,12 +1207,19 @@ class Writer {
     for (let at = lineStart; at !== 0 && at <= to; at = this.source.indexOf('\n', at) + 1) {
       if (this.breakLineStarts.has(at)) return undefined;
     }
+    // A two-space break is what a former backslash break is written as:
+    // after it the line stays text, so a second `fix` writes the same.
+    let textEnd = lineStart - 1;
+    while (textEnd > from && (this.source[textEnd - 1] === ' ' || this.source[textEnd - 1] === '\t')) textEnd--;
+    if (this.source.endsWith('  ', lineStart - 1)) return undefined;
     const marker = lineStart + /^[ \t]*/.exec(line)![0].length;
     const edits: Edit[] = [{ from: lineStart, to: marker, text: '' }, { from: marker + bare[1]!.length, to: lineEnd, text: ' ' }];
     // The item's text now ends before Linear's empty item: Linear drops the
-    // spaces or tabs at its end, a two-space break among them.
-    const trailing = /[ \t]+$/.exec(this.source.slice(from, lineStart - 1));
-    if (trailing !== null) edits.push({ from: lineStart - 1 - trailing[0].length, to: lineStart - 1, text: '' });
+    // spaces or a tab at its end. After a space reference they stay, so the
+    // reference keeps its spelling.
+    if (textEnd < lineStart - 1 && !SPACE_REFERENCE_BEFORE.test(this.source.slice(Math.max(from, textEnd - 16), textEnd))) {
+      edits.push({ from: textEnd, to: lineStart - 1, text: '' });
+    }
     if (lineEnd < to) {
       const numbered = this.numberedLines(item, marker, bare[1]!, lineEnd, to, texts);
       if (numbered === undefined) return undefined;
@@ -1263,7 +1274,7 @@ class Writer {
       // itself: a dash, a heading or a quote there opens a block in Linear.
       const numbered = /^([ \t]*)(\d{1,9})\.(?:([ \t]*)|( (?![ \t]).*[^ \t]))$/.exec(this.source.slice(start, end));
       if (numbered === null || this.prefixEnd(start, this.source.slice(start, end)).lazy) return undefined;
-      if (numbered[4] !== undefined && !readsAsParagraph(numbered[4].slice(1))) return undefined;
+      if (numbered[4] !== undefined && !itemTextAsLinear(numbered[4].slice(1))) return undefined;
       const numberColumn = column(start + numbered[1]!.length);
       const inside = numberColumn >= emptyContent;
       if ((nested !== undefined && inside !== nested) || (bare === '*' && !inside)) return undefined;
@@ -2334,9 +2345,22 @@ function blockStartEscapes(text: string, startsLine: boolean): number[] {
   }
 }
 
-/** Whether `text` by itself is one paragraph: it opens no other block. */
-function readsAsParagraph(text: string): boolean {
-  const blocks = parse(text).children;
+/**
+ * Whether `text` after a numbered line's marker is what Linear reads as an
+ * item's text: it starts with a letter, a digit or one of the marks probed
+ * there (emphasis, code, a link, parentheses, quotes), it is no task
+ * checkbox, and by itself it is one paragraph, opening no other block.
+ */
+function itemTextAsLinear(text: string): boolean {
+  if (!/^[\p{L}\p{N}*_`(["]/u.test(text) || /^\[[ xX]\]/.test(text)) return false;
+  let blocks;
+  try {
+    blocks = parse(text).children;
+  } catch (error) {
+    // Text that is too deep by itself (`> > …`) keeps the escaped form.
+    if (error instanceof MarkdownLimitError) return false;
+    throw error;
+  }
   return blocks.length === 1 && blocks[0]!.type === 'paragraph';
 }
 

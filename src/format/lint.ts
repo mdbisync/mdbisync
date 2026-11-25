@@ -106,24 +106,45 @@ export function lintText(file: string, text: string, options: LintOptions = {}):
 }
 
 /**
- * The lines of space references (`&#32;`) at the start or end of a block's
- * text, also just inside bold, italic or strikethrough there. Linear stores
- * the space on its first write and drops it on the next: no text `fix`
- * writes reads back the same in both, so `fix` leaves the file to its author.
+ * The lines of space references (`&#32;`) at the start or end of a
+ * paragraph's or heading's text, also just inside bold, italic or
+ * strikethrough there, and next to an image, which `fix` writes as a
+ * paragraph of its own. Linear stores the space on its first write and
+ * drops it on the next: no text `fix` writes reads back the same in both, so
+ * `fix` leaves the file to its author. A table cell is left out: Linear can
+ * end a table where Markdown reads more rows.
  */
 function spaceReferenceEdges(tree: Root, body: string): number[] {
   const lines: number[] = [];
-  const edgeText = (children: PhrasingContent[], side: 'first' | 'last'): PhrasingContent | undefined => {
-    let child = side === 'first' ? children[0] : children.at(-1);
+  // Literal spaces or tabs only: a reference to a space is not blank.
+  const blank = (node: PhrasingContent): boolean => node.type === 'text' && node.position !== undefined && /^[ \t\n]*$/.test(body.slice(start(node), end(node)));
+  const edgeText = (child: PhrasingContent | undefined, side: 'first' | 'last'): PhrasingContent | undefined => {
     while (child !== undefined && (child.type === 'strong' || child.type === 'emphasis' || child.type === 'delete')) child = side === 'first' ? child.children[0] : child.children.at(-1);
     return child?.type === 'text' && child.position !== undefined ? child : undefined;
   };
+  const check = (child: PhrasingContent | undefined, side: 'first' | 'last'): void => {
+    const text = edgeText(child, side);
+    if (text?.type !== 'text') return;
+    // Spaces next to an image go when `fix` splits the paragraph there.
+    let from = start(text);
+    let to = end(text);
+    while (from < to && (body[from] === ' ' || body[from] === '\t')) from++;
+    while (to > from && (body[to - 1] === ' ' || body[to - 1] === '\t')) to--;
+    if (side === 'first' && SPACE_REFERENCE_START.test(body.slice(from, from + 16))) lines.push(line(text));
+    if (side === 'last' && SPACE_REFERENCE_END.test(body.slice(Math.max(from, to - 16), to))) lines.push(text.position!.end.line);
+  };
   visit(tree, (node) => {
-    if (node.type !== 'paragraph' && node.type !== 'heading' && node.type !== 'tableCell') return;
-    const first = edgeText(node.children, 'first');
-    if (first?.type === 'text' && first.value.startsWith(' ') && SPACE_REFERENCE_START.test(body.slice(start(first), start(first) + 16))) lines.push(line(first));
-    const last = edgeText(node.children, 'last');
-    if (last?.type === 'text' && last.value.endsWith(' ') && SPACE_REFERENCE_END.test(body.slice(Math.max(0, end(last) - 16), end(last)))) lines.push(last.position!.end.line);
+    if (node.type !== 'paragraph' && node.type !== 'heading') return;
+    const parts: PhrasingContent[][] = [[]];
+    for (const child of node.children) {
+      if (node.type === 'paragraph' && (child.type === 'image' || child.type === 'imageReference')) parts.push([]);
+      else parts.at(-1)!.push(child);
+    }
+    for (const part of parts) {
+      const kept = part.filter((child, index) => !(blank(child) && (index === 0 || index === part.length - 1)));
+      check(kept[0], 'first');
+      check(kept.at(-1), 'last');
+    }
   });
   return lines;
 }

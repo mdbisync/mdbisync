@@ -369,9 +369,10 @@ Inline text:
   strikethrough the space moves out of it: `x **&#32;Tip** y` becomes
   `x  **Tip** y`. Where a space would change what the text says (make a
   line break, a list item or HTML, or close a heading), the reference
-  stays. At the start or end of a paragraph, heading, item, quote or cell
+  stays. At the start or end of a paragraph, heading, item or quote
   `fix` leaves the file to its author: see
-  [`space-reference-edge`](#space-reference-edge).
+  [`space-reference-edge`](#space-reference-edge). At the start or end of a
+  table cell the space goes, since Linear drops it on its next write.
 - A tab reference (`&#9;`, `&#x9;`) becomes a literal tab in inline
   text. At the inner edge of an emphasis mark it moves outside the mark.
   Where the tab would change how Markdown reads the text, `fix` leaves
@@ -810,7 +811,7 @@ The sync sends the file as written.
 ### `space-reference-edge`
 
 Linear stores a space character reference at the start or end of
-a paragraph, heading, list item or table cell as a space, and drops that
+a paragraph, heading or list item as a space, and drops that
 space the next time the document is written, so no form of this text stays
 the same in Linear. Fix leaves this document as-is. Remove the reference,
 or keep the space inside the text. The sync sends the file as written.

@@ -275,15 +275,16 @@ describe('space references, adjacent links and lone backticks as Linear stores t
     const cases: Array<[string, number]> = [
       ['&#32;Leading', 1], ['**&#32;Tip** one', 1], ['Intro\n\nTail **bold&#32;**', 3], ['End&#x20;', 1], ['&#32;', 1],
       ['* &#32;item', 1], ['1. Plan\n   1. Pack the bags&#32;\n2. Next', 2], ['# **&#32;Head**', 1], ['> &#32;quote', 1],
-      ['| Col |\n| --- |\n| &#32;cell |', 3], ['**&#32;&#32;Seeds:** buy them\n\nMore', 1], ['Ask the host.\nBring the map.&#32;', 2],
+      ['Text ![leaf](leaf.png) **&#32; leaf**', 1], ['**&#32;&#32;Seeds:** buy them\n\nMore', 1], ['Ask the host.\nBring the map.&#32;', 2],
     ];
     for (const [text, line] of cases) {
       assert.deepEqual(lintText('doc.md', text).map((finding) => [finding.rule, finding.line]), [['space-reference-edge', line]], text);
-      assert.deepEqual(lintInTree('doc.md', text, new Set()), [], `the sync sends it: ${text}`);
+      assert.deepEqual(lintInTree('doc.md', text, new Set(['leaf.png'])), [], `the sync sends it: ${text}`);
       assert.equal(fixText(text), text, text);
     }
     // Inside the text, at a line's start or end, it is no block edge.
-    for (const text of ['first\n&#32;second', 'a&#32;\nb', 'x **&#32;mid** y', '[&#32;a](https://a.test) b']) {
+    // A table cell's edge is left to fix: Linear can end the table earlier than Markdown.
+    for (const text of ['first\n&#32;second', 'a&#32;\nb', 'x **&#32;mid** y', '[&#32;a](https://a.test) b', '| Col |\n| --- |\n| cell |\nLine&#32;\nContinued']) {
       assert.deepEqual(lintText('doc.md', text), [], text);
     }
   });
@@ -1135,7 +1136,8 @@ describe('what fix leaves alone', () => {
       ['1. Trip\n\t2. \n\t3. \n\t4. Pack', '1. Trip\n   2. \n   3. \n   4. Pack'],
       ['1. Trip\n\t1. \n\t\t2. *soft* (step) `code` [Map](https://a.test)', '1. Trip\n   1. \n      2. *soft* (step) `code` [Map](<https://a.test>)'],
       ['1. Pump\n\t1. \n\t2. Rinse:\u00a0 Fill it\u00a0', '1. Pump\n   1. \n   2. Rinse:\u00a0 Fill it\u00a0'],
-      // A heading or a quote there would open a block in Linear's item.
+      // A heading, a quote, a checkbox or a section line there reads another way in Linear.
+      ['1. Trip\n\t1. \n\t\t2. +++ Notes', '1. Trip\n    1\\. \n    \t2\\. +++ Notes'],
       ['1. Trip\n\t1. \n\t\t2. # Heading', '1. Trip\n    1\\. \n    \t2\\. # Heading'],
       ['1. Trip\n\t1. \n\t\t2. > quoted', '1. Trip\n    1\\. \n    \t2\\. > quoted'],
       // The item's text ends before Linear's empty item: Linear drops the spaces or tab there.
@@ -1164,13 +1166,32 @@ describe('what fix leaves alone', () => {
     }
   });
 
-  it('drops a two-space break before Linear\'s empty item, as Linear does', () => {
-    // Linear reads the empty item there and drops the break: Markdown's
-    // paragraph keeps the same words, without the break before the marker.
-    const fixed = fixText('1. Plan 2  \n   1.');
-    assert.equal(fixed, '1. Plan 2\n   1. ');
+  it('keeps the text form of a bare marker after a break or a space reference', () => {
+    // A two-space break is how a former backslash break is written: the line
+    // after it stays text in both runs. A space reference keeps its spelling.
+    for (const text of ['1. Plan 2  \n   1.', '1. Plan  \\\n   1.', '1. Plan&#32; \n   1.']) {
+      const fixed = fixText(text);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${JSON.stringify(text)}`);
+      assert.deepEqual(lintText('a.md', fixed), [], JSON.stringify(text));
+    }
+    assert.ok(fixText('1. Plan&#32; \n   1.').includes('&#32;'));
+  });
+
+  it('keeps the escaped form where numbered text is too deep to read by itself', () => {
+    const text = '1. Plan\n   1.\n   2. ' + '> '.repeat(128) + 'x';
+    assert.match(fixText(text), /2\\\. >/);
+  });
+
+  it('keeps a heading\'s hashes when an empty bold run starts it', () => {
+    const fixed = fixText('****Plan** Check #**\n===');
+    assert.ok(fixed.replace(/^# /, '').includes('#'), fixed);
     assert.equal(fixText(fixed), fixed);
-    assert.deepEqual(lintText('a.md', fixed), []);
+  });
+
+  it('finds trailing spaces before a bare marker in linear time', () => {
+    const started = performance.now();
+    fixText('1. A' + ' '.repeat(50_000) + 'B\n   1.');
+    assert.ok(performance.now() - started < 2000);
   });
 
   it('keeps a literal asterisk before an image on an item\'s second line', () => {
