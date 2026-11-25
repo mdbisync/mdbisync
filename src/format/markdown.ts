@@ -150,7 +150,9 @@ export function parse(body: string, mdastExtensions: Extension[] = [], linearDom
   const gfmExtensions = gfmFromMarkdown();
   const transforms = gfmExtensions.flatMap((extension) => extension.transforms ?? []);
   const untransformed = gfmExtensions.map(({ transforms: _transforms, ...extension }) => extension);
-  const syntax = gfm();
+  // Linear uses double tildes for strikethrough. A single tilde remains
+  // literal when shortening an autolink exposes it to the inline parser.
+  const syntax = gfm({ singleTilde: !linearDomains });
   if (linearDomains && syntax.text) {
     // Treat www. like any other bare host in Linear mode. Prevent the
     // tokenizer from splitting the source of an unsupported www. name.
@@ -171,6 +173,9 @@ export function parse(body: string, mdastExtensions: Extension[] = [], linearDom
   return tree;
 }
 
+/** A spaced bold italic suffix immediately after a marked link. */
+export const LINKED_BOLD_ITALIC_SUFFIX = /^\*{3}( (?:\\[^\r\n]|[^*\\\r\n])+)\*{3}(?!\*)/;
+
 /** Linear can write a leading space inside the bold italic text immediately after a marked link. */
 function placeLinkedBoldItalicSuffixes(tree: Root, source: string): void {
   const points = new PointIndex(source);
@@ -184,18 +189,20 @@ function placeLinkedBoldItalicSuffixes(tree: Root, source: string): void {
       if (text.type !== 'text' || text.position === undefined || end(link) !== start(text)) return [text];
       const from = start(text);
       if (!text.value.startsWith('*** ')) return [text];
-      const match = /^\*{3}( [^*\\\r\n]+)\*{3}(?!\*)/.exec(source.slice(from, end(text)));
-      if (!match || !text.value.startsWith(match[0])) return [text];
+      const match = LINKED_BOLD_ITALIC_SUFFIX.exec(source.slice(from, end(text)));
+      if (!match) return [text];
+      const decoded = decodeTextLiteral(match[0]);
+      if (!text.value.startsWith(decoded)) return [text];
       const to = from + match[0].length;
       const position = (start: number, end: number) => ({ start: points.at(start), end: points.at(end) });
       const marked: Nodes = {
         type: 'emphasis', position: position(from, to), children: [{
           type: 'strong', position: position(from + 1, to - 1),
-          children: [{ type: 'text', value: match[1]!, position: position(from + 3, to - 3) }],
+          children: [{ type: 'text', value: decodeTextLiteral(match[1]!), position: position(from + 3, to - 3) }],
         }],
       };
       if (to === end(text)) return [marked];
-      return [marked, { ...text, value: text.value.slice(match[0].length), position: { ...text.position, start: points.at(to) } }];
+      return [marked, { ...text, value: text.value.slice(decoded.length), position: { ...text.position, start: points.at(to) } }];
     }) as Parent['children'];
   });
 }
@@ -217,7 +224,10 @@ function placeLinearHttpEnds(tree: Root, source: string): void {
       const raw = source.slice(from, originalEnd);
       const next = children[index + 1];
       const following = next?.type === 'text' && next.position !== undefined && start(next) === originalEnd ? next : undefined;
-      if (!/^https?:\/\/[^/?#]+[/?#]/i.test(raw)) {
+      const suffix = following === undefined ? ''
+        : /^[_.~:#?!,;)\]}'"]+/.exec(source.slice(originalEnd, end(following)))?.[0] ?? '';
+      const candidate = raw + suffix;
+      if (!/^https?:\/\/[^/?#]+[/?#]/i.test(candidate)) {
         if (source[from - 1] !== '[' && following?.value.startsWith('_') && /^\\?_/.test(source.slice(originalEnd, originalEnd + 2))) {
           // An underscore attached directly to the host prevents Linear from linking it.
           adjusted[adjusted.length - 1] = {
@@ -228,9 +238,6 @@ function placeLinearHttpEnds(tree: Root, source: string): void {
         }
         continue;
       }
-      const suffix = following === undefined ? ''
-        : /^[_.~:?!,;)\]}]+/.exec(source.slice(originalEnd, end(following)))?.[0] ?? '';
-      const candidate = raw + suffix;
       const length = httpUrlEnd(candidate);
       const written = candidate.slice(0, length);
       if (length === raw.length && !/[\[\]]/.test(written)) continue;
@@ -681,7 +688,7 @@ export function markdownBaseline(body: string | undefined): string | undefined {
  * table cell, `*` for `_`, a code span on one line), which changes nothing
  * in the document; the sync keeps the file's spelling for those.
  */
-export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean; linearBoldForms?: boolean } = {}): boolean {
+export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean; linearBoldForms?: boolean; ignoreBold?: boolean } = {}): boolean {
   if (a === b) return true;
   return isDeepStrictEqual(comparable(a, options), comparable(b, options));
 }
@@ -1085,7 +1092,7 @@ export function withoutTrailingNewlines(text: string): string {
 }
 
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
-function comparable(body: string, { linearNumberSpacing, linearBoldForms }: { linearNumberSpacing?: boolean; linearBoldForms?: boolean }): unknown {
+function comparable(body: string, { linearNumberSpacing, linearBoldForms, ignoreBold }: NonNullable<Parameters<typeof sameMarkdown>[2]>): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
   // A lone `\+`, as `fix` writes for item text that is a bare `+`, cannot
   // be part of `+++`. Markdown reads it as a regular escape.
@@ -1114,8 +1121,8 @@ function comparable(body: string, { linearNumberSpacing, linearBoldForms }: { li
       for (const [index, child] of node.children.entries()) {
         const startsLine = node.type === 'paragraph' ? index === 0 || node.children[index - 1]?.type === 'break' : undefined;
         const part = strip(child, startsLine);
-        // A strong span immediately inside another one adds no formatting.
-        if (node.type === 'strong' && part.type === 'strong') {
+        // Nested strong is redundant. For adjacent bold rewrites compare everything except bold.
+        if ((ignoreBold || node.type === 'strong') && part.type === 'strong') {
           for (const nested of part.children!) appendComparable(children, nested);
         } else {
           appendComparable(children, part);

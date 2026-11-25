@@ -232,7 +232,8 @@ Inline text:
   When the bold link is followed immediately by punctuation inside the
   same span, the punctuation gets its own bold marks. A leading bold italic
   link likewise carries its marks in the label, with separate marks for the
-  text that follows it.
+  text that follows it. When the text starts with a space, Linear writes
+  `*** text***`. CommonMark renders those asterisks literally.
   When bold spans multiple lines, `fix` closes it and reopens it on each line.
 - Link destinations go in angle brackets: `[a](https://example.com/x)`
   becomes `[a](<https://example.com/x>)`. A backslash, `|`, `^`, `{` and

@@ -16,7 +16,7 @@ import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
-import { ALERT, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -197,7 +197,7 @@ function fixBody(body: string, options: FixOptions): string | undefined {
 /** Linear closes the first bold span at the second four-star boundary. */
 function adjacentBoldAsLinear(body: string, tree: Root): string {
   if (!body.includes('****')) return body;
-  const edits: Edit[] = [];
+  const groups = new Map<Nodes, Edit[]>();
   visit(tree, (node, ancestors) => {
     if (node.type !== 'strong' || node.position!.start.line !== node.position!.end.line
       || ancestors.some((parent) => parent.type === 'strong' || parent.type === 'emphasis')) return;
@@ -210,6 +210,8 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
       body.slice(start(part), start(part) + 4) !== '****' || body.slice(end(part) - 4, end(part)) !== '****'
       || part.children.length !== 1 || part.children[0]?.type !== 'strong'
       || part.children[0].children.some((child) => child.type !== 'text'))) return;
+    const block = ancestors[1] ?? node;
+    const edits = groups.get(block) ?? [];
     for (const [index, part] of boundaries.entries()) {
       edits.push(
         { from: start(part), to: start(part) + (index === 0 ? 4 : 2), text: '' },
@@ -217,8 +219,10 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
       );
     }
     edits.push({ from: end(node) - 2, to: end(node), text: '' });
+    groups.set(block, edits);
   });
-  return rewriteBoldRange(body, 0, body.length, edits) ?? body;
+  // Changing these bold marks must leave links, other styles and text intact.
+  return reSpellBold(body, groups, true) ?? body;
 }
 
 /** Re-spell bold across line breaks and around a single link in the written body. */
@@ -337,8 +341,8 @@ function boldLinkEdit(body: string, outer: PhrasingContent): Edit | undefined {
     node = first;
   }
   if (node.type !== 'link' || body[start(node)] !== '[' || node.position!.start.line !== node.position!.end.line) return;
-  if (!bold && !(node.children.length === 1 && node.children[0]?.type === 'strong')) return;
-  if (suffix.includes('\n') || (!italic && /^\s/u.test(suffix))) return;
+  if (!bold && (suffix !== '' || node.children.length !== 1 || node.children[0]?.type !== 'strong')) return;
+  if (suffix.includes('\n')) return;
   const last = node.children.at(-1);
   if (last === undefined) return;
   const label = body.slice(start(node) + 1, end(last));
@@ -347,16 +351,17 @@ function boldLinkEdit(body: string, outer: PhrasingContent): Edit | undefined {
     ? body.slice(start(child) + 2, end(child) - 2) : body.slice(start(child), end(child))).join('');
   const mark = italic ? '***' : '**';
   const markedSuffix = suffix === '' ? '' : mark + suffix + mark;
+  if (/^\s/u.test(suffix) && (!italic || !LINKED_BOLD_ITALIC_SUFFIX.test(markedSuffix))) return;
   return { from: start(outer), to: end(outer), text: `[${mark}${text}${mark}${body.slice(end(last), end(node))}${markedSuffix}` };
 }
 
-function reSpellBold(body: string, groups: ReadonlyMap<Nodes, Edit[]>): string | undefined {
+function reSpellBold(body: string, groups: ReadonlyMap<Nodes, Edit[]>, ignoreBold = false): string | undefined {
   if (groups.size === 0) return undefined;
   const equivalent = (from: number, to: number, edits: Edit[]): string | undefined => {
     const candidate = rewriteBoldRange(body, from, to, edits);
     if (candidate === undefined) return;
     try {
-      if (sameMarkdown(body.slice(from, to), candidate, { linearBoldForms: true })) return candidate;
+      if (sameMarkdown(body.slice(from, to), candidate, { linearBoldForms: !ignoreBold, ignoreBold })) return candidate;
     } catch (error) {
       if (!(error instanceof MarkdownLimitError)) throw error;
     }

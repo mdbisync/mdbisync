@@ -18,4 +18,18 @@ https://example.com\_ and [example.com/guide\_](<http://example.com/guide_>)
 
 [**https://example.test/p\_**](<https://example.test/p_>)
 
+[https://example.test?\_](<https://example.test?_>) and [https://example.test#\_](<https://example.test#_>)
+
+[https://example.test/p](<https://example.test/p>)(x\~y\~z and [https://example.test/p](<https://example.test/p>)(x~~y~~z
+
+[https://example.test/p](<https://example.test/p>)(x**y**z and [https://example.test/p](<https://example.test/p>)(foo`bar`baz
+
+See [https://example.test/o'reilly/notes](<https://example.test/o'reilly/notes>) and [https://example.test/p](<https://example.test/p>)' next.
+
+See [https://example.test/path](<https://example.test/path>)"quoted/notes and [https://example.test/p](<https://example.test/p>)" next.
+
+See [https://example.test/path“quoted”/notes](<https://example.test/path%E2%80%9Cquoted%E2%80%9D/notes>) and [https://example.test/p”](<https://example.test/p%E2%80%9D>) next.
+
+See [https://example.test/path«quoted»/notes](<https://example.test/path%C2%ABquoted%C2%BB/notes>) and [https://example.test/p»](<https://example.test/p%C2%BB>) next.
+
 Ref kx-73d145bc

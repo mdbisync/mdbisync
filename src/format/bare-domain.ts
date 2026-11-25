@@ -14,6 +14,7 @@ interface BareDomain {
 const HOST_RUN = /[.\p{L}\p{M}\p{N}\p{Extended_Pictographic}_+=-]+/gu;
 const INVALID_LABEL = /(?:^|\.)-|-(?:\.|$)|\.\.|_/;
 const TAIL_BOUNDARY = /[\s\p{Cc}<>"'“”‘’«»\\]/u;
+const HTTP_TAIL_BOUNDARY = /[\s\p{Cc}<>"]/u;
 const TAIL_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]{1,31}));/y;
 const PORT = /^:(0|[1-9]\d{0,4})(?=$|[/?#\s.,;!()[\]{}<>"'“”‘’«»])/u;
 const NON_ASCII = /[^\x00-\x7F]/;
@@ -82,7 +83,7 @@ function scanTail(value: string, at: number, withScheme: boolean): { end: number
   let end = at;
   for (; end < value.length; end++) {
     const char = value[end]!;
-    if (withScheme ? char !== '\\' && TAIL_BOUNDARY.test(char)
+    if (withScheme ? HTTP_TAIL_BOUNDARY.test(char)
       : TAIL_BOUNDARY.test(char) || (char === '&' && beginsReference(value, end))) break;
     if (char === '(' || char === '[' || (withScheme && char === '{')) {
       const parent = open.at(-1);
@@ -95,7 +96,7 @@ function scanTail(value: string, at: number, withScheme: boolean): { end: number
   }
   const scanned = end;
   end = open[0]?.at ?? end;
-  if (end > at && '.,;!?'.includes(value[end - 1]!)) {
+  if (end > at && (withScheme ? ".,;!?'" : '.,;!?').includes(value[end - 1]!)) {
     const punctuation = value[--end];
     if (withScheme) while (end > at && value[end - 1] === punctuation) end--;
   }
