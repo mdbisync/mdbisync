@@ -1164,7 +1164,7 @@ describe('what fix leaves alone', () => {
     const escapedUrl = 'https://example.org/blue\\_\\_jars/café\\_menu/shelf\\_4';
     const inline = `[${escapedUrl}](${url})`;
     // The label keeps the letter; the destination is percent-encoded, as Linear writes it.
-    const expected = `[${url}](<${url.replace('é', '%C3%A9')}>)`;
+    const expected = `[${url}](<https://example.org/blue__jars/caf%C3%A9_menu/shelf_4>)`;
     for (const input of [url, `<${url}>`, inline, `[${escapedUrl}][stock]\n\n[stock]: ${url}`]) {
       const fixed = fixText(input);
       assert.equal(fixed, expected, input);
