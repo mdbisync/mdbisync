@@ -130,13 +130,22 @@ function fixBody(body: string, options: FixOptions): string {
     // not place, which lint reports as `unplaced-link`) would make it copy
     // the wrong text: leave the body as it came.
     if (hasUnplacedNode(tree)) return body;
-    const writer = new Writer(current, tree, options);
+    let writer = new Writer(current, tree, options);
     let next = writer.root();
+    let escapeBrackets = true;
     if (writer.bracketsMayChangeLinks) {
-      const withOriginalBrackets = new Writer(current, tree, options, false).root();
-      // A bracket we could not escape can pair with a different bracket
-      // when an intervening one is escaped, even across inline nodes.
-      if (!sameMarkdown(next, withOriginalBrackets)) next = withOriginalBrackets;
+      const fallback = new Writer(current, tree, options, false);
+      const withOriginalBrackets = fallback.root();
+      if (!sameMarkdown(next, withOriginalBrackets)) {
+        escapeBrackets = false;
+        next = withOriginalBrackets;
+        writer = fallback;
+      }
+    }
+    if (writer.rewroteAsterisks) {
+      const withOriginalAsterisks = new Writer(current, tree, options, escapeBrackets, false).root();
+      // A locally equivalent edit can still affect a surrounding block.
+      if (!sameMarkdown(next, withOriginalAsterisks)) next = withOriginalAsterisks;
     }
     if (next === current) return next;
     current = next;
@@ -145,6 +154,7 @@ function fixBody(body: string, options: FixOptions): string {
 }
 
 type Edit = { from: number; to: number; text: string };
+type InlineEdits = { edits: Edit[]; rewriteAsterisks: boolean; changedAsterisks: boolean };
 
 /** A container whose prefix starts each source line of its content: a quote, or a list item's indentation. */
 /** `content` is the source offset where the container's content starts on its first line. */
@@ -172,7 +182,9 @@ class Writer {
   private readonly tree: Root;
   private readonly options: FixOptions;
   private readonly escapeBrackets: boolean;
+  private readonly rewriteAsterisks: boolean;
   bracketsMayChangeLinks = false;
+  rewroteAsterisks = false;
   private conflictCallouts: Set<number> | undefined;
   /** Where the table cell being written starts its text: an escape there stays. */
   private cellStart: number | undefined;
@@ -183,11 +195,12 @@ class Writer {
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
 
-  constructor(source: string, tree: Root, options: FixOptions, escapeBrackets = true) {
+  constructor(source: string, tree: Root, options: FixOptions, escapeBrackets = true, rewriteAsterisks = true) {
     this.source = source;
     this.tree = tree;
     this.options = options;
     this.escapeBrackets = escapeBrackets;
+    this.rewriteAsterisks = rewriteAsterisks;
     visit(tree, (node) => {
       if (node.type === 'definition' && !this.definitions.has(node.identifier)) this.definitions.set(node.identifier, node);
     });
@@ -489,8 +502,6 @@ class Writer {
     if (children.length === 0) return '';
     const from = start(children[0]!);
     const to = end(children.at(-1)!);
-    const edits: Edit[] = [];
-    for (const child of children) this.inlineEdits(child, edits);
     const code: Array<[number, number]> = [];
     const texts: Array<[number, number]> = [];
     const html: Array<[number, number]> = [];
@@ -501,8 +512,20 @@ class Writer {
         if (node.type === 'html') html.push([start(node), end(node)]);
       });
     }
-    if (lineStarts === 'none') return this.rewritten(from, to, edits, code);
-    return this.rewritten(from, to, edits, code, { texts, html, first: lineStarts === 'all' });
+    const paragraph = lineStarts === 'none' ? undefined : { texts, html, first: lineStarts === 'all' };
+    const render = (rewriteAsterisks: boolean) => {
+      const inline: InlineEdits = { edits: [], rewriteAsterisks, changedAsterisks: false };
+      this.inlineChildrenEdits(children, inline);
+      return { text: this.rewritten(from, to, inline.edits, code, paragraph), changedAsterisks: inline.changedAsterisks };
+    };
+    const candidate = render(this.rewriteAsterisks);
+    if (!candidate.changedAsterisks) return candidate.text;
+    const original = render(false);
+    // A table or heading can begin with characters that would open a block
+    // if the same inline text was parsed by itself.
+    if (!sameMarkdown('Text ' + candidate.text, 'Text ' + original.text)) return original.text;
+    this.rewroteAsterisks = true;
+    return candidate.text;
   }
 
   /**
@@ -542,9 +565,8 @@ class Writer {
 
   /**
    * Escapes a literal `-` or `*` at `at`, a line's first content character,
-   * as Linear does, and says whether it did. A `*` followed by another one
-   * is left alone: it shares a delimiter run with emphasis (`***(a)*`), and
-   * an escape would change which asterisks pair.
+   * as Linear does, and says whether it did. Inline edits handle a run of
+   * asterisks because it can include both literal text and delimiters.
    */
   private escapeLineStart(at: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[]): boolean {
     const char = this.source[at];
@@ -590,22 +612,51 @@ class Writer {
     return { from: lineStart, to: at, text: '' };
   }
 
-  private inlineEdits(node: PhrasingContent, edits: Edit[]): void {
+  private inlineChildrenEdits(children: readonly PhrasingContent[], inline: InlineEdits, insideStrong = false): void {
+    for (const [index, child] of children.entries()) {
+      if (child.type !== 'strong') {
+        this.inlineEdits(child, inline);
+        continue;
+      }
+      const previous = children[index - 1];
+      const next = children[index + 1];
+      const joinLeft = insideStrong || (previous?.type === 'strong' && end(previous) === start(child));
+      const joinsNext = next?.type === 'strong' && end(child) === start(next);
+      if (inline.rewriteAsterisks && joinsNext) {
+        // Join the italic text across the bold boundary too, without
+        // creating a new delimiter run between the two italic words.
+        const last = child.children.at(-1);
+        const first = next.children[0];
+        if (last?.type === 'emphasis' && first?.type === 'emphasis'
+          && end(last) === end(child) - 2 && start(first) === start(next) + 2) {
+          inline.edits.push({ from: end(last) - 1, to: end(last), text: '' }, { from: start(first), to: start(first) + 1, text: '' });
+        }
+      }
+      const joinRight = insideStrong || joinsNext;
+      this.inlineEdits(child, inline, joinLeft, joinRight);
+    }
+  }
+
+  private inlineEdits(node: PhrasingContent, inline: InlineEdits, joinLeft = false, joinRight = false): void {
+    const { edits, rewriteAsterisks } = inline;
     const from = start(node);
     const to = end(node);
     switch (node.type) {
       case 'emphasis':
       case 'strong': {
         const width = node.type === 'strong' ? 2 : 1;
-        if (this.source[from] === '_') {
+        if (rewriteAsterisks) {
           const mark = '*'.repeat(width);
-          edits.push({ from, to: from + width, text: mark }, { from: to - width, to, text: mark });
+          const underscore = this.source[from] === '_';
+          if (joinLeft || underscore) edits.push({ from, to: from + width, text: joinLeft ? '' : mark });
+          if (joinRight || underscore) edits.push({ from: to - width, to, text: joinRight ? '' : mark });
+          if (joinLeft || joinRight || underscore) inline.changedAsterisks = true;
         }
-        for (const child of node.children) this.inlineEdits(child, edits);
+        this.inlineChildrenEdits(node.children, inline, node.type === 'strong');
         return;
       }
       case 'delete':
-        for (const child of node.children) this.inlineEdits(child, edits);
+        this.inlineChildrenEdits(node.children, inline);
         return;
       case 'link': {
         // An autolink (`<url>` or a bare URL) has no brackets in the source:
@@ -634,6 +685,11 @@ class Writer {
       case 'text': {
         const text = this.literal ? literalEdits(this.source, from, to) : textEdits(this.source, from, to, this.cellStart);
         for (const edit of text) edits.push(edit);
+        if (!this.literal && rewriteAsterisks) {
+          const asterisks = literalAsteriskEdits(this.source.slice(from, to), from);
+          for (const edit of asterisks) edits.push(edit);
+          if (asterisks.length > 0) inline.changedAsterisks = true;
+        }
         if (!this.literal && this.escapeBrackets) this.escapeTextBrackets(from, to, edits);
         return;
       }
@@ -755,6 +811,19 @@ function squareBracketEdits(raw: string, from: number, markerBrackets?: readonly
   return edits;
 }
 
+/** Match escapes first, so an existing asterisk escape stays intact. */
+function literalAsteriskEdits(raw: string, from: number): Edit[] {
+  if (!/[*&]/.test(raw)) return [];
+  const edits: Edit[] = [];
+  for (const match of raw.matchAll(ASTERISK_SPELLING)) {
+    const spelling = match[0];
+    if (spelling !== '*' && (spelling[0] !== '&' || decodeEntity(spelling) !== '*')) continue;
+    const at = from + match.index;
+    edits.push({ from: at, to: at + spelling.length, text: '\\*' });
+  }
+  return edits;
+}
+
 /**
  * Rewrites inside an autolink's text written as a link label, so the label
  * reads exactly as the URL. Every backslash is literal there, so each is
@@ -812,6 +881,7 @@ function* emojiShortcodeStarts(label: string): Generator<number> {
 
 /** A character reference as Markdown spells one; whether it names a character is decided apart. */
 const CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
+const ASTERISK_SPELLING = new RegExp(String.raw`\\.|[*]|` + CHARACTER_REFERENCE.source, 'g');
 
 /** The `:name:` shortcodes in `raw` that name an emoji Linear knows, with their offsets. */
 function* emojiShortcodes(raw: string): Generator<{ index: number; length: number; emoji: string }> {

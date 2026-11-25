@@ -725,6 +725,20 @@ function isLonePlus(text: string, at: number): boolean {
   return text[at - 1] !== '+' && (after === undefined || after === ' ' || after === '\t' || after === '\n');
 }
 
+type ComparableNode = { type: Nodes['type']; value?: string; children?: ComparableNode[] };
+
+/** Consecutive spans of the same style render as one. */
+function appendComparable(children: ComparableNode[], child: ComparableNode): void {
+  const previous = children.at(-1);
+  if (child.type === 'text' && previous?.type === 'text') {
+    previous.value += child.value!;
+  } else if ((child.type === 'strong' || child.type === 'emphasis') && previous?.type === child.type) {
+    for (const part of child.children!) appendComparable(previous.children!, part);
+  } else {
+    children.push(child);
+  }
+}
+
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
 function comparable(body: string): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
@@ -737,10 +751,22 @@ function comparable(body: string): unknown {
     .replace(/\\[$+]/g, (escape, at: number, text: string) => (escape === '\\+' && isLonePlus(text, at) ? escape : LINEAR_SYNTAX_ESCAPES[escape]!))
     .replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, '$1 ');
   const tree = parse(marked);
-  const strip = (node: Nodes): unknown => {
+  const strip = (node: Nodes): ComparableNode => {
     const { position: _position, ...rest } = node;
     if ('url' in rest) rest.url = normalizeUri(rest.url);
-    if ('children' in node) return { ...rest, children: node.children.map(strip) };
+    if ('children' in node) {
+      const children: ComparableNode[] = [];
+      for (const child of node.children) {
+        const part = strip(child);
+        // A strong span immediately inside another one adds no formatting.
+        if (node.type === 'strong' && part.type === 'strong') {
+          for (const nested of part.children!) appendComparable(children, nested);
+        } else {
+          appendComparable(children, part);
+        }
+      }
+      return { ...rest, children };
+    }
     return rest;
   };
   return strip(tree);
