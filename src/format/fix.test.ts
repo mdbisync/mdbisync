@@ -888,6 +888,91 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('writes a bare number or bullet on an item\'s second line as the empty item Linear reads there', () => {
+    // An empty marker cannot interrupt a paragraph: it is the item's text.
+    // Linear reads an empty item nested in the item and writes it at the
+    // item's content with a space after it; four or more columns past the
+    // content Linear reads indented code, and `fix` writes the same form.
+    const cases: Array<[string, string]> = [
+      ['1. Plan\n   2.', '1. Plan\n   2. '],
+      ['1. Plan\n   1. Sub\n      2.', '1. Plan\n   1. Sub\n      2. '],
+      ['1. Trip\n    1. Plan\n        2.', '1. Trip\n   1. Plan\n      2. '],
+      ['* Trip\n    1. Plan\n        2.', '* Trip\n  1. Plan\n     2. '],
+      ['1. Trip\n   1. Plan\n      1. Pack\n         2.', '1. Trip\n   1. Plan\n      1. Pack\n         2. '],
+      ['1. Trip\n   1. Plan\n         2.', '1. Trip\n   1. Plan\n      2. '],
+      ['1. Trip\n   * Plan\n     2.', '1. Trip\n   * Plan\n     2. '],
+      ['* Trip\n  * Plan\n    *', '* Trip\n  * Plan\n    * '],
+      ['1. Plan\n\t2.', '1. Plan\n   2. '],
+      ['1. Trip\n   1. Plan\n\t\t2.', '1. Trip\n   1. Plan\n      2. '],
+      ['- [ ] Pack\n  2.', '- [ ] Pack\n  2. '],
+      ['10. Plan\n    2.', '10. Plan\n    2. '],
+      ['1. Plan\n   2.\n\n   Note', '1. Plan\n   2. \n\n   Note'],
+      // Past the content Linear makes the line indented code.
+      ['1. Plan\n\t\t2.', '1. Plan\n   2. '],
+      ['1. Plan\n        2.', '1. Plan\n   2. '],
+      ['1. Plan\n\t\t\t2.', '1. Plan\n   2. '],
+      ['- [ ] Pack\n      2.', '- [ ] Pack\n  2. '],
+      // Linear reads text: under a quote, after other lines, before more text,
+      // or with a delimiter or bullet Linear would write another way.
+      ['> 1. Plan\n>    2.', '> 1. Plan\n>    2.'],
+      ['1. Plan\n   Note\n   2.', '1. Plan\n   Note\n   2.'],
+      ['1. Plan\n\n   Note\n   2.', '1. Plan\n\n   Note\n   2.'],
+      ['1. Plan\n   2.\n   more', '1. Plan\n   2.\n   more'],
+      ['* Plan\n  Note\n  *', '* Plan\n  Note\n  \\*'],
+      ['1. Trip\n   1. Plan\n      3)', '1. Trip\n   1. Plan\n      3)'],
+      ['1. Plan\n   +', '1. Plan\n   +'],
+      // An ordered list after it would continue Linear's empty item and be renumbered; a bullet list does not.
+      ['1. Plan\n   2.\n   1. x', '1. Plan\n   2.\n   1. x'],
+      ['* Plan\n  *\n  * x', '* Plan\n  * \n  * x'],
+    ];
+    for (const [text, expected] of cases) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, JSON.stringify(text));
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${JSON.stringify(text)}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${JSON.stringify(text)}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${JSON.stringify(text)}`);
+    }
+  });
+
+  it('keeps a literal asterisk before an image on an item\'s second line', () => {
+    const text = '1. Plan\n   *![Diagram](d.png)';
+    const fixed = fixText(text, { linkedFileExists: () => true });
+    assert.equal(fixed, '1. Plan\n   \\*\n\n   ![Diagram](d.png)');
+    assert.equal(fixText(fixed, { linkedFileExists: () => true }), fixed);
+  });
+
+  it('keeps the tabs of a numbered continuation line after the columns its item takes, as Linear does', () => {
+    // The item's prefix takes its columns of the first tab; the others stay
+    // as spaces and the later tabs stay tabs. Escaped, the number is text
+    // at any column, also where the written prefix is shorter than the source's.
+    const cases: Array<[string, string]> = [
+      ['1. Plan\n\t\t2. step', '1. Plan\n    \t2\\. step'],
+      ['1. Plan\n\t\t2\\. step', '1. Plan\n    \t2\\. step'],
+      ['1. Plan\n\t\t\t2. step', '1. Plan\n    \t\t2\\. step'],
+      ['1. Plan\n\t\t\t\t2. step', '1. Plan\n    \t\t\t2\\. step'],
+      ['* Plan\n\t\t2. step', '* Plan\n    \t2\\. step'],
+      ['1. Plan\n\t\t- step', '1. Plan\n    \t- step'],
+      ['1. Trip\n   1. Plan\n\t\t\t2. step', '1. Trip\n   1. Plan\n        \t2\\. step'],
+      ['-   Plan\n    \t2. step', '* Plan\n  \t2\\. step'],
+      ['1. Trip\n    1. Plan\n\t\t\t2. step', '1. Trip\n   1. Plan\n       \t2\\. step'],
+      // Where the written prefix ends at the source's column, tabs before other block starts stay too.
+      ['* a\n  \t\t# b', '* a\n  \t\t\\# b'],
+      ['* a\n\t\t> b', '* a\n    \t> b'],
+      // Spaces stay as they are.
+      ['1. Plan\n        2. step', '1. Plan\n        2\\. step'],
+      ['1. Trip\n    1. Plan\n            2. step', '1. Trip\n   1. Plan\n           2\\. step'],
+      // Before other text that could open a block, a tab under a shorter prefix still becomes spaces.
+      ['-   a\n    \t- b', '* a\n      - b'],
+    ];
+    for (const [text, expected] of cases) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, JSON.stringify(text));
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${JSON.stringify(text)}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${JSON.stringify(text)}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${JSON.stringify(text)}`);
+    }
+  });
+
   it('keeps a continuation line text where its indentation kept it from opening a block', () => {
     const kept: Array<[string, string]> = [
       // A lazy line: the item takes none of the spaces that kept it text.
