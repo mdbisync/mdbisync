@@ -121,7 +121,10 @@ Blocks:
 - Loose lists become tight: the blank lines between items go, and a nested
   list follows its paragraph on the next line.
 - Ordered lists use dots and count up from their start: `1) a` becomes
-  `1. a`.
+  `1. a`. Numbers are right-aligned to the widest one, and every item's
+  content lines up past it: in a list of ten items, the first is written
+  ` 1. a` above `10. j`.
+- An empty item keeps a space after its marker: `*` becomes `* `.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
   `- [X] done`. A checkbox without a label keeps one space after it.
 - A paragraph's text that starts like a list marker gets its marker
