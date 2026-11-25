@@ -26,7 +26,7 @@ import { type FileContent, contentBytes, ContentSpool } from '../state/content.t
 import { checkPushScope } from '../sync/head-check.ts';
 import { posix } from 'node:path';
 import { fixLinearText, joinFile, linkedFileCheck, splitFile } from '../format/index.ts';
-import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
+import { MarkdownLimitError, linearMarkersAsText, markdownBaseline } from '../format/markdown.ts';
 import { LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
@@ -536,6 +536,8 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     // Each document's body once its embedded files are downloaded, the files, and their upload URLs by content hash.
     const bodies = new Map<string, { body: string; files: Map<string, FileContent>; uploads: UploadMap }>();
     const trackedBodies = new Map<string, string>();
+    // Each document's text as Linear holds it, with the marker escapes it dropped put back.
+    const readableContents = new Map<string, string>();
     // A link to another synchronized document's URL becomes a relative link to its file, as the capture does:
     // only to a file the record holds, so the links follow every file left out on the way.
     let linkBase: string | undefined;
@@ -573,7 +575,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
       const key = `${entry.path}\0${joined}`;
       let text = fixedTexts.get(key);
       if (text === undefined) {
-        text = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)), trackedBodies.get(entry.path));
+        text = fixLinearText(joined, readableContents.get(entry.path) ?? contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)), trackedBodies.get(entry.path));
         fixedTexts.set(key, text);
       }
       return text;
@@ -608,9 +610,13 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
       try {
         // Keep parsing and link discovery inside this document's boundary.
         checkImageRepairSize(content);
-        if (linksLinearDocuments(content)) needsLinkBase = true;
+        // Links and files are found in the text as Linear holds it, with the marker escapes it dropped put back:
+        // `4)     [a](b)` would otherwise read as a list item holding code, which hides the link.
+        const readable = linearMarkersAsText(content, trackedBody);
+        readableContents.set(entry.path, readable);
+        if (linksLinearDocuments(readable)) needsLinkBase = true;
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
-        const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content, input.mapping.files), uploads, trackedBody);
+        const captured = await download(entry.path, restoreBody(transforms, entry.path, readable, readable, input.mapping.files), uploads, trackedBody);
         // Initial import records only observations and writes nothing to Linear.
         // Defer a repair to the next ordinary capture, whose PR also records its provenance.
         if (captured.observedBody !== undefined) { imageBlocked.push(entry.path); continue; }

@@ -370,10 +370,16 @@ Inline text:
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
   `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`.
-  `&nbsp;` becomes the nonbreaking space Linear stores for it. Next to `*`,
-  `_` or `~`, a reference stays when its character would change what they
-  mark. A nonbreaking space at the end of a heading stays, as Linear keeps
-  it; spaces and tabs there go.
+  `&nbsp;` becomes the nonbreaking space Linear stores for it, and other
+  whitespace references such as `&ensp;` or `&#12288;` become their
+  characters too. At the inner edge of bold, italic or strikethrough the
+  character moves out of it, as Linear writes it: in `x **&nbsp;Tip** y`
+  the nonbreaking space is written before `**Tip**`. Elsewhere
+  next to `*`, `_` or `~`, a reference stays when its character would
+  change what they mark. Such a space at the start or end of a paragraph,
+  heading, item, quote or body cell stays, as Linear keeps it; spaces and
+  tabs there go. Around a header cell's text it goes, since Linear drops it
+  on its next write.
   Asterisk references such as `&#42;` become `\*`. Other ASCII references,
   such as `&lt;b&gt;`, `&quot;` and `&#65;`, stay as written.
 - A space reference (`&#32;`, `&#x20;`) becomes a space, as Linear stores
@@ -578,16 +584,17 @@ to the page instead.
 
 ### `content-too-long`
 
-This document exceeds Linear's 250,000-character content limit. The author
-must decide how to shorten or split it. Linear refuses the whole document.
-The limit counts Unicode code points of the text after the front matter.
-Such a document is not checked further, so `content-too-long` is its only
-finding.
+This document exceeds Linear's 250,000-character content limit. Linear
+refuses the whole document, so the sync leaves the file out until it fits.
+The author must decide how to shorten or split it. The limit counts Unicode
+code points of the text after the front matter. Such a document is not
+checked further, so `content-too-long` is its only finding.
 
 `fix` leaves a file already over the limit as it is. A rewrite can take a
-file past the limit, for example when `fix` writes a bare URL as a link:
-`fix` saves the rewrite and reports `content-too-long`, and `lint` and both
-hooks fail on the file until the author shortens or splits it.
+file past the limit, for example when `fix` writes a bare URL as a link or
+escapes a character as Linear does: `fix` saves the rewrite and reports
+`content-too-long`, and `lint` and both hooks fail on the file until the
+author shortens or splits it.
 
 ```text
 A 260 KB log pasted into one Markdown file.

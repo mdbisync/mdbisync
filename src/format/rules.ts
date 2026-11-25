@@ -15,7 +15,7 @@ export const LINT_RULES = {
   'table-hash-cell': 'A table body cell starting with # becomes a heading.',
   'table-list-cell': 'A table body cell starting with -, + or * and a space, or with a number and ), becomes a list, which Linear writes with * or a number and a dot. Put a backslash before the -, + or *, or reword the cell.',
   'image-in-link': 'The link around an image is dropped.',
-  'content-too-long': "This document exceeds Linear's 250,000-character content limit. The author must decide how to shorten or split it.",
+  'content-too-long': "This document exceeds Linear's 250,000-character content limit. Linear refuses the whole document, so the sync leaves the file out until it fits. The author must decide how to shorten or split it.",
   'markdown-complexity': 'Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.',
   'duplicate-title': 'Two or more files map to one document title.',
   'table-alignment': 'Table column alignment is dropped. Remove the colons from the separator row to accept that.',

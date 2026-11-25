@@ -1420,6 +1420,14 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
   });
 
+  it('finds a link after a number whose escape Linear dropped, and writes it as a relative link', async () => {
+    // Read as Linear returns it, `4)` and five spaces open a list item holding code, which hides the link.
+    world.linear.documents[0]!.content = '4)     [Target](https://linear.app/example-team/document/target)\n';
+    world.linear.documents.push({id: 'target', title: 'target', projectId: 'project-api', content: 'Target.\n', createdAt: '2026-01-04T00:00:00Z'});
+    await run();
+    assert.equal(splitFile(await text('docs/plan.md')).body, '4\\)     [Target](<target.md>)');
+  });
+
   it('refreshes unchanged inbound links and keeps the accepted target when a rename is blocked', async () => {
     world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target)\n';
     world.linear.documents.push({id: 'target', title: 'target', projectId: 'project-api', content: 'Target.\n', createdAt: '2026-01-04T00:00:00Z'});
