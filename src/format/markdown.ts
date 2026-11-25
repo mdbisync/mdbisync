@@ -144,7 +144,7 @@ export class MarkdownLimitError extends Error {
   }
 }
 
-export function parse(body: string, mdastExtensions: Extension[] = [], linearDomains = false): Root {
+export function parse(body: string, mdastExtensions: Extension[] = [], linearDomains = false, extraSyntax: MicromarkExtension[] = []): Root {
   // GFM's tree transforms (its search for bare URLs inside text) run here,
   // after the parse, so the nodes they make get source positions.
   const gfmExtensions = gfmFromMarkdown();
@@ -159,7 +159,7 @@ export function parse(body: string, mdastExtensions: Extension[] = [], linearDom
       if (Array.isArray(constructs)) syntax.text[code] = constructs.filter((construct) => construct.name !== 'wwwAutolink');
     }
   }
-  const tree = fromMarkdown(body, { extensions: [syntax, inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
+  const tree = fromMarkdown(body, { extensions: [syntax, ...extraSyntax, inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
   // The parser counts source offsets after one leading BOM.
   const source = body.startsWith('\uFEFF') ? body.slice(1) : body;
   placeTextLinks(tree, source, transforms, linearDomains);
@@ -442,7 +442,7 @@ class PointIndex {
 }
 
 // Parser extension types, from the GFM extension's own.
-type MicromarkExtension = ReturnType<typeof gfm>;
+export type MicromarkExtension = ReturnType<typeof gfm>;
 type Construct = Exclude<NonNullable<MicromarkExtension['text']>[number], unknown[] | undefined | null>;
 type TokenizeContext = ThisParameterType<NonNullable<Construct['previous']>>;
 

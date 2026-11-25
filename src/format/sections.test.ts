@@ -106,3 +106,34 @@ describe('a line opening with >>>', () => {
     assert.deepEqual(findings.map((finding) => finding.line), [7]);
   });
 });
+
+describe('triple-plus section markers', () => {
+  const cases = [
+    ['bare opener and closer', '+++\n\nSeeds\n\n+++', '+++ \n\nSeeds\n\n+++'],
+    ['titled opener', '+++ Garden\n\nSeeds\n\n+++', '+++ Garden\n\nSeeds\n\n+++'],
+    ['titled opener with a padded closer', '+++ Garden\n\nSeeds\n\n+++ \t', '+++ Garden\n\nSeeds\n\n+++'],
+    ['nesting and successive sections', '+++\n\n+++ Tray\n\nSeeds\n\n+++\n\nWater daily\n\n+++\n\n+++\n\nTools\n\n+++',
+      '+++ \n\n+++ Tray\n\nSeeds\n\n+++\n\nWater daily\n\n+++\n\n+++ \n\nTools\n\n+++'],
+    ['explicit empty section', '+++\n\n+++', '+++ \n\n+++'],
+    ['unpaired opener with a body', '+++\n\nSeeds', '+++ \n\nSeeds\n\n+++'],
+    ['unpaired nested opener with a body', '+++\n\n+++ Tray\n\nSeeds', '+++ \n\n+++ Tray\n\nSeeds\n\n+++\n\n+++'],
+    ['lone marker', '+++', '+++'],
+    ['final marker with no opener', 'Seeds\n+++', 'Seeds\n\n+++'],
+    ['final title-like text inside a section', '+++\n\nSeeds\n\n+++ Tray', '+++ \n\nSeeds\n\n+++ Tray\n\n+++'],
+    ['paragraph interruption', 'Before\n+++\nSeeds\n+++\nOutside', 'Before\n\n+++ \n\nSeeds\n\n+++\n\nOutside'],
+    ['quote boundary', '+++ Garden\n\n> +++\n>\n> Seeds\n\n+++', '+++ Garden\n\n> +++ \n>\n> Seeds\n>\n> +++\n\n+++'],
+    ['list item boundary', '* Tray\n  +++\n  Seeds\n* Tools\n  +++', '* Tray\n\n  +++ \n\n  Seeds\n\n  +++\n* Tools\n\n  +++'],
+    ['section first in item', '* +++\n\n  Seeds\n\n  +++\n* Tools', '* \n\n  +++ \n\n  Seeds\n\n  +++\n* Tools'],
+    ['lazy list continuation', '* Tray\n+++\nSeeds\n+++', '* Tray\n\n+++ \n\nSeeds\n\n+++'],
+    ['escaped marker', '\\+++\n\nSeeds', '\\+++\n\nSeeds'],
+    ['fenced marker', '```\n+++\n```', '```\n+++\n```'],
+    ['open code fence at end of section', '+++\n\n```\nSeeds', '+++ \n\n```\nSeeds\n```\n\n+++'],
+  ] as const;
+  for (const [label, input, expected] of cases) {
+    it(label, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected);
+      assert.deepEqual(lintText('doc.md', expected), []);
+    });
+  }
+});

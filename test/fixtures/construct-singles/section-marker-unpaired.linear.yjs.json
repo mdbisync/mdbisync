@@ -1,0 +1,20 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "collapsible_section",
+      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+      "children": [
+        {
+          "type": "collapsible_heading",
+          "children": [
+            {"type":"paragraph"}
+          ]
+        },
+        {"type":"paragraph","children":[{"text":"Seeds for the tray (kx-4f13c557).","marks":{"attribution":"user"}}]}
+      ]
+    }
+  ]
+}

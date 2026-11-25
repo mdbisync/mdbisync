@@ -10,7 +10,7 @@
 // that a line above opened (its first `>` belongs to that quote).
 
 import type { Nodes } from 'mdast';
-import { end, parse, start, visit } from './markdown.ts';
+import { end, parse, start, visit, type MicromarkExtension } from './markdown.ts';
 
 /** `lines`: the section lines the edit writes. */
 type Edit = { from: number; to: number; text: string; depth: number; lines?: number };
@@ -18,6 +18,148 @@ type Opener = { node: Nodes; parent: Nodes; depth: number };
 
 /** Rounds of splitting: each makes the section lines that nest in quotes the round before split off visible. */
 const SPLIT_ROUNDS = 8;
+const PLUS_MARKER = /^\+{3}(?!\+)(.*)$/;
+
+// For this scan only, give a +++ line a block node so it can interrupt a
+// paragraph or end a lazy list/quote continuation. Fences and HTML blocks
+// still own their content. The ordinary Markdown parser writes the result.
+const plusSectionSyntax: MicromarkExtension = {
+  flow: {
+    43: {
+      tokenize(effects, ok, nok) {
+        let signs = 0;
+        return opening;
+
+        function opening(code: Parameters<typeof ok>[0]): ReturnType<typeof ok> {
+          if (signs === 0) effects.enter('thematicBreak');
+          if (code === 43 && signs < 3) {
+            signs++;
+            effects.consume(code);
+            return opening;
+          }
+          return signs === 3 && code !== 43 ? rest(code) : nok(code);
+        }
+
+        function rest(code: Parameters<typeof ok>[0]): ReturnType<typeof ok> {
+          if (code === null || (code >= -5 && code <= -3)) {
+            effects.exit('thematicBreak');
+            return ok(code);
+          }
+          effects.consume(code);
+          return rest;
+        }
+      },
+    },
+  },
+};
+
+/**
+ * Pairs triple-plus lines within each Markdown container. A title always
+ * starts a new section. A title-less line closes the innermost open one
+ * even if it carries whitespace. Without a section to close, it opens
+ * one if the container has a body or a closing line for it.
+ */
+export function plusSectionsAsLinear(body: string): string {
+  if (!body.includes('+++')) return body;
+  let tree = parse(body, [], false, [plusSectionSyntax]);
+  const joined = joinSectionItemLines(body, tree);
+  if (joined !== body) {
+    body = joined;
+    tree = parse(body, [], false, [plusSectionSyntax]);
+  }
+  const edits: Edit[] = [];
+  visit(tree, (parent, ancestors) => {
+    if (parent.type !== 'root' && parent.type !== 'blockquote' && parent.type !== 'listItem') return;
+    const blocks = parent.children;
+    const markers = blocks.map((node) => node.type === 'thematicBreak' ? PLUS_MARKER.exec(body.slice(start(node), end(node))) : null);
+    if (markers.every((marker) => marker === null)) return;
+    // Longer delimiters pair by their own width. Their stored spelling
+    // also uses three signs, so leave mixed-width containers to the author.
+    if (blocks.some((node) => node.type === 'paragraph' && /^\+{4}/.test(body.slice(start(node), start(node) + 4)))) return;
+    const depth = ancestors.length;
+    const lastContent = markers.findLastIndex((marker) => marker === null);
+    const open: number[] = [];
+    const roles = new Map<number, string>();
+    let closedAfterContent = false;
+    for (const [index, marker] of markers.entries()) {
+      if (marker === null) continue;
+      const title = marker[1]!.trim();
+      if (title === '' && open.length > 0) {
+        const opener = open.pop()!;
+        if (opener > lastContent) closedAfterContent = true;
+        roles.set(opener, `+++ ${markers[opener]![1]!.trim()}`);
+        roles.set(index, '+++');
+      } else if (index < blocks.length - 1) {
+        open.push(index);
+      }
+    }
+    const implicit = open.filter((index) => index < lastContent);
+    const last = blocks.at(-1)!;
+    // The writer will close an open code fence. An inserted marker before
+    // that happens would land in the code, so supply its fence first.
+    const lastLineEnd = lineEndAt(body, end(last));
+    const fence = last.type === 'code' ? unclosedFence(body, last) : '';
+    for (const index of implicit) roles.set(index, `+++ ${markers[index]![1]!.trim()}`);
+
+    for (const [index, marker] of markers.entries()) {
+      if (marker === null) continue;
+      const node = blocks[index]!;
+      const at = start(node);
+      const line = prefixes(body, at);
+      const blank = line.prefix.trimEnd();
+      const before = index > 0 || line.linePrefix === line.prefix && parent.type === 'root' && line.lineStart > 0;
+      const written = roles.get(index) ?? marker[0].trimEnd();
+      edits.push({
+        from: line.lineStart, to: lineEndAt(body, at),
+        text: `${before ? `${blank}\n` : ''}${line.linePrefix}${written}${index < blocks.length - 1 ? `\n${blank}` : ''}`,
+        depth,
+      });
+    }
+    if (implicit.length > 0) {
+      const prefix = prefixes(body, start(blocks[implicit[0]!]!)).prefix;
+      const blank = prefix.trimEnd();
+      // A final title-like paragraph inside an untitled section exports
+      // just like the header of an empty inner section. Keep the written
+      // outer opener and final closer in this ambiguous form.
+      const count = implicit.filter((index) => {
+        const marker = markers[index]![0];
+        return !closedAfterContent || marker !== roles.get(index);
+      }).length;
+      if (count > 0) {
+        const closes = `\n${blank}\n${prefix}+++`.repeat(count);
+        edits.push({ from: lastLineEnd, to: lastLineEnd, text: (fence === '' ? '' : `\n${prefix}${fence}`) + closes, depth });
+      }
+    }
+  });
+  return applyEdits(body, edits);
+}
+
+/** Read Linear's empty item paragraph and section below it as a single list item. */
+export function joinSectionItemLines(body: string, tree?: Nodes): string {
+  if (!/(?:[*+.-]|\)) \n[ >]*\n[ >]*\+{3} /.test(body)) return body;
+  const edits: Edit[] = [];
+  visit(tree ?? parse(body, [], false, [plusSectionSyntax]), (node, ancestors) => {
+    if (node.type !== 'thematicBreak' || !body.startsWith('+++ ', start(node))) return;
+    const { lineStart, linePrefix } = prefixes(body, start(node));
+    if (lineStart === 0) return;
+    const blankStart = body.lastIndexOf('\n', lineStart - 2) + 1;
+    if (blankStart === 0) return;
+    const itemStart = body.lastIndexOf('\n', blankStart - 2) + 1;
+    const item = /^([ >]*)([*+-]|\d{1,9}[.)]) $/.exec(body.slice(itemStart, blankStart - 1));
+    if (item === null || body.slice(blankStart, lineStart - 1) !== item[1]!.trimEnd()) return;
+    if (linePrefix !== item[1] + ' '.repeat(item[2]!.length + 1)) return;
+    edits.push({ from: blankStart - 1, to: start(node), text: '', depth: ancestors.length });
+  });
+  return applyEdits(body, edits);
+}
+
+function unclosedFence(body: string, code: Nodes): string {
+  const opening = /^(`{3,}|~{3,})/.exec(body.slice(start(code), lineEndAt(body, start(code))))?.[1];
+  if (opening === undefined) return '';
+  const lastStart = body.lastIndexOf('\n', end(code) - 1) + 1;
+  const closing = body.slice(lastStart, end(code)).replace(/^[\t >]*/, '');
+  return lastStart > start(code) && closing.trimEnd().startsWith(opening) && /^(`+|~+)[ \t]*$/.test(closing) ? '' : opening;
+}
 
 /**
  * The body with each `>>>` section line written as Linear writes the

@@ -413,6 +413,26 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/section-marker-bare.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/section-marker-containers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/section-marker-nested.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/section-marker-standalone.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/section-marker-unpaired.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/task-checked.md": {
       "yjs": "recorded",
       "fixedPoint": true

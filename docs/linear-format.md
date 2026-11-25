@@ -151,6 +151,12 @@ Blocks:
   between the signs (`> > >`), or when the first sign continues a quote
   above, it stays a quote. A file that also has a `+++` line is left to
   you, since Linear would pair that line with the section.
+- A bare `+++` opens an untitled section when it has a body or a closing
+  marker and there is no section open in the same document, list item or
+  quote. `fix` writes that opener with one trailing space, as Linear does.
+  A bare marker inside a section closes the innermost section and is written
+  without trailing whitespace. A final bare marker with no section to close
+  stays plain text.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
