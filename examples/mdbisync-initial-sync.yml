@@ -13,7 +13,8 @@
 # - linear-to-git: one pull request removes the synchronized files that have
 #   no document; a person reviews and merges it.
 #
-# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.
+# Needs: variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID,
+# in the repository or in the mdbisync environment.
 # In the mdbisync environment limited to the tracked branch, set
 # MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET.
 name: mdbisync initial sync
