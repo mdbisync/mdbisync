@@ -1,0 +1,187 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+            {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"code","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Pear","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Plum","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+            {
+              "type": "blockquote",
+              "children": [
+                {"type":"paragraph","children":[{"text":"quote","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "ordered_list",
+              "attrs": {"order":2},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Fig","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+            {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Head","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Lime","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+            {
+              "type": "table",
+              "attrs": {"sizing":"fit"},
+              "children": [
+                {
+                  "type": "table_row",
+                  "children": [
+                    {
+                      "type": "table_header",
+                      "attrs": {"colspan":1,"rowspan":1},
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"A","marks":{"attribution":"user"}}]}
+                      ]
+                    },
+                    {
+                      "type": "table_header",
+                      "attrs": {"colspan":1,"rowspan":1},
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"B","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "table_row",
+                  "children": [
+                    {
+                      "type": "table_cell",
+                      "attrs": {"colspan":1,"rowspan":1},
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"1","marks":{"attribution":"user"}}]}
+                      ]
+                    },
+                    {
+                      "type": "table_cell",
+                      "attrs": {"colspan":1,"rowspan":1},
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"2","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Kiwi","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+            {"type":"horizontal_rule"},
+            {
+              "type": "todo_list",
+              "children": [
+                {
+                  "type": "todo_item",
+                  "attrs": {"done":false},
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Date","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+            {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"code","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":2},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Corn","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+            {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"code","marks":{"attribution":"user"}}]},
+            {"type":"paragraph","children":[{"text":"Text after code.","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-5a9354d8","marks":{"attribution":"user"}}]}
+  ]
+}

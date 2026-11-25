@@ -70,6 +70,16 @@ describe('image labels', () => {
   });
 });
 
+describe('code spans', () => {
+  it('fix a paragraph of 5,000 code spans whose fences shrink in a few times a parse', { timeout: 160_000 }, () => {
+    // Every block is searched for a backtick outside text and code, by a walk
+    // beside its sorted code spans. Many more spans in one paragraph pass the
+    // inline limit, which lint reports as markdown-complexity.
+    const timing = timed(`'\`\`c\`\` '.repeat(5_000)`, `fix.fixText(text)`);
+    assert.ok(timing.ms < 4 * timing.parseMs + 2_000, report(timing));
+  });
+});
+
 describe('file blocks', () => {
   it('join each file block onto its item line', () => {
     assert.equal(relativeFileBlocksAsLinks('-\n  [a](a.pdf)\n-\n  [b](b.pdf)\n\ntext\n'), '- [a](a.pdf)\n- [b](b.pdf)\n\ntext\n');

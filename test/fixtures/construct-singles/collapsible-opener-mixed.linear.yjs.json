@@ -1,0 +1,60 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "collapsible_section",
+      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+      "children": [
+        {
+          "type": "collapsible_heading",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Earlier notes","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {"type":"paragraph","children":[{"text":"Kept from last week.","marks":{"attribution":"user"}}]},
+        {
+          "type": "collapsible_section",
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+          "children": [
+            {
+              "type": "collapsible_heading",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Details","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {"type":"paragraph","children":[{"text":"Two rows.","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "collapsible_section",
+      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+      "children": [
+        {
+          "type": "collapsible_heading",
+          "children": [
+            {"type":"paragraph","children":[{"text":"New notes","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {"type":"paragraph","children":[{"text":"Added today.","marks":{"attribution":"user"}}]},
+        {
+          "type": "collapsible_section",
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+          "children": [
+            {
+              "type": "collapsible_heading",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Inner","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {"type":"paragraph","children":[{"text":"Checked.","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-ae592b3b","marks":{"attribution":"user"}}]}
+  ]
+}

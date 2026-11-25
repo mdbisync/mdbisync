@@ -39,7 +39,7 @@ rules:
   - id: subscript
     title: "Tilde subscript is dropped."
   - id: table-escaped-pipe
-    title: "An escaped pipe in a plain table cell splits the row."
+    title: "A pipe in a plain table cell, escaped or written as a character reference, splits the row."
   - id: image-in-link
     title: "The link around an image is dropped."
   - id: content-too-long
@@ -56,6 +56,8 @@ rules:
     title: "Bold or italic around inline code is dropped from the code."
   - id: hard-break-backslash
     title: "A backslash line break becomes a plain line break."
+  - id: code-span-padding
+    title: "Linear drops a space at each end of inline code that starts and ends with a space."
   - id: hard-break-in-heading
     title: "A hard line break in a setext heading is lost when the heading is written as one line."
   - id: tab-reference-layout
@@ -63,7 +65,7 @@ rules:
   - id: git-conflict-marker
     title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
   - id: section-opener
-    title: "A line starting with >>> opens a collapsible section that fix cannot write next to +++ lines."
+    title: "A line starting with >>> opens a collapsible section that fix cannot write here."
   - id: url-in-html
     title: "A URL inside raw HTML is turned into a Markdown link."
   - id: block-first-in-list-item
@@ -86,7 +88,17 @@ rules:
     title: "A paragraph that is only a number and a dot or parenthesis comes back from Linear without the backslash, which reads as an empty numbered list item."
   - id: list-after-item-text
     title: "In a list item, Linear writes a list on the line right below the text or the list of another kind before it, where Markdown reads a first marker that cannot interrupt a paragraph as text."
+  - id: list-number-too-long
+    title: "An ordered list numbered past 999999999: Linear numbers its items on, and Markdown reads a number of more than nine digits as text of the item above it."
 known_constructs:
+  - construct: task-check-below-marker
+    class: fixable
+  - construct: list-after-indented-code
+    class: fixable
+  - construct: list-after-block-in-item
+    class: fixable
+  - construct: list-number-too-long
+    class: lint-error
   - construct: item-section-long-run
     class: fixable
   - construct: section-long-run
@@ -153,6 +165,16 @@ known_constructs:
     class: fixable
   - construct: code-span-lines
     class: fixable
+  - construct: code-span-quote-tab
+    class: fixable
+  - construct: code-span-fence-like
+    class: fixable
+  - construct: code-span-padding
+    class: fixable
+  - construct: code-span-fences
+    class: fixable
+  - construct: code-span-outer-spaces
+    class: lint-error
   - construct: table-document-end
     class: fixable
   - construct: code-blank-lines-before-fence
@@ -2530,6 +2552,16 @@ fixtures:
     line: 3
     basis: known
     canary: kx-d1b9730f
+  - file: "lint-errors/table-pipe-reference.md"
+    group: lint-errors
+    construct: table-escaped-pipe-plain-cell
+    class: lint-error
+    rule: table-escaped-pipe
+    line: 3
+    basis: known
+    canary: kx-2215b3ab
+    corpus: false
+    note: "Linear keeps a pipe written &#124; in the cell, but writes it back bare, which splits the row"
   - file: "lint-errors/image-in-link.md"
     group: lint-errors
     construct: image-in-link
@@ -3263,6 +3295,14 @@ fixtures:
     canary: kx-c27a9f15
     corpus: false
     note: "a line opening with >>> is a collapsible section: the line is its title, a paragraph it interrupts gets a blank line, and a >>> line without a title closes it"
+  - file: "construct-singles/collapsible-opener-mixed.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-ae592b3b
+    corpus: false
+    note: ">>> and +++ lines pair apart: a title-less +++ closes the innermost +++ section, a title-less >>> every >>> section, each with the sections nested in it"
   - file: "construct-singles/collapsible-opener-containers.md"
     group: construct-singles
     construct: collapsible-section-opener
@@ -3292,11 +3332,11 @@ fixtures:
     construct: section-opener-with-section-lines
     class: lint-error
     rule: section-opener
-    line: 7
+    line: 5
     basis: known
     canary: kx-6d2e8b41
     corpus: false
-    note: "a >>> line in a file that also has +++ section lines: Linear pairs them, so fix leaves the file"
+    note: "a >>> line without a title inside a +++ section opens a section there, which Linear writes as +++ with a space, a closing line when read again, so fix leaves the file"
   - file: "construct-singles/literal-tilde.md"
     group: construct-singles
     construct: literal-tilde
@@ -3393,6 +3433,38 @@ fixtures:
     canary: kx-58a3f733
     corpus: false
     note: "Linear writes a code span that runs over lines on one line: each line ending becomes a space, container prefixes go, the line's own indentation stays"
+  - file: "construct-singles/code-span-quote-tab.md"
+    group: construct-singles
+    construct: code-span-quote-tab
+    class: fixable
+    basis: known
+    canary: kx-9d805414
+    corpus: false
+    note: "Linear writes a code span over lines in a quote on one line; a tab the quote's > takes in part stays a tab in the code, and one it takes whole goes"
+  - file: "construct-singles/code-span-fence-like.md"
+    group: construct-singles
+    construct: code-span-fence-like
+    class: fixable
+    basis: known
+    canary: kx-0413d122
+    corpus: false
+    note: "Linear writes a code span between one backtick more than the longest run in its code; a fence-like span after an image becomes `js foo` in a paragraph of its own"
+  - file: "construct-singles/code-span-padding.md"
+    group: construct-singles
+    construct: code-span-padding
+    class: fixable
+    basis: known
+    canary: kx-b31cf0bc
+    corpus: false
+    note: "Linear writes a code span without padding unless its code holds a backtick; one space at each end that Markdown strips goes, a tab or no-break space stays"
+  - file: "construct-singles/code-span-fences.md"
+    group: construct-singles
+    construct: code-span-fences
+    class: fixable
+    basis: known
+    canary: kx-748f3bed
+    corpus: false
+    note: "Linear pads a code span with one space inside each fence whenever its code holds a backtick, and uses one backtick more than the longest run; two spaces alone stay"
   - file: "construct-singles/heading-empty-levels.md"
     group: construct-singles
     construct: heading-empty
@@ -3700,6 +3772,16 @@ fixtures:
     canary: kx-09b751d0
     corpus: false
     note: "Linear decodes tabs inside text and moves them outside inline marks"
+  - file: "lint-errors/code-span-padding.md"
+    group: lint-errors
+    construct: code-span-outer-spaces
+    class: lint-error
+    basis: known
+    rule: code-span-padding
+    line: 1
+    canary: kx-1700a6e5
+    corpus: false
+    note: "Linear keeps code that starts and ends with a space but writes it without the padding that keeps those spaces, and reads three spaces or more alone as two fewer"
   - file: "lint-errors/tab-reference-blank.md"
     group: lint-errors
     construct: tab-reference-layout
@@ -3740,3 +3822,37 @@ fixtures:
     canary: kx-09b751d3
     corpus: false
     note: "Markdown reads the exported leading tabs as code indentation"
+  - file: "list-items/task-check-below-marker.md"
+    group: list-items
+    construct: task-check-below-marker
+    class: fixable
+    basis: known
+    canary: kx-8f554e61
+    corpus: false
+    note: "A checkbox that starts the line below a bare marker is a task item in Linear, also when spaces or a tab follow the marker"
+  - file: "list-items/list-after-indented-code.md"
+    group: list-items
+    construct: list-after-indented-code
+    class: fixable
+    basis: known
+    canary: kx-a7fe67bd
+    corpus: false
+    note: "A list right after indented code is a list in Linear and CommonMark, also from a number above 1 or with an empty first item"
+  - file: "list-items/list-after-block-in-item.md"
+    group: list-items
+    construct: list-after-block-in-item
+    class: fixable
+    basis: known
+    canary: kx-5a9354d8
+    corpus: false
+    note: "In a list item, Linear writes a list right below code, a quote, a heading, a rule or a table"
+  - file: "lint-errors/list-number-too-long.md"
+    group: lint-errors
+    construct: list-number-too-long
+    class: lint-error
+    basis: known
+    rule: list-number-too-long
+    line: 2
+    canary: kx-575a16ec
+    corpus: false
+    note: "Linear numbers the list on past nine digits, which Markdown reads as text of the item above"

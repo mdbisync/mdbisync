@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
-import { linkedFileCheck, lintText } from './lint.ts';
+import { linkedFileCheck, lintInTree, lintText } from './lint.ts';
 import { parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 import { CONTENT_LIMIT } from './rules.ts';
 
@@ -332,6 +332,23 @@ describe('a code span over lines, as Linear writes it', () => {
     });
   }
 
+  it('keeps a tab a quote\'s sign takes in part as a tab, as Linear reads it', () => {
+    // `>` and one column of the tab are the prefix; Linear keeps the tab whole in the code.
+    for (const [input, expected] of [
+      ['> Quote `alpha\n>\tbeta` end', '> Quote `alpha \tbeta` end'],
+      ['> Two `alpha\n>  \tbeta` end', '> Two `alpha  \tbeta` end'],
+      ['> > Inner `alpha\n> >  \tbeta` end', '> > Inner `alpha  \tbeta` end'],
+    ]) {
+      assert.equal(fixText(input!), expected, input);
+      assert.equal(fixText(expected!), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected!), [], 'lint is clean on the result');
+    }
+    // A tab the sign takes whole goes, and one an item takes from keeps its other columns as spaces.
+    assert.equal(fixText('> > Nest `alpha\n> >\tbeta` end'), '> > Nest `alpha beta` end');
+    assert.equal(fixText('> 1. Num `alpha\n>\t   beta` end'), '> 1. Num `alpha   beta` end');
+    assert.equal(fixText('> * Bullet `alpha\n>\t beta` end'), '> * Bullet `alpha  beta` end');
+  });
+
   it('keeps the columns of a tab an item\'s prefix takes in part as spaces', () => {
     // The item takes two of the tab's four columns: two stay code text.
     assert.equal(fixText('* Item `alpha\n\tbeta` end'), '* Item `alpha   beta` end');
@@ -351,6 +368,62 @@ describe('a code span over lines, as Linear writes it', () => {
 
   it('an image\'s alt text keeps its lines', () => {
     assert.equal(fixText('* ![a `x\n  y` b](x.png)'), '* ![a `x\n  y` b](x.png)');
+  });
+});
+
+describe('a code span\'s fence and padding, as Linear writes them', () => {
+  // [name, input, what fix writes]
+  const written: Array<[string, string, string]> = [
+    ['code without a backtick goes between single backticks', 'Wide ``alpha`` and ````beta```` end.', 'Wide `alpha` and `beta` end.'],
+    ['the padding Markdown strips goes', 'One ` alpha beta ` end.', 'One `alpha beta` end.'],
+    ['also over lines', 'Lines ` alpha\nbeta ` end.', 'Lines `alpha beta` end.'],
+    ['and in an item, a quote, a heading, a link label and a table cell', '* ` a `\n\n> ` b `\n\n# ``c``\n\n[``d``](https://a.test)\n\n| ` e ` |\n| -- |\n| ``f`` |', '* `a`\n\n> `b`\n\n# `c`\n\n[`d`](<https://a.test>)\n\n| `e` |\n| -- |\n| `f` |\n'],
+    ['code with a backtick goes between one backtick more than its longest run, padded', 'Mid ``a`b`` and ` `` ` and ```` a`b``c ```` end.', 'Mid `` a`b `` and ``` `` ``` and ``` a`b``c ``` end.'],
+    ['and keeps a space at its end', 'Tick space ``alpha ` `` end.', 'Tick space `` alpha `  `` end.'],
+  ];
+  for (const [name, input, expected] of written) {
+    it(name, () => {
+      assert.equal(fixText(input), expected);
+      assert.ok(sameMarkdown(input, expected), 'the same document');
+      assert.equal(fixText(expected), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected), [], 'lint is clean on the result');
+    });
+  }
+
+  it('keeps code Linear keeps as written', () => {
+    for (const text of ['` alpha` `alpha ` ` ` `  ` `` `alpha` `` `` `alpha `` `` ` ``', 'Tab `\talpha\t` and `\u00a0alpha\u00a0`', '| `a \\| b` |\n| -- |\n| x |\n']) {
+      assert.equal(fixText(text), text, text);
+      assert.deepEqual(lintText('doc.md', text), [], text);
+    }
+  });
+
+  it('keeps a fence a backtick outside text and code would pair with', () => {
+    // An alt text's backtick in a table cell would open a single-backtick span.
+    const cell = '| A |\n| -- |\n| ![a ` b](x.png) ``c`` |\n';
+    assert.equal(fixText(cell), cell);
+    assert.equal(fixText('| A |\n| -- |\n| ![a b](x.png) ``c`` |'), '| A |\n| -- |\n| ![a b](x.png) `c` |\n');
+    // A lone backtick in text gets its backslash, so the fence can shrink.
+    assert.equal(fixText('a ` b ``c`` d'), 'a \\` b `c` d');
+  });
+
+  it('finds the longest backtick run of large code', () => {
+    const code = 'a`'.repeat(124_990); // Near the content limit: too many runs to spread into arguments.
+    assert.equal(fixText(`\`\`${code}a\`\``), `\`\` ${code}a \`\``);
+  });
+
+  it('writes a quote\'s tab Linear keeps in code that would otherwise be spaces alone', () => {
+    // Markdown reads the tab's columns as three spaces; Linear holds a space and a tab.
+    assert.equal(fixText('> `\n>\t`'), '> ` \t`');
+    assert.deepEqual(lintText('doc.md', '> `\n>\t`'), []);
+  });
+
+  it('leaves code to its author whose outer spaces Linear drops', () => {
+    // Linear keeps the code but writes it without the padding that keeps its outer spaces.
+    for (const text of ['Two `  alpha  ` end.', 'Spaces `   ` end.', 'Wide ``  alpha  `` end.']) {
+      assert.equal(fixText(text), text, text);
+      assert.deepEqual(lintText('doc.md', text).map(({ rule }) => rule), ['code-span-padding'], text);
+      assert.deepEqual(lintInTree('doc.md', text, new Set()), [], 'the sync sends it as it is');
+    }
   });
 });
 
@@ -743,8 +816,9 @@ describe('text split off at an image', () => {
 
   it('writes a code span that would open a fence on one line, without a backslash', () => {
     // Escaping its backticks would end the span; on one line it opens no fence.
+    // Linear writes it between single backticks, as any code without one.
     const once = fixText('Before ![a](x.png) ```js\nfoo``` y');
-    assert.equal(once, 'Before\n\n![a](x.png)\n\n```js foo``` y');
+    assert.equal(once, 'Before\n\n![a](x.png)\n\n`js foo` y');
     assert.equal(fixText(once), once, 'a second fix changes nothing');
   });
 });
@@ -2097,6 +2171,93 @@ describe('what fix leaves alone', () => {
 
   it('keeps a tilde fence whose info string holds a backtick', () => {
     assert.equal(fixText('~~~ foo`bar\nx\n~~~'), '~~~foo`bar\nx\n~~~');
+  });
+
+  it('writes a checkbox that starts the line below a marker followed by spaces as a task item, as Linear does', () => {
+    const cases: Array<[string, string]> = [
+      ['-   \n  [ ] Pack', '- [ ] Pack'],
+      ['-\n  [ ] Pack', '- [ ] Pack'],
+      ['* \t\n  [x] Pack', '- [X] Pack'],
+      ['- \n  [x] Pack\n- [ ] Rest', '- [X] Pack\n- [ ] Rest'],
+      ['> -  \n>   [ ] Pack', '> - [ ] Pack'],
+      // An escaped bracket is text, in Linear too.
+      ['-   \n  \\[ ] Pack', '* \\[ \\] Pack'],
+    ];
+    for (const [text, expected] of cases) {
+      assert.equal(fixText(text), expected, text);
+      assert.equal(fixText(expected), expected, expected);
+      assert.deepEqual(lintText('a.md', expected), [], expected);
+    }
+    // A numbered one is an ordered task list: Linear writes it with a bullet.
+    assert.equal(fixText('1.   \n   [ ] Pack'), '1.   \n   [ ] Pack');
+    // A checkbox alone on its line stays text, also in a quote; a `[x]` a definition makes a link stays a link.
+    assert.equal(fixText('> -   \n>   [x]\n>   Pack'), '> * \\[x\\]\n>   Pack');
+    assert.equal(fixText('-   \n  [x] Pack\n\n[x]: https://example.com/a'), '* [x](<https://example.com/a>) Pack');
+  });
+
+  it('reads a list right after indented code as a list, as Linear and CommonMark do', () => {
+    const cases: Array<[string, string]> = [
+      ['\tcode\n2. Pear\n3. Plum', '```\ncode\n```\n\n2. Pear\n3. Plum'],
+      ['    code\n\n2. Pear\n3. Plum', '```\ncode\n```\n\n2. Pear\n3. Plum'],
+      ['    code\n2) Pear', '```\ncode\n```\n\n2. Pear'],
+      ['    code\n-\n\nText.', '```\ncode\n```\n\n* \n\nText.'],
+      ['\t1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j', '```\n1. a\n```\n\n 2. b\n 3. c\n 4. d\n 5. e\n 6. f\n 7. g\n 8. h\n 9. i\n10. j'],
+      ['- Note\n\n      code\n  2. Pear', '* Note\n\n  ```\n  code\n  ```\n  2. Pear'],
+      // Indented code still continues over blank lines, and a paragraph still takes a number above 1 in.
+      ['    code\n\n    more\n2. Pear', '```\ncode\n\nmore\n```\n\n2. Pear'],
+      ['Text\n2. Pear', 'Text\n2\\. Pear'],
+    ];
+    for (const [text, expected] of cases) {
+      assert.equal(fixText(text), expected, text);
+      assert.equal(fixText(expected), expected, expected);
+      assert.deepEqual(lintText('a.md', expected), [], expected);
+    }
+  });
+
+  it('writes a list right below code, a quote, a heading, a rule or a table in a list item, as Linear does', () => {
+    const cases: Array<[string, string]> = [
+      ['* Note\n\n  ```\n  code\n  ```\n\n  1. Pear\n  2. Plum', '* Note\n\n  ```\n  code\n  ```\n  1. Pear\n  2. Plum'],
+      ['* Note\n\n  > quote\n\n  1. Pear', '* Note\n\n  > quote\n  1. Pear'],
+      ['* Note\n\n  # Head\n\n  * Pear', '* Note\n\n  # Head\n  * Pear'],
+      ['* Note\n\n  | A | B |\n  | --- | --- |\n  | 1 | 2 |\n\n  * Pear', '* Note\n\n  | A | B |\n  | -- | -- |\n  | 1 | 2 |\n  * Pear'],
+      ['* Note\n\n  ---\n\n  * Pear', '* Note\n\n  ---\n  * Pear'],
+      ['1. Note\n\n   ```\n   code\n   ```\n\n   - [ ] Pear', '1. Note\n\n   ```\n   code\n   ```\n   - [ ] Pear'],
+      ['* Note\n\n  > quote\n\n  2. Pear', '* Note\n\n  > quote\n  2. Pear'],
+      ['* Note\n\n  | A | B |\n  | --- | --- |\n  | 1 | 2 |\n\n  2. Pear', '* Note\n\n  | A | B |\n  | -- | -- |\n  | 1 | 2 |\n  2. Pear'],
+      ['* Note\n\n  > quote\n\n  *', '* Note\n\n  > quote\n  * '],
+      ['* Note\n\n  ---\n\n  1.', '* Note\n\n  ---\n  1. '],
+      // A paragraph after code, and a list after code outside an item, keep their blank line.
+      ['* Note\n\n  ```\n  code\n  ```\n\n  Text.', '* Note\n\n  ```\n  code\n  ```\n\n  Text.'],
+      ['```\ncode\n```\n\n* Pear', '```\ncode\n```\n\n* Pear'],
+      ['> ```\n> code\n> ```\n>\n> 1. Pear', '> ```\n> code\n> ```\n>\n> 1. Pear'],
+    ];
+    for (const [text, expected] of cases) {
+      assert.equal(fixText(text), expected, text);
+      assert.equal(fixText(expected), expected, expected);
+      assert.ok(sameMarkdown(text, expected), text);
+    }
+  });
+
+  it('keeps a list right below a quote in an item apart from the quote: no marker after a quote is a lazy line', () => {
+    // CommonMark reads a list marker after a quote's paragraph as a list, even one that cannot interrupt a paragraph.
+    for (const [marker, start] of [['2. Pear', 2], ['* ', null], ['1. ', 1]] as const) {
+      const written = fixText(`* Note\n\n  > quote\n\n  ${marker.trim()}`);
+      assert.equal(written, `* Note\n\n  > quote\n  ${marker}`);
+      const [list] = parse(written).children;
+      const blocks = list?.type === 'list' ? list.children[0]!.children : [];
+      assert.deepEqual(blocks.map((block) => block.type), ['paragraph', 'blockquote', 'list'], marker);
+      const nested = blocks[2];
+      assert.equal(nested?.type === 'list' ? nested.start ?? null : undefined, start, marker);
+      const quote = blocks[1];
+      assert.equal(quote?.type === 'blockquote' ? quote.children.length : 0, 1, marker);
+    }
+  });
+
+  it('leaves an ordered list numbered past nine digits to its author', () => {
+    for (const text of ['999999999. Pear\n999999999. Plum', '999999998. Pear\n999999998. Plum\n999999998. Fig']) {
+      assert.equal(fixText(text), text);
+    }
+    assert.equal(fixText('999999998. Pear\n999999998. Plum'), '999999998. Pear\n999999999. Plum');
   });
 
   it('settles a list that mixes task and plain items', () => {

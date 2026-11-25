@@ -6,14 +6,14 @@
 import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table, TableRow } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, bracketedLabel, listKind, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
+import { allowedLink, bracketedLabel, codeSpanText, linearDropsCodeSpaces, listKind, listParts, MAX_LIST_NUMBER, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link', 'number-paragraph']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['code-span-padding', 'hard-break-in-heading', 'list-after-item-text', 'list-number-too-long', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link', 'number-paragraph']);
 const NUMBER_ONLY = /^\d{1,9}\\[.)]$/;
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
@@ -65,7 +65,47 @@ export function lintInTree(file: string, text: string, files: ReadonlySet<string
   // Markdown, but Linear's own export can hold it (a rule, text lines and a
   // rule; a list in a table cell): a document Linear wrote is not left out.
   // `unplaced-link` stops only `fix`: the sync sends the text as it is.
+  // So does `code-span-padding`: Linear keeps the code, and only writes it
+  // without the padding that keeps its outer spaces.
   return findings.filter((finding) => !FIX_ONLY_RULES.has(finding.rule));
+}
+
+/**
+ * The code Linear holds for a code span (`value` as Markdown reads it,
+ * `raw` its source with fences and line prefixes). Inside quotes only, a
+ * tab the innermost quote's `>` takes in part stays a tab in Linear, where
+ * Markdown reads its other columns as spaces; `fix` writes it so. Elsewhere
+ * the code is Markdown's, a line ending read as a space.
+ */
+function linearCode(value: string, raw: string, ancestors: readonly Nodes[]): string {
+  const plain = value.replace(/\r\n?|\n/g, ' ');
+  if (ancestors.some((a) => a.type === 'listItem')) return plain;
+  const depth = ancestors.filter((a) => a.type === 'blockquote').length;
+  if (depth === 0) return plain;
+  const fence = /^`+/.exec(raw)![0].length;
+  const [first, ...rest] = raw.slice(fence, raw.length - fence).split(/\r\n?|\n/);
+  const parts = [first!];
+  let quoteTab = false;
+  for (const line of rest) {
+    let at = 0;
+    let tab = false;
+    for (let level = 0; level < depth; level++) {
+      const marker = /^ {0,3}>/.exec(line.slice(at));
+      if (marker === null) break;
+      at += marker[0].length;
+      if (line[at] === ' ') at++;
+      else if (line[at] === '\t') {
+        // Not worked out past an outer quote: Markdown's code stands.
+        if (level < depth - 1) return plain;
+        // The tab runs to the next multiple of four columns; `>` takes one.
+        tab = 3 - (at % 4) > 0;
+        at++;
+      }
+    }
+    quoteTab ||= tab;
+    parts.push((tab ? '\t' : '') + line.slice(at));
+  }
+  return quoteTab ? codeSpanText(parts.join(' ')) : plain;
 }
 
 /** Lint findings for one file's text, ordered by line. */
@@ -256,6 +296,10 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (node.type === 'inlineCode' && ancestors.some((a) => a.type === 'emphasis' || a.type === 'strong' || a.type === 'delete')) {
           report('code-in-emphasis', line(node));
         }
+        // `fix` keeps such code as written: Linear's form would read as other code.
+        if (node.type === 'inlineCode' && linearDropsCodeSpaces(linearCode(node.value, body.slice(start(node), end(node)), ancestors))) {
+          report('code-span-padding', line(node));
+        }
         break;
       case 'footnoteReference':
       case 'footnoteDefinition':
@@ -302,6 +346,15 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         // ends up in a bullet task list.
         const task = node.ordered ? node.children.find((item) => item.checked !== null && item.checked !== undefined) : undefined;
         if (task !== undefined) report('ordered-task-list', line(task));
+        // Linear numbers the items of each part of a list on from the
+        // part's first number; Markdown reads a number of more than nine
+        // digits as text of the item above.
+        if (node.ordered) {
+          for (const { items, first } of listParts(node, body)) {
+            const past = items[MAX_LIST_NUMBER - first + 1];
+            if (past !== undefined) report('list-number-too-long', line(past));
+          }
+        }
         break;
       }
       case 'heading': {
@@ -346,7 +399,10 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         const cellAt = ancestors.findIndex((a) => a.type === 'tableCell');
         const table = ancestors[cellAt - 2];
         const inCell = cellAt !== -1 && !(table?.type === 'table' && endedBefore(body, table, ancestors[cellAt - 1]!));
-        if (inCell && body.slice(start(node), end(node)).includes('\\|')) {
+        // Linear keeps a pipe in a cell's text (escaped, or a character
+        // reference) but writes it back bare, which splits the row. Inline
+        // code keeps its escaped pipe.
+        if (inCell && node.value.includes('|')) {
           report('table-escaped-pipe', line(node));
         }
         if (body.slice(start(node), end(node)).includes('^[')) report('footnote', line(node));
