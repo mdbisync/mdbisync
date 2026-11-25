@@ -14,7 +14,8 @@
 # from your own scheduler through workflow_dispatch:
 # https://github.com/mdbisync/mdbisync/blob/main/docs/own-scheduler.md
 #
-# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.
+# Needs: variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID,
+# in the repository or in the mdbisync environment.
 # In the mdbisync environment limited to the tracked branch, set
 # MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET.
 name: mdbisync
