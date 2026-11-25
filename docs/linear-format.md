@@ -274,6 +274,10 @@ Inline text:
 - Redundant escapes inside a line go. `a \# b` becomes `a # b`, and
   `**\-10**` becomes `**-10**`.
   Text such as `\#tag` and `\+value` loses the escape when it cannot open a block.
+  So does a line-start `\=`, except on a line of only `=` that would
+  underline the paragraph above, and a `\-` or `\+` on a continuation
+  line indented four or more columns past its list item or quote (`\-x`
+  after any indentation).
   Escapes that keep text from becoming Markdown syntax or an emoji stay.
 - A backslash line break (`\` at the end of a line) loses its backslash,
   as Linear writes it; spaces or a tab before it stay. Linear holds every

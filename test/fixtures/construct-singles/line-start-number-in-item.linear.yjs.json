@@ -1,0 +1,93 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  1. first under a bullet","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  2. second under a bullet","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Plain steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  2. two without an escape","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" 2. under an ordered item","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"   3. six spaces under it","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Lazy steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"    1. six spaces under a bullet","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Close steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"1. two spaces under a bullet","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-5ef7ce6f","marks":{"attribution":"user"}}]}
+  ]
+}

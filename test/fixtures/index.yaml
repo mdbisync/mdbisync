@@ -75,6 +75,8 @@ rules:
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
+  - construct: line-start-escape
+    class: fixable
   - construct: table-document-end
     class: fixable
   - construct: code-blank-lines-before-fence
@@ -2894,6 +2896,38 @@ fixtures:
     canary: kx-cbd5160c
     corpus: false
     note: "Linear escapes a - or * that starts a paragraph line, also after a soft break, in an item or a quote; + stays"
+  - file: "construct-singles/line-start-equals.md"
+    group: construct-singles
+    construct: line-start-escape
+    class: fixable
+    basis: known
+    canary: kx-9b470119
+    corpus: false
+    note: "Linear drops the escape of a run of = except where it would underline the paragraph above"
+  - file: "construct-singles/line-start-deep-indent.md"
+    group: construct-singles
+    construct: line-start-escape
+    class: fixable
+    basis: known
+    canary: kx-f4c3e32f
+    corpus: false
+    note: "Linear drops an escaped -, + or = after a paragraph continuation line's indentation where no block can start, in an item too"
+  - file: "construct-singles/line-start-number-in-item.md"
+    group: construct-singles
+    construct: line-start-escape
+    class: fixable
+    basis: known
+    canary: kx-5ef7ce6f
+    corpus: false
+    note: "Linear keeps an escaped number and dot on an indented line under a list item as text"
+  - file: "construct-singles/line-start-number-nbsp.md"
+    group: construct-singles
+    construct: line-start-escape
+    class: fixable
+    basis: known
+    canary: kx-86c060c9
+    corpus: false
+    note: "a number, dot and no-break space under a list item stays text, the dot escaped; after a tab it is a nested item"
   - file: "construct-singles/lazy-underline-line.md"
     group: construct-singles
     construct: lazy-underline-line
