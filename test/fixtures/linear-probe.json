@@ -185,11 +185,27 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/code-span-fence-like.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-span-fences.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/code-span-lazy-dash-line.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
     "construct-singles/code-span-lines.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-span-padding.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-span-quote-tab.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -910,6 +926,10 @@
       "fixedPoint": true
     },
     "lint-errors/badge-in-link.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/code-span-padding.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

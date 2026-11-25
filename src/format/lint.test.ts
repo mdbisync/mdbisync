@@ -15,6 +15,8 @@ import { parse, visit } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
 const cases: Array<[LintRule, string, number]> = [
+  ['code-span-padding', 'Intro.\n\nTwo `  alpha  ` end.', 3],
+  ['code-span-padding', '* Item `   ` end', 1],
   ['tab-reference-layout', 'Seed&#9;order\n\n1. &#9;Collect', 3],
   ['footnote', 'Text.\n\nA claim.[^1]\n\n[^1]: Source.', 3],
   ['footnote', 'An inline note.^[Text.]', 1],

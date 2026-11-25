@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
-import { linkedFileCheck, lintText } from './lint.ts';
+import { linkedFileCheck, lintInTree, lintText } from './lint.ts';
 import { parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 
 const cases: Array<[string, string, string]> = [
@@ -331,6 +331,23 @@ describe('a code span over lines, as Linear writes it', () => {
     });
   }
 
+  it('keeps a tab a quote\'s sign takes in part as a tab, as Linear reads it', () => {
+    // `>` and one column of the tab are the prefix; Linear keeps the tab whole in the code.
+    for (const [input, expected] of [
+      ['> Quote `alpha\n>\tbeta` end', '> Quote `alpha \tbeta` end'],
+      ['> Two `alpha\n>  \tbeta` end', '> Two `alpha  \tbeta` end'],
+      ['> > Inner `alpha\n> >  \tbeta` end', '> > Inner `alpha  \tbeta` end'],
+    ]) {
+      assert.equal(fixText(input!), expected, input);
+      assert.equal(fixText(expected!), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected!), [], 'lint is clean on the result');
+    }
+    // A tab the sign takes whole goes, and one an item takes from keeps its other columns as spaces.
+    assert.equal(fixText('> > Nest `alpha\n> >\tbeta` end'), '> > Nest `alpha beta` end');
+    assert.equal(fixText('> 1. Num `alpha\n>\t   beta` end'), '> 1. Num `alpha   beta` end');
+    assert.equal(fixText('> * Bullet `alpha\n>\t beta` end'), '> * Bullet `alpha  beta` end');
+  });
+
   it('keeps the columns of a tab an item\'s prefix takes in part as spaces', () => {
     // The item takes two of the tab's four columns: two stay code text.
     assert.equal(fixText('* Item `alpha\n\tbeta` end'), '* Item `alpha   beta` end');
@@ -350,6 +367,62 @@ describe('a code span over lines, as Linear writes it', () => {
 
   it('an image\'s alt text keeps its lines', () => {
     assert.equal(fixText('* ![a `x\n  y` b](x.png)'), '* ![a `x\n  y` b](x.png)');
+  });
+});
+
+describe('a code span\'s fence and padding, as Linear writes them', () => {
+  // [name, input, what fix writes]
+  const written: Array<[string, string, string]> = [
+    ['code without a backtick goes between single backticks', 'Wide ``alpha`` and ````beta```` end.', 'Wide `alpha` and `beta` end.'],
+    ['the padding Markdown strips goes', 'One ` alpha beta ` end.', 'One `alpha beta` end.'],
+    ['also over lines', 'Lines ` alpha\nbeta ` end.', 'Lines `alpha beta` end.'],
+    ['and in an item, a quote, a heading, a link label and a table cell', '* ` a `\n\n> ` b `\n\n# ``c``\n\n[``d``](https://a.test)\n\n| ` e ` |\n| -- |\n| ``f`` |', '* `a`\n\n> `b`\n\n# `c`\n\n[`d`](<https://a.test>)\n\n| `e` |\n| -- |\n| `f` |\n'],
+    ['code with a backtick goes between one backtick more than its longest run, padded', 'Mid ``a`b`` and ` `` ` and ```` a`b``c ```` end.', 'Mid `` a`b `` and ``` `` ``` and ``` a`b``c ``` end.'],
+    ['and keeps a space at its end', 'Tick space ``alpha ` `` end.', 'Tick space `` alpha `  `` end.'],
+  ];
+  for (const [name, input, expected] of written) {
+    it(name, () => {
+      assert.equal(fixText(input), expected);
+      assert.ok(sameMarkdown(input, expected), 'the same document');
+      assert.equal(fixText(expected), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected), [], 'lint is clean on the result');
+    });
+  }
+
+  it('keeps code Linear keeps as written', () => {
+    for (const text of ['` alpha` `alpha ` ` ` `  ` `` `alpha` `` `` `alpha `` `` ` ``', 'Tab `\talpha\t` and `\u00a0alpha\u00a0`', '| `a \\| b` |\n| -- |\n| x |\n']) {
+      assert.equal(fixText(text), text, text);
+      assert.deepEqual(lintText('doc.md', text), [], text);
+    }
+  });
+
+  it('keeps a fence a backtick outside text and code would pair with', () => {
+    // An alt text's backtick in a table cell would open a single-backtick span.
+    const cell = '| A |\n| -- |\n| ![a ` b](x.png) ``c`` |\n';
+    assert.equal(fixText(cell), cell);
+    assert.equal(fixText('| A |\n| -- |\n| ![a b](x.png) ``c`` |'), '| A |\n| -- |\n| ![a b](x.png) `c` |\n');
+    // A lone backtick in text gets its backslash, so the fence can shrink.
+    assert.equal(fixText('a ` b ``c`` d'), 'a \\` b `c` d');
+  });
+
+  it('finds the longest backtick run of large code', () => {
+    const code = 'a`'.repeat(124_990); // Near the content limit: too many runs to spread into arguments.
+    assert.equal(fixText(`\`\`${code}a\`\``), `\`\` ${code}a \`\``);
+  });
+
+  it('writes a quote\'s tab Linear keeps in code that would otherwise be spaces alone', () => {
+    // Markdown reads the tab's columns as three spaces; Linear holds a space and a tab.
+    assert.equal(fixText('> `\n>\t`'), '> ` \t`');
+    assert.deepEqual(lintText('doc.md', '> `\n>\t`'), []);
+  });
+
+  it('leaves code to its author whose outer spaces Linear drops', () => {
+    // Linear keeps the code but writes it without the padding that keeps its outer spaces.
+    for (const text of ['Two `  alpha  ` end.', 'Spaces `   ` end.', 'Wide ``  alpha  `` end.']) {
+      assert.equal(fixText(text), text, text);
+      assert.deepEqual(lintText('doc.md', text).map(({ rule }) => rule), ['code-span-padding'], text);
+      assert.deepEqual(lintInTree('doc.md', text, new Set()), [], 'the sync sends it as it is');
+    }
   });
 });
 
@@ -700,8 +773,9 @@ describe('text split off at an image', () => {
 
   it('writes a code span that would open a fence on one line, without a backslash', () => {
     // Escaping its backticks would end the span; on one line it opens no fence.
+    // Linear writes it between single backticks, as any code without one.
     const once = fixText('Before ![a](x.png) ```js\nfoo``` y');
-    assert.equal(once, 'Before\n\n![a](x.png)\n\n```js foo``` y');
+    assert.equal(once, 'Before\n\n![a](x.png)\n\n`js foo` y');
     assert.equal(fixText(once), once, 'a second fix changes nothing');
   });
 });

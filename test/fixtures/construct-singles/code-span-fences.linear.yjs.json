@@ -1,0 +1,60 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Mid ","marks":{"attribution":"user"}},{"text":"a`b","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Mid tight ","marks":{"attribution":"user"}},{"text":"a`b","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Double mid ","marks":{"attribution":"user"}},{"text":"a``b","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Mixed ","marks":{"attribution":"user"}},{"text":"a`b``c","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Wide ","marks":{"attribution":"user"}},{"text":"alpha","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Wider ","marks":{"attribution":"user"}},{"text":"alpha","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"One space ","marks":{"attribution":"user"}},{"text":" ","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Two spaces ","marks":{"attribution":"user"}},{"text":"  ","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Lone tick ","marks":{"attribution":"user"}},{"text":"`","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Space tick ","marks":{"attribution":"user"}},{"text":"` alpha","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Tick space ","marks":{"attribution":"user"}},{"text":"alpha ` ","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Head ","marks":{"attribution":"user"}},{"text":"alpha","marks":{"attribution":"user","code":{}}},{"text":" end","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Link ","marks":{"attribution":"user","link":{"href":"https://a.test","noEmbed":null}}},{"text":"alpha","marks":{"attribution":"user","code":{},"link":{"href":"https://a.test","noEmbed":null}}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"Quote ","marks":{"attribution":"user"}},{"text":"alpha","marks":{"attribution":"user","code":{}}},{"text":" end","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "ordered_list",
+          "attrs": {"order":1},
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Num ","marks":{"attribution":"user"}},{"text":"alpha   beta","marks":{"attribution":"user","code":{}}},{"text":" end","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "bullet_list",
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Bullet ","marks":{"attribution":"user"}},{"text":"alpha  beta","marks":{"attribution":"user","code":{}}},{"text":" end","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-748f3bed","marks":{"attribution":"user"}}]}
+  ]
+}

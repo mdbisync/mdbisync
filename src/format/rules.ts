@@ -26,6 +26,7 @@ export const LINT_RULES = {
   'hard-break-backslash': 'A backslash line break becomes a plain line break. Run fix to write it as Linear does; where fix leaves it, put the text on one line or start a new paragraph.',
   'setext-heading-lines': 'Linear keeps only the first line of a heading underlined with = or - as the heading; the lines after it become a paragraph. Put the heading text on one line.',
   'table-header-pipe': 'A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |.',
+  'code-span-padding': 'Linear drops a space at each end of inline code that starts and ends with a space, or that holds only three spaces or more, so the code reads differently. Remove the spaces at the ends of the code, or keep a space at one end only; write code of spaces alone as one or two spaces.',
   'hard-break-in-heading': 'A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.',
   'tab-reference-layout': 'Linear writes tab character references as literal tabs. Fix leaves this document as-is because a tab would change how Markdown reads it. Reword the text or use ordinary spacing.',
   'git-conflict-marker': 'Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.',

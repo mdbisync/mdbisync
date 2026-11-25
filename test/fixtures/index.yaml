@@ -56,6 +56,8 @@ rules:
     title: "Bold or italic around inline code is dropped from the code."
   - id: hard-break-backslash
     title: "A backslash line break becomes a plain line break."
+  - id: code-span-padding
+    title: "Linear drops a space at each end of inline code that starts and ends with a space."
   - id: hard-break-in-heading
     title: "A hard line break in a setext heading is lost when the heading is written as one line."
   - id: tab-reference-layout
@@ -135,6 +137,16 @@ known_constructs:
     class: fixable
   - construct: code-span-lines
     class: fixable
+  - construct: code-span-quote-tab
+    class: fixable
+  - construct: code-span-fence-like
+    class: fixable
+  - construct: code-span-padding
+    class: fixable
+  - construct: code-span-fences
+    class: fixable
+  - construct: code-span-outer-spaces
+    class: lint-error
   - construct: table-document-end
     class: fixable
   - construct: code-blank-lines-before-fence
@@ -3375,6 +3387,38 @@ fixtures:
     canary: kx-58a3f733
     corpus: false
     note: "Linear writes a code span that runs over lines on one line: each line ending becomes a space, container prefixes go, the line's own indentation stays"
+  - file: "construct-singles/code-span-quote-tab.md"
+    group: construct-singles
+    construct: code-span-quote-tab
+    class: fixable
+    basis: known
+    canary: kx-9d805414
+    corpus: false
+    note: "Linear writes a code span over lines in a quote on one line; a tab the quote's > takes in part stays a tab in the code, and one it takes whole goes"
+  - file: "construct-singles/code-span-fence-like.md"
+    group: construct-singles
+    construct: code-span-fence-like
+    class: fixable
+    basis: known
+    canary: kx-0413d122
+    corpus: false
+    note: "Linear writes a code span between one backtick more than the longest run in its code; a fence-like span after an image becomes `js foo` in a paragraph of its own"
+  - file: "construct-singles/code-span-padding.md"
+    group: construct-singles
+    construct: code-span-padding
+    class: fixable
+    basis: known
+    canary: kx-b31cf0bc
+    corpus: false
+    note: "Linear writes a code span without padding unless its code holds a backtick; one space at each end that Markdown strips goes, a tab or no-break space stays"
+  - file: "construct-singles/code-span-fences.md"
+    group: construct-singles
+    construct: code-span-fences
+    class: fixable
+    basis: known
+    canary: kx-748f3bed
+    corpus: false
+    note: "Linear pads a code span with one space inside each fence whenever its code holds a backtick, and uses one backtick more than the longest run; two spaces alone stay"
   - file: "construct-singles/heading-empty-levels.md"
     group: construct-singles
     construct: heading-empty
@@ -3616,6 +3660,16 @@ fixtures:
     canary: kx-09b751d0
     corpus: false
     note: "Linear decodes tabs inside text and moves them outside inline marks"
+  - file: "lint-errors/code-span-padding.md"
+    group: lint-errors
+    construct: code-span-outer-spaces
+    class: lint-error
+    basis: known
+    rule: code-span-padding
+    line: 1
+    canary: kx-1700a6e5
+    corpus: false
+    note: "Linear keeps code that starts and ends with a space but writes it without the padding that keeps those spaces, and reads three spaces or more alone as two fewer"
   - file: "lint-errors/tab-reference-blank.md"
     group: lint-errors
     construct: tab-reference-layout

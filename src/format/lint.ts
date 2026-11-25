@@ -6,14 +6,14 @@
 import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, bracketedLabel, listKind, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, bracketedLabel, linearDropsCodeSpaces, listKind, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['code-span-padding', 'hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link']);
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
@@ -58,6 +58,8 @@ export function lintInTree(file: string, text: string, files: ReadonlySet<string
   // Markdown, but Linear's own export can hold it (a rule, text lines and a
   // rule; a list in a table cell): a document Linear wrote is not left out.
   // `unplaced-link` stops only `fix`: the sync sends the text as it is.
+  // So does `code-span-padding`: Linear keeps the code, and only writes it
+  // without the padding that keeps its outer spaces.
   return findings.filter((finding) => !FIX_ONLY_RULES.has(finding.rule));
 }
 
@@ -234,6 +236,11 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (node.type === 'inlineCode' && ancestors.some((a) => a.type === 'emphasis' || a.type === 'strong' || a.type === 'delete')) {
           report('code-in-emphasis', line(node));
         }
+        // `fix` keeps such code as written: Linear's form would read as other
+        // code. A tab a quote's `>` takes in part reads as spaces here, but
+        // Linear keeps it a tab, as `fix` writes it: such code is left to `fix`.
+        if (node.type === 'inlineCode' && !/>[ ]?\t/.test(body.slice(start(node), end(node)))
+          && linearDropsCodeSpaces(node.value.replace(/\r\n?|\n/g, ' '))) report('code-span-padding', line(node));
         break;
       case 'footnoteReference':
       case 'footnoteDefinition':

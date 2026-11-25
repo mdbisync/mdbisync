@@ -17,7 +17,7 @@ import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } fro
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
-import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, listKind, opensWithText, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, linearDropsCodeSpaces, linearMarkersAsText, linkDestination, listKind, opensWithText, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -496,6 +496,8 @@ class Writer {
   private inlineFrom = -1;
   /** The bounds of the block's inline text being written (a paragraph's, heading's or cell's), not a link label's. */
   private blockInline: [number, number] | undefined;
+  /** Whether the block's inline text holds a backtick outside text and code (in an alt text, a destination, HTML). */
+  private blockStrayTick = false;
   /** The space references `edgeSpaceEdits` has moved, by offset: an inner run of marks leaves them. */
   private readonly movedSpaces = new Set<number>();
   /** The space edits made so far in the block being written, which a later one is checked with. */
@@ -938,14 +940,17 @@ class Writer {
       const inline: InlineEdits = { edits: [], rewriteAsterisks, changedAsterisks: false };
       const outer = this.inlineFrom;
       const block = this.blockInline;
+      const strayTick = this.blockStrayTick;
       this.inlineFrom = from;
       this.blockInline ??= [from, to];
+      if (block === undefined) this.blockStrayTick = hasStrayTick(this.source, from, to, [...texts, ...code]);
       this.movedSpaces.clear();
       for (const at of block === undefined ? [] : moved) this.movedSpaces.add(at);
       this.spaceEdits = block === undefined ? [] : [...spaceEdits];
       this.inlineChildrenEdits(children, inline);
       this.inlineFrom = outer;
       this.blockInline = block;
+      this.blockStrayTick = strayTick;
       this.movedSpaces.clear();
       for (const at of moved) this.movedSpaces.add(at);
       // A nested render's edits stay in the block's text: keep them for the checks that follow.
@@ -1267,15 +1272,18 @@ class Writer {
    * a line without one (a lazy line) keeps its indentation for the quote;
    * an item takes up to its content indent in columns, so a lazy line
    * indented less loses all of it. A tab counts to the next multiple of
-   * four columns; `pad` is the columns of a tab past the last prefix, and
-   * `lazy` whether a container found no prefix of its own on the line.
+   * four columns; `pad` is the columns of a tab past the last prefix,
+   * `quoteTab` whether those columns are of a tab a quote's `>` took in
+   * part and no item took from, and `lazy` whether a container found no
+   * prefix of its own on the line.
    */
-  private prefixEnd(lineStart: number, line: string): { at: number; pad: number; lazy: boolean } {
+  private prefixEnd(lineStart: number, line: string): { at: number; pad: number; lazy: boolean; quoteTab: boolean } {
     const lineEnd = lineStart + line.length;
     let at = lineStart;
     let column = 0;
     let pad = 0;
     let lazy = false;
+    let quoteTab = false;
     const take = (): number => {
       const before = column;
       column = advanceColumn(column, this.source[at]!);
@@ -1293,29 +1301,38 @@ class Writer {
         pad = 0;
         for (let index = 0; index < marker[0].length; index++) take();
         // The `>` takes one space after it, or one column of a tab.
+        quoteTab = false;
         if (this.source[at] === ' ') take();
-        else if (this.source[at] === '\t') pad = take() - 1;
+        else if (this.source[at] === '\t') {
+          pad = take() - 1;
+          quoteTab = pad > 0;
+        }
         continue;
       }
       let need = container.indent;
       const taken = Math.min(pad, need);
       pad -= taken;
       need -= taken;
+      if (taken > 0) quoteTab = false;
       while (need > 0 && at < lineEnd && isSpaceOrTab(this.source[at]!)) {
         const width = take();
-        if (width > need) pad = width - need;
+        if (width > need) {
+          pad = width - need;
+          quoteTab = false;
+        }
         need = Math.max(0, need - width);
       }
       if (need > 0) lazy = true;
     }
-    return { at, pad, lazy };
+    return { at, pad, lazy, quoteTab };
   }
 
   /**
    * The code span from `from` to `to` on one line, as Linear writes one that
    * runs over lines: each line ending becomes a space, and a line's
    * container prefixes go. The indentation past them is code text and
-   * stays; the columns of a tab a prefix takes in part stay as spaces.
+   * stays; the columns of a tab an item's prefix takes in part stay as
+   * spaces. A tab a quote's `>` takes in part stays a tab, as Linear reads it.
    */
   private codeSpanOnOneLine(from: number, to: number): string {
     let out = '';
@@ -1327,8 +1344,8 @@ class Writer {
       const line = this.source.slice(lineStart, next === -1 ? undefined : next);
       const prefix = this.prefixEnd(lineStart, line);
       // A lazy line carries no further prefixes and keeps its spaces.
-      const rest = prefix.lazy ? { at: this.codePrefixEnd(lineStart, line), pad: 0 } : prefix;
-      out += ' '.repeat(1 + rest.pad);
+      const rest = prefix.lazy ? { at: this.codePrefixEnd(lineStart, line), pad: 0, quoteTab: false } : prefix;
+      out += rest.quoteTab ? ' \t' : ' '.repeat(1 + rest.pad);
       at = rest.at;
     }
     return out + this.source.slice(at, to);
@@ -1532,18 +1549,31 @@ class Writer {
         if (!this.literal && this.rewriteEscapes) this.escapeTextBrackets(from, to, edits);
         return;
       }
-      case 'inlineCode':
+      case 'inlineCode': {
         // Linear writes a code span that runs over lines on one line. A
         // joined line that holds a `|` could become a table's head row: such
         // a span keeps its lines.
-        if (this.source.slice(from, to).includes('\n')) {
+        let span = this.source.slice(from, to);
+        if (span.includes('\n')) {
           const joined = this.codeSpanOnOneLine(from, to);
           const before = this.source.slice(lineStartOf(this.source, from), from);
           const lineEnd = this.source.indexOf('\n', to);
           const after = this.source.slice(to, lineEnd === -1 ? undefined : lineEnd);
-          if (!`${before}${joined}${after}`.includes('|')) edits.push({ from, to, text: joined });
+          if (`${before}${joined}${after}`.includes('|')) return;
+          span = joined;
         }
+        let written = linearCodeSpan(span) ?? span;
+        // Other fences can pair with a backtick that text and code do not
+        // hold (in an alt text or a destination): keep them where the block
+        // would then read differently.
+        if (written !== span && this.blockStrayTick && this.blockInline !== undefined) {
+          const [blockFrom, blockTo] = this.blockInline;
+          const around = (code: string) => `Text ${this.source.slice(blockFrom, from)}${code}${this.source.slice(to, blockTo)}`;
+          if (!sameMarkdown(around(written), around(span))) written = span;
+        }
+        if (written !== this.source.slice(from, to)) edits.push({ from, to, text: written });
         return;
+      }
       case 'html':
         // Linear writes a line break in a table cell as a character reference.
         if (this.inCell && CELL_BREAK.test(node.value)) edits.push({ from, to, text: '&#10;' });
@@ -2412,6 +2442,44 @@ function attachmentLink(paragraph: Paragraph): Link | undefined {
 /** The prefix `container` takes at the start of `rest`: a quote marker or up to its item's indent in spaces. */
 function prefixOf(container: Container, rest: string): RegExpExecArray | null {
   return container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
+}
+
+/**
+ * A code span on one line (`span`, backticks included) as Linear writes it:
+ * between the fewest backticks that close it (one more than the longest run
+ * in the code), with a space inside each fence only when the code holds a
+ * backtick. `undefined` where Linear's form would read as other code
+ * (`linearDropsCodeSpaces`); `lint` reports it as `code-span-padding`.
+ */
+export function linearCodeSpan(span: string): string | undefined {
+  const fence = /^`+/.exec(span)![0].length;
+  const code = codeSpanText(span.slice(fence, span.length - fence));
+  if (linearDropsCodeSpaces(code)) return undefined;
+  let longest = 0;
+  for (const run of code.matchAll(/`+/g)) longest = Math.max(longest, run[0].length);
+  if (longest === 0) return `\`${code}\``;
+  const ticks = '`'.repeat(longest + 1);
+  return `${ticks} ${code} ${ticks}`;
+}
+
+/**
+ * The code of a code span's text between its fences on one line, as
+ * Markdown reads it: one space at each end goes when both ends are spaces
+ * and the text is not only spaces.
+ */
+function codeSpanText(inner: string): string {
+  return inner.length > 2 && inner.startsWith(' ') && inner.endsWith(' ') && /[^ ]/.test(inner) ? inner.slice(1, -1) : inner;
+}
+
+/**
+ * Whether the source from `from` to `to` holds a backtick outside the
+ * `covered` ranges (text and code nodes).
+ */
+function hasStrayTick(source: string, from: number, to: number, covered: ReadonlyArray<readonly [number, number]>): boolean {
+  for (let at = source.indexOf('`', from); at !== -1 && at < to; at = source.indexOf('`', at + 1)) {
+    if (!covered.some(([a, b]) => a <= at && at < b)) return true;
+  }
+  return false;
 }
 
 /** Where the line holding `at` starts. */
