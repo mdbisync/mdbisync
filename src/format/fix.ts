@@ -139,9 +139,18 @@ function fixBody(body: string, options: FixOptions): string {
       // Edits can expose syntax across inline nodes even when an edited
       // character would be safe in its own node or on its own line.
       if (!sameMarkdown(next, withOriginalEscapes)) {
-        rewriteEscapes = false;
-        next = withOriginalEscapes;
-        writer = fallback;
+        // An escaped `~` or `_` can move a link's end: give those up first,
+        // and the other escapes only if the document still changes.
+        const withoutTildeUnderscore = new Writer(current, tree, options, true, true, false);
+        const partial = withoutTildeUnderscore.root();
+        if (sameMarkdown(partial, withOriginalEscapes)) {
+          next = partial;
+          writer = withoutTildeUnderscore;
+        } else {
+          rewriteEscapes = false;
+          next = withOriginalEscapes;
+          writer = fallback;
+        }
       }
     }
     if (writer.rewroteAsterisks) {
@@ -332,6 +341,8 @@ class Writer {
   private readonly options: FixOptions;
   private readonly rewriteEscapes: boolean;
   private readonly rewriteAsterisks: boolean;
+  /** Whether literal `~` and `_` get Linear's escapes; the first part of the text's escapes to give up when they change the document. */
+  private readonly rewriteTildeUnderscore: boolean;
   compareEscapes = false;
   rewroteAsterisks = false;
   private conflictCallouts: Set<number> | undefined;
@@ -349,12 +360,13 @@ class Writer {
   /** A list's sibling block written right before it, when that is a list. */
   private readonly listBefore = new Map<List, List>();
 
-  constructor(source: string, tree: Root, options: FixOptions, rewriteEscapes = true, rewriteAsterisks = true) {
+  constructor(source: string, tree: Root, options: FixOptions, rewriteEscapes = true, rewriteAsterisks = true, rewriteTildeUnderscore = true) {
     this.source = source;
     this.tree = tree;
     this.options = options;
     this.rewriteEscapes = rewriteEscapes;
     this.rewriteAsterisks = rewriteAsterisks;
+    this.rewriteTildeUnderscore = rewriteTildeUnderscore;
     visit(tree, (node) => {
       if (node.type === 'definition' && !this.definitions.has(node.identifier)) this.definitions.set(node.identifier, node);
       if (!('children' in node)) return;
@@ -796,6 +808,12 @@ class Writer {
       }
       return false; // Preserve the indentation Linear keeps before a literal number.
     }
+    // A `#` that reads like a heading start (four columns in, or before a
+    // no-break space) cannot open one, but Linear escapes it there.
+    if (char === '#' && /^#{1,6}(?:\s|$)/.test(this.source.slice(at, this.textLineAt(at).to)) && texts.some(([a, b]) => a <= at && at < b)) {
+      edits.push({ from: at, to: at, text: '\\' });
+      return true;
+    }
     if ((char !== '-' || indented) && (char !== '*' || this.source[at + 1] === '*')) return false;
     if (!texts.some(([a, b]) => a <= at && at < b)) return false;
     edits.push({ from: at, to: at, text: '\\' });
@@ -987,6 +1005,12 @@ class Writer {
           return true;
         });
         for (const edit of text) edits.push(edit);
+        if (!this.literal && this.rewriteEscapes && this.rewriteTildeUnderscore) {
+          const escapes = tildeUnderscoreEdits(this.source.slice(from, to), from);
+          for (const edit of escapes) edits.push(edit);
+          // An escape changes flanking and autolink boundaries: the writer checks the document.
+          if (escapes.length > 0) this.compareEscapes = true;
+        }
         if (!this.literal && rewriteAsterisks) {
           const asterisks = literalAsteriskEdits(this.source.slice(from, to), from);
           for (const edit of asterisks) edits.push(edit);
@@ -1015,7 +1039,8 @@ class Writer {
     if (line.first < at && at + 2 <= line.last) return true;
     // Hashtags and +words cannot open blocks. A plus sign before whitespace
     // or a run of plus signs can still need its escape at a block boundary.
-    if (char === '#') return /^#{1,6}[^# \t\r\n]/.test(this.source.slice(at + 1, at + 8));
+    // Linear escapes a `#` before any whitespace, a no-break space too.
+    if (char === '#') return /^#{1,6}[^#\s]/.test(this.source.slice(at + 1, at + 8));
     return char === '+' && /^\+[^+ \t\r\n]/.test(this.source.slice(at + 1, at + 3));
   }
 
@@ -1137,6 +1162,47 @@ function textEdits(source: string, from: number, to: number, redundantEscape: (a
   return edits;
 }
 
+/**
+ * Linear's escapes for a literal `~` or `_` in text, character by
+ * character: every `~` gets one, and a `_` gets one unless the characters
+ * on both sides of it in the text are ASCII letters, digits or `_`
+ * (`snake_case` and `a__b` stay, `value__ end` becomes `value_\_ end`,
+ * `é_é` becomes `é\_é`). The text's own start and end count as no such
+ * character. An escape the rule does not need goes: `file\_name` becomes
+ * `file_name`.
+ */
+function tildeUnderscoreEdits(raw: string, from: number): Edit[] {
+  if (!/[~_]/.test(raw)) return [];
+  // The text as it reads: a backslash before ASCII punctuation escapes it.
+  const chars: Array<{ char: string; at: number; backslash?: number }> = [];
+  for (let at = 0; at < raw.length; at++) {
+    if (raw[at] === '\\' && at + 1 < raw.length && /[!-/:-@[-`{-~]/.test(raw[at + 1]!)) {
+      chars.push({ char: raw[at + 1]!, at: at + 1, backslash: at });
+      at++;
+    } else {
+      chars.push({ char: raw[at]!, at });
+    }
+  }
+  const word = (index: number): boolean => index >= 0 && index < chars.length && UNDERSCORE_NEIGHBOUR.test(chars[index]!.char);
+  // An escape inside an emoji shortcode's name keeps the shortcode text.
+  const text = chars.map(({ char }) => char).join('');
+  const shortcode = new Set<number>();
+  for (const match of text.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
+    if (Object.hasOwn(nameToEmoji, match[1]!)) for (let index = match.index; index < match.index + match[1]!.length + 2; index++) shortcode.add(index);
+  }
+  const edits: Edit[] = [];
+  chars.forEach(({ char, at, backslash }, index) => {
+    if (char !== '~' && char !== '_') return;
+    const plain = char === '_' && word(index - 1) && word(index + 1);
+    if (!plain && backslash === undefined) edits.push({ from: from + at, to: from + at, text: '\\' });
+    if (plain && backslash !== undefined && !shortcode.has(index)) edits.push({ from: from + backslash, to: from + backslash + 1, text: '' });
+  });
+  return edits;
+}
+
+/** The characters around a `_` that keep it plain in Linear's text. */
+const UNDERSCORE_NEIGHBOUR = /^[A-Za-z0-9_]$/;
+
 /** Escape literal brackets, including character references, outside marker syntax. */
 function squareBracketEdits(raw: string, from: number, markerBrackets?: readonly [number, number]): Edit[] {
   if (!/[\[\]&]/.test(raw)) return [];
@@ -1179,9 +1245,9 @@ function literalEdits(source: string, from: number, to: number): Edit[] {
   const raw = source.slice(from, to);
   const escape = new Set<number>();
   for (let at = 0; at < raw.length; at++) if (LABEL_SYNTAX.has(raw[at]!)) escape.add(at);
-  // An underscore run between letters or digits cannot open or close emphasis.
-  for (const match of raw.matchAll(/(?<=[\p{L}\p{N}])_+(?=[\p{L}\p{N}])/gu)) {
-    for (let at = match.index; at < match.index + match[0].length; at++) escape.delete(at);
+  // An underscore between ASCII letters, digits or underscores stays plain, as Linear writes it.
+  for (let at = 0; at < raw.length; at++) {
+    if (raw[at] === '_' && UNDERSCORE_NEIGHBOUR.test(raw[at - 1] ?? '') && UNDERSCORE_NEIGHBOUR.test(raw[at + 1] ?? '')) escape.delete(at);
   }
   for (const match of raw.matchAll(CHARACTER_REFERENCE)) {
     if (match[0][1] === '#' || decodeEntity(match[0]) !== undefined) escape.add(match.index);
@@ -1207,7 +1273,7 @@ const URL_LABEL = /^(?:(?:https?:\/\/|www\.)\S+|[^\s@]+@[^.\s@]+(?:\.[^.\s@]+)+)
 
 /** Remove redundant escapes in an existing plain URL label. */
 function plainUrlUnderscores(label: string): string {
-  const plain = label.replace(/(?<=[\p{L}\p{N}])(?:\\?_)+(?=[\p{L}\p{N}])/gu, (run) => run.replaceAll('\\', ''));
+  const plain = label.replace(/(?<=[A-Za-z0-9])(?:\\?_)+(?=[A-Za-z0-9])/g, (run) => run.replaceAll('\\', ''));
   if (plain === label) return label;
   const shortcodes = new Set(emojiShortcodeStarts(plain));
   return plain.replace(/:/g, (colon, at: number) => shortcodes.has(at) && !escaped(plain, at) ? '\\:' : colon);

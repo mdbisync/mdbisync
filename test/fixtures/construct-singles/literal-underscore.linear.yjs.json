@@ -1,0 +1,82 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"snake_case_name here","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"a_b_c and x_y","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"_leading word","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"trailing_ word","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"A lone _ here","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"file_name.txt and number 2_000","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"double a__b inside","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"emphasis","marks":{"attribution":"user","em":{}}},{"text":" and ","marks":{"attribution":"user"}},{"text":"strong","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Heading snake_case","marks":{"attribution":"user"}}]},
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"col_a","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"col b","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"x_y","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"1","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"item a_b","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"quoted a_b","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"under_score_","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"_under_score","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Already _escaped","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"unicode wordé_é and é~é","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-505d8b21","marks":{"attribution":"user"}}]}
+  ]
+}

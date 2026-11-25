@@ -1,0 +1,47 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"First line","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"    # after four spaces","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"    # four past the item","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {"text":"quoted","marks":{"attribution":"user"}},
+            {"type":"hard_break"},
+            {"text":"    # four past the marker","marks":{"attribution":"user"}}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-20544ac6","marks":{"attribution":"user"}}]}
+  ]
+}

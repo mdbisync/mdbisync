@@ -165,6 +165,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/continuation-hash.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/continuation-indent-items.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -230,6 +234,10 @@
       "fixedPoint": true
     },
     "construct-singles/final-newlines-many.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/hash-before-nbsp.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -342,6 +350,18 @@
       "fixedPoint": true
     },
     "construct-singles/list-ordered.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/literal-tilde.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/literal-underscore-runs.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/literal-underscore.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

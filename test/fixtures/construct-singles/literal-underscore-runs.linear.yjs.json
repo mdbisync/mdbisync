@@ -1,0 +1,16 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"value__ end","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"__init x","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"snake__","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"a ____ b","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"file_name and x__y","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"See ","marks":{"attribution":"user"}},{"text":"https://example.com/café_été","marks":{"attribution":"user","link":{"href":"https://example.com/x","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"See ","marks":{"attribution":"user"}},{"text":"https://example.org/a~b_c","marks":{"attribution":"user","link":{"href":"https://example.org/a~b_c","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"bold **x_**y and ","marks":{"attribution":"user"}},{"text":"em","marks":{"attribution":"user","em":{}}},{"text":"_z","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-f3a19cd2","marks":{"attribution":"user"}}]}
+  ]
+}

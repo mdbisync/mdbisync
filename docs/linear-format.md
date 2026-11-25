@@ -228,7 +228,8 @@ Inline text:
   So do web addresses Markdown finds inside other text, where the bare URL
   rule does not apply: `Site: "www.example.com"` becomes
   `Site: "[www.example.com](<http://www.example.com>)"`.
-  In a URL label, underscores between letters or digits stay plain, as in
+  In a URL label, underscores between ASCII letters, digits or underscores
+  stay plain, as in
   `[https://example.com/shelf_4](<https://example.com/shelf_4>)`.
 - Bare addresses with recognized domain suffixes become HTTP links.
   `example.com/guide` becomes `[example.com/guide](<http://example.com/guide>)`.
@@ -255,7 +256,16 @@ Inline text:
 - A `-` or `*` that starts a line of a paragraph as text gets a backslash,
   as Linear writes it: `-- a remark` becomes `\-- a remark`, and `*note`
   becomes `\*note`. After a continuation line's own indentation only the
-  `*` gets one.
+  `*` gets one, and so does a `#` that would start a heading there: a
+  continuation line `    # note` is written `    \# note`, and so is a
+  `#` before a no-break space.
+- A literal `~` gets a backslash, as Linear writes it: `~$5` becomes
+  `\~$5`. So does a literal `_`, unless the characters on both sides of it
+  are ASCII letters, digits or `_`: `snake_case` and `a__b` stay, while
+  `_note` becomes `\_note`, `value__ end` becomes `value_\_ end`, and
+  `é_é` becomes `é\_é`. An escape the rule does not need goes:
+  `file\_name` becomes `file_name`. Link text follows the same rule;
+  strikethrough and code keep their characters.
 - A continuation line of a paragraph keeps its own indentation, as Linear
   does: the quote's `>` or the item's indent is written in place of the
   source's, and spaces or tabs past it stay. A tab that the item's indent
