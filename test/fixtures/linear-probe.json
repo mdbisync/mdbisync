@@ -321,7 +321,23 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/line-start-deep-indent.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/line-start-equals.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/line-start-markers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/line-start-number-in-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/line-start-number-nbsp.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

@@ -1034,6 +1034,54 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('removes line-start escapes of = and of indented - and + where no block can start, as Linear does', () => {
+    for (const [input, expected] of [
+      // A run of `=` that opens a paragraph, an item or a quote cannot underline anything.
+      ['Plan\n\n\\=====', 'Plan\n\n====='],
+      ['\\=== Shelves', '=== Shelves'],
+      ['Plan\n\\=== and jars', 'Plan\n=== and jars'],
+      ['1. \\====\n2. \\=== a step', '1. ====\n2. === a step'],
+      ['* \\====', '* ===='],
+      ['- [ ] \\====', '- [ ] ===='],
+      ['> \\=====', '> ====='],
+      // Past four columns of indentation, no list item or underline starts.
+      ['Prices:\n          \\- 5 euro\n          \\+ 7 euro\n          \\= 9 euro\n          \\=====', 'Prices:\n          - 5 euro\n          + 7 euro\n          = 9 euro\n          ====='],
+      ['Plan\n    \\- spare', 'Plan\n    - spare'],
+      ['Plan\n\t\\+ spare', 'Plan\n\t+ spare'],
+      ['* Plan\n      \\- spare\n      \\+ spare', '* Plan\n      - spare\n      + spare'],
+      ['> Plan\n>     \\- spare', '> Plan\n>     - spare'],
+      ['> Plan\n    \\- spare', '> Plan\n>     - spare'],
+      ['* Plan\n      \\====', '* Plan\n      ===='],
+      ['* Plan\n      ====', '* Plan\n      ===='],
+      ['> Plan\n>     \\====', '> Plan\n>     ===='],
+      ['* Plan\n      ----', '* Plan\n      ----'],
+      ['Plan\n    \\---', 'Plan\n    ---'],
+      // After any indentation a dash that no space follows opens nothing.
+      ['Plan\n  \\-x spare', 'Plan\n  -x spare'],
+      ['* Plan\n    \\-x spare', '* Plan\n    -x spare'],
+      // Kept: these would underline the paragraph or start a list item.
+      ['Plan\n\\=====', 'Plan\n\\====='],
+      ['Plan\n   \\====', 'Plan\n   \\===='],
+      ['Plan\n\\=\\=\\=', 'Plan\n\\=\\=\\='],
+      ['* Plan\n  \\===', '* Plan\n  \\==='],
+      ['Plan\n  \\- spare', 'Plan\n  \\- spare'],
+      ['Plan\n  \\+ spare', 'Plan\n  \\+ spare'],
+      ['* Plan\n    \\- spare', '* Plan\n    \\- spare'],
+      ['Plan\n\\-x spare', 'Plan\n\\-x spare'],
+      ['Plan\n  \\---', 'Plan\n  \\---'],
+      ['* Plan\n \\- spare', '* Plan\n  \\- spare'],
+      // A tab can span fewer columns under the shorter prefix fix writes.
+      ['-   Plan\n    \t\\- spare', '* Plan\n  \t\\- spare'],
+      ['1.  Plan\n    \t\\=====', '1. Plan\n   \t\\====='],
+      ['* Plan\n\t  ====', '* Plan\n  \\===='],
+    ] as const) {
+      assert.equal(fixText(input), expected, input);
+      assert.equal(fixText(expected), expected, input);
+      assert.ok(sameMarkdown(input, expected), input);
+      assert.deepEqual(lintText('inventory.md', expected), [], input);
+    }
+  });
+
   it('writes a bare plus on a paragraph continuation without creating an item', () => {
     for (const output of ['Plan\n+', '* Plan\n  +', '> Plan\n> +']) {
       const input = output.slice(0, -1) + '\\+';

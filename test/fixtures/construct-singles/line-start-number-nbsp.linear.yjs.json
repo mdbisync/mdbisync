@@ -1,0 +1,272 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" 1. four spaces and a no-break space","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"1. three spaces and a no-break space","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"    1. seven spaces and a no-break space","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  1. four spaces under a bullet","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"1. two spaces under a bullet","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  2. a two under a bullet","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Steps","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"four spaces and a tab","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Steps","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"1. a paragraph line","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" 1. a tab and a no-break space","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  1. a tab under a bullet","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" 1.  a no-break space and a space","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Steps","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":" a space and a no-break space","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  1. four spaces under a task","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"    1. six spaces under a bullet","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"     1. eight spaces under an item","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Steps","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" 1.  two no-break spaces","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-86c060c9","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -366,7 +366,7 @@ class Writer {
   compareEscapes = false;
   rewroteAsterisks = false;
   private conflictCallouts: Set<number> | undefined;
-  private textLine: { from: number; to: number; first: number; last: number; delimiter: boolean } | undefined;
+  private textLine: { from: number; to: number; first: number; last: number; delimiter: boolean; equalsOnly: boolean; indent?: number } | undefined;
   /** Where the table cell being written starts its text: an escape there stays. */
   private cellStart: number | undefined;
   /** Whether the text being written is a table cell's. */
@@ -375,6 +375,8 @@ class Writer {
   private fileBlockIndent = 0;
   /** Whether the text being written is an autolink's, where a backslash escapes nothing. */
   private literal = false;
+  /** Where the inline text being written starts: its line is no continuation line. */
+  private inlineFrom = -1;
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
   /** A list's sibling block written right before it, when that is a list. */
@@ -756,7 +758,10 @@ class Writer {
     const paragraph = lineStarts === 'none' ? undefined : { texts, html, first: lineStarts === 'all' };
     const render = (rewriteAsterisks: boolean) => {
       const inline: InlineEdits = { edits: [], rewriteAsterisks, changedAsterisks: false };
+      const outer = this.inlineFrom;
+      this.inlineFrom = from;
       this.inlineChildrenEdits(children, inline);
+      this.inlineFrom = outer;
       return { text: this.rewritten(from, to, inline.edits, code, paragraph), changedAsterisks: inline.changedAsterisks };
     };
     const candidate = render(this.rewriteAsterisks);
@@ -869,7 +874,10 @@ class Writer {
     // space: the line joins the one before. Outside a container no prefix
     // is written: the line stays as it is.
     const underline = /^([ \t]*)(?:-+|=+)[ \t]*$/.exec(this.source.slice(at, lineStart + line.length));
-    if (underline && (this.containers.length > 0 || this.fileBlockIndent > 0)) {
+    // Four spaces past the prefixes, the line is no underline; the writer
+    // keeps spaces as they are (a tab's width can change).
+    const deep = underline !== null && pad === 0 && this.fileBlockIndent === 0 && /^ {4}/.test(underline[1]!);
+    if (underline && !deep && (this.containers.length > 0 || this.fileBlockIndent > 0)) {
       if (inCode) return { from: lineStart - 1, to: at, text: ' ', underline: true };
       return { from: lineStart, to: at + underline[1]!.length, text: paragraph ? '\\' : ' '.repeat(4 + this.fileBlockIndent), underline: true };
     }
@@ -1095,13 +1103,40 @@ class Writer {
     if ((char === '#' || char === '+') && (this.source[at - 1] === char || this.source.startsWith(`\\${char}`, at + 2))) return false;
     if (char === '+' && this.source[at + 2] === '+') return false;
     const line = this.textLineAt(at);
-    if (line.delimiter && (char === '-' || char === '=')) return false;
+    // A run of `=` is a setext underline only alone on a continuation line
+    // indented less than four columns past its containers.
+    const continuation = line.from > this.inlineFrom;
+    if (char === '=') return !line.equalsOnly || !continuation || this.indentPastContainers(line) >= 4;
+    // Past four columns no list item, underline or rule can interrupt the
+    // paragraph; after less indentation a dash that no space follows
+    // opens nothing either.
+    const indent = continuation && at === line.first && (char === '-' || char === '+') ? this.indentPastContainers(line) : 0;
+    if (indent >= 4 && !this.source.slice(line.first, line.to).includes('|')) return true;
+    if (line.delimiter && char === '-') return false;
     if (line.first < at && at + 2 <= line.last) return true;
+    if (char === '-' && indent > 0 && !/^[ \t]|^$/.test(this.source.slice(at + 2, line.to))) return true;
     // Hashtags and +words cannot open blocks. A plus sign before whitespace
     // or a run of plus signs can still need its escape at a block boundary.
     // Linear escapes a `#` before any whitespace, a no-break space too.
     if (char === '#') return /^#{1,6}[^#\s]/.test(this.source.slice(at + 1, at + 8));
     return char === '+' && /^\+[^+ \t\r\n]/.test(this.source.slice(at + 1, at + 3));
+  }
+
+  /** The columns of whitespace a continuation line has before its text, past its containers' prefixes. */
+  private indentPastContainers(line: NonNullable<Writer['textLine']>): number {
+    if (line.indent !== undefined) return line.indent;
+    const { at, pad } = this.prefixEnd(line.from, this.source.slice(line.from, line.to));
+    // The writer can change a tab's width (under a shorter item prefix)
+    // and drops a file block label's indentation: count those as none.
+    if (at > line.first || this.fileBlockIndent > 0 || pad > 0
+      || (this.containers.length > 0 && this.source.slice(line.from, line.first).includes('\t'))) return line.indent = 0;
+    let column = 0;
+    let prefix = 0;
+    for (let offset = line.from; offset < line.first; offset++) {
+      if (offset === at) prefix = column;
+      column = advanceColumn(column, this.source[offset]!);
+    }
+    return line.indent = pad + column - (at === line.first ? column : prefix);
   }
 
   /** Significant line bounds, cached so many escapes do not rescan the line. */
@@ -1116,7 +1151,9 @@ class Writer {
     while (last >= from && /[ \t#]/.test(this.source[last]!)) last--;
     // A delimiter line may still need its escape to stay paragraph text.
     const delimiter = /^[ \t|:\\=-]+$/.test(line.slice(prefix.length));
-    return this.textLine = { from, to, first: from + prefix.length, last, delimiter };
+    // A line of only `=` (escaped or not) may underline the paragraph above.
+    const equalsOnly = /^(?:\\?=)+[ \t]*$/.test(line.slice(prefix.length));
+    return this.textLine = { from, to, first: from + prefix.length, last, delimiter, equalsOnly };
   }
 
   private escapeTextBrackets(from: number, to: number, edits: Edit[]): void {
