@@ -15,6 +15,7 @@ import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
+import { sectionOpenersAsLinear } from './sections.ts';
 import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
@@ -39,34 +40,43 @@ export interface FixOptions {
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
-  const lf = body.replace(/\r\n?/g, '\n');
-  const spaced = backslashBreaksAsSpaces(lf);
-  if (spaced === undefined) return text;
-  const fixed = fixBody(spaced, options);
-  // The writer can still lose a break it now holds as two spaces (text split
+  const lf = sectionOpenersAsLinear(body.replace(/\r\n?/g, '\n'));
+  if (lf === undefined) return text;
+  const unbroken = backslashBreaksAsLinear(lf);
+  if (unbroken === undefined) return text;
+  const fixed = fixBody(unbroken, options);
+  // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
   // block): such a file stays with its author.
-  if (spaced !== lf && breakCount(fixed) < breakCount(spaced)) return text;
+  if (unbroken !== lf && lineEndings(fixed) < lineEndings(unbroken)) return text;
   return joinFile(head, fixed);
 }
 
-function breakCount(body: string): number {
+/**
+ * The line endings inside paragraphs: hard breaks and the line endings of
+ * text. A heading's are left out: `fix` writes a setext heading on one line.
+ */
+function lineEndings(body: string): number {
   let count = 0;
-  visit(parse(body), (node) => {
+  visit(parse(body), (node, ancestors) => {
+    if (ancestors.some((ancestor) => ancestor.type === 'heading')) return;
     if (node.type === 'break') count++;
+    else if (node.type === 'text') count += lineBreaks(node.value);
   });
   return count;
 }
 
 /**
- * The body with each backslash line break written as two trailing spaces,
- * the form Linear keeps for the same break; spaces before the backslash
- * become part of the two. Undefined when that would change what the
- * Markdown says, so the file stays with its author: a break in a heading,
- * which `fix` writes on one line, or a line that reads differently without
- * its backslash (`#\`, `=\`, `***\`, a backslash alone on its line).
+ * The body with each backslash line break written as Linear writes it: the
+ * line without its backslash, keeping the spaces or tabs before it. Linear
+ * holds every line ending of a paragraph as a line break, so the break
+ * stays one there. Undefined when that would change what the Markdown says
+ * beyond the break, so the file stays with its author: a break in a
+ * heading, which `fix` writes on one line, or a line that reads
+ * differently without its backslash (`#\`, `=\`, `***\`, a backslash alone
+ * on its line).
  */
-function backslashBreaksAsSpaces(body: string): string | undefined {
+function backslashBreaksAsLinear(body: string): string | undefined {
   if (!body.includes('\\')) return body;
   const tree = parse(body);
   const breaks: number[] = [];
@@ -85,9 +95,7 @@ function backslashBreaksAsSpaces(body: string): string | undefined {
   let written = '';
   let at = 0;
   for (const backslash of breaks.sort((a, b) => a - b)) {
-    let from = backslash;
-    while (from > at && isSpaceOrTab(body[from - 1]!)) from--;
-    written += `${body.slice(at, from)}  `;
+    written += body.slice(at, backslash);
     at = backslash + 1;
   }
   written += body.slice(at);
@@ -95,19 +103,29 @@ function backslashBreaksAsSpaces(body: string): string | undefined {
 }
 
 /**
- * A tree without positions, where text before a line break loses its
- * trailing spaces and tabs (they do not render, and in the two-space form
- * they belong to the break), and text left empty by that goes.
+ * A tree without positions, where a line break is a line ending of the
+ * text around it (Linear holds both as one break), adjacent text is joined,
+ * and spaces and tabs before a line ending go (they do not render).
  */
 function breakShape(tree: Root): unknown {
   const shape = (node: Nodes): unknown => {
     const { position: _position, ...rest } = node;
     if (!('children' in node)) return rest;
-    const children = (node.children as Nodes[]).flatMap((child, index, all) => {
-      if (child.type !== 'text' || all[index + 1]?.type !== 'break') return [shape(child)];
-      const value = child.value.replace(/[ \t]+$/, '');
-      return value === '' ? [] : [{ type: 'text', value }];
-    });
+    const children: unknown[] = [];
+    let text: string | undefined;
+    const flush = () => {
+      if (text !== undefined && text !== '') children.push({ type: 'text', value: text.replace(/[ \t]+\n/g, '\n') });
+      text = undefined;
+    };
+    for (const child of node.children as Nodes[]) {
+      if (child.type === 'text' || child.type === 'break') {
+        text = (text ?? '') + (child.type === 'text' ? child.value : '\n');
+      } else {
+        flush();
+        children.push(shape(child));
+      }
+    }
+    flush();
     return { ...rest, children };
   };
   return shape(tree);
@@ -496,6 +514,8 @@ class Writer {
     const raw = this.source.slice(start(node), end(node));
     const math = MATH_PARAGRAPH.exec(raw);
     if (math) return [`\`\`\`math\n${math[1]}\n\`\`\``];
+    // A section without a title: Linear writes its opener with the space.
+    if (/^\+{3}[ \t]+$/.test(raw)) return ['+++ '];
     const isImage = (child: PhrasingContent): boolean => child.type === 'image' || child.type === 'imageReference';
     const images = node.children.filter(isImage).length;
     const hasText = node.children.some((child) => !isImage(child) && !(child.type === 'text' && child.value.trim() === ''));
@@ -1031,7 +1051,7 @@ class Writer {
           if (!this.rewriteEscapes || !this.redundantLineEscape(at, char)) return false;
           this.compareEscapes = true;
           return true;
-        });
+        }, !this.inCell);
         for (const edit of text) edits.push(edit);
         if (!this.literal && this.rewriteEscapes && this.rewriteTildeUnderscore) {
           const escapes = tildeUnderscoreEdits(this.source.slice(from, to), from);
@@ -1164,7 +1184,7 @@ class Writer {
  * Rewrites inside plain text: entities, emoji shortcodes and backslashes
  * Linear spells differently. The writer decides which line escapes can go.
  */
-function textEdits(source: string, from: number, to: number, redundantEscape: (at: number, char: string) => boolean): Edit[] {
+function textEdits(source: string, from: number, to: number, redundantEscape: (at: number, char: string) => boolean, inBlock = true): Edit[] {
   const edits: Edit[] = [];
   const raw = source.slice(from, to);
   // Character references become the characters when that cannot make markup:
@@ -1191,10 +1211,14 @@ function textEdits(source: string, from: number, to: number, redundantEscape: (a
   for (const match of raw.matchAll(/:(?=([a-z0-9_+-]*)\\([+-][a-z0-9_+-]*):)/g)) {
     if (Object.hasOwn(nameToEmoji, match[1]! + match[2]!)) shortcodeEscapes.add(match.index + 1 + match[1]!.length);
   }
-  // A backslash before a letter is a literal backslash; Linear doubles it.
-  for (const match of raw.matchAll(/\\(.)/g)) {
+  // A backslash before a letter is a literal backslash; Linear doubles it,
+  // as it does one that ends its line (where it breaks no line: a block's
+  // end). A table cell's goes on to the cell's pipe, which `fix` writes.
+  for (const match of raw.matchAll(/\\(.|$)/g)) {
     const at = from + match.index;
     const next = match[1]!;
+    // A heading's closing hashes, which `fix` drops, follow its text as plain characters.
+    if (next === '' && (!inBlock || !/^[ \t]*(?:#+[ \t]*)?(?:\n|$)/.test(source.slice(to)))) continue;
     if (/[!-/:-@[-`{-~]/.test(next)) {
       if (!shortcodeEscapes.has(match.index) && redundantEscape(at, next)) {
         edits.push({ from: at, to: at + 1, text: '' });

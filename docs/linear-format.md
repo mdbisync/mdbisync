@@ -139,6 +139,18 @@ Blocks:
   Linear keeps such text but can return `4\) pear` and a lone `\+` without
   their escapes. The sync restores an escape where the text would read as
   a block. A lone `+` on a paragraph continuation line stays plain.
+- A line that opens with three or more `>` signs is a collapsible section
+  in Linear, not a nested quote, and `fix` writes it as Linear does: the
+  rest of the line becomes the title of a `+++` line, and the section holds
+  the blocks after it up to a `>>>` line without a title, or else to the
+  end of the document, list item or quote it is in. A `+++` line closes it
+  there. A line `>>> Plans` followed by `Some text` is written as three
+  blocks, one blank line apart: `+++ Plans`, `Some text` and `+++`. A
+  `>>>` line without a title closes every section still open there; with
+  none open, it opens one without a title (`+++` and a space). With spaces
+  between the signs (`> > >`), or when the first sign continues a quote
+  above, it stays a quote. A file that also has a `+++` line is left to
+  you, since Linear would pair that line with the section.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
@@ -212,7 +224,11 @@ Inline text:
   becomes `[a](<https://example.com/x>)`. A backslash, `|`, `^`, `{` and
   `}` in a destination are percent-encoded, as Linear writes them:
   `[a](https://example.com/a\b)` becomes
-  `[a](<https://example.com/a%5Cb>)`. A `%` that starts no escape becomes
+  `[a](<https://example.com/a%5Cb>)`. So are characters outside ASCII, as
+  UTF-8: `[a](https://example.com/café)` becomes
+  `[a](<https://example.com/caf%C3%A9>)`, and such a host is written in its
+  ASCII form (for `café.example`, `xn--caf-dma.example`). The link text
+  stays as written. A `%` that starts no escape becomes
   `%25`. In a relative path that is not valid percent-encoding, every `%` is
   written `%25`, so the link still names the same file.
 - A code span that runs over lines is written on one line, as Linear
@@ -257,14 +273,18 @@ Inline text:
   as written.
 - A backslash before anything but ASCII punctuation (a letter, a digit, a
   space) is a literal backslash, and it is doubled, as Linear doubles it:
-  `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`.
+  `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`. So is a
+  backslash that ends a paragraph, heading or item, where it breaks no
+  line: `Path ends in \` becomes `Path ends in \\`.
 - Redundant escapes inside a line go. `a \# b` becomes `a # b`, and
   `**\-10**` becomes `**-10**`.
   Text such as `\#tag` and `\+value` loses the escape when it cannot open a block.
   Escapes that keep text from becoming Markdown syntax or an emoji stay.
-- A backslash line break (`\` at the end of a line) is written as two
-  trailing spaces, which Linear keeps as the same break (see
-  [`hard-break-backslash`](#hard-break-backslash)).
+- A backslash line break (`\` at the end of a line) loses its backslash,
+  as Linear writes it; spaces or a tab before it stay. Linear holds every
+  line ending of a paragraph as a line break, so the break stays one there
+  (see [`hard-break-backslash`](#hard-break-backslash)). A break written
+  with two or more trailing spaces stays as it is.
 - A `-` or `*` that starts a line of a paragraph as text gets a backslash,
   as Linear writes it: `-- a remark` becomes `\-- a remark`, and `*note`
   becomes `\*note`. After a continuation line's own indentation only the
@@ -537,19 +557,22 @@ Run **`npm test`** first.
 ### `hard-break-backslash`
 
 A backslash line break becomes a plain line break. Run fix to write it as
-two trailing spaces; where fix leaves it, put the text on one line or start
-a new paragraph. Linear drops the backslash, and the two lines join into
-one; it keeps a break written as two spaces, the same break in Markdown.
+Linear does; where fix leaves it, put the text on one line or start a new
+paragraph. Linear keeps the break but drops the backslash: it holds every
+line ending of a paragraph as a line break and writes it as a plain line
+ending, which other Markdown renderers join into one line.
 
 ```markdown
 First line\
 Second line
 ```
 
-`fix` writes this as `First line` with two trailing spaces, then
-`Second line`. Spaces before the backslash become part of those two.
+`fix` writes this as `First line`, then `Second line` on the next line.
+Spaces or a tab before the backslash stay. To keep the break for other
+renderers too, end the line with two spaces instead: Linear keeps them.
 
-`fix` leaves the file to you wherever two spaces would change the document:
+`fix` leaves the file to you wherever dropping the backslash would change
+the document:
 in a setext heading, which it writes on one line (see
 [`hard-break-in-heading`](#hard-break-in-heading)); where the backslash is
 alone on its line, or right after a task checkbox; where the line would
@@ -557,11 +580,9 @@ read differently without its backslash (`#\`, `***\`, a `=` or `---`
 underline, a table row, emphasis that the backslash lets close); and where
 the break sits next to an image, which `fix` moves into a paragraph of its
 own. There you can also end the line with two spaces or `<br>` yourself,
-if the line still reads as you meant.
-
-A hook that trims trailing whitespace in Markdown files also removes the
-two spaces, and with them the break: exclude Markdown from it (see
-[Other fixing hooks](#other-fixing-hooks)).
+if the line still reads as you meant. A hook that trims trailing
+whitespace in Markdown files removes those spaces, and with them the
+break: exclude Markdown from it (see [Other fixing hooks](#other-fixing-hooks)).
 
 ### `hard-break-in-heading`
 
@@ -592,6 +613,28 @@ The meeting is on Monday.
 =======
 The meeting is on Tuesday.
 >>>>>>> theirs
+```
+
+### `section-opener`
+
+A line starting with >>> opens a collapsible section in Linear, which fix
+cannot write here: the file also has lines starting with +++, which Linear
+pairs with it, or the section would end inside code. Write the section with
++++ lines, or start the line with \>.
+
+Elsewhere `fix` writes a `>>>` line as Linear's section (see
+[What `fix` changes](#what-fix-changes)).
+
+```markdown
++++ Earlier notes
+
+Kept from last week.
+
++++
+
+>>> New notes
+
+Added today.
 ```
 
 ### `url-in-html`
@@ -766,8 +809,10 @@ toolchain or packages when they install or run.
 A hook that rewrites the same Markdown in another way fights `fix`, and
 the two never settle. The common ones are `end-of-file-fixer`, which adds
 back the final line break `fix` removes, and `trailing-whitespace`, which
-removes the two spaces of a line break and the indentation `fix` writes on
-a blank line inside a code block in a list item. An editor that trims
+removes the two spaces of a line break, the indentation `fix` writes on
+a blank line inside a code block in a list item, and the space after
+`+++` that marks a collapsible section without a title (without it, Linear
+reads the line as the end of a section). An editor that trims
 trailing whitespace on save does the same. Keep them away from
 synchronized Markdown files:
 
@@ -782,9 +827,7 @@ synchronized Markdown files:
 ```
 
 Otherwise every run changes the files again, and the CI example's check
-never passes. A backslash line break is the exception, and the worse case:
-`fix` writes it as two spaces, `trailing-whitespace` removes them, and both
-hooks then pass with the break gone.
+never passes.
 
 ### In CI
 

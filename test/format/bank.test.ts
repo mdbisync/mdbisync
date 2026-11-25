@@ -43,12 +43,14 @@ describe('fix on the fixture bank', () => {
           assert.equal(fixed, head + form, "L0-02: fix reaches Linear's recorded form");
         }
       } else if (FIXED_BY_FIX.has(fixture.file)) {
-        // A rule fix writes in a form Linear keeps: the finding goes and the Markdown stays.
+        // A rule fix writes in Linear's form: the finding goes and fix reaches the recorded form.
         assert.ok(fixture.class === 'lint-error' && FIXED_RULES.has(fixture.rule as LintRule), 'a fixture of a rule fix writes');
         assert.notEqual(fixed, source, 'fix rewrites it');
         const after = lintText(fixture.file, fixed, options).map((finding) => finding.rule);
         assert.deepEqual(after, [], 'lint reports nothing after fix');
-        assert.ok(sameMarkdown(splitFile(fixed).body, splitFile(source).body), 'fix keeps the Markdown');
+        const form = golden(fixture);
+        assert.ok(form !== undefined, 'a fixture of a rule fix writes has its recorded Linear form');
+        assert.equal(fixed, splitFile(source).head + form, "fix reaches Linear's recorded form");
       } else {
         assert.equal(fixed, source, 'L0-03: fix leaves it byte for byte');
         const form = golden(fixture);

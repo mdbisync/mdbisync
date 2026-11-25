@@ -234,33 +234,43 @@ describe('a code span over lines, as Linear writes it', () => {
 describe('a backslash line break', () => {
   // [input, what fix writes]
   const written: Array<[string, string]> = [
-    ['Rain on the roof\\\nand the kettle on', 'Rain on the roof  \nand the kettle on'],
-    ['> Quiet hours\\\n> begin at nine', '> Quiet hours  \n> begin at nine'],
-    ['> Quiet hours\\\nbegin at nine', '> Quiet hours  \n> begin at nine'],
-    ['- Pack the tent\\\n  and the stove\n- Leave early', '* Pack the tent  \n  and the stove\n* Leave early'],
-    ['- [ ] Water the fern\\\n  on Sunday', '- [ ] Water the fern  \n  on Sunday'],
-    ['[two\\\nlines](https://example.com)', '[two  \nlines](<https://example.com>)'],
-    ['Tabs after\\\n\tthe break', 'Tabs after  \n\tthe break'],
-    ['Spaces before \\\nthe backslash', 'Spaces before  \nthe backslash'],
-    ['A break\\\n-- then a dash line', 'A break  \n\\-- then a dash line'],
+    ['Rain on the roof\\\nand the kettle on', 'Rain on the roof\nand the kettle on'],
+    ['> Quiet hours\\\n> begin at nine', '> Quiet hours\n> begin at nine'],
+    ['> Quiet hours\\\nbegin at nine', '> Quiet hours\n> begin at nine'],
+    ['- Pack the tent\\\n  and the stove\n- Leave early', '* Pack the tent\n  and the stove\n* Leave early'],
+    ['- [ ] Water the fern\\\n  on Sunday', '- [ ] Water the fern\n  on Sunday'],
+    ['[two\\\nlines](https://example.com)', '[two\nlines](<https://example.com>)'],
+    ['Tabs after\\\n\tthe break', 'Tabs after\n\tthe break'],
+    // The spaces or tab before the backslash stay, as Linear keeps them.
+    ['Spaces before \\\nthe backslash', 'Spaces before \nthe backslash'],
+    ['A tab before\t\\\nthe backslash', 'A tab before\t\nthe backslash'],
+    ['A break\\\n-- then a dash line', 'A break\n\\-- then a dash line'],
     // Inline HTML cannot interrupt a paragraph, so this line stays text.
-    ['Lanterns\n<b>\\\nabove', 'Lanterns\n<b>  \nabove'],
+    ['Lanterns\n<b>\\\nabove', 'Lanterns\n<b>\nabove'],
     // A list starting at 2 cannot interrupt a paragraph: `2.` is text, not a prefix.
-    ['Lanterns\n2. \\\nabove', 'Lanterns\n2.  \nabove'],
+    ['Lanterns\n2. \\\nabove', 'Lanterns\n2. \nabove'],
   ];
   for (const [input, expected] of written) {
-    it(`is written as two trailing spaces: ${JSON.stringify(input)}`, () => {
+    it(`is written as Linear writes it, without the backslash: ${JSON.stringify(input)}`, () => {
       assert.deepEqual([...new Set(lintText('doc.md', input).map((finding) => finding.rule))], ['hard-break-backslash']);
       const fixed = fixText(input);
       assert.equal(fixed, expected);
       assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
       assert.deepEqual(lintText('doc.md', fixed), [], 'lint reports nothing after fix');
-      // Spaces before a break do not render; past them, the Markdown is the same.
-      const breaks = (markdown: string) => readMarkdown(markdown).map((part) => part.replace(/[ \t]+$/, ''));
-      assert.deepEqual(breaks(fixed), breaks(input));
-      assert.ok(readMarkdown(fixed).includes('break'));
+      // Linear holds each line ending of a paragraph as a line break: past the
+      // spaces before it, which do not render, the lines are the same.
+      const lines = (markdown: string) => readMarkdown(markdown).map((part) => (part === 'break' ? '\n' : part)).join('').replace(/[ \t]+\n/g, '\n');
+      assert.deepEqual(lines(fixed), lines(input));
     });
   }
+
+  it('is written next to a setext heading that fix writes on one line', () => {
+    assert.equal(fixText('Garden\nplan\n===\n\nRain\\\nand tea'), '# Garden plan\n\nRain\nand tea');
+  });
+
+  it('keeps a break written with two spaces, as Linear does', () => {
+    for (const input of ['Rain  \nand the kettle on', 'Rain   \nand the kettle on', '> Quiet  \n> hours']) assert.equal(fixText(input), input);
+  });
 
   // A heading is written on one line; two spaces alone on a line would end
   // the paragraph; without its backslash a line can open a block or a checkbox.
@@ -292,10 +302,38 @@ describe('a backslash line break', () => {
     });
   }
 
-  it('is not a break in a code span or at the end of a paragraph', () => {
-    // The code span is written on one line, as Linear writes it.
+  it('is not a break in a code span, which is written on one line as Linear writes it', () => {
     assert.equal(fixText('`code\\\nspan`'), '`code\\ span`');
-    assert.equal(fixText('Ends with a backslash\\'), 'Ends with a backslash\\');
+  });
+});
+
+describe('a backslash at the end of a block', () => {
+  // It breaks no line there: a literal backslash, which Linear doubles.
+  const written: Array<[string, string]> = [
+    ['Ends with a backslash\\', 'Ends with a backslash\\\\'],
+    ['Ends with a space and a backslash \\', 'Ends with a space and a backslash \\\\'],
+    ['\\', '\\\\'],
+    ['* An item \\', '* An item \\\\'],
+    ['> A quote \\', '> A quote \\\\'],
+    ['# A heading \\', '# A heading \\\\'],
+    ['First \\\n\nSecond', 'First \\\\\n\nSecond'],
+  ];
+  for (const [input, expected] of written) {
+    it(`is doubled: ${JSON.stringify(input)}`, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected, 'a second fix changes nothing');
+      assert.deepEqual(lintText('doc.md', expected), []);
+    });
+  }
+
+  it('stays single inside a table cell, with or without the closing pipe', () => {
+    assert.equal(fixText('| a \\ |\n| -- |\n'), '| a \\ |\n| -- |\n');
+    assert.equal(fixText('| a | b \\\n| -- | -- |\n| c | d \\'), '| a | b \\ |\n| -- | -- |\n| c | d \\ |\n');
+  });
+
+  it('is doubled before a heading\'s closing hashes, which fix drops', () => {
+    assert.equal(fixText('# Path \\ #'), '# Path \\\\');
+    assert.equal(fixText('# Path \\\\'), '# Path \\\\');
   });
 });
 
@@ -313,7 +351,7 @@ describe('Linear bold forms', () => {
     ['file label in a list item', '* **[Trail map](trail.pdf)**', '* [**Trail map**](<trail.pdf>)'],
     ['soft breaks', '**Birch\nCedar\nMaple**', '**Birch**\n**Cedar**\n**Maple**'],
     ['hard break', '**Birch  \nCedar**', '**Birch**  \n**Cedar**'],
-    ['backslash hard break', '**Birch\\\nCedar**', '**Birch**  \n**Cedar**'],
+    ['backslash hard break', '**Birch\\\nCedar**', '**Birch**\n**Cedar**'],
     ['continuation spaces', '**Birch \n  Cedar**', '**Birch** \n  **Cedar**'],
     ['quote and list', '> * **Birch\n>   Cedar**', '> * **Birch**\n>   **Cedar**'],
     ['bold and italic', '***Birch\nCedar***', '***Birch***\n***Cedar***'],
@@ -1248,12 +1286,35 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('percent-encodes characters outside ASCII in a destination and writes the host in ASCII, as Linear does', () => {
+    const cases: Array<[string, string]> = [
+      ['[a](https://a.test/café)', '[a](<https://a.test/caf%C3%A9>)'],
+      ['[b](<https://a.test/caf é>)', '[b](<https://a.test/caf%20%C3%A9>)'],
+      ['<https://a.test/naïve>', '[https://a.test/naïve](<https://a.test/na%C3%AFve>)'],
+      ['https://a.test/über', '[https://a.test/über](<https://a.test/%C3%BCber>)'],
+      ['[c](https://a.test/x?q=ü#ß)', '[c](<https://a.test/x?q=%C3%BC#%C3%9F>)'],
+      ['[d](https://a.test/caf%C3%A9)', '[d](<https://a.test/caf%C3%A9>)'],
+      ['[e](https://a.test/日本)', '[e](<https://a.test/%E6%97%A5%E6%9C%AC>)'],
+      ['[f](https://a.test/😀)', '[f](<https://a.test/%F0%9F%98%80>)'],
+      ['[g](https://café.test/x)', '[g](<https://xn--caf-dma.test/x>)'],
+      ['[n](café)', '[n](<caf%C3%A9>)'],
+      ['[m](<docs/naïve plan>)', '[m](<docs/na%C3%AFve%20plan>)'],
+      // A backslash ends the host, as it does in a browser: the path after it stays.
+      ['[p](<https://café.test\\folder?q=2>)', '[p](<https://xn--caf-dma.test%5Cfolder?q=2>)'],
+    ];
+    for (const [input, expected] of cases) {
+      assert.equal(fixText(input), expected, input);
+      assert.equal(fixText(expected), expected, input);
+    }
+  });
+
   it('writes intraword underscores plain in URL labels', () => {
     const url = 'https://example.org/blue__jars/café_menu/shelf_4';
     const escapedUrl = 'https://example.org/blue\\_\\_jars/café\\_menu/shelf\\_4';
     const inline = `[${escapedUrl}](${url})`;
-    // Next to a letter outside ASCII the underscore keeps its escape, as Linear writes it.
-    const expected = `[https://example.org/blue__jars/café\\_menu/shelf_4](<${url}>)`;
+    // Next to a letter outside ASCII the underscore keeps its escape in the label, and the
+    // destination is percent-encoded, as Linear writes them.
+    const expected = '[https://example.org/blue__jars/café\\_menu/shelf_4](<https://example.org/blue__jars/caf%C3%A9_menu/shelf_4>)';
     for (const input of [url, `<${url}>`, inline, `[${escapedUrl}][stock]\n\n[stock]: ${url}`]) {
       const fixed = fixText(input);
       assert.equal(fixed, expected, input);

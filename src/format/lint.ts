@@ -7,6 +7,7 @@ import type { Definition, ImageReference, LinkReference, Nodes, Root, Table } fr
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, bracketedLabel, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { unwritableSectionLine } from './sections.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
@@ -320,6 +321,8 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
       rest = rest.slice(prefix[0].length);
     }
   });
+  const section = unwritableSectionLine(body);
+  if (section !== undefined) report('section-opener', section);
 }
 
 /**

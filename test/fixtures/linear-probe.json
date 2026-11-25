@@ -97,6 +97,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/backslash-block-end.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/blank-lines-many.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -170,6 +174,14 @@
       "fixedPoint": true
     },
     "construct-singles/code-span-lines.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/collapsible-opener-containers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/collapsible-opener.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -673,6 +685,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "links/destination-non-ascii.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "links/destination-unsafe-characters.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -778,6 +794,10 @@
       "fixedPoint": true
     },
     "lint-errors/image-in-link.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/section-opener.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
