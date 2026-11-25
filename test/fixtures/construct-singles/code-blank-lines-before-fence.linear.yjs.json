@@ -1,0 +1,27 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"alpha\n\nbeta\n","marks":{"attribution":"user"}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"gamma\n","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Step","marks":{"attribution":"user"}}]},
+            {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"delta\n","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-6fa81daf","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -73,6 +73,12 @@ rules:
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
+  - construct: table-document-end
+    class: fixable
+  - construct: code-blank-lines-before-fence
+    class: fixable
+  - construct: table-cell-br
+    class: fixable
   - construct: empty-list-item
     class: fixable
   - construct: ordered-list-aligned-numbers
@@ -1546,10 +1552,9 @@ fixtures:
     construct: table-hash-escaped-body
     class: fixable
     basis: known
-    git_form: captured
     canary: kx-28002669
     corpus: false
-    note: "in fix's form; Linear keeps the escaped body hash as text and adds only a final newline after the table that ends the document, which the sync captures as fix's form"
+    note: "Linear keeps the escaped body hash as text and adds a final newline after the table that ends the document, as fix writes it"
   - file: "tables/table-hash-double-body.md"
     group: tables
     construct: table-hash-heading-body
@@ -1591,10 +1596,9 @@ fixtures:
     construct: table-quoted-end
     class: fixable
     basis: known
-    git_form: captured
     canary: kx-9e3d51a7
     corpus: false
-    note: "in fix's form; Linear adds a final newline after a quoted table that ends the document, as after any table that ends it, which the sync captures as fix's form"
+    note: "Linear adds a final newline after a quoted table that ends the document, as after any table that ends it, and so does fix"
   - file: "tables/table-inline-marks.md"
     group: tables
     construct: table-inline-marks
@@ -2967,3 +2971,43 @@ fixtures:
     canary: kx-a649dff0
     corpus: false
     note: "an ordered list that passes 100 aligns its numbers to three digits"
+  - file: "tables/table-document-end.md"
+    group: tables
+    construct: table-document-end
+    class: fixable
+    basis: known
+    canary: kx-b97dc4be
+    corpus: false
+    note: "a document that ends with a table"
+  - file: "tables/table-document-end-item.md"
+    group: tables
+    construct: table-document-end
+    class: fixable
+    basis: known
+    canary: kx-db392236
+    corpus: false
+    note: "a document that ends with a table inside a list item"
+  - file: "construct-singles/code-blank-lines-before-fence.md"
+    group: construct-singles
+    construct: code-blank-lines-before-fence
+    class: fixable
+    basis: known
+    canary: kx-6fa81daf
+    corpus: false
+    note: "Linear drops a blank line before the closing fence of a top-level code block, keeps it in a quote and indents it in a list item"
+  - file: "construct-singles/code-blank-lines-document-end.md"
+    group: construct-singles
+    construct: code-blank-lines-before-fence
+    class: fixable
+    basis: known
+    canary: kx-69dfa3cf
+    corpus: false
+    note: "a document that ends with a code block whose last line is blank"
+  - file: "tables/table-cell-br.md"
+    group: tables
+    construct: table-cell-br
+    class: fixable
+    basis: known
+    canary: kx-5e968e11
+    corpus: false
+    note: "a line break in a table cell, written as <br>, <br/> and &#10;"

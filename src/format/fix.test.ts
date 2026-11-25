@@ -62,15 +62,15 @@ const cases: Array<[string, string, string]> = [
   ['a bullet item with only an MP3 link keeps the link on its line, in angle brackets', '* \n  [Voice note](media/note.mp3)\n* [Call](<call one.MP3>)\n* [Memo](memo.mp3?v=2)', '* [Voice note](<media/note.mp3>)\n* [Call](<call%20one.MP3>)\n* [Memo](<memo.mp3?v=2>)'],
   ['an MP3 task keeps its break and a numbered MP3 stays on the marker line', '- [ ] [Note](note.mp3)\n\n3. [Note](note.mp3)', '- [ ] \n  [Note](note.mp3)\n\n3. [Note](<note.mp3>)'],
   ['a list item with only a video link becomes a video on its line', '* [Demo](media/demo.mp4)\n* [Clip](<clip one.MOV>)\n* [Loop](loop.webm)', '* [Demo](media/demo.mp4)\n* [Clip](clip%20one.MOV)\n* [Loop](loop.webm)'],
-  ['tables get outer pipes and short separators', 'A | B\n--- | ---\n1 | 2', '| A | B |\n| -- | -- |\n| 1 | 2 |'],
-  ['a hash header cell is escaped', '| # | Customer |\n| --- | --- |\n| 1 | Example |', '| \\# | Customer |\n| -- | -- |\n| 1 | Example |'],
-  ['a hash header in a quote is escaped', '> | Name | # |\n> | -- | -- |\n> | Example | 1 |', '> | Name | \\# |\n> | -- | -- |\n> | Example | 1 |'],
-  ['hash escapes keep cell text and inline markup', '| \\# | `#` | **#** | Issue # |\n| -- | -- | -- | -- |\n| \\# | `#` | **#** | Issue # |', '| \\# | `#` | **#** | Issue # |\n| -- | -- | -- | -- |\n| \\# | `#` | **#** | Issue # |'],
-  ['an escaped hash body cell keeps its escape', '| Name | No. |\n| --- | --- |\n| Example | \\# |', '| Name | No. |\n| -- | -- |\n| Example | \\# |'],
-  ['a hash inside cell text needs no escape', '| A |\n| -- |\n| Issue \\# |', '| A |\n| -- |\n| Issue # |'],
-  ['an escaped hash starting a cell keeps its escape', '| \\# 1 | A |\n| -- | -- |\n| \\# 2 | \\## |', '| \\# 1 | A |\n| -- | -- |\n| \\# 2 | \\## |'],
+  ['tables get outer pipes and short separators', 'A | B\n--- | ---\n1 | 2', '| A | B |\n| -- | -- |\n| 1 | 2 |\n'],
+  ['a hash header cell is escaped', '| # | Customer |\n| --- | --- |\n| 1 | Example |', '| \\# | Customer |\n| -- | -- |\n| 1 | Example |\n'],
+  ['a hash header in a quote is escaped', '> | Name | # |\n> | -- | -- |\n> | Example | 1 |', '> | Name | \\# |\n> | -- | -- |\n> | Example | 1 |\n'],
+  ['hash escapes keep cell text and inline markup', '| \\# | `#` | **#** | Issue # |\n| -- | -- | -- | -- |\n| \\# | `#` | **#** | Issue # |', '| \\# | `#` | **#** | Issue # |\n| -- | -- | -- | -- |\n| \\# | `#` | **#** | Issue # |\n'],
+  ['an escaped hash body cell keeps its escape', '| Name | No. |\n| --- | --- |\n| Example | \\# |', '| Name | No. |\n| -- | -- |\n| Example | \\# |\n'],
+  ['a hash inside cell text needs no escape', '| A |\n| -- |\n| Issue \\# |', '| A |\n| -- |\n| Issue # |\n'],
+  ['an escaped hash starting a cell keeps its escape', '| \\# 1 | A |\n| -- | -- |\n| \\# 2 | \\## |', '| \\# 1 | A |\n| -- | -- |\n| \\# 2 | \\## |\n'],
   ['a file with a bare hash body cell is left alone', '| Name | No. |\n| --- | --- |\n| Example | # |', '| Name | No. |\n| --- | --- |\n| Example | # |'],
-  ['ragged rows fit the header', '| A | B |\n| -- | -- |\n| 1 |\n| 1 | 2 | 3 |', '| A | B |\n| -- | -- |\n| 1 |  |\n| 1 | 2 |'],
+  ['ragged rows fit the header', '| A | B |\n| -- | -- |\n| 1 |\n| 1 | 2 | 3 |', '| A | B |\n| -- | -- |\n| 1 |  |\n| 1 | 2 |\n'],
   ['character references become characters', 'Fish &amp; chips &mdash; &copy;', 'Fish & chips — ©'],
   ['references that would make markup stay', '&lt;b&gt; &amp;amp;', '&lt;b&gt; &amp;amp;'],
   ['emoji shortcodes become emoji', 'Done :tada:, unknown :not_an_emoji:', 'Done \u{1F389}, unknown :not_an_emoji:'],
@@ -99,6 +99,33 @@ describe('fix rules', () => {
     it(name, () => {
       assert.equal(fixText(input), expected);
       assert.equal(fixText(expected), expected, 'the result is a fixed point');
+    });
+  }
+});
+
+describe('blank lines, the final line break and cell breaks as Linear writes them', () => {
+  const written: Array<[string, string, string]> = [
+    ['a document that ends with a table ends with a line break', 'Stock\n\n| Fruit | Count |\n| -- | -- |\n| Plum | 3 |', 'Stock\n\n| Fruit | Count |\n| -- | -- |\n| Plum | 3 |\n'],
+    ['one line break, however many the source has', '| Fruit |\n| -- |\n| Plum |\n\n\n', '| Fruit |\n| -- |\n| Plum |\n'],
+    ['also when the table ends a list item', 'Stock\n\n* Shelf\n\n  | Fruit |\n  | -- |\n  | Plum |', 'Stock\n\n* Shelf\n\n  | Fruit |\n  | -- |\n  | Plum |\n'],
+    ['also when the table ends a quote', '> | Fruit |\n> | -- |\n> | Plum |', '> | Fruit |\n> | -- |\n> | Plum |\n'],
+    ['a table followed by text gets none', '| Fruit |\n| -- |\n| Plum |\n\nTotal.\n', '| Fruit |\n| -- |\n| Plum |\n\nTotal.'],
+    ['a top-level code block loses its blank lines before the closing fence', '```\nalpha\n\nbeta\n\n\n```\n\nAfter.', '```\nalpha\n\nbeta\n```\n\nAfter.'],
+    ['also at the end of the document and with a language', '```js\nx = 1\n\n```', '```js\nx = 1\n```'],
+    ['a code block of blank lines becomes empty', '```\n\n\n```', '```\n```'],
+    ['a code block in a quote keeps them', '> ```\n> gamma\n>\n> ```', '> ```\n> gamma\n> \n> ```'],
+    ['a code block in a list item keeps them, indented', '* Step\n\n  ```\n  delta\n\n  epsilon\n\n  ```', '* Step\n\n  ```\n  delta\n  \n  epsilon\n  \n  ```'],
+    ['also in a nested item', '* Outer\n  * Inner\n\n    ```\n    n\n\n    ```', '* Outer\n  * Inner\n\n    ```\n    n\n    \n    ```'],
+    ['a blank line between an item\'s blocks stays empty', '* Step\n\n  ```\n  x\n  ```\n\n  Done.', '* Step\n\n  ```\n  x\n  ```\n\n  Done.'],
+    ['a line break tag in a table cell becomes a character reference', '| Step | Note |\n| -- | -- |\n| One | first<br>second |\n| Two | a<br/>b<BR />c |\n\nEnd.', '| Step | Note |\n| -- | -- |\n| One | first&#10;second |\n| Two | a&#10;b&#10;c |\n\nEnd.'],
+    ['the character reference stays', '| Note |\n| -- |\n| first&#10;second |\n\nEnd.', '| Note |\n| -- |\n| first&#10;second |\n\nEnd.'],
+    ['a tag in a cell\'s code span or outside a table stays', '| Note |\n| -- |\n| `a<br>b` |\n\nFirst<br>second', '| Note |\n| -- |\n| `a<br>b` |\n\nFirst<br>second'],
+  ];
+  for (const [name, input, expected] of written) {
+    it(name, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected), [], 'lint is clean on the result');
     });
   }
 });
@@ -328,9 +355,9 @@ describe('links to files that are not there', () => {
   });
 
   it('text from Linear is only re-spelled: a rewrite that would change the document leaves the text as it is', () => {
-    // A table at the end of Linear's export includes a final newline.
+    // A table at the end of Linear's export includes a final newline, and so does fix.
     const padded = '| Step | State |\n| -- | -- |\n| Draft  | tbd |\n';
-    assert.equal(fixLinearText(padded, padded, () => false), '| Step | State |\n| -- | -- |\n| Draft | tbd |');
+    assert.equal(fixLinearText(padded, padded, () => false), '| Step | State |\n| -- | -- |\n| Draft | tbd |\n');
     // `fix` writes a setext heading on one line, joining its lines with a space: another text.
     const setext = 'Two\nlines\n---\n\nText.';
     assert.notEqual(fixText(setext), setext);
@@ -977,7 +1004,7 @@ describe('what fix leaves alone', () => {
       ['Open [https://example.com] and _more_.\n', 'Open \\[[https://example.com](<https://example.com>)\\] and *more*.'],
       ['> Quote "www.example.com/a_b".\n> _Next_ line\n', '> Quote "[www.example.com/a_b](<http://www.example.com/a_b>)".\n> *Next* line'],
       ['- Mail "team@example.com" or "www.example.com", "www.example.com".\n', '* Mail "[team@example.com](<mailto:team@example.com>)" or "[www.example.com](<http://www.example.com>)", "[www.example.com](<http://www.example.com>)".'],
-      ['| Site | Note |\n| - | - |\n| "www.example.com" | _x_ |\n', '| Site | Note |\n| -- | -- |\n| "[www.example.com](<http://www.example.com>)" | *x* |'],
+      ['| Site | Note |\n| - | - |\n| "www.example.com" | _x_ |\n', '| Site | Note |\n| -- | -- |\n| "[www.example.com](<http://www.example.com>)" | *x* |\n'],
       ['# Notes on "www.example.com"\n', '# Notes on "[www.example.com](<http://www.example.com>)"'],
       ['Skip xwww.example.com, then "www.example.com".\n', 'Skip xwww.example.com, then "[www.example.com](<http://www.example.com>)".'],
       ['Mail "&amp;team@example.com" now.\n', 'Mail "&[team@example.com](<mailto:team@example.com>)" now.'],

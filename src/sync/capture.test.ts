@@ -405,7 +405,8 @@ describe('capture from Linear', () => {
     const stored = 'Inventory.\n\n| Color | Size |\n| -- | -- |\n| Blue | Large |\n';
     world.linear.documents.push({id: 'new', title: 'Inventory', content: stored, projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z'});
     assert.equal((await run()).ok, true);
-    assert.equal(splitFile(await text('docs/Inventory.md')).body, stored.trimEnd());
+    // The hook's form keeps the final line break Linear writes after a table that ends the document.
+    assert.equal(splitFile(await text('docs/Inventory.md')).body, stored);
   });
 
   it('writes a Linear body that opens with a rule in the hook\'s form, under the file\'s front matter', async () => {

@@ -202,8 +202,8 @@ describe('check helpers', () => {
     const sides = { hashes: new Map(), uploadsByHash: new Map() };
     // Linear can store a cell with a trailing space; the sync writes it as the hook does and leaves Linear's spelling.
     const stored = '| Step | State |\n| -- | -- |\n| Draft  | tbd |';
-    assert.equal(sameAsFile('| Step | State |\n| -- | -- |\n| Draft | tbd |', stored, 'eng/plan.md', sides), true);
-    assert.equal(sameAsFile('| Step | State |\n| -- | -- |\n| Drafted | tbd |', stored, 'eng/plan.md', sides), false, 'a real body difference still fails I1');
+    assert.equal(sameAsFile('| Step | State |\n| -- | -- |\n| Draft | tbd |\n', stored, 'eng/plan.md', sides), true);
+    assert.equal(sameAsFile('| Step | State |\n| -- | -- |\n| Drafted | tbd |\n', stored, 'eng/plan.md', sides), false, 'a real body difference still fails I1');
   });
 
   it('find canaries without quoting the text around them', () => {
