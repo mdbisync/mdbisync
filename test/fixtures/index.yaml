@@ -81,6 +81,12 @@ known_constructs:
     class: fixable
   - construct: table-cell-br
     class: fixable
+  - construct: literal-tilde
+    class: fixable
+  - construct: literal-underscore
+    class: fixable
+  - construct: continuation-hash
+    class: fixable
   - construct: continuation-indent
     class: fixable
   - construct: empty-list-item
@@ -3105,3 +3111,43 @@ fixtures:
     canary: kx-6d2e8b41
     corpus: false
     note: "a >>> line in a file that also has +++ section lines: Linear pairs them, so fix leaves the file"
+  - file: "construct-singles/literal-tilde.md"
+    group: construct-singles
+    construct: literal-tilde
+    class: fixable
+    basis: known
+    canary: kx-d5b95d6b
+    corpus: false
+    note: "Linear escapes every literal ~ in text, in headings, table cells and items too; strikethrough and code keep theirs"
+  - file: "construct-singles/literal-underscore.md"
+    group: construct-singles
+    construct: literal-underscore
+    class: fixable
+    basis: known
+    canary: kx-505d8b21
+    corpus: false
+    note: "Linear escapes a literal _ except in a run between two ASCII letters or digits; next to a letter outside ASCII it escapes it too"
+  - file: "construct-singles/continuation-hash.md"
+    group: construct-singles
+    construct: continuation-hash
+    class: fixable
+    basis: known
+    canary: kx-20544ac6
+    corpus: false
+    note: "Linear escapes a # that starts a continuation line four or more columns past its container"
+  - file: "construct-singles/literal-underscore-runs.md"
+    group: construct-singles
+    construct: literal-underscore
+    class: fixable
+    basis: known
+    canary: kx-f3a19cd2
+    corpus: false
+    note: "Linear decides each _ by its own neighbours (ASCII letters, digits or _), in link labels too, and drops an escape it does not need"
+  - file: "construct-singles/hash-before-nbsp.md"
+    group: construct-singles
+    construct: continuation-hash
+    class: fixable
+    basis: known
+    canary: kx-bb890607
+    corpus: false
+    note: "Linear escapes a # at a continuation line's start before a no-break space, with or without indentation"

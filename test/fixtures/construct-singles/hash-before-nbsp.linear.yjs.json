@@ -1,0 +1,24 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"First line","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"# after a hash","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Second line","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"    # after four spaces","marks":{"attribution":"user"}}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-bb890607","marks":{"attribution":"user"}}]}
+  ]
+}

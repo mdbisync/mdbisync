@@ -543,9 +543,9 @@ describe('what fix leaves alone', () => {
     }
   });
 
-  it('keeps a literal > or # at the start of a continuation line', () => {
+  it('keeps a literal > or # at the start of a continuation line, with the escape Linear writes before #', () => {
     assert.equal(fixText('a\n    > b'), 'a\n    > b');
-    assert.equal(fixText('a\n    # b'), 'a\n    # b');
+    assert.equal(fixText('a\n    # b'), 'a\n    \\# b');
   });
 
   it('keeps a lazy line of dashes or equals signs as text, not a heading underline: escaped as Linear writes it', () => {
@@ -591,7 +591,7 @@ describe('what fix leaves alone', () => {
       ['- [ ] Pack the tent\n\n  and\n  3. pegs', '- [ ] Pack the tent\n\n  and\n  3\\. pegs'],
       // Four columns past the content, `>` and `#` are paragraph text: they keep that distance.
       ['- [ ] Pack the tent\n      > pegs', '- [ ] Pack the tent\n      > pegs'],
-      ['- [ ] Pack the tent\n      # pegs', '- [ ] Pack the tent\n      # pegs'],
+      ['- [ ] Pack the tent\n      # pegs', '- [ ] Pack the tent\n      \\# pegs'],
       ['-\t[ ] Pack the tent\n        > pegs', '- [ ] Pack the tent\n      > pegs'],
       ['-\t[ ] Pack\n  \t-\t[ ] the tent\n            > pegs', '- [ ] Pack\n  - [ ] the tent\n        > pegs'],
       // In a code span, spaces past the item's prefix are code text; the
@@ -673,9 +673,9 @@ describe('what fix leaves alone', () => {
   it('keeps a continuation line text where its indentation kept it from opening a block', () => {
     const kept: Array<[string, string]> = [
       // A lazy line: the item takes none of the spaces that kept it text.
-      ['> - fern\n    # x', '> * fern\n>       # x'],
+      ['> - fern\n    # x', '> * fern\n>       \\# x'],
       ['> - fern\n    - x', '> * fern\n>       - x'],
-      ['10.  fern\n    # x', '10. fern\n        # x'],
+      ['10.  fern\n    # x', '10. fern\n        \\# x'],
       ['*    a\n\n     > b\n    > c', '* a\n\n  > b\n  >     > c'],
       // A tab before such text becomes the spaces it spanned in the source.
       ['> foo\n\t- bar', '> foo\n>     - bar'],
@@ -685,7 +685,7 @@ describe('what fix leaves alone', () => {
       ['* a\n\t* b\n\t\tc', '* a\n  * b\n      c'],
       ['> - a\n>\tb', '> * a\n>   b'],
       // An item after a tab that follows `>`: the quote takes one column of the tab.
-      ['>\t- a\n>\t      # b', '> * a\n>       # b'],
+      ['>\t- a\n>\t      # b', '> * a\n>       \\# b'],
       ['>\t- a\n>\t    b', '> * a\n>     b'],
       ['> - a\n>\t-x', '> * a\n>   \\-x'],
       ['*\ta\n    b', '* a\n  b'],
@@ -698,6 +698,53 @@ describe('what fix leaves alone', () => {
       assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
       assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+    }
+  });
+
+  it('escapes a literal ~ or _ in text as Linear writes it', () => {
+    const cases: Array<[string, string]> = [
+      ['Price ~$5\n\nRange 5~10\n\nA lone ~ here', 'Price \\~$5\n\nRange 5\\~10\n\nA lone \\~ here'],
+      ['~ starts\n\nEnds ~\n\nTwo ~~ here', '\\~ starts\n\nEnds \\~\n\nTwo \\~\\~ here'],
+      ['# Heading ~3\n\n* item ~2\n\n| a~b |\n| -- |\n| c ~ d |', '# Heading \\~3\n\n* item \\~2\n\n| a\\~b |\n| -- |\n| c \\~ d |\n'],
+      // Strikethrough and code keep their tildes.
+      ['~~struck~~ and `code ~x`', '~~struck~~ and `code ~x`'],
+      // Between ASCII letters or digits an underscore run stays plain.
+      ['snake_case_name, 2_000, a__b and x_y', 'snake_case_name, 2_000, a__b and x_y'],
+      ['_lead word\n\ntrail_ word\n\nA lone _ here', '\\_lead word\n\ntrail\\_ word\n\nA lone \\_ here'],
+      ['under_score_ and _under_score', 'under_score\\_ and \\_under_score'],
+      // Next to a letter outside ASCII it is escaped.
+      ['word\u00e9_\u00e9 and \u00e9~', 'word\u00e9\\_\u00e9 and \u00e9\\~'],
+      // An escape the rule does not need goes, as Linear writes the text; one it needs stays.
+      ['a_\\_b', 'a__b'],
+      // Where an escape would change what Markdown reads, the text keeps its escapes as written.
+      ['cost**~$5**', 'cost**~$5**'],
+      // Still when another paragraph's emphasis is rewritten.
+      ['cost**~$5**\n\n_italic_', 'cost**~$5**\n\n*italic*'],
+      ['mail alice@example.com_', 'mail alice@example.com_'],
+      ['Already \\_escaped and \\~too, a\\_b', 'Already \\_escaped and \\~too, a_b'],
+    ];
+    for (const [input, expected] of cases) {
+      const fixed = fixText(input);
+      assert.equal(fixed, expected, JSON.stringify(input));
+      assert.equal(fixText(fixed), fixed, `${JSON.stringify(input)}: a second fix changes nothing`);
+      assert.ok(sameMarkdown(fixed, input), `${JSON.stringify(input)}: the document stays`);
+      assert.deepEqual(lintText('a.md', fixed), [], `${JSON.stringify(input)}: lint finds nothing`);
+    }
+  });
+
+  it('escapes a # that starts a continuation line four or more columns in, as Linear writes it', () => {
+    const cases: Array<[string, string]> = [
+      ['First\n    # four', 'First\n    \\# four'],
+      ['* item\n      # four past the item', '* item\n      \\# four past the item'],
+      ['> quoted\n>     # four past the marker', '> quoted\n>     \\# four past the marker'],
+      // Not a heading start: no escape.
+      ['First\n    #tag', 'First\n    #tag'],
+    ];
+    for (const [input, expected] of cases) {
+      const fixed = fixText(input);
+      assert.equal(fixed, expected, JSON.stringify(input));
+      assert.equal(fixText(fixed), fixed, `${JSON.stringify(input)}: a second fix changes nothing`);
+      assert.ok(sameMarkdown(fixed, input), `${JSON.stringify(input)}: the document stays`);
     }
   });
 
@@ -831,7 +878,7 @@ describe('what fix leaves alone', () => {
     assert.ok(!sameMarkdown(splitUrl, '**https://example.com**'));
     for (const [first, formatted] of [[splitUrl, splitUrl], ['*Oak*___**Pine**___', '*Oak****Pine***']]) {
       const input = [first, 'Birch ** Pine', '**Oak**__Elm__', '[https://example.com_', '[Shelf]'].join('\n\n');
-      const expected = [formatted, 'Birch \\*\\* Pine', '**OakElm**', '[https://example.com_', '\\[Shelf\\]'].join('\n\n');
+      const expected = [formatted, 'Birch \\*\\* Pine', '**OakElm**', '[https://example.com\\_', '\\[Shelf\\]'].join('\n\n');
       assert.equal(fixText(input), expected);
       assert.equal(fixText(expected), expected);
       assert.ok(sameMarkdown(input, expected));
@@ -1163,8 +1210,9 @@ describe('what fix leaves alone', () => {
     const url = 'https://example.org/blue__jars/café_menu/shelf_4';
     const escapedUrl = 'https://example.org/blue\\_\\_jars/café\\_menu/shelf\\_4';
     const inline = `[${escapedUrl}](${url})`;
-    // The label keeps the letter; the destination is percent-encoded, as Linear writes it.
-    const expected = `[${url}](<https://example.org/blue__jars/caf%C3%A9_menu/shelf_4>)`;
+    // Next to a letter outside ASCII the underscore keeps its escape in the label, and the
+    // destination is percent-encoded, as Linear writes them.
+    const expected = '[https://example.org/blue__jars/café\\_menu/shelf_4](<https://example.org/blue__jars/caf%C3%A9_menu/shelf_4>)';
     for (const input of [url, `<${url}>`, inline, `[${escapedUrl}][stock]\n\n[stock]: ${url}`]) {
       const fixed = fixText(input);
       assert.equal(fixed, expected, input);
@@ -1172,8 +1220,8 @@ describe('what fix leaves alone', () => {
       assert.deepEqual(lintText('stock.md', fixed), [], input);
     }
     assert.ok(sameMarkdown(expected, inline));
-    const label = '[blue\\_jars](<https://example.org>)';
-    assert.equal(fixText(label), label);
+    // Between ASCII letters Linear writes the underscore plain in any label.
+    assert.equal(fixText('[blue\\_jars](<https://example.org>)'), '[blue_jars](<https://example.org>)');
   });
 
   it('keeps shortcode names literal when unescaping URL underscores', () => {
@@ -1237,13 +1285,14 @@ describe('what fix leaves alone', () => {
   });
 
   it('keeps brackets where escaping them would create a link from plain text', () => {
-    for (const input of [
-      '[https://example.com_',
-      '[https://example.com_ *shelf* blue] *jars* ](stock.md) [https://example.com_',
+    // A literal `_` at the end of the text still gets Linear's escape.
+    for (const [input, written] of [
+      ['[https://example.com_', '[https://example.com\\_'],
+      ['[https://example.com_ *shelf* blue] *jars* ](stock.md) [https://example.com_', '[https://example.com_ *shelf* blue] *jars* ](stock.md) [https://example.com_'],
     ]) {
       const body = `# Supplies ###\n\n${input}`;
       const fixed = fixText(body);
-      assert.equal(fixed, `# Supplies\n\n${input}`);
+      assert.equal(fixed, `# Supplies\n\n${written}`);
       assert.equal(fixText(fixed), fixed);
       assert.deepEqual(lintText('stock.md', fixed), []);
       assert.ok(sameMarkdown(body, fixed));
