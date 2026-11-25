@@ -1,0 +1,149 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item one","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"continued lazily","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item two","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  continued with four spaces","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item three","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  continued after a tab","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item four","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"\ttab after the prefix","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item one","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"lazy with two spaces","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item two","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"  continued with five spaces","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item three","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":" continued after a tab","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"A list of eleven:","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":9},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"item nine","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item ten","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"continued at content indent","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"item eleven","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"continued lazily","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-b134e62a","marks":{"attribution":"user"}}]}
+  ]
+}
