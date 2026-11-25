@@ -197,6 +197,5 @@ function outcome(operation: Operation, report: SetupReport): PreflightOutcome {
 }
 
 async function readTrackedFile(git: Git, commit: string, path: string): Promise<string | null> {
-  const result = await git.run(['cat-file', 'blob', `${commit}:${path}`], { okCodes: [0, 128] });
-  return result.code === 0 ? result.stdout.toString('utf8') : null;
+  return (await git.readBlob(`${commit}:${path}`))?.toString('utf8') ?? null;
 }

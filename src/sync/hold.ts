@@ -237,7 +237,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     const all = await readAll(failure);
     const own = new Map([...all].map(([name, list]) => [name, list.filter((annotation) => annotation.path === path)] as const));
     const needsText = [...own.values()].some((list) => list.length > 0);
-    const shown = needsText ? await git.run(['show', `${failure.head}:${path}`], { okCodes: [0, 128] }) : undefined;
+    const shown = needsText ? await git.showBlob(`${failure.head}:${path}`, { okCodes: [0, 128] }) : undefined;
     const text = shown?.code === 0 ? shown.stdout.toString('utf8') : '';
     // A file the check read but this commit lacks cannot be compared: its messages are not quoted.
     if (needsText && shown?.code !== 0) for (const [name, list] of own) own.set(name, list.map(({ message: _message, ...rest }) => ({ ...rest, message: '' })));

@@ -1,11 +1,17 @@
-// A thin runner for the git command line. The engine never prints document
-// content: errors carry the git arguments, the exit code and git's own
-// error output, never the data passed on standard input or read back.
+// A thin runner for the git command line. Commands start from a small helper
+// process (spawner.ts), and objects are read and written through long-lived
+// git processes (object-reader.ts, object-writer.ts) instead of one process
+// each. The engine never prints document content: errors carry the git
+// arguments, the exit code and git's own error output, never the data passed
+// on standard input or read back.
 
-import { spawn } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { message } from '../messages.ts';
+import { type GitObject, type ObjectInfo, ObjectReader, batchName } from './object-reader.ts';
+import { ObjectWriter } from './object-writer.ts';
+import { spawnGit } from './spawner.ts';
+import { type TreeEntry, readBlobBatch, readTreeListing } from './objects.ts';
 
 export type Oid = string;
 
@@ -63,6 +69,11 @@ const BASE_ENV: Record<string, string> = {
   LC_ALL: 'C',
 };
 
+/**
+ * Git commands in one repository. What it learns of the repository once
+ * (its object format, folders and message encoding) holds for the life of
+ * the instance: an instance belongs to one repository, not to a path.
+ */
 export class Git {
   readonly dir: string;
   private readonly env: Record<string, string | undefined>;
@@ -76,57 +87,158 @@ export class Git {
     this.env = env;
   }
 
-  private environment(options: RunOptions): Record<string, string | undefined> {
+  private environment(options: RunOptions): Record<string, string> {
     const env: Record<string, string | undefined> =
       options.onlyEnv !== undefined ? { ...BASE_ENV, ...options.onlyEnv } : { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
     for (const key of Object.keys(env)) {
       if (env[key] === undefined) delete env[key];
     }
-    return env;
+    return env as Record<string, string>;
   }
 
-  run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
-    const env = this.environment(options);
-    const okCodes = options.okCodes ?? [0];
-    return new Promise((resolve, reject) => {
-      const child = spawn('git', args, { cwd: this.dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
-      const out: Buffer[] = [];
-      const err: Buffer[] = [];
-      let exceededLimit: number | undefined;
-      const collector = (chunks: Buffer[], limit?: number) => {
-        let bytes = 0;
-        return (chunk: Buffer) => {
-          if (exceededLimit !== undefined) return;
-          bytes += chunk.length;
-          if (limit !== undefined && bytes > limit) {
-            exceededLimit = limit;
-            child.kill('SIGKILL');
-            return;
-          }
-          chunks.push(chunk);
-        };
-      };
-      child.stdout.on('data', collector(out, options.maxOutputBytes));
-      child.stderr.on('data', collector(err, options.maxOutputBytes === undefined ? undefined : 64 * 1024));
-      child.on('error', reject);
-      // A command that exits before reading all its input closes the pipe;
-      // the exit code tells what happened.
-      child.stdin.on('error', () => {});
-      child.on('close', (code) => {
-        if (exceededLimit !== undefined) {
-          reject(new GitOutputLimitError(exceededLimit));
-          return;
-        }
-        const result: RunResult = {
-          code: code ?? -1,
-          stdout: Buffer.concat(out),
-          stderr: Buffer.concat(err).toString('utf8'),
-        };
-        if (okCodes.includes(result.code)) resolve(result);
-        else reject(new GitError(args, result.code, result.stderr));
-      });
-      child.stdin.end(options.input ?? '');
+  private reader: ObjectReader | undefined;
+  private writer: ObjectWriter | undefined;
+  private format: Promise<string> | undefined;
+
+  /** The absolute path of the repository's object directory, for the long-lived processes to notice a repository made again. */
+  private readonly objectDirectory = (): Promise<string> => {
+    this.objectPath ??= this.text(['rev-parse', '--path-format=absolute', '--git-path', 'objects']).catch((error: unknown) => {
+      this.objectPath = undefined;
+      throw error;
     });
+    return this.objectPath;
+  };
+  private objectPath: Promise<string> | undefined;
+
+  /**
+   * Reads objects through one long-lived git process instead of a process
+   * per read. Names are revisions as `git cat-file` takes them (`<oid>`,
+   * `<commit>:<path>`, `<ref>^{commit}`).
+   */
+  private objects(): ObjectReader {
+    this.reader ??= new ObjectReader(this.dir, () => this.environment({}), this.objectDirectory);
+    return this.reader;
+  }
+
+  /** Writes blobs and trees through long-lived git processes instead of a process per object. */
+  objectWriter(): ObjectWriter {
+    this.writer ??= new ObjectWriter(this.dir, () => this.environment({}), this.objectDirectory);
+    return this.writer;
+  }
+
+  /** The object a name resolves to, with its content; null when it resolves to none. */
+  async readObject(name: string): Promise<GitObject | null> {
+    if (batchName(name)) return this.objects().contents(name);
+    const found = await this.run(['rev-parse', '--verify', '--quiet', '--end-of-options', name], { okCodes: [0, 1, 128] });
+    if (found.code !== 0) return null;
+    const oid = found.stdout.toString('utf8').trim();
+    return this.objects().contents(oid);
+  }
+
+  /**
+   * Every file of a commit or tree, recursively, as `git ls-tree -r -l`
+   * lists them (see `listTree` in objects.ts).
+   */
+  listTree(treeish: string, maxOutputBytes?: number): Promise<TreeEntry[]> {
+    return readTreeListing(this, treeish, maxOutputBytes);
+  }
+
+  /** Blobs by id, one batch (see `readBlobs` in objects.ts). */
+  readBlobs(oids: readonly Oid[], maxOutputBytes?: number): Promise<Map<Oid, Buffer>> {
+    return readBlobBatch(this, oids, maxOutputBytes);
+  }
+
+  /** The content of the blob a name resolves to, as `git cat-file blob` gives it; null when it resolves to no blob. */
+  async readBlob(name: string, maxBytes?: number): Promise<Buffer | null> {
+    if (maxBytes === undefined) {
+      const found = await this.readObject(name);
+      return found?.type === 'blob' ? found.content : null;
+    }
+    const info = await this.objectInfo(name);
+    if (info?.type !== 'blob') return null;
+    if (info.size > maxBytes) throw new GitOutputLimitError(maxBytes);
+    return (await this.objects().contents(info.oid))?.content ?? null;
+  }
+
+  /**
+   * The id a name resolves to, as `git rev-parse <name>` gives it: read
+   * through the object reader, and from `rev-parse` itself (with its error)
+   * when the reader finds no object.
+   */
+  async revParse(name: string): Promise<Oid> {
+    return (await this.objectInfo(name))?.oid ?? this.text(['rev-parse', name]);
+  }
+
+  /**
+   * What `git show <name>` gives: for a blob its content, read through the
+   * object reader; anything else, and a name that resolves to nothing, is
+   * left to `git show` itself.
+   */
+  async showBlob(name: string, options: RunOptions = {}): Promise<RunResult> {
+    const found = await this.readObject(name);
+    if (found?.type === 'blob') return { code: 0, stdout: found.content, stderr: '' };
+    return this.run(['show', name], options);
+  }
+
+  /** The id, type and size of the object a name resolves to; null when it resolves to none. */
+  async objectInfo(name: string): Promise<ObjectInfo | null> {
+    if (batchName(name)) return this.objects().info(name);
+    const found = await this.run(['rev-parse', '--verify', '--quiet', '--end-of-options', name], { okCodes: [0, 1, 128] });
+    if (found.code !== 0) return null;
+    return this.objects().info(found.stdout.toString('utf8').trim());
+  }
+
+  private plain: Promise<boolean> | undefined;
+
+  /**
+   * True when git prints commit messages as stored, without re-encoding:
+   * the repository sets no message encoding other than UTF-8
+   * (`i18n.commitEncoding`, `i18n.logOutputEncoding`).
+   */
+  plainMessages(): Promise<boolean> {
+    this.plain ??= this.run(['config', '--get-regexp', '^i18n\\.(commitencoding|logoutputencoding)$'], { okCodes: [0, 1] }).then(
+      ({ stdout }) => stdout.toString('utf8').split('\n').filter(Boolean).every((line) => /^\S+ utf-?8$/i.test(line)),
+      (error: unknown) => {
+        this.plain = undefined;
+        throw error;
+      },
+    );
+    return this.plain;
+  }
+
+  private common: Promise<string> | undefined;
+
+  /**
+   * True when git reads some commits' parents other than as stored: a
+   * shallow repository cuts history at its boundary, and grafts replace
+   * parents. Checked on every call, as a fetch can make a repository shallow.
+   */
+  async rewritesHistory(): Promise<boolean> {
+    this.common ??= this.text(['rev-parse', '--path-format=absolute', '--git-common-dir']).catch((error: unknown) => {
+      this.common = undefined;
+      throw error;
+    });
+    const common = await this.common;
+    return existsSync(join(common, 'shallow')) || existsSync(join(common, 'info', 'grafts'));
+  }
+
+  /** The repository's object format, `sha1` or `sha256`; it does not change while the repository exists. */
+  objectFormat(): Promise<string> {
+    this.format ??= this.text(['rev-parse', '--show-object-format']).catch((error: unknown) => {
+      this.format = undefined;
+      throw error;
+    });
+    return this.format;
+  }
+
+  async run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
+    const okCodes = options.okCodes ?? [0];
+    // A command that exits before reading all its input closes the pipe; the exit code tells what happened.
+    const result = await spawnGit({ args, cwd: this.dir, env: this.environment(options), input: options.input ?? '', ...(options.maxOutputBytes === undefined ? {} : { maxOutputBytes: options.maxOutputBytes }) });
+    if (result.exceeded !== undefined) throw new GitOutputLimitError(result.exceeded);
+    const { code, stdout, stderr } = result;
+    if (!okCodes.includes(code)) throw new GitError(args, code, stderr);
+    return { code, stdout, stderr };
   }
 
   /**
@@ -135,23 +247,7 @@ export class Git {
    * is capped at 64 KiB. A failing exit is a `GitError`.
    */
   async runToFile(args: readonly string[], path: string, fileMode: number): Promise<void> {
-    const child = spawn('git', args, { cwd: this.dir, env: this.environment({}), stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 64 * 1024) stderr += chunk.toString('utf8'); });
-    const exited = new Promise<number>((resolve, reject) => {
-      child.on('error', reject);
-      child.on('close', (code) => resolve(code ?? -1));
-    });
-    // A spawn failure rejects `exited` while the copy below is still running; it is awaited after the copy.
-    exited.catch(() => {});
-    try {
-      await pipeline(child.stdout, createWriteStream(path, { flags: 'wx', mode: fileMode }));
-    } catch (error) {
-      child.kill('SIGKILL');
-      await exited.catch(() => {});
-      throw error;
-    }
-    const code = await exited;
+    const { code, stderr } = await spawnGit({ args, cwd: this.dir, env: this.environment({}), file: { path, mode: fileMode } });
     if (code !== 0) throw new GitError(args, code, stderr);
   }
 

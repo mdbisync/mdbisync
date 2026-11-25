@@ -1089,11 +1089,14 @@ export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: 
   const result = new Map(changes);
   const oids: string[] = [];
   try {
+    const written = [...changes].filter(([, content]) => content !== null);
+    if (written.length === 0) return { changes: result, oids: [] };
     await git.run(['read-tree', tracked], { env });
-    for (const [path, content] of changes) {
+    // One call for every path: `check-attr -z` answers `<path>\0filter\0<value>\0` for each, in order.
+    const attributes = (await git.run(['check-attr', '--cached', '-z', '--stdin', 'filter'], { input: written.map(([path]) => `${path}\0`).join(''), env })).stdout.toString('utf8').split('\0');
+    for (const [index, [path, content]] of written.entries()) {
       if (content === null) continue;
-      const attributes = await git.run(['check-attr', '--cached', '-z', '--stdin', 'filter'], { input: `${path}\0`, env });
-      if (attributes.stdout.toString('utf8').split('\0')[2] !== 'lfs') continue;
+      if (attributes[index * 3 + 2] !== 'lfs') continue;
       // No path: git-lfs takes the size of a file at that path in the working copy for the size of
       // its input, and a checkout without LFS content holds the pointer there, so it would store only
       // the first kilobyte of the content. The content given here is never the file on disk.

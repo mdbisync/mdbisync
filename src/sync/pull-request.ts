@@ -64,6 +64,7 @@ import {
   readSyncPushed,
   stateRef,
   commitTree,
+  showCommit,
 } from '../state/index.ts';
 import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_MESSAGE_LENGTH, linkTarget, plainLine } from './hold.ts';
 import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgain, checksAgainTrailer, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
@@ -279,7 +280,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
   linear = view.commit;
   // Mask before merging, so frozen paths cannot conflict or restart normal checks.
   const laneLinear = frozen.size === 0 ? linear : await treeCommit(git, await takePaths(git, linear, sync ?? tracked, frozen), linear);
-  const trackedTree = await git.text(['rev-parse', `${tracked}^{tree}`]);
+  const trackedTree = await git.revParse(`${tracked}^{tree}`);
   const wanted = await mergedTree(git, tracked, laneLinear);
   if (wanted === null) return { ...result, needed: true, code: 'conflict' };
   result.needed = wanted !== trackedTree;
@@ -373,7 +374,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
       if (merged === null) return { ...result, code: 'conflict' };
       head = merged.head;
       addResolution(resolved, merged);
-      headTree = await git.text(['rev-parse', `${head}^{tree}`]);
+      headTree = await git.revParse(`${head}^{tree}`);
     }
     // A held branch: once the tracked branch's tip no longer fails those checks (a fix, or a person's rerun there),
     // the sync branch merges it, so the checks run again on a head that holds that tip.
@@ -385,7 +386,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
         if (merged === null) return { ...result, code: 'conflict' };
         head = merged.head;
         addResolution(resolved, merged);
-        headTree = await git.text(['rev-parse', `${head}^{tree}`]);
+        headTree = await git.revParse(`${head}^{tree}`);
         hold = null;
       }
     }
@@ -402,7 +403,7 @@ async function pullRequestStep(context: RunContext, options: PullRequestOptions 
         carried = again.carried;
         const message = again.from === undefined ? CHECKS_AGAIN_MESSAGE : `${CHECKS_AGAIN_MESSAGE}\n\n${checksAgainTrailer(again.from)}`;
         // The head's own files: the tracked branch's changes join only through a merge that records them.
-        head = await commitTree(git, { base: await git.text(['rev-parse', `${sync}^{tree}`]), changes: new Map(), parents: [sync], message, identity, skipIfUnchanged: false });
+        head = await commitTree(git, { base: await git.revParse(`${sync}^{tree}`), changes: new Map(), parents: [sync], message, identity, skipIfUnchanged: false });
       }
     }
 
@@ -563,7 +564,7 @@ async function checkedHeadReady(github: GitHubRepository, head: Oid, expectation
 
 /** Whether `commit` is an initial sync's record, in either direction. */
 async function isInitialRecord(git: Git, commit: Oid): Promise<boolean> {
-  const [subject] = (await git.text(['show', '-s', '--format=%s', commit])).split('\n');
+  const [subject] = (await showCommit(git, '%s', commit)).split('\n');
   return INITIAL_RECORD_SUBJECTS.has(subject ?? '');
 }
 
@@ -579,7 +580,7 @@ async function isInitialRecord(git: Git, commit: Oid): Promise<boolean> {
 async function holdsInitialRecord(git: Git, sync: Oid, tracked: Oid, own: Oid | undefined): Promise<boolean> {
   let chosen: Oid | undefined;
   // A head the clone no longer has (the branch was rewritten since) proves nothing either.
-  if (own !== undefined && (await git.run(['cat-file', '-e', `${own}^{commit}`], { okCodes: [0, 1, 128] })).code === 0) {
+  if (own !== undefined && await git.objectInfo(`${own}^{commit}`) !== null) {
     const made = new Set((await git.text(['rev-list', own, '--not', tracked])).split('\n'));
     const commits = (await git.text(['log', '--first-parent', '--format=%H %s', `${tracked}..${sync}`])).split('\n');
     for (const line of commits) {

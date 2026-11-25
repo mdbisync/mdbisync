@@ -83,7 +83,9 @@ describe('capture from Linear', () => {
     const changes = new Map([[path, 'a'.repeat(MAPPING_FILE_BYTES + 1)]]);
     const commit = await commitTree(git, { parents: [initial], base: initial, changes, message: 'Recorded document', identity: IDENTITY });
     const oid = await git.text(['rev-parse', `${commit}:${path}`]);
-    const runGit = t.mock.method(git, 'run');
+    const reads = t.mock.method(git, 'readObject');
+    const blobs = t.mock.method(git, 'readBlob');
+    const blobReads = t.mock.method(git, 'readBlobs');
     Object.assign(world.linear.documents[0]!, { content: 'Updated body.\n', updatedAt: '2026-01-03T00:00:00Z' });
 
     const result = await capture(context, { config, state: { ...context.fetched.state, linear: commit }, stageOnly: true });
@@ -91,10 +93,9 @@ describe('capture from Linear', () => {
     assert.deepEqual(result.leftOut, [{ id: 'plan', rule: 'blob-too-large' }]);
     assert.deepEqual(result.changed, []);
     assert.deepEqual(result.removed, []);
-    for (const { arguments: [args, options] } of runGit.mock.calls) {
-      assert.ok(!(args[0] === 'cat-file' && args[1] === 'blob' && args[2] === `${commit}:${path}`));
-      if (args[0] === 'cat-file' && args[1] === '--batch') assert.ok(!String(options?.input).includes(oid));
-    }
+    // Content is read through these, by path or by id; sizes alone (as `ls-tree -l` lists them) are not content.
+    for (const { arguments: [name] } of [...reads.mock.calls, ...blobs.mock.calls]) assert.ok(name !== `${commit}:${path}` && name !== oid);
+    for (const { arguments: [oids] } of blobReads.mock.calls) assert.ok(!oids.includes(oid));
   });
 
   it('fails before reading document bodies when the recorded mapping exceeds its byte budget', async (t) => {
@@ -107,13 +108,14 @@ describe('capture from Linear', () => {
     const commit = await commitTree(git, { parents: [initial], base: initial, changes, message: 'Recorded documents', identity: IDENTITY });
     const entries = await listTree(git, commit);
     const annotationOids = entries.filter(({ path }) => path.endsWith('/README.md')).map(({ oid }) => oid);
-    const runGit = t.mock.method(git, 'run');
+    const blobReads = t.mock.method(git, 'readBlobs');
     const listDocuments = t.mock.method(context.linear, 'listDocumentsInPlaces');
     await assert.rejects(capture(context, { config, state: { ...context.fetched.state, linear: commit } }), { code: 'mapping-blob-budget' });
 
-    const batches = runGit.mock.calls.filter(({ arguments: [args] }) => args.join(' ') === 'cat-file --batch');
+    // An empty batch reads nothing; a batch reads each id once.
+    const batches = blobReads.mock.calls.filter(({ arguments: [oids] }) => oids.length > 0);
     assert.equal(batches.length, 1);
-    assert.deepEqual(String(batches[0]!.arguments[1]?.input).trim().split('\n'), annotationOids);
+    assert.deepEqual([...new Set(batches[0]!.arguments[0])], annotationOids);
     assert.equal(listDocuments.mock.callCount(), 0);
     assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), initial);
   });

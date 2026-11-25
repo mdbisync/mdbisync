@@ -978,7 +978,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   async function writesNothing(): Promise<boolean> {
     if (merge.changes.length > 0 || cacheLost || releasing || supersededBefore.size > 0) return false;
     if ([...reserved].some(([path, id]) => ids.has(path) && ids.get(path)?.id !== id)) return false;
-    return merge.tree === await git.text(['rev-parse', `${linearTip}^{tree}`]);
+    return merge.tree === await git.revParse(`${linearTip}^{tree}`);
   }
 
   /**
@@ -1245,8 +1245,7 @@ async function repairMerged(git: Git, source: Oid, tracked: Oid, path: string, r
   const blob = await git.text(['hash-object', '--stdin'], { input: replacement });
   const commits = (await git.text(['log', '--format=%H', `--find-object=${blob}`, `${source}..${tracked}`])).split('\n').filter((line: string) => line !== '');
   for (const commit of commits) {
-    const found = await git.run(['rev-parse', '--verify', '--quiet', `${commit}:${path}`], { okCodes: [0, 1, 128] });
-    if (found.code === 0 && found.stdout.toString('utf8').trim() === blob) return true;
+    if ((await git.objectInfo(`${commit}:${path}`))?.oid === blob) return true;
   }
   return false;
 }

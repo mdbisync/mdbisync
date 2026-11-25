@@ -13,7 +13,7 @@ import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPu
 import { type RunContext } from '../run/preflight.ts';
 import { checkpoint } from '../test-hooks.ts';
 import { GitOutputLimitError } from '../state/git.ts';
-import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
+import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, showCommit, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure, ExpectedCheck } from '../pull-request/index.ts';
@@ -78,7 +78,7 @@ export interface LaneOptions {
   security: RepairGate;
 }
 
-const treeOf = (git: Git, commit: Oid) => git.text(['rev-parse', `${commit}^{tree}`]);
+const treeOf = (git: Git, commit: Oid) => git.revParse(`${commit}^{tree}`);
 
 export class LaneMoved extends Error {}
 export class LaneConflict extends Error {
@@ -231,7 +231,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   const paths = suspendedPaths(ids);
   // Finish a deferred close (or a crash after the atomic push) before release
   // can replace the set-aside head. The normal lane must preserve it too.
-  if (context.fetched.sync !== null && await git.text(['show', '-s', '--format=%s', context.fetched.sync]) === SET_ASIDE_MESSAGE) {
+  if (context.fetched.sync !== null && await showCommit(git, '%s', context.fetched.sync) === SET_ASIDE_MESSAGE) {
     const pending: SuspendedResult = { paths: [...paths].sort(), checks: [], normalClosePending: true };
     try {
       const normal = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
@@ -288,7 +288,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       const tree = await mergeTree(git, input, head, base, ids, options.state.ids);
       const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
       const selected = await takePaths(git, head, tree, paths);
-      if (linearChanged || selected !== await git.text(['rev-parse', `${head}^{tree}`])) {
+      if (linearChanged || selected !== await git.revParse(`${head}^{tree}`)) {
         head = await commit(context, options, selected, intake === linear ? [head] : [head, intake], LINEAR_INTAKE_MESSAGE + note(tracked, linear, intake));
         bases.linear = linear;
         bases.view = intake;
@@ -309,7 +309,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     if (again !== null) {
       carried = again.carried;
       const trailer = again.from === undefined ? '' : checksAgainTrailer(again.from);
-      head = await commit(context, options, await git.text(['rev-parse', `${unchanged}^{tree}`]), [unchanged], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view) + trailer);
+      head = await commit(context, options, await git.revParse(`${unchanged}^{tree}`), [unchanged], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view) + trailer);
     }
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
@@ -450,7 +450,7 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   await addEpisodes(context, options, ids, paths, checks, timedOut);
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
-  const normal = await commit(context, options, await git.text(['rev-parse', `${tracked}^{tree}`]), [failed, tracked], SET_ASIDE_MESSAGE);
+  const normal = await commit(context, options, await git.revParse(`${tracked}^{tree}`), [failed, tracked], SET_ASIDE_MESSAGE);
   // Everything this suspension publishes is decided and nothing of it is published yet: a crash here leaves no trace.
   await checkpoint('before-suspension-push');
   await push(context, options, ids, head, previous, { expected: failed, next: normal });

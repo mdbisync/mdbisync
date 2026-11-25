@@ -581,6 +581,8 @@ content).
 - `Invalid merge-file conflict output`, `git merge-tree gave no tree`
 - `invalid repository path "<path>"`
 - `git object <id> is missing`, `git object <id> is a <type>, not a blob`
+- `a git tree object could not be read`, `invalid tree entry name <name>`, `git object name <name> cannot be asked in a batch`, `git <command> gave an answer that could not be read`
+- `the process that starts git commands ended (<reason>)`: something stopped the run's helper process for git commands; run again.
 - `a push names the same ref twice`
 - `ids.json has an invalid entry for a path`; `reserved-ids.json`, `superseded-ids.json`, `uploads.json` or `written.json` `has an invalid entry`
 - `ids.json maps a document id to more than one path`: the recorded state assigns the same Linear document to multiple files. Recover with an initial sync if it repeats.

@@ -74,7 +74,7 @@ async function onTracked(git: Git, config: StateConfig, tracked: Oid, merged: st
   await git.run(['fetch', '--no-tags', '--no-write-fetch-head', config.remote, branchRef(config.trackedBranch)]);
   // A commit the fetch did not bring is not on the branch: merge-base then exits 128.
   if ((await git.run(['merge-base', '--is-ancestor', merged, tip], { okCodes: [0, 1, 128] })).code !== 0) return 'absent';
-  return (await git.text(['rev-parse', `${merged}^1`])) === tracked ? 'checked' : 'unchecked';
+  return (await git.revParse(`${merged}^1`)) === tracked ? 'checked' : 'unchecked';
 }
 
 /**

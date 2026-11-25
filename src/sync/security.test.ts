@@ -454,10 +454,11 @@ const BUDGET_HOOK = `repos:
 function spyCatFile(git: Git): { batches: { oids: string[]; maxOutputBytes: number | undefined }[]; streamed: string[] } {
   const batches: { oids: string[]; maxOutputBytes: number | undefined }[] = [];
   const streamed: string[] = [];
-  const run = git.run.bind(git);
-  git.run = (args, options = {}) => {
-    if (args[0] === 'cat-file' && args[1] === '--batch') batches.push({oids: String(options.input).trim().split('\n'), maxOutputBytes: options.maxOutputBytes});
-    return run(args, options);
+  const readBlobs = git.readBlobs.bind(git);
+  git.readBlobs = (oids, maxOutputBytes) => {
+    // An empty batch reads nothing; a batch reads each id once.
+    if (oids.length > 0) batches.push({oids: [...new Set(oids)], maxOutputBytes});
+    return readBlobs(oids, maxOutputBytes);
   };
   const runToFile = git.runToFile.bind(git);
   git.runToFile = (args, path, mode) => {

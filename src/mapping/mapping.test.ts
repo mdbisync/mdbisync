@@ -284,7 +284,7 @@ describe('folder mapping of a commit', () => {
       const commit = await git.text(['rev-parse', 'origin/main']);
       const entries = await listTree(git, commit);
       const oversized = entries.filter((entry) => entry.size === MAPPING_FILE_BYTES + 1);
-      const run = t.mock.method(git, 'run');
+      const readBlobs = t.mock.method(git, 'readBlobs');
 
       const mapping = await loadMapping(git, commit);
       assert.deepEqual(mapping.problems.map(({ readme, kind }) => [readme, kind]), [
@@ -297,11 +297,12 @@ describe('folder mapping of a commit', () => {
       assert.deepEqual(mapping.documents.map(({ path }) => path), [
         'docs/README.md', 'docs/note-0.md', 'docs/note-1.md', 'docs/note-2.md', 'docs/note-3.md', 'docs/note-4.md',
       ]);
-      const batches = run.mock.calls.filter(({ arguments: [args] }) => args[0] === 'cat-file');
+      // An empty batch reads nothing.
+      const batches = readBlobs.mock.calls.filter(({ arguments: [oids] }) => oids.length > 0);
       assert.equal(batches.length, 3);
-      for (const { arguments: [, options] } of batches) {
-        assert.ok(options?.maxOutputBytes !== undefined && options.maxOutputBytes <= 4 * 1024 * 1024);
-        for (const { oid } of oversized) assert.ok(!String(options.input).includes(oid));
+      for (const { arguments: [oids, maxOutputBytes] } of batches) {
+        assert.ok(maxOutputBytes !== undefined && maxOutputBytes <= 4 * 1024 * 1024);
+        for (const { oid } of oversized) assert.ok(!oids.includes(oid));
       }
       await assert.rejects(git.run(['show', `${commit}:docs/README.md`], { maxOutputBytes: 8 }), /git-output-limit/);
     } finally {

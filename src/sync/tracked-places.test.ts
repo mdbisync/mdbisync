@@ -116,10 +116,9 @@ describe('places the tracked branch named', () => {
     const first = await commit([], { 'docs/README.md': project('First', 'ENG'), 'docs/page.md': 'Page.\n' });
     const large = await commit([first], { 'docs/page.md': 'Page, edited.\n' });
     const tip = await commit([large], { 'docs/README.md': project('Second', 'ENG') });
-    // That commit's tree listing goes over its output limit, through git's own limit check.
-    const run = git.run.bind(git);
-    t.mock.method(git, 'run', (args: string[], options?: Parameters<Git['run']>[1]) =>
-      run(args, args[0] === 'ls-tree' && args[1] === '-r' && args.includes(large) ? { ...options, maxOutputBytes: 1 } : options));
+    // That commit's tree listing goes over its output limit, through the listing's own limit check.
+    const listTree = git.listTree.bind(git);
+    t.mock.method(git, 'listTree', (treeish: string, maxOutputBytes?: number) => listTree(treeish, treeish === large ? 1 : maxOutputBytes));
     assert.equal(await check(tip, 'docs/page.md', inProject('ENG', 'First')), false);
   });
 
