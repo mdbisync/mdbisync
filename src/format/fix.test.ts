@@ -41,7 +41,7 @@ const cases: Array<[string, string, string]> = [
   ['an escape past a no-break space stays', '\u00a0 \\# a\n\n\u00a0 4\\. a\n\n| A |\n| -- |\n| \u00a0 \\# b |', '\u00a0 \\# a\n\n\u00a0 4\\. a\n\n| A |\n| -- |\n| \u00a0 \\# b |\n'],
   ['a body cell of only a number and a dot gets a space after the dot', '| A | B |\n| -- | -- |\n| 12. | 7. x |\n| 3.5 | x 1. |\n\n| 1. |\n| -- |\n| a |', '| A | B |\n| -- | -- |\n| 12.  | 7. x |\n| 3.5 | x 1. |\n\n| 1. |\n| -- |\n| a |\n'],
   ['an ordered list past 100 aligns to three digits', '99. a\n100. b\n     * c', ' 99. a\n100. b\n     * c'],
-  ['an aligned ordered list nests under a bullet, in a quote and in another one', '* a\n\n  9. b\n  10. c\n\n> 9. d\n> 10. e\n\n9. f\n10. g\n\n    9. h\n    10. i', '* a\n\n   9. b\n  10. c\n\n>  9. d\n> 10. e\n\n 9. f\n10. g\n\n     9. h\n    10. i'],
+  ['an aligned ordered list nests under a bullet and in a quote', '* 9. b\n  10. c\n\n> 9. d\n> 10. e\n\n9. f\n10. g', '* \n   9. b\n  10. c\n\n>  9. d\n> 10. e\n\n 9. f\n10. g'],
   ['an ordered list keeps its start', '3. a\n4. b', '3. a\n4. b'],
   ['task items use - and an uppercase X', '* [x] done\n* [ ] open', '- [X] done\n- [ ] open'],
   ['nested task items line up after the dash', '* [ ] a\n  * [x] b', '- [ ] a\n  - [X] b'],
@@ -64,9 +64,7 @@ const cases: Array<[string, string, string]> = [
   ['a list item with only a file link becomes a file block', '* [Report](report.pdf)', '* \n  [Report](report.pdf)'],
   ['a nested bullet after its parent’s text keeps the file link on the marker line', '* Parent\n  * [Report](report.csv)', '* Parent\n  * [Report](<report.csv>)'],
   ['a nested numbered item after its parent’s text keeps the file link on the marker line', '* Parent\n  1. [Report](report.csv)', '* Parent\n  1. [Report](<report.csv>)'],
-  ['a nested numbered list starting above one keeps its blank line and file block', '* Parent\n\n  3. [Report](report.csv)', '* Parent\n\n  3. \n     [Report](report.csv)'],
   ['a nested attachment after a sibling still becomes a file block', '* Parent\n  * First\n  * [Report](report.csv)', '* Parent\n  * First\n  * \n    [Report](report.csv)'],
-  ['a nested list starting with an empty item keeps its blank line after the parent', '* Parent\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next', '* Parent\n\n  * \n  * Next\n\n1. Parent\n\n   1. \n   2. Next'],
   ['a nested file block keeps its existing blank line after the parent', '* Parent\n\n  * \n    [Report](report.csv)', '* Parent\n\n  * \n    [Report](report.csv)'],
   ['a task or numbered item with only a video link keeps the file block (the video form is recorded for bullets)', '- [ ] [Demo](demo.mp4)\n\n1. [Demo](demo.mp4)', '- [ ] \n  [Demo](demo.mp4)\n\n1. \n   [Demo](demo.mp4)'],
   ['a bullet item with only an MP3 link keeps the link on its line, in angle brackets', '* \n  [Voice note](media/note.mp3)\n* [Call](<call one.MP3>)\n* [Memo](memo.mp3?v=2)', '* [Voice note](<media/note.mp3>)\n* [Call](<call%20one.MP3>)\n* [Memo](<memo.mp3?v=2>)'],
@@ -551,17 +549,18 @@ describe('list boundaries as Linear writes them', () => {
     ['a task list after a bullet one in an item', '* Plan\n  * one\n\n  - [ ] two', '* Plan\n  * one\n  - [ ] two'],
     ['lists of other kinds in a deeper item and in a quote', '* Plan\n  * Step\n    1. one\n\n    * two\n\n> * Plan\n>   * one\n>\n>   1. two', '* Plan\n  * Step\n    1. one\n    * two\n\n> * Plan\n>   * one\n>   1. two'],
     ['a list after one whose item has more text', '* Plan\n  * one\n    more\n\n  1. two', '* Plan\n  * one\n    more\n  1. two'],
-    // Each of these would join the line before it: the blank line stays.
-    ['a numbered list from 3 after a bullet one keeps its blank line', '* Plan\n  * one\n\n  3. two', '* Plan\n  * one\n\n  3. two'],
-    ['a list opening with an empty item keeps its blank line', '* Plan\n  1. one\n\n  *\n  * two', '* Plan\n  1. one\n\n  * \n  * two'],
+    // A file block below the marker would join the line before it: the blank line stays.
     ['a list opening with a file block keeps its blank line', '* Plan\n  1. one\n\n  * [Report](report.csv)', '* Plan\n  1. one\n\n  * \n    [Report](report.csv)'],
-    ['a list opening with a nested list keeps its blank line', '* Plan\n  1. one\n\n  * * two', '* Plan\n  1. one\n\n  * \n    * two'],
     // Outside an item, lists of other kinds stay a blank line apart.
     ['top-level lists of other kinds stay a blank line apart', '1. one\n* two\n\n- [ ] three', '1. one\n\n* two\n\n- [ ] three'],
     // Two blank lines after an empty item start a new list in Linear.
     ['two blank lines after an empty item', '1. one\n2.\n\n\n\n3. three', '1. one\n2. \n\n\n3. three'],
     ['two blank lines after an empty bullet, nested and in a quote', '* one\n*\n\n\n* three\n\nText.\n\n* Plan\n  1. one\n  2.\n\n\n  3. three\n\n> 1. one\n> 2.\n>\n>\n> 3. three', '* one\n* \n\n\n* three\n\nText.\n\n* Plan\n  1. one\n  2. \n\n\n  3. three\n\n> 1. one\n> 2. \n>\n>\n> 3. three'],
     ['two blank lines after an empty first item', '1.\n\n\n2. two', '1. \n\n\n2. two'],
+    // Linear starts the list split off there at its first item's number.
+    ['a list split off after an empty item keeps its first number', '1.\n\n\n1.\n\nText.\n\n3. three\n4.\n\n\n2. two\n7. more\n\nText.\n\n* Plan\n  1. one\n  2.\n\n\n  5. five', '1. \n\n\n1. \n\nText.\n\n3. three\n4. \n\n\n2. two\n3. more\n\nText.\n\n* Plan\n  1. one\n  2. \n\n\n  5. five'],
+    ['a split list whose own number would run past the marker limit counts on', '1. a\n2.\n\n\n999999999. b\n1. c', '1. a\n2. \n\n\n3. b\n4. c'],
+    ['a list split off after an empty item aligns from its first number', '1. a\n2.\n\n\n9. b\n10. c', '1. a\n2. \n\n\n 9. b\n10. c'],
     // Each part aligns its numbers on its own, as Linear's separate lists do.
     ['each part of a split list aligns on its own', '9.\n\n\n10. ten\n\nText.\n\n8. eight\n9.\n\n\n10. ten\n11. eleven', '9. \n\n\n10. ten\n\nText.\n\n8. eight\n9. \n\n\n10. ten\n11. eleven'],
     ['one blank line after an empty item goes', '1. one\n2.\n\n3. three', '1. one\n2. \n3. three'],
@@ -570,7 +569,6 @@ describe('list boundaries as Linear writes them', () => {
     ['an item whose text is only a number and a dot', '1. 2.\n\n* 3.\n* next', '1. \n   2. \n\n* \n  3. \n* next'],
     ['an item that starts with a list', '* * one\n  * two\n\n  more\n\nText.\n\n1. 3. three\n\nText.\n\n1. - [ ] four', '* \n  * one\n  * two\n\n  more\n\nText.\n\n1. \n   3. three\n\nText.\n\n1. \n   - [ ] four'],
     ['a list that starts an item stays below its marker line', '* \n  * one\n\n1. \n   12. ', '* \n  * one\n\n1. \n   12. '],
-    ['a list in the first item of a nested list after text', '* Plan\n  * * one', '* Plan\n\n  * \n    * one'],
   ];
   for (const [name, input, expected] of written) {
     it(name, () => {
@@ -586,6 +584,44 @@ describe('list boundaries as Linear writes them', () => {
     const fixed = fixText('* Plan\n  1. one\n\n  * +++ \n\n    words\n\n    +++');
     assert.equal(fixed, '* Plan\n  1. one\n\n  * \n\n    +++ \n\n    words\n\n    +++');
     assert.equal(fixText(fixed), fixed, 'the result is a fixed point');
+  });
+});
+
+describe('a list Linear writes right below an item\'s text', () => {
+  // Linear writes the list on the line below the text or the list of another
+  // kind before it, where Markdown reads a marker that cannot interrupt a
+  // paragraph as text: lint reports it and fix leaves the file.
+  const cases: Array<[string, string, number]> = [
+    ['a nested list that starts with an empty item', '1. Plan\n\n   2.\n      * step\n   3. Next', 3],
+    ['a nested list that starts with an empty item numbered 1', '* Plan\n\n  *\n  * Next\n\n1. Parent\n\n   1.\n   2. Next', 3],
+    ['a nested list whose first item starts with a list', '* Plan\n  * * one', 2],
+    ['a nested numbered list starting above one', '1. Plan\n\n   2. Two\n   3. Three', 3],
+    ['a nested numbered list starting at zero', '1. Plan\n\n   0. Zero', 3],
+    ['a nested numbered list starting above one with a file block', '* Parent\n\n  3. [Report](report.csv)', 3],
+    ['a numbered list from 3 after a bullet one', '* Plan\n  * one\n\n  3. two', 4],
+    ['a list opening with an empty item after a list of another kind', '* Plan\n  1. one\n\n  *\n  * two', 4],
+    ['a list opening with a nested list after a list of another kind', '* Plan\n  1. one\n\n  * * two', 4],
+    ['an empty bullet item after a task item in one list', '* Plan\n  - [ ] Draft\n  -', 3],
+    ['in a task item, a deeper item and a quote', '- [ ] Plan\n\n  2.\n     * step\n\nText.\n\n* a\n  * Plan\n\n    2.\n       * step\n\nText.\n\n> 1. Plan\n>\n>    2.\n>       * step', 3],
+  ];
+  for (const [name, input, line] of cases) {
+    it(name, () => {
+      assert.equal(fixText(input), input);
+      const findings = lintText('a.md', input);
+      assert.equal(findings[0]?.line, line);
+      assert.deepEqual(new Set(findings.map((finding) => finding.rule)), new Set(['list-after-item-text']));
+    });
+  }
+
+  it('leaves a first item that starts with another block to block-first-in-list-item', () => {
+    assert.deepEqual(lintText('a.md', '* Plan\n\n  * # Heading').map((finding) => finding.rule), ['block-first-in-list-item']);
+  });
+
+  it('leaves a list that can start right below the text, and lists at the top level', () => {
+    // Where nothing above ends in text (an empty item, code), the marker cannot be taken in.
+    for (const text of ['* Plan\n\n  1. one\n  2.', '* Plan\n  * one\n\n  1. two', 'Para\n\n2.\n   * step', '> Para\n>\n> 2.\n>    * step', '1. \n   2. \n      * step', '* Plan\n  * one\n  *\n\n  3. two', '* Plan\n  1. First\n  2. \n  * ', '* Plan\n  * one\n\n    ```\n    x\n    ```\n\n  3. two']) {
+      assert.deepEqual(lintText('a.md', text), [], text);
+    }
   });
 });
 
@@ -903,7 +939,7 @@ describe('what fix leaves alone', () => {
   });
 
   it('writes empty items and aligned numbers that lint finds nothing in', () => {
-    for (const text of ['* a\n*\n\n1. b\n2.', '9.\n10. a\n    * b', '* a\n\n  9. b\n  10. c', '> 99. a\n> 100.']) {
+    for (const text of ['* a\n*\n\n1. b\n2.', '9.\n10. a\n    * b', '* 9. b\n  10. c', '> 99. a\n> 100.']) {
       const fixed = fixText(text);
       assert.notEqual(fixed, text, text);
       assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);

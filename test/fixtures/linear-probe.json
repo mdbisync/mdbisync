@@ -957,6 +957,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/list-after-item-text.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/list-first-in-item.md": {
       "yjs": "recorded",
       "fixedPoint": true

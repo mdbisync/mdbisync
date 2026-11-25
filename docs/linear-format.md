@@ -125,12 +125,15 @@ Blocks:
 - Thematic breaks become `---`: `***` becomes `---`.
 - Bullets become `*`: `- item` becomes `* item`.
 - Loose lists become tight: the blank lines between items go, and a nested
-  list follows its paragraph on the next line. In a list item, a list of
+  list follows its paragraph on the next line (where Markdown would read
+  its first marker as text, see [`list-after-item-text`](#list-after-item-text)). In a list item, a list of
   another kind (bullet, numbered, task) follows the list before it on the
   next line too, where its first line can start a list there.
 - Two or more blank lines after an empty item end the list in Linear:
   `fix` keeps two there (`2. `, two blank lines, `3. c`). Elsewhere they
-  collapse like other blank lines between items.
+  collapse like other blank lines between items. The list after them
+  starts at the number its first item has, as in Linear: `1. `, two blank
+  lines, `1. b` stays as it is.
 - A list that starts an item goes below the item's marker line, which
   keeps its space: `fix` writes `1. 2.` as `1. ` above `   2. `, and
   `* * a` as `* ` above `  * a`.
@@ -786,6 +789,23 @@ leaves the file as it is; the sync sends it unchanged.
 
 ```markdown
 See "www.example.com/a\_b" for details.
+```
+
+### `list-after-item-text`
+
+In a list item, Linear writes a list on the line right below the text or
+the list of another kind before it. When its first item is empty, starts
+with a list, or is numbered other than 1, Markdown reads that marker as
+part of the text above. Start the list with an item of text, numbered 1 in
+a numbered list. Linear keeps the list itself; only its written form reads
+differently, so no form `fix` could write matches both. The rule stops
+only `fix`; the sync sends such a file as it is.
+
+```markdown
+1. Plan
+
+   2.
+      * Call the team
 ```
 
 ### `block-first-in-list-item`

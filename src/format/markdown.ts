@@ -2,7 +2,7 @@
 // positions, and the split between front matter and the body.
 
 import { isDeepStrictEqual } from 'node:util';
-import type { Nodes, Paragraph, Parent, PhrasingContent, Root, Text } from 'mdast';
+import type { List, ListItem, Nodes, Paragraph, Parent, PhrasingContent, Root, Text } from 'mdast';
 import { fromMarkdown, type Extension, type Transform } from 'mdast-util-from-markdown';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
@@ -1556,4 +1556,18 @@ function firstAtOrAfter(values: readonly number[], min: number): number | undefi
     else high = middle;
   }
   return values[low];
+}
+
+/** The kind of list Linear holds an item in: task items have their own list, without numbers. */
+export function listKind(list: List, item: ListItem | undefined): 'task' | 'ordered' | 'bullet' {
+  return item?.checked != null ? 'task' : list.ordered ? 'ordered' : 'bullet';
+}
+
+/**
+ * Whether the list's first line, as `fix` writes it, can interrupt a
+ * paragraph: its first item starts with text, and a number that starts it is 1.
+ */
+export function opensWithText(list: List): boolean {
+  const [item] = list.children;
+  return item !== undefined && item.children[0]?.type === 'paragraph' && (listKind(list, item) !== 'ordered' || (list.start ?? 1) === 1);
 }

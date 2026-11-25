@@ -6,13 +6,13 @@
 import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, bracketedLabel, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, bracketedLabel, listKind, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'unplaced-link']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'unplaced-link']);
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
@@ -247,6 +247,28 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         // `fix` writes a list that starts an item on the next line, as Linear does.
         const [first] = node.children;
         if (first !== undefined && first.type !== 'paragraph' && first.type !== 'list') report('block-first-in-list-item', line(first));
+        // In an item, Linear writes a list on the line below the text or the
+        // list of another kind before it. Markdown reads its first marker
+        // there as text when it cannot interrupt a paragraph.
+        // A first item that starts with another block is block-first-in-list-item.
+        node.children.forEach((child, index) => {
+          const previous = node.children[index - 1];
+          if (child.type !== 'list' || opensWithText(child) || !['paragraph', 'list'].includes(child.children[0]?.children[0]?.type ?? 'paragraph')) return;
+          const below = previous?.type === 'paragraph'
+            || (previous?.type === 'list' && listKind(previous, previous.children.at(-1)) !== listKind(child, child.children[0]));
+          if (below && endsWithParagraph(previous)) report('list-after-item-text', line(child));
+        });
+        // Markdown can hold a task item and a bullet item in one list, which
+        // Linear (and `fix`) writes as two lists, the second on the next line.
+        for (const list of node.children) {
+          if (list.type !== 'list') continue;
+          list.children.forEach((item, index) => {
+            const previous = list.children[index - 1];
+            if (previous === undefined || listKind(list, previous) === listKind(list, item)) return;
+            if (item.children[0] !== undefined && item.children[0].type !== 'list') return;
+            if (endsWithParagraph(previous)) report('list-after-item-text', line(item));
+          });
+        }
         break;
       }
       case 'list': {
@@ -440,4 +462,13 @@ function hasUrlOrLinkAttribute(html: string): boolean {
 function softBreakInText(node: PhrasingContent, body: string): boolean {
   if (node.type === 'text') return body.slice(start(node), end(node)).includes('\n');
   return 'children' in node && (node.children as PhrasingContent[]).some((child) => softBreakInText(child, body));
+}
+
+/**
+ * Whether a paragraph ends the block: the last block, through lists, items
+ * and quotes, a marker on the next line would continue as text.
+ */
+function endsWithParagraph(node: Nodes | undefined): boolean {
+  while (node !== undefined && (node.type === 'list' || node.type === 'listItem' || node.type === 'blockquote')) node = node.children.at(-1);
+  return node?.type === 'paragraph';
 }

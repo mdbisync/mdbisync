@@ -80,6 +80,8 @@ rules:
     title: "Linear keeps only the first line of a heading underlined with = or - as the heading; the lines after it become a paragraph. Put the heading text on one line."
   - id: table-header-pipe
     title: "A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |."
+  - id: list-after-item-text
+    title: "In a list item, Linear writes a list on the line right below the text or the list of another kind before it, where Markdown reads a first marker that cannot interrupt a paragraph as text."
 known_constructs:
   - construct: heading-empty
     class: fixable
@@ -103,6 +105,8 @@ known_constructs:
     class: fixable
   - construct: list-first-in-item
     class: fixable
+  - construct: list-after-item-text
+    class: lint-error
   - construct: space-reference
     class: fixable
   - construct: lone-backtick
@@ -3473,7 +3477,7 @@ fixtures:
     basis: known
     canary: kx-ae019ab3
     corpus: false
-    note: "Two or more blank lines after an empty item end the list in Linear, which writes two blank lines there"
+    note: "Two or more blank lines after an empty item end the list in Linear, which writes two blank lines there and starts the list after them at its first item's number"
   - file: "list-items/list-first-in-item.md"
     group: list-items
     construct: list-first-in-item
@@ -3482,6 +3486,16 @@ fixtures:
     canary: kx-51459ba8
     corpus: false
     note: "Linear writes a list that starts an item below an empty marker line, nested in the item"
+  - file: "list-items/list-after-item-text.md"
+    group: list-items
+    construct: list-after-item-text
+    class: lint-error
+    rule: list-after-item-text
+    line: 3
+    basis: known
+    canary: kx-3eca5c15
+    corpus: false
+    note: "In an item, Linear writes a list whose first marker cannot interrupt a paragraph right below the text or list before it"
   - file: "construct-singles/space-reference.md"
     group: construct-singles
     construct: space-reference

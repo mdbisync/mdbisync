@@ -16,7 +16,7 @@ import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
-import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, listKind, opensWithText, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -652,26 +652,17 @@ class Writer {
    * stay unaligned.
    */
   private list(node: List, interruptsParagraph = false): string {
-    const start = node.start ?? 1;
-    // Linear holds the parts that two blank lines after an empty item split off as lists of their own.
-    const parts: ListItem[][] = [];
-    node.children.forEach((item, index) => {
-      if (index === 0 || splitsAfter(node.children[index - 1]!, item)) parts.push([item]);
-      else parts.at(-1)!.push(item);
-    });
     const before = this.listBefore.get(node);
-    let beforeIndent = before === undefined ? Infinity : itemIndent(before);
-    let index = 0;
-    return parts
-      .map((items) => {
-        const first = start + index;
+    let beforeIndent = before === undefined ? Infinity : itemIndent(before, this.source);
+    return listParts(node, this.source)
+      .map(({ items, first }, part) => {
         const last = first + items.length - 1;
         const padding = `${last}.`.length - `${first}.`.length;
         const width = node.ordered && padding <= 3 && padding < beforeIndent ? `${last}.`.length : 0;
-        const written = items.map((item) => {
-          const number = start + index++;
+        const written = items.map((item, offset) => {
+          const number = first + offset;
           const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${number}.`.padStart(width) : '*';
-          return this.listItem(item, marker, interruptsParagraph && number === start);
+          return this.listItem(item, marker, interruptsParagraph && part === 0 && offset === 0);
         });
         beforeIndent = !node.ordered || items.at(-1)!.checked != null ? 2 : `${last}.`.length + 1;
         return written.join('\n');
@@ -679,11 +670,6 @@ class Writer {
       .join('\n\n\n');
   }
 
-  /**
-   * Whether an item's first line holds its text: not a file block or a
-   * section below an empty marker line. The marker line of a list that
-   * follows another without a blank line must not be empty.
-   */
   private textOnMarkerLine(item: ListItem): boolean {
     const [first] = item.children;
     return first?.type === 'paragraph' && itemAttachment(item) === undefined && !/^\+{3}[ \t]*$/.test(this.source.slice(start(first), end(first)));
@@ -731,9 +717,9 @@ class Writer {
     if (item.checked !== null && item.checked !== undefined && first.type === 'paragraph') this.taskParagraph = first;
     // Blocks of an item are a blank line apart, but a nested list follows
     // its paragraph on the next line when it can interrupt that paragraph.
-    // Ordered lists starting above or below 1, lists starting with an empty
-    // item and existing file blocks need their blank line to stay separate
-    // from the preceding paragraph.
+    // A list that cannot (an empty first item, a number other than 1) stops
+    // `fix` through lint's `list-after-item-text`, unless nothing above can
+    // take its marker in; it and an existing file block keep their blank line.
     let content = '';
     // Lines (0-based) of the item's own code blocks: Linear indents their blank lines too.
     const codeLines = new Set<number>();
@@ -2184,10 +2170,41 @@ const MP3 = /\.mp3$/i;
 const WAV_OR_OGG = /\.(?:wav|ogg)$/i;
 
 /** The content indent `fix` writes for a list's last item: past its bullet, or past its widest number. */
-function itemIndent(list: List): number {
+function itemIndent(list: List, source: string): number {
   if (!list.ordered || list.children.at(-1)?.checked != null) return 2;
-  return `${(list.start ?? 1) + list.children.length - 1}.`.length + 1;
+  return `${lastNumber(list, source)}.`.length + 1;
 }
+
+/** The number `fix` writes on a list's last item. */
+function lastNumber(list: List, source: string): number {
+  const parts = listParts(list, source);
+  const last = parts.at(-1)!;
+  return last.first + last.items.length - 1;
+}
+
+/**
+ * The parts Linear holds a list in: two blank lines after an empty item
+ * start a new list. Each part after the first starts at the number its first
+ * item has in the source, as Linear keeps it, unless its numbers would then
+ * run past Markdown's nine digits: there it counts on from the part before.
+ */
+function listParts(list: List, source: string): Array<{ items: ListItem[]; first: number }> {
+  const parts: Array<{ items: ListItem[]; first: number }> = [];
+  list.children.forEach((item, index) => {
+    const previous = parts.at(-1);
+    if (previous !== undefined && !splitsAfter(list.children[index - 1]!, item)) {
+      previous.items.push(item);
+      return;
+    }
+    const counted = previous === undefined ? list.start ?? 1 : previous.first + previous.items.length;
+    const own = Number(/^\d+/.exec(source.slice(start(item)))?.[0] ?? counted);
+    parts.push({ items: [item], first: previous === undefined ? counted : own + list.children.length - index - 1 <= MAX_LIST_NUMBER ? own : counted });
+  });
+  return parts;
+}
+
+/** The largest list number Markdown reads: nine digits. */
+const MAX_LIST_NUMBER = 999_999_999;
 
 /** Whether the last block written, inside the last quote or list item that ends the document, is a table. */
 function endsWithTable(tree: Root): boolean {
@@ -2205,20 +2222,6 @@ function endsWithTable(tree: Root): boolean {
  */
 function splitsAfter(item: ListItem, next: ListItem): boolean {
   return item.children.length === 0 && next.position!.start.line - item.position!.end.line > 2;
-}
-
-/** The kind of list Linear holds an item in: task items have their own list, without numbers. */
-function listKind(list: List, item: ListItem): 'task' | 'ordered' | 'bullet' {
-  return item.checked != null ? 'task' : list.ordered ? 'ordered' : 'bullet';
-}
-
-/**
- * Whether the list's first line, as `fix` writes it, can interrupt a
- * paragraph: its first item starts with text, and a number that starts it is 1.
- */
-function opensWithText(list: List): boolean {
-  const [item] = list.children;
-  return item !== undefined && item.children[0]?.type === 'paragraph' && (listKind(list, item) !== 'ordered' || (list.start ?? 1) === 1);
 }
 
 function startsWithFileBlock(list: List): boolean {
