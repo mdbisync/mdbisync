@@ -158,7 +158,8 @@ Blocks:
   a block in Linear's item, so such a line stays escaped text. Linear reads the
   line as text under a quote, after more lines of the paragraph, before
   other text or an ordered list in the item, and with `)` or `+`: there it
-  stays as it is.
+  stays as it is. After a line break at the end of the item's first line it
+  stays as it is too.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
   `- [X] done`. A checkbox without a label keeps one space after it. Text
   right after the checkbox gets a backslash where Linear writes one: before
