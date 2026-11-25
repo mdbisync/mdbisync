@@ -957,6 +957,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/list-first-in-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/list-form-empty-items.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -974,6 +978,14 @@
       "fixedPoint": true
     },
     "list-items/list-form-ordered-ten.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-kinds-in-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-split-after-empty-item.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

@@ -65,7 +65,7 @@ rules:
   - id: url-in-html
     title: "A URL inside raw HTML is turned into a Markdown link."
   - id: block-first-in-list-item
-    title: "A list item that starts with a heading, code, a quote, a list or another block is written in a form Markdown reads as an empty item."
+    title: "A list item that starts with a heading, code, a quote or another block is written in a form Markdown reads as an empty item."
   - id: ordered-task-list
     title: "An ordered task list becomes a bullet task list."
   - id: table-hash-cell
@@ -98,6 +98,10 @@ known_constructs:
   - construct: table-cell-markers
     class: lint-error
   - construct: table-cell-escaped-markers
+    class: fixable
+  - construct: list-kinds
+    class: fixable
+  - construct: list-first-in-item
     class: fixable
   - construct: space-reference
     class: fixable
@@ -3454,6 +3458,30 @@ fixtures:
     canary: kx-38d519db
     corpus: false
     note: "escaped list markers at a body cell's start stay text; a cell of only a number and a dot is written with a space after it"
+  - file: "list-items/list-kinds-in-item.md"
+    group: list-items
+    construct: list-kinds
+    class: fixable
+    basis: known
+    canary: kx-b16712d8
+    corpus: false
+    note: "In a list item, Linear writes a list of another kind (bullet, numbered, task) on the line after the list before it"
+  - file: "list-items/list-split-after-empty-item.md"
+    group: list-items
+    construct: empty-list-item
+    class: fixable
+    basis: known
+    canary: kx-ae019ab3
+    corpus: false
+    note: "Two or more blank lines after an empty item end the list in Linear, which writes two blank lines there"
+  - file: "list-items/list-first-in-item.md"
+    group: list-items
+    construct: list-first-in-item
+    class: fixable
+    basis: known
+    canary: kx-51459ba8
+    corpus: false
+    note: "Linear writes a list that starts an item below an empty marker line, nested in the item"
   - file: "construct-singles/space-reference.md"
     group: construct-singles
     construct: space-reference

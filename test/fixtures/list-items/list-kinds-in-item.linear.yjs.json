@@ -1,0 +1,291 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Plan","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Book the room","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Bring snacks","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Trip","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Pack bags","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Leave early","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Week","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Draft","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "todo_list",
+              "children": [
+                {
+                  "type": "todo_item",
+                  "attrs": {"done":false},
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Review","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Chores","marks":{"attribution":"user"}}]},
+            {
+              "type": "todo_list",
+              "children": [
+                {
+                  "type": "todo_item",
+                  "attrs": {"done":true},
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Dishes","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Laundry","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Garden","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Water","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "todo_list",
+              "children": [
+                {
+                  "type": "todo_item",
+                  "attrs": {"done":false},
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Weed","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Day","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Morning","marks":{"attribution":"user"}}]},
+                    {
+                      "type": "ordered_list",
+                      "attrs": {"order":1},
+                      "children": [
+                        {
+                          "type": "list_item",
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"Run","marks":{"attribution":"user"}}]}
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "bullet_list",
+                      "children": [
+                        {
+                          "type": "list_item",
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"Read","marks":{"attribution":"user"}}]}
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "bullet_list",
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Shop","marks":{"attribution":"user"}}]},
+                {
+                  "type": "bullet_list",
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"Bread","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "ordered_list",
+                  "attrs": {"order":1},
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"Milk","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Notes","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "children": [
+                        {"text":"First","marks":{"attribution":"user"}},
+                        {"type":"hard_break"},
+                        {"text":"more words","marks":{"attribution":"user"}}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Second","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-b16712d8","marks":{"attribution":"user"}}]}
+  ]
+}

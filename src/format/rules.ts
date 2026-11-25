@@ -31,7 +31,7 @@ export const LINT_RULES = {
   'section-opener': 'A line starting with >>> opens a collapsible section in Linear, which fix cannot write here: the file also has lines starting with +++, which Linear pairs with it, or the section would end inside code. Write the section with +++ lines, or start the line with \\>.',
   'url-in-html': 'A URL inside raw HTML is turned into a Markdown link.',
   'unplaced-link': 'A web address Markdown finds inside other text, such as "www.example.com" in quotes, cannot be matched to its text in the source, for example because an escape or a character reference spells it, so fix cannot write it as a link. Write it in angle brackets or as a link.',
-  'block-first-in-list-item': 'A list item that starts with a heading, code, a quote, a list or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.',
+  'block-first-in-list-item': 'A list item that starts with a heading, code, a quote or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.',
   'ordered-task-list': 'An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.',
   'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path.',
   'image-file-missing': 'An image must name a file that exists in the repository, not a folder or a Markdown document.',

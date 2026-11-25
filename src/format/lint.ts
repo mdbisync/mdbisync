@@ -244,8 +244,9 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         else if (ancestors.some((a) => a.type === 'heading')) report('hard-break-in-heading', line(node));
         break;
       case 'listItem': {
+        // `fix` writes a list that starts an item on the next line, as Linear does.
         const [first] = node.children;
-        if (first !== undefined && first.type !== 'paragraph') report('block-first-in-list-item', line(first));
+        if (first !== undefined && first.type !== 'paragraph' && first.type !== 'list') report('block-first-in-list-item', line(first));
         break;
       }
       case 'list': {
