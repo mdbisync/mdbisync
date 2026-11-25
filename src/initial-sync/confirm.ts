@@ -406,7 +406,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         let held: boolean | undefined;
         const holds = () => (held ??= document !== undefined && (holdsBody(document.content ?? '', body) || (
           sameLinkDestinations(document.content ?? '', body)
-          && holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body, sources.input.mapping.files)), source)
+          && holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body, sources.input.mapping.files), { linearExport: true }), source)
         )));
         // A resumed run skips what the stopped run wrote, as long as the text
         // to send is the same and the document still holds what was written:

@@ -634,6 +634,48 @@ describe('an empty first nested item after its parent’s text', () => {
   }
 });
 
+describe('a line without a pipe after a table', () => {
+  // Linear ends the table at that line and reads it, and the lines below
+  // it, as a paragraph; GFM reads them as rows.
+  const cases: Array<[string, string, string]> = [
+    ['one column', '| A |\n| --- |\n| 1 |\nnote', '| A |\n| -- |\n| 1 |\n\nnote'],
+    ['two columns, more lines', '| A | B |\n| --- | --- |\n| 1 | 2 |\nnote two\nmore words\n\nAfter.', '| A | B |\n| -- | -- |\n| 1 | 2 |\n\nnote two\nmore words\n\nAfter.'],
+    ['a row with pipes after it', '| A | B |\n| --- | --- |\n| 1 | 2 |\nnote\n| 5 | 6 |', '| A | B |\n| -- | -- |\n| 1 | 2 |\n\nnote\n| 5 | 6 |'],
+    ['no body rows', '| A | B |\n| --- | --- |\nnote', '| A | B |\n| -- | -- |\n\nnote'],
+    ['in a quote', '> | A | B |\n> | --- | --- |\n> | 1 | 2 |\n> note', '> | A | B |\n> | -- | -- |\n> | 1 | 2 |\n>\n> note'],
+    ['in a list item', '* Intro\n\n  | A | B |\n  | --- | --- |\n  | 1 | 2 |\n  note', '* Intro\n\n  | A | B |\n  | -- | -- |\n  | 1 | 2 |\n\n  note'],
+  ];
+  for (const [label, text, expected] of cases) {
+    it(label, () => {
+      assert.equal(fixText(text), expected);
+      assert.equal(fixText(expected), expected);
+      assert.deepEqual(lintText('doc.md', expected), []);
+    });
+  }
+
+  it('ends a table that ending the one above exposes', () => {
+    assert.equal(
+      fixText('| A | B |\n| -- | -- |\nnote\n| C |\n| -- |\nmore\n| x | y |'),
+      '| A | B |\n| -- | -- |\n\nnote\n\n| C |\n| -- |\n\nmore\n| x | y |',
+    );
+  });
+
+  it('leaves the file to its author when the lines a table gives up form a block lint reports', () => {
+    // `Total` over `| --- |` is a table whose header has no pipe (`table-header-pipe`).
+    const text = '| A |\n| - |\n| 1 |\nTotal\n| --- |\n| 5 |';
+    assert.equal(fixText(text), text);
+  });
+
+  it('ends tables before it pairs section markers', () => {
+    // The `+++` the table gives up meets a four-sign opener: the container stays as written.
+    assert.equal(fixText('++++ Outer\n\n| A |\n| -- |\n+++\nBody'), '++++ Outer\n\n| A |\n| -- |\n\n+++\nBody');
+  });
+
+  it('keeps a row that has a pipe', () => {
+    assert.equal(fixText('| A | B |\n| -- | -- |\n| 1 | 2 |\n| 3 | 4'), '| A | B |\n| -- | -- |\n| 1 | 2 |\n| 3 | 4 |\n');
+  });
+});
+
 describe('list boundaries as Linear writes them', () => {
   const written: Array<[string, string, string]> = [
     // In an item, a list of another kind follows the list before it on the next line.
@@ -741,8 +783,8 @@ describe('text split off at an image', () => {
     ['an escaped quote that is then a heading', 'Before ![a](x.png) > # x', 'Before\n\n![a](x.png)\n\n\\> # x'],
     ['a definition before the image', '[ref]: /dest ![a](x.png)', '\\[ref\\]: /dest\n\n![a](x.png)'],
     ['a rule before the image', '*** ![a](x.png)', '\\*\\*\\*\n\n![a](x.png)'],
-    ['an underline after a task checkbox', '- [ ] # Before\n  === ![a](x.png)', '- [ ] # Before\n  \\===\n\n  ![a](x.png)'],
-    ['a task checkbox keeps the hash after it as text', '- [ ] # x ![a](x.png) y', '- [ ] # x\n\n  ![a](x.png)\n\n  y'],
+    ['an underline after a task checkbox', '- [ ] # Before\n  === ![a](x.png)', '- [ ] \\# Before\n  \\===\n\n  ![a](x.png)'],
+    ['a task checkbox keeps the hash after it as text', '- [ ] # x ![a](x.png) y', '- [ ] \\# x\n\n  ![a](x.png)\n\n  y'],
     ['a Linear collapsible section', 'Before ![a](x.png) +++ Details\nBody\n+++', 'Before\n\n![a](x.png)\n\n\\+++ Details\nBody\n\\+++'],
     ['a Git conflict marker', 'Before ![a](x.png) <<<<<<< ours', 'Before\n\n![a](x.png)\n\n\\<<<<<<< ours'],
     ['in a quote', '> Before ![a](x.png) # x', '> Before\n>\n> ![a](x.png)\n>\n> \\# x'],
@@ -1336,36 +1378,49 @@ describe('what fix leaves alone', () => {
     }
   });
 
-  it('keeps item text that starts like a list marker as text when it writes the blank line before the list', () => {
-    // A list that interrupts a paragraph cannot open a nested list on its
-    // first line with a number other than 1 or an empty item: that stays
-    // the item's text, and needs an escape once the list stands apart.
-    const marked: Array<[string, string]> = [
-      ['Note\n1. 3. plum', 'Note\n\n1. 3\\. plum'],
-      ['Note\n1. 3) plum\n2. pear', 'Note\n\n1. 3\\) plum\n2. pear'],
-      ['Note\n1. -', 'Note\n\n1. \\-'],
-      ['Note\n1. *', 'Note\n\n1. \\*'],
-      ['Note\n- 2. fig', 'Note\n\n* 2\\. fig'],
-      ['> Note\n> 1. 3. plum', '> Note\n>\n> 1. 3\\. plum'],
-      // Inside an item the list still follows its paragraph; Linear reads the text as a list there too.
-      ['- Note\n  1. 3. plum', '* Note\n  1. 3\\. plum'],
-      // After a task checkbox the text does not start its line: no escape.
-      ['- [ ] 1. Draft\n- [x] - pear', '- [ ] 1. Draft\n- [X] - pear'],
+  it('writes item text that starts like a list marker as the nested list Linear reads', () => {
+    // A list that interrupts a paragraph opens no nested list on its first
+    // line for the parser fix uses (`3. plum` stays the item's text), but
+    // CommonMark and Linear read one there: fix writes it below an empty
+    // marker line, with the blank line before the list that keeps the list
+    // from continuing the paragraph. An escaped marker stays text.
+    const nested: Array<[string, string]> = [
+      ['Note\n1. 3. plum', 'Note\n\n1. \n   3. plum'],
+      ['Note\n1. 3) plum\n2. pear', 'Note\n\n1. \n   3. plum\n2. pear'],
+      ['Note\n1. -', 'Note\n\n1. \n   * '],
+      ['Note\n- 2. fig', 'Note\n\n* \n  2. fig'],
+      ['> Note\n> 1. 3. plum', '> Note\n>\n> 1. \n>    3. plum'],
+      // The nested text is written as a list of its own: a checkbox stays one, an image goes below its text.
+      ['Note\n1. 3. - [x] a', 'Note\n\n1. \n   3. \n      - [X] a'],
+      ['Note\n1. 3. plum ![a](x.png)', 'Note\n\n1. \n   3. plum\n\n      ![a](x.png)'],
+      ['Note\n1. -  ', 'Note\n\n1. \n   * '],
+      // A reference in it keeps its destination, written into the link as everywhere.
+      ['Note\n1. 3. [plum][p]\n\n[p]: https://example.com', 'Note\n\n1. \n   3. [plum](<https://example.com>)'],
+      ['Note\n1. 3. ![pic][i] end\n\n[i]: images/a.png', 'Note\n\n1. \n   3. ![pic](images/a.png)\n\n      end'],
     ];
-    const read = (markdown: string): string[] => {
-      const out: string[] = [];
-      visit(parse(markdown), (node) => {
-        out.push(node.type === 'text' ? node.value : node.type);
-      });
-      return out;
-    };
-    for (const [text, expected] of marked) {
+    for (const [text, expected] of nested) {
       const fixed = fixText(text);
       assert.equal(fixed, expected, text);
-      assert.deepEqual(read(fixed), read(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
       assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${text}`);
     }
+    for (const text of ['Note\n\n1. 3\\. plum', '* x\n  1. 2\\. a', '1. 2\\. a']) assert.equal(fixText(text), text, text);
+    // Inside an item Linear writes the nested list right below the item's
+    // text, which Markdown reads as text: list-after-item-text, as for an
+    // empty first item there, leaves the file to its author.
+    for (const text of ['- Note\n  1. 3. plum', '* x\n  1. 2.', '* x\n  * 3. a\n\n    More words', '1. x\n   1. 2. a\n      more words\n   2. b']) {
+      assert.equal(fixText(text), text, text);
+      assert.deepEqual(lintText('a.md', text).map((finding) => finding.rule), ['list-after-item-text'], text);
+    }
+  });
+
+  it('escapes a block start after a task checkbox, as Linear writes it', () => {
+    assert.equal(
+      fixText('- [ ] 2. a\n- [x] 10. b\n- [ ] - a\n- [ ] + a\n- [ ] # a\n- [ ] > a\n- [ ] ## a\n- [ ] #\n- [ ] -a\n- [ ] >a\n- [ ] 2.\ta\n- [ ] -'),
+      '- [ ] 2\\. a\n- [X] 10\\. b\n- [ ] \\- a\n- [ ] \\+ a\n- [ ] \\# a\n- [ ] \\> a\n- [ ] \\## a\n- [ ] \\#\n- [ ] \\-a\n- [ ] \\>a\n- [ ] 2\\. a\n- [ ] \\-',
+    );
+    // Linear leaves these plain.
+    for (const text of ['- [ ] 3) a', '- [ ] 12.', '- [ ] 2.a', '- [ ] #a', '- [ ] +']) assert.equal(fixText(text), text, text);
   });
 
   it("takes the escaped marker when it captures Linear's text: a lone \\+ is no +++ delimiter", () => {
@@ -1375,11 +1430,16 @@ describe('what fix leaves alone', () => {
     assert.ok(!sameMarkdown('\\+++ Title', '+++ Title'), 'an escaped +++ delimiter stays apart');
   });
 
+  it('leaves a file to its author when text split off at an image is only a number', () => {
+    // `3\\.` alone is what `number-paragraph` reports: Linear writes it back as an empty item.
+    assert.equal(fixText('Before ![a](x.png) 3.'), 'Before ![a](x.png) 3.');
+  });
+
   it('keeps text split off at an image as text when it starts like a list marker', () => {
     assert.equal(fixText('Before ![a](x.png) 3. plum'), 'Before\n\n![a](x.png)\n\n3\\. plum');
     assert.equal(fixText('Before ![a](x.png) - pear'), 'Before\n\n![a](x.png)\n\n\\- pear');
-    // The part before the image still follows a task checkbox: no escape there.
-    assert.equal(fixText('- [ ] 1. Draft ![a](x.png) 2. more'), '- [ ] 1. Draft\n\n  ![a](x.png)\n\n  2\\. more');
+    // The part before the image follows a task checkbox, where Linear escapes the number too.
+    assert.equal(fixText('- [ ] 1. Draft ![a](x.png) 2. more'), '- [ ] 1\\. Draft\n\n  ![a](x.png)\n\n  2\\. more');
   });
 
   it('escapes a lone -- line between blank lines, and reads one under a paragraph as Markdown does: a heading', () => {

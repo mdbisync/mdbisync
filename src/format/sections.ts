@@ -18,7 +18,9 @@ type Opener = { node: Nodes; parent: Nodes; depth: number };
 
 /** Rounds of splitting: each makes the section lines that nest in quotes the round before split off visible. */
 const SPLIT_ROUNDS = 8;
-const PLUS_MARKER = /^\+{3}(?!\+)(.*)$/;
+// Linear reads a longer run of signs as the same marker (`++++Tip` opens a
+// section titled `Tip`) and writes it with three.
+const PLUS_MARKER = /^(\+{3,})(.*)$/;
 
 // For this scan only, give a +++ line a block node so it can interrupt a
 // paragraph or end a lazy list/quote continuation. Fences and HTML blocks
@@ -33,12 +35,12 @@ function plusSectionSyntax(ignored: ReadonlySet<number>): MicromarkExtension {
 
         function opening(code: Parameters<typeof ok>[0]): ReturnType<typeof ok> {
           if (signs === 0) effects.enter('thematicBreak');
-          if (code === 43 && signs < 3) {
+          if (code === 43) {
             signs++;
             effects.consume(code);
             return opening;
           }
-          return signs === 3 && code !== 43 ? rest(code) : nok(code);
+          return signs >= 3 ? rest(code) : nok(code);
         }
 
         function rest(code: Parameters<typeof ok>[0]): ReturnType<typeof ok> {
@@ -102,9 +104,6 @@ export function plusSectionsAsLinear(body: string): string {
     const blocks = parent.children;
     const markers = blocks.map((node) => node.type === 'thematicBreak' ? PLUS_MARKER.exec(body.slice(start(node), end(node))) : null);
     if (markers.every((marker) => marker === null)) return;
-    // Longer delimiters pair by their own width. Their stored spelling
-    // also uses three signs, so leave mixed-width containers to the author.
-    if (blocks.some((node) => node.type === 'paragraph' && /(?:^|\n)[ \t>]*\+{4}/.test(body.slice(start(node), end(node))))) return;
     const depth = ancestors.length;
     const lastContent = markers.findLastIndex((marker, index) => marker === null && blocks[index]!.type !== 'definition');
     const open: number[] = [];
@@ -112,11 +111,15 @@ export function plusSectionsAsLinear(body: string): string {
     let closedAfterContent = 0;
     for (const [index, marker] of markers.entries()) {
       if (marker === null) continue;
-      const title = marker[1]!.trim();
+      const title = marker[2]!.trim();
       if (title === '' && open.length > 0) {
+        // A closing marker pairs only with an opener of its own width;
+        // Linear keeps one of another width as text in the section. Leave
+        // such a container to the author.
+        if (markers[open.at(-1)!]![1]!.length !== marker[1]!.length) return;
         const opener = open.pop()!;
         if (opener > lastContent) closedAfterContent++;
-        roles.set(opener, `+++ ${markers[opener]![1]!.trim()}`);
+        roles.set(opener, `+++ ${markers[opener]![2]!.trim()}`);
         roles.set(index, '+++');
       } else if (index < blocks.length - 1) {
         open.push(index);
@@ -134,7 +137,7 @@ export function plusSectionsAsLinear(body: string): string {
       edits.push({ from: start(blocks[0]!), to: start(blocks[0]!), text: '\\', depth: ancestors.length });
       return;
     }
-    for (const index of implicit) roles.set(index, `+++ ${markers[index]![1]!.trim()}`);
+    for (const index of implicit) roles.set(index, `+++ ${markers[index]![2]!.trim()}`);
     // A final title-like paragraph exports just like the header of an empty
     // inner section. Keep an already written outer opener in that case.
     const closes = implicit.filter((index) => {

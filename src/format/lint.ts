@@ -3,17 +3,18 @@
 // callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
-import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table } from 'mdast';
+import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table, TableRow } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, bracketedLabel, linearDropsCodeSpaces, listKind, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, bracketedLabel, linearDropsCodeSpaces, listKind, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['code-span-padding', 'hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['code-span-padding', 'hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link', 'number-paragraph']);
+const NUMBER_ONLY = /^\d{1,9}\\[.)]$/;
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
@@ -31,6 +32,12 @@ export interface LintOptions {
    * Markdown document.
    */
   linkedFileExists?: (url: string) => boolean;
+  /**
+   * The text is Linear's export, which writes a list that starts an item
+   * below the marker line: item text that starts with a marker is text
+   * (`fix`'s option of the same name).
+   */
+  linearExport?: boolean;
 }
 
 /**
@@ -185,6 +192,21 @@ function childrenLength(reference: LinkReference, length: (from: number, to: num
   return first === undefined || last === undefined ? 0 : length(start(first), end(last));
 }
 
+/** Whether Linear ends the table at this row or a row above it (`endingRow`). */
+function endedBefore(body: string, table: Table, row: Nodes): boolean {
+  let ended = endedRows.get(table);
+  if (ended === undefined) {
+    // Once per table: a large table has a cell rule check for every cell.
+    const ending = endingRow(body, table);
+    ended = new Set(ending === undefined ? [] : table.children.slice(table.children.indexOf(ending)));
+    endedRows.set(table, ended);
+  }
+  return ended.has(row as TableRow);
+}
+
+/** The rows of each table that Linear reads as a paragraph (`endedBefore`). */
+const endedRows = new WeakMap<Table, ReadonlySet<TableRow>>();
+
 function codePoints(text: string): number {
   let count = 0;
   for (const _ of text) count++;
@@ -263,7 +285,8 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         // A first item that starts with another block is block-first-in-list-item.
         node.children.forEach((child, index) => {
           const previous = node.children[index - 1];
-          if (child.type !== 'list' || opensWithText(child) || !['paragraph', 'list'].includes(child.children[0]?.children[0]?.type ?? 'paragraph')) return;
+          // Text that starts with a marker is a nested list there too (`1. 2. a`).
+          if (child.type !== 'list' || (opensWithText(child) && (options.linearExport === true || !nestsMarkerText(body, child.children[0]!))) || !['paragraph', 'list'].includes(child.children[0]?.children[0]?.type ?? 'paragraph')) return;
           const below = previous?.type === 'paragraph'
             || (previous?.type === 'list' && listKind(previous, previous.children.at(-1)) !== listKind(child, child.children[0]));
           if (below && endsWithParagraph(previous)) report('list-after-item-text', line(child));
@@ -309,6 +332,8 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         // the text. An escaped `\#` stays text, and the header row keeps a
         // bare `#` as text too.
         const [row, table] = ancestors.slice(-2).reverse();
+        // Rows from a line without `|` on are a paragraph in Linear, which `fix` writes.
+        if (table?.type === 'table' && endedBefore(body, table, row!)) break;
         // Test the whole cell text: a first text node of only `#` may be
         // followed by markup (`#**tag**`), which is no heading.
         const first = node.children[0];
@@ -324,12 +349,16 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (list && table?.type === 'table' && table.children[0] !== row) report('table-list-cell', line(node));
         break;
       }
-      case 'text':
-        if (ancestors.some((a) => a.type === 'tableCell') && body.slice(start(node), end(node)).includes('\\|')) {
+      case 'text': {
+        const cellAt = ancestors.findIndex((a) => a.type === 'tableCell');
+        const table = ancestors[cellAt - 2];
+        const inCell = cellAt !== -1 && !(table?.type === 'table' && endedBefore(body, table, ancestors[cellAt - 1]!));
+        if (inCell && body.slice(start(node), end(node)).includes('\\|')) {
           report('table-escaped-pipe', line(node));
         }
         if (body.slice(start(node), end(node)).includes('^[')) report('footnote', line(node));
         break;
+      }
       case 'link':
         if (!allowedLink(node.url)) report('link-scheme', line(node));
         if (node.title) report('link-title', line(node));
@@ -356,6 +385,17 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
       case 'html':
         if (hasUrlOrLinkAttribute(node.value)) report('url-in-html', line(node));
         break;
+      case 'paragraph': {
+        // Linear writes a paragraph of only a number and a dot or
+        // parenthesis without its escape (`7\.` comes back `7.`), which
+        // Markdown, and Linear on the next write, read as an empty item.
+        // A task item's text follows its checkbox, where Linear keeps the escape.
+        const item = ancestors.at(-1);
+        const afterCheckbox = item?.type === 'listItem' && item.checked != null && item.children[0] === node;
+        const [only] = node.children;
+        if (!afterCheckbox && node.children.length === 1 && only!.type === 'text' && NUMBER_ONLY.test(body.slice(start(node), end(node)).trimEnd())) report('number-paragraph', line(node));
+        break;
+      }
       default:
         break;
     }
