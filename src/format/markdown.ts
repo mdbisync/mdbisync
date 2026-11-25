@@ -2,7 +2,7 @@
 // positions, and the split between front matter and the body.
 
 import { isDeepStrictEqual } from 'node:util';
-import type { Nodes, Paragraph, Parent, PhrasingContent, Root, Text } from 'mdast';
+import type { Nodes, Paragraph, Parent, PhrasingContent, Root, Table, TableRow, Text } from 'mdast';
 import { fromMarkdown, type Extension, type Transform } from 'mdast-util-from-markdown';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
@@ -1297,6 +1297,15 @@ export function advanceColumn(column: number, char: string): number {
 
 export function end(node: Nodes): number {
   return node.position?.end.offset ?? 0;
+}
+
+/**
+ * The first body row of a table whose line has no `|`. Linear ends the table
+ * there and reads that line, and the lines after it, as a paragraph; GFM
+ * reads them as rows.
+ */
+export function endingRow(body: string, table: Table): TableRow | undefined {
+  return table.children.slice(1).find((row) => !body.slice(start(row), end(row)).includes('|'));
 }
 
 export function line(node: Nodes): number {

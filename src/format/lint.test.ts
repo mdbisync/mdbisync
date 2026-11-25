@@ -110,6 +110,16 @@ describe('lint rules', () => {
     }
   });
 
+  it('number-paragraph ignores trailing spaces', () => {
+    assert.deepEqual(lintText('doc.md', '7\\.  ').map((finding) => finding.rule), ['number-paragraph']);
+  });
+
+  it('table cell rules spare the rows from a line without a pipe on, which Linear reads as a paragraph', () => {
+    for (const text of ['| A | B |\n| -- | -- |\nnote\n| # | C |', '| A | B |\n| -- | -- |\nnote\n| - | C |', '| A | B |\n| -- | -- |\nnote\n| a \\| b | C |']) {
+      assert.deepEqual(lintText('doc.md', text), [], text);
+    }
+  });
+
   it('number-paragraph spares a number with text, a task item and a number Markdown reads as a list', () => {
     for (const text of ['7\\. Seven', 'Text 7\\.', '- [ ] 7\\.', '7.', '* x\n  1. 2.', '| A |\n| -- |\n| 7. |']) {
       assert.deepEqual(lintText('doc.md', text).filter((finding) => finding.rule === 'number-paragraph'), [], text);

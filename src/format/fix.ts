@@ -14,10 +14,10 @@ import { nameToEmoji } from 'gemoji';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
-import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
+import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES, type Finding } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
-import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, endingRow, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -45,23 +45,37 @@ export interface FixOptions {
  * the source.
  */
 export function fixText(text: string, options: FixOptions = {}): string {
-  if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule))) return text;
+  if (lintText('', text).some(stopsFix)) return text;
   const { head, body } = splitFile(text);
   const normalized = tabReferences(body.replace(/\r\n?/g, '\n')).text;
-  const sections = sectionOpenersAsLinear(normalized);
-  const lf = sections === normalized ? plusSectionsAsLinear(sections) : sections;
+  // Tables end first: a section marker on a line they give up is a marker.
+  const ended = tablesEndAsLinear(normalized);
+  // The lines a table gives up can form blocks lint has not seen (a table
+  // whose header has no pipe): lint them as written.
+  if (ended !== normalized && lintText('', ended).some(stopsFix)) return text;
+  const sections = sectionOpenersAsLinear(ended);
+  const lf = sections === ended ? plusSectionsAsLinear(sections) : sections;
   if (lf === undefined) return text;
-  const ended = tablesEndAsLinear(lf);
-  const unbroken = backslashBreaksAsLinear(ended);
+  const unbroken = backslashBreaksAsLinear(lf);
   if (unbroken === undefined) return text;
   const fixed = fixBody(unbroken, options);
   if (fixed === undefined) return text;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
   // block): such a file stays with its author.
-  if (unbroken !== ended && lineEndings(fixed) < lineEndings(unbroken)) return text;
+  if (unbroken !== lf && lineEndings(fixed) < lineEndings(unbroken)) return text;
+  // Text split off at an image can be a paragraph of only a number (`3\.`),
+  // which Linear writes back as an empty item (`number-paragraph`).
+  if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText('', fixed).some((finding) => finding.rule === 'number-paragraph')) return text;
   return joinFile(head, fixed);
 }
+
+/** Lint findings that leave a file to its author. */
+function stopsFix(finding: Finding): boolean {
+  return !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule);
+}
+
+const NUMBER_PARAGRAPH_LINE = /(?:^|\n)[ \t>]*\d{1,9}\\[.)][ \t]*(?:\n|$)/;
 
 /**
  * The line endings inside paragraphs: hard breaks and the line endings of
@@ -122,17 +136,21 @@ function backslashBreaksAsLinear(body: string): string | undefined {
  */
 function tablesEndAsLinear(body: string): string {
   if (!body.includes('|')) return body;
-  const rows: number[] = [];
-  visit(parse(body), (node) => {
-    if (node.type !== 'table') return;
-    const row = node.children.slice(1).find((candidate) => !body.slice(start(candidate), end(candidate)).includes('|'));
-    if (row !== undefined) rows.push(start(row));
-  });
-  for (const at of rows.sort((a, b) => b - a)) {
-    const lineStart = lineStartOf(body, at);
-    body = `${body.slice(0, lineStart)}${body.slice(lineStart, at).trimEnd()}\n${body.slice(lineStart)}`;
+  // Ending a table can expose another in the lines it gives up: repeat
+  // until none ends. Each round adds a blank line, so the rounds are bounded.
+  for (;;) {
+    const rows: number[] = [];
+    visit(parse(body), (node) => {
+      if (node.type !== 'table') return;
+      const row = endingRow(body, node);
+      if (row !== undefined) rows.push(start(row));
+    });
+    if (rows.length === 0) return body;
+    for (const at of rows.sort((a, b) => b - a)) {
+      const lineStart = lineStartOf(body, at);
+      body = `${body.slice(0, lineStart)}${body.slice(lineStart, at).trimEnd()}\n${body.slice(lineStart)}`;
+    }
   }
-  return body;
 }
 
 /**
@@ -470,7 +488,7 @@ const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
 // followed by a space, a tab or the end of the line.
 const LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
 /** Item text Linear reads as a nested list: a marker followed by text, or a lone bullet or number and dot. */
-const NESTED_MARKER_TEXT = /^(?:(?:[*+-]|\d{1,9}[.)])[ \t]+\S|[*+-]$|\d{1,9}\.$)/;
+const NESTED_MARKER_TEXT = /^(?:(?:[*+-]|\d{1,9}[.)])[ \t]+\S|(?:[*+-]|\d{1,9}\.)[ \t]*$)/;
 
 const LINEAR_ALERT = /^\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i;
 
@@ -662,10 +680,12 @@ class Writer {
       this.wholeParagraphEnd = node.children.length > 0 ? end(node.children.at(-1)!) : undefined;
       // The text after a nested list's marker starts no line of its own.
       const text = node === this.taskParagraph ? taskTextAsLinear(this.inline(node.children, 'continuation'))
-        : this.nestedLists.has(node) ? this.inline(node.children, 'continuation') : this.paragraphText(node.children);
+        : this.nestedLists.has(node) ? this.nestedListText(node) : this.paragraphText(node.children);
       this.wholeParagraphEnd = undefined;
       return [escapeLiteralSectionEnd(text)];
     }
+    // A nested list's text on one line is written as that list, images and all.
+    if (this.nestedLists.has(node) && !this.source.slice(start(node), end(node)).includes('\n')) return [this.nestedListText(node)];
     // Linear holds images as blocks: text before and after an image becomes its own paragraph.
     const parts: PhrasingContent[][] = [[]];
     for (const child of node.children) {
@@ -676,8 +696,11 @@ class Writer {
     return parts
       .map((part, index) => {
         const afterCheckbox = index === 0 && node === this.taskParagraph;
-        const text = afterCheckbox ? taskTextAsLinear(trimKeepingNbsp(this.inline(part, 'continuation'))) : this.paragraphText(part, true);
-        return escapeLiteralSectionEnd(paragraphPart(text, !afterCheckbox));
+        // The first part of a nested list's text keeps its marker.
+        const nestedList = index === 0 && this.nestedLists.has(node);
+        const text = afterCheckbox ? taskTextAsLinear(trimKeepingNbsp(this.inline(part, 'continuation')))
+          : nestedList ? trimKeepingNbsp(this.inline(part, 'continuation')) : this.paragraphText(part, true);
+        return escapeLiteralSectionEnd(paragraphPart(text, !afterCheckbox && !nestedList));
       })
       .filter((part) => part !== '');
   }
@@ -757,6 +780,17 @@ class Writer {
     if (this.options.linearExport || item.checked != null || first?.type !== 'paragraph' || first.children[0]?.type !== 'text') return false;
     if (lineStartOf(this.source, start(first)) !== lineStartOf(this.source, start(item))) return false;
     return NESTED_MARKER_TEXT.test(this.source.slice(start(first), end(first)));
+  }
+
+  /**
+   * The text of an item that Linear reads as a nested list, written as
+   * that list: on one line, as a document of its own (`3. - [x] a` keeps
+   * its checkbox); over more lines, as the item's text without escapes.
+   */
+  private nestedListText(node: Paragraph): string {
+    const raw = this.source.slice(start(node), end(node));
+    if (raw.includes('\n')) return this.inline(node.children, 'continuation');
+    return withoutTrailingNewlines(fixText(raw, this.options));
   }
 
   private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
@@ -2089,12 +2123,16 @@ function paragraphPart(text: string, startsLine: boolean): string {
 }
 
 /**
- * A task item's text as Linear writes it after the checkbox: with a
- * backslash before a list marker, `#` or `>` and the space after it
- * (`- [ ] \\- a`, `- [ ] 2\\. a`). Linear leaves `3) a` and `12.` plain.
+ * A task item's text as Linear writes it after the checkbox: a backslash
+ * before a leading `-` or `>`, a `+` followed by a space, one to six `#`
+ * followed by a space or nothing more, and the dot of a number followed by
+ * a space or tab (`- [ ] 2\\. a`; a tab there becomes a space). Linear
+ * leaves `#a`, a lone `+`, `3) a` and `12.` plain.
  */
 function taskTextAsLinear(text: string): string {
-  return text.replace(/^(?:(\d{1,9})(?=\.[ \t])|(?=[-+#>][ \t]))/, (_, digits: string | undefined) => `${digits ?? ''}\\`);
+  const number = /^(\d{1,9})\.[ \t]/.exec(text);
+  if (number) return `${number[1]}\\. ${text.slice(number[0].length)}`;
+  return /^(?:[->]|\+[ \t]|#{1,6}(?:[ \t]|$))/.test(text) ? `\\${text}` : text;
 }
 
 /** An unescaped closing marker can open a section after a literal title. */

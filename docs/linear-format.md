@@ -149,9 +149,11 @@ Blocks:
   quote, after more lines of the paragraph, before more text or an ordered
   list in the item, and with `)` or `+`: there it stays as it is.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
-  `- [X] done`. A checkbox without a label keeps one space after it. A
-  list marker followed by a space, `#` or `>` right after the checkbox gets
-  a backslash, as Linear writes it: `- [ ] 2. a` becomes `- [ ] 2\. a`.
+  `- [X] done`. A checkbox without a label keeps one space after it. Text
+  right after the checkbox gets a backslash where Linear writes one: before
+  a `-` or `>`, a `+` followed by a space, one to six `#` followed by a
+  space or nothing, and a number's dot followed by a space or tab (which
+  becomes a space): `- [ ] 2. a` becomes `- [ ] 2\. a`.
 - A list marker at the start of an item's text opens a list nested in the
   item, also where the item's list follows a paragraph: `Note` followed by
   `1. 3. plum` is written `Note`, a blank line, `1. ` and `   3. plum`. A
@@ -215,7 +217,9 @@ Blocks:
 - Tables get outer pipes and short separators (`| -- | -- |`), and a row
   gets as many cells as the header. A line without `|` right after a table
   ends it, as in Linear: `fix` writes a blank line before it, and it and the
-  lines below it become a paragraph (GFM reads them as rows). A cell containing only `#` is written
+  lines below it become a paragraph (GFM reads them as rows). When those
+  lines would form a block a lint rule reports, such as a table whose header
+  row has no `|`, `fix` leaves the file to you. A cell containing only `#` is written
   as `\#`, preserving its text, and an escaped `#` that starts a cell keeps
   its escape (a bare one in a body cell is the
   [`table-hash-cell`](#table-hash-cell) rule). A line break tag in a cell
@@ -231,6 +235,8 @@ Blocks:
   it becomes its own paragraph. Where that text would start another block,
   a backslash escape keeps it text: in
   `Before ![a](x.png) # x`, the text after the image is written as `\# x`.
+  Text that would be only a number and a dot (`3\.`) is the
+  [`number-paragraph`](#number-paragraph) case: `fix` leaves the file to you.
   The same holds for a quote, rule, list marker, code fence, HTML tag,
   `[label]:` definition, `$$` or `+++` line, Git conflict marker, a `===`
   or `---` underline and a table's delimiter row. Linear drops some of

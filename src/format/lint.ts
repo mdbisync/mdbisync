@@ -3,10 +3,10 @@
 // callouts (bold paragraphs in earlier versions) and pass. Every image must be a file of the repository: Linear
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
-import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table } from 'mdast';
+import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table, TableRow } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, bracketedLabel, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, bracketedLabel, endingRow, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
@@ -184,6 +184,12 @@ function childrenLength(reference: LinkReference, length: (from: number, to: num
   return first === undefined || last === undefined ? 0 : length(start(first), end(last));
 }
 
+/** Whether Linear ends the table at this row or a row above it (`endingRow`). */
+function endedBefore(body: string, table: Table, row: Nodes): boolean {
+  const ending = endingRow(body, table);
+  return ending !== undefined && table.children.indexOf(row as TableRow) >= table.children.indexOf(ending);
+}
+
 function codePoints(text: string): number {
   let count = 0;
   for (const _ of text) count++;
@@ -281,6 +287,8 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         // the text. An escaped `\#` stays text, and the header row keeps a
         // bare `#` as text too.
         const [row, table] = ancestors.slice(-2).reverse();
+        // Rows from a line without `|` on are a paragraph in Linear, which `fix` writes.
+        if (table?.type === 'table' && endedBefore(body, table, row!)) break;
         // Test the whole cell text: a first text node of only `#` may be
         // followed by markup (`#**tag**`), which is no heading.
         const first = node.children[0];
@@ -296,12 +304,16 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (list && table?.type === 'table' && table.children[0] !== row) report('table-list-cell', line(node));
         break;
       }
-      case 'text':
-        if (ancestors.some((a) => a.type === 'tableCell') && body.slice(start(node), end(node)).includes('\\|')) {
+      case 'text': {
+        const cellAt = ancestors.findIndex((a) => a.type === 'tableCell');
+        const table = ancestors[cellAt - 2];
+        const inCell = cellAt !== -1 && !(table?.type === 'table' && endedBefore(body, table, ancestors[cellAt - 1]!));
+        if (inCell && body.slice(start(node), end(node)).includes('\\|')) {
           report('table-escaped-pipe', line(node));
         }
         if (body.slice(start(node), end(node)).includes('^[')) report('footnote', line(node));
         break;
+      }
       case 'link':
         if (!allowedLink(node.url)) report('link-scheme', line(node));
         if (node.title) report('link-title', line(node));
@@ -336,7 +348,7 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         const item = ancestors.at(-1);
         const afterCheckbox = item?.type === 'listItem' && item.checked != null && item.children[0] === node;
         const [only] = node.children;
-        if (!afterCheckbox && node.children.length === 1 && only!.type === 'text' && NUMBER_ONLY.test(body.slice(start(node), end(node)))) report('number-paragraph', line(node));
+        if (!afterCheckbox && node.children.length === 1 && only!.type === 'text' && NUMBER_ONLY.test(body.slice(start(node), end(node)).trimEnd())) report('number-paragraph', line(node));
         break;
       }
       default:

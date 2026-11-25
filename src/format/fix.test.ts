@@ -568,6 +568,24 @@ describe('a line without a pipe after a table', () => {
     });
   }
 
+  it('ends a table that ending the one above exposes', () => {
+    assert.equal(
+      fixText('| A | B |\n| -- | -- |\nnote\n| C |\n| -- |\nmore\n| x | y |'),
+      '| A | B |\n| -- | -- |\n\nnote\n\n| C |\n| -- |\n\nmore\n| x | y |',
+    );
+  });
+
+  it('leaves the file to its author when the lines a table gives up form a block lint reports', () => {
+    // `Total` over `| --- |` is a table whose header has no pipe (`table-header-pipe`).
+    const text = '| A |\n| - |\n| 1 |\nTotal\n| --- |\n| 5 |';
+    assert.equal(fixText(text), text);
+  });
+
+  it('ends tables before it pairs section markers', () => {
+    // The `+++` the table gives up meets a four-sign opener: the container stays as written.
+    assert.equal(fixText('++++ Outer\n\n| A |\n| -- |\n+++\nBody'), '++++ Outer\n\n| A |\n| -- |\n\n+++\nBody');
+  });
+
   it('keeps a row that has a pipe', () => {
     assert.equal(fixText('| A | B |\n| -- | -- |\n| 1 | 2 |\n| 3 | 4'), '| A | B |\n| -- | -- |\n| 1 | 2 |\n| 3 | 4 |\n');
   });
@@ -1177,6 +1195,10 @@ describe('what fix leaves alone', () => {
       ['* x\n  1. 2.', '* x\n\n  1. \n     2. '],
       ['* x\n  * 3. a\n\n    More words', '* x\n\n  * \n    3. a\n\n    More words'],
       ['1. x\n   1. 2. a\n      more words\n   2. b', '1. x\n\n   1. \n      2. a\n         more words\n   2. b'],
+      // The nested text is written as a list of its own: a checkbox stays one, an image goes below its text.
+      ['Note\n1. 3. - [x] a', 'Note\n\n1. \n   3. \n      - [X] a'],
+      ['Note\n1. 3. plum ![a](x.png)', 'Note\n\n1. \n   3. plum\n\n      ![a](x.png)'],
+      ['Note\n1. -  ', 'Note\n\n1. \n   * '],
     ];
     for (const [text, expected] of nested) {
       const fixed = fixText(text);
@@ -1189,11 +1211,11 @@ describe('what fix leaves alone', () => {
 
   it('escapes a block start after a task checkbox, as Linear writes it', () => {
     assert.equal(
-      fixText('- [ ] 2. a\n- [x] 10. b\n- [ ] - a\n- [ ] + a\n- [ ] # a\n- [ ] > a'),
-      '- [ ] 2\\. a\n- [X] 10\\. b\n- [ ] \\- a\n- [ ] \\+ a\n- [ ] \\# a\n- [ ] \\> a',
+      fixText('- [ ] 2. a\n- [x] 10. b\n- [ ] - a\n- [ ] + a\n- [ ] # a\n- [ ] > a\n- [ ] ## a\n- [ ] #\n- [ ] -a\n- [ ] >a\n- [ ] 2.\ta\n- [ ] -'),
+      '- [ ] 2\\. a\n- [X] 10\\. b\n- [ ] \\- a\n- [ ] \\+ a\n- [ ] \\# a\n- [ ] \\> a\n- [ ] \\## a\n- [ ] \\#\n- [ ] \\-a\n- [ ] \\>a\n- [ ] 2\\. a\n- [ ] \\-',
     );
     // Linear leaves these plain.
-    for (const text of ['- [ ] 3) a', '- [ ] 12.', '- [ ] 2.a', '- [ ] #a']) assert.equal(fixText(text), text, text);
+    for (const text of ['- [ ] 3) a', '- [ ] 12.', '- [ ] 2.a', '- [ ] #a', '- [ ] +']) assert.equal(fixText(text), text, text);
   });
 
   it("takes the escaped marker when it captures Linear's text: a lone \\+ is no +++ delimiter", () => {
@@ -1201,6 +1223,11 @@ describe('what fix leaves alone', () => {
     const linear = '* Note\n  1. +';
     assert.equal(fixLinearText(linear, linear, () => false), '* Note\n  1. \\+');
     assert.ok(!sameMarkdown('\\+++ Title', '+++ Title'), 'an escaped +++ delimiter stays apart');
+  });
+
+  it('leaves a file to its author when text split off at an image is only a number', () => {
+    // `3\\.` alone is what `number-paragraph` reports: Linear writes it back as an empty item.
+    assert.equal(fixText('Before ![a](x.png) 3.'), 'Before ![a](x.png) 3.');
   });
 
   it('keeps text split off at an image as text when it starts like a list marker', () => {

@@ -136,6 +136,42 @@
         }
       ]
     },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "ordered_list",
+              "attrs": {"order":3},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "todo_list",
+                      "children": [
+                        {
+                          "type": "todo_item",
+                          "attrs": {"done":true},
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"a","marks":{"attribution":"user"}}]}
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
     {"type":"paragraph","children":[{"text":"Ref kx-833d1d0f","marks":{"attribution":"user"}}]}
   ]
 }
