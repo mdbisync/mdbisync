@@ -1,0 +1,21 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Pack (tent, rope","marks":{"attribution":"user","strong":{}}},{"text":"), map (","marks":{"attribution":"user"}},{"text":"compass","marks":{"attribution":"user","strong":{}}},{"text":"), food, water","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Then ","marks":{"attribution":"user"}},{"text":"pack tent","marks":{"attribution":"user","strong":{}}},{"text":" rope ","marks":{"attribution":"user"}},{"text":"map","marks":{"attribution":"user","strong":{}}},{"text":" food water","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Pack tent","marks":{"attribution":"user","strong":{}}},{"text":" and rope today","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-0716b38a","marks":{"attribution":"user"}}]}
+  ]
+}

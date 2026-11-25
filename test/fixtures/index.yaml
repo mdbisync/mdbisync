@@ -103,6 +103,8 @@ known_constructs:
     class: lint-error
   - construct: item-section-long-run
     class: lint-error
+  - construct: item-long-plus-run-text
+    class: fixable
   - construct: section-long-run
     class: fixable
   - construct: table-line-without-pipe
@@ -132,6 +134,8 @@ known_constructs:
   - construct: table-cell-markers
     class: lint-error
   - construct: table-cell-escaped-markers
+    class: fixable
+  - construct: table-cell-start-dash
     class: fixable
   - construct: list-kinds
     class: fixable
@@ -3665,6 +3669,14 @@ fixtures:
     canary: kx-38d519db
     corpus: false
     note: "escaped list markers at a body cell's start stay text; a cell of only a number and a dot is written with a space after it"
+  - file: "tables/table-cell-start-dash.md"
+    group: tables
+    construct: table-cell-start-dash
+    class: fixable
+    basis: known
+    canary: kx-9bbd184a
+    corpus: false
+    note: "Linear escapes a dash that starts a header or body cell's text, a +, > or number dot before a space and text in a header cell, and drops the escape of a plus sign at a cell's start that opens no list"
   - file: "list-items/list-kinds-in-item.md"
     group: list-items
     construct: list-kinds
@@ -3725,6 +3737,23 @@ fixtures:
     canary: kx-507bbf82
     corpus: false
     note: "an empty bold run before a bold run: Linear bolds the text up to the next ** and leaves the rest plain"
+  - file: "construct-singles/bold-reopened.md"
+    group: construct-singles
+    construct: adjacent-bold-boundaries
+    class: fixable
+    basis: known
+    canary: kx-0716b38a
+    corpus: false
+    note: "bold opened again inside bold: Linear's bold ends at the first closing **, later pairs stay bold and the outer closing ** goes"
+  - file: "construct-singles/item-long-plus-run-text.md"
+    group: construct-singles
+    construct: item-long-plus-run-text
+    class: fixable
+    basis: known
+    canary: kx-a6edb21b
+    git_form: captured
+    corpus: false
+    note: "an item's text that starts with four or more + and runs on after a break is text in Linear; Linear writes it without the escape, which a fresh write reads as a section, so fix keeps the escape and the sync captures it"
   - file: "construct-singles/lone-backtick.md"
     group: construct-singles
     construct: lone-backtick

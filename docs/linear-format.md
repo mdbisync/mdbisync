@@ -217,6 +217,11 @@ Blocks:
   writes it with three: `++++ Tip` and a closing `++++` become `+++ Tip`
   and `+++`. A closing marker pairs only with an opener of its own width,
   so a list item, quote or document that mixes widths is left to you.
+  Where such a run starts a list item or quote whose text goes on in a
+  line below without its indentation (`* ++++Tip` / `lazy words`), Linear
+  keeps it as text; `fix` escapes it (`* \++++Tip` / `  lazy words`).
+  Linear writes that text back without the backslash, and the sync puts
+  the backslash back, since a new document would read it as a section.
 - A bare `+++` opens an untitled section when it has a body or a closing
   marker and there is no section open in the same document, list item or
   quote. `fix` writes that opener with one trailing space, as Linear does.
@@ -260,7 +265,13 @@ Blocks:
   row has no `|`, `fix` leaves the file to you. A cell containing only `#` is written
   as `\#`, preserving its text, and an escaped `#` that starts a cell keeps
   its escape (a bare one in a body cell is the
-  [`table-hash-cell`](#table-hash-cell) rule). A line break tag in a cell
+  [`table-hash-cell`](#table-hash-cell) rule). A `-` that starts a cell's
+  text gets a backslash (`| \-1.5 |`), and an escaped `+` that starts a
+  cell loses it unless a space, a tab, a backslash, a character reference,
+  another `+` or the cell's end follows (`| +1 |`), as Linear writes them. In a header cell, a
+  starting `>` gets a backslash too, and so do a `+` that a space and text
+  follow and a number's dot that whitespace and text follow
+  (`| \+ Plan | 1\. Step |`). A line break tag in a cell
   (`<br>`, `<br/>`, `<br />`) is written as `&#10;`, as Linear writes it.
   Linear shows it as a line break; GitHub shows it as a space. A body cell
   keeps a nonbreaking space around its text; a header cell loses it, as
@@ -313,8 +324,11 @@ Inline text:
   Linear writes `**ab**c`.
   An empty bold run before a bold run, as in `****Plan**.**`, bolds only
   the text up to the next `**` in Linear: it becomes `**Plan**.`.
-  In `**(**notes**)**`, Linear joins the first two bold runs and leaves
-  the closing punctuation outside, as `**(notes**)`. A pair of stars
+  Bold opened again inside bold ends at the first closing `**` in Linear;
+  later bold runs inside stay bold and the outer closing `**` goes:
+  `**Pack **tent** rope **map** food** water` becomes
+  `**Pack tent** rope **map** food water`. So in `**(**notes**)**`, Linear
+  leaves the closing punctuation outside, as `**(notes**)`. A pair of stars
   enclosing italic spans separated by spaces goes, so `**a* *b**`
   becomes `*a* *b*`.
 - Adjacent links to the same destination become one link, since Linear

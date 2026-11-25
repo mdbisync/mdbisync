@@ -289,6 +289,27 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
       groups.set(block, edits);
       return;
     }
+    // Bold opened again inside bold (`**a **b** c** d`): Linear holds bold
+    // as a mark, which the first closing `**` ends, so the reopened opening
+    // and the outer closing marks drop (`**a b** c d`); later reopened runs
+    // stay bold. Only runs of `**` directly inside, holding no bold. A run
+    // that holds just a link is Linear's older spelling of a bold link in
+    // bold text (`**Use the **[map](u)** today**`), read as one bold run.
+    // In a heading, a `#` left at the line's end would close it.
+    const reopened = node.children.filter((child) => child.type === 'strong');
+    const container = ancestors.at(-1)?.type;
+    const exposesCloser = container === 'heading'
+      && /[ \t]#+$/.test(body.slice(start(node), end(node) - 2)) && body.slice(end(node), end(ancestors.at(-1)!)).trim() === '';
+    if (reopened.length > 0 && first !== undefined && first.type !== 'strong' && (container === 'paragraph' || container === 'heading') && !exposesCloser
+      && reopened.every((part) => body.slice(start(part), start(part) + 2) === '**' && body.slice(end(part) - 2, end(part)) === '**'
+        && !holdsStrong(part) && !(part.children.length === 1 && (part.children[0]!.type === 'link' || part.children[0]!.type === 'linkReference')))
+      && node.children.every((child) => child.type === 'strong' || !holdsStrong(child))) {
+      const block = ancestors[1] ?? node;
+      const edits = groups.get(block) ?? [];
+      edits.push({ from: start(reopened[0]!), to: start(reopened[0]!) + 2, text: '' }, { from: end(node) - 2, to: end(node), text: '' });
+      groups.set(block, edits);
+      return;
+    }
     if (first?.type !== 'text' || rest.at(-1)?.type !== 'text') return;
     // Linear joins the opening punctuation's span to the next bold text
     // and leaves the closing punctuation outside it.
@@ -322,6 +343,13 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
   });
   // Changing these bold marks must leave links, other styles and text intact.
   return reSpellBold(body, groups, true) ?? body;
+}
+
+/** Whether a bold run is inside the node. */
+function holdsStrong(node: Nodes): boolean {
+  let found = false;
+  visit(node, (child) => { found ||= child !== node && child.type === 'strong'; });
+  return found;
 }
 
 /** Re-spell bold across line breaks and around a single link in the written body. */
@@ -1006,8 +1034,11 @@ class Writer {
         let text = header ? inline.trim() : trimKeepingWideSpace(inline);
         // The trim can take leading whitespace past which Linear escapes: look past what is left.
         const lead = text.length - text.trimStart().length;
-        const escape = header || unicodeSpaceLead(inline.replace(/^[ \t]+/, '')) === 0 ? undefined : headingOrNumberEscape(text.slice(lead));
+        const escape = header ? headerCellEscape(text) : unicodeSpaceLead(inline.replace(/^[ \t]+/, '')) === 0 ? undefined : headingOrNumberEscape(text.slice(lead));
         if (escape !== undefined) text = `${text.slice(0, lead + escape)}\\${text.slice(lead + escape)}`;
+        // Linear escapes a dash that starts a cell's text (`\-1.5`); a dash
+        // before a space is a list there, which lint reports.
+        else if (text.startsWith('-')) text = `\\${text}`;
         // Linear holds a body cell of only a number and a dot as an empty
         // ordered list and writes the space after its marker.
         if (!header && /^\d{1,9}\.$/.test(text)) text += ' ';
@@ -1753,7 +1784,11 @@ class Writer {
   }
 
   private redundantLineEscape(at: number, char: string): boolean {
-    if (at === this.cellStart || !'#-=+>'.includes(char)) return false;
+    if (!'#-=+>'.includes(char)) return false;
+    // A cell's first escape stays, except before a plus sign that opens no
+    // list: Linear writes `\+1` there as `+1`. A character reference after
+    // it can decode to a space (`\+&#32;a`), so the escape stays before one.
+    if (at === this.cellStart) return char === '+' && /^\+[^+ \t\r\n|\\&]/.test(this.source.slice(at + 1, at + 3));
     if (char === '#' && this.source[at - 1] === '&') return false;
     if (char === '#') {
       // Past a no-break space at the line's start Linear escapes a heading-like run.
@@ -2742,6 +2777,17 @@ function unicodeSpaceLead(line: string): number {
 function headingOrNumberEscape(rest: string): number | undefined {
   if (/^#{1,6}(?:\s|$)/.test(rest)) return 0;
   const number = /^\d+(?=\.\s+\S)/.exec(rest);
+  return number === null ? undefined : number[0].length;
+}
+
+/**
+ * Where Linear escapes the start of a header cell's text: any `>`, a `+`
+ * before a space and more text (0), or a number's dot (`1\. a`). A `#`, a
+ * lone `+`, a `+` before a tab and a number with `)` stay plain there.
+ */
+function headerCellEscape(text: string): number | undefined {
+  if (text.startsWith('>') || /^\+ +\S/.test(text)) return 0;
+  const number = /^\d+(?=\.[ \t]+\S)/.exec(text);
   return number === null ? undefined : number[0].length;
 }
 
