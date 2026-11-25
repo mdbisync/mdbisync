@@ -58,6 +58,8 @@ rules:
     title: "A backslash line break becomes a plain line break."
   - id: hard-break-in-heading
     title: "A hard line break in a setext heading is lost when the heading is written as one line."
+  - id: tab-reference-layout
+    title: "A literal tab would change how Markdown reads the document."
   - id: git-conflict-marker
     title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
   - id: section-opener
@@ -109,6 +111,10 @@ known_constructs:
     class: lint-error
   - construct: space-reference
     class: fixable
+  - construct: tab-reference
+    class: fixable
+  - construct: tab-reference-layout
+    class: lint-error
   - construct: lone-backtick
     class: fixable
   - construct: adjacent-links
@@ -3529,3 +3535,91 @@ fixtures:
     canary: kx-4eec1c8c
     corpus: false
     note: "Linear joins adjacent links to the same destination into one, with the marks around each part inside it; a space, another destination or a line ending keeps them apart"
+  - file: "construct-singles/bold-punctuation-boundaries.md"
+    group: construct-singles
+    construct: adjacent-bold-boundaries
+    class: fixable
+    basis: known
+    canary: kx-09b751c4
+    corpus: false
+    note: "Closing punctuation moves outside a split bold run"
+  - file: "construct-singles/bold-italic-boundaries.md"
+    group: construct-singles
+    construct: adjacent-bold-boundaries
+    class: fixable
+    basis: known
+    canary: kx-09b751c5
+    corpus: false
+    note: "Outer stars around whitespace-separated italic runs disappear"
+  - file: "links/url-punctuation-boundaries.md"
+    group: links
+    construct: bare-url-endings
+    class: fixable
+    basis: known
+    canary: kx-09b751c3
+    corpus: false
+    note: "Trailing punctuation stays outside the link, including the last comma or semicolon in a run"
+  - file: "links/url-star-boundaries.md"
+    group: links
+    construct: bare-url-endings
+    class: fixable
+    basis: known
+    canary: kx-09b751c2
+    corpus: false
+    note: "Two or more periods before stars end the bare link"
+  - file: "links/url-bare-controls.md"
+    group: links
+    construct: bare-url-endings
+    class: fixable
+    basis: known
+    canary: kx-09b751d5
+    corpus: false
+    note: "A scheme-less link follows the same path punctuation rules"
+  - file: "construct-singles/tab-reference-middle.md"
+    group: construct-singles
+    construct: tab-reference
+    class: fixable
+    basis: known
+    canary: kx-09b751d0
+    corpus: false
+    note: "Linear decodes tabs inside text and moves them outside inline marks"
+  - file: "lint-errors/tab-reference-blank.md"
+    group: lint-errors
+    construct: tab-reference-layout
+    class: lint-error
+    basis: known
+    rule: tab-reference-layout
+    line: 1
+    canary: kx-09b751c0
+    corpus: false
+    note: "A single tab is a paragraph in Linear and a blank line in Markdown"
+  - file: "lint-errors/tab-reference-list.md"
+    group: lint-errors
+    construct: tab-reference-layout
+    class: lint-error
+    basis: known
+    rule: tab-reference-layout
+    line: 1
+    canary: kx-09b751d1
+    corpus: false
+    note: "Markdown reads the exported tabs as list or quote indentation and discards trailing tabs"
+  - file: "lint-errors/tab-reference-trailing.md"
+    group: lint-errors
+    construct: tab-reference-layout
+    class: lint-error
+    basis: known
+    rule: tab-reference-layout
+    line: 1
+    canary: kx-09b751d2
+    corpus: false
+    note: "Markdown drops the tabs Linear keeps at the end of a paragraph"
+  - file: "lint-errors/tab-reference-leading-mark.md"
+    group: lint-errors
+    construct: tab-reference-layout
+    class: lint-error
+    basis: known
+    rule: tab-reference-layout
+    line: 1
+    canary: kx-09b751d3
+    corpus: false
+    note: "Markdown reads the exported leading tabs as code indentation"

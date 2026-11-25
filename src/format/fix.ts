@@ -16,7 +16,8 @@ import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
-import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, listKind, opensWithText, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { tabReferences } from './tab-reference.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, listKind, opensWithText, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -40,7 +41,7 @@ export interface FixOptions {
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
-  const normalized = body.replace(/\r\n?/g, '\n');
+  const normalized = tabReferences(body.replace(/\r\n?/g, '\n')).text;
   const sections = sectionOpenersAsLinear(normalized);
   const lf = sections === normalized ? plusSectionsAsLinear(sections) : sections;
   if (lf === undefined) return text;
@@ -195,9 +196,11 @@ function fixBody(body: string, options: FixOptions): string | undefined {
   return rewroteSections ? undefined : current;
 }
 
-/** Linear closes the first bold span at the second four-star boundary. */
+const SPLIT_BOLD_PUNCTUATION = new Set(['()', '[]', '«»', ':!', ':?', '(!']);
+
+/** Linear closes the first bold span at the second boundary. */
 function adjacentBoldAsLinear(body: string, tree: Root): string {
-  if (!body.includes('****')) return body;
+  if (!body.includes('**')) return body;
   const groups = new Map<Nodes, Edit[]>();
   visit(tree, (node, ancestors) => {
     if (node.type !== 'strong' || node.position!.start.line !== node.position!.end.line
@@ -205,6 +208,19 @@ function adjacentBoldAsLinear(body: string, tree: Root): string {
     if (body.slice(start(node), start(node) + 2) !== '**') return;
     const [first, ...rest] = node.children;
     if (first?.type !== 'text' || rest.at(-1)?.type !== 'text') return;
+    // Linear joins the opening punctuation's span to the next bold text
+    // and leaves the closing punctuation outside it.
+    const [inner, closing] = rest;
+    if (rest.length === 2 && inner?.type === 'strong' && closing?.type === 'text'
+      && SPLIT_BOLD_PUNCTUATION.has(first.value + closing.value)
+      && body.slice(start(inner), start(inner) + 2) === '**'
+      && end(first) === start(inner) && end(inner) === start(closing)) {
+      const block = ancestors[1] ?? node;
+      const edits = groups.get(block) ?? [];
+      edits.push({ from: start(inner), to: start(inner) + 2, text: '' }, { from: end(node) - 2, to: end(node), text: '' });
+      groups.set(block, edits);
+      return;
+    }
     const boundaries = rest.filter((part) => part.type === 'strong');
     if (boundaries.length === 0 || rest.some((part) => part.type !== 'text' && part.type !== 'strong')) return;
     if (boundaries.some((part) =>
@@ -247,7 +263,7 @@ function linearBoldForms(body: string, tree?: Root, splitLines = true): string {
     if (node.type === 'strong' || node.type === 'emphasis') {
       const parent = ancestors.at(-1);
       if (!((parent?.type === 'strong' || parent?.type === 'emphasis') && parent.children.length === 1)) {
-        const edit = boldLinkEdit(body, node) ?? boldItalicEdit(body, node);
+        const edit = splitItalicSpans(body, node) ?? boldLinkEdit(body, node) ?? boldItalicEdit(body, node);
         if (edit !== undefined) group().links.push(edit);
       }
     }
@@ -304,6 +320,12 @@ function linearBoldForms(body: string, tree?: Root, splitLines = true): string {
   }
   const split = reSpellBold(body, breaks);
   return split === undefined ? reSpellBold(body, links) ?? body : linearBoldForms(split, undefined, false);
+}
+
+/** A pair of outer stars around spaced italic spans adds no visible emphasis. */
+function splitItalicSpans(body: string, node: PhrasingContent): Edit | undefined {
+  if (!hasOuterStars(body, node)) return;
+  return { from: start(node), to: end(node), text: body.slice(start(node) + 1, end(node) - 1) };
 }
 
 /** Coextensive bold and italic use one three-star delimiter on each side. */

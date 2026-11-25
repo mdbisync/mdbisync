@@ -1,0 +1,11 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Finish\t","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Check\t\t","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Done\t","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-09b751d2","marks":{"attribution":"user"}}]}
+  ]
+}

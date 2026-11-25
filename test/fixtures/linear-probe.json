@@ -109,6 +109,14 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/bold-italic-boundaries.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/bold-punctuation-boundaries.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/break-backslash.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -525,6 +533,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/tab-reference-middle.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/task-checked.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -873,6 +885,18 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "links/url-bare-controls.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/url-punctuation-boundaries.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/url-star-boundaries.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "lint-errors/badge-in-link.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -914,6 +938,22 @@
       "fixedPoint": true
     },
     "lint-errors/subscript.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/tab-reference-blank.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/tab-reference-leading-mark.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/tab-reference-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/tab-reference-trailing.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

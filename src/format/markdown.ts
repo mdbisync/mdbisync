@@ -1068,6 +1068,16 @@ function comparableBoldForms(node: ComparableNode, insideStrong = false): Compar
   return [{ ...node, children }];
 }
 
+/** A pair of outer stars around simple italic spans separated by whitespace. */
+export function hasOuterStars(body: string, node: Nodes): boolean {
+  if (node.type !== 'emphasis' || node.position === undefined) return false;
+  const { children } = node;
+  return body.slice(start(node), start(node) + 2) === '**' && body.slice(end(node) - 2, end(node)) === '**'
+    && children.length >= 3 && children.length % 2 === 1 && children.every((child, index) => index % 2 === 0
+      ? child.type === 'emphasis' && child.children.every((part) => part.type === 'text')
+      : child.type === 'text' && /^[ \t]+$/.test(child.value));
+}
+
 /** Apply coextensive marks once, in the same order on either side of a comparison. */
 function coextensiveBoldForms(node: ComparableNode): ComparableNode {
   let inner = node;
@@ -1122,7 +1132,8 @@ function comparable(body: string, { linearNumberSpacing, linearBoldForms, ignore
         const startsLine = node.type === 'paragraph' ? index === 0 || node.children[index - 1]?.type === 'break' : undefined;
         const part = strip(child, startsLine);
         // Nested strong is redundant. For adjacent bold rewrites compare everything except bold.
-        if ((ignoreBold || node.type === 'strong') && part.type === 'strong') {
+        if (((ignoreBold || node.type === 'strong') && part.type === 'strong')
+          || (linearBoldForms && hasOuterStars(marked, child))) {
           for (const nested of part.children!) appendComparable(children, nested);
         } else {
           appendComparable(children, part);

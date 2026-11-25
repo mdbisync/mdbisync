@@ -15,6 +15,7 @@ import { parse, visit } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
 const cases: Array<[LintRule, string, number]> = [
+  ['tab-reference-layout', 'Seed&#9;order\n\n1. &#9;Collect', 3],
   ['footnote', 'Text.\n\nA claim.[^1]\n\n[^1]: Source.', 3],
   ['footnote', 'An inline note.^[Text.]', 1],
   ['subscript', 'H~2~O', 1],
@@ -77,6 +78,19 @@ const cases: Array<[LintRule, string, number]> = [
   ['image-not-in-repository', '![Folder](img/)', 1],
   ['image-not-in-repository', '![Query](?raw=1)', 1],
 ];
+
+it('tab references that change Markdown layout stop fix only', () => {
+  const cases = [
+    '&#9;', '**&#9;&#9;Tip**', 'Collect&#9;', '1. &#9;Collect', '> &#9;Rest',
+    'See **&#9;** today.', 'Before&#9;![Photo](photo.png) after.',
+    'Before ![Photo](photo.png) &#9;after.', 'See www.example.com/garden&#9;',
+  ];
+  for (const input of cases) {
+    assert.deepEqual(lintText('doc.md', input).map(({ rule, line }) => [rule, line]), [['tab-reference-layout', 1]], input);
+    assert.deepEqual(lintInTree('doc.md', input, new Set(['photo.png'])), [], input);
+    assert.equal(fixText(input), input);
+  }
+});
 
 describe('lint rules', () => {
   it('table-hash-cell spares a header hash, an escaped hash and a hash that is no heading', () => {
