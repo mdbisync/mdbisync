@@ -574,18 +574,41 @@ class Writer {
    * stay unaligned.
    */
   private list(node: List, interruptsParagraph = false): string {
-    const first = node.start ?? 1;
-    const last = first + node.children.length - 1;
-    const padding = `${last}.`.length - `${first}.`.length;
+    const start = node.start ?? 1;
+    // Linear holds the parts that two blank lines after an empty item split off as lists of their own.
+    const parts: ListItem[][] = [];
+    node.children.forEach((item, index) => {
+      if (index === 0 || splitsAfter(node.children[index - 1]!, item)) parts.push([item]);
+      else parts.at(-1)!.push(item);
+    });
     const before = this.listBefore.get(node);
-    const beforeIndent = before === undefined ? Infinity : itemIndent(before);
-    const width = node.ordered && padding <= 3 && padding < beforeIndent ? `${last}.`.length : 0;
-    return node.children
-      .map((item, index) => {
-        const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${(node.start ?? 1) + index}.`.padStart(width) : '*';
-        return this.listItem(item, marker, interruptsParagraph && index === 0);
+    let beforeIndent = before === undefined ? Infinity : itemIndent(before);
+    let index = 0;
+    return parts
+      .map((items) => {
+        const first = start + index;
+        const last = first + items.length - 1;
+        const padding = `${last}.`.length - `${first}.`.length;
+        const width = node.ordered && padding <= 3 && padding < beforeIndent ? `${last}.`.length : 0;
+        const written = items.map((item) => {
+          const number = start + index++;
+          const marker = item.checked !== null && item.checked !== undefined ? `- [${item.checked ? 'X' : ' '}]` : node.ordered ? `${number}.`.padStart(width) : '*';
+          return this.listItem(item, marker, interruptsParagraph && number === start);
+        });
+        beforeIndent = !node.ordered || items.at(-1)!.checked != null ? 2 : `${last}.`.length + 1;
+        return written.join('\n');
       })
-      .join('\n');
+      .join('\n\n\n');
+  }
+
+  /**
+   * Whether an item's first line holds its text: not a file block or a
+   * section below an empty marker line. The marker line of a list that
+   * follows another without a blank line must not be empty.
+   */
+  private textOnMarkerLine(item: ListItem): boolean {
+    const [first] = item.children;
+    return first?.type === 'paragraph' && itemAttachment(item) === undefined && !/^\+{3}[ \t]*$/.test(this.source.slice(start(first), end(first)));
   }
 
   private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
@@ -639,10 +662,16 @@ class Writer {
       const previous = item.children[index - 1];
       const interrupts = child.type === 'list'
         && previous?.type === 'paragraph'
-        && (!child.ordered || (child.start ?? 1) === 1)
-        && child.children[0]!.children.length > 0
+        && opensWithText(child)
         && !(child.position!.start.line > previous.position!.end.line + 1 && startsWithFileBlock(child));
-      const separator = index === 0 ? '' : interrupts ? '\n' : '\n\n';
+      // Linear writes a list of another kind (bullet, numbered, task) right
+      // below the list before it in the same item. A marker that cannot
+      // interrupt a paragraph keeps its blank line: the previous list's
+      // last line would take it in.
+      const followsList = child.type === 'list' && previous?.type === 'list'
+        && listKind(previous, previous.children.at(-1)!) !== listKind(child, child.children[0]!)
+        && opensWithText(child) && this.textOnMarkerLine(child.children[0]!);
+      const separator = index === 0 ? '' : interrupts || followsList ? '\n' : '\n\n';
       const written = child.type === 'list' ? this.list(child, interrupts) : this.block(child).join('\n\n');
       line += separator.length;
       const breaks = lineBreaks(written);
@@ -660,6 +689,10 @@ class Writer {
       && !/(?:^|\n)[ \t>]*\+{4}/.test(this.source.slice(start(first), end(item)))) {
       return `${marker} \n\n${lines.join('\n')}`;
     }
+    // Linear writes a list that starts an item below an empty marker line
+    // (`1. 2.` becomes `1. ` and `   2. `), which Markdown reads as the
+    // same nested list.
+    if (first.type === 'list') return `${marker} \n${lines.join('\n')}`;
     return `${marker} ${lines.join('\n').slice(indent.length)}`;
   }
 
@@ -1684,6 +1717,29 @@ function endsWithTable(tree: Root): boolean {
     node = (node.children as Nodes[]).findLast((child) => child.type !== 'definition');
   }
   return node?.type === 'table';
+}
+
+/**
+ * Whether Linear ends the list after an item: two blank lines after an
+ * empty item start a new list, which Linear writes two blank lines below
+ * it. Markdown reads the same list either way.
+ */
+function splitsAfter(item: ListItem, next: ListItem): boolean {
+  return item.children.length === 0 && next.position!.start.line - item.position!.end.line > 2;
+}
+
+/** The kind of list Linear holds an item in: task items have their own list, without numbers. */
+function listKind(list: List, item: ListItem): 'task' | 'ordered' | 'bullet' {
+  return item.checked != null ? 'task' : list.ordered ? 'ordered' : 'bullet';
+}
+
+/**
+ * Whether the list's first line, as `fix` writes it, can interrupt a
+ * paragraph: its first item starts with text, and a number that starts it is 1.
+ */
+function opensWithText(list: List): boolean {
+  const [item] = list.children;
+  return item !== undefined && item.children[0]?.type === 'paragraph' && (listKind(list, item) !== 'ordered' || (list.start ?? 1) === 1);
 }
 
 function startsWithFileBlock(list: List): boolean {

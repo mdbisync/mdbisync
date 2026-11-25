@@ -2,7 +2,7 @@
 // test (test/format/bank.test.ts) checks the same rules against Linear's
 // recorded forms.
 
-import type { Blockquote, List, Paragraph } from 'mdast';
+import type { Blockquote, List, Nodes, Paragraph } from 'mdast';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -92,6 +92,19 @@ function readMarkdown(markdown: string): string[] {
     else out.push(node.type);
   });
   return out;
+}
+
+/**
+ * The tree Markdown reads, nested: node types, text, list starts and task
+ * states. Looseness and source positions are left out, as `fix` changes them.
+ */
+function readTree(markdown: string): unknown {
+  const node = (value: Nodes): unknown => {
+    if (value.type === 'text') return value.value;
+    const label = value.type === 'list' ? `list ${value.ordered ? value.start ?? 1 : '*'}` : value.type === 'listItem' ? `item ${value.checked ?? ''}` : value.type;
+    return 'children' in value ? [label, ...(value.children as Nodes[]).map(node)] : label;
+  };
+  return node(parse(markdown));
 }
 
 describe('fix rules', () => {
@@ -412,6 +425,54 @@ describe('an empty first nested item after its parent’s text', () => {
       assert.equal(nested[1]!.children[0]?.type, 'paragraph');
     });
   }
+});
+
+describe('list boundaries as Linear writes them', () => {
+  const written: Array<[string, string, string]> = [
+    // In an item, a list of another kind follows the list before it on the next line.
+    ['a bullet list after a numbered one in an item', '* Plan\n  1. one\n\n  * two', '* Plan\n  1. one\n  * two'],
+    ['a numbered list after a bullet one in an item', '1. Plan\n   * one\n\n   1. two', '1. Plan\n   * one\n   1. two'],
+    ['a task list after a numbered one in an item', '* Plan\n  1. one\n\n  - [ ] two', '* Plan\n  1. one\n  - [ ] two'],
+    ['a numbered list after a task one in an item', '* Plan\n  - [x] one\n\n  1. two', '* Plan\n  - [X] one\n  1. two'],
+    ['a task list after a bullet one in an item', '* Plan\n  * one\n\n  - [ ] two', '* Plan\n  * one\n  - [ ] two'],
+    ['lists of other kinds in a deeper item and in a quote', '* Plan\n  * Step\n    1. one\n\n    * two\n\n> * Plan\n>   * one\n>\n>   1. two', '* Plan\n  * Step\n    1. one\n    * two\n\n> * Plan\n>   * one\n>   1. two'],
+    ['a list after one whose item has more text', '* Plan\n  * one\n    more\n\n  1. two', '* Plan\n  * one\n    more\n  1. two'],
+    // Each of these would join the line before it: the blank line stays.
+    ['a numbered list from 3 after a bullet one keeps its blank line', '* Plan\n  * one\n\n  3. two', '* Plan\n  * one\n\n  3. two'],
+    ['a list opening with an empty item keeps its blank line', '* Plan\n  1. one\n\n  *\n  * two', '* Plan\n  1. one\n\n  * \n  * two'],
+    ['a list opening with a file block keeps its blank line', '* Plan\n  1. one\n\n  * [Report](report.csv)', '* Plan\n  1. one\n\n  * \n    [Report](report.csv)'],
+    ['a list opening with a nested list keeps its blank line', '* Plan\n  1. one\n\n  * * two', '* Plan\n  1. one\n\n  * \n    * two'],
+    // Outside an item, lists of other kinds stay a blank line apart.
+    ['top-level lists of other kinds stay a blank line apart', '1. one\n* two\n\n- [ ] three', '1. one\n\n* two\n\n- [ ] three'],
+    // Two blank lines after an empty item start a new list in Linear.
+    ['two blank lines after an empty item', '1. one\n2.\n\n\n\n3. three', '1. one\n2. \n\n\n3. three'],
+    ['two blank lines after an empty bullet, nested and in a quote', '* one\n*\n\n\n* three\n\nText.\n\n* Plan\n  1. one\n  2.\n\n\n  3. three\n\n> 1. one\n> 2.\n>\n>\n> 3. three', '* one\n* \n\n\n* three\n\nText.\n\n* Plan\n  1. one\n  2. \n\n\n  3. three\n\n> 1. one\n> 2. \n>\n>\n> 3. three'],
+    ['two blank lines after an empty first item', '1.\n\n\n2. two', '1. \n\n\n2. two'],
+    // Each part aligns its numbers on its own, as Linear's separate lists do.
+    ['each part of a split list aligns on its own', '9.\n\n\n10. ten\n\nText.\n\n8. eight\n9.\n\n\n10. ten\n11. eleven', '9. \n\n\n10. ten\n\nText.\n\n8. eight\n9. \n\n\n10. ten\n11. eleven'],
+    ['one blank line after an empty item goes', '1. one\n2.\n\n3. three', '1. one\n2. \n3. three'],
+    ['two blank lines after an item with text go', '* one\n\n\n* two', '* one\n* two'],
+    // A list that starts an item goes on the next line.
+    ['an item whose text is only a number and a dot', '1. 2.\n\n* 3.\n* next', '1. \n   2. \n\n* \n  3. \n* next'],
+    ['an item that starts with a list', '* * one\n  * two\n\n  more\n\nText.\n\n1. 3. three\n\nText.\n\n1. - [ ] four', '* \n  * one\n  * two\n\n  more\n\nText.\n\n1. \n   3. three\n\nText.\n\n1. \n   - [ ] four'],
+    ['a list that starts an item stays below its marker line', '* \n  * one\n\n1. \n   12. ', '* \n  * one\n\n1. \n   12. '],
+    ['a list in the first item of a nested list after text', '* Plan\n  * * one', '* Plan\n\n  * \n    * one'],
+  ];
+  for (const [name, input, expected] of written) {
+    it(name, () => {
+      const fixed = fixText(input);
+      assert.equal(fixed, expected);
+      assert.equal(fixText(fixed), fixed, 'the result is a fixed point');
+      assert.deepEqual(lintText('a.md', fixed), [], 'lint finds nothing');
+      assert.deepEqual(readTree(fixed), readTree(input), 'Markdown reads the same document');
+    });
+  }
+  it('a list opening with a section keeps its blank line', () => {
+    // The section is written in Linear's form below an empty marker line, which must not follow the list's text.
+    const fixed = fixText('* Plan\n  1. one\n\n  * +++ \n\n    words\n\n    +++');
+    assert.equal(fixed, '* Plan\n  1. one\n\n  * \n\n    +++ \n\n    words\n\n    +++');
+    assert.equal(fixText(fixed), fixed, 'the result is a fixed point');
+  });
 });
 
 describe('text split off at an image', () => {
@@ -745,10 +806,10 @@ describe('what fix leaves alone', () => {
     // Four spaces would open indented code.
     const long = items(1, 10000);
     assert.equal(fixText(long), long);
-    // An item that starts with a list is lint's to report: fix leaves the file alone.
-    for (const text of ['* 9. a\n  10. b', '1. 9. a\n   10. b']) {
-      assert.equal(fixText(text), text, text);
-      assert.ok(lintText('a.md', text).some((finding) => finding.rule === 'block-first-in-list-item'), text);
+    // A list that starts an item goes below its marker line and aligns there.
+    for (const [text, fixed] of [['* 9. a\n  10. b', '* \n   9. a\n  10. b'], ['1. 9. a\n   10. b', '1. \n    9. a\n   10. b']] as const) {
+      assert.equal(fixText(text), fixed, text);
+      assert.deepEqual(readTree(fixed), readTree(text), text);
     }
     for (const text of [afterBullet, `* Intro\n\n${items(1, 10)}`, `> - [ ] a\n\n${items(8, 10)}`]) {
       assert.deepEqual(readMarkdown(fixText(text)), readMarkdown(text), `same document: ${text.slice(0, 20)}`);

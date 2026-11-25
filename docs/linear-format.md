@@ -121,7 +121,15 @@ Blocks:
 - Thematic breaks become `---`: `***` becomes `---`.
 - Bullets become `*`: `- item` becomes `* item`.
 - Loose lists become tight: the blank lines between items go, and a nested
-  list follows its paragraph on the next line.
+  list follows its paragraph on the next line. In a list item, a list of
+  another kind (bullet, numbered, task) follows the list before it on the
+  next line too, where its first line can start a list there.
+- Two or more blank lines after an empty item end the list in Linear:
+  `fix` keeps two there (`2. `, two blank lines, `3. c`). Elsewhere they
+  collapse like other blank lines between items.
+- A list that starts an item goes below the item's marker line, which
+  keeps its space: `fix` writes `1. 2.` as `1. ` above `   2. `, and
+  `* * a` as `* ` above `  * a`.
 - Ordered lists use dots and count up from their start: `1) a` becomes
   `1. a`. Numbers are right-aligned to the widest one, and every item's
   content lines up past it: in a list of ten items, the first is written
@@ -676,13 +684,14 @@ See "www.example.com/a\_b" for details.
 
 ### `block-first-in-list-item`
 
-A list item that starts with a heading, code, a quote, a list or another
-block is written in a form Markdown reads as an empty item. Start the item
-with a line of text and put the block below it. Linear's list items always
-start with a paragraph: it adds an empty one and writes the marker, a blank
-line and the indented block, so the block falls out of the list. A list
-that starts an item (`* * a`, `1. 3. b`) counts too. `fix` cannot choose
-the text the item should start with, so it leaves the file to you.
+A list item that starts with a heading, code, a quote or another block is
+written in a form Markdown reads as an empty item. Start the item with a
+line of text and put the block below it. Before such a block Linear adds
+an empty paragraph and writes the marker, a blank line and the indented
+block, so the block falls out of the list. `fix` cannot
+choose the text the item should start with, so it leaves the file to you.
+A list that starts an item (`* * a`, `1. 2.`) is no finding: `fix` writes
+it below the marker line, as Linear does.
 
 ```markdown
 * ## Step one
