@@ -2,7 +2,7 @@
 // positions, and the split between front matter and the body.
 
 import { isDeepStrictEqual } from 'node:util';
-import type { List, ListItem, Nodes, Paragraph, Parent, PhrasingContent, Root, Text } from 'mdast';
+import type { List, ListItem, Nodes, Paragraph, Parent, PhrasingContent, Root, Text, Table, TableRow } from 'mdast';
 import { fromMarkdown, type Extension, type Transform } from 'mdast-util-from-markdown';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
@@ -1355,6 +1355,31 @@ export function advanceColumn(column: number, char: string): number {
 
 export function end(node: Nodes): number {
   return node.position?.end.offset ?? 0;
+}
+
+/** Item text CommonMark and Linear read as a nested list: a marker followed by text, or a lone bullet or number and dot. */
+const NESTED_MARKER_TEXT = /^(?:(?:[*+-]|\d{1,9}[.)])[ \t]+\S|(?:[*+-]|\d{1,9}\.)[ \t]*$)/;
+
+/**
+ * Whether the item's text starts with a list marker that Linear, like
+ * CommonMark, reads as a list nested in the item (`1. 2. a`). The parser
+ * reads it as text where the item's list interrupts a paragraph (`Note` /
+ * `1. 3. plum`, `* x` / `  1. 2. a`); an escaped marker stays text in both.
+ */
+export function nestsMarkerText(body: string, item: ListItem): boolean {
+  const [first] = item.children;
+  if (item.checked != null || first?.type !== 'paragraph' || first.children[0]?.type !== 'text') return false;
+  if (body.slice(start(item), start(first)).includes('\n')) return false;
+  return NESTED_MARKER_TEXT.test(body.slice(start(first), end(first)));
+}
+
+/**
+ * The first body row of a table whose line has no `|`. Linear ends the table
+ * there and reads that line, and the lines after it, as a paragraph; GFM
+ * reads them as rows.
+ */
+export function endingRow(body: string, table: Table): TableRow | undefined {
+  return table.children.slice(1).find((row) => !body.slice(start(row), end(row)).includes('|'));
 }
 
 export function line(node: Nodes): number {

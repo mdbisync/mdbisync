@@ -82,6 +82,8 @@ rules:
     title: "Linear keeps only the first line of a heading underlined with = or - as the heading; the lines after it become a paragraph. Put the heading text on one line."
   - id: table-header-pipe
     title: "A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |."
+  - id: number-paragraph
+    title: "A paragraph that is only a number and a dot or parenthesis comes back from Linear without the backslash, which reads as an empty numbered list item."
   - id: list-after-item-text
     title: "In a list item, Linear writes a list on the line right below the text or the list of another kind before it, where Markdown reads a first marker that cannot interrupt a paragraph as text."
   - id: list-number-too-long
@@ -94,6 +96,18 @@ known_constructs:
   - construct: list-after-block-in-item
     class: fixable
   - construct: list-number-too-long
+    class: lint-error
+  - construct: item-section-long-run
+    class: fixable
+  - construct: section-long-run
+    class: fixable
+  - construct: table-line-without-pipe
+    class: fixable
+  - construct: list-marker-in-item-text
+    class: fixable
+  - construct: task-text-block-starts
+    class: fixable
+  - construct: number-paragraph
     class: lint-error
   - construct: heading-empty
     class: fixable
@@ -3578,6 +3592,56 @@ fixtures:
     canary: kx-4eec1c8c
     corpus: false
     note: "Linear joins adjacent links to the same destination into one, with the marks around each part inside it; a space, another destination or a line ending keeps them apart"
+  - file: "construct-singles/item-section-long-run.md"
+    group: construct-singles
+    construct: item-section-long-run
+    class: fixable
+    basis: known
+    canary: kx-750c916e
+    corpus: false
+    note: "a run of four or more + starting a list item or quote opens a section when more of it follows, written with three signs; alone it stays text"
+  - file: "construct-singles/section-long-run.md"
+    group: construct-singles
+    construct: section-long-run
+    class: fixable
+    basis: known
+    canary: kx-a7bb8e54
+    corpus: false
+    note: "longer + markers pair by their width and are written with three signs; a bare run opens an untitled section"
+  - file: "tables/table-line-without-pipe.md"
+    group: tables
+    construct: table-line-without-pipe
+    class: fixable
+    basis: known
+    canary: kx-2e2e7fd4
+    corpus: false
+    note: "Linear ends a table at a line without a pipe and reads it and the lines below it as a paragraph"
+  - file: "list-items/list-marker-in-item-text.md"
+    group: list-items
+    construct: list-marker-in-item-text
+    class: fixable
+    basis: known
+    canary: kx-833d1d0f
+    corpus: false
+    note: "a list marker starting the text of an item whose list follows a paragraph is a nested list in Linear and CommonMark"
+  - file: "list-items/task-text-block-starts.md"
+    group: list-items
+    construct: task-text-block-starts
+    class: fixable
+    basis: known
+    canary: kx-9c08b6dd
+    corpus: false
+    note: "Linear escapes a list marker, # or > followed by a space after a task checkbox, but not N) or a number alone"
+  - file: "lint-errors/number-paragraph.md"
+    group: lint-errors
+    construct: number-paragraph
+    class: lint-error
+    rule: number-paragraph
+    line: 3
+    basis: known
+    canary: kx-e9d93dc0
+    corpus: false
+    note: "Linear writes a paragraph of only a number and a dot without its escape"
   - file: "construct-singles/bold-punctuation-boundaries.md"
     group: construct-singles
     construct: adjacent-bold-boundaries
