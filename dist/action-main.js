@@ -29018,7 +29018,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.1-rc.4" : packageJson.version;
+var VERSION = true ? "1.0.1-rc.5" : packageJson.version;
 
 // src/linear/facts.ts
 var CONTENT_LIMIT = 25e4;
@@ -29050,11 +29050,11 @@ function lengthRefusal(document3, facts = LINEAR_FACTS) {
 var LINT_RULES = {
   footnote: "Footnotes are dropped.",
   subscript: "Tilde subscript is dropped.",
-  "table-escaped-pipe": "An escaped pipe in a plain table cell splits the row. Put the cell text in inline code, or rephrase it without the pipe.",
+  "table-escaped-pipe": "A pipe in a plain table cell, escaped or written as a character reference, comes back from Linear unescaped, which splits the row. Put the cell text in inline code, or rephrase it without the pipe.",
   "table-hash-cell": "A table body cell starting with # becomes a heading.",
   "table-list-cell": "A table body cell starting with -, + or * and a space, or with a number and ), becomes a list, which Linear writes with * or a number and a dot. Put a backslash before the -, + or *, or reword the cell.",
   "image-in-link": "The link around an image is dropped.",
-  "content-too-long": "This document exceeds Linear's 250,000-character content limit. The author must decide how to shorten or split it.",
+  "content-too-long": "This document exceeds Linear's 250,000-character content limit. Linear refuses the whole document, so the sync leaves the file out until it fits. The author must decide how to shorten or split it.",
   "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.",
   "duplicate-title": "Two or more files map to one document title.",
   "table-alignment": "Table column alignment is dropped. Remove the colons from the separator row to accept that.",
@@ -29065,12 +29065,18 @@ var LINT_RULES = {
   "hard-break-backslash": "A backslash line break becomes a plain line break. Run fix to write it as Linear does; where fix leaves it, put the text on one line or start a new paragraph.",
   "setext-heading-lines": "Linear keeps only the first line of a heading underlined with = or - as the heading; the lines after it become a paragraph. Put the heading text on one line.",
   "table-header-pipe": "A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |.",
+  "code-span-padding": "Linear drops a space at each end of inline code that starts and ends with a space, or that holds only three spaces or more, so the code reads differently. Remove the spaces at the ends of the code, or keep a space at one end only; write code of spaces alone as one or two spaces.",
   "hard-break-in-heading": "A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.",
+  "number-paragraph": "A paragraph that is only a number and a dot or parenthesis, such as 7\\., comes back from Linear without the backslash, which reads as an empty numbered list item. Add text after the number, or remove the line.",
+  "tab-reference-layout": "Linear writes tab character references as literal tabs. Fix leaves this document as-is because a tab would change how Markdown reads it. Reword the text or use ordinary spacing.",
+  "space-reference-edge": "Linear stores a space character reference at the start or end of a paragraph, heading or list item as a space, and drops that space the next time the document is written, so no form of this text stays the same in Linear. Fix leaves this document as-is. Remove the reference, or keep the space inside the text.",
   "git-conflict-marker": "Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.",
-  "section-opener": "A line starting with >>> opens a collapsible section in Linear, which fix cannot write here: the file also has lines starting with +++, which Linear pairs with it, or the section would end inside code. Write the section with +++ lines, or start the line with \\>.",
+  "section-opener": "A line starting with >>> opens a collapsible section in Linear, which fix cannot write here: a section line without a title would open a section inside another one, or a >>> line without a title follows a +++ line that closed its sections, or a ++++ line, code or HTML would take in a closing line. Close a >>> section with a >>> line and a +++ section with a +++ line, or start the line with \\>.",
   "url-in-html": "A URL inside raw HTML is turned into a Markdown link.",
   "unplaced-link": 'A web address Markdown finds inside other text, such as "www.example.com" in quotes, cannot be matched to its text in the source, for example because an escape or a character reference spells it, so fix cannot write it as a link. Write it in angle brackets or as a link.',
-  "block-first-in-list-item": "A list item that starts with a heading, code, a quote or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
+  "list-after-item-text": "In a list item, Linear writes a list on the line right below the text or the list of another kind before it. When its first item is empty, starts with a list, or is numbered other than 1, Markdown reads that marker as part of the text above. Start the list with an item of text, numbered 1 in a numbered list.",
+  "list-number-too-long": "An ordered list numbered past 999999999: Linear numbers its items on from the first number, and Markdown reads a number of more than nine digits as text of the item above it. Start the list at a smaller number.",
+  "block-first-in-list-item": "A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
   "ordered-task-list": "An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.",
   "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path.",
   "image-file-missing": "An image must name a file that exists in the repository, not a folder or a Markdown document.",
@@ -40261,6 +40267,7 @@ var TAIL_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]
 var PORT = /^:(0|[1-9]\d{0,4})(?=$|[/?#\s.,;!()[\]{}<>"'“”‘’«»])/u;
 var NON_ASCII = /[^\x00-\x7F]/;
 var URL_AUTHORITY = /^https?:\/\/[^/?#()[\]{}]+/i;
+var PUNCTUATION_AFTER_DOTS = /[*~_,;!?]/;
 function* bareDomains(value) {
   let used = 0;
   for (const match of value.matchAll(HOST_RUN)) {
@@ -40313,10 +40320,21 @@ function httpUrlEnd(value) {
 }
 function scanTail(value, at, withScheme) {
   const open4 = [];
+  let endedAtDots = false;
   let end2 = at;
   for (; end2 < value.length; end2++) {
     const char = value[end2];
     if (withScheme ? HTTP_TAIL_BOUNDARY.test(char) : TAIL_BOUNDARY.test(char) || char === "&" && beginsReference(value, end2)) break;
+    if (char === "." && value[end2 + 1] === ".") {
+      let after = end2 + 2;
+      while (value[after] === ".") after++;
+      if (open4.length === 0 && PUNCTUATION_AFTER_DOTS.test(value[after] ?? "")) {
+        endedAtDots = true;
+        break;
+      }
+      end2 = after - 1;
+      continue;
+    }
     if (char === "(" || char === "[" || withScheme && char === "{") {
       const parent = open4.at(-1);
       if (parent) parent.nested = true;
@@ -40328,9 +40346,9 @@ function scanTail(value, at, withScheme) {
   }
   const scanned = end2;
   end2 = open4[0]?.at ?? end2;
-  if (end2 > at && (withScheme ? ".,;!?'" : ".,;!?").includes(value[end2 - 1])) {
+  if (!endedAtDots && end2 > at && (withScheme ? ".,;!?'" : ".,;!?").includes(value[end2 - 1])) {
     const punctuation = value[--end2];
-    if (withScheme) while (end2 > at && value[end2 - 1] === punctuation) end2--;
+    if (".!?'".includes(punctuation)) while (end2 > at && value[end2 - 1] === punctuation) end2--;
   }
   if (end2 === at + 1 && value[at] === "#") end2 = at;
   return { end: end2, scanned };
@@ -40548,8 +40566,9 @@ function parse2(body2, mdastExtensions = [], linearDomains = false, extraSyntax 
       if (Array.isArray(constructs2)) syntax.text[code4] = constructs2.filter((construct) => construct.name !== "wwwAutolink");
     }
   }
-  const tree = fromMarkdown(body2, { extensions: [syntax, ...extraSyntax, inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
+  const tree = fromMarkdown(body2, { extensions: [syntax, ...extraSyntax, inlineBudget(), indentedCodeEnds(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
   const source = body2.startsWith("\uFEFF") ? body2.slice(1) : body2;
+  taskChecksBelowMarkerLines(tree, source);
   placeTextLinks(tree, source, transforms, linearDomains);
   if (linearDomains && /https?:\/\//i.test(source)) placeLinearHttpEnds(tree, source);
   if (linearDomains && BARE_DOMAIN_HINT.test(source)) placeLinearDomains(tree, source);
@@ -40888,6 +40907,39 @@ function inlineBudget() {
   text6[91] = bracket;
   return { text: text6 };
 }
+function indentedCodeEnds() {
+  const construct = {
+    name: "indentedCodeEnds",
+    tokenize(effects, ok3, nok) {
+      const code4 = [this.parser.constructs.flowInitial?.[32]].flat().find((candidate) => candidate?.name === "codeIndented");
+      if (code4 === void 0 || code4 === null) return nok;
+      const settled = (next) => (character) => {
+        this._gfmTableDynamicInterruptHack = false;
+        return next(character);
+      };
+      this._gfmTableDynamicInterruptHack = true;
+      return code4.tokenize.call(this, effects, settled(ok3), settled(nok));
+    }
+  };
+  return { flowInitial: { [-2]: construct, [-1]: construct, [32]: construct } };
+}
+function taskChecksBelowMarkerLines(tree, source) {
+  visit2(tree, (node2) => {
+    if (node2.type !== "listItem" || node2.checked !== null && node2.checked !== void 0) return;
+    const [paragraph2] = node2.children;
+    if (paragraph2?.type !== "paragraph" || line(paragraph2) === line(node2)) return;
+    const check2 = /^\[([ xX])\][ \t]+[^\s]/.exec(source.slice(start(paragraph2), end(paragraph2)));
+    const [head] = paragraph2.children;
+    if (check2 === null || head?.type !== "text" || start(head) !== start(paragraph2) || !head.value.startsWith(check2[0].slice(0, 4))) return;
+    const from = paragraph2.position.start;
+    const after = { line: from.line, column: from.column + 4, offset: from.offset + 4 };
+    node2.checked = check2[1] !== " ";
+    head.value = head.value.slice(4);
+    if (head.value === "") paragraph2.children.shift();
+    else head.position.start = { ...after };
+    paragraph2.position.start = { ...after };
+  });
+}
 function lazyBudget() {
   let work = 0;
   let watching = false;
@@ -40962,6 +41014,12 @@ function sameAsLinear(content4, body2) {
   const restored = linearMarkersAsText(content4, body2);
   if (sameMarkdown(restored, body2)) return true;
   return body2.includes("\\+++") && sameMarkdown(restored, linearSectionEnd(body2));
+}
+function closesAboveList(lines2, index2, last) {
+  if (last <= index2) return false;
+  const next = lines2[index2 + 1];
+  const prefix = LINE_PREFIX.exec(next)[0];
+  return lines2[index2].startsWith(prefix) && /^(?:\d{1,9}\.[ \t]|[*-][ \t]*$)/.test(next.slice(prefix.length));
 }
 function linearSectionEnd(body2) {
   const lines2 = body2.split(LINE_END);
@@ -41138,7 +41196,7 @@ function linearMarkersAsText(content4, previous3 = "") {
             open4.push({ at: at2, literal: accepted.escapes.has("section:" + first) && accepted.escapes.has(blockLineKey("+++", true)) });
             sections.set(parent, open4);
           }
-        } else if (first === "+++" && last === index2) {
+        } else if (first === "+++" && (last === index2 || closesAboveList(lines2, index2, last))) {
           const open4 = sections.get(parent)?.pop();
           if (open4?.literal) {
             escapes.add(open4.at);
@@ -41275,6 +41333,11 @@ function comparableBoldForms(node2, insideStrong = false) {
   }
   return [{ ...node2, children }];
 }
+function hasOuterStars(body2, node2) {
+  if (node2.type !== "emphasis" || node2.position === void 0) return false;
+  const { children } = node2;
+  return body2.slice(start(node2), start(node2) + 2) === "**" && body2.slice(end(node2) - 2, end(node2)) === "**" && children.length >= 3 && children.length % 2 === 1 && children.every((child2, index2) => index2 % 2 === 0 ? child2.type === "emphasis" && child2.children.every((part) => part.type === "text") : child2.type === "text" && /^[ \t]+$/.test(child2.value));
+}
 function coextensiveBoldForms(node2) {
   let inner = node2;
   let strong2 = false;
@@ -41294,6 +41357,13 @@ function withoutTrailingNewlines(text6) {
   while (end2 > 0 && text6[end2 - 1] === "\n") end2--;
   return end2 === text6.length ? text6 : text6.slice(0, end2);
 }
+function codeSpanText(inner) {
+  return inner.length > 2 && inner.startsWith(" ") && inner.endsWith(" ") && /[^ ]/.test(inner) ? inner.slice(1, -1) : inner;
+}
+function linearDropsCodeSpaces(code4) {
+  if (code4.includes("`")) return false;
+  return /^ {3,}$/.test(code4) || code4.length > 2 && code4.startsWith(" ") && code4.endsWith(" ");
+}
 function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldForms2, ignoreBold }) {
   const marked = markFileBlockStarts(nestedFileBlocksOnItemLine(body2).replace(/\\[$+]/g, (escape2, at, text6) => escape2 === "\\+" && isLonePlus(text6, at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]));
   const tree = parse2(marked, [], true);
@@ -41303,7 +41373,7 @@ function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldFor
     if ("url" in rest) rest.url = normalizeUri(rest.url);
     if (node2.type === "inlineCode") return { ...rest, value: node2.value.replace(/\r\n?|\n/g, " ") };
     if (linearNumberSpacing && node2.type === "text" && paragraphLine !== void 0) {
-      const separator = paragraphLine ? /(^|\n)([ \t]*\d+\.)[\t\u00a0]/g : /(\n)([ \t]*\d+\.)[\t\u00a0]/g;
+      const separator = paragraphLine ? /(^|\n)([ \t]*\d+\.)[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g : /(\n)([ \t]*\d+\.)[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g;
       return { ...rest, value: node2.value.replace(separator, "$1$2 ") };
     }
     if ("children" in node2) {
@@ -41311,7 +41381,7 @@ function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldFor
       for (const [index2, child2] of node2.children.entries()) {
         const startsLine = node2.type === "paragraph" ? index2 === 0 || node2.children[index2 - 1]?.type === "break" : void 0;
         const part = strip(child2, startsLine);
-        if ((ignoreBold || node2.type === "strong") && part.type === "strong") {
+        if ((ignoreBold || node2.type === "strong") && part.type === "strong" || linearBoldForms2 && hasOuterStars(marked, child2)) {
           for (const nested of part.children) appendComparable(children, nested);
         } else {
           appendComparable(children, part);
@@ -41416,6 +41486,16 @@ function advanceColumn(column, char) {
 }
 function end(node2) {
   return node2.position?.end.offset ?? 0;
+}
+var NESTED_MARKER_TEXT = /^(?:(?:[*+-]|\d{1,9}[.)])[ \t]+\S|(?:[*+-]|\d{1,9}\.)[ \t]*$)/;
+function nestsMarkerText(body2, item) {
+  const [first] = item.children;
+  if (item.checked != null || first?.type !== "paragraph" || first.children[0]?.type !== "text") return false;
+  if (body2.slice(start(item), start(first)).includes("\n")) return false;
+  return NESTED_MARKER_TEXT.test(body2.slice(start(first), end(first)));
+}
+function endingRow(body2, table) {
+  return table.children.slice(1).find((row) => !body2.slice(start(row), end(row)).includes("|"));
 }
 function line(node2) {
   return node2.position?.start.line ?? 1;
@@ -41609,6 +41689,31 @@ function firstAtOrAfter(values, min) {
     else high = middle;
   }
   return values[low];
+}
+function listKind(list4, item) {
+  return item?.checked != null ? "task" : list4.ordered ? "ordered" : "bullet";
+}
+function opensWithText(list4) {
+  const [item] = list4.children;
+  return item !== void 0 && item.children[0]?.type === "paragraph" && (listKind(list4, item) !== "ordered" || (list4.start ?? 1) === 1);
+}
+var MAX_LIST_NUMBER = 999999999;
+function listParts(list4, source) {
+  const parts = [];
+  list4.children.forEach((item, index2) => {
+    const previous3 = parts.at(-1);
+    if (previous3 !== void 0 && !splitsAfter(list4.children[index2 - 1], item)) {
+      previous3.items.push(item);
+      return;
+    }
+    const counted = previous3 === void 0 ? list4.start ?? 1 : previous3.first + previous3.items.length;
+    const own6 = Number(/^\d+/.exec(source.slice(start(item)))?.[0] ?? counted);
+    parts.push({ items: [item], first: previous3 === void 0 ? counted : own6 + list4.children.length - index2 - 1 <= MAX_LIST_NUMBER ? own6 : counted });
+  });
+  return parts;
+}
+function splitsAfter(item, next) {
+  return item.children.length === 0 && next.position.start.line - item.position.end.line > 2;
 }
 
 // src/mapping/front-matter.ts
@@ -43920,7 +44025,7 @@ function sharedDestinations(zones, targets) {
 }
 
 // src/format/fix.ts
-import { isDeepStrictEqual as isDeepStrictEqual2 } from "node:util";
+import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
 
 // node_modules/gemoji/index.js
 var nameToEmoji = {
@@ -47303,7 +47408,7 @@ function safeSvg(bytes) {
 
 // src/format/sections.ts
 var SPLIT_ROUNDS = 8;
-var PLUS_MARKER = /^\+{3}(?!\+)(.*)$/;
+var PLUS_MARKER = /^(\+{3,})(.*)$/;
 function plusSectionSyntax(ignored) {
   return { flow: {
     43: {
@@ -47313,12 +47418,12 @@ function plusSectionSyntax(ignored) {
         return opening;
         function opening(code4) {
           if (signs === 0) effects.enter("thematicBreak");
-          if (code4 === 43 && signs < 3) {
+          if (code4 === 43) {
             signs++;
             effects.consume(code4);
             return opening;
           }
-          return signs === 3 && code4 !== 43 ? rest(code4) : nok(code4);
+          return signs >= 3 ? rest(code4) : nok(code4);
         }
         function rest(code4) {
           if (code4 === null || code4 >= -5 && code4 <= -3) {
@@ -47345,14 +47450,13 @@ function parseForSections(body2) {
   }
   return parse2(body2, [], false, [plusSectionSyntax(ignored)]);
 }
-function plusSectionsAsLinear(body2) {
+function plusSectionsAsLinear(body2, firstInItem) {
+  return pairSections(body2, /* @__PURE__ */ new Map(), firstInItem);
+}
+function pairSections(body2, fromOpeners, firstInItem) {
   if (!body2.includes("+++")) return body2;
-  let tree = parseForSections(body2);
-  const joined = joinSectionItemLines(body2, tree);
-  if (joined !== body2) {
-    body2 = joined;
-    tree = parseForSections(body2);
-  }
+  const tree = parseForSections(body2);
+  let unwritable = false;
   const edits = [];
   let paragraphEnds;
   const lazyAfter = (marker) => {
@@ -47371,53 +47475,119 @@ function plusSectionsAsLinear(body2) {
     const blocks = parent.children;
     const markers = blocks.map((node2) => node2.type === "thematicBreak" ? PLUS_MARKER.exec(body2.slice(start(node2), end(node2))) : null);
     if (markers.every((marker) => marker === null)) return;
-    if (blocks.some((node2) => node2.type === "paragraph" && /(?:^|\n)[ \t>]*\+{4}/.test(body2.slice(start(node2), end(node2))))) return;
+    const opener = (index2) => fromOpeners.get(start(blocks[index2]));
+    const mixed = markers.some((marker, index2) => marker !== null && opener(index2) !== void 0);
+    if (mixed && markers.some((marker) => marker !== null && marker[1].length > 3)) {
+      unwritable = true;
+      return;
+    }
     const depth2 = ancestors.length;
+    const giveUp = (opens) => {
+      if (opens && parent.type === "listItem" && markers[0] !== null) firstInItem?.(start(blocks[0]));
+    };
     const lastContent = markers.findLastIndex((marker, index2) => marker === null && blocks[index2].type !== "definition");
     const open4 = [];
     const roles = /* @__PURE__ */ new Map();
+    const alsoCloses = /* @__PURE__ */ new Map();
+    const dropped = /* @__PURE__ */ new Set();
+    const closingRuns = /* @__PURE__ */ new Set();
     let closedAfterContent = 0;
+    const close = (index2, from) => {
+      const closed = open4.splice(from);
+      for (const other of closed) {
+        if (other > lastContent && opener(other) === void 0) closedAfterContent++;
+        roles.set(other, `+++ ${markers[other][2].trim()}`);
+      }
+      roles.set(index2, "+++");
+      if (closed.length > 1) alsoCloses.set(index2, closed.length - 1);
+    };
     for (const [index2, marker] of markers.entries()) {
       if (marker === null) continue;
-      const title = marker[1].trim();
-      if (title === "" && open4.length > 0) {
-        const opener = open4.pop();
-        if (opener > lastContent) closedAfterContent++;
-        roles.set(opener, `+++ ${markers[opener][1].trim()}`);
-        roles.set(index2, "+++");
+      const title = marker[2].trim();
+      const line2 = opener(index2);
+      if (line2 !== void 0 && line2.role !== "open") {
+        if (closingRuns.has(line2.run)) {
+          dropped.add(index2);
+          continue;
+        }
+        if (index2 === 0) {
+          unwritable = true;
+          return;
+        }
+        closingRuns.add(line2.run);
+        const outermost = open4.findIndex((other) => opener(other) !== void 0);
+        if (outermost !== -1) close(index2, outermost);
+        else if (line2.role === "end") dropped.add(index2);
+        else {
+          unwritable = true;
+          return;
+        }
+      } else if (title === "" && open4.length > 0) {
+        const innermost = mixed ? open4.findLastIndex((other) => opener(other) === void 0) : open4.length - 1;
+        if (line2 !== void 0 || innermost === -1) {
+          unwritable = true;
+          return;
+        }
+        if (markers[open4[innermost]][1].length !== marker[1].length) {
+          giveUp(roles.has(0) || open4[0] === 0);
+          unwritable ||= mixed;
+          return;
+        }
+        close(index2, innermost);
       } else if (index2 < blocks.length - 1) {
+        if (mixed && line2 === void 0 && blocks.slice(index2 + 1).every((_, after) => opener(index2 + 1 + after)?.role === "end")) {
+          unwritable = true;
+          return;
+        }
         open4.push(index2);
       }
     }
+    if (open4.some((index2) => opener(index2) !== void 0)) {
+      unwritable = true;
+      return;
+    }
+    const lastKept = blocks.findLastIndex((_, index2) => !dropped.has(index2));
     const implicit = open4.filter((index2) => index2 < lastContent);
     if (parent.type !== "root" && blocks.length === 1 && markers[0] !== null && lazyAfter(blocks[0])) {
       edits.push({ from: start(blocks[0]), to: start(blocks[0]), text: "\\", depth: ancestors.length });
       return;
     }
-    for (const index2 of implicit) roles.set(index2, `+++ ${markers[index2][1].trim()}`);
+    for (const index2 of implicit) roles.set(index2, `+++ ${markers[index2][2].trim()}`);
     const closes = implicit.filter((index2) => {
       if (closedAfterContent === 0 || markers[index2][0] !== roles.get(index2)) return true;
       closedAfterContent--;
       return false;
     });
-    const last = blocks.at(-1);
+    const last = blocks[lastKept];
     if (closes.length > 0 && last.type === "html" && parse2(`${last.value}
 
-+++`).children.at(-1)?.type !== "paragraph") return;
++++`).children.at(-1)?.type !== "paragraph") {
+      giveUp(roles.has(0));
+      unwritable ||= mixed;
+      return;
+    }
     for (const [index2, marker] of markers.entries()) {
       if (marker === null) continue;
       const node2 = blocks[index2];
       const at = start(node2);
+      if (dropped.has(index2)) {
+        const previous4 = blocks[index2 - 1];
+        edits.push({ from: lineEndAt(body2, Math.max(start(previous4), end(previous4) - 1)), to: lineEndAt(body2, at), text: "", depth: depth2 });
+        continue;
+      }
       if (!roles.has(index2) && parent.type !== "root" && index2 === 0 && index2 === blocks.length - 1) continue;
       const previous3 = blocks[index2 - 1];
       if (!roles.has(index2) && previous3?.type === "paragraph" && previous3.position.end.line + 1 === node2.position.start.line && (body2.startsWith("\\+++", start(previous3)) || previous3.children.some((child2) => child2.type === "image" || child2.type === "imageReference"))) continue;
       const line2 = prefixes(body2, at);
       const blank = line2.prefix.trimEnd();
       const before = index2 > 0 || line2.linePrefix === line2.prefix && parent.type === "root" && line2.lineStart > 0;
-      const written = roles.get(index2) ?? marker[0].trimEnd();
+      const written = [roles.get(index2) ?? marker[0].trimEnd(), ...Array(alsoCloses.get(index2) ?? 0).fill("+++")].join(`
+${blank}
+${line2.prefix}`);
+      if (index2 === 0 && parent.type === "listItem" && roles.get(index2)?.startsWith("+++ ") === true) firstInItem?.(at);
       const to = lineEndAt(body2, at);
       const next = body2.slice(to + 1, lineEndAt(body2, to + 1));
-      const after = index2 < blocks.length - 1 ? `
+      const after = index2 < lastKept ? `
 ${blank}` : next.trim() === "" ? "" : `
 ${sharedQuotePrefix(blank, next)}`;
       edits.push({
@@ -47440,7 +47610,7 @@ ${prefix}+++`.repeat(closes.length);
 ${prefix}${fence}`) + markers2, depth: depth2 });
     }
   });
-  return applyEdits(body2, edits);
+  return unwritable ? void 0 : applyEdits(body2, edits);
 }
 function sharedQuotePrefix(first, next) {
   let lastQuote = -1;
@@ -47448,23 +47618,6 @@ function sharedQuotePrefix(first, next) {
     if (first[index2] === ">") lastQuote = index2;
   }
   return first.slice(0, lastQuote + 1);
-}
-function joinSectionItemLines(body2, tree) {
-  if (!/(?:[*+.-]|\)) \n[ >]*\n[ >]*\+{3} /.test(body2)) return body2;
-  const edits = [];
-  visit2(tree, (node2, ancestors) => {
-    if (node2.type !== "thematicBreak" || !body2.startsWith("+++ ", start(node2))) return;
-    const { lineStart, linePrefix } = prefixes(body2, start(node2));
-    if (lineStart === 0) return;
-    const blankStart = body2.lastIndexOf("\n", lineStart - 2) + 1;
-    if (blankStart === 0) return;
-    const itemStart = body2.lastIndexOf("\n", blankStart - 2) + 1;
-    const item = /^([ >]*)([*+-]|\d{1,9}[.)]) $/.exec(body2.slice(itemStart, blankStart - 1));
-    if (item === null || body2.slice(blankStart, lineStart - 1) !== item[1].trimEnd()) return;
-    if (linePrefix !== item[1] + " ".repeat(item[2].length + 1)) return;
-    edits.push({ from: blankStart - 1, to: start(node2), text: "", depth: ancestors.length });
-  });
-  return applyEdits(body2, edits);
 }
 function sectionPrefix(body2, parent, at) {
   if (parent.type === "root") return "";
@@ -47491,7 +47644,6 @@ function sectionOpenersAsLinear(body2) {
   if (!body2.includes(">>>")) return body2;
   let openers = sectionOpeners(body2);
   if (openers.length === 0) return body2;
-  if (hasSectionLine(body2, openers)) return void 0;
   for (let round = 0; ; round++) {
     const splits = openers.flatMap((opener) => splitEdits(body2, opener.node, opener.depth));
     if (splits.length === 0) break;
@@ -47502,9 +47654,21 @@ function sectionOpenersAsLinear(body2) {
   const containers = /* @__PURE__ */ new Map();
   for (const opener of openers) containers.set(opener.parent, [...containers.get(opener.parent) ?? [], opener]);
   const edits = [...containers.values()].flatMap((group2) => containerEdits(body2, group2));
-  const written = applyEdits(body2, edits);
+  const { body: written, marks } = applyTrackedEdits(body2, edits);
   const lines2 = edits.reduce((count4, edit) => count4 + (edit.lines ?? 0), 0);
-  return sectionLineCount(written) === lines2 ? written : void 0;
+  const plusLines = plusLineCount(body2, openers);
+  if (sectionLineCount(written) !== lines2 + plusLines) return void 0;
+  return plusLines === 0 ? written : pairSections(written, marks);
+}
+function sectionsFirstInItem(body2) {
+  const found = [];
+  if (body2.includes(">>>")) {
+    for (const { node: node2, parent } of sectionOpeners(body2)) {
+      if (parent.type === "listItem" && parent.children[0] === node2) found.push(start(node2));
+    }
+  }
+  plusSectionsAsLinear(body2, (at) => found.push(at));
+  return found.sort((a, b) => a - b);
 }
 function unwritableSectionLine(body2) {
   if (!body2.includes(">>>") || sectionOpenersAsLinear(body2) !== void 0) return void 0;
@@ -47564,29 +47728,35 @@ function containerEdits(body2, openers) {
 ` : "";
     const lineEnd = lineEndAt(body2, at);
     const title = body2.slice(at, lineEnd).replace(/^>+/, "").trim();
+    const lead = `${before}${line2.linePrefix}`;
+    const between2 = `
+${blank}
+${prefix}`;
     let written;
     let lines2 = 1;
     if (title === "" && open4 > 0) {
-      written = Array.from({ length: open4 }, () => "+++").join(`
-${blank}
-${prefix}`);
+      written = Array.from({ length: open4 }, () => "+++").join(between2);
       lines2 = open4;
       open4 = 0;
     } else {
       open4++;
       written = `+++ ${title}`;
     }
-    edits.push({ from: line2.lineStart, to: lineEnd, text: `${before}${line2.linePrefix}${written}
-${blank}`, depth: depth2, lines: lines2 });
+    const starts = Array.from({ length: lines2 }, (_, index2) => lead.length + index2 * ("+++".length + between2.length));
+    const role = written.startsWith("+++ ") ? "open" : "close";
+    edits.push({ from: line2.lineStart, to: lineEnd, text: `${lead}${written}
+${blank}`, depth: depth2, lines: lines2, marks: { at: starts, role } });
   }
   if (open4 > 0) {
     const parent = openers[0].parent;
     const last = "children" in parent ? parent.children.at(-1) : void 0;
     let containerEnd = parent.type === "root" ? body2.length : end(last ?? parent);
     while (body2[containerEnd] === " " || body2[containerEnd] === "	") containerEnd++;
-    edits.push({ from: containerEnd, to: containerEnd, text: `
+    const closer = `
 ${prefix.trimEnd()}
-${prefix}+++`.repeat(open4), depth: depth2, lines: open4 });
+${prefix}+++`;
+    const starts = Array.from({ length: open4 }, (_, index2) => (index2 + 1) * closer.length - "+++".length);
+    edits.push({ from: containerEnd, to: containerEnd, text: closer.repeat(open4), depth: depth2, lines: open4, marks: { at: starts, role: "end" } });
   }
   return edits;
 }
@@ -47594,6 +47764,23 @@ function applyEdits(body2, edits) {
   const sorted = [...edits].sort((a, b) => b.from - a.from || a.depth - b.depth);
   for (const edit of sorted) body2 = body2.slice(0, edit.from) + edit.text + body2.slice(edit.to);
   return body2;
+}
+function applyTrackedEdits(body2, edits, points = []) {
+  const sorted = [...edits].sort((a, b) => a.from - b.from || b.depth - a.depth);
+  let result = "";
+  let cursor = 0;
+  const marks = /* @__PURE__ */ new Map();
+  const moved = [];
+  for (const [run2, edit] of sorted.entries()) {
+    result += body2.slice(cursor, edit.from);
+    for (const at of edit.marks?.at ?? []) marks.set(result.length + at, { role: edit.marks.role, run: run2 });
+    result += edit.text;
+    cursor = edit.to;
+    moved.push({ to: edit.to, shift: result.length - edit.to });
+  }
+  result += body2.slice(cursor);
+  const shifted = points.map((point3) => point3 + (moved.findLast((edit) => edit.to <= point3)?.shift ?? 0));
+  return { body: result, marks, points: shifted };
 }
 function sectionLineCount(body2, skip = () => false) {
   let count4 = 0;
@@ -47604,16 +47791,148 @@ function sectionLineCount(body2, skip = () => false) {
   });
   return count4;
 }
-function hasSectionLine(body2, openers) {
+function plusLineCount(body2, openers) {
   const titles = openers.map(({ node: node2 }) => [start(node2), lineEndAt(body2, start(node2))]);
-  return sectionLineCount(body2, (at) => titles.some(([from, to]) => from <= at && at <= to)) > 0;
+  return sectionLineCount(body2, (at) => titles.some(([from, to]) => from <= at && at <= to));
+}
+
+// src/format/tab-reference.ts
+import { isDeepStrictEqual as isDeepStrictEqual2 } from "node:util";
+var TAB_REFERENCE = /&#(?:0{0,6}9|[xX]0{0,5}9);/;
+var ESCAPE_OR_TAB_REFERENCE = new RegExp(String.raw`\\[^\r\n]|` + TAB_REFERENCE.source, "g");
+function tabReferences(body2) {
+  if (!TAB_REFERENCE.test(body2)) return { text: body2 };
+  let original;
+  try {
+    original = parse2(body2, [], true);
+  } catch (error2) {
+    if (!(error2 instanceof MarkdownLimitError)) throw error2;
+    return { text: body2 };
+  }
+  const edits = [];
+  let imageEdgeLine;
+  const imageEdges = /* @__PURE__ */ new Map();
+  visit2(original, (node2, ancestors) => {
+    if (node2.type === "paragraph") {
+      const edges = imageTrimEdges(body2, node2);
+      if (edges.size !== 0) imageEdges.set(node2, edges);
+    }
+    if (node2.type !== "text" || node2.position === void 0) return;
+    if (ancestors.some((parent) => parent.type === "link" && body2[start(parent)] !== "[")) return;
+    const from = start(node2);
+    const raw = body2.slice(from, end(node2));
+    const runs = [];
+    let row = line(node2);
+    let newline = raw.indexOf("\n");
+    for (const match of raw.matchAll(ESCAPE_OR_TAB_REFERENCE)) {
+      if (match[0][0] === "\\") continue;
+      while (newline !== -1 && newline < match.index) {
+        row++;
+        newline = raw.indexOf("\n", newline + 1);
+      }
+      const at = from + match.index;
+      const last = runs.at(-1);
+      if (last?.to === at) {
+        last.to += match[0].length;
+        last.count++;
+      } else {
+        runs.push({ from: at, to: at + match[0].length, at, count: 1, line: row });
+      }
+    }
+    for (const run2 of runs) {
+      const leading = run2.from === from;
+      const trailing = run2.to === end(node2);
+      let child2 = node2;
+      for (let index2 = ancestors.length - 1; index2 >= 0; index2--) {
+        const parent = ancestors[index2];
+        if (parent.type !== "strong" && parent.type !== "emphasis" && parent.type !== "delete") break;
+        if (leading && parent.children[0] === child2) run2.at = start(parent);
+        else if (trailing && parent.children.at(-1) === child2) run2.at = end(parent);
+        else break;
+        child2 = parent;
+      }
+      const paragraph2 = ancestors.find((parent) => parent.type === "paragraph");
+      const edges = paragraph2 && imageEdges.get(paragraph2);
+      if (edges?.has(run2.at) || edges?.has(run2.to)) imageEdgeLine ??= run2.line;
+      edits.push(run2);
+    }
+  });
+  if (edits.length === 0) return { text: body2 };
+  if (imageEdgeLine !== void 0) return { text: body2, unsafeLine: imageEdgeLine };
+  const candidate = applyTabs(body2, edits);
+  try {
+    const originalBlocks = original.children;
+    const written = parse2(candidate, [], true).children;
+    const changed2 = originalBlocks.findIndex((node2, index2) => written[index2] === void 0 || !isDeepStrictEqual2(tabShape(node2), tabShape(written[index2])));
+    if (changed2 === -1 && originalBlocks.length === written.length) return { text: candidate };
+    const block = originalBlocks[changed2];
+    const unsafe3 = block && edits.find(({ from, to }) => from >= start(block) && to <= end(block));
+    if (unsafe3 !== void 0) return { text: body2, unsafeLine: unsafe3.line };
+  } catch (error2) {
+    if (!(error2 instanceof MarkdownLimitError)) throw error2;
+  }
+  return { text: body2, unsafeLine: edits[0].line };
+}
+function imageTrimEdges(body2, node2) {
+  const edges = /* @__PURE__ */ new Set();
+  const trim = (char) => char !== void 0 && char !== "\xA0" && char.trim() === "";
+  for (const child2 of node2.children) {
+    if (child2.type !== "image" && child2.type !== "imageReference") continue;
+    let before = start(child2);
+    let after = end(child2);
+    while (before > start(node2) && trim(body2[before - 1])) before--;
+    while (after < end(node2) && trim(body2[after])) after++;
+    edges.add(before);
+    edges.add(after);
+  }
+  return edges;
+}
+function applyTabs(body2, edits) {
+  const changes = edits.flatMap(({ from, to, at, count: count4 }) => at === from ? [{ from, to, text: "	".repeat(count4) }] : [{ from, to, text: "" }, { from: at, to: at, text: "	".repeat(count4) }]);
+  const parts = [];
+  let offset = 0;
+  for (const { from, to, text: text6 } of changes.sort((a, b) => a.from - b.from || a.to - b.to)) {
+    parts.push(body2.slice(offset, from), text6);
+    offset = to;
+  }
+  return parts.join("") + body2.slice(offset);
+}
+function tabShape(node2) {
+  const { position: _position, ...fields } = node2;
+  if (!("children" in node2)) return [fields];
+  const children = [];
+  for (const child2 of node2.children) {
+    for (const part of tabShape(child2)) {
+      const previous3 = children.at(-1);
+      if (previous3?.type === "text" && part.type === "text") previous3.value += part.value;
+      else children.push(part);
+    }
+  }
+  const shape = { ...fields, children };
+  if (node2.type !== "strong" && node2.type !== "emphasis" && node2.type !== "delete") return [shape];
+  const lead = extractTabs(children, true);
+  const tail = extractTabs(children, false);
+  return [...lead, ...children.length === 0 ? [] : [shape], ...tail];
+}
+function extractTabs(children, leading) {
+  const index2 = leading ? 0 : children.length - 1;
+  const text6 = children[index2];
+  if (text6?.type !== "text") return [];
+  const value = text6.value;
+  let length = 0;
+  while (value[leading ? length : value.length - 1 - length] === "	") length++;
+  if (length === 0) return [];
+  text6.value = leading ? value.slice(length) : value.slice(0, -length);
+  if (text6.value === "") children.splice(index2, 1);
+  return [{ type: "text", value: "	".repeat(length) }];
 }
 
 // src/format/lint.ts
 var GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 var QUOTE_PREFIX = /^ {0,3}> ?/;
 var ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-var FIX_ONLY_RULES = /* @__PURE__ */ new Set(["hard-break-in-heading", "setext-heading-lines", "table-header-pipe", "table-list-cell", "unplaced-link"]);
+var FIX_ONLY_RULES = /* @__PURE__ */ new Set(["code-span-padding", "hard-break-in-heading", "list-after-item-text", "list-number-too-long", "setext-heading-lines", "table-header-pipe", "table-list-cell", "tab-reference-layout", "space-reference-edge", "unplaced-link", "number-paragraph"]);
+var NUMBER_ONLY = /^\d{1,9}\\[.)]$/;
 var LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 var LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 var SCHEME_CHARACTER = /[a-z0-9+.-]/i;
@@ -47628,6 +47947,34 @@ function linkedFileCheck(documentPath2, isFile) {
 function lintInTree(file, text6, files) {
   const findings = lintText(file, text6, { linkedFileExists: linkedFileCheck(file, (path7) => files.has(path7)) });
   return findings.filter((finding) => !FIX_ONLY_RULES.has(finding.rule));
+}
+function linearCode(value, raw, ancestors) {
+  const plain = value.replace(/\r\n?|\n/g, " ");
+  if (ancestors.some((a) => a.type === "listItem")) return plain;
+  const depth2 = ancestors.filter((a) => a.type === "blockquote").length;
+  if (depth2 === 0) return plain;
+  const fence = /^`+/.exec(raw)[0].length;
+  const [first, ...rest] = raw.slice(fence, raw.length - fence).split(/\r\n?|\n/);
+  const parts = [first];
+  let quoteTab = false;
+  for (const line2 of rest) {
+    let at = 0;
+    let tab = false;
+    for (let level = 0; level < depth2; level++) {
+      const marker = /^ {0,3}>/.exec(line2.slice(at));
+      if (marker === null) break;
+      at += marker[0].length;
+      if (line2[at] === " ") at++;
+      else if (line2[at] === "	") {
+        if (level < depth2 - 1) return plain;
+        tab = 3 - at % 4 > 0;
+        at++;
+      }
+    }
+    quoteTab ||= tab;
+    parts.push((tab ? "	" : "") + line2.slice(at));
+  }
+  return quoteTab ? codeSpanText(parts.join(" ")) : plain;
 }
 function lintText(file, text6, options = {}) {
   const { head, body: body2 } = splitFile(text6);
@@ -47656,8 +48003,51 @@ function lintText(file, text6, options = {}) {
     return sorted();
   }
   lintTree(file, tree, content4, report, options);
+  const { unsafeLine } = tabReferences(content4);
+  if (unsafeLine !== void 0) report("tab-reference-layout", unsafeLine);
+  for (const at of spaceReferenceEdges(tree, content4)) report("space-reference-edge", at);
   return sorted();
 }
+function spaceReferenceEdges(tree, body2) {
+  const lines2 = [];
+  const blank = (node2) => node2.type === "text" && node2.position !== void 0 && /^[ \t\n]*$/.test(body2.slice(start(node2), end(node2)));
+  const edgeText = (child2, side) => {
+    while (child2 !== void 0 && (child2.type === "strong" || child2.type === "emphasis" || child2.type === "delete")) child2 = side === "first" ? child2.children[0] : child2.children.at(-1);
+    return child2?.type === "text" && child2.position !== void 0 ? child2 : void 0;
+  };
+  const check2 = (child2, side) => {
+    const text6 = edgeText(child2, side);
+    if (text6?.type !== "text") return;
+    let from = start(text6);
+    let to = end(text6);
+    while (from < to && (body2[from] === " " || body2[from] === "	")) from++;
+    while (to > from && (body2[to - 1] === " " || body2[to - 1] === "	")) to--;
+    const escaped2 = (at) => {
+      let slashes = 0;
+      while (at - slashes - 1 >= 0 && body2[at - slashes - 1] === "\\") slashes++;
+      return slashes % 2 === 1;
+    };
+    if (side === "first" && SPACE_REFERENCE_START.test(body2.slice(from, from + 16)) && !escaped2(from)) lines2.push(line(text6));
+    const ending = SPACE_REFERENCE_END.exec(body2.slice(Math.max(from, to - 16), to));
+    if (side === "last" && ending !== null && !escaped2(to - ending[0].length)) lines2.push(text6.position.end.line);
+  };
+  visit2(tree, (node2) => {
+    if (node2.type !== "paragraph" && node2.type !== "heading") return;
+    const parts = [[]];
+    for (const child2 of node2.children) {
+      if (node2.type === "paragraph" && (child2.type === "image" || child2.type === "imageReference")) parts.push([]);
+      else parts.at(-1).push(child2);
+    }
+    for (const part of parts) {
+      const kept = part.filter((child2, index2) => !(blank(child2) && (index2 === 0 || index2 === part.length - 1)));
+      check2(kept[0], "first");
+      check2(kept.at(-1), "last");
+    }
+  });
+  return lines2;
+}
+var SPACE_REFERENCE_START = /^&#(?:0*32|[xX]0*20);/;
+var SPACE_REFERENCE_END = /&#(?:0*32|[xX]0*20);$/;
 function paddingOverLimit(tree) {
   let nodes = 0;
   const tables = [];
@@ -47712,6 +48102,16 @@ function childrenLength(reference, length) {
   const last = reference.children.at(-1);
   return first === void 0 || last === void 0 ? 0 : length(start(first), end(last));
 }
+function endedBefore(body2, table, row) {
+  let ended = endedRows.get(table);
+  if (ended === void 0) {
+    const ending = endingRow(body2, table);
+    ended = new Set(ending === void 0 ? [] : table.children.slice(table.children.indexOf(ending)));
+    endedRows.set(table, ended);
+  }
+  return ended.has(row);
+}
+var endedRows = /* @__PURE__ */ new WeakMap();
 function codePoints(text6) {
   let count4 = 0;
   for (const _ of text6) count4++;
@@ -47755,6 +48155,9 @@ function lintTree(file, tree, body2, report, options) {
         if (node2.type === "inlineCode" && ancestors.some((a) => a.type === "emphasis" || a.type === "strong" || a.type === "delete")) {
           report("code-in-emphasis", line(node2));
         }
+        if (node2.type === "inlineCode" && linearDropsCodeSpaces(linearCode(node2.value, body2.slice(start(node2), end(node2)), ancestors))) {
+          report("code-span-padding", line(node2));
+        }
         break;
       case "footnoteReference":
       case "footnoteDefinition":
@@ -47770,11 +48173,32 @@ function lintTree(file, tree, body2, report, options) {
       case "listItem": {
         const [first] = node2.children;
         if (first !== void 0 && first.type !== "paragraph" && first.type !== "list") report("block-first-in-list-item", line(first));
+        node2.children.forEach((child2, index2) => {
+          const previous3 = node2.children[index2 - 1];
+          if (child2.type !== "list" || opensWithText(child2) && (options.linearExport === true || !nestsMarkerText(body2, child2.children[0])) || !["paragraph", "list"].includes(child2.children[0]?.children[0]?.type ?? "paragraph")) return;
+          const below = previous3?.type === "paragraph" || previous3?.type === "list" && listKind(previous3, previous3.children.at(-1)) !== listKind(child2, child2.children[0]);
+          if (below && endsWithParagraph(previous3)) report("list-after-item-text", line(child2));
+        });
+        for (const list4 of node2.children) {
+          if (list4.type !== "list") continue;
+          list4.children.forEach((item, index2) => {
+            const previous3 = list4.children[index2 - 1];
+            if (previous3 === void 0 || listKind(list4, previous3) === listKind(list4, item)) return;
+            if (item.children[0] !== void 0 && item.children[0].type !== "list") return;
+            if (endsWithParagraph(previous3)) report("list-after-item-text", line(item));
+          });
+        }
         break;
       }
       case "list": {
         const task = node2.ordered ? node2.children.find((item) => item.checked !== null && item.checked !== void 0) : void 0;
         if (task !== void 0) report("ordered-task-list", line(task));
+        if (node2.ordered) {
+          for (const { items, first } of listParts(node2, body2)) {
+            const past = items[MAX_LIST_NUMBER - first + 1];
+            if (past !== void 0) report("list-number-too-long", line(past));
+          }
+        }
         break;
       }
       case "heading": {
@@ -47789,6 +48213,7 @@ function lintTree(file, tree, body2, report, options) {
       }
       case "tableCell": {
         const [row, table] = ancestors.slice(-2).reverse();
+        if (table?.type === "table" && endedBefore(body2, table, row)) break;
         const first = node2.children[0];
         const last = node2.children.at(-1);
         const heading2 = first?.type === "text" && last !== void 0 && ATX_HEADING.test(body2.slice(start(first), end(last)));
@@ -47799,12 +48224,16 @@ function lintTree(file, tree, body2, report, options) {
         if (list4 && table?.type === "table" && table.children[0] !== row) report("table-list-cell", line(node2));
         break;
       }
-      case "text":
-        if (ancestors.some((a) => a.type === "tableCell") && body2.slice(start(node2), end(node2)).includes("\\|")) {
+      case "text": {
+        const cellAt = ancestors.findIndex((a) => a.type === "tableCell");
+        const table = ancestors[cellAt - 2];
+        const inCell = cellAt !== -1 && !(table?.type === "table" && endedBefore(body2, table, ancestors[cellAt - 1]));
+        if (inCell && node2.value.includes("|")) {
           report("table-escaped-pipe", line(node2));
         }
         if (body2.slice(start(node2), end(node2)).includes("^[")) report("footnote", line(node2));
         break;
+      }
       case "link":
         if (!allowedLink(node2.url)) report("link-scheme", line(node2));
         if (node2.title) report("link-title", line(node2));
@@ -47830,6 +48259,13 @@ function lintTree(file, tree, body2, report, options) {
       case "html":
         if (hasUrlOrLinkAttribute(node2.value)) report("url-in-html", line(node2));
         break;
+      case "paragraph": {
+        const item = ancestors.at(-1);
+        const afterCheckbox = item?.type === "listItem" && item.checked != null && item.children[0] === node2;
+        const [only] = node2.children;
+        if (!afterCheckbox && node2.children.length === 1 && only.type === "text" && NUMBER_ONLY.test(body2.slice(start(node2), end(node2)).trimEnd())) report("number-paragraph", line(node2));
+        break;
+      }
       default:
         break;
     }
@@ -47848,6 +48284,16 @@ function lintTree(file, tree, body2, report, options) {
   });
   const section = unwritableSectionLine(body2);
   if (section !== void 0) report("section-opener", section);
+  if (body2.includes("+++") || body2.includes(">>>")) {
+    let firstInItem = [];
+    try {
+      firstInItem = sectionsFirstInItem(body2);
+    } catch (error2) {
+      if (!(error2 instanceof MarkdownLimitError)) throw error2;
+      report("markdown-complexity", 1);
+    }
+    for (const at of firstInItem) report("block-first-in-list-item", body2.slice(0, at).split("\n").length);
+  }
 }
 function unplacedLine(node2, ancestors) {
   const parent = ancestors.at(-1);
@@ -47886,22 +48332,81 @@ function softBreakInText(node2, body2) {
   if (node2.type === "text") return body2.slice(start(node2), end(node2)).includes("\n");
   return "children" in node2 && node2.children.some((child2) => softBreakInText(child2, body2));
 }
+function endsWithParagraph(node2) {
+  while (node2 !== void 0 && (node2.type === "list" || node2.type === "listItem" || node2.type === "blockquote")) node2 = node2.children.at(-1);
+  return node2?.type === "paragraph";
+}
+
+// src/format/marker-lines.ts
+var PLUS_ONLY = /^[ \t]*(\\?\+)([ \t]*)$/;
+var PLUS_LINE = /\n[ \t]*\\?\+[ \t]*\n/;
+function plusLinesAsLinear(body2) {
+  if (!PLUS_LINE.test(body2)) return body2;
+  const edits = [];
+  visit2(parse2(body2), (node2, ancestors) => {
+    if (node2.type !== "paragraph") return;
+    const item = ancestors.at(-1);
+    if (item?.type !== "listItem" || item.children[0] !== node2 || line(node2) !== line(item)) return;
+    if (ancestors.some((ancestor) => ancestor.type === "blockquote")) return;
+    const firstEnd = body2.indexOf("\n", start(node2));
+    if (firstEnd === -1 || firstEnd >= end(node2)) return;
+    const from = firstEnd + 1;
+    const newline = body2.indexOf("\n", from);
+    if (newline === -1 || newline >= end(node2)) return;
+    const plus = PLUS_ONLY.exec(body2.slice(from, newline));
+    if (plus === null || !inText(node2, from + plus[0].indexOf(plus[1]))) return;
+    edits.push({ from, to: newline, text: `${" ".repeat(itemTextColumn(body2, start(item)))}+\xA0${plus[2]}` });
+  });
+  if (edits.length === 0) return body2;
+  let out = "";
+  let at = 0;
+  for (const edit of edits.sort((a, b) => a.from - b.from)) {
+    out += body2.slice(at, edit.from) + edit.text;
+    at = edit.to;
+  }
+  out += body2.slice(at);
+  return overContentLimit(out) ? body2 : out;
+}
+function itemTextColumn(body2, at) {
+  const lineStart = body2.lastIndexOf("\n", at - 1) + 1;
+  const marker = /^(?:\d{1,9}[.)]|[*+-])/.exec(body2.slice(at))[0];
+  const markerEnd = [...body2.slice(lineStart, at)].reduce(advanceColumn, 0) + marker.length;
+  const gap = /^[ \t]*/.exec(body2.slice(at + marker.length))[0];
+  const width = [...gap].reduce(advanceColumn, markerEnd) - markerEnd;
+  return markerEnd + (width >= 1 && width <= 4 ? width : 1);
+}
+function inText(paragraph2, offset) {
+  let found = false;
+  visit2(paragraph2, (node2) => {
+    if (node2.type === "text" && start(node2) <= offset && offset < end(node2)) found = true;
+  });
+  return found;
+}
 
 // src/format/fix.ts
 function fixText(text6, options = {}) {
-  if (lintText("", text6).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule))) return text6;
+  if (lintText("", text6, { linearExport: options.linearExport === true }).some(stopsFix)) return text6;
   const { head, body: body2 } = splitFile(text6);
-  const normalized = body2.replace(/\r\n?/g, "\n");
-  const sections = sectionOpenersAsLinear(normalized);
-  const lf2 = sections === normalized ? plusSectionsAsLinear(sections) : sections;
+  const normalized = tabReferences(body2.replace(/\r\n?/g, "\n")).text;
+  const ended = tablesEndAsLinear(normalized);
+  if (ended !== normalized && lintText("", ended, { linearExport: options.linearExport === true }).some(stopsFix)) return text6;
+  const sections = sectionOpenersAsLinear(ended);
+  const lf2 = sections === ended ? plusSectionsAsLinear(sections) : sections;
   if (lf2 === void 0) return text6;
-  const unbroken = backslashBreaksAsLinear(lf2);
-  if (unbroken === void 0) return text6;
-  const fixed = fixBody(unbroken, options);
+  const broken = backslashBreaksAsLinear(lf2);
+  if (broken === void 0) return text6;
+  const { body: unbroken, lines: breakLines } = broken;
+  const fixed = fixBody(unbroken, { ...options, breakLines });
   if (fixed === void 0) return text6;
   if (unbroken !== lf2 && lineEndings(fixed) < lineEndings(unbroken)) return text6;
-  return joinFile(head, fixed);
+  if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText("", fixed).some((finding) => finding.rule === "number-paragraph")) return text6;
+  if (lf2 !== ended && lintText("", fixed, { linearExport: options.linearExport === true }).some((finding) => finding.rule === "list-after-item-text")) return text6;
+  return joinFile(head, options.linearExport === true ? fixed : plusLinesAsLinear(fixed));
 }
+function stopsFix(finding) {
+  return !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule);
+}
+var NUMBER_PARAGRAPH_LINE = /(?:^|\n)[ \t>]*\d{1,9}\\[.)][^\S\n]*(?:\n|$)/;
 function lineEndings(body2) {
   let count4 = 0;
   visit2(parse2(body2), (node2, ancestors) => {
@@ -47912,7 +48417,8 @@ function lineEndings(body2) {
   return count4;
 }
 function backslashBreaksAsLinear(body2) {
-  if (!body2.includes("\\")) return body2;
+  const lines2 = /* @__PURE__ */ new Set();
+  if (!body2.includes("\\")) return { body: body2, lines: lines2 };
   const tree = parse2(body2);
   const breaks = [];
   let unwritable = false;
@@ -47924,16 +48430,36 @@ function backslashBreaksAsLinear(body2) {
     if (leading || ancestors.some((a) => a.type === "heading")) unwritable = true;
     breaks.push(start(node2));
   });
-  if (breaks.length === 0) return body2;
+  if (breaks.length === 0) return { body: body2, lines: lines2 };
   if (unwritable) return void 0;
   let written = "";
   let at = 0;
+  let line2 = 0;
   for (const backslash of breaks.sort((a, b) => a - b)) {
     written += body2.slice(at, backslash);
+    for (let newline = body2.indexOf("\n", at); newline !== -1 && newline < backslash; newline = body2.indexOf("\n", newline + 1)) line2++;
+    lines2.add(line2 + 1);
     at = backslash + 1;
   }
   written += body2.slice(at);
-  return isDeepStrictEqual2(breakShape(parse2(written)), breakShape(tree)) ? written : void 0;
+  return isDeepStrictEqual3(breakShape(parse2(written)), breakShape(tree)) ? { body: written, lines: lines2 } : void 0;
+}
+function tablesEndAsLinear(body2) {
+  if (!body2.includes("|")) return body2;
+  for (; ; ) {
+    const rows = [];
+    visit2(parse2(body2), (node2) => {
+      if (node2.type !== "table") return;
+      const row = endingRow(body2, node2);
+      if (row !== void 0) rows.push(start(row));
+    });
+    if (rows.length === 0) return body2;
+    for (const at of rows.sort((a, b) => b - a)) {
+      const lineStart = lineStartOf(body2, at);
+      body2 = `${body2.slice(0, lineStart)}${body2.slice(lineStart, at).trimEnd()}
+${body2.slice(lineStart)}`;
+    }
+  }
 }
 function breakShape(tree) {
   const shape = (node2) => {
@@ -47958,12 +48484,14 @@ function breakShape(tree) {
   };
   return shape(tree);
 }
-function fixBody(body2, options) {
-  if (body2.trim() === "" && !body2.includes(NBSP)) return "";
+function fixBody(body2, bodyOptions) {
+  if (/^[ \t\n\v\f\r]*$/.test(body2)) return "";
   let current = body2;
   let rewroteSections = false;
   for (let pass = 0; pass < 5; pass++) {
     const source = pass === 0 ? current : plusSectionsAsLinear(current);
+    const { breakLines: _written, ...rest } = bodyOptions;
+    const options = pass === 0 ? bodyOptions : rest;
     rewroteSections ||= source !== current;
     let tree = parse2(source, [], true);
     const adjacent = adjacentBoldAsLinear(source, tree);
@@ -48001,14 +48529,30 @@ function fixBody(body2, options) {
   }
   return rewroteSections ? void 0 : current;
 }
+var SPLIT_BOLD_PUNCTUATION = /* @__PURE__ */ new Set(["()", "[]", "\xAB\xBB", ":!", ":?", "(!"]);
 function adjacentBoldAsLinear(body2, tree) {
-  if (!body2.includes("****")) return body2;
+  if (!body2.includes("**")) return body2;
   const groups = /* @__PURE__ */ new Map();
   visit2(tree, (node2, ancestors) => {
     if (node2.type !== "strong" || node2.position.start.line !== node2.position.end.line || ancestors.some((parent) => parent.type === "strong" || parent.type === "emphasis")) return;
     if (body2.slice(start(node2), start(node2) + 2) !== "**") return;
     const [first, ...rest] = node2.children;
+    if (first?.type === "strong" && ancestors.at(-1)?.type === "paragraph" && rest.length > 0 && rest.every((part) => part.type === "text") && first.children.every((child2) => child2.type === "text") && body2.slice(start(node2), start(node2) + 4) === "****" && start(first) === start(node2) + 2) {
+      const block2 = ancestors[1] ?? node2;
+      const edits2 = groups.get(block2) ?? [];
+      edits2.push({ from: start(node2), to: start(node2) + 2, text: "" }, { from: end(node2) - 2, to: end(node2), text: "" });
+      groups.set(block2, edits2);
+      return;
+    }
     if (first?.type !== "text" || rest.at(-1)?.type !== "text") return;
+    const [inner, closing] = rest;
+    if (rest.length === 2 && inner?.type === "strong" && closing?.type === "text" && SPLIT_BOLD_PUNCTUATION.has(first.value + closing.value) && body2.slice(start(inner), start(inner) + 2) === "**" && end(first) === start(inner) && end(inner) === start(closing)) {
+      const block2 = ancestors[1] ?? node2;
+      const edits2 = groups.get(block2) ?? [];
+      edits2.push({ from: start(inner), to: start(inner) + 2, text: "" }, { from: end(node2) - 2, to: end(node2), text: "" });
+      groups.set(block2, edits2);
+      return;
+    }
     const boundaries = rest.filter((part) => part.type === "strong");
     if (boundaries.length === 0 || rest.some((part) => part.type !== "text" && part.type !== "strong")) return;
     if (boundaries.some((part) => body2.slice(start(part), start(part) + 4) !== "****" || body2.slice(end(part) - 4, end(part)) !== "****" || part.children.length !== 1 || part.children[0]?.type !== "strong" || part.children[0].children.some((child2) => child2.type !== "text"))) return;
@@ -48045,7 +48589,7 @@ function linearBoldForms(body2, tree, splitLines = true) {
     if (node2.type === "strong" || node2.type === "emphasis") {
       const parent = ancestors.at(-1);
       if (!((parent?.type === "strong" || parent?.type === "emphasis") && parent.children.length === 1)) {
-        const edit = boldLinkEdit(body2, node2) ?? boldItalicEdit(body2, node2);
+        const edit = splitItalicSpans(body2, node2) ?? boldLinkEdit(body2, node2) ?? boldItalicEdit(body2, node2);
         if (edit !== void 0) group2().links.push(edit);
       }
     }
@@ -48095,6 +48639,10 @@ function linearBoldForms(body2, tree, splitLines = true) {
   }
   const split = reSpellBold(body2, breaks);
   return split === void 0 ? reSpellBold(body2, links) ?? body2 : linearBoldForms(split, void 0, false);
+}
+function splitItalicSpans(body2, node2) {
+  if (!hasOuterStars(body2, node2)) return;
+  return { from: start(node2), to: end(node2), text: body2.slice(start(node2) + 1, end(node2) - 1) };
 }
 function boldItalicEdit(body2, outer) {
   let node2 = outer;
@@ -48178,8 +48726,14 @@ function rewriteBoldRange(body2, from, to, edits) {
   const candidate = parts.join("");
   return overContentLimit(candidate) ? void 0 : candidate;
 }
-var BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t\u00a0]))/;
-var NUMBER_TEXT = /^\d+\\?\.[ \t\u00a0]+[^ \t\u00a0]/;
+var WIDE_SPACE = String.raw`\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000`;
+var NUMBER_WITH_SPACE = new RegExp(String.raw`^(\d+)(\\?)\.([ \t${WIDE_SPACE}])(?=[ \t${WIDE_SPACE}]*[^ \t${WIDE_SPACE}])`);
+var GLUED_NUMBER = new RegExp(String.raw`^\d{1,9}[.)][^ \t${WIDE_SPACE}]`);
+var BLOCK_START = new RegExp(String.raw`^(?:[<>#*+\-=_\`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t${WIDE_SPACE}]))`);
+var NUMBER_TEXT = new RegExp(String.raw`^\d+\\?\.[ \t${WIDE_SPACE}]+[^ \t${WIDE_SPACE}]`);
+var ESCAPED_MARKER = /^([ \t]*)\\(?:-(?:[ \t]|$)|\+[ \t]+[^ \t])/;
+var SPACE_REFERENCE_BEFORE = /&#(?:0*(?:32|9)|[xX]0*(?:20|9));$/;
+var AFTER_BREAK_ESCAPED = /^(?:-|#{1,6}(?:[ \t]|$)|\*(?!\*)|\d{1,9}\.[ \t]+[^ \t])/;
 var MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
 var LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
 var LINEAR_ALERT = /^\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i;
@@ -48190,6 +48744,8 @@ var Writer = class {
   source;
   tree;
   options;
+  /** Where the lines that follow a former backslash break start. */
+  breakLineStarts = /* @__PURE__ */ new Set();
   rewriteEscapes;
   rewriteAsterisks;
   /** Whether literal `~` and `_` get Linear's escapes; the first part of the text's escapes to give up when they change the document. */
@@ -48210,12 +48766,16 @@ var Writer = class {
   inlineFrom = -1;
   /** The bounds of the block's inline text being written (a paragraph's, heading's or cell's), not a link label's. */
   blockInline;
+  /** Whether code spans keep their fences: set for a block whose shorter fences would read differently. */
+  keepFences = false;
   /** The space references `edgeSpaceEdits` has moved, by offset: an inner run of marks leaves them. */
   movedSpaces = /* @__PURE__ */ new Set();
   /** The space edits made so far in the block being written, which a later one is checked with. */
   spaceEdits = [];
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   taskParagraph;
+  /** First paragraphs of items that Linear reads as a nested list (`nestsMarkerText`). */
+  nestedLists = /* @__PURE__ */ new Set();
   /** A list's sibling block written right before it, when that is a list. */
   listBefore = /* @__PURE__ */ new Map();
   constructor(source, tree, options, rewriteEscapes = true, rewriteAsterisks = true, rewriteTildeUnderscore = true) {
@@ -48225,6 +48785,12 @@ var Writer = class {
     this.rewriteEscapes = rewriteEscapes;
     this.rewriteAsterisks = rewriteAsterisks;
     this.rewriteTildeUnderscore = rewriteTildeUnderscore;
+    if (options.breakLines !== void 0 && options.breakLines.size > 0) {
+      for (let line2 = 0, at = 0; at !== 0 || line2 === 0; line2++) {
+        if (options.breakLines.has(line2)) this.breakLineStarts.add(at);
+        at = source.indexOf("\n", at) + 1;
+      }
+    }
     visit2(tree, (node2) => {
       if (node2.type === "definition" && !this.definitions.has(node2.identifier)) this.definitions.set(node2.identifier, node2);
       if (!("children" in node2)) return;
@@ -48280,7 +48846,7 @@ var Writer = class {
         return this.paragraph(node2);
       case "heading": {
         const hashes = "#".repeat(node2.depth);
-        const heading2 = trimEndKeepingNbsp(`${hashes} ${joinLines(this.inline(node2.children))}`);
+        const heading2 = trimEndKeepingWideSpace(`${hashes} ${joinLines(this.inline(node2.children))}`);
         return [heading2 === hashes ? `${hashes} ` : heading2];
       }
       case "thematicBreak":
@@ -48345,10 +48911,11 @@ ${math[1]}
     const hasText = node2.children.some((child2) => !isImage(child2) && !(child2.type === "text" && child2.value.trim() === ""));
     if (images === 0 || !hasText && images === 1) {
       this.wholeParagraphEnd = node2.children.length > 0 ? end(node2.children.at(-1)) : void 0;
-      const text6 = node2 === this.taskParagraph ? this.inline(node2.children, "continuation") : this.paragraphText(node2.children);
+      const text6 = node2 === this.taskParagraph ? taskTextAsLinear(this.inline(node2.children, "continuation")) : this.nestedLists.has(node2) ? this.nestedListText(node2) : this.paragraphText(node2.children);
       this.wholeParagraphEnd = void 0;
       return [escapeLiteralSectionEnd(text6)];
     }
+    if (this.nestedLists.has(node2) && !this.source.slice(start(node2), end(node2)).includes("\n")) return [this.nestedListText(node2)];
     const parts = [[]];
     for (const child2 of node2.children) {
       if (isImage(child2)) parts.push([child2], []);
@@ -48356,8 +48923,9 @@ ${math[1]}
     }
     return parts.map((part, index2) => {
       const afterCheckbox = index2 === 0 && node2 === this.taskParagraph;
-      const text6 = afterCheckbox ? trimKeepingNbsp(this.inline(part, "continuation")) : this.paragraphText(part, true);
-      return escapeLiteralSectionEnd(paragraphPart(text6, !afterCheckbox));
+      const nestedList2 = index2 === 0 && this.nestedLists.has(node2);
+      const text6 = afterCheckbox ? taskTextAsLinear(trimKeepingWideSpace(this.inline(part, "continuation"))) : nestedList2 ? trimKeepingWideSpace(this.inline(part, "continuation")) : this.paragraphText(part, true);
+      return escapeLiteralSectionEnd(paragraphPart(text6, !afterCheckbox && !nestedList2));
     }).filter((part) => part !== "");
   }
   /**
@@ -48369,7 +48937,7 @@ ${math[1]}
    * spaces around a part split off at an image.
    */
   paragraphText(children, trim = false) {
-    const text6 = trim ? trimKeepingNbsp(this.inline(children, "all")) : this.inline(children, "all");
+    const text6 = trim ? trimKeepingWideSpace(this.inline(children, "all")) : this.inline(children, "all");
     if (children[0]?.type !== "text") return text6;
     const marker = LIST_MARKER_START.exec(text6);
     if (marker === null) return text6;
@@ -48385,37 +48953,47 @@ ${math[1]}
    * stay unaligned.
    */
   list(node2, interruptsParagraph = false) {
-    const start2 = node2.start ?? 1;
-    const parts = [];
-    node2.children.forEach((item, index3) => {
-      if (index3 === 0 || splitsAfter(node2.children[index3 - 1], item)) parts.push([item]);
-      else parts.at(-1).push(item);
-    });
     const before = this.listBefore.get(node2);
-    let beforeIndent = before === void 0 ? Infinity : itemIndent(before);
-    let index2 = 0;
-    return parts.map((items) => {
-      const first = start2 + index2;
+    let beforeIndent = before === void 0 ? Infinity : itemIndent(before, this.source);
+    return listParts(node2, this.source).map(({ items, first }, part) => {
       const last = first + items.length - 1;
       const padding = `${last}.`.length - `${first}.`.length;
       const width = node2.ordered && padding <= 3 && padding < beforeIndent ? `${last}.`.length : 0;
-      const written = items.map((item) => {
-        const number = start2 + index2++;
+      const written = items.map((item, offset) => {
+        const number = first + offset;
         const marker = item.checked !== null && item.checked !== void 0 ? `- [${item.checked ? "X" : " "}]` : node2.ordered ? `${number}.`.padStart(width) : "*";
-        return this.listItem(item, marker, interruptsParagraph && number === start2);
+        return this.listItem(item, marker, interruptsParagraph && part === 0 && offset === 0);
       });
       beforeIndent = !node2.ordered || items.at(-1).checked != null ? 2 : `${last}.`.length + 1;
       return written.join("\n");
     }).join("\n\n\n");
   }
-  /**
-   * Whether an item's first line holds its text: not a file block or a
-   * section below an empty marker line. The marker line of a list that
-   * follows another without a blank line must not be empty.
-   */
   textOnMarkerLine(item) {
     const [first] = item.children;
-    return first?.type === "paragraph" && itemAttachment(item) === void 0 && !/^\+{3}[ \t]*$/.test(this.source.slice(start(first), end(first)));
+    return first?.type === "paragraph" && !this.nestsMarkerText(item) && itemAttachment(item) === void 0 && !/^\+{3}[ \t]*$/.test(this.source.slice(start(first), end(first)));
+  }
+  /** `nestsMarkerText` of the source; never for Linear's export, which writes such a list below the marker line. */
+  nestsMarkerText(item) {
+    return !this.options.linearExport && nestsMarkerText(this.source, item);
+  }
+  /**
+   * The text of an item that Linear reads as a nested list, written as
+   * that list: on one line, as a document of its own (`3. - [x] a` keeps
+   * its checkbox); over more lines, as the item's text without escapes.
+   */
+  nestedListText(node2) {
+    const raw = this.source.slice(start(node2), end(node2));
+    if (raw.includes("\n")) return this.inline(node2.children, "continuation");
+    let references = false;
+    visit2(node2, (child2) => {
+      if (child2.type === "linkReference" || child2.type === "imageReference") references = true;
+    });
+    if (!references) return withoutTrailingNewlines(fixText(raw, this.options));
+    const definitions = [...this.definitions.values()].map((definition3) => this.source.slice(start(definition3), end(definition3)));
+    if (definitions.some((definition3) => definition3.includes("\n"))) return this.inline(node2.children, "continuation");
+    return withoutTrailingNewlines(fixText(`${raw}
+
+${definitions.join("\n")}`, this.options));
   }
   listItem(item, marker, interruptsParagraph) {
     const indent2 = " ".repeat(/^ *[^ ]+/.exec(marker)[0].length + 1);
@@ -48448,14 +49026,17 @@ ${indent2}[${label}](${destination2})`;
     if (bareCheckbox) container.markerBrackets = [start(first), start(first) + 2];
     this.containers.push(container);
     if (item.checked !== null && item.checked !== void 0 && first.type === "paragraph") this.taskParagraph = first;
+    const nested = this.nestsMarkerText(item);
+    if (nested) this.nestedLists.add(first);
     let content4 = "";
     const codeLines = /* @__PURE__ */ new Set();
     let line2 = 0;
     item.children.forEach((child2, index2) => {
       const previous3 = item.children[index2 - 1];
-      const interrupts = child2.type === "list" && previous3?.type === "paragraph" && opensWithText(child2) && !(child2.position.start.line > previous3.position.end.line + 1 && startsWithFileBlock(child2));
+      const interrupts = child2.type === "list" && previous3?.type === "paragraph" && opensWithText(child2) && !this.nestsMarkerText(child2.children[0]) && !(child2.position.start.line > previous3.position.end.line + 1 && startsWithFileBlock(child2));
       const followsList = child2.type === "list" && previous3?.type === "list" && listKind(previous3, previous3.children.at(-1)) !== listKind(child2, child2.children[0]) && opensWithText(child2) && this.textOnMarkerLine(child2.children[0]);
-      const separator = index2 === 0 ? "" : interrupts || followsList ? "\n" : "\n\n";
+      const followsBlock = child2.type === "list" && previous3 !== void 0 && LIST_ENDS_BLOCK.has(previous3.type) && !(child2.position.start.line > previous3.position.end.line + 1 && startsWithFileBlock(child2));
+      const separator = index2 === 0 ? "" : interrupts || followsList || followsBlock ? "\n" : "\n\n";
       const written = child2.type === "list" ? this.list(child2, interrupts) : this.block(child2).join("\n\n");
       line2 += separator.length;
       const breaks = lineBreaks(written);
@@ -48470,7 +49051,7 @@ ${indent2}[${label}](${destination2})`;
 
 ${lines2.join("\n")}`;
     }
-    if (first.type === "list") return `${marker} 
+    if (first.type === "list" || nested) return `${marker} 
 ${lines2.join("\n")}`;
     return `${marker} ${lines2.join("\n").slice(indent2.length)}`;
   }
@@ -48529,7 +49110,7 @@ ${lines2.join("\n")}`;
         this.cellStart = first ? start(first) : void 0;
         this.inCell = true;
         const inline = cell2 ? this.inline(cell2.children) : "";
-        let text6 = header2 ? inline.trim() : trimKeepingNbsp(inline);
+        let text6 = header2 ? inline.trim() : trimKeepingWideSpace(inline);
         const lead = text6.length - text6.trimStart().length;
         const escape2 = header2 || unicodeSpaceLead(inline.replace(/^[ \t]+/, "")) === 0 ? void 0 : headingOrNumberEscape(text6.slice(lead));
         if (escape2 !== void 0) text6 = `${text6.slice(0, lead + escape2)}\\${text6.slice(lead + escape2)}`;
@@ -48569,7 +49150,8 @@ ${lines2.join("\n")}`;
         if (node2.type === "html") html2.push([start(node2), end(node2)]);
       });
     }
-    const paragraph2 = lineStarts === "none" ? void 0 : { texts, html: html2, first: lineStarts === "all" };
+    const ownTexts = children.filter((child2) => child2.type === "text").map((child2) => [start(child2), end(child2)]);
+    const paragraph2 = lineStarts === "none" ? void 0 : { texts, ownTexts, html: html2, first: lineStarts === "all" };
     const moved = [...this.movedSpaces];
     const spaceEdits = [...this.spaceEdits];
     const render3 = (rewriteAsterisks) => {
@@ -48589,12 +49171,20 @@ ${lines2.join("\n")}`;
       if (block === void 0) this.spaceEdits = spaceEdits;
       return { text: this.rewritten(from, to, inline.edits, code4, paragraph2), changedAsterisks: inline.changedAsterisks };
     };
-    const candidate = render3(this.rewriteAsterisks);
-    if (!candidate.changedAsterisks) return candidate.text;
-    const original = render3(false);
-    if (!sameMarkdown("Text " + candidate.text, "Text " + original.text)) return original.text;
-    this.rewroteAsterisks = true;
-    return candidate.text;
+    const written = () => {
+      const candidate = render3(this.rewriteAsterisks);
+      if (!candidate.changedAsterisks) return candidate.text;
+      const original = render3(false);
+      if (!sameMarkdown("Text " + candidate.text, "Text " + original.text)) return original.text;
+      this.rewroteAsterisks = true;
+      return candidate.text;
+    };
+    if (this.blockInline !== void 0 || this.keepFences || !hasStrayTick(this.source, from, to, [...texts, ...code4])) return written();
+    const text6 = written();
+    this.keepFences = true;
+    const kept = written();
+    this.keepFences = false;
+    return text6 === kept || sameMarkdown("Text " + text6, "Text " + kept) ? text6 : kept;
   }
   /**
    * The source from `from` to `to` with `edits` made and each continuation
@@ -48607,12 +49197,17 @@ ${lines2.join("\n")}`;
     const inside2 = (ranges, at2) => ranges.some(([a, b]) => a <= at2 && at2 < b);
     if (paragraph2?.first) this.escapeLineStart(from, to, paragraph2.texts, edits);
     for (let at2 = this.source.indexOf("\n", from); at2 !== -1 && at2 < to; at2 = this.source.indexOf("\n", at2 + 1)) {
-      const marker = paragraph2 === void 0 || inside2(code4, at2) || inside2(paragraph2.html, at2) ? void 0 : this.bareMarkerLine(from, at2 + 1, to);
+      const marker = paragraph2 === void 0 || inside2(code4, at2) || inside2(paragraph2.html, at2) ? void 0 : this.bareMarkerLine(from, at2 + 1, to, paragraph2.ownTexts);
       if (marker !== void 0) {
         edits.push(...marker);
+        break;
+      }
+      const escapedMarker = paragraph2 === void 0 || inside2(code4, at2) ? void 0 : this.escapedMarkerLine(at2 + 1, paragraph2.texts);
+      if (escapedMarker !== void 0) {
+        edits.push(escapedMarker);
         continue;
       }
-      const continuation = this.continuation(at2 + 1, inside2(code4, at2), paragraph2 !== void 0 && !inside2(paragraph2.html, at2));
+      const continuation = this.continuation(at2 + 1, inside2(code4, at2), paragraph2 !== void 0 && !inside2(paragraph2.html, at2), paragraph2?.texts);
       edits.push(continuation);
       if (paragraph2 === void 0 || continuation.underline) continue;
       const indented = continuation.text !== "" || /^[ \t]/.test(this.source.slice(continuation.to, to));
@@ -48628,6 +49223,29 @@ ${lines2.join("\n")}`;
     }
     out += this.source.slice(at, to);
     return out;
+  }
+  /**
+   * The edit for a paragraph line that continues with an escaped `-` or `+`
+   * (`\\- step`) one to three columns past its container's content: Linear
+   * drops the escape there, and the line becomes a list item. At the
+   * content's column Linear keeps it, and a paragraph line's indentation is
+   * no part of its text: the line is written there, without its own
+   * indentation. Undefined for any other line.
+   */
+  escapedMarkerLine(lineStart, texts) {
+    if (this.fileBlockIndent > 0) return void 0;
+    const newline = this.source.indexOf("\n", lineStart);
+    const line2 = this.source.slice(lineStart, newline === -1 ? void 0 : newline);
+    const { at, pad } = this.prefixEnd(lineStart, line2);
+    const marker = ESCAPED_MARKER.exec(this.source.slice(at, lineStart + line2.length));
+    if (marker === null) return void 0;
+    const backslash = at + marker[1].length;
+    if (!texts.some(([a, b]) => a <= backslash && backslash < b)) return void 0;
+    if (this.containers.some((container) => container.kind === "item" && container.written === void 0)) return void 0;
+    const prefix = this.containers.reduce((sum, container) => sum + (container.kind === "item" ? container.written : 2), 0);
+    const past = [..." ".repeat(pad), ...this.source.slice(at, backslash)].reduce(advanceColumn, prefix) - prefix;
+    if (past < 1 || past > 3) return void 0;
+    return { from: lineStart, to: backslash, text: "" };
   }
   /**
    * Rewrites the first content of a paragraph line as Linear writes it,
@@ -48647,8 +49265,9 @@ ${lines2.join("\n")}`;
       return false;
     }
     if (char !== void 0 && char >= "0" && char <= "9") {
+      if (continuation) this.escapeLoneNumber(at, limit, texts, edits);
       const end2 = Math.min(limit, this.textLineAt(at).to);
-      const number = /^(\d+)(\\?)\.([ \t\u00a0])(?=[ \t\u00a0]*[^ \t\u00a0])/.exec(this.source.slice(at, end2));
+      const number = NUMBER_WITH_SPACE.exec(this.source.slice(at, end2));
       if (number) {
         const from = at + number[1].length;
         const dot = from + number[2].length;
@@ -48667,53 +49286,145 @@ ${lines2.join("\n")}`;
     edits.push({ from: at, to: at, text: "\\" });
     return true;
   }
+  /**
+   * A paragraph line of only a number and a dot (`2.`), before the
+   * paragraph's last line. With spaces after the dot Linear escapes it
+   * (`2\. `), and keeps that form. Without them it reads `2.` inside a list
+   * item as an empty item that ends the paragraph, and writes an escaped
+   * `2\.` back without its escape: there `fix` writes `2\. `, which reads
+   * as the same text and which Linear keeps.
+   */
+  escapeLoneNumber(at, limit, texts, edits) {
+    const line2 = this.textLineAt(at);
+    const lone = /^(\d{1,9})(\\?)\.([ \t]*)$/.exec(this.source.slice(at, line2.to));
+    if (lone === null || line2.to >= limit) return;
+    const dot = at + lone[1].length;
+    if (!texts.some(([a, b]) => a <= at && dot < b)) return;
+    if (lone[3] !== "") {
+      if (lone[2] === "") edits.push({ from: dot, to: dot, text: "\\" });
+      return;
+    }
+    if (this.containers.length === 0) return;
+    if (this.containers.at(-1)?.kind !== "item" || this.prefixEnd(line2.from, this.source.slice(line2.from, line2.to)).lazy) return;
+    edits.push({ from: dot, to: dot + lone[2].length, text: "\\" }, { from: line2.to, to: line2.to, text: " " });
+  }
   /** Linear's escape in a paragraph line that starts with whitespace outside ASCII (`unicodeSpaceEscape`). */
   escapeAfterUnicodeSpace(at, limit, texts, edits) {
     const offset = unicodeSpaceEscape(this.source.slice(at, Math.min(limit, this.textLineAt(at).to)));
     if (offset !== void 0 && texts.some(([a, b]) => a <= at + offset && at + offset < b)) edits.push({ from: at + offset, to: at + offset, text: "\\" });
   }
   /**
-   * The edits for the second and last line of an item's first paragraph,
-   * starting on the item's line, when that line holds only `N.` or `*`
-   * inside list items: an empty marker cannot interrupt a paragraph, so it
-   * is text, but Linear reads it as an empty item nested in the item and
-   * writes it at the item's content with a space after it (four or more
-   * columns past the content, it reads indented code there, which `fix`
-   * cannot write without changing the text: the same form keeps the text
-   * and is what Linear keeps of it). Under a quote, on a line that does not
-   * reach the item's content, with other lines before or after it, Linear
-   * reads the text: `undefined`, the line is written as before.
+   * The edits for the second line of an item's first paragraph, starting
+   * on the item's line, when that line holds only `N.` or `*` inside list
+   * items: an empty marker cannot interrupt a paragraph, so it is text, but
+   * Linear reads it as an empty item nested in the item and writes it at
+   * the item's content with a space after it (four or more columns past the
+   * content, it reads indented code there, which `fix` cannot write without
+   * changing the text: the same form keeps the text and is what Linear
+   * keeps of it). The line is the paragraph's last, or the lines after it
+   * are numbered lines Linear reads as list items (`numberedLines`). Under
+   * a quote, on a line that does not reach the item's content, after other
+   * lines, before other text or after a hard break, Linear reads the text:
+   * `undefined`, the line is written as before.
    */
-  bareMarkerLine(from, lineStart, to) {
+  bareMarkerLine(from, lineStart, to, texts) {
     const item = this.containers.at(-1);
     if (to !== this.wholeParagraphEnd) return void 0;
-    if (this.fileBlockIndent > 0 || item === void 0 || this.containers.some((container) => container.kind !== "item")) return void 0;
+    if (this.fileBlockIndent > 0 || item?.kind !== "item" || this.containers.some((container) => container.kind !== "item")) return void 0;
     if (lineStartOf(this.source, item.content) !== lineStartOf(this.source, from) || this.source.indexOf("\n", from) !== lineStart - 1) return void 0;
     const next = this.source.indexOf("\n", lineStart);
-    if (next !== -1 && next < to) return void 0;
-    const bare = /^[ \t]*(?:\d{1,9}\.|\*)$/.exec(this.source.slice(lineStart, to));
+    const lineEnd = next === -1 || next > to ? to : next;
+    const bare = /^[ \t]*(\d{1,9}\.|\*)[ \t]*$/.exec(this.source.slice(lineStart, lineEnd));
     if (bare === null) return void 0;
     const line2 = this.source.slice(lineStart, next === -1 ? void 0 : next);
     if (this.prefixEnd(lineStart, line2).lazy) return void 0;
-    if (next !== -1) {
-      const after = this.source.indexOf("\n", next + 1);
-      const nextLine = this.source.slice(next + 1, after === -1 ? void 0 : after);
-      if (/^[ \t]*\d{1,9}[.)](?:[ \t]|$)/.test(nextLine) && !this.prefixEnd(next + 1, nextLine).lazy) return void 0;
+    for (let at = lineStart; at !== 0 && at <= to; at = this.source.indexOf("\n", at) + 1) {
+      if (this.breakLineStarts.has(at)) return void 0;
     }
+    let textEnd = lineStart - 1;
+    while (textEnd > from && (this.source[textEnd - 1] === " " || this.source[textEnd - 1] === "	")) textEnd--;
+    if (this.source.endsWith("  ", lineStart - 1)) return void 0;
     const marker = lineStart + /^[ \t]*/.exec(line2)[0].length;
-    return [{ from: lineStart, to: marker, text: "" }, { from: to, to, text: " " }];
+    const edits = [{ from: lineStart, to: marker, text: "" }, { from: marker + bare[1].length, to: lineEnd, text: " " }];
+    if (textEnd < lineStart - 1 && !SPACE_REFERENCE_BEFORE.test(this.source.slice(Math.max(from, textEnd - 16), textEnd))) {
+      edits.push({ from: textEnd, to: lineStart - 1, text: "" });
+    }
+    if (lineEnd < to) {
+      const numbered = this.numberedLines(item, marker, bare[1], lineEnd, to, texts);
+      if (numbered === void 0) return void 0;
+      edits.push(...numbered);
+    }
+    const after = this.source.indexOf("\n", to);
+    if (after !== -1) {
+      const afterEnd = this.source.indexOf("\n", after + 1);
+      const nextLine = this.source.slice(after + 1, afterEnd === -1 ? void 0 : afterEnd);
+      if (/^[ \t]*\d{1,9}[.)](?:[ \t]|$)/.test(nextLine) && !this.prefixEnd(after + 1, nextLine).lazy) return void 0;
+    }
+    return edits;
+  }
+  /**
+   * The edits for the lines after a bare marker line (`bareMarkerLine`:
+   * the marker `bare` at offset `marker`, its line ending at `lineEnd`) up
+   * to the paragraph's end `to`, when each is a number and a dot, alone
+   * (an empty item, written with one space after it) or with one space and
+   * text that opens no block: Linear reads them as the items of a list, nested in the
+   * empty item where the lines reach its content (`1. Trip` / `   1. ` /
+   * `      2. step`), else after it in its list (`   2. ` / `   3. Pack`),
+   * and writes their numbers unescaped. Written so, a line still continues
+   * the paragraph text in Markdown: its number is not 1, and the empty item
+   * cannot interrupt the paragraph. The numbers must count on from the
+   * list's first, with as many digits and no leading zero, each line under
+   * four columns past the content it belongs to (past it Linear reads
+   * code), and no line ending inside markup (`ownTexts` holds the
+   * paragraph's own text nodes); otherwise `undefined`.
+   */
+  numberedLines(item, marker, bare, lineEnd, to, texts) {
+    const column = (offset) => [...this.source.slice(lineStartOf(this.source, offset), offset)].reduce(advanceColumn, 0);
+    const markerColumn = column(marker);
+    const itemContent = column(item.content);
+    if (markerColumn - itemContent >= 4) return void 0;
+    const emptyContent = markerColumn + bare.length + 1;
+    const edits = [];
+    let nested;
+    let expected;
+    let digits;
+    for (let newline = lineEnd; newline !== -1 && newline < to; newline = this.source.indexOf("\n", newline + 1)) {
+      if (!texts.some(([a, b]) => a <= newline && newline < b)) return void 0;
+      const start2 = newline + 1;
+      const nextNewline = this.source.indexOf("\n", start2);
+      const end2 = nextNewline === -1 || nextNewline > to ? to : nextNewline;
+      const numbered = /^([ \t]*)(\d{1,9})\.(?:([ \t]*)|( (?![ \t]).*[^ \t]))$/.exec(this.source.slice(start2, end2));
+      if (numbered === null || this.prefixEnd(start2, this.source.slice(start2, end2)).lazy) return void 0;
+      if (numbered[4] !== void 0 && !itemTextAsLinear(numbered[4].slice(1))) return void 0;
+      const numberColumn = column(start2 + numbered[1].length);
+      const inside2 = numberColumn >= emptyContent;
+      if (nested !== void 0 && inside2 !== nested || bare === "*" && !inside2) return void 0;
+      if (numberColumn - (inside2 ? emptyContent : itemContent) >= 4 || numbered[2].startsWith("0")) return void 0;
+      nested = inside2;
+      expected ??= nested ? Number(numbered[2]) : Number(bare.slice(0, -1)) + 1;
+      digits ??= nested ? numbered[2].length : bare.length - 1;
+      if (Number(numbered[2]) !== expected || expected < 2 || numbered[2].length !== digits) return void 0;
+      expected++;
+      edits.push({ from: start2, to: start2 + numbered[1].length, text: nested ? " ".repeat(bare.length + 1) : "" });
+      if (numbered[3] !== void 0 && numbered[3] !== " ") edits.push({ from: end2 - numbered[3].length, to: end2, text: " " });
+    }
+    return edits;
   }
   /** The end of the paragraph being written whole, which `bareMarkerLine` needs. */
   wholeParagraphEnd;
   /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's text. */
-  continuation(lineStart, inCode, paragraph2 = false) {
+  continuation(lineStart, inCode, paragraph2 = false, texts = []) {
     const line2 = this.source.slice(lineStart, this.source.indexOf("\n", lineStart) === -1 ? void 0 : this.source.indexOf("\n", lineStart));
     const lineEnd = lineStart + line2.length;
     const matched = this.codePrefixEnd(lineStart, line2);
     const ownText = matched + /^[ \t]*/.exec(this.source.slice(matched, lineEnd))[0].length;
     const startsBlock = BLOCK_START.test(this.source.slice(ownText, lineEnd));
     let { at, pad, lazy } = inCode ? { at: matched, pad: 0, lazy: false } : this.prefixEnd(lineStart, line2);
-    if (!inCode && (lazy || this.fileBlockIndent > 0) && startsBlock) ({ at, pad } = { at: matched, pad: 0 });
+    const inText2 = paragraph2 && texts.some(([a, b]) => a <= ownText && ownText < b);
+    const escapedNumber = inText2 && NUMBER_TEXT.test(this.source.slice(ownText, lineEnd));
+    const glued = inText2 && GLUED_NUMBER.test(this.source.slice(ownText, lineEnd));
+    const keepsIndent = this.fileBlockIndent > 0 || !(paragraph2 && (escapedNumber || glued));
+    if (!inCode && (lazy || this.fileBlockIndent > 0) && startsBlock && keepsIndent) ({ at, pad } = { at: matched, pad: 0 });
     const underline = /^([ \t]*)(?:-+|=+)[ \t]*$/.exec(this.source.slice(at, lineStart + line2.length));
     const deep = underline !== null && pad === 0 && this.fileBlockIndent === 0 && /^ {4}/.test(underline[1]);
     if (underline && !deep && (this.containers.length > 0 || this.fileBlockIndent > 0)) {
@@ -48721,8 +49432,10 @@ ${lines2.join("\n")}`;
       return { from: lineStart, to: at + underline[1].length, text: paragraph2 ? "\\" : " ".repeat(4 + this.fileBlockIndent), underline: true };
     }
     if (!inCode && this.fileBlockIndent > 0 && !startsBlock) return { from: lineStart, to: ownText, text: "" };
-    const escapedNumber = paragraph2 && NUMBER_TEXT.test(this.source.slice(ownText, lineEnd));
-    if (!inCode && startsBlock && this.containers.length > 0 && this.source.slice(at, ownText).includes("	") && !escapedNumber && !this.samePrefixColumns(lineStart, at, pad)) {
+    if (!inCode && paragraph2 && this.breakLineStarts.has(lineStart) && (!startsBlock || glued || AFTER_BREAK_ESCAPED.test(this.source.slice(ownText, lineEnd)))) {
+      return { from: lineStart, to: ownText, text: "" };
+    }
+    if (!inCode && startsBlock && !glued && this.containers.length > 0 && this.source.slice(at, ownText).includes("	") && !escapedNumber && !this.samePrefixColumns(lineStart, at, pad)) {
       const column = (offset) => [...this.source.slice(lineStart, offset)].reduce(advanceColumn, 0);
       return { from: lineStart, to: ownText, text: " ".repeat(pad + column(ownText) - column(at)) };
     }
@@ -48748,8 +49461,10 @@ ${lines2.join("\n")}`;
    * a line without one (a lazy line) keeps its indentation for the quote;
    * an item takes up to its content indent in columns, so a lazy line
    * indented less loses all of it. A tab counts to the next multiple of
-   * four columns; `pad` is the columns of a tab past the last prefix, and
-   * `lazy` whether a container found no prefix of its own on the line.
+   * four columns; `pad` is the columns of a tab past the last prefix,
+   * `quoteTab` whether those columns are of a tab a quote's `>` took in
+   * part and no item took from, and `lazy` whether a container found no
+   * prefix of its own on the line.
    */
   prefixEnd(lineStart, line2) {
     const lineEnd = lineStart + line2.length;
@@ -48757,6 +49472,7 @@ ${lines2.join("\n")}`;
     let column = 0;
     let pad = 0;
     let lazy = false;
+    let quoteTab = false;
     const take = () => {
       const before = column;
       column = advanceColumn(column, this.source[at]);
@@ -48772,28 +49488,37 @@ ${lines2.join("\n")}`;
         }
         pad = 0;
         for (let index2 = 0; index2 < marker[0].length; index2++) take();
+        quoteTab = false;
         if (this.source[at] === " ") take();
-        else if (this.source[at] === "	") pad = take() - 1;
+        else if (this.source[at] === "	") {
+          pad = take() - 1;
+          quoteTab = pad > 0;
+        }
         continue;
       }
       let need = container.indent;
       const taken = Math.min(pad, need);
       pad -= taken;
       need -= taken;
+      if (taken > 0) quoteTab = false;
       while (need > 0 && at < lineEnd && isSpaceOrTab(this.source[at])) {
         const width = take();
-        if (width > need) pad = width - need;
+        if (width > need) {
+          pad = width - need;
+          quoteTab = false;
+        }
         need = Math.max(0, need - width);
       }
       if (need > 0) lazy = true;
     }
-    return { at, pad, lazy };
+    return { at, pad, lazy, quoteTab };
   }
   /**
    * The code span from `from` to `to` on one line, as Linear writes one that
    * runs over lines: each line ending becomes a space, and a line's
    * container prefixes go. The indentation past them is code text and
-   * stays; the columns of a tab a prefix takes in part stay as spaces.
+   * stays; the columns of a tab an item's prefix takes in part stay as
+   * spaces. A tab a quote's `>` takes in part stays a tab, as Linear reads it.
    */
   codeSpanOnOneLine(from, to) {
     let out = "";
@@ -48804,8 +49529,8 @@ ${lines2.join("\n")}`;
       const next = this.source.indexOf("\n", lineStart);
       const line2 = this.source.slice(lineStart, next === -1 ? void 0 : next);
       const prefix = this.prefixEnd(lineStart, line2);
-      const rest = prefix.lazy ? { at: this.codePrefixEnd(lineStart, line2), pad: 0 } : prefix;
-      out += " ".repeat(1 + rest.pad);
+      const rest = prefix.lazy ? { at: this.codePrefixEnd(lineStart, line2), pad: 0, quoteTab: false } : prefix;
+      out += rest.quoteTab ? " 	" : " ".repeat(1 + rest.pad);
       at = rest.at;
     }
     return out + this.source.slice(at, to);
@@ -48920,7 +49645,7 @@ ${lines2.join("\n")}`;
     const [link2, ...rest] = paragraph2?.type === "paragraph" ? paragraph2.children : [];
     if (others.length > 0 || rest.length > 0 || link2?.type !== "link" || link2.url !== url) return void 0;
     const shape = (node2) => breakShape({ type: "root", children: [{ type: "paragraph", children: [node2] }] });
-    return isDeepStrictEqual2(shape({ ...link2, title: null }), shape({ type: "link", url, title: null, children: expected })) ? text6 : void 0;
+    return isDeepStrictEqual3(shape({ ...link2, title: null }), shape({ type: "link", url, title: null, children: expected })) ? text6 : void 0;
   }
   inlineEdits(node2, inline, joinLeft = false, joinRight = false) {
     const { edits, rewriteAsterisks } = inline;
@@ -48989,15 +49714,20 @@ ${lines2.join("\n")}`;
         if (!this.literal && this.rewriteEscapes) this.escapeTextBrackets(from, to, edits);
         return;
       }
-      case "inlineCode":
-        if (this.source.slice(from, to).includes("\n")) {
+      case "inlineCode": {
+        let span = this.source.slice(from, to);
+        if (span.includes("\n")) {
           const joined = this.codeSpanOnOneLine(from, to);
           const before = this.source.slice(lineStartOf(this.source, from), from);
           const lineEnd = this.source.indexOf("\n", to);
           const after = this.source.slice(to, lineEnd === -1 ? void 0 : lineEnd);
-          if (!`${before}${joined}${after}`.includes("|")) edits.push({ from, to, text: joined });
+          if (`${before}${joined}${after}`.includes("|")) return;
+          span = joined;
         }
+        const written = this.keepFences ? span : linearCodeSpan(span) ?? span;
+        if (written !== this.source.slice(from, to)) edits.push({ from, to, text: written });
         return;
+      }
       case "html":
         if (this.inCell && CELL_BREAK.test(node2.value)) edits.push({ from, to, text: "&#10;" });
         return;
@@ -49093,27 +49823,35 @@ ${lines2.join("\n")}`;
   /**
    * Linear moves a space at the inner edge of bold, italic or strikethrough
    * out of it: `**&#32;Tip**` is ` **Tip**`. At the start or end of a
-   * block's text the space then goes, as `spaceReferenceEdits` says.
+   * block's text the space then goes, as `spaceReferenceEdits` says. It
+   * moves whitespace outside ASCII the same way, as the character, which
+   * stays at a block's edge: `**&nbsp;Tip**` is an NBSP and `**Tip**`.
    */
   edgeSpaceEdits(node2, edits) {
     const [blockFrom, blockTo] = this.blockInline ?? [-1, -1];
-    const edge = (side) => {
+    const inner = (side) => {
       let child2 = node2;
       while (child2 !== void 0 && (child2.type === "strong" || child2.type === "emphasis" || child2.type === "delete")) child2 = side === "first" ? child2.children[0] : child2.children.at(-1);
+      return child2;
+    };
+    const edge = (side) => {
+      const child2 = inner(side);
       return child2?.type === "text" ? child2 : void 0;
     };
+    const contentStart = start(inner("first") ?? node2);
+    const contentEnd = end(inner("last") ?? node2);
     const groups = [];
     const first = edge("first");
-    const lead = first && spaceReferenceRuns(this.source, start(first), end(first)).find((run2) => run2.from === start(first));
-    if (lead && !this.movedSpaces.has(lead.from) && lead.to < end(first) && !/\s/u.test(this.source[lead.to])) {
+    const lead = first && spaceReferenceRuns(this.source, start(first), end(first), true).find((run2) => run2.from === start(first));
+    if (lead && !this.movedSpaces.has(lead.from) && lead.to < contentEnd && !/\s/u.test(this.source[lead.to])) {
       this.movedSpaces.add(lead.from);
-      groups.push([{ from: start(node2), to: start(node2), text: start(node2) === blockFrom ? "" : " ".repeat(lead.count) }, { from: lead.from, to: lead.to, text: "" }]);
+      groups.push([{ from: start(node2), to: start(node2), text: start(node2) === blockFrom ? trimKeepingWideSpace(lead.text) : lead.text }, { from: lead.from, to: lead.to, text: "" }]);
     }
     const last = edge("last");
-    const tail = last && spaceReferenceRuns(this.source, start(last), end(last)).find((run2) => run2.to === end(last));
-    if (tail && !this.movedSpaces.has(tail.from) && tail.from > start(last) && !/\s/u.test(this.source[tail.from - 1])) {
+    const tail = last && spaceReferenceRuns(this.source, start(last), end(last), true).find((run2) => run2.to === end(last));
+    if (tail && !this.movedSpaces.has(tail.from) && tail.from > contentStart && !/\s/u.test(this.source[tail.from - 1])) {
       this.movedSpaces.add(tail.from);
-      groups.push([{ from: tail.from, to: tail.to, text: "" }, { from: end(node2), to: end(node2), text: end(node2) === blockTo ? "" : " ".repeat(tail.count) }]);
+      groups.push([{ from: tail.from, to: tail.to, text: "" }, { from: end(node2), to: end(node2), text: end(node2) === blockTo ? trimKeepingWideSpace(tail.text) : tail.text }]);
     }
     this.pushIfKept(groups, edits);
   }
@@ -49155,7 +49893,7 @@ ${lines2.join("\n")}`;
       at = edit.to;
     }
     edited2 += this.source.slice(at, to);
-    return isDeepStrictEqual2(spaceShape(parse2(edited2)), spaceShape(parse2(this.source.slice(from, to))));
+    return isDeepStrictEqual3(spaceShape(parse2(edited2)), spaceShape(parse2(this.source.slice(from, to))));
   }
   /** Linear writes every link destination in angle brackets, without a title. */
   link(children, url) {
@@ -49204,7 +49942,7 @@ function textEdits(source, from, to, redundantEscape, inBlock = true) {
     const char = decodeEntity(match[0]);
     const at = from + match.index;
     const after = raw.slice(match.index + match[0].length);
-    if (char === void 0 || char.trim() === "" && char !== NBSP) continue;
+    if (char === void 0 || char.trim() === "" && !isWideSpace(char)) continue;
     if (char === "&" ? /^[A-Za-z0-9#]+;/.test(after) : char.codePointAt(0) < 128) continue;
     if (!sameFlanking(source, at, at + match[0].length, char)) continue;
     edits.push({ from: at, to: at + match[0].length, text: char });
@@ -49314,7 +50052,6 @@ function* emojiShortcodeStarts(label) {
     if (Object.hasOwn(nameToEmoji, match[1])) yield match.index;
   }
 }
-var NBSP = "\xA0";
 function loneBackticks(source, from, to) {
   const runs = [];
   const raw = source.slice(from, to);
@@ -49352,8 +50089,8 @@ function spaceShape(tree) {
         text6(child2.value);
       } else if (child2.type === "strong" || child2.type === "emphasis" || child2.type === "delete") {
         const inner = phrasing3(child2.children);
-        const lead = trimSpaces(inner, "start");
-        const tail = trimSpaces(inner, "end");
+        const lead = trimSpaces(inner, "start", true);
+        const tail = trimSpaces(inner, "end", true);
         text6(lead);
         out.push({ type: child2.type, children: inner });
         text6(tail);
@@ -49379,36 +50116,39 @@ function spaceShape(tree) {
   };
   return shape(tree);
 }
-function trimSpaces(shapes, side) {
+function trimSpaces(shapes, side, wide = false) {
   const index2 = side === "start" ? 0 : shapes.length - 1;
   const edge = shapes[index2];
   if (edge?.type !== "text") return "";
   const value = edge.value;
   let at = side === "start" ? 0 : value.length;
-  if (side === "start") while (value[at] === " ") at++;
-  else while (value[at - 1] === " ") at--;
+  const space = (char) => char === " " || wide && char !== void 0 && isWideSpace(char);
+  if (side === "start") while (space(value[at])) at++;
+  else while (space(value[at - 1])) at--;
   edge.value = side === "start" ? value.slice(at) : value.slice(0, at);
   if (edge.value === "") shapes.splice(index2, 1);
   return side === "start" ? value.slice(0, at) : value.slice(at);
 }
-function spaceReferenceRuns(source, from, to) {
+function spaceReferenceRuns(source, from, to, wide = false) {
   const runs = [];
-  if (!source.slice(from, to).includes("&#")) return runs;
+  if (!source.slice(from, to).includes("&")) return runs;
   for (const match of source.slice(from, to).matchAll(CHARACTER_REFERENCE)) {
     const at = from + match.index;
-    if (escaped(source, at) || decodeEntity(match[0]) !== " ") continue;
+    const char = decodeEntity(match[0]);
+    if (escaped(source, at) || char === void 0 || char !== " " && !(wide && isWideSpace(char))) continue;
     const last = runs.at(-1);
     if (last?.to === at) {
       last.to += match[0].length;
       last.count++;
+      last.text += char;
     } else {
-      runs.push({ from: at, to: at + match[0].length, count: 1 });
+      runs.push({ from: at, to: at + match[0].length, count: 1, text: char });
     }
   }
   return runs;
 }
 var DELIMITER = /^[*_~]$/;
-var UNICODE_WHITESPACE = /^[\t\n\f\r\p{Zs}]$/u;
+var UNICODE_WHITESPACE = /^\s$/u;
 var UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
 function sameFlanking(source, from, to, char) {
   const kind = (c) => c === void 0 || UNICODE_WHITESPACE.test(c) ? "space" : UNICODE_PUNCTUATION.test(c) ? "punctuation" : "other";
@@ -49469,6 +50209,11 @@ function paragraphPart(text6, startsLine) {
   }
   return text6;
 }
+function taskTextAsLinear(text6) {
+  const number = /^(\d{1,9})\.[ \t]/.exec(text6);
+  if (number) return `${number[1]}\\. ${text6.slice(number[0].length)}`;
+  return /^(?:[->]|\+[ \t]|#{1,6}(?:[ \t]|$))/.test(text6) ? `\\${text6}` : text6;
+}
 function escapeLiteralSectionEnd(text6) {
   if (!/^\\\+{3}(?:[ \t]|\n)/.test(text6)) return text6;
   return text6.replace(/\n\+{3}$/, "\n\\+++");
@@ -49515,6 +50260,17 @@ function blockStartEscapes(text6, startsLine) {
       return [];
   }
 }
+function itemTextAsLinear(text6) {
+  if (!/^[\p{L}\p{N}*_`(["]/u.test(text6) || /^\[[ xX]\]/.test(text6)) return false;
+  let blocks;
+  try {
+    blocks = parse2(text6).children;
+  } catch (error2) {
+    if (error2 instanceof MarkdownLimitError) return false;
+    throw error2;
+  }
+  return blocks.length === 1 && blocks[0].type === "paragraph";
+}
 function hasUnplacedNode(tree) {
   let unplaced = false;
   visit2(tree, (node2) => {
@@ -49538,11 +50294,11 @@ function fixLinearText(linearText, content4, inRepository, previousBody) {
   const notUploaded = relativeUrls(content4, /* @__PURE__ */ new Set(["link", "image"]));
   const notUploadedUris = new Set([...notUploaded].map((url) => normalizeUri(url)));
   const uploaded = (url) => !notUploadedUris.has(normalizeUri(url));
-  const linear = { linkedFileExists: uploaded };
+  const linear = { linkedFileExists: uploaded, linearExport: true };
   const fixed = fixText(text6, linear);
   if (fixed !== text6 && !sameMarkdown(splitFile(fixed).body, splitFile(text6).body, { linearNumberSpacing: true, linearBoldForms: true })) return text6;
   if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]) && inRepository(url))) return fixed;
-  const hooked = fixText(text6, { linkedFileExists: (url) => uploaded(url) || inRepository(url) });
+  const hooked = fixText(text6, { linkedFileExists: (url) => uploaded(url) || inRepository(url), linearExport: true });
   return fixText(hooked, linear) === fixed ? hooked : fixed;
 }
 function relativeFileBlocksAsLinks(body2) {
@@ -49573,26 +50329,22 @@ function relativeUrls(text6, types) {
 var VIDEO = /\.(?:mp4|mov|webm)$/i;
 var MP3 = /\.mp3$/i;
 var WAV_OR_OGG = /\.(?:wav|ogg)$/i;
-function itemIndent(list4) {
+function itemIndent(list4, source) {
   if (!list4.ordered || list4.children.at(-1)?.checked != null) return 2;
-  return `${(list4.start ?? 1) + list4.children.length - 1}.`.length + 1;
+  return `${lastNumber(list4, source)}.`.length + 1;
 }
+function lastNumber(list4, source) {
+  const parts = listParts(list4, source);
+  const last = parts.at(-1);
+  return last.first + last.items.length - 1;
+}
+var LIST_ENDS_BLOCK = /* @__PURE__ */ new Set(["code", "blockquote", "heading", "thematicBreak", "table"]);
 function endsWithTable(tree) {
   let node2 = tree;
   while (node2 !== void 0 && (node2.type === "root" || node2.type === "blockquote" || node2.type === "list" || node2.type === "listItem")) {
     node2 = node2.children.findLast((child2) => child2.type !== "definition");
   }
   return node2?.type === "table";
-}
-function splitsAfter(item, next) {
-  return item.children.length === 0 && next.position.start.line - item.position.end.line > 2;
-}
-function listKind(list4, item) {
-  return item.checked != null ? "task" : list4.ordered ? "ordered" : "bullet";
-}
-function opensWithText(list4) {
-  const [item] = list4.children;
-  return item !== void 0 && item.children[0]?.type === "paragraph" && (listKind(list4, item) !== "ordered" || (list4.start ?? 1) === 1);
 }
 function startsWithFileBlock(list4) {
   const [item] = list4.children;
@@ -49620,6 +50372,25 @@ function attachmentLink(paragraph2) {
 function prefixOf(container, rest) {
   return container.kind === "quote" ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
 }
+function linearCodeSpan(span) {
+  const fence = /^`+/.exec(span)[0].length;
+  const code4 = codeSpanText(span.slice(fence, span.length - fence));
+  if (linearDropsCodeSpaces(code4)) return void 0;
+  let longest = 0;
+  for (const run2 of code4.matchAll(/`+/g)) longest = Math.max(longest, run2[0].length);
+  if (longest === 0) return `\`${code4}\``;
+  const ticks = "`".repeat(longest + 1);
+  return `${ticks} ${code4} ${ticks}`;
+}
+function hasStrayTick(source, from, to, covered) {
+  const ranges = [...covered].sort((a, b) => a[0] - b[0]);
+  let range = 0;
+  for (let at = source.indexOf("`", from); at !== -1 && at < to; at = source.indexOf("`", at + 1)) {
+    while (range < ranges.length && ranges[range][1] <= at) range++;
+    if (range === ranges.length || ranges[range][0] > at) return true;
+  }
+  return false;
+}
 function lineStartOf(source, at) {
   return source.lastIndexOf("\n", at - 1) + 1;
 }
@@ -49634,18 +50405,21 @@ function joinLines(text6) {
     return line2.slice(start2, end2);
   }).join(" ");
 }
-function trimKeepingNbsp(text6) {
+function trimKeepingWideSpace(text6) {
   let start2 = 0;
   while (start2 < text6.length && trimmed(text6[start2])) start2 += 1;
-  return trimEndKeepingNbsp(text6.slice(start2));
+  return trimEndKeepingWideSpace(text6.slice(start2));
 }
-function trimEndKeepingNbsp(text6) {
+function trimEndKeepingWideSpace(text6) {
   let end2 = text6.length;
   while (end2 > 0 && trimmed(text6[end2 - 1])) end2 -= 1;
   return text6.slice(0, end2);
 }
 function trimmed(char) {
-  return char !== NBSP && char.trim() === "";
+  return char.trim() === "" && !isWideSpace(char);
+}
+function isWideSpace(char) {
+  return char.charCodeAt(0) > 127 && char !== "\uFEFF" && char.trim() === "";
 }
 function unicodeSpaceEscape(line2) {
   const lead = unicodeSpaceLead(line2);
@@ -55938,7 +56712,7 @@ async function confirmInitialSync(context, options) {
         const hash = sha2564(body2);
         sent.set(path7, body2);
         let held;
-        const holds = () => held ??= document3 !== void 0 && (holdsBody(document3.content ?? "", body2) || sameLinkDestinations(document3.content ?? "", body2) && holdsBody(fixText(restoreBody(transforms, path7, document3.content ?? "", body2, sources.input.mapping.files)), source));
+        const holds = () => held ??= document3 !== void 0 && (holdsBody(document3.content ?? "", body2) || sameLinkDestinations(document3.content ?? "", body2) && holdsBody(fixText(restoreBody(transforms, path7, document3.content ?? "", body2, sources.input.mapping.files), { linearExport: true }), source));
         const before = previous3.get(path7);
         if (document3 !== void 0 && resumed && before?.id === document3.id && writtenBefore.get(path7) === hash && (before.observedDigest !== void 0 && observedDigest(document3) === before.observedDigest || holds())) {
           result.skippedCompleted.push(path7);
@@ -57084,6 +57858,7 @@ async function confirmWithGate(context, options, gate) {
   async function record() {
     const bodies = /* @__PURE__ */ new Map();
     const trackedBodies = /* @__PURE__ */ new Map();
+    const readableContents = /* @__PURE__ */ new Map();
     let linkBase;
     const documentOf = new Map([...plan.overwrite, ...plan.create].map((entry) => [entry.path, entry.documentId]));
     let linkMemo;
@@ -57115,7 +57890,7 @@ async function confirmWithGate(context, options, gate) {
       const key = `${entry.path}\0${joined}`;
       let text6 = fixedTexts.get(key);
       if (text6 === void 0) {
-        text6 = fixLinearText(joined, contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)), trackedBodies.get(entry.path));
+        text6 = fixLinearText(joined, readableContents.get(entry.path) ?? contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)), trackedBodies.get(entry.path));
         fixedTexts.set(key, text6);
       }
       return text6;
@@ -57148,8 +57923,10 @@ async function confirmWithGate(context, options, gate) {
       if (trackedBody !== void 0) trackedBodies.set(entry.path, trackedBody);
       try {
         checkImageRepairSize(content4);
-        if (linksLinearDocuments(content4)) needsLinkBase = true;
-        const captured = await download2(entry.path, restoreBody(transforms, entry.path, content4, content4, input.mapping.files), uploads, trackedBody);
+        const readable = linearMarkersAsText(content4, trackedBody);
+        readableContents.set(entry.path, readable);
+        if (linksLinearDocuments(readable)) needsLinkBase = true;
+        const captured = await download2(entry.path, restoreBody(transforms, entry.path, readable, readable, input.mapping.files), uploads, trackedBody);
         if (captured.observedBody !== void 0) {
           imageBlocked.push(entry.path);
           continue;
@@ -58370,11 +59147,16 @@ async function capture(context, options) {
     }
     const limited = /* @__PURE__ */ new Set();
     let needsLinkBase = false;
+    const readable = /* @__PURE__ */ new Map();
     for (const doc of work.values()) {
       if (!live(doc)) continue;
       try {
         checkImageRepairSize(doc.content ?? "");
-        if (linksLinearDocuments(doc.content ?? "")) needsLinkBase = true;
+        const old = byId.get(doc.id);
+        const previousBody = old === void 0 ? void 0 : markdownBaseline(splitFile(previous3.get(old.path)?.toString("utf8") ?? "").body);
+        const text6 = linearMarkersAsText(doc.content ?? "", previousBody);
+        readable.set(doc.id, { text: text6, previousBody });
+        if (linksLinearDocuments(text6)) needsLinkBase = true;
       } catch (error2) {
         if (!(error2 instanceof MarkdownLimitError || error2 instanceof ImageRepairBudgetError)) throw error2;
         limited.add(doc.id);
@@ -58439,8 +59221,8 @@ async function capture(context, options) {
       const prior = splitFile(old === void 0 ? "" : previous3.get(old.path)?.toString("utf8") ?? "");
       const head = old !== void 0 && path7 !== old.path && annotationHead(old.path) !== void 0 ? relocatedHead(prior.head) : prior.head;
       try {
-        const previousBody = old === void 0 ? void 0 : markdownBaseline(prior.body);
-        const assets = await downloadAssets(path7, doc.content ?? "", uploads, previousBody, old?.path, new Set(old?.entry.plainFiles));
+        const { text: body2, previousBody } = readable.get(doc.id);
+        const assets = await downloadAssets(path7, body2, uploads, previousBody, old?.path, new Set(old?.entry.plainFiles));
         const candidate = { doc, path: path7, head, assets, files: new Map([[path7, joinFile(head, assets.body)], ...assets.files]) };
         if (old?.path === path7 && previousBody !== void 0) candidate.previousBody = previousBody;
         candidates2.set(doc.id, candidate);
@@ -58482,7 +59264,7 @@ async function capture(context, options) {
       }
       if (candidate.compared?.body !== body2) {
         const unchanged = candidate.previousBody !== void 0 && sameAsLinear(body2, candidate.previousBody);
-        const text6 = unchanged ? joinFile(candidate.head, candidate.previousBody) : fixLinearText(joinFile(candidate.head, body2), candidate.doc.content ?? "", linkedFileCheck(candidate.path, (file) => mapping.files.has(file)), candidate.previousBody);
+        const text6 = unchanged ? joinFile(candidate.head, candidate.previousBody) : fixLinearText(joinFile(candidate.head, body2), readable.get(candidate.doc.id)?.text ?? candidate.doc.content ?? "", linkedFileCheck(candidate.path, (file) => mapping.files.has(file)), candidate.previousBody);
         candidate.compared = { body: body2, text: text6 };
       }
       return candidate.compared.text;
@@ -58625,7 +59407,7 @@ ${assets.plainFiles.join("\n")}
       const { head, body: body2 } = splitFile(baseline.text);
       let assets;
       try {
-        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? "", uploads, body2, candidate.path, new Set(byId.get(candidate.doc.id)?.entry.plainFiles));
+        assets = await captureAtBaseline(candidate.path, linearMarkersAsText(candidate.doc.content ?? "", body2), uploads, body2, candidate.path, new Set(byId.get(candidate.doc.id)?.entry.plainFiles));
         return assets.files.size === 0 && textOf({ doc: candidate.doc, path: candidate.path, head, assets, files: /* @__PURE__ */ new Map(), previousBody: body2 }, documentIds) === baseline.text;
       } catch (error2) {
         if (error2 instanceof MarkdownLimitError || error2 instanceof ImageRepairBudgetError) return false;
@@ -58656,7 +59438,8 @@ ${assets.plainFiles.join("\n")}
           hash: createHash16("sha256").update(observed).digest("hex"),
           observedHash: createHash16("sha256").update(candidate.doc.content ?? "").digest("hex"),
           replacement: String(repaired),
-          images: imageLinks(candidate.doc.content ?? "", new Set(deadUploads)).images
+          // The images are counted in the text the capture read; the digest stays on Linear's content.
+          images: imageLinks(readable.get(id)?.text ?? candidate.doc.content ?? "", new Set(deadUploads)).images
         };
         const recorded2 = old === void 0 ? void 0 : signedRepair(context.pushedKey, old.path, old.entry);
         if (recorded2?.hash === entry.pullRewrite.hash && recorded2.source !== void 0) entry.pullRewrite.source = recorded2.source;
