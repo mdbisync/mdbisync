@@ -135,6 +135,15 @@ Blocks:
   content lines up past it: in a list of ten items, the first is written
   ` 1. a` above `10. j`.
 - An empty item keeps a space after its marker: `*` becomes `* `.
+- A lone `2.` or `*` on the line after an item's first line is the item's
+  text, since an empty marker cannot interrupt a paragraph, but Linear reads
+  it as an empty item nested in that item. `fix` writes it at the item's
+  content with a space after it, as Linear does: `1. Plan` followed by
+  `        2.` is written `1. Plan` and `   2. `. Indented four or more
+  columns past the content, the line reads as indented code in Linear;
+  `fix` writes the same form there. Linear reads the line as text under a
+  quote, after more lines of the paragraph, before more text or an ordered
+  list in the item, and with `)` or `+`: there it stays as it is.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
   `- [X] done`. A checkbox without a label keeps one space after it.
 - A paragraph's text that starts like a list marker gets its marker
@@ -332,7 +341,11 @@ Inline text:
   does: the quote's `>` or the item's indent is written in place of the
   source's, and spaces or tabs past it stay. A tab that the item's indent
   covers only in part leaves its other columns as spaces: under `* item`, a
-  line indented with one tab is written with four spaces.
+  line indented with one tab is written with four spaces. Later tabs stay
+  tabs: under `1. Plan`, two tabs before `2. step` become four spaces and a
+  tab before `2\. step`. Where `fix` writes a shorter prefix than the
+  source's, a tab before text that could open a block becomes the spaces it
+  spanned, except before an escaped number, which reads as text anywhere.
 
 ## How documents look in Linear
 

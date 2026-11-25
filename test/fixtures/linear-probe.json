@@ -209,6 +209,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/continuation-indent-tabs.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/dash-only-lines.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -902,6 +906,10 @@
       "fixedPoint": true
     },
     "list-items/list-form-empty-items.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-form-empty-nested-items.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

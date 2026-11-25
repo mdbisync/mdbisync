@@ -3052,6 +3052,14 @@ fixtures:
     canary: kx-711fd64a
     corpus: false
     note: "Linear writes an empty bullet or numbered item with a space after its marker, also nested and in a quote"
+  - file: "list-items/list-form-empty-nested-items.md"
+    group: list-items
+    construct: empty-list-item
+    class: fixable
+    basis: known
+    canary: kx-3c5e81a2
+    corpus: false
+    note: "a paragraph's last line of only a number and dot, or a bullet, under an item at or past its content is text; Linear writes it as an empty item at the innermost item's content, with a space after it"
   - file: "list-items/list-form-ordered-ten.md"
     group: list-items
     construct: ordered-list-aligned-numbers
@@ -3140,6 +3148,14 @@ fixtures:
     canary: kx-b134e62a
     corpus: false
     note: "an item's continuation line keeps its indentation past the item's content indent; a tab the item takes in part leaves its other columns as spaces"
+  - file: "construct-singles/continuation-indent-tabs.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-9d2f47b6
+    corpus: false
+    note: "tabs after the columns an item's prefix takes keep their place before text that reads like a list marker when the written prefix ends at the source's column"
   - file: "construct-singles/continuation-indent-lazy.md"
     group: construct-singles
     construct: continuation-indent
