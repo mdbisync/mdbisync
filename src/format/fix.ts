@@ -7,7 +7,7 @@
 // findings. Neither stops at a rule whose construct `fix` writes in Linear's
 // form (FIXED_RULES).
 
-import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Nodes, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
+import type { BlockContent, Definition, DefinitionContent, Delete, Emphasis, Link, List, ListItem, Nodes, Paragraph, PhrasingContent, Root, RootContent, Strong, Table, TableRow, Text } from 'mdast';
 import { isDeepStrictEqual } from 'node:util';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
@@ -448,6 +448,12 @@ class Writer {
   private literal = false;
   /** Where the inline text being written starts: its line is no continuation line. */
   private inlineFrom = -1;
+  /** The bounds of the block's inline text being written (a paragraph's, heading's or cell's), not a link label's. */
+  private blockInline: [number, number] | undefined;
+  /** The space references `edgeSpaceEdits` has moved, by offset: an inner run of marks leaves them. */
+  private readonly movedSpaces = new Set<number>();
+  /** The space edits made so far in the block being written, which a later one is checked with. */
+  private spaceEdits: Edit[] = [];
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
   /** A list's sibling block written right before it, when that is a list. */
@@ -872,12 +878,26 @@ class Writer {
       });
     }
     const paragraph = lineStarts === 'none' ? undefined : { texts, html, first: lineStarts === 'all' };
+    // A render can be dropped (the other asterisk candidate, a link join
+    // that does not read the same): each starts from the spaces moved before it.
+    const moved = [...this.movedSpaces];
+    const spaceEdits = [...this.spaceEdits];
     const render = (rewriteAsterisks: boolean) => {
       const inline: InlineEdits = { edits: [], rewriteAsterisks, changedAsterisks: false };
       const outer = this.inlineFrom;
+      const block = this.blockInline;
       this.inlineFrom = from;
+      this.blockInline ??= [from, to];
+      this.movedSpaces.clear();
+      for (const at of block === undefined ? [] : moved) this.movedSpaces.add(at);
+      this.spaceEdits = block === undefined ? [] : [...spaceEdits];
       this.inlineChildrenEdits(children, inline);
       this.inlineFrom = outer;
+      this.blockInline = block;
+      this.movedSpaces.clear();
+      for (const at of moved) this.movedSpaces.add(at);
+      // A nested render's edits stay in the block's text: keep them for the checks that follow.
+      if (block === undefined) this.spaceEdits = spaceEdits;
       return { text: this.rewritten(from, to, inline.edits, code, paragraph), changedAsterisks: inline.changedAsterisks };
     };
     const candidate = render(this.rewriteAsterisks);
@@ -1164,7 +1184,9 @@ class Writer {
   }
 
   private inlineChildrenEdits(children: readonly PhrasingContent[], inline: InlineEdits, insideStrong = false): void {
+    const merged = this.adjacentLinkEdits(children, inline.edits);
     for (const [index, child] of children.entries()) {
+      if (merged.has(index)) continue;
       if (child.type !== 'strong') {
         this.inlineEdits(child, inline);
         continue;
@@ -1188,10 +1210,95 @@ class Writer {
     }
   }
 
+  /**
+   * Linear holds a link as a mark on its text, so links to the same
+   * destination with nothing between them become one link, with the marks
+   * around each part inside it: `[a](u)**[b](u)**` is `[a**b**](u)`. Edits
+   * write each such run of `children` as one link; returns the indexes they
+   * cover. A run whose joined link would read differently stays as it is.
+   */
+  private adjacentLinkEdits(children: readonly PhrasingContent[], edits: Edit[]): Set<number> {
+    const covered = new Set<number>();
+    if (this.literal) return covered;
+    let index = 0;
+    while (index < children.length) {
+      const first = this.wrappedLink(children[index]!);
+      let last = index;
+      while (first !== undefined && last + 1 < children.length && end(children[last]!) === start(children[last + 1]!)
+        && this.wrappedLink(children[last + 1]!)?.url === first.url) last++;
+      // A `!` right before the joined link would make it an image.
+      const bang = this.source[start(children[index]!) - 1] === '!' && !escaped(this.source, start(children[index]!) - 1);
+      if (first !== undefined && last > index && !bang) {
+        const parts = children.slice(index, last + 1);
+        const text = this.joinedLink(parts, first.url);
+        if (text !== undefined) {
+          edits.push({ from: start(parts[0]!), to: end(parts.at(-1)!), text });
+          for (let at = index; at <= last; at++) covered.add(at);
+        }
+      }
+      index = last + 1;
+    }
+    return covered;
+  }
+
+  /** The link inside `node` and its destination, when `node` is a link with only bold, italic or strikethrough around it. */
+  private wrappedLink(node: PhrasingContent): { url: string } | undefined {
+    while ((node.type === 'strong' || node.type === 'emphasis' || node.type === 'delete') && node.children.length === 1) node = node.children[0]!;
+    if (node.type === 'link') return { url: node.url };
+    if (node.type === 'linkReference') {
+      const definition = this.definitions.get(node.identifier);
+      return definition ? { url: definition.url } : undefined;
+    }
+    return undefined;
+  }
+
+  /** `parts` (wrapped links to `url`) written as one link, or undefined when that link would not read as their joined text and marks. */
+  private joinedLink(parts: readonly PhrasingContent[], url: string): string | undefined {
+    // A join not made leaves its labels' space edits unmade.
+    const spaceEdits = [...this.spaceEdits];
+    const text = this.joinedLinkText(parts, url);
+    if (text === undefined) this.spaceEdits = spaceEdits;
+    return text;
+  }
+
+  private joinedLinkText(parts: readonly PhrasingContent[], url: string): string | undefined {
+    const labels: string[] = [];
+    const expected: PhrasingContent[] = [];
+    for (const part of parts) {
+      const opens: string[] = [];
+      const closes: string[] = [];
+      const wrap = (node: PhrasingContent): PhrasingContent[] => {
+        if (node.type === 'link' || node.type === 'linkReference') {
+          // An autolink's text is its address, where a backslash would escape.
+          this.literal = node.type === 'link' && this.source[start(node)] !== '[';
+          labels.push(opens.join('') + this.linkLabel(node.children) + closes.reverse().join(''));
+          this.literal = false;
+          return node.children;
+        }
+        if (node.type !== 'strong' && node.type !== 'emphasis' && node.type !== 'delete') return [node];
+        const mark = node.type === 'strong' ? '**' : node.type === 'emphasis' ? '*' : /^~{1,2}/.exec(this.source.slice(start(node), start(node) + 2))![0];
+        opens.push(mark);
+        closes.push(mark);
+        return [{ ...node, children: wrap(node.children[0]!) } as PhrasingContent];
+      };
+      expected.push(...wrap(part));
+    }
+    // Labels joined can spell a shortcode neither held, which a later fix would turn into an emoji.
+    const shortcodes = (label: string) => [...emojiShortcodes(label)].length;
+    if (shortcodes(labels.join('')) > labels.reduce((sum, label) => sum + shortcodes(label), 0)) return undefined;
+    const text = `[${labels.join('')}](${linkDestination(url)})`;
+    const [paragraph, ...others] = parse(text).children;
+    const [link, ...rest] = paragraph?.type === 'paragraph' ? paragraph.children : [];
+    if (others.length > 0 || rest.length > 0 || link?.type !== 'link' || link.url !== url) return undefined;
+    const shape = (node: Nodes) => breakShape({ type: 'root', children: [{ type: 'paragraph', children: [node as PhrasingContent] }] });
+    return isDeepStrictEqual(shape({ ...link, title: null }), shape({ type: 'link', url, title: null, children: expected })) ? text : undefined;
+  }
+
   private inlineEdits(node: PhrasingContent, inline: InlineEdits, joinLeft = false, joinRight = false): void {
     const { edits, rewriteAsterisks } = inline;
     const from = start(node);
     const to = end(node);
+    if ((node.type === 'emphasis' || node.type === 'strong' || node.type === 'delete') && !this.literal) this.edgeSpaceEdits(node, edits);
     switch (node.type) {
       case 'emphasis':
       case 'strong': {
@@ -1240,6 +1347,11 @@ class Writer {
           return true;
         }, !this.inCell);
         for (const edit of text) edits.push(edit);
+        if (!this.literal) {
+          this.spaceReferenceEdits(from, to, edits);
+          // Linear escapes a backtick that opens no code span.
+          for (const at of loneBackticks(this.source, from, to)) edits.push({ from: at, to: at, text: '\\' });
+        }
         if (!this.literal && this.rewriteEscapes && this.rewriteTildeUnderscore) {
           const escapes = tildeUnderscoreEdits(this.source.slice(from, to), from);
           for (const edit of escapes) edits.push(edit);
@@ -1356,14 +1468,108 @@ class Writer {
     for (const edit of brackets) edits.push(edit);
   }
 
+  /**
+   * Linear stores a space reference (`&#32;`) as a space. At the start or
+   * end of a block's text it stores the space until the next write, which
+   * drops it: there it goes. A reference next to a `*`, `_` or `~` run is
+   * left to `edgeSpaceEdits`. A reference keeps its spelling where the
+   * space would change what the block says (`keepsBlock`): a line break, a
+   * list item, a heading's closing hashes, an autolink.
+   */
+  private spaceReferenceEdits(from: number, to: number, edits: Edit[]): void {
+    const [blockFrom, blockTo] = this.blockInline ?? [-1, -1];
+    const groups: Edit[][] = [];
+    for (const run of spaceReferenceRuns(this.source, from, to)) {
+      if (!sameFlanking(this.source, run.from, run.to, ' ')) continue;
+      if (run.from === blockFrom && run.to === blockTo) continue;
+      const edge = run.from === blockFrom || run.to === blockTo;
+      groups.push([{ from: run.from, to: run.to, text: edge ? '' : ' '.repeat(run.count) }]);
+    }
+    this.pushIfKept(groups, edits);
+  }
+
+  /**
+   * Linear moves a space at the inner edge of bold, italic or strikethrough
+   * out of it: `**&#32;Tip**` is ` **Tip**`. At the start or end of a
+   * block's text the space then goes, as `spaceReferenceEdits` says.
+   */
+  private edgeSpaceEdits(node: Emphasis | Strong | Delete, edits: Edit[]): void {
+    const [blockFrom, blockTo] = this.blockInline ?? [-1, -1];
+    const edge = (side: 'first' | 'last'): Text | undefined => {
+      let child: PhrasingContent | undefined = node;
+      while (child !== undefined && (child.type === 'strong' || child.type === 'emphasis' || child.type === 'delete')) child = side === 'first' ? child.children[0] : child.children.at(-1);
+      return child?.type === 'text' ? child : undefined;
+    };
+    const groups: Edit[][] = [];
+    const first = edge('first');
+    const lead = first && spaceReferenceRuns(this.source, start(first), end(first)).find((run) => run.from === start(first));
+    if (lead && !this.movedSpaces.has(lead.from) && lead.to < end(first) && !/\s/u.test(this.source[lead.to]!)) {
+      this.movedSpaces.add(lead.from);
+      groups.push([{ from: start(node), to: start(node), text: start(node) === blockFrom ? '' : ' '.repeat(lead.count) }, { from: lead.from, to: lead.to, text: '' }]);
+    }
+    const last = edge('last');
+    const tail = last && spaceReferenceRuns(this.source, start(last), end(last)).find((run) => run.to === end(last));
+    if (tail && !this.movedSpaces.has(tail.from) && tail.from > start(last) && !/\s/u.test(this.source[tail.from - 1]!)) {
+      this.movedSpaces.add(tail.from);
+      groups.push([{ from: tail.from, to: tail.to, text: '' }, { from: end(node), to: end(node), text: end(node) === blockTo ? '' : ' '.repeat(tail.count) }]);
+    }
+    this.pushIfKept(groups, edits);
+  }
+
+  /**
+   * Pushes the groups of space edits whose block still says the same
+   * together with the space edits already made in it: all of them when
+   * they keep it together, else each group in turn that keeps it with
+   * those before, up to a bound, so a long block is not read again and again.
+   */
+  private pushIfKept(groups: readonly Edit[][], edits: Edit[]): void {
+    if (groups.length === 0) return;
+    const accept = (group: readonly Edit[]) => {
+      edits.push(...group);
+      this.spaceEdits.push(...group);
+    };
+    if (this.keepsBlock([...this.spaceEdits, ...groups.flat()])) {
+      for (const group of groups) accept(group);
+      return;
+    }
+    if (groups.length === 1 || groups.length > 16) return;
+    for (const group of groups) if (this.keepsBlock([...this.spaceEdits, ...group])) accept(group);
+  }
+
+  /**
+   * Whether the block being written reads the same with `edits` made,
+   * apart from what Linear does with a space (`spaceShape`). The block is
+   * read with its first line's prefixes, so a heading's closing hashes
+   * count; a cell is read alone.
+   */
+  private keepsBlock(edits: readonly Edit[]): boolean {
+    if (this.blockInline === undefined) return false;
+    const [blockFrom, blockTo] = this.blockInline;
+    const lineEnd = this.source.indexOf('\n', blockTo);
+    const from = this.inCell ? blockFrom : lineStartOf(this.source, blockFrom);
+    const to = this.inCell ? blockTo : lineEnd === -1 ? this.source.length : lineEnd;
+    let edited = '';
+    let at = from;
+    for (const edit of [...edits].sort((a, b) => a.from - b.from)) {
+      edited += this.source.slice(at, edit.from) + edit.text;
+      at = edit.to;
+    }
+    edited += this.source.slice(at, to);
+    return isDeepStrictEqual(spaceShape(parse(edited)), spaceShape(parse(this.source.slice(from, to))));
+  }
+
   /** Linear writes every link destination in angle brackets, without a title. */
   private link(children: readonly PhrasingContent[], url: string): string {
-    let label = this.inline(children);
+    return `[${this.linkLabel(children)}](${linkDestination(url)})`;
+  }
+
+  private linkLabel(children: readonly PhrasingContent[]): string {
+    const label = this.inline(children);
     const [child] = children;
     if (!this.literal && label.includes('\\_') && children.length === 1 && child?.type === 'text' && URL_LABEL.test(child.value)) {
-      label = plainUrlUnderscores(label);
+      return plainUrlUnderscores(label);
     }
-    return `[${label}](${linkDestination(url)})`;
+    return label;
   }
 
   /**
@@ -1571,6 +1777,119 @@ function* emojiShortcodeStarts(label: string): Generator<number> {
 }
 
 const NBSP = '\u00a0';
+/**
+ * The offsets of the backticks in the text from `from` to `to` that open no
+ * code span. The parser leaves only those in text, except in the tail it
+ * splits off a bare URL at Linear's end, which is read again on the next
+ * pass: there a run with a partner of the same length is a code span, as
+ * Linear reads it.
+ */
+function loneBackticks(source: string, from: number, to: number): number[] {
+  const runs: Array<{ at: number; length: number }> = [];
+  const raw = source.slice(from, to);
+  for (let index = raw.indexOf('`'); index !== -1; index = raw.indexOf('`', index)) {
+    let at = from + index;
+    let end = at;
+    while (end < to && source[end] === '`') end++;
+    // An escaped first backtick is text; the rest of the run is a run of its own.
+    if (escaped(source, at)) at++;
+    if (end > at) runs.push({ at, length: end - at });
+    index = end - from;
+  }
+  const lone: number[] = [];
+  for (let index = 0; index < runs.length; index++) {
+    const run = runs[index]!;
+    const partner = runs.findIndex((other, later) => later > index && other.length === run.length);
+    if (partner !== -1) {
+      runs.splice(partner, 1);
+      continue;
+    }
+    for (let at = run.at; at < run.at + run.length; at++) lone.push(at);
+  }
+  return lone;
+}
+
+type Shape = { type: string; value?: string; children?: Shape[] };
+
+/**
+ * A tree without positions, read as Linear reads the space a reference
+ * stands for: a space at the inner edge of bold, italic or strikethrough
+ * is outside it, spaces at the edges of a paragraph's, heading's or cell's
+ * text go, adjacent text is joined, and spaces around a line ending go.
+ */
+function spaceShape(tree: Root): Shape {
+  const phrasing = (children: readonly PhrasingContent[]): Shape[] => {
+    const out: Shape[] = [];
+    const text = (value: string) => {
+      if (value === '') return;
+      const previous = out.at(-1);
+      if (previous?.type === 'text') previous.value += value;
+      else out.push({ type: 'text', value });
+    };
+    for (const child of children) {
+      if (child.type === 'text') {
+        text(child.value);
+      } else if (child.type === 'strong' || child.type === 'emphasis' || child.type === 'delete') {
+        const inner = phrasing(child.children);
+        const lead = trimSpaces(inner, 'start');
+        const tail = trimSpaces(inner, 'end');
+        text(lead);
+        out.push({ type: child.type, children: inner });
+        text(tail);
+      } else {
+        out.push(shape(child));
+      }
+    }
+    for (const item of out) if (item.type === 'text') item.value = item.value!.replace(/[ \t]*\n[ \t]*/g, '\n');
+    return out;
+  };
+  const shape = (node: Nodes): Shape => {
+    const { position: _position, ...rest } = node;
+    if (!('children' in node)) return rest;
+    if (node.type === 'paragraph' || node.type === 'heading' || node.type === 'tableCell') {
+      const children = phrasing(node.children);
+      trimSpaces(children, 'start');
+      trimSpaces(children, 'end');
+      return { ...rest, children };
+    }
+    const children = node.children as Nodes[];
+    const inline = node.type === 'link' || node.type === 'linkReference' || node.type === 'strong' || node.type === 'emphasis' || node.type === 'delete';
+    return { ...rest, children: inline ? phrasing(children as PhrasingContent[]) : children.map(shape) };
+  };
+  return shape(tree);
+}
+
+/** Removes the spaces at one edge of `shapes` (and a text left empty) and returns them. */
+function trimSpaces(shapes: Shape[], side: 'start' | 'end'): string {
+  const index = side === 'start' ? 0 : shapes.length - 1;
+  const edge = shapes[index];
+  if (edge?.type !== 'text') return '';
+  const value = edge.value!;
+  let at = side === 'start' ? 0 : value.length;
+  if (side === 'start') while (value[at] === ' ') at++;
+  else while (value[at - 1] === ' ') at--;
+  edge.value = side === 'start' ? value.slice(at) : value.slice(0, at);
+  if (edge.value === '') shapes.splice(index, 1);
+  return side === 'start' ? value.slice(0, at) : value.slice(at);
+}
+
+/** The runs of space references (`&#32;`, `&#x20;`) in the text from `from` to `to`, with how many each holds. */
+function spaceReferenceRuns(source: string, from: number, to: number): Array<{ from: number; to: number; count: number }> {
+  const runs: Array<{ from: number; to: number; count: number }> = [];
+  if (!source.slice(from, to).includes('&#')) return runs;
+  for (const match of source.slice(from, to).matchAll(CHARACTER_REFERENCE)) {
+    const at = from + match.index;
+    if (escaped(source, at) || decodeEntity(match[0]) !== ' ') continue;
+    const last = runs.at(-1);
+    if (last?.to === at) {
+      last.to += match[0].length;
+      last.count++;
+    } else {
+      runs.push({ from: at, to: at + match[0].length, count: 1 });
+    }
+  }
+  return runs;
+}
 const DELIMITER = /^[*_~]$/;
 const UNICODE_WHITESPACE = /^[\t\n\f\r\p{Zs}]$/u;
 const UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;

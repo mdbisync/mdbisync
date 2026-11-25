@@ -413,6 +413,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/lone-backtick.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/nbsp-forms.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -470,6 +474,14 @@
       "fixedPoint": true
     },
     "construct-singles/section-marker-unpaired.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/space-reference-edges.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/space-reference.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -710,6 +722,10 @@
       "fixedPoint": true
     },
     "images/webp.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/adjacent-links.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

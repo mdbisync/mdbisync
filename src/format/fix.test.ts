@@ -211,6 +211,90 @@ describe('NBSP as Linear stores it', () => {
   });
 });
 
+describe('space references, adjacent links and lone backticks as Linear stores them', () => {
+  const written: Array<[string, string, string]> = [
+    ['a space reference becomes a space', 'Word&#32;word, hex&#x20;form and two&#32;&#32;refs', 'Word word, hex form and two  refs'],
+    ['also in a link label, at its edge too', 'x [&#32;a](https://a.test) and [b&#32;](https://a.test) y', 'x [ a](<https://a.test>) and [b ](<https://a.test>) y'],
+    ['one at a mark\'s inner edge moves out of it', 'x **&#32;mid** y, *b&#32;* c and ~~&#32;d~~', 'x  **mid** y, *b*  c and  ~~d~~'],
+    ['out of every mark around it', 'x ***&#32;both*** y', 'x  ***both*** y'],
+    ['one at a block\'s start or end goes', '&#32;Leading\n\n**&#32;Tip** one\n\nTail **bold&#32;**\n\nEnd&#32;', 'Leading\n\n**Tip** one\n\nTail **bold**\n\nEnd'],
+    ['also in an item, heading, quote and cell', '* &#32;item\n\n# **&#32;Head**\n\n> &#32;quote\n\n| Col |\n| --- |\n| &#32;cell |', '* item\n\n# **Head**\n\n> quote\n\n| Col |\n| -- |\n| cell |\n'],
+    ['a continuation line keeps it before a word', 'first\n&#32;second\n**&#32;b** c', 'first\n second\n **b** c'],
+    ['adjacent links to one destination become one', '[Shop](https://a.test)[More](https://a.test)[Last](https://a.test)', '[ShopMoreLast](<https://a.test>)'],
+    ['with the marks around a part inside it', '[a](https://a.test)**[b](https://a.test)***[c](https://a.test)*~~[d](https://a.test)~~', '[a**b***c*~~d~~](<https://a.test>)'],
+    ['a code span and a link reference join too', '[a](https://a.test)[`b`](https://a.test)[c][r]\n\n[r]: https://a.test', '[a`b`c](<https://a.test>)'],
+    ['in an item, heading and cell', '* [a](https://a.test)[b](https://a.test) x\n\n# [a](https://a.test)[b](https://a.test)\n\n| Col |\n| --- |\n| [a](https://a.test)[b](https://a.test) |', '* [ab](<https://a.test>) x\n\n# [ab](<https://a.test>)\n\n| Col |\n| -- |\n| [ab](<https://a.test>) |\n'],
+    ['a lone backtick is escaped', 'a ` b\n\na `` b\n\nx`y', 'a \\` b\n\na \\`\\` b\n\nx\\`y'],
+    ['at a line\'s start or end, in a code span\'s company, a link label and marks', '` start\n\nend `\n\npair `x` and lone ` here\n\n[a ` b](https://a.test)\n\n**c ` d**', '\\` start\n\nend \\`\n\npair `x` and lone \\` here\n\n[a \\` b](<https://a.test>)\n\n**c \\` d**'],
+    ['in a heading, item, quote and cell', '# a ` b\n\n* c ` d\n\n> e ` f\n\n| Col |\n| --- |\n| g ` h |', '# a \\` b\n\n* c \\` d\n\n> e \\` f\n\n| Col |\n| -- |\n| g \\` h |\n'],
+  ];
+  for (const [name, input, expected] of written) {
+    it(name, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected, 'the result is a fixed point');
+      assert.deepEqual(lintText('doc.md', expected), [], 'lint is clean on the result');
+    });
+  }
+
+  it('keeps a space reference where a space would change what the text says', () => {
+    const kept = [
+      'a&#32;&#32;\nb', '&#32;# not a heading', 'first\n&#32;- not an item', '**a&#32;&#32;**\nb', '&#32;',
+      'first\n&#32;1. x', '> first\n> &#32;1. x', '&#32;1. x', 'Note\n1.&#32;Item', 'Note\n===&#32;', '# Notes on C&#32;#',
+      'a <b&#32;c="d"> e', 'x **a&#32;** \nb',
+    ];
+    for (const text of kept) {
+      const fixed = fixText(text);
+      assert.ok(fixed.includes('&#32;'), `${JSON.stringify(text)} became ${JSON.stringify(fixed)}`);
+      assert.ok(sameMarkdown(fixed, text), text);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+    }
+  });
+
+  it('checks the space edits of a block together', () => {
+    // Each edit alone keeps the paragraph; both would make it a heading.
+    const fixed = fixText('&#32;#&#32;heading');
+    assert.equal(fixed, '#&#32;heading');
+    assert.equal(parse(fixed).children[0]?.type, 'paragraph');
+    assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
+  });
+
+  it('moves a space reference out of a mark at a line ending, as Linear does', () => {
+    assert.equal(fixText('**a&#32;**\nb'), '**a** \nb');
+    assert.equal(fixText('a&#32;\nb'), 'a \nb');
+  });
+
+  it('moves a space reference out of a mark in a link next to another link', () => {
+    assert.equal(fixText('x [**&#32;a**](https://a.test) and [b](https://a.test) y'), 'x [ **a**](<https://a.test>) and [b](<https://a.test>) y');
+    assert.equal(fixText('x [**&#32;a** b](https://a.test)[c](https://a.test) y'), 'x [ **a** bc](<https://a.test>) y');
+  });
+
+  it('joins autolinks too, in one fix', () => {
+    const fixed = fixText('[a](https://a.test)<https://a.test>');
+    assert.equal(fixed, '[ahttps://a.test](<https://a.test>)');
+    assert.equal(fixText('<https://a.test><https://a.test>'), fixText(fixText('<https://a.test><https://a.test>')));
+  });
+
+  it('keeps links apart where the joined link would read differently', () => {
+    // A `!` before it would make an image; joined labels would spell a shortcode.
+    for (const text of ['!**[a](<https://a.test>)**[b](<https://a.test>)', '[:ta](<https://a.test>)[da:](<https://a.test>)']) {
+      const fixed = fixText(text);
+      assert.equal(fixText(fixed), fixed, text);
+      assert.ok(sameMarkdown(fixed, text) || fixed === text, `${text} became ${fixed}`);
+      assert.deepEqual(lintText('doc.md', fixed).map((finding) => finding.rule), [], text);
+    }
+  });
+
+  it('keeps links apart that are not adjacent or lead elsewhere', () => {
+    for (const text of ['[a](<https://a.test>) [b](<https://a.test>)', '[a](<https://a.test>)[b](<https://b.test>)', '[a](<https://a.test>)[b](<https://a.test/>)', '[a](<https://a.test>)\n[b](<https://a.test>)']) {
+      assert.equal(fixText(text), text, text);
+    }
+  });
+
+  it('keeps an escaped backtick and a code span', () => {
+    assert.equal(fixText('a \\` b and `c`'), 'a \\` b and `c`');
+  });
+});
+
 describe('a code span over lines, as Linear writes it', () => {
   const joined: Array<[string, string, string]> = [
     ['joins its lines with a space', 'See `alpha\nbeta` here.', 'See `alpha beta` here.'],
