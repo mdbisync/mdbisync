@@ -1442,6 +1442,7 @@ function codePointAt(source: string, at: number): string | undefined {
   const code = source.codePointAt(at);
   return code === undefined ? undefined : String.fromCodePoint(code);
 }
+
 /** A character reference as Markdown spells one; whether it names a character is decided apart. */
 const CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
 const ASTERISK_SPELLING = new RegExp(String.raw`\\.|[*]|` + CHARACTER_REFERENCE.source, 'g');
