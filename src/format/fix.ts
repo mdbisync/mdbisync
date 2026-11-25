@@ -388,6 +388,8 @@ class Writer {
   private blockInline: [number, number] | undefined;
   /** The space references `edgeSpaceEdits` has moved, by offset: an inner run of marks leaves them. */
   private readonly movedSpaces = new Set<number>();
+  /** The space edits made so far in the block being written, which a later one is checked with. */
+  private spaceEdits: Edit[] = [];
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
   /** A list's sibling block written right before it, when that is a list. */
@@ -778,6 +780,7 @@ class Writer {
     // A render can be dropped (the other asterisk candidate, a link join
     // that does not read the same): each starts from the spaces moved before it.
     const moved = [...this.movedSpaces];
+    const spaceEdits = [...this.spaceEdits];
     const render = (rewriteAsterisks: boolean) => {
       const inline: InlineEdits = { edits: [], rewriteAsterisks, changedAsterisks: false };
       const outer = this.inlineFrom;
@@ -786,11 +789,14 @@ class Writer {
       this.blockInline ??= [from, to];
       this.movedSpaces.clear();
       for (const at of block === undefined ? [] : moved) this.movedSpaces.add(at);
+      this.spaceEdits = block === undefined ? [] : [...spaceEdits];
       this.inlineChildrenEdits(children, inline);
       this.inlineFrom = outer;
       this.blockInline = block;
       this.movedSpaces.clear();
       for (const at of moved) this.movedSpaces.add(at);
+      // A nested render's edits stay in the block's text: keep them for the checks that follow.
+      if (block === undefined) this.spaceEdits = spaceEdits;
       return { text: this.rewritten(from, to, inline.edits, code, paragraph), changedAsterisks: inline.changedAsterisks };
     };
     const candidate = render(this.rewriteAsterisks);
@@ -1084,6 +1090,14 @@ class Writer {
 
   /** `parts` (wrapped links to `url`) written as one link, or undefined when that link would not read as their joined text and marks. */
   private joinedLink(parts: readonly PhrasingContent[], url: string): string | undefined {
+    // A join not made leaves its labels' space edits unmade.
+    const spaceEdits = [...this.spaceEdits];
+    const text = this.joinedLinkText(parts, url);
+    if (text === undefined) this.spaceEdits = spaceEdits;
+    return text;
+  }
+
+  private joinedLinkText(parts: readonly PhrasingContent[], url: string): string | undefined {
     const labels: string[] = [];
     const expected: PhrasingContent[] = [];
     for (const part of parts) {
@@ -1342,14 +1356,23 @@ class Writer {
   }
 
   /**
-   * Pushes the groups of space edits whose block still says the same: all
-   * of them when they keep it together, else each group that keeps it
-   * alone, up to a bound, so a long block is not read again and again.
+   * Pushes the groups of space edits whose block still says the same
+   * together with the space edits already made in it: all of them when
+   * they keep it together, else each group in turn that keeps it with
+   * those before, up to a bound, so a long block is not read again and again.
    */
   private pushIfKept(groups: readonly Edit[][], edits: Edit[]): void {
     if (groups.length === 0) return;
-    const kept = this.keepsBlock(groups.flat()) ? groups : groups.length > 1 && groups.length <= 16 ? groups.filter((group) => this.keepsBlock(group)) : [];
-    for (const group of kept) edits.push(...group);
+    const accept = (group: readonly Edit[]) => {
+      edits.push(...group);
+      this.spaceEdits.push(...group);
+    };
+    if (this.keepsBlock([...this.spaceEdits, ...groups.flat()])) {
+      for (const group of groups) accept(group);
+      return;
+    }
+    if (groups.length === 1 || groups.length > 16) return;
+    for (const group of groups) if (this.keepsBlock([...this.spaceEdits, ...group])) accept(group);
   }
 
   /**

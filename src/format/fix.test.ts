@@ -237,6 +237,14 @@ describe('space references, adjacent links and lone backticks as Linear stores t
     }
   });
 
+  it('checks the space edits of a block together', () => {
+    // Each edit alone keeps the paragraph; both would make it a heading.
+    const fixed = fixText('&#32;#&#32;heading');
+    assert.equal(fixed, '#&#32;heading');
+    assert.equal(parse(fixed).children[0]?.type, 'paragraph');
+    assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
+  });
+
   it('moves a space reference out of a mark at a line ending, as Linear does', () => {
     assert.equal(fixText('**a&#32;**\nb'), '**a** \nb');
     assert.equal(fixText('a&#32;\nb'), 'a \nb');
