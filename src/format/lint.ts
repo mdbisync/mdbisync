@@ -188,7 +188,7 @@ function paddingCells(table: Table): number {
 }
 
 /** Whether the text has more Unicode code points than `CONTENT_LIMIT`, counted without copying it. */
-function overContentLimit(text: string): boolean {
+export function overContentLimit(text: string): boolean {
   if (text.length <= CONTENT_LIMIT) return false;
   let count = 0;
   for (const _ of text) if (++count > CONTENT_LIMIT) return true;

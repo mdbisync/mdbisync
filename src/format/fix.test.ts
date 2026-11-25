@@ -203,6 +203,9 @@ describe('Linear bold forms', () => {
     ['explicit label', '__[trail map](https://example.com/trails)__', '[**trail map**](<https://example.com/trails>)'],
     ['partly bold label', '**[trail **map**](https://example.com/trails)**', '[**trail map**](<https://example.com/trails>)'],
     ['italic label', '**[*trail map*](https://example.com/trails)**', '[***trail map***](<https://example.com/trails>)'],
+    ['italic around a bold link', '***[trail map](https://example.com/trails)***', '[***trail map***](<https://example.com/trails>)'],
+    ['bold around an italic link', '**_[trail map](https://example.com/trails)_**', '[***trail map***](<https://example.com/trails>)'],
+    ['italic around a link with a bold label', '*[**trail map**](https://example.com/trails)*', '[***trail map***](<https://example.com/trails>)'],
     ['mixed link and prose', '**Use the [trail map](https://example.com/trails)**', '**Use the [trail map](<https://example.com/trails>)**'],
     ['file label in a list item', '* **[Trail map](trail.pdf)**', '* [**Trail map**](<trail.pdf>)'],
     ['soft breaks', '**Birch\nCedar\nMaple**', '**Birch**\n**Cedar**\n**Maple**'],
@@ -211,6 +214,8 @@ describe('Linear bold forms', () => {
     ['continuation spaces', '**Birch \n  Cedar**', '**Birch** \n  **Cedar**'],
     ['quote and list', '> * **Birch\n>   Cedar**', '> * **Birch**\n>   **Cedar**'],
     ['bold and italic', '***Birch\nCedar***', '***Birch***\n***Cedar***'],
+    ['bold inside strikethrough', '~~**Birch\nCedar**~~', '~~**Birch**~~\n~~**Cedar**~~'],
+    ['a continuation beginning with NBSP', '**Elm\n\u00a0Ash**', '**Elm**\n\u00a0**Ash**'],
     ['multiline link label', '**[Trail\nmap](https://example.com/trails)**', '[**Trail**](<https://example.com/trails>)\n[**map**](<https://example.com/trails>)'],
     ['link takes up one line', '**Birch\n[Trail map](https://example.com/trails)**', '**Birch**\n[**Trail map**](<https://example.com/trails>)'],
   ] as const;
@@ -224,8 +229,18 @@ describe('Linear bold forms', () => {
   }
 
   it('can normalize older read-back forms during sync', () => {
-    const content = '**[Trail map](<https://example.com/trails>)**\n\n**Birch\nCedar**';
-    assert.equal(fixLinearText(content, content, () => false), '[**Trail map**](<https://example.com/trails>)\n\n**Birch**\n**Cedar**');
+    const content = '**[Trail map](<https://example.com/trails>)**\n\n**Birch\nCedar**\n\n**Use the **[trail map](https://example.com/trails)** today**';
+    const expected = '[**Trail map**](<https://example.com/trails>)\n\n**Birch**\n**Cedar**\n\n**Use the [trail map](<https://example.com/trails>) today**';
+    assert.equal(fixLinearText(content, content, () => false), expected);
+  });
+
+  it('keeps a multiline link when duplicating its destination would exceed the content limit', () => {
+    const label = 'Trail\n'.repeat(99) + 'map';
+    const url = 'https://example.com/' + 'a'.repeat(6000);
+    const fixed = fixText('**Birch\nCedar**\n\n**[' + label + '](' + url + ')**');
+    assert.equal(fixed, '**Birch**\n**Cedar**\n\n**[' + label + '](<' + url + '>)**');
+    assert.equal(fixText(fixed), fixed);
+    assert.deepEqual(lintText('trails.md', fixed), []);
   });
 });
 

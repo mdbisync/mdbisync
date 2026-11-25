@@ -895,12 +895,16 @@ function appendComparable(children: ComparableNode[], child: ComparableNode): vo
   }
 }
 
-/** A bold span and its link can exchange wrappers. Coextensive bold and italic can too. */
+/** A bold span and its link can exchange wrappers, as can coextensive styles. */
 function comparableBold(node: ComparableNode, children: ComparableNode[]): ComparableNode {
   const [only] = children;
-  if (node.type !== 'strong' || children.length !== 1) return { ...node, children };
-  if (only?.type === 'emphasis') {
-    return { ...only, children: [comparableBold(node, only.children!)] };
+  if (children.length !== 1) return { ...node, children };
+  if (node.type === 'emphasis' && only?.type === 'link' && only.children?.length === 1 && only.children[0]?.type === 'strong') {
+    return { ...only, children: [{ ...node, children: only.children }] };
+  }
+  if (node.type !== 'strong') return { ...node, children };
+  if (only?.type === 'emphasis' || only?.type === 'delete') {
+    return comparableBold(only, [comparableBold(node, only.children!)]);
   }
   if (only?.type === 'link') {
     const label: ComparableNode[] = [];
@@ -924,14 +928,45 @@ function comparableLines(node: ComparableNode, children: ComparableNode[]): Comp
   for (const child of children) {
     if (child.type === 'break') separate(child);
     else if (child.type === 'text' && /[\r\n]/.test(child.value!)) {
-      for (const text of child.value!.split(/(\r\n?|\n)/)) {
-        if (/^[\r\n]/.test(text)) separate({ type: 'text', value: text });
-        else if (text !== '') appendComparable(line, { type: 'text', value: text });
+      let at = 0;
+      const value = child.value!;
+      for (const newline of value.matchAll(/\r\n?|\n/g)) {
+        let from = newline.index;
+        let to = from + newline[0].length;
+        // Non-ASCII whitespace next to a line break stays outside the marks.
+        while (from > at && /[^\S\r\n \t]/u.test(value[from - 1]!)) from--;
+        while (/[^\S\r\n \t]/u.test(value[to] ?? '')) to++;
+        if (from > at) appendComparable(line, { type: 'text', value: value.slice(at, from) });
+        separate({ type: 'text', value: value.slice(from, to) });
+        at = to;
       }
+      if (at < value.length) appendComparable(line, { type: 'text', value: value.slice(at) });
     } else appendComparable(line, child);
   }
   if (line.length > 0) parts.push(comparableBold(node, line));
   return parts.length > 0 ? parts : [{ ...node, children }];
+}
+
+function containsStrong(node: ComparableNode): boolean {
+  return node.type === 'strong' || (node.children?.some(containsStrong) ?? false);
+}
+
+function comparableBoldForms(node: ComparableNode, insideStrong = false): ComparableNode[] {
+  if (node.children === undefined) return [node];
+  const children: ComparableNode[] = [];
+  for (const child of node.children) {
+    for (const part of comparableBoldForms(child, insideStrong || node.type === 'strong')) appendComparable(children, part);
+  }
+  switch (node.type) {
+    case 'strong':
+      return comparableLines(node, children);
+    case 'emphasis':
+    case 'link':
+    case 'delete':
+      if (insideStrong || children.some(containsStrong)) return comparableLines(node, children);
+      break;
+  }
+  return [{ ...node, children }];
 }
 
 /** The text without its trailing line breaks, scanned from the end so a long run inside costs nothing. */
@@ -955,36 +990,33 @@ function comparable(body: string, { linearNumberSpacing, linearBoldForms }: { li
   // its closing fence each time it is written, and `fix` writes none: those
   // blank lines are a spelling, not content the sync compares.
   for (const child of tree.children) if (child.type === 'code') child.value = withoutTrailingNewlines(child.value);
-  const strip = (node: Nodes, paragraphLine?: boolean): ComparableNode[] => {
+  const strip = (node: Nodes, paragraphLine?: boolean): ComparableNode => {
     const { position: _position, ...rest } = node;
     if ('url' in rest) rest.url = normalizeUri(rest.url);
     if (linearNumberSpacing && node.type === 'text' && paragraphLine !== undefined) {
       // Linear substitutes one space after a literal number's dot. This is
       // only a re-spelling in a paragraph, after the parser resolved blocks.
       const separator = paragraphLine ? /(^|\n)([ \t]*\d+\.)[\t\u00a0]/g : /(\n)([ \t]*\d+\.)[\t\u00a0]/g;
-      return [{ ...rest, value: node.value.replace(separator, '$1$2 ') }];
+      return { ...rest, value: node.value.replace(separator, '$1$2 ') };
     }
     if ('children' in node) {
       const children: ComparableNode[] = [];
       for (const [index, child] of node.children.entries()) {
         const startsLine = node.type === 'paragraph' ? index === 0 || node.children[index - 1]?.type === 'break' : undefined;
-        for (const part of strip(child, startsLine)) {
-          // A strong span immediately inside another one adds no formatting.
-          if (node.type === 'strong' && part.type === 'strong') {
-            for (const nested of part.children!) appendComparable(children, nested);
-          } else {
-            appendComparable(children, part);
-          }
+        const part = strip(child, startsLine);
+        // A strong span immediately inside another one adds no formatting.
+        if (node.type === 'strong' && part.type === 'strong') {
+          for (const nested of part.children!) appendComparable(children, nested);
+        } else {
+          appendComparable(children, part);
         }
       }
-      if (linearBoldForms && (node.type === 'strong' || node.type === 'emphasis' || node.type === 'link')) {
-        return comparableLines(rest, children);
-      }
-      return [{ ...rest, children }];
+      return { ...rest, children };
     }
-    return [rest];
+    return rest;
   };
-  return strip(tree);
+  const comparableTree = strip(tree);
+  return linearBoldForms ? comparableBoldForms(comparableTree)[0] : comparableTree;
 }
 
 /**
