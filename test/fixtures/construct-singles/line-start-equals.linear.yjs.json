@@ -1,0 +1,75 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Opening paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"=====","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"=== Section name","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"==== a remark after a run","marks":{"attribution":"user"}}]},
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"A paragraph line","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"=====","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Another paragraph line","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"=== and words after a run","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"====","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"=== a step","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"====","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {"type":"paragraph","children":[{"text":"====","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"=====","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-9b470119","marks":{"attribution":"user"}}]}
+  ]
+}

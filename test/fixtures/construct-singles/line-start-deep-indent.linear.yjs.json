@@ -1,0 +1,72 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Prices:","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"          - 5 euro","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"          + 7 euro","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"          = 9 euro","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"          =====","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Short indent:","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"   = three spaces before an equals sign","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"   ====","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Four spaces:","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"    - four spaces before a dash","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"    + four spaces before a plus","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Words:","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"  -x two spaces before a word","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"      -x six spaces before a word","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"An item","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"    - six spaces in an item","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"    + six spaces in an item","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-f4c3e32f","marks":{"attribution":"user"}}]}
+  ]
+}
