@@ -19,6 +19,7 @@ const TAIL_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-
 const PORT = /^:(0|[1-9]\d{0,4})(?=$|[/?#\s.,;!()[\]{}<>"'“”‘’«»])/u;
 const NON_ASCII = /[^\x00-\x7F]/;
 const URL_AUTHORITY = /^https?:\/\/[^/?#()[\]{}]+/i;
+const PUNCTUATION_AFTER_DOTS = /[*~_,;!?]/;
 
 export function* bareDomains(value: string): Iterable<BareDomain> {
   let used = 0;
@@ -80,11 +81,24 @@ export function httpUrlEnd(value: string): number {
 
 function scanTail(value: string, at: number, withScheme: boolean): { end: number; scanned: number } {
   const open: Array<{ at: number; end: string; nested: boolean }> = [];
+  let endedAtDots = false;
   let end = at;
   for (; end < value.length; end++) {
     const char = value[end]!;
     if (withScheme ? HTTP_TAIL_BOUNDARY.test(char)
       : TAIL_BOUNDARY.test(char) || (char === '&' && beginsReference(value, end))) break;
+    if (char === '.' && value[end + 1] === '.') {
+      let after = end + 2;
+      while (value[after] === '.') after++;
+      // Outside matched delimiters Linear leaves a run of dots and the
+      // punctuation after it in the prose, without dropping what preceded it.
+      if (open.length === 0 && PUNCTUATION_AFTER_DOTS.test(value[after] ?? '')) {
+        endedAtDots = true;
+        break;
+      }
+      end = after - 1;
+      continue;
+    }
     if (char === '(' || char === '[' || (withScheme && char === '{')) {
       const parent = open.at(-1);
       if (parent) parent.nested = true;
@@ -96,9 +110,9 @@ function scanTail(value: string, at: number, withScheme: boolean): { end: number
   }
   const scanned = end;
   end = open[0]?.at ?? end;
-  if (end > at && (withScheme ? ".,;!?'" : '.,;!?').includes(value[end - 1]!)) {
+  if (!endedAtDots && end > at && (withScheme ? ".,;!?'" : '.,;!?').includes(value[end - 1]!)) {
     const punctuation = value[--end];
-    if (withScheme) while (end > at && value[end - 1] === punctuation) end--;
+    if (".!?'".includes(punctuation!)) while (end > at && value[end - 1] === punctuation) end--;
   }
   // A # separates a fragment, once there is text beyond the host.
   if (end === at + 1 && value[at] === '#') end = at;
