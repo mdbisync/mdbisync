@@ -11,7 +11,7 @@ import { EditMap } from 'micromark-util-edit-map';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { posix } from 'node:path';
 import { domainToASCII } from 'node:url';
-import { bareDomains } from './bare-domain.ts';
+import { bareDomains, httpUrlEnd } from './bare-domain.ts';
 
 type ParserEvent = Parameters<EditMap['consume']>[0][number];
 
@@ -150,7 +150,9 @@ export function parse(body: string, mdastExtensions: Extension[] = [], linearDom
   const gfmExtensions = gfmFromMarkdown();
   const transforms = gfmExtensions.flatMap((extension) => extension.transforms ?? []);
   const untransformed = gfmExtensions.map(({ transforms: _transforms, ...extension }) => extension);
-  const syntax = gfm();
+  // Linear uses double tildes for strikethrough. A single tilde remains
+  // literal when shortening an autolink exposes it to the inline parser.
+  const syntax = gfm({ singleTilde: !linearDomains });
   if (linearDomains && syntax.text) {
     // Treat www. like any other bare host in Linear mode. Prevent the
     // tokenizer from splitting the source of an unsupported www. name.
@@ -163,10 +165,100 @@ export function parse(body: string, mdastExtensions: Extension[] = [], linearDom
   // The parser counts source offsets after one leading BOM.
   const source = body.startsWith('\uFEFF') ? body.slice(1) : body;
   placeTextLinks(tree, source, transforms, linearDomains);
+  if (linearDomains && /https?:\/\//i.test(source)) placeLinearHttpEnds(tree, source);
   if (linearDomains && BARE_DOMAIN_HINT.test(source)) placeLinearDomains(tree, source);
+  if (linearDomains && source.includes(')*** ')) placeLinkedBoldItalicSuffixes(tree, source);
   // Validate before returning the tree to any recursive renderer or comparer.
   visit(tree, () => {});
   return tree;
+}
+
+/** A spaced bold italic suffix immediately after a marked link. */
+export const LINKED_BOLD_ITALIC_SUFFIX = /^\*{3}( (?:\\[^\r\n]|[^*\\\r\n])+)\*{3}(?!\*)/;
+
+/** Linear can write a leading space inside the bold italic text immediately after a marked link. */
+function placeLinkedBoldItalicSuffixes(tree: Root, source: string): void {
+  const points = new PointIndex(source);
+  visit(tree, (node) => {
+    if (!('children' in node)) return;
+    node.children = (node.children as Nodes[]).flatMap((text, index, children): Nodes[] => {
+      const link = children[index - 1];
+      if (link?.type !== 'link' || link.position === undefined || link.children.length !== 1
+        || link.children[0]?.type !== 'emphasis' || link.children[0].children.length !== 1
+        || link.children[0].children[0]?.type !== 'strong') return [text];
+      if (text.type !== 'text' || text.position === undefined || end(link) !== start(text)) return [text];
+      const from = start(text);
+      if (!text.value.startsWith('*** ')) return [text];
+      const match = LINKED_BOLD_ITALIC_SUFFIX.exec(source.slice(from, end(text)));
+      if (!match) return [text];
+      const decoded = decodeTextLiteral(match[0]);
+      if (!text.value.startsWith(decoded)) return [text];
+      const to = from + match[0].length;
+      const position = (start: number, end: number) => ({ start: points.at(start), end: points.at(end) });
+      const marked: Nodes = {
+        type: 'emphasis', position: position(from, to), children: [{
+          type: 'strong', position: position(from + 1, to - 1),
+          children: [{ type: 'text', value: decodeTextLiteral(match[1]!), position: position(from + 3, to - 3) }],
+        }],
+      };
+      if (to === end(text)) return [marked];
+      return [marked, { ...text, value: text.value.slice(decoded.length), position: { ...text.position, start: points.at(to) } }];
+    }) as Parent['children'];
+  });
+}
+
+/** Adjust GFM's bare HTTP links without crossing any parsed inline markup. */
+function placeLinearHttpEnds(tree: Root, source: string): void {
+  const points = new PointIndex(source);
+  visit(tree, (node) => {
+    if (!('children' in node)) return;
+    const children = node.children as Nodes[];
+    const adjusted: Nodes[] = [];
+    for (let index = 0; index < children.length; index++) {
+      const link = children[index]!;
+      adjusted.push(link);
+      if (link.type !== 'link' || link.position === undefined || !/^https?:\/\//i.test(link.url)) continue;
+      const from = start(link);
+      if (!/[hH]/.test(source[from] ?? '')) continue;
+      const originalEnd = end(link);
+      const raw = source.slice(from, originalEnd);
+      const next = children[index + 1];
+      const following = next?.type === 'text' && next.position !== undefined && start(next) === originalEnd ? next : undefined;
+      const suffix = following === undefined ? ''
+        : /^[_.~:#?!,;)\]}'"]+/.exec(source.slice(originalEnd, end(following)))?.[0] ?? '';
+      const candidate = raw + suffix;
+      if (!/^https?:\/\/[^/?#]+[/?#]/i.test(candidate)) {
+        if (source[from - 1] !== '[' && following?.value.startsWith('_') && /^\\?_/.test(source.slice(originalEnd, originalEnd + 2))) {
+          // An underscore attached directly to the host prevents Linear from linking it.
+          adjusted[adjusted.length - 1] = {
+            type: 'text', value: decodeTextLiteral(raw.replace(/\\$/, '')) + following.value,
+            position: { start: link.position.start, end: following.position!.end },
+          };
+          index++;
+        }
+        continue;
+      }
+      const length = httpUrlEnd(candidate);
+      const written = candidate.slice(0, length);
+      if (length === raw.length && !/[\[\]]/.test(written)) continue;
+      const to = from + length;
+      const consumed = to > originalEnd ? decodeTextLiteral(source.slice(originalEnd, to)) : '';
+      if (consumed !== '' && !following?.value.startsWith(consumed)) continue;
+      const url = normalizeUri(written).replace(/\[/g, '%5B').replace(/\]/g, '%5D');
+      const position = { start: link.position.start, end: points.at(to) };
+      adjusted[adjusted.length - 1] = { ...link, url, position, children: [{ type: 'text', value: written, position }] };
+      if (to < originalEnd) {
+        const remainder = decodeTextLiteral(source.slice(to, originalEnd));
+        adjusted.push({ type: 'text', value: remainder, position: { start: position.end, end: link.position.end } });
+      } else if (to > originalEnd && following !== undefined) {
+        index++;
+        if (consumed.length < following.value.length) {
+          adjusted.push({ ...following, value: following.value.slice(consumed.length), position: { ...following.position!, start: position.end } });
+        }
+      }
+    }
+    node.children = adjusted as Parent['children'];
+  });
 }
 
 function placeLinearDomains(tree: Root, source: string): void {
@@ -596,7 +688,7 @@ export function markdownBaseline(body: string | undefined): string | undefined {
  * table cell, `*` for `_`, a code span on one line), which changes nothing
  * in the document; the sync keeps the file's spelling for those.
  */
-export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean; linearBoldForms?: boolean } = {}): boolean {
+export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean; linearBoldForms?: boolean; ignoreBold?: boolean } = {}): boolean {
   if (a === b) return true;
   return isDeepStrictEqual(comparable(a, options), comparable(b, options));
 }
@@ -942,6 +1034,11 @@ function comparableLines(node: ComparableNode, children: ComparableNode[]): Comp
         at = to;
       }
       if (at < value.length) appendComparable(line, { type: 'text', value: value.slice(at) });
+    } else if (child.type === 'link' && (node.type === 'strong'
+      || (node.type === 'emphasis' && child.children?.length === 1 && child.children[0]?.type === 'strong'))) {
+      if (line.length > 0) parts.push(comparableBold(node, line));
+      parts.push(comparableBold(node, [child]));
+      line = [];
     } else appendComparable(line, child);
   }
   if (line.length > 0) parts.push(comparableBold(node, line));
@@ -954,8 +1051,9 @@ function containsStrong(node: ComparableNode): boolean {
 
 function comparableBoldForms(node: ComparableNode, insideStrong = false): ComparableNode[] {
   if (node.children === undefined) return [node];
+  if (node.type === 'strong' || node.type === 'emphasis') node = coextensiveBoldForms(node);
   const children: ComparableNode[] = [];
-  for (const child of node.children) {
+  for (const child of node.children!) {
     for (const part of comparableBoldForms(child, insideStrong || node.type === 'strong')) appendComparable(children, part);
   }
   switch (node.type) {
@@ -970,6 +1068,22 @@ function comparableBoldForms(node: ComparableNode, insideStrong = false): Compar
   return [{ ...node, children }];
 }
 
+/** Apply coextensive marks once, in the same order on either side of a comparison. */
+function coextensiveBoldForms(node: ComparableNode): ComparableNode {
+  let inner = node;
+  let strong = false;
+  let emphasis = false;
+  for (;;) {
+    strong ||= inner.type === 'strong';
+    emphasis ||= inner.type === 'emphasis';
+    const child = inner.children![0];
+    if (inner.children!.length !== 1 || (child?.type !== 'strong' && child?.type !== 'emphasis')) break;
+    inner = child;
+  }
+  if (strong && emphasis) return { type: 'emphasis', children: [{ type: 'strong', children: inner.children! }] };
+  return inner;
+}
+
 /** The text without its trailing line breaks, scanned from the end so a long run inside costs nothing. */
 export function withoutTrailingNewlines(text: string): string {
   let end = text.length;
@@ -978,7 +1092,7 @@ export function withoutTrailingNewlines(text: string): string {
 }
 
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
-function comparable(body: string, { linearNumberSpacing, linearBoldForms }: { linearNumberSpacing?: boolean; linearBoldForms?: boolean }): unknown {
+function comparable(body: string, { linearNumberSpacing, linearBoldForms, ignoreBold }: NonNullable<Parameters<typeof sameMarkdown>[2]>): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
   // A lone `\+`, as `fix` writes for item text that is a bare `+`, cannot
   // be part of `+++`. Markdown reads it as a regular escape.
@@ -1007,8 +1121,8 @@ function comparable(body: string, { linearNumberSpacing, linearBoldForms }: { li
       for (const [index, child] of node.children.entries()) {
         const startsLine = node.type === 'paragraph' ? index === 0 || node.children[index - 1]?.type === 'break' : undefined;
         const part = strip(child, startsLine);
-        // A strong span immediately inside another one adds no formatting.
-        if (node.type === 'strong' && part.type === 'strong') {
+        // Nested strong is redundant. For adjacent bold rewrites compare everything except bold.
+        if ((ignoreBold || node.type === 'strong') && part.type === 'strong') {
           for (const nested of part.children!) appendComparable(children, nested);
         } else {
           appendComparable(children, part);

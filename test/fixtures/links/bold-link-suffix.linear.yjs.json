@@ -1,0 +1,38 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Guide","marks":{"attribution":"user","link":{"href":"https://example.test","noEmbed":null},"strong":{}}},{"text":":","marks":{"attribution":"user","strong":{}}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Guide","marks":{"attribution":"user","link":{"href":"https://example.test","noEmbed":null},"strong":{}}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Guide","marks":{"attribution":"user","link":{"href":"https://example.test","noEmbed":null},"strong":{}}},{"text":": Ready","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Guide","marks":{"attribution":"user","link":{"href":"https://example.test","noEmbed":null},"strong":{}}},{"text":" now","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Read ","marks":{"attribution":"user","strong":{}}},{"text":"Guide","marks":{"attribution":"user","link":{"href":"https://example.test","noEmbed":null},"strong":{}}},{"text":" now","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Guide","marks":{"attribution":"user","em":{},"link":{"href":"https://example.test","noEmbed":null},"strong":{}}},{"text":" now","marks":{"attribution":"user","em":{},"strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Guide","marks":{"attribution":"user","em":{},"link":{"href":"https://example.test","noEmbed":null},"strong":{}}},{"text":" now","marks":{"attribution":"user","em":{},"strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Guide","marks":{"attribution":"user","em":{},"link":{"href":"https://example.test","noEmbed":null},"strong":{}}},{"text":": ready","marks":{"attribution":"user","em":{},"strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Read ","marks":{"attribution":"user","em":{},"strong":{}}},{"text":"Guide","marks":{"attribution":"user","em":{},"link":{"href":"https://example.test","noEmbed":null},"strong":{}}},{"text":" now","marks":{"attribution":"user","em":{},"strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-614f27ab","marks":{"attribution":"user"}}]}
+  ]
+}

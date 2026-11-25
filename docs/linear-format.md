@@ -219,11 +219,14 @@ Blocks:
 Inline text:
 
 - Underscore emphasis becomes asterisks: `__bold__ and _em_` becomes
-  `**bold** and *em*`.
+  `**bold** and *em*`. Text that is both bold and italic throughout a
+  span uses three asterisks, as in `***note***`.
 - Asterisks that read as text are escaped. `**Birch****Pine**` becomes
   `**Birch\*\*\*\*Pine**`, and `**Inventory` becomes `\*\*Inventory`.
   Consecutive bold spans join when they can keep their formatting.
   Bold immediately inside another bold span is folded into the outer span.
+  In a chain of four-asterisk boundaries such as `**a****b****c**`,
+  Linear writes `**ab**c`.
 - Adjacent links to the same destination become one link, since Linear
   holds a link as a mark on its text. Bold, italic or strikethrough around
   a part goes inside the label: `[Shop](https://a.test)**[Sale](https://a.test)**`
@@ -231,6 +234,11 @@ Inline text:
   another destination keeps links apart, and so does a `!` before them.
 - Bold around a single link moves into the link label. For example,
   `**[Map](https://example.com)**` becomes `[**Map**](<https://example.com>)`.
+  When the bold link is followed immediately by punctuation inside the
+  same span, the punctuation gets its own bold marks. A leading bold italic
+  link likewise carries its marks in the label, with separate marks for the
+  text that follows it. When the text starts with a space, Linear writes
+  `*** text***`. CommonMark renders those asterisks literally.
   When bold spans multiple lines, `fix` closes it and reopens it on each line.
 - Link destinations go in angle brackets: `[a](https://example.com/x)`
   becomes `[a](<https://example.com/x>)`. A backslash, `|`, `^`, `{` and
@@ -267,6 +275,9 @@ Inline text:
   In a URL label, underscores between ASCII letters, digits or underscores
   stay plain, as in
   `[https://example.com/shelf_4](<https://example.com/shelf_4>)`.
+  A trailing underscore in a URL path, query or fragment stays in the link.
+  Matched parentheses can be part of the URL. An unmatched opening or
+  closing parenthesis ends it.
 - Bare addresses with recognized domain suffixes become HTTP links.
   `example.com/guide` becomes `[example.com/guide](<http://example.com/guide>)`.
   Relative paths, standalone Markdown filenames, and suffixes such as
