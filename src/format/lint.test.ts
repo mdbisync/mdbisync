@@ -17,6 +17,10 @@ import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 const cases: Array<[LintRule, string, number]> = [
   ['code-span-padding', 'Intro.\n\nTwo `  alpha  ` end.', 3],
   ['code-span-padding', '* Item `   ` end', 1],
+  // A `>` and a tab in the code are code text, not a quote's prefix.
+  ['code-span-padding', 'Text `  a>\tb  ` end', 1],
+  // A quote's tab Linear keeps inside the code leaves its outer spaces unsafe.
+  ['code-span-padding', '> `  a\n>\tb  `', 1],
   ['tab-reference-layout', 'Seed&#9;order\n\n1. &#9;Collect', 3],
   ['footnote', 'Text.\n\nA claim.[^1]\n\n[^1]: Source.', 3],
   ['footnote', 'An inline note.^[Text.]', 1],

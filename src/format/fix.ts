@@ -17,7 +17,7 @@ import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } fro
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES, type Finding } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
-import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, linearDropsCodeSpaces, linearMarkersAsText, linkDestination, listKind, nestedFileBlocksOnItemLine, nestsMarkerText, opensWithText, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines, endingRow } from './markdown.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, codeSpanText, linearDropsCodeSpaces, linearMarkersAsText, linkDestination, listKind, nestedFileBlocksOnItemLine, nestsMarkerText, opensWithText, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines, endingRow } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -542,8 +542,8 @@ class Writer {
   private inlineFrom = -1;
   /** The bounds of the block's inline text being written (a paragraph's, heading's or cell's), not a link label's. */
   private blockInline: [number, number] | undefined;
-  /** Whether the block's inline text holds a backtick outside text and code (in an alt text, a destination, HTML). */
-  private blockStrayTick = false;
+  /** Whether code spans keep their fences: set for a block whose shorter fences would read differently. */
+  private keepFences = false;
   /** The space references `edgeSpaceEdits` has moved, by offset: an inner run of marks leaves them. */
   private readonly movedSpaces = new Set<number>();
   /** The space edits made so far in the block being written, which a later one is checked with. */
@@ -1021,31 +1021,39 @@ class Writer {
       const inline: InlineEdits = { edits: [], rewriteAsterisks, changedAsterisks: false };
       const outer = this.inlineFrom;
       const block = this.blockInline;
-      const strayTick = this.blockStrayTick;
       this.inlineFrom = from;
       this.blockInline ??= [from, to];
-      if (block === undefined) this.blockStrayTick = hasStrayTick(this.source, from, to, [...texts, ...code]);
       this.movedSpaces.clear();
       for (const at of block === undefined ? [] : moved) this.movedSpaces.add(at);
       this.spaceEdits = block === undefined ? [] : [...spaceEdits];
       this.inlineChildrenEdits(children, inline);
       this.inlineFrom = outer;
       this.blockInline = block;
-      this.blockStrayTick = strayTick;
       this.movedSpaces.clear();
       for (const at of moved) this.movedSpaces.add(at);
       // A nested render's edits stay in the block's text: keep them for the checks that follow.
       if (block === undefined) this.spaceEdits = spaceEdits;
       return { text: this.rewritten(from, to, inline.edits, code, paragraph), changedAsterisks: inline.changedAsterisks };
     };
-    const candidate = render(this.rewriteAsterisks);
-    if (!candidate.changedAsterisks) return candidate.text;
-    const original = render(false);
-    // A table or heading can begin with characters that would open a block
-    // if the same inline text was parsed by itself.
-    if (!sameMarkdown('Text ' + candidate.text, 'Text ' + original.text)) return original.text;
-    this.rewroteAsterisks = true;
-    return candidate.text;
+    const written = (): string => {
+      const candidate = render(this.rewriteAsterisks);
+      if (!candidate.changedAsterisks) return candidate.text;
+      const original = render(false);
+      // A table or heading can begin with characters that would open a block
+      // if the same inline text was parsed by itself.
+      if (!sameMarkdown('Text ' + candidate.text, 'Text ' + original.text)) return original.text;
+      this.rewroteAsterisks = true;
+      return candidate.text;
+    };
+    // A shorter or longer fence can pair with a backtick that text and code
+    // do not hold (in an alt text or a destination): a block with such a
+    // backtick keeps its fences where it would then read differently.
+    if (this.blockInline !== undefined || this.keepFences || !hasStrayTick(this.source, from, to, [...texts, ...code])) return written();
+    const text = written();
+    this.keepFences = true;
+    const kept = written();
+    this.keepFences = false;
+    return text === kept || sameMarkdown('Text ' + text, 'Text ' + kept) ? text : kept;
   }
 
   /**
@@ -1643,15 +1651,7 @@ class Writer {
           if (`${before}${joined}${after}`.includes('|')) return;
           span = joined;
         }
-        let written = linearCodeSpan(span) ?? span;
-        // Other fences can pair with a backtick that text and code do not
-        // hold (in an alt text or a destination): keep them where the block
-        // would then read differently.
-        if (written !== span && this.blockStrayTick && this.blockInline !== undefined) {
-          const [blockFrom, blockTo] = this.blockInline;
-          const around = (code: string) => `Text ${this.source.slice(blockFrom, from)}${code}${this.source.slice(to, blockTo)}`;
-          if (!sameMarkdown(around(written), around(span))) written = span;
-        }
+        const written = this.keepFences ? span : linearCodeSpan(span) ?? span;
         if (written !== this.source.slice(from, to)) edits.push({ from, to, text: written });
         return;
       }
@@ -2557,21 +2557,16 @@ export function linearCodeSpan(span: string): string | undefined {
 }
 
 /**
- * The code of a code span's text between its fences on one line, as
- * Markdown reads it: one space at each end goes when both ends are spaces
- * and the text is not only spaces.
- */
-function codeSpanText(inner: string): string {
-  return inner.length > 2 && inner.startsWith(' ') && inner.endsWith(' ') && /[^ ]/.test(inner) ? inner.slice(1, -1) : inner;
-}
-
-/**
  * Whether the source from `from` to `to` holds a backtick outside the
  * `covered` ranges (text and code nodes).
  */
 function hasStrayTick(source: string, from: number, to: number, covered: ReadonlyArray<readonly [number, number]>): boolean {
+  // The ranges do not overlap: walk them in order beside the backticks.
+  const ranges = [...covered].sort((a, b) => a[0] - b[0]);
+  let range = 0;
   for (let at = source.indexOf('`', from); at !== -1 && at < to; at = source.indexOf('`', at + 1)) {
-    if (!covered.some(([a, b]) => a <= at && at < b)) return true;
+    while (range < ranges.length && ranges[range]![1] <= at) range++;
+    if (range === ranges.length || ranges[range]![0] > at) return true;
   }
   return false;
 }

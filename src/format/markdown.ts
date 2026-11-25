@@ -1102,6 +1102,15 @@ export function withoutTrailingNewlines(text: string): string {
 }
 
 /**
+ * The code of a code span's text between its fences on one line, as
+ * Markdown reads it: one space at each end goes when both ends are spaces
+ * and the text is not only spaces.
+ */
+export function codeSpanText(inner: string): string {
+  return inner.length > 2 && inner.startsWith(' ') && inner.endsWith(' ') && /[^ ]/.test(inner) ? inner.slice(1, -1) : inner;
+}
+
+/**
  * Whether Linear writes this code (as Markdown reads it) in a form that
  * reads as other code: code without a backtick that starts and ends with a
  * space around other text loses the padding that keeps those spaces, and

@@ -6,7 +6,7 @@
 import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table, TableRow } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, bracketedLabel, linearDropsCodeSpaces, listKind, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
+import { allowedLink, bracketedLabel, codeSpanText, linearDropsCodeSpaces, listKind, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
@@ -68,6 +68,44 @@ export function lintInTree(file: string, text: string, files: ReadonlySet<string
   // So does `code-span-padding`: Linear keeps the code, and only writes it
   // without the padding that keeps its outer spaces.
   return findings.filter((finding) => !FIX_ONLY_RULES.has(finding.rule));
+}
+
+/**
+ * The code Linear holds for a code span (`value` as Markdown reads it,
+ * `raw` its source with fences and line prefixes). Inside quotes only, a
+ * tab the innermost quote's `>` takes in part stays a tab in Linear, where
+ * Markdown reads its other columns as spaces; `fix` writes it so. Elsewhere
+ * the code is Markdown's, a line ending read as a space.
+ */
+function linearCode(value: string, raw: string, ancestors: readonly Nodes[]): string {
+  const plain = value.replace(/\r\n?|\n/g, ' ');
+  if (ancestors.some((a) => a.type === 'listItem')) return plain;
+  const depth = ancestors.filter((a) => a.type === 'blockquote').length;
+  if (depth === 0) return plain;
+  const fence = /^`+/.exec(raw)![0].length;
+  const [first, ...rest] = raw.slice(fence, raw.length - fence).split(/\r\n?|\n/);
+  const parts = [first!];
+  let quoteTab = false;
+  for (const line of rest) {
+    let at = 0;
+    let tab = false;
+    for (let level = 0; level < depth; level++) {
+      const marker = /^ {0,3}>/.exec(line.slice(at));
+      if (marker === null) break;
+      at += marker[0].length;
+      if (line[at] === ' ') at++;
+      else if (line[at] === '\t') {
+        // Not worked out past an outer quote: Markdown's code stands.
+        if (level < depth - 1) return plain;
+        // The tab runs to the next multiple of four columns; `>` takes one.
+        tab = 3 - (at % 4) > 0;
+        at++;
+      }
+    }
+    quoteTab ||= tab;
+    parts.push((tab ? '\t' : '') + line.slice(at));
+  }
+  return quoteTab ? codeSpanText(parts.join(' ')) : plain;
 }
 
 /** Lint findings for one file's text, ordered by line. */
@@ -258,11 +296,10 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         if (node.type === 'inlineCode' && ancestors.some((a) => a.type === 'emphasis' || a.type === 'strong' || a.type === 'delete')) {
           report('code-in-emphasis', line(node));
         }
-        // `fix` keeps such code as written: Linear's form would read as other
-        // code. A tab a quote's `>` takes in part reads as spaces here, but
-        // Linear keeps it a tab, as `fix` writes it: such code is left to `fix`.
-        if (node.type === 'inlineCode' && !/>[ ]?\t/.test(body.slice(start(node), end(node)))
-          && linearDropsCodeSpaces(node.value.replace(/\r\n?|\n/g, ' '))) report('code-span-padding', line(node));
+        // `fix` keeps such code as written: Linear's form would read as other code.
+        if (node.type === 'inlineCode' && linearDropsCodeSpaces(linearCode(node.value, body.slice(start(node), end(node)), ancestors))) {
+          report('code-span-padding', line(node));
+        }
         break;
       case 'footnoteReference':
       case 'footnoteDefinition':
