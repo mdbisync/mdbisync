@@ -3003,6 +3003,14 @@ fixtures:
     canary: kx-69dfa3cf
     corpus: false
     note: "a document that ends with a code block whose last line is blank"
+  - file: "construct-singles/code-blank-lines-quoted-item.md"
+    group: construct-singles
+    construct: code-blank-lines-before-fence
+    class: fixable
+    basis: known
+    canary: kx-877287ad
+    corpus: false
+    note: "blank lines in a code block of a list item in a quote: Linear writes the quote marker and the item's indentation"
   - file: "tables/table-cell-br.md"
     group: tables
     construct: table-cell-br

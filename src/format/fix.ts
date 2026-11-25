@@ -15,7 +15,7 @@ import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
-import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -308,7 +308,7 @@ class Writer {
         // than it holds, so blank lines before its closing fence shrink on
         // every new document: only none of them comes back as written. In a
         // quote or list item they come back as written.
-        const value = this.containers.length === 0 ? node.value.replace(/\n+$/, '') : node.value;
+        const value = this.containers.length === 0 ? withoutTrailingNewlines(node.value) : node.value;
         const info = [node.lang, node.meta].filter(Boolean).join(' ');
         // A backtick fence cannot carry a backtick in its info string; keep tildes then.
         const mark = info.includes('`') ? '~' : '`';
@@ -1254,7 +1254,6 @@ function advanceColumn(column: number, char: string): number {
 function lineStartOf(source: string, at: number): number {
   return source.lastIndexOf('\n', at - 1) + 1;
 }
-
 
 /**
  * Joins lines with one space, dropping the spaces and tabs around each line

@@ -166,6 +166,7 @@ Blocks:
   its escape (a bare one in a body cell is the
   [`table-hash-cell`](#table-hash-cell) rule). A line break tag in a cell
   (`<br>`, `<br/>`, `<br />`) is written as `&#10;`, as Linear writes it.
+  Linear shows it as a line break; GitHub shows it as a space.
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph. Where that text would start another block,
   a backslash escape keeps it text: in
@@ -730,8 +731,10 @@ toolchain or packages when they install or run.
 A hook that rewrites the same Markdown in another way fights `fix`, and
 the two never settle. The common ones are `end-of-file-fixer`, which adds
 back the final line break `fix` removes, and `trailing-whitespace`, which
-removes the two spaces of a line break. Keep them away from synchronized
-Markdown files:
+removes the two spaces of a line break and the indentation `fix` writes on
+a blank line inside a code block in a list item. An editor that trims
+trailing whitespace on save does the same. Keep them away from
+synchronized Markdown files:
 
 ```yaml
   - repo: https://github.com/pre-commit/pre-commit-hooks

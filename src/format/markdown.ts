@@ -759,6 +759,13 @@ function appendComparable(children: ComparableNode[], child: ComparableNode): vo
   }
 }
 
+/** The text without its trailing line breaks, scanned from the end so a long run inside costs nothing. */
+export function withoutTrailingNewlines(text: string): string {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === '\n') end--;
+  return end === text.length ? text : text.slice(0, end);
+}
+
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
 function comparable(body: string, linearNumberSpacing = false): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
@@ -769,6 +776,10 @@ function comparable(body: string, linearNumberSpacing = false): unknown {
   const marked = markFileBlockStarts(nestedFileBlocksOnItemLine(body)
     .replace(/\\[$+]/g, (escape, at: number, text: string) => (escape === '\\+' && isLonePlus(text, at) ? escape : LINEAR_SYNTAX_ESCAPES[escape]!)));
   const tree = parse(marked);
+  // Linear returns a top-level code block with one blank line fewer before
+  // its closing fence each time it is written, and `fix` writes none: those
+  // blank lines are a spelling, not content the sync compares.
+  for (const child of tree.children) if (child.type === 'code') child.value = withoutTrailingNewlines(child.value);
   const strip = (node: Nodes, paragraphLine?: boolean): ComparableNode => {
     const { position: _position, ...rest } = node;
     if ('url' in rest) rest.url = normalizeUri(rest.url);

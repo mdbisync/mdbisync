@@ -121,6 +121,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/code-blank-lines-quoted-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/code-fence-blank-lines.md": {
       "yjs": "recorded",
       "fixedPoint": true

@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { linkedFileCheck, lintText } from './lint.ts';
-import { parse, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],
@@ -358,6 +358,13 @@ describe('links to files that are not there', () => {
     // A table at the end of Linear's export includes a final newline, and so does fix.
     const padded = '| Step | State |\n| -- | -- |\n| Draft  | tbd |\n';
     assert.equal(fixLinearText(padded, padded, () => false), '| Step | State |\n| -- | -- |\n| Draft | tbd |\n');
+    // Blank lines before a top-level closing fence are Linear's spelling: the file takes fix's form, and the sync sees no change.
+    const fenced = 'Run:\n\n```sh\nmake\n\n\n```';
+    assert.equal(fixLinearText(fenced, fenced, () => false), 'Run:\n\n```sh\nmake\n```');
+    assert.equal(sameAsLinear(fenced, 'Run:\n\n```sh\nmake\n```'), true);
+    assert.equal(sameAsLinear(fenced, 'Run:\n\n```sh\nmake now\n```'), false, 'a real code difference is still one');
+    // In a quote they are content.
+    assert.equal(sameAsLinear('> ```\n> make\n> \n> ```', '> ```\n> make\n> ```'), false);
     // `fix` writes a setext heading on one line, joining its lines with a space: another text.
     const setext = 'Two\nlines\n---\n\nText.';
     assert.notEqual(fixText(setext), setext);
@@ -616,7 +623,7 @@ describe('what fix leaves alone', () => {
       ['**Birch** **Pine**', '**Birch** **Pine**'],
       ['***Birch***', '***Birch***'],
       ['[**Inventory](https://example.com)', '[\\*\\*Inventory](<https://example.com>)'],
-      ['| Shelf |\n| -- |\n| **Birch |', '| Shelf |\n| -- |\n| \\*\\*Birch |'],
+      ['| Shelf |\n| -- |\n| **Birch |', '| Shelf |\n| -- |\n| \\*\\*Birch |\n'],
       ['> **Inventory', '> \\*\\*Inventory'],
       ['`**Inventory`', '`**Inventory`'],
     ] as const;
