@@ -2094,6 +2094,93 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('~~~ foo`bar\nx\n~~~'), '~~~foo`bar\nx\n~~~');
   });
 
+  it('writes a checkbox that starts the line below a marker followed by spaces as a task item, as Linear does', () => {
+    const cases: Array<[string, string]> = [
+      ['-   \n  [ ] Pack', '- [ ] Pack'],
+      ['-\n  [ ] Pack', '- [ ] Pack'],
+      ['* \t\n  [x] Pack', '- [X] Pack'],
+      ['- \n  [x] Pack\n- [ ] Rest', '- [X] Pack\n- [ ] Rest'],
+      ['> -  \n>   [ ] Pack', '> - [ ] Pack'],
+      // An escaped bracket is text, in Linear too.
+      ['-   \n  \\[ ] Pack', '* \\[ \\] Pack'],
+    ];
+    for (const [text, expected] of cases) {
+      assert.equal(fixText(text), expected, text);
+      assert.equal(fixText(expected), expected, expected);
+      assert.deepEqual(lintText('a.md', expected), [], expected);
+    }
+    // A numbered one is an ordered task list: Linear writes it with a bullet.
+    assert.equal(fixText('1.   \n   [ ] Pack'), '1.   \n   [ ] Pack');
+    // A checkbox alone on its line stays text, also in a quote; a `[x]` a definition makes a link stays a link.
+    assert.equal(fixText('> -   \n>   [x]\n>   Pack'), '> * \\[x\\]\n>   Pack');
+    assert.equal(fixText('-   \n  [x] Pack\n\n[x]: https://example.com/a'), '* [x](<https://example.com/a>) Pack');
+  });
+
+  it('reads a list right after indented code as a list, as Linear and CommonMark do', () => {
+    const cases: Array<[string, string]> = [
+      ['\tcode\n2. Pear\n3. Plum', '```\ncode\n```\n\n2. Pear\n3. Plum'],
+      ['    code\n\n2. Pear\n3. Plum', '```\ncode\n```\n\n2. Pear\n3. Plum'],
+      ['    code\n2) Pear', '```\ncode\n```\n\n2. Pear'],
+      ['    code\n-\n\nText.', '```\ncode\n```\n\n* \n\nText.'],
+      ['\t1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j', '```\n1. a\n```\n\n 2. b\n 3. c\n 4. d\n 5. e\n 6. f\n 7. g\n 8. h\n 9. i\n10. j'],
+      ['- Note\n\n      code\n  2. Pear', '* Note\n\n  ```\n  code\n  ```\n  2. Pear'],
+      // Indented code still continues over blank lines, and a paragraph still takes a number above 1 in.
+      ['    code\n\n    more\n2. Pear', '```\ncode\n\nmore\n```\n\n2. Pear'],
+      ['Text\n2. Pear', 'Text\n2\\. Pear'],
+    ];
+    for (const [text, expected] of cases) {
+      assert.equal(fixText(text), expected, text);
+      assert.equal(fixText(expected), expected, expected);
+      assert.deepEqual(lintText('a.md', expected), [], expected);
+    }
+  });
+
+  it('writes a list right below code, a quote, a heading, a rule or a table in a list item, as Linear does', () => {
+    const cases: Array<[string, string]> = [
+      ['* Note\n\n  ```\n  code\n  ```\n\n  1. Pear\n  2. Plum', '* Note\n\n  ```\n  code\n  ```\n  1. Pear\n  2. Plum'],
+      ['* Note\n\n  > quote\n\n  1. Pear', '* Note\n\n  > quote\n  1. Pear'],
+      ['* Note\n\n  # Head\n\n  * Pear', '* Note\n\n  # Head\n  * Pear'],
+      ['* Note\n\n  | A | B |\n  | --- | --- |\n  | 1 | 2 |\n\n  * Pear', '* Note\n\n  | A | B |\n  | -- | -- |\n  | 1 | 2 |\n  * Pear'],
+      ['* Note\n\n  ---\n\n  * Pear', '* Note\n\n  ---\n  * Pear'],
+      ['1. Note\n\n   ```\n   code\n   ```\n\n   - [ ] Pear', '1. Note\n\n   ```\n   code\n   ```\n   - [ ] Pear'],
+      ['* Note\n\n  > quote\n\n  2. Pear', '* Note\n\n  > quote\n  2. Pear'],
+      ['* Note\n\n  | A | B |\n  | --- | --- |\n  | 1 | 2 |\n\n  2. Pear', '* Note\n\n  | A | B |\n  | -- | -- |\n  | 1 | 2 |\n  2. Pear'],
+      ['* Note\n\n  > quote\n\n  *', '* Note\n\n  > quote\n  * '],
+      ['* Note\n\n  ---\n\n  1.', '* Note\n\n  ---\n  1. '],
+      // A paragraph after code, and a list after code outside an item, keep their blank line.
+      ['* Note\n\n  ```\n  code\n  ```\n\n  Text.', '* Note\n\n  ```\n  code\n  ```\n\n  Text.'],
+      ['```\ncode\n```\n\n* Pear', '```\ncode\n```\n\n* Pear'],
+      ['> ```\n> code\n> ```\n>\n> 1. Pear', '> ```\n> code\n> ```\n>\n> 1. Pear'],
+    ];
+    for (const [text, expected] of cases) {
+      assert.equal(fixText(text), expected, text);
+      assert.equal(fixText(expected), expected, expected);
+      assert.ok(sameMarkdown(text, expected), text);
+    }
+  });
+
+  it('keeps a list right below a quote in an item apart from the quote: no marker after a quote is a lazy line', () => {
+    // CommonMark reads a list marker after a quote's paragraph as a list, even one that cannot interrupt a paragraph.
+    for (const [marker, start] of [['2. Pear', 2], ['* ', null], ['1. ', 1]] as const) {
+      const written = fixText(`* Note\n\n  > quote\n\n  ${marker.trim()}`);
+      assert.equal(written, `* Note\n\n  > quote\n  ${marker}`);
+      const [list] = parse(written).children;
+      const blocks = list?.type === 'list' ? list.children[0]!.children : [];
+      assert.deepEqual(blocks.map((block) => block.type), ['paragraph', 'blockquote', 'list'], marker);
+      const nested = blocks[2];
+      assert.equal(nested?.type === 'list' ? nested.start ?? null : undefined, start, marker);
+      const quote = blocks[1];
+      assert.equal(quote?.type === 'blockquote' ? quote.children.length : 0, 1, marker);
+    }
+  });
+
+  it('leaves an ordered list numbered past nine digits to its author', () => {
+    for (const text of ['999999999. Pear\n999999999. Plum', '999999998. Pear\n999999998. Plum\n999999998. Fig']) {
+      assert.equal(fixText(text), text);
+    }
+    assert.equal(fixText('999999998. Pear\n999999998. Plum'), '999999998. Pear\n999999999. Plum');
+  });
+
   it('settles a list that mixes task and plain items', () => {
     const once = fixText('* [ ] a\n* b');
     assert.equal(once, '- [ ] a\n\n* b');
