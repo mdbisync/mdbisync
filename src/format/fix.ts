@@ -794,7 +794,15 @@ class Writer {
   private nestedListText(node: Paragraph): string {
     const raw = this.source.slice(start(node), end(node));
     if (raw.includes('\n')) return this.inline(node.children, 'continuation');
-    return withoutTrailingNewlines(fixText(raw, this.options));
+    // A reference in it needs the document's definitions, which fix writes
+    // into the link as it does everywhere; one over more lines is left to
+    // the item's text writer, which reads the definitions itself.
+    let references = false;
+    visit(node, (child) => { if (child.type === 'linkReference' || child.type === 'imageReference') references = true; });
+    if (!references) return withoutTrailingNewlines(fixText(raw, this.options));
+    const definitions = [...this.definitions.values()].map((definition) => this.source.slice(start(definition), end(definition)));
+    if (definitions.some((definition) => definition.includes('\n'))) return this.inline(node.children, 'continuation');
+    return withoutTrailingNewlines(fixText(`${raw}\n\n${definitions.join('\n')}`, this.options));
   }
 
   private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {

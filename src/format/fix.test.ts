@@ -1320,6 +1320,9 @@ describe('what fix leaves alone', () => {
       ['Note\n1. 3. - [x] a', 'Note\n\n1. \n   3. \n      - [X] a'],
       ['Note\n1. 3. plum ![a](x.png)', 'Note\n\n1. \n   3. plum\n\n      ![a](x.png)'],
       ['Note\n1. -  ', 'Note\n\n1. \n   * '],
+      // A reference in it keeps its destination, written into the link as everywhere.
+      ['Note\n1. 3. [plum][p]\n\n[p]: https://example.com', 'Note\n\n1. \n   3. [plum](<https://example.com>)'],
+      ['Note\n1. 3. ![pic][i] end\n\n[i]: images/a.png', 'Note\n\n1. \n   3. ![pic](images/a.png)\n\n      end'],
     ];
     for (const [text, expected] of nested) {
       const fixed = fixText(text);
