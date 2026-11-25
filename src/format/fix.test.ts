@@ -520,6 +520,9 @@ describe('what fix leaves alone', () => {
       ['* a\n\t* b\n\t\t  - x', '* a\n  * b\n        - x'],
       ['* a\n\t* b\n\t\tc', '* a\n  * b\n      c'],
       ['> - a\n>\tb', '> * a\n>   b'],
+      // An item after a tab that follows `>`: the quote takes one column of the tab.
+      ['>\t- a\n>\t      # b', '> * a\n>       # b'],
+      ['>\t- a\n>\t    b', '> * a\n>     b'],
       ['> - a\n>\t-x', '> * a\n>   \\-x'],
       ['*\ta\n    b', '* a\n  b'],
       // A file block label's later lines carry no prefix for their item: their indentation goes.

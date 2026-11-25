@@ -444,18 +444,19 @@ class Writer {
     const line = lineStartOf(this.source, start(item));
     const columnAt = (offset: number): number => [...this.source.slice(line, offset)].reduce(advanceColumn, 0);
     let at = line;
-    // Where a parent item's prefix ends inside a tab it takes only in part.
+    // Where a parent's prefix ends inside a tab it takes only in part: an
+    // item's indent, or the one column a quote's `>` takes of a tab after it.
     let partial: number | undefined;
     for (const container of this.containers) {
-      if (lineStartOf(this.source, container.content) === line) at = container.content;
-      else if (container.kind === 'quote') at += prefixOf(container, this.source.slice(at, start(item)))?.[0].length ?? 0;
-      else {
+      if (container.kind === 'item' && lineStartOf(this.source, container.content) !== line) {
         const end = (partial ?? columnAt(at)) + container.indent;
         while (at < start(item) && isSpaceOrTab(this.source[at]!) && advanceColumn(columnAt(at), this.source[at]!) <= end) at++;
         partial = at < start(item) && this.source[at] === '\t' && columnAt(at) < end ? end : undefined;
         continue;
       }
-      partial = undefined;
+      if (lineStartOf(this.source, container.content) === line) at = container.content;
+      else at += prefixOf(container, this.source.slice(at, start(item)))?.[0].length ?? 0;
+      partial = container.kind === 'quote' && this.source[at - 1] === '>' && this.source[at] === '\t' ? columnAt(at) + 1 : undefined;
     }
     const content = this.contentIndent(item);
     // Past the marker the indent counts columns: a tab after it runs to the next multiple of four.
