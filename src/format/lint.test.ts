@@ -35,6 +35,9 @@ const cases: Array<[LintRule, string, number]> = [
   ['table-list-cell', '> | A | B |\n> | -- | -- |\n> | x | 3) |', 3],
   ['table-header-pipe', 'Intro.\n\nTotal\n| --- |\n| 5 |', 3],
   ['table-header-pipe', '* Item\n\n  Total\n  |---|\n  |5|', 3],
+  ['number-paragraph', 'Text.\n\n7\\.', 3],
+  ['number-paragraph', '> 12\\)', 1],
+  ['number-paragraph', '* a\n\n  7\\.', 3],
   ['list-after-item-text', '1. Plan\n\n   2.\n      * step', 3],
   ['list-after-item-text', '* Plan\n  * one\n\n  3. two', 4],
   ['setext-heading-lines', 'Intro.\n\nPlan\nfor May\n===', 3],
@@ -111,6 +114,22 @@ describe('lint rules', () => {
   it('table-header-pipe spares a table whose header row has a pipe', () => {
     for (const text of ['| Total |\n| --- |\n| 5 |', 'Total |\n--- |\n5 |', '| Total\n| ---\n| 5', '|Total|\n|-|\n|5|']) {
       assert.deepEqual(lintText('doc.md', text), [], text);
+    }
+  });
+
+  it('number-paragraph ignores trailing spaces', () => {
+    assert.deepEqual(lintText('doc.md', '7\\.  ').map((finding) => finding.rule), ['number-paragraph']);
+  });
+
+  it('table cell rules spare the rows from a line without a pipe on, which Linear reads as a paragraph', () => {
+    for (const text of ['| A | B |\n| -- | -- |\nnote\n| # | C |', '| A | B |\n| -- | -- |\nnote\n| - | C |', '| A | B |\n| -- | -- |\nnote\n| a \\| b | C |']) {
+      assert.deepEqual(lintText('doc.md', text), [], text);
+    }
+  });
+
+  it('number-paragraph spares a number with text, a task item and a number Markdown reads as a list', () => {
+    for (const text of ['7\\. Seven', 'Text 7\\.', '- [ ] 7\\.', '7.', '* x\n  1. 2.', '| A |\n| -- |\n| 7. |']) {
+      assert.deepEqual(lintText('doc.md', text).filter((finding) => finding.rule === 'number-paragraph'), [], text);
     }
   });
 

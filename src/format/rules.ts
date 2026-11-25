@@ -27,6 +27,7 @@ export const LINT_RULES = {
   'setext-heading-lines': 'Linear keeps only the first line of a heading underlined with = or - as the heading; the lines after it become a paragraph. Put the heading text on one line.',
   'table-header-pipe': 'A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |.',
   'hard-break-in-heading': 'A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.',
+  'number-paragraph': 'A paragraph that is only a number and a dot or parenthesis, such as 7\\., comes back from Linear without the backslash, which reads as an empty numbered list item. Add text after the number, or remove the line.',
   'tab-reference-layout': 'Linear writes tab character references as literal tabs. Fix leaves this document as-is because a tab would change how Markdown reads it. Reword the text or use ordinary spacing.',
   'git-conflict-marker': 'Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.',
   'section-opener': 'A line starting with >>> opens a collapsible section in Linear, which fix cannot write here: a section line without a title would open a section inside another one, or a >>> line without a title follows a +++ line that closed its sections, or a ++++ line, code or HTML would take in a closing line. Close a >>> section with a >>> line and a +++ section with a +++ line, or start the line with \\>.',

@@ -153,6 +153,16 @@ describe('>>> and +++ section lines in one file', () => {
 describe('triple-plus section markers', () => {
   const cases = [
     ['bare opener and closer', '+++\n\nSeeds\n\n+++', '+++ \n\nSeeds\n\n+++'],
+    // Linear reads a longer run of signs as a marker and writes three (MDS-029-88).
+    ['longer markers pair by their width', '++++ Tip\n\nSeeds\n\n++++', '+++ Tip\n\nSeeds\n\n+++'],
+    ['a longer titled marker interrupts a paragraph', 'Intro\n++++Tip\n\nSeeds', 'Intro\n\n+++ Tip\n\nSeeds\n\n+++'],
+    ['a longer bare marker opens an untitled section', 'Intro\n\n++++++++++\n\nSeeds', 'Intro\n\n+++ \n\nSeeds\n\n+++'],
+    ['a longer marker starting an item with more of it', '1. ++++Tip\n   Seeds', '1. \n\n   +++ Tip\n\n   Seeds\n\n   +++'],
+    ['a longer marker starting a nested item', '* a\n  * ++++Tip\n\n    Seeds', '* a\n  * \n\n    +++ Tip\n\n    Seeds\n\n    +++'],
+    ['a longer marker starting a quote', '> ++++Tip\n>\n> Seeds', '> +++ Tip\n>\n> Seeds\n>\n> +++'],
+    ['a longer marker that is the item\'s only text stays text', '1. ++++Tip\n2. Next', '1. ++++Tip\n2. Next'],
+    // Markers of other widths do not pair in Linear: the container stays as written.
+    ['mixed widths stay as written', '1. ++++Tip\n\n   Seeds\n\n   +++', '1. ++++Tip\n\n   Seeds\n\n   +++'],
     ['titled opener', '+++ Garden\n\nSeeds\n\n+++', '+++ Garden\n\nSeeds\n\n+++'],
     ['titled opener with a padded closer', '+++ Garden\n\nSeeds\n\n+++ \t', '+++ Garden\n\nSeeds\n\n+++'],
     ['nesting and successive sections', '+++\n\n+++ Tray\n\nSeeds\n\n+++\n\nWater daily\n\n+++\n\n+++\n\nTools\n\n+++',
@@ -192,7 +202,9 @@ describe('triple-plus section markers', () => {
     ['multiline link label', 'Read [the\n+++\nnotes](/notes).', 'Read [the\n+++\nnotes](</notes>).'],
     ['a code span does not affect a later marker', '`first\n+++\nlast`\n\n+++\n\nSeeds', '`first +++ last`\n\n+++ \n\nSeeds\n\n+++'],
     ['marker inside display math', '$$\na\n+++\nb\n$$', '```math\na\n+++\nb\n```'],
-    ['marker inside a table row', '| a |\n| - |\n| b |\n+++\nSeeds', '| a |\n| -- |\n| b |\n| +++ |\n| Seeds |\n'],
+    // Linear ends the table at the line without a pipe (MDS-029-90).
+    ['marker after a table row', '| a |\n| - |\n| b |\n+++\nSeeds', '| a |\n| -- |\n| b |\n\n+++ \n\nSeeds\n\n+++'],
+    ['marker inside a table row', '| a |\n| - |\n| b |\n| +++ |\nSeeds', '| a |\n| -- |\n| b |\n| +++ |\n\nSeeds'],
     ['open code fence at end of section', '+++\n\n```\nSeeds', '+++ \n\n```\nSeeds\n```\n\n+++'],
     ['indented backticks do not close the fence', '+++\n\n```\n    ```', '+++ \n\n````\n    ```\n````\n\n+++'],
     ['open fence ends at the next item', '* Tray\n\n  +++\n\n   ```\n   Seeds\n* Tools',

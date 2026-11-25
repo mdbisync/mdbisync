@@ -1,0 +1,182 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph"},
+            {
+              "type": "collapsible_section",
+              "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+              "children": [
+                {
+                  "type": "collapsible_heading",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Tip","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {"type":"paragraph","children":[{"text":"More words","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"a","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph"},
+                    {
+                      "type": "collapsible_section",
+                      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+                      "children": [
+                        {
+                          "type": "collapsible_heading",
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"Tip","marks":{"attribution":"user"}}]}
+                          ]
+                        },
+                        {"type":"paragraph","children":[{"text":"More words","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "collapsible_section",
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+          "children": [
+            {
+              "type": "collapsible_heading",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Tip","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {"type":"paragraph","children":[{"text":"More words","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph"},
+            {
+              "type": "collapsible_section",
+              "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+              "children": [
+                {
+                  "type": "collapsible_heading",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Notes","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {"type":"paragraph","children":[{"text":"Body line","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Next","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"a","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"x","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph"},
+                    {
+                      "type": "collapsible_section",
+                      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+                      "children": [
+                        {
+                          "type": "collapsible_heading",
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"Tip","marks":{"attribution":"user"}}]}
+                          ]
+                        },
+                        {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"code here","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"++++Tip","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Next","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-750c916e","marks":{"attribution":"user"}}]}
+  ]
+}

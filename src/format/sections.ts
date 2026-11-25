@@ -24,7 +24,9 @@ type OpenerLine = { role: 'open' | 'close' | 'end'; run: number };
 
 /** Rounds of splitting: each makes the section lines that nest in quotes the round before split off visible. */
 const SPLIT_ROUNDS = 8;
-const PLUS_MARKER = /^\+{3}(?!\+)(.*)$/;
+// Linear reads a longer run of signs as the same marker (`++++Tip` opens a
+// section titled `Tip`) and writes it with three.
+const PLUS_MARKER = /^(\+{3,})(.*)$/;
 
 // For this scan only, give a +++ line a block node so it can interrupt a
 // paragraph or end a lazy list/quote continuation. Fences and HTML blocks
@@ -39,12 +41,12 @@ function plusSectionSyntax(ignored: ReadonlySet<number>): MicromarkExtension {
 
         function opening(code: Parameters<typeof ok>[0]): ReturnType<typeof ok> {
           if (signs === 0) effects.enter('thematicBreak');
-          if (code === 43 && signs < 3) {
+          if (code === 43) {
             signs++;
             effects.consume(code);
             return opening;
           }
-          return signs === 3 && code !== 43 ? rest(code) : nok(code);
+          return signs >= 3 ? rest(code) : nok(code);
         }
 
         function rest(code: Parameters<typeof ok>[0]): ReturnType<typeof ok> {
@@ -132,10 +134,10 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
     if (markers.every((marker) => marker === null)) return;
     const opener = (index: number) => fromOpeners.get(start(blocks[index]!));
     const mixed = markers.some((marker, index) => marker !== null && opener(index) !== undefined);
-    // Longer delimiters pair by their own width. Their stored spelling
-    // also uses three signs, so leave mixed-width containers to the author.
-    if (blocks.some((node) => node.type === 'paragraph' && /(?:^|\n)[ \t>]*\+{4}/.test(body.slice(start(node), end(node))))) {
-      unwritable ||= mixed;
+    // Linear's pairing of wider markers with `>>>` lines is not known:
+    // leave such a container to the author.
+    if (mixed && markers.some((marker) => marker !== null && marker[1]!.length > 3)) {
+      unwritable = true;
       return;
     }
     const depth = ancestors.length;
@@ -154,14 +156,14 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
       for (const other of closed) {
         // Only a +++ line of the text can be a final title-like paragraph.
         if (other > lastContent && opener(other) === undefined) closedAfterContent++;
-        roles.set(other, `+++ ${markers[other]![1]!.trim()}`);
+        roles.set(other, `+++ ${markers[other]![2]!.trim()}`);
       }
       roles.set(index, '+++');
       if (closed.length > 1) alsoCloses.set(index, closed.length - 1);
     };
     for (const [index, marker] of markers.entries()) {
       if (marker === null) continue;
-      const title = marker[1]!.trim();
+      const title = marker[2]!.trim();
       const line = opener(index);
       if (line !== undefined && line.role !== 'open') {
         if (closingRuns.has(line.run)) {
@@ -186,6 +188,13 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
         const innermost = mixed ? open.findLastIndex((other) => opener(other) === undefined) : open.length - 1;
         if (line !== undefined || innermost === -1) {
           unwritable = true;
+          return;
+        }
+        // A closing marker pairs only with an opener of its own width;
+        // Linear keeps one of another width as text in the section. Leave
+        // such a container to the author.
+        if (markers[open[innermost]!]![1]!.length !== marker[1]!.length) {
+          unwritable ||= mixed;
           return;
         }
         close(index, innermost);
@@ -217,7 +226,7 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
       edits.push({ from: start(blocks[0]!), to: start(blocks[0]!), text: '\\', depth: ancestors.length });
       return;
     }
-    for (const index of implicit) roles.set(index, `+++ ${markers[index]![1]!.trim()}`);
+    for (const index of implicit) roles.set(index, `+++ ${markers[index]![2]!.trim()}`);
     // A final title-like paragraph exports just like the header of an empty
     // inner section. Keep an already written outer opener in that case.
     const closes = implicit.filter((index) => {
