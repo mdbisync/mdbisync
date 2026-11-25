@@ -170,8 +170,15 @@ function spaceReferenceEdges(tree: Root, body: string): number[] {
     let to = end(text);
     while (from < to && (body[from] === ' ' || body[from] === '\t')) from++;
     while (to > from && (body[to - 1] === ' ' || body[to - 1] === '\t')) to--;
-    if (side === 'first' && SPACE_REFERENCE_START.test(body.slice(from, from + 16))) lines.push(line(text));
-    if (side === 'last' && SPACE_REFERENCE_END.test(body.slice(Math.max(from, to - 16), to))) lines.push(text.position!.end.line);
+    // An escaped `\&#32;` is literal text, not a space.
+    const escaped = (at: number): boolean => {
+      let slashes = 0;
+      while (at - slashes - 1 >= 0 && body[at - slashes - 1] === '\\') slashes++;
+      return slashes % 2 === 1;
+    };
+    if (side === 'first' && SPACE_REFERENCE_START.test(body.slice(from, from + 16)) && !escaped(from)) lines.push(line(text));
+    const ending = SPACE_REFERENCE_END.exec(body.slice(Math.max(from, to - 16), to));
+    if (side === 'last' && ending !== null && !escaped(to - ending[0].length)) lines.push(text.position!.end.line);
   };
   visit(tree, (node) => {
     if (node.type !== 'paragraph' && node.type !== 'heading') return;

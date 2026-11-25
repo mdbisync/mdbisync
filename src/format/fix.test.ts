@@ -275,7 +275,7 @@ describe('space references, adjacent links and lone backticks as Linear stores t
     const cases: Array<[string, number]> = [
       ['&#32;Leading', 1], ['**&#32;Tip** one', 1], ['Intro\n\nTail **bold&#32;**', 3], ['End&#x20;', 1], ['&#32;', 1],
       ['* &#32;item', 1], ['1. Plan\n   1. Pack the bags&#32;\n2. Next', 2], ['# **&#32;Head**', 1], ['> &#32;quote', 1],
-      ['Text ![leaf](leaf.png) **&#32; leaf**', 1], ['**&#32;&#32;Seeds:** buy them\n\nMore', 1], ['Ask the host.\nBring the map.&#32;', 2],
+      ['Text ![leaf](leaf.png) **&#32; leaf**', 1], ['Tail \\\\&#32;', 1], ['**&#32;&#32;Seeds:** buy them\n\nMore', 1], ['Ask the host.\nBring the map.&#32;', 2],
     ];
     for (const [text, line] of cases) {
       assert.deepEqual(lintText('doc.md', text).map((finding) => [finding.rule, finding.line]), [['space-reference-edge', line]], text);
@@ -284,7 +284,7 @@ describe('space references, adjacent links and lone backticks as Linear stores t
     }
     // Inside the text, at a line's start or end, it is no block edge.
     // A table cell's edge is left to fix: Linear can end the table earlier than Markdown.
-    for (const text of ['first\n&#32;second', 'a&#32;\nb', 'x **&#32;mid** y', '[&#32;a](https://a.test) b', '| Col |\n| --- |\n| cell |\nLine&#32;\nContinued']) {
+    for (const text of ['first\n&#32;second', 'a&#32;\nb', 'x **&#32;mid** y', '[&#32;a](https://a.test) b', 'Tail \\&#32;', '\\&#32;Lead', '**\\&#32;Tip** one', 'Tail \\\\\\&#32;', '| Col |\n| --- |\n| cell |\nLine&#32;\nContinued']) {
       assert.deepEqual(lintText('doc.md', text), [], text);
     }
   });
