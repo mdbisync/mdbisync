@@ -151,6 +151,13 @@ Blocks:
   between the signs (`> > >`), or when the first sign continues a quote
   above, it stays a quote. A file that also has a `+++` line is left to
   you, since Linear would pair that line with the section.
+- A bare `+++` opens an untitled section when it has a body or a closing
+  marker and there is no section open in the same document, list item or
+  quote. `fix` writes that opener with one trailing space, as Linear does.
+  A bare marker inside a section closes the innermost section and is written
+  without trailing whitespace. A final bare marker with no section to close
+  stays plain text. A blank line after an unpaired opener at the start of a
+  list item or quote distinguishes it from a continued paragraph.
 - Lazy quote lines get their `>`. A blank line between blocks in a quote
   is a bare `>`; a blank line inside a code block in a quote keeps the
   space (`> `), as Linear writes it. A lazy line of only `-` or `=` in a
@@ -815,8 +822,7 @@ the two never settle. The common ones are `end-of-file-fixer`, which adds
 back the final line break `fix` removes, and `trailing-whitespace`, which
 removes the two spaces of a line break, the indentation `fix` writes on
 a blank line inside a code block in a list item, and the space after
-`+++` that marks a collapsible section without a title (without it, Linear
-reads the line as the end of a section). An editor that trims
+`+++` that Linear stores on an untitled section opener. An editor that trims
 trailing whitespace on save does the same. Keep them away from
 synchronized Markdown files:
 

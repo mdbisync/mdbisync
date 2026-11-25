@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "collapsible_section",
+      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+      "children": [
+        {
+          "type": "collapsible_heading",
+          "children": [
+            {"type":"paragraph"}
+          ]
+        },
+        {
+          "type": "collapsible_section",
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+          "children": [
+            {
+              "type": "collapsible_heading",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Tray","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {"type":"paragraph","children":[{"text":"Seeds for the tray (kx-29ab3e29).","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {"type":"paragraph","children":[{"text":"Water daily.","marks":{"attribution":"user"}}]}
+      ]
+    }
+  ]
+}

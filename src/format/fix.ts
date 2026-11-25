@@ -15,8 +15,8 @@ import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
-import { sectionOpenersAsLinear } from './sections.ts';
-import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
+import { ALERT, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -40,11 +40,14 @@ export interface FixOptions {
 export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
-  const lf = sectionOpenersAsLinear(body.replace(/\r\n?/g, '\n'));
+  const normalized = body.replace(/\r\n?/g, '\n');
+  const sections = sectionOpenersAsLinear(normalized);
+  const lf = sections === normalized ? plusSectionsAsLinear(sections) : sections;
   if (lf === undefined) return text;
   const unbroken = backslashBreaksAsLinear(lf);
   if (unbroken === undefined) return text;
   const fixed = fixBody(unbroken, options);
+  if (fixed === undefined) return text;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
   // block): such a file stays with its author.
@@ -131,35 +134,38 @@ function breakShape(tree: Root): unknown {
   return shape(tree);
 }
 
-function fixBody(body: string, options: FixOptions): string {
+function fixBody(body: string, options: FixOptions): string | undefined {
   if (body.trim() === '' && !body.includes(NBSP)) return '';
   let current = body;
+  let rewroteSections = false;
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    const tree = parse(current, [], true);
+    const source = pass === 0 ? current : plusSectionsAsLinear(current);
+    rewroteSections ||= source !== current;
+    const tree = parse(source, [], true);
     // Lint checked the source; a rewrite may expose a table or references it
     // did not see. Text split off at an image is escaped so it exposes none:
     // this guard keeps the limits for any rewrite that still does.
-    if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, current) !== undefined)) throw new MarkdownLimitError('nodes');
+    if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, source) !== undefined)) throw new MarkdownLimitError('nodes');
     // The writer copies text by source offset. A node the parser left
     // without one (a link the bare-URL search inside text found but could
     // not place, which lint reports as `unplaced-link`) would make it copy
     // the wrong text: leave the body as it came.
     if (hasUnplacedNode(tree)) return body;
-    let writer = new Writer(current, tree, options);
+    let writer = new Writer(source, tree, options);
     let next = writer.root();
     let rewriteEscapes = true;
     let rewriteTildeUnderscore = true;
     if (writer.compareEscapes) {
-      const fallback = new Writer(current, tree, options, false);
+      const fallback = new Writer(source, tree, options, false);
       const withOriginalEscapes = fallback.root();
       // Edits can expose syntax across inline nodes even when an edited
       // character would be safe in its own node or on its own line.
       if (!sameMarkdown(next, withOriginalEscapes)) {
         // An escaped `~` or `_` can move a link's end: give those up first,
         // and the other escapes only if the document still changes.
-        const withoutTildeUnderscore = new Writer(current, tree, options, true, true, false);
+        const withoutTildeUnderscore = new Writer(source, tree, options, true, true, false);
         const partial = withoutTildeUnderscore.root();
         if (sameMarkdown(partial, withOriginalEscapes)) {
           rewriteTildeUnderscore = false;
@@ -174,15 +180,16 @@ function fixBody(body: string, options: FixOptions): string {
     }
     if (writer.rewroteAsterisks) {
       // The escapes given up above stay given up there.
-      const withOriginalAsterisks = new Writer(current, tree, options, rewriteEscapes, false, rewriteTildeUnderscore).root();
+      const withOriginalAsterisks = new Writer(source, tree, options, rewriteEscapes, false, rewriteTildeUnderscore).root();
       // A locally equivalent edit can still affect a surrounding block.
       if (!sameMarkdown(next, withOriginalAsterisks)) next = withOriginalAsterisks;
     }
-    next = linearBoldForms(next, next === current ? tree : undefined);
+    next = linearBoldForms(next, next === source ? tree : undefined);
     if (next === current) return next;
     current = next;
   }
-  return current;
+  // Any section edit still changing after the passes is ambiguous.
+  return rewroteSections ? undefined : current;
 }
 
 /** Re-spell bold across line breaks and around a single link in the written body. */
@@ -645,6 +652,14 @@ class Writer {
     });
     this.containers.pop();
     const lines = content.split('\n').map((text, at) => (text === '' && !codeLines.has(at) ? '' : indent + text));
+    // A section can be the first block of an item. Linear keeps an empty
+    // paragraph on the marker line and puts the section on its own line.
+    if (item.checked == null && first?.type === 'paragraph'
+      && this.source.slice(start(first), end(first)) === '+++ '
+      && item.children.slice(1).some((child) => child.type === 'paragraph' && this.source.slice(start(child), end(child)) === '+++')
+      && !/(?:^|\n)[ \t>]*\+{4}/.test(this.source.slice(start(first), end(item)))) {
+      return `${marker} \n\n${lines.join('\n')}`;
+    }
     return `${marker} ${lines.join('\n').slice(indent.length)}`;
   }
 
@@ -1702,11 +1717,6 @@ function attachmentLink(paragraph: Paragraph): Link | undefined {
 /** The prefix `container` takes at the start of `rest`: a quote marker or up to its item's indent in spaces. */
 function prefixOf(container: Container, rest: string): RegExpExecArray | null {
   return container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
-}
-
-/** The column after `char`, from `column`: a tab runs to the next multiple of four. */
-function advanceColumn(column: number, char: string): number {
-  return char === '\t' ? column + 4 - (column % 4) : column + 1;
 }
 
 /** Where the line holding `at` starts. */

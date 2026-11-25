@@ -1,0 +1,55 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph"},
+            {
+              "type": "collapsible_section",
+              "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+              "children": [
+                {
+                  "type": "collapsible_heading",
+                  "children": [
+                    {"type":"paragraph"}
+                  ]
+                },
+                {"type":"paragraph","children":[{"text":"Seeds for the tray (kx-681bd3ea).","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Water daily.","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "collapsible_section",
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+          "children": [
+            {
+              "type": "collapsible_heading",
+              "children": [
+                {"type":"paragraph"}
+              ]
+            },
+            {"type":"paragraph","children":[{"text":"Cover the pots.","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    }
+  ]
+}

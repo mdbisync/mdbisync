@@ -106,3 +106,54 @@ describe('a line opening with >>>', () => {
     assert.deepEqual(findings.map((finding) => finding.line), [7]);
   });
 });
+
+describe('triple-plus section markers', () => {
+  const cases = [
+    ['bare opener and closer', '+++\n\nSeeds\n\n+++', '+++ \n\nSeeds\n\n+++'],
+    ['titled opener', '+++ Garden\n\nSeeds\n\n+++', '+++ Garden\n\nSeeds\n\n+++'],
+    ['titled opener with a padded closer', '+++ Garden\n\nSeeds\n\n+++ \t', '+++ Garden\n\nSeeds\n\n+++'],
+    ['nesting and successive sections', '+++\n\n+++ Tray\n\nSeeds\n\n+++\n\nWater daily\n\n+++\n\n+++\n\nTools\n\n+++',
+      '+++ \n\n+++ Tray\n\nSeeds\n\n+++\n\nWater daily\n\n+++\n\n+++ \n\nTools\n\n+++'],
+    ['explicit empty section', '+++\n\n+++', '+++ \n\n+++'],
+    ['unpaired opener with a body', '+++\n\nSeeds', '+++ \n\nSeeds\n\n+++'],
+    ['unpaired nested opener with a body', '+++\n\n+++ Tray\n\nSeeds', '+++ \n\n+++ Tray\n\nSeeds\n\n+++\n\n+++'],
+    ['lone marker', '+++', '+++'],
+    ['final marker with no opener', 'Seeds\n+++', 'Seeds\n\n+++'],
+    ['final title-like text inside a section', '+++\n\nSeeds\n\n+++ Tray', '+++ \n\nSeeds\n\n+++ Tray\n\n+++'],
+    ['paragraph interruption', 'Before\n+++\nSeeds\n+++\nOutside', 'Before\n\n+++ \n\nSeeds\n\n+++\n\nOutside'],
+    ['quote boundary', '+++ Garden\n\n> +++\n>\n> Seeds\n\n+++', '+++ Garden\n\n> +++ \n>\n> Seeds\n>\n> +++\n\n+++'],
+    ['list item boundary', '* Tray\n  +++\n  Seeds\n* Tools\n  +++', '* Tray\n\n  +++ \n\n  Seeds\n\n  +++\n* Tools\n\n  +++'],
+    ['tab after a bullet marker', '*\tTray\n\n\t+++\n\n\tSeeds',
+      '* Tray\n\n  +++ \n\n  Seeds\n\n  +++'],
+    ['space and tab after an ordered marker', '1. \tTray\n\n\t+++\n\n\tSeeds',
+      '1. Tray\n\n   +++ \n\n   Seeds\n\n   +++'],
+    ['tab after a bullet inside a quote', '>  *\tTray\n>\n> \t\t+++\n>\n> \t\tSeeds',
+      '> * Tray\n>\n>   +++ \n>\n>   Seeds\n>\n>   +++'],
+    ['section first in item', '* +++\n\n  Seeds\n\n  +++\n* Tools', '* \n\n  +++ \n\n  Seeds\n\n  +++\n* Tools'],
+    ['lazy list continuation', '* Tray\n+++\nSeeds\n+++', '* Tray\n\n+++ \n\nSeeds\n\n+++'],
+    ['literal marker in a lazy quote', '> +++\nSeeds', '> +++\n> Seeds'],
+    ['literal marker in a lazy item', '* +++\nSeeds', '* +++\n  Seeds'],
+    ['indent at the document root does not move the closer into a list', '  +++\n\n* Seeds', '+++ \n\n* Seeds\n\n+++'],
+    ['indent in a quote does not move the closer into a list', '>   +++\n>\n> * Seeds',
+      '> +++ \n>\n> * Seeds\n>\n> +++'],
+    ['escaped marker', '\\+++\n\nSeeds', '\\+++\n\nSeeds'],
+    ['fenced marker', '```\n+++\n```', '```\n+++\n```'],
+    ['multiline link label', 'Read [the\n+++\nnotes](/notes).', 'Read [the\n+++\nnotes](</notes>).'],
+    ['a code span does not affect a later marker', '`first\n+++\nlast`\n\n+++\n\nSeeds', '`first +++ last`\n\n+++ \n\nSeeds\n\n+++'],
+    ['marker inside display math', '$$\na\n+++\nb\n$$', '```math\na\n+++\nb\n```'],
+    ['marker inside a table row', '| a |\n| - |\n| b |\n+++\nSeeds', '| a |\n| -- |\n| b |\n| +++ |\n| Seeds |\n'],
+    ['open code fence at end of section', '+++\n\n```\nSeeds', '+++ \n\n```\nSeeds\n```\n\n+++'],
+    ['indented backticks do not close the fence', '+++\n\n```\n    ```', '+++ \n\n````\n    ```\n````\n\n+++'],
+    ['open fence ends at the next item', '* Tray\n\n  +++\n\n   ```\n   Seeds\n* Tools',
+      '* Tray\n\n  +++ \n\n  ```\n  Seeds\n  ```\n\n  +++\n* Tools'],
+    ['open HTML would swallow the closer', '+++\n\n<pre>\nSeeds', '+++\n\n<pre>\nSeeds'],
+    ['unclosed section with only an empty nested section stays literal', '+++\n\n+++ Tray\n\n+++', '+++\n\n+++ Tray\n\n+++'],
+  ] as const;
+  for (const [label, input, expected] of cases) {
+    it(label, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected);
+      assert.deepEqual(lintText('doc.md', expected), []);
+    });
+  }
+});

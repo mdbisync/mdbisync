@@ -3190,6 +3190,46 @@ fixtures:
     canary: kx-bb890607
     corpus: false
     note: "Linear escapes a # at a continuation line's start before a no-break space, with or without indentation"
+  - file: "construct-singles/section-marker-bare.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-1938df17
+    corpus: false
+    note: "A bare opener gains one trailing space."
+  - file: "construct-singles/section-marker-nested.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-29ab3e29
+    corpus: false
+    note: "Bare closing markers close the innermost section."
+  - file: "construct-singles/section-marker-unpaired.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-4f13c557
+    corpus: false
+    note: "A section with a body closes at the end of its container."
+  - file: "construct-singles/section-marker-containers.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-681bd3ea
+    corpus: false
+    note: "Section pairing is local to each list item or quote."
+  - file: "construct-singles/section-marker-standalone.md"
+    group: construct-singles
+    construct: collapsible-section-opener
+    class: fixable
+    basis: known
+    canary: kx-c89e31cb
+    corpus: false
+    note: "A trailing bare marker remains literal."
   - file: "construct-singles/nbsp-forms.md"
     group: construct-singles
     construct: nbsp
