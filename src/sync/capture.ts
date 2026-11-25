@@ -15,7 +15,7 @@ import { fixLinearText, joinFile, linkedFileCheck, lintInTree, sameAsLinear, spl
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, hasDocumentLinks, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
-import { MarkdownLimitError, markdownBaseline } from '../format/markdown.ts';
+import { MarkdownLimitError, linearMarkersAsText, markdownBaseline } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
@@ -442,12 +442,21 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     const limited = new Set<string>();
     let needsLinkBase = false;
+    // Each document's text as Linear holds it, with the file's body before this run (where it has one).
+    // Links and files are found in that text: a marker escape Linear dropped (`4)     [a](b)`)
+    // would otherwise read as a list item holding code, which hides the link.
+    const readable = new Map<string, {text: string; previousBody: string | undefined}>();
     for (const doc of work.values()) {
       if (!live(doc)) continue;
       try {
         // Check every body, including those after the first linked document.
         checkImageRepairSize(doc.content ?? '');
-        if (linksLinearDocuments(doc.content ?? '')) needsLinkBase = true;
+        const old = byId.get(doc.id);
+        // An over-limit legacy body is not evidence for links or equality.
+        const previousBody = old === undefined ? undefined : markdownBaseline(splitFile(previous.get(old.path)?.toString('utf8') ?? '').body);
+        const text = linearMarkersAsText(doc.content ?? '', previousBody);
+        readable.set(doc.id, {text, previousBody});
+        if (linksLinearDocuments(text)) needsLinkBase = true;
       } catch (error) {
         if (!(error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError)) throw error;
         limited.add(doc.id);
@@ -521,9 +530,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
-        // An over-limit legacy body is not evidence for links or equality.
-        const previousBody = old === undefined ? undefined : markdownBaseline(prior.body);
-        const assets = await downloadAssets(path, doc.content ?? '', uploads, previousBody, old?.path, new Set(old?.entry.plainFiles));
+        const {text: body, previousBody} = readable.get(doc.id)!;
+        const assets = await downloadAssets(path, body, uploads, previousBody, old?.path, new Set(old?.entry.plainFiles));
         const candidate: Candidate = {doc, path, head, assets, files: new Map<string, FileContent>([[path, joinFile(head, assets.body)], ...assets.files])};
         if (old?.path === path && previousBody !== undefined) candidate.previousBody = previousBody;
         candidates.set(doc.id, candidate);
@@ -575,7 +583,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // Compared again only when other link targets change the body.
       if (candidate.compared?.body !== body) {
         const unchanged = candidate.previousBody !== undefined && sameAsLinear(body, candidate.previousBody);
-        const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), candidate.doc.content ?? '', linkedFileCheck(candidate.path, (file) => mapping.files.has(file)), candidate.previousBody);
+        const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), readable.get(candidate.doc.id)?.text ?? candidate.doc.content ?? '', linkedFileCheck(candidate.path, (file) => mapping.files.has(file)), candidate.previousBody);
         candidate.compared = {body, text};
       }
       return candidate.compared.text;
@@ -750,7 +758,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const {head, body} = splitFile(baseline.text);
       let assets: CapturedAssets;
       try {
-        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body, candidate.path, new Set(byId.get(candidate.doc.id)?.entry.plainFiles));
+        // Read with that version's body as evidence for the marker escapes Linear dropped, as the capture reads it.
+        assets = await captureAtBaseline(candidate.path, linearMarkersAsText(candidate.doc.content ?? '', body), uploads, body, candidate.path, new Set(byId.get(candidate.doc.id)?.entry.plainFiles));
         // Linear's spelling of that version reads back as its text.
         return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
       } catch (error) {
@@ -781,7 +790,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         candidate.files.set(candidate.path, observed);
         const deadUploads = candidate.assets.deadUploads ?? [];
         entry.pullRewrite = {hash: createHash('sha256').update(observed).digest('hex'), observedHash: createHash('sha256').update(candidate.doc.content ?? '').digest('hex'), replacement: String(repaired),
-          images: imageLinks(candidate.doc.content ?? '', new Set(deadUploads)).images};
+          // The images are counted in the text the capture read; the digest stays on Linear's content.
+          images: imageLinks(readable.get(id)?.text ?? candidate.doc.content ?? '', new Set(deadUploads)).images};
         const recorded = old === undefined ? undefined : signedRepair(context.pushedKey, old.path, old.entry);
         if (recorded?.hash === entry.pullRewrite.hash && recorded.source !== undefined) entry.pullRewrite.source = recorded.source;
         entry.pullRewrite = signRepair(context.pushedKey, candidate.path, id, entry.pullRewrite);

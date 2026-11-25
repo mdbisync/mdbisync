@@ -1,0 +1,58 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":" Fresh","marks":{"attribution":"user","strong":{}}},{"text":" start","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Plan ","marks":{"attribution":"user"}},{"text":" ahead","marks":{"attribution":"user","strong":{}}},{"text":" and ","marks":{"attribution":"user"}},{"text":"check ","marks":{"attribution":"user","strong":{}}},{"text":" daily","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ends ","marks":{"attribution":"user"}},{"text":"soon ","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":" Notes","marks":{"attribution":"user","em":{}}},{"text":" for ","marks":{"attribution":"user"}},{"text":" later","marks":{"attribution":"user","em":{}}},{"text":" and ","marks":{"attribution":"user"}},{"text":" draft","marks":{"attribution":"user","strike":{}}},{"text":" text","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Both ","marks":{"attribution":"user"}},{"text":" sides ","marks":{"attribution":"user","strong":{}}},{"text":" here and ","marks":{"attribution":"user"}},{"text":" all","marks":{"attribution":"user","em":{},"strong":{}}},{"text":" of it","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Two ","marks":{"attribution":"user"}},{"text":"  wide","marks":{"attribution":"user","strong":{}}},{"text":" and ","marks":{"attribution":"user"}},{"text":" thin","marks":{"attribution":"user","strong":{}}},{"text":" gaps","marks":{"attribution":"user"}}]},
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Item","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"a ","marks":{"attribution":"user"}},{"text":" bold","marks":{"attribution":"user","strong":{}}},{"text":" cell","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"end ","marks":{"attribution":"user","strong":{}}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-a664e088","marks":{"attribution":"user"}}]}
+  ]
+}

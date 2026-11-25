@@ -1199,9 +1199,10 @@ function comparable(body: string, { linearNumberSpacing, linearBoldForms, ignore
     // A line ending in a code span reads as a space; Linear writes the span on one line.
     if (node.type === 'inlineCode') return { ...rest, value: node.value.replace(/\r\n?|\n/g, ' ') };
     if (linearNumberSpacing && node.type === 'text' && paragraphLine !== undefined) {
-      // Linear substitutes one space after a literal number's dot. This is
+      // Linear substitutes one space after a literal number's dot (for a tab
+      // or whitespace outside ASCII). This is
       // only a re-spelling in a paragraph, after the parser resolved blocks.
-      const separator = paragraphLine ? /(^|\n)([ \t]*\d+\.)[\t\u00a0]/g : /(\n)([ \t]*\d+\.)[\t\u00a0]/g;
+      const separator = paragraphLine ? /(^|\n)([ \t]*\d+\.)[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g : /(\n)([ \t]*\d+\.)[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g;
       return { ...rest, value: node.value.replace(separator, '$1$2 ') };
     }
     if ('children' in node) {

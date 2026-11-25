@@ -3425,6 +3425,22 @@ fixtures:
     canary: kx-3e71d00f
     corpus: false
     note: "Linear keeps a trailing NBSP after a heading's or a body cell's text, drops one around a header cell's, and stores &nbsp;, &#160; and &#xA0; as the character outside code"
+  - file: "construct-singles/wide-space-mark-edges.md"
+    group: construct-singles
+    construct: nbsp
+    class: fixable
+    basis: known
+    canary: kx-a664e088
+    corpus: false
+    note: "Linear moves an NBSP or en space reference at the inner edge of bold, italic or strikethrough out of it as the character, which stays at a block's edge"
+  - file: "construct-singles/wide-space-references.md"
+    group: construct-singles
+    construct: nbsp
+    class: fixable
+    basis: known
+    canary: kx-f08151cd
+    corpus: false
+    note: "Linear stores references to whitespace outside ASCII (en, em, thin, ideographic space, line separator) as the characters, kept at a block's edge, and writes a number's dot before one as an escaped dot and a space"
   - file: "construct-singles/code-span-lines.md"
     group: construct-singles
     construct: code-span-lines

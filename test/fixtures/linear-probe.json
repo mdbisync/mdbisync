@@ -605,6 +605,14 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/wide-space-mark-edges.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/wide-space-references.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "front-matter/annotation.md": {
       "yjs": "recorded",
       "fixedPoint": true

@@ -626,6 +626,16 @@ describe('initial sync from Linear to the tracked branch', () => {
     );
   });
 
+  it('finds a link after a number whose escape Linear dropped, and maps it back to a relative link', async () => {
+    // Read as Linear returns it, `4)` and five spaces open a list item holding code, which hides the link.
+    const world = fakeWorld();
+    const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-faq' ? { ...d, content: `4)     [the plan](${url('doc-plan')}) ${CANARY}\n` } : d));
+    const { result } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/faq.md'), `4\\)     [the plan](<plan.md>) ${CANARY}`);
+  });
+
   it('keeps a link to a new document left out as its Linear URL', async () => {
     const world = fakeWorld();
     const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
