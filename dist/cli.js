@@ -9934,6 +9934,7 @@ var LINT_RULES = {
   subscript: "Tilde subscript is dropped.",
   "table-escaped-pipe": "An escaped pipe in a plain table cell splits the row. Put the cell text in inline code, or rephrase it without the pipe.",
   "table-hash-cell": "A table body cell starting with # becomes a heading.",
+  "table-list-cell": "A table body cell starting with -, + or * and a space, or with a number and ), becomes a list, which Linear writes with * or a number and a dot. Put a backslash before the -, + or *, or reword the cell.",
   "image-in-link": "The link around an image is dropped.",
   "content-too-long": "This document exceeds Linear's 250,000-character content limit. The author must decide how to shorten or split it.",
   "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.",
@@ -9944,12 +9945,14 @@ var LINT_RULES = {
   "image-title": "An image title is dropped from the Markdown. Remove the title, or move its text into the alt text.",
   "code-in-emphasis": "Bold or italic around inline code is dropped from the code. Write the code without emphasis, or emphasize the words around it.",
   "hard-break-backslash": "A backslash line break becomes a plain line break. Run fix to write it as Linear does; where fix leaves it, put the text on one line or start a new paragraph.",
+  "setext-heading-lines": "Linear keeps only the first line of a heading underlined with = or - as the heading; the lines after it become a paragraph. Put the heading text on one line.",
+  "table-header-pipe": "A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |.",
   "hard-break-in-heading": "A hard line break in a setext heading is lost when the heading is written as one line. Put the heading on one line, or move the text after the break below it.",
   "git-conflict-marker": "Git conflict marker lines are rewritten as headings, quotes or collapsible sections. Resolve the conflict.",
   "section-opener": "A line starting with >>> opens a collapsible section in Linear, which fix cannot write here: the file also has lines starting with +++, which Linear pairs with it, or the section would end inside code. Write the section with +++ lines, or start the line with \\>.",
   "url-in-html": "A URL inside raw HTML is turned into a Markdown link.",
   "unplaced-link": 'A web address Markdown finds inside other text, such as "www.example.com" in quotes, cannot be matched to its text in the source, for example because an escape or a character reference spells it, so fix cannot write it as a link. Write it in angle brackets or as a link.',
-  "block-first-in-list-item": "A list item that starts with a heading, code, a quote, a list or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
+  "block-first-in-list-item": "A list item that starts with a heading, code, a quote or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
   "ordered-task-list": "An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.",
   "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path.",
   "image-file-missing": "An image must name a file that exists in the repository, not a folder or a Markdown document.",
@@ -23490,9 +23493,11 @@ import { domainToASCII } from "node:url";
 var HOST_RUN = /[.\p{L}\p{M}\p{N}\p{Extended_Pictographic}_+=-]+/gu;
 var INVALID_LABEL = /(?:^|\.)-|-(?:\.|$)|\.\.|_/;
 var TAIL_BOUNDARY = /[\s\p{Cc}<>"'“”‘’«»\\]/u;
+var HTTP_TAIL_BOUNDARY = /[\s\p{Cc}<>"]/u;
 var TAIL_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]{1,31}));/y;
 var PORT = /^:(0|[1-9]\d{0,4})(?=$|[/?#\s.,;!()[\]{}<>"'“”‘’«»])/u;
 var NON_ASCII = /[^\x00-\x7F]/;
+var URL_AUTHORITY = /^https?:\/\/[^/?#()[\]{}]+/i;
 function* bareDomains(value) {
   let used = 0;
   for (const match of value.matchAll(HOST_RUN)) {
@@ -23535,23 +23540,35 @@ function domainTail(value, hostEnd) {
     at += port[0].length;
   }
   if (!"/?#".includes(value[at] ?? " ")) return { end: at, scanned: at };
+  return scanTail(value, at, false);
+}
+function httpUrlEnd(value) {
+  const authority = URL_AUTHORITY.exec(value)?.[0];
+  if (authority === void 0 || authority.length === value.length) return value.length;
+  if (!"/?#".includes(value[authority.length])) return value.length;
+  return scanTail(value, authority.length, true).end;
+}
+function scanTail(value, at, withScheme) {
   const open3 = [];
   let end2 = at;
   for (; end2 < value.length; end2++) {
     const char = value[end2];
-    if (TAIL_BOUNDARY.test(char) || char === "&" && beginsReference(value, end2)) break;
-    if (char === "(" || char === "[") {
+    if (withScheme ? HTTP_TAIL_BOUNDARY.test(char) : TAIL_BOUNDARY.test(char) || char === "&" && beginsReference(value, end2)) break;
+    if (char === "(" || char === "[" || withScheme && char === "{") {
       const parent = open3.at(-1);
       if (parent) parent.nested = true;
-      open3.push({ at: end2, end: char === "(" ? ")" : "]", nested: false });
-    } else if (char === ")" || char === "]") {
+      open3.push({ at: end2, end: char === "(" ? ")" : char === "[" ? "]" : "}", nested: false });
+    } else if (char === ")" || char === "]" || withScheme && char === "}") {
       if (open3.at(-1)?.end !== char) break;
       if (open3.pop().nested) break;
     }
   }
   const scanned = end2;
   end2 = open3[0]?.at ?? end2;
-  if (end2 > at && ".,;!?".includes(value[end2 - 1])) end2--;
+  if (end2 > at && (withScheme ? ".,;!?'" : ".,;!?").includes(value[end2 - 1])) {
+    const punctuation = value[--end2];
+    if (withScheme) while (end2 > at && value[end2 - 1] === punctuation) end2--;
+  }
   if (end2 === at + 1 && value[at] === "#") end2 = at;
   return { end: end2, scanned };
 }
@@ -23761,7 +23778,7 @@ function parse2(body2, mdastExtensions = [], linearDomains = false, extraSyntax 
   const gfmExtensions = gfmFromMarkdown();
   const transforms = gfmExtensions.flatMap((extension2) => extension2.transforms ?? []);
   const untransformed = gfmExtensions.map(({ transforms: _transforms, ...extension2 }) => extension2);
-  const syntax = gfm();
+  const syntax = gfm({ singleTilde: !linearDomains });
   if (linearDomains && syntax.text) {
     for (const code4 of [87, 119]) {
       const constructs2 = syntax.text[code4];
@@ -23771,10 +23788,94 @@ function parse2(body2, mdastExtensions = [], linearDomains = false, extraSyntax 
   const tree = fromMarkdown(body2, { extensions: [syntax, ...extraSyntax, inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
   const source = body2.startsWith("\uFEFF") ? body2.slice(1) : body2;
   placeTextLinks(tree, source, transforms, linearDomains);
+  if (linearDomains && /https?:\/\//i.test(source)) placeLinearHttpEnds(tree, source);
   if (linearDomains && BARE_DOMAIN_HINT.test(source)) placeLinearDomains(tree, source);
+  if (linearDomains && source.includes(")*** ")) placeLinkedBoldItalicSuffixes(tree, source);
   visit2(tree, () => {
   });
   return tree;
+}
+var LINKED_BOLD_ITALIC_SUFFIX = /^\*{3}( (?:\\[^\r\n]|[^*\\\r\n])+)\*{3}(?!\*)/;
+function placeLinkedBoldItalicSuffixes(tree, source) {
+  const points = new PointIndex(source);
+  visit2(tree, (node2) => {
+    if (!("children" in node2)) return;
+    node2.children = node2.children.flatMap((text6, index2, children) => {
+      const link2 = children[index2 - 1];
+      if (link2?.type !== "link" || link2.position === void 0 || link2.children.length !== 1 || link2.children[0]?.type !== "emphasis" || link2.children[0].children.length !== 1 || link2.children[0].children[0]?.type !== "strong") return [text6];
+      if (text6.type !== "text" || text6.position === void 0 || end(link2) !== start(text6)) return [text6];
+      const from = start(text6);
+      if (!text6.value.startsWith("*** ")) return [text6];
+      const match = LINKED_BOLD_ITALIC_SUFFIX.exec(source.slice(from, end(text6)));
+      if (!match) return [text6];
+      const decoded = decodeTextLiteral(match[0]);
+      if (!text6.value.startsWith(decoded)) return [text6];
+      const to = from + match[0].length;
+      const position2 = (start2, end2) => ({ start: points.at(start2), end: points.at(end2) });
+      const marked = {
+        type: "emphasis",
+        position: position2(from, to),
+        children: [{
+          type: "strong",
+          position: position2(from + 1, to - 1),
+          children: [{ type: "text", value: decodeTextLiteral(match[1]), position: position2(from + 3, to - 3) }]
+        }]
+      };
+      if (to === end(text6)) return [marked];
+      return [marked, { ...text6, value: text6.value.slice(decoded.length), position: { ...text6.position, start: points.at(to) } }];
+    });
+  });
+}
+function placeLinearHttpEnds(tree, source) {
+  const points = new PointIndex(source);
+  visit2(tree, (node2) => {
+    if (!("children" in node2)) return;
+    const children = node2.children;
+    const adjusted = [];
+    for (let index2 = 0; index2 < children.length; index2++) {
+      const link2 = children[index2];
+      adjusted.push(link2);
+      if (link2.type !== "link" || link2.position === void 0 || !/^https?:\/\//i.test(link2.url)) continue;
+      const from = start(link2);
+      if (!/[hH]/.test(source[from] ?? "")) continue;
+      const originalEnd = end(link2);
+      const raw = source.slice(from, originalEnd);
+      const next = children[index2 + 1];
+      const following = next?.type === "text" && next.position !== void 0 && start(next) === originalEnd ? next : void 0;
+      const suffix = following === void 0 ? "" : /^[_.~:#?!,;)\]}'"]+/.exec(source.slice(originalEnd, end(following)))?.[0] ?? "";
+      const candidate = raw + suffix;
+      if (!/^https?:\/\/[^/?#]+[/?#]/i.test(candidate)) {
+        if (source[from - 1] !== "[" && following?.value.startsWith("_") && /^\\?_/.test(source.slice(originalEnd, originalEnd + 2))) {
+          adjusted[adjusted.length - 1] = {
+            type: "text",
+            value: decodeTextLiteral(raw.replace(/\\$/, "")) + following.value,
+            position: { start: link2.position.start, end: following.position.end }
+          };
+          index2++;
+        }
+        continue;
+      }
+      const length = httpUrlEnd(candidate);
+      const written = candidate.slice(0, length);
+      if (length === raw.length && !/[\[\]]/.test(written)) continue;
+      const to = from + length;
+      const consumed = to > originalEnd ? decodeTextLiteral(source.slice(originalEnd, to)) : "";
+      if (consumed !== "" && !following?.value.startsWith(consumed)) continue;
+      const url = normalizeUri(written).replace(/\[/g, "%5B").replace(/\]/g, "%5D");
+      const position2 = { start: link2.position.start, end: points.at(to) };
+      adjusted[adjusted.length - 1] = { ...link2, url, position: position2, children: [{ type: "text", value: written, position: position2 }] };
+      if (to < originalEnd) {
+        const remainder = decodeTextLiteral(source.slice(to, originalEnd));
+        adjusted.push({ type: "text", value: remainder, position: { start: position2.end, end: link2.position.end } });
+      } else if (to > originalEnd && following !== void 0) {
+        index2++;
+        if (consumed.length < following.value.length) {
+          adjusted.push({ ...following, value: following.value.slice(consumed.length), position: { ...following.position, start: position2.end } });
+        }
+      }
+    }
+    node2.children = adjusted;
+  });
 }
 function placeLinearDomains(tree, source) {
   const points = new PointIndex(source);
@@ -24381,6 +24482,10 @@ function comparableLines(node2, children) {
         at = to;
       }
       if (at < value.length) appendComparable(line2, { type: "text", value: value.slice(at) });
+    } else if (child.type === "link" && (node2.type === "strong" || node2.type === "emphasis" && child.children?.length === 1 && child.children[0]?.type === "strong")) {
+      if (line2.length > 0) parts.push(comparableBold(node2, line2));
+      parts.push(comparableBold(node2, [child]));
+      line2 = [];
     } else appendComparable(line2, child);
   }
   if (line2.length > 0) parts.push(comparableBold(node2, line2));
@@ -24391,6 +24496,7 @@ function containsStrong(node2) {
 }
 function comparableBoldForms(node2, insideStrong = false) {
   if (node2.children === void 0) return [node2];
+  if (node2.type === "strong" || node2.type === "emphasis") node2 = coextensiveBoldForms(node2);
   const children = [];
   for (const child of node2.children) {
     for (const part of comparableBoldForms(child, insideStrong || node2.type === "strong")) appendComparable(children, part);
@@ -24406,12 +24512,26 @@ function comparableBoldForms(node2, insideStrong = false) {
   }
   return [{ ...node2, children }];
 }
+function coextensiveBoldForms(node2) {
+  let inner = node2;
+  let strong2 = false;
+  let emphasis2 = false;
+  for (; ; ) {
+    strong2 ||= inner.type === "strong";
+    emphasis2 ||= inner.type === "emphasis";
+    const child = inner.children[0];
+    if (inner.children.length !== 1 || child?.type !== "strong" && child?.type !== "emphasis") break;
+    inner = child;
+  }
+  if (strong2 && emphasis2) return { type: "emphasis", children: [{ type: "strong", children: inner.children }] };
+  return inner;
+}
 function withoutTrailingNewlines(text6) {
   let end2 = text6.length;
   while (end2 > 0 && text6[end2 - 1] === "\n") end2--;
   return end2 === text6.length ? text6 : text6.slice(0, end2);
 }
-function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldForms2 }) {
+function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldForms2, ignoreBold }) {
   const marked = markFileBlockStarts(nestedFileBlocksOnItemLine(body2).replace(/\\[$+]/g, (escape2, at, text6) => escape2 === "\\+" && isLonePlus(text6, at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]));
   const tree = parse2(marked, [], true);
   for (const child of tree.children) if (child.type === "code") child.value = withoutTrailingNewlines(child.value);
@@ -24428,7 +24548,7 @@ function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldFor
       for (const [index2, child] of node2.children.entries()) {
         const startsLine = node2.type === "paragraph" ? index2 === 0 || node2.children[index2 - 1]?.type === "break" : void 0;
         const part = strip(child, startsLine);
-        if (node2.type === "strong" && part.type === "strong") {
+        if ((ignoreBold || node2.type === "strong") && part.type === "strong") {
           for (const nested of part.children) appendComparable(children, nested);
         } else {
           appendComparable(children, part);
@@ -26243,6 +26363,18 @@ function plusSectionsAsLinear(body2) {
     tree = parseForSections(body2);
   }
   const edits = [];
+  let paragraphEnds;
+  const lazyAfter = (marker) => {
+    if (paragraphEnds === void 0) {
+      const ends = /* @__PURE__ */ new Map();
+      visit2(parse2(body2), (node2) => {
+        if (node2.type === "paragraph") ends.set(start(node2), end(node2));
+      });
+      paragraphEnds = ends;
+    }
+    const paragraphEnd = paragraphEnds.get(start(marker));
+    return paragraphEnd !== void 0 && paragraphEnd > lineEndAt(body2, start(marker));
+  };
   visit2(tree, (parent, ancestors) => {
     if (parent.type !== "root" && parent.type !== "blockquote" && parent.type !== "listItem") return;
     const blocks = parent.children;
@@ -26266,8 +26398,11 @@ function plusSectionsAsLinear(body2) {
         open3.push(index2);
       }
     }
-    const tightFirstBlock = (index2) => parent.type !== "root" && index2 === 0 && blocks[index2 + 1] !== void 0 && blocks[index2 + 1].position.start.line === blocks[index2].position.end.line + 1;
-    const implicit = open3.filter((index2) => index2 < lastContent && !tightFirstBlock(index2));
+    const implicit = open3.filter((index2) => index2 < lastContent);
+    if (parent.type !== "root" && blocks.length === 1 && markers[0] !== null && lazyAfter(blocks[0])) {
+      edits.push({ from: start(blocks[0]), to: start(blocks[0]), text: "\\", depth: ancestors.length });
+      return;
+    }
     for (const index2 of implicit) roles.set(index2, `+++ ${markers[index2][1].trim()}`);
     const closes = implicit.filter((index2) => {
       if (closedAfterContent === 0 || markers[index2][0] !== roles.get(index2)) return true;
@@ -26282,7 +26417,7 @@ function plusSectionsAsLinear(body2) {
       if (marker === null) continue;
       const node2 = blocks[index2];
       const at = start(node2);
-      if (!roles.has(index2) && parent.type !== "root" && index2 === 0 && (index2 === blocks.length - 1 || tightFirstBlock(index2))) continue;
+      if (!roles.has(index2) && parent.type !== "root" && index2 === 0 && index2 === blocks.length - 1) continue;
       const previous3 = blocks[index2 - 1];
       if (!roles.has(index2) && previous3?.type === "paragraph" && previous3.position.end.line + 1 === node2.position.start.line && (body2.startsWith("\\+++", start(previous3)) || previous3.children.some((child) => child.type === "image" || child.type === "imageReference"))) continue;
       const line2 = prefixes(body2, at);
@@ -26487,6 +26622,8 @@ function hasSectionLine(body2, openers) {
 var GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 var QUOTE_PREFIX = /^ {0,3}> ?/;
 var ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
+var FIX_ONLY_RULES = /* @__PURE__ */ new Set(["hard-break-in-heading", "setext-heading-lines", "table-header-pipe", "table-list-cell", "unplaced-link"]);
+var LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 var LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 var SCHEME_CHARACTER = /[a-z0-9+.-]/i;
 var LETTER = /[a-z]/i;
@@ -26499,7 +26636,7 @@ function linkedFileCheck(documentPath2, isFile) {
 }
 function lintInTree(file, text6, files) {
   const findings = lintText(file, text6, { linkedFileExists: linkedFileCheck(file, (path2) => files.has(path2)) });
-  return findings.filter((finding) => finding.rule !== "hard-break-in-heading" && finding.rule !== "unplaced-link");
+  return findings.filter((finding) => !FIX_ONLY_RULES.has(finding.rule));
 }
 function lintText(file, text6, options = {}) {
   const { head, body: body2 } = splitFile(text6);
@@ -26641,7 +26778,7 @@ function lintTree(file, tree, body2, report, options) {
         break;
       case "listItem": {
         const [first] = node2.children;
-        if (first !== void 0 && first.type !== "paragraph") report("block-first-in-list-item", line(first));
+        if (first !== void 0 && first.type !== "paragraph" && first.type !== "list") report("block-first-in-list-item", line(first));
         break;
       }
       case "list": {
@@ -26649,9 +26786,16 @@ function lintTree(file, tree, body2, report, options) {
         if (task !== void 0) report("ordered-task-list", line(task));
         break;
       }
-      case "table":
-        if (node2.align?.some((align) => align !== null)) report("table-alignment", line(node2));
+      case "heading": {
+        if (node2.children.some((child) => softBreakInText(child, body2))) report("setext-heading-lines", line(node2));
         break;
+      }
+      case "table": {
+        if (node2.align?.some((align) => align !== null)) report("table-alignment", line(node2));
+        const lineEnd = body2.indexOf("\n", start(node2));
+        if (!body2.slice(start(node2), lineEnd === -1 ? void 0 : lineEnd).includes("|")) report("table-header-pipe", line(node2));
+        break;
+      }
       case "tableCell": {
         const [row, table] = ancestors.slice(-2).reverse();
         const first = node2.children[0];
@@ -26660,6 +26804,8 @@ function lintTree(file, tree, body2, report, options) {
         if (heading2 && table?.type === "table" && table.children[0] !== row) {
           report("table-hash-cell", line(node2));
         }
+        const list4 = first?.type === "text" && last !== void 0 && LIST_CELL.test(body2.slice(start(first), end(last)));
+        if (list4 && table?.type === "table" && table.children[0] !== row) report("table-list-cell", line(node2));
         break;
       }
       case "text":
@@ -26764,6 +26910,10 @@ function hasUrlOrLinkAttribute(html2) {
   }
   return false;
 }
+function softBreakInText(node2, body2) {
+  if (node2.type === "text") return body2.slice(start(node2), end(node2)).includes("\n");
+  return "children" in node2 && node2.children.some((child) => softBreakInText(child, body2));
+}
 
 // src/format/fix.ts
 function fixText(text6, options = {}) {
@@ -26843,18 +26993,20 @@ function fixBody(body2, options) {
   for (let pass = 0; pass < 5; pass++) {
     const source = pass === 0 ? current : plusSectionsAsLinear(current);
     rewroteSections ||= source !== current;
-    const tree = parse2(source, [], true);
-    if (pass > 0 && (paddingOverLimit(tree) !== void 0 || referencesOverLimit(tree, source) !== void 0)) throw new MarkdownLimitError("nodes");
+    let tree = parse2(source, [], true);
+    const adjacent = adjacentBoldAsLinear(source, tree);
+    if (adjacent !== source) tree = parse2(adjacent, [], true);
+    if ((pass > 0 || adjacent !== source) && (paddingOverLimit(tree) !== void 0 || referencesOverLimit(tree, adjacent) !== void 0)) throw new MarkdownLimitError("nodes");
     if (hasUnplacedNode(tree)) return body2;
-    let writer = new Writer(source, tree, options);
+    let writer = new Writer(adjacent, tree, options);
     let next = writer.root();
     let rewriteEscapes = true;
     let rewriteTildeUnderscore = true;
     if (writer.compareEscapes) {
-      const fallback = new Writer(source, tree, options, false);
+      const fallback = new Writer(adjacent, tree, options, false);
       const withOriginalEscapes = fallback.root();
       if (!sameMarkdown(next, withOriginalEscapes)) {
-        const withoutTildeUnderscore = new Writer(source, tree, options, true, true, false);
+        const withoutTildeUnderscore = new Writer(adjacent, tree, options, true, true, false);
         const partial = withoutTildeUnderscore.root();
         if (sameMarkdown(partial, withOriginalEscapes)) {
           rewriteTildeUnderscore = false;
@@ -26868,17 +27020,41 @@ function fixBody(body2, options) {
       }
     }
     if (writer.rewroteAsterisks) {
-      const withOriginalAsterisks = new Writer(source, tree, options, rewriteEscapes, false, rewriteTildeUnderscore).root();
+      const withOriginalAsterisks = new Writer(adjacent, tree, options, rewriteEscapes, false, rewriteTildeUnderscore).root();
       if (!sameMarkdown(next, withOriginalAsterisks)) next = withOriginalAsterisks;
     }
-    next = linearBoldForms(next, next === source ? tree : void 0);
+    next = linearBoldForms(next, next === adjacent ? tree : void 0);
     if (next === current) return next;
     current = next;
   }
   return rewroteSections ? void 0 : current;
 }
+function adjacentBoldAsLinear(body2, tree) {
+  if (!body2.includes("****")) return body2;
+  const groups = /* @__PURE__ */ new Map();
+  visit2(tree, (node2, ancestors) => {
+    if (node2.type !== "strong" || node2.position.start.line !== node2.position.end.line || ancestors.some((parent) => parent.type === "strong" || parent.type === "emphasis")) return;
+    if (body2.slice(start(node2), start(node2) + 2) !== "**") return;
+    const [first, ...rest] = node2.children;
+    if (first?.type !== "text" || rest.at(-1)?.type !== "text") return;
+    const boundaries = rest.filter((part) => part.type === "strong");
+    if (boundaries.length === 0 || rest.some((part) => part.type !== "text" && part.type !== "strong")) return;
+    if (boundaries.some((part) => body2.slice(start(part), start(part) + 4) !== "****" || body2.slice(end(part) - 4, end(part)) !== "****" || part.children.length !== 1 || part.children[0]?.type !== "strong" || part.children[0].children.some((child) => child.type !== "text"))) return;
+    const block = ancestors[1] ?? node2;
+    const edits = groups.get(block) ?? [];
+    for (const [index2, part] of boundaries.entries()) {
+      edits.push(
+        { from: start(part), to: start(part) + (index2 === 0 ? 4 : 2), text: "" },
+        { from: end(part) - 2, to: end(part), text: "" }
+      );
+    }
+    edits.push({ from: end(node2) - 2, to: end(node2), text: "" });
+    groups.set(block, edits);
+  });
+  return reSpellBold(body2, groups, true) ?? body2;
+}
 function linearBoldForms(body2, tree, splitLines = true) {
-  if (!body2.includes("**")) return body2;
+  if (!body2.includes("**") && !body2.includes("__")) return body2;
   const blocks = /* @__PURE__ */ new Map();
   if (tree === void 0) {
     tree = parse2(body2, [], true);
@@ -26897,7 +27073,7 @@ function linearBoldForms(body2, tree, splitLines = true) {
     if (node2.type === "strong" || node2.type === "emphasis") {
       const parent = ancestors.at(-1);
       if (!((parent?.type === "strong" || parent?.type === "emphasis") && parent.children.length === 1)) {
-        const edit = boldLinkEdit(body2, node2);
+        const edit = boldLinkEdit(body2, node2) ?? boldItalicEdit(body2, node2);
         if (edit !== void 0) group().links.push(edit);
       }
     }
@@ -26948,32 +27124,58 @@ function linearBoldForms(body2, tree, splitLines = true) {
   const split = reSpellBold(body2, breaks);
   return split === void 0 ? reSpellBold(body2, links) ?? body2 : linearBoldForms(split, void 0, false);
 }
+function boldItalicEdit(body2, outer) {
+  let node2 = outer;
+  let bold = false;
+  let italic = false;
+  while (node2.type === "strong" || node2.type === "emphasis") {
+    bold ||= node2.type === "strong";
+    italic ||= node2.type === "emphasis";
+    if (node2.children.length !== 1 || node2.children[0]?.type !== "strong" && node2.children[0]?.type !== "emphasis") break;
+    node2 = node2.children[0];
+  }
+  if (!bold || !italic || node2.type !== "strong" && node2.type !== "emphasis") return;
+  const width = node2.type === "strong" ? 2 : 1;
+  const text6 = "***" + body2.slice(start(node2) + width, end(node2) - width) + "***";
+  if (text6 === body2.slice(start(outer), end(outer))) return;
+  return { from: start(outer), to: end(outer), text: text6 };
+}
 function boldLinkEdit(body2, outer) {
   let node2 = outer;
   let bold = false;
   let italic = false;
-  while ((node2.type === "strong" || node2.type === "emphasis") && node2.children.length === 1) {
+  let suffix = "";
+  while (node2.type === "strong" || node2.type === "emphasis") {
     bold ||= node2.type === "strong";
     italic ||= node2.type === "emphasis";
-    node2 = node2.children[0];
+    const first = node2.children[0];
+    if (first === void 0) return;
+    if (node2.children.length > 1) {
+      if (first.type !== "link" || !node2.children.slice(1).every((child) => child.type === "text")) return;
+      suffix = body2.slice(end(first), end(node2) - (node2.type === "strong" ? 2 : 1));
+    }
+    node2 = first;
   }
   if (node2.type !== "link" || body2[start(node2)] !== "[" || node2.position.start.line !== node2.position.end.line) return;
-  if (!bold && !(node2.children.length === 1 && node2.children[0]?.type === "strong")) return;
+  if (!bold && (suffix !== "" || node2.children.length !== 1 || node2.children[0]?.type !== "strong")) return;
+  if (suffix.includes("\n")) return;
   const last = node2.children.at(-1);
   if (last === void 0) return;
   const label = body2.slice(start(node2) + 1, end(last));
   if (label === "" || label !== label.trim()) return;
   const text6 = node2.children.map((child) => child.type === "strong" ? body2.slice(start(child) + 2, end(child) - 2) : body2.slice(start(child), end(child))).join("");
   const mark2 = italic ? "***" : "**";
-  return { from: start(outer), to: end(outer), text: `[${mark2}${text6}${mark2}${body2.slice(end(last), end(node2))}` };
+  const markedSuffix = suffix === "" ? "" : mark2 + suffix + mark2;
+  if (/^\s/u.test(suffix) && (!italic || !LINKED_BOLD_ITALIC_SUFFIX.test(markedSuffix))) return;
+  return { from: start(outer), to: end(outer), text: `[${mark2}${text6}${mark2}${body2.slice(end(last), end(node2))}${markedSuffix}` };
 }
-function reSpellBold(body2, groups) {
+function reSpellBold(body2, groups, ignoreBold = false) {
   if (groups.size === 0) return void 0;
   const equivalent = (from, to, edits) => {
     const candidate = rewriteBoldRange(body2, from, to, edits);
     if (candidate === void 0) return;
     try {
-      if (sameMarkdown(body2.slice(from, to), candidate, { linearBoldForms: true })) return candidate;
+      if (sameMarkdown(body2.slice(from, to), candidate, { linearBoldForms: !ignoreBold, ignoreBold })) return candidate;
     } catch (error) {
       if (!(error instanceof MarkdownLimitError)) throw error;
     }
@@ -27005,6 +27207,7 @@ function rewriteBoldRange(body2, from, to, edits) {
   return overContentLimit(candidate) ? void 0 : candidate;
 }
 var BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t\u00a0]))/;
+var NUMBER_TEXT = /^\d+\\?\.[ \t\u00a0]+[^ \t\u00a0]/;
 var MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
 var LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
 var LINEAR_ALERT = /^\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i;
@@ -27033,6 +27236,12 @@ var Writer = class {
   literal = false;
   /** Where the inline text being written starts: its line is no continuation line. */
   inlineFrom = -1;
+  /** The bounds of the block's inline text being written (a paragraph's, heading's or cell's), not a link label's. */
+  blockInline;
+  /** The space references `edgeSpaceEdits` has moved, by offset: an inner run of marks leaves them. */
+  movedSpaces = /* @__PURE__ */ new Set();
+  /** The space edits made so far in the block being written, which a later one is checked with. */
+  spaceEdits = [];
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   taskParagraph;
   /** A list's sibling block written right before it, when that is a list. */
@@ -27097,11 +27306,15 @@ var Writer = class {
     switch (node2.type) {
       case "paragraph":
         return this.paragraph(node2);
-      case "heading":
-        return [trimEndKeepingNbsp(`${"#".repeat(node2.depth)} ${joinLines(this.inline(node2.children))}`)];
+      case "heading": {
+        const hashes = "#".repeat(node2.depth);
+        const heading2 = trimEndKeepingNbsp(`${hashes} ${joinLines(this.inline(node2.children))}`);
+        return [heading2 === hashes ? `${hashes} ` : heading2];
+      }
       case "thematicBreak":
         return ["---"];
       case "blockquote": {
+        if (node2.children.length === 0) return ["> "];
         const marker = this.source.indexOf(">", start(node2));
         const content4 = marker + (this.source[marker + 1] === " " ? 2 : 1);
         const container = { kind: "quote", content: content4 };
@@ -27159,7 +27372,9 @@ ${math[1]}
     const images = node2.children.filter(isImage).length;
     const hasText = node2.children.some((child) => !isImage(child) && !(child.type === "text" && child.value.trim() === ""));
     if (images === 0 || !hasText && images === 1) {
+      this.wholeParagraphEnd = node2.children.length > 0 ? end(node2.children.at(-1)) : void 0;
       const text6 = node2 === this.taskParagraph ? this.inline(node2.children, "continuation") : this.paragraphText(node2.children);
+      this.wholeParagraphEnd = void 0;
       return [escapeLiteralSectionEnd(text6)];
     }
     const parts = [[]];
@@ -27198,16 +27413,37 @@ ${math[1]}
    * stay unaligned.
    */
   list(node2, interruptsParagraph = false) {
-    const first = node2.start ?? 1;
-    const last = first + node2.children.length - 1;
-    const padding = `${last}.`.length - `${first}.`.length;
+    const start2 = node2.start ?? 1;
+    const parts = [];
+    node2.children.forEach((item, index3) => {
+      if (index3 === 0 || splitsAfter(node2.children[index3 - 1], item)) parts.push([item]);
+      else parts.at(-1).push(item);
+    });
     const before = this.listBefore.get(node2);
-    const beforeIndent = before === void 0 ? Infinity : itemIndent(before);
-    const width = node2.ordered && padding <= 3 && padding < beforeIndent ? `${last}.`.length : 0;
-    return node2.children.map((item, index2) => {
-      const marker = item.checked !== null && item.checked !== void 0 ? `- [${item.checked ? "X" : " "}]` : node2.ordered ? `${(node2.start ?? 1) + index2}.`.padStart(width) : "*";
-      return this.listItem(item, marker, interruptsParagraph && index2 === 0);
-    }).join("\n");
+    let beforeIndent = before === void 0 ? Infinity : itemIndent(before);
+    let index2 = 0;
+    return parts.map((items) => {
+      const first = start2 + index2;
+      const last = first + items.length - 1;
+      const padding = `${last}.`.length - `${first}.`.length;
+      const width = node2.ordered && padding <= 3 && padding < beforeIndent ? `${last}.`.length : 0;
+      const written = items.map((item) => {
+        const number = start2 + index2++;
+        const marker = item.checked !== null && item.checked !== void 0 ? `- [${item.checked ? "X" : " "}]` : node2.ordered ? `${number}.`.padStart(width) : "*";
+        return this.listItem(item, marker, interruptsParagraph && number === start2);
+      });
+      beforeIndent = !node2.ordered || items.at(-1).checked != null ? 2 : `${last}.`.length + 1;
+      return written.join("\n");
+    }).join("\n\n\n");
+  }
+  /**
+   * Whether an item's first line holds its text: not a file block or a
+   * section below an empty marker line. The marker line of a list that
+   * follows another without a blank line must not be empty.
+   */
+  textOnMarkerLine(item) {
+    const [first] = item.children;
+    return first?.type === "paragraph" && itemAttachment(item) === void 0 && !/^\+{3}[ \t]*$/.test(this.source.slice(start(first), end(first)));
   }
   listItem(item, marker, interruptsParagraph) {
     const indent2 = " ".repeat(/^ *[^ ]+/.exec(marker)[0].length + 1);
@@ -27236,6 +27472,7 @@ ${indent2}[${label}](${destination2})`;
     }
     if (first === void 0) return `${marker} `;
     const container = this.itemContainer(item);
+    if (container.kind === "item") container.written = indent2.length;
     if (bareCheckbox) container.markerBrackets = [start(first), start(first) + 2];
     this.containers.push(container);
     if (item.checked !== null && item.checked !== void 0 && first.type === "paragraph") this.taskParagraph = first;
@@ -27244,8 +27481,9 @@ ${indent2}[${label}](${destination2})`;
     let line2 = 0;
     item.children.forEach((child, index2) => {
       const previous3 = item.children[index2 - 1];
-      const interrupts = child.type === "list" && previous3?.type === "paragraph" && (!child.ordered || (child.start ?? 1) === 1) && child.children[0].children.length > 0 && !(child.position.start.line > previous3.position.end.line + 1 && startsWithFileBlock(child));
-      const separator = index2 === 0 ? "" : interrupts ? "\n" : "\n\n";
+      const interrupts = child.type === "list" && previous3?.type === "paragraph" && opensWithText(child) && !(child.position.start.line > previous3.position.end.line + 1 && startsWithFileBlock(child));
+      const followsList = child.type === "list" && previous3?.type === "list" && listKind(previous3, previous3.children.at(-1)) !== listKind(child, child.children[0]) && opensWithText(child) && this.textOnMarkerLine(child.children[0]);
+      const separator = index2 === 0 ? "" : interrupts || followsList ? "\n" : "\n\n";
       const written = child.type === "list" ? this.list(child, interrupts) : this.block(child).join("\n\n");
       line2 += separator.length;
       const breaks = lineBreaks(written);
@@ -27255,11 +27493,13 @@ ${indent2}[${label}](${destination2})`;
     });
     this.containers.pop();
     const lines2 = content4.split("\n").map((text6, at) => text6 === "" && !codeLines.has(at) ? "" : indent2 + text6);
-    if (item.checked == null && first?.type === "paragraph" && this.source.slice(start(first), end(first)) === "+++ " && item.children.slice(1).some((child) => child.type === "paragraph" && this.source.slice(start(child), end(child)) === "+++") && !/(?:^|\n)[ \t>]*\+{4}/.test(this.source.slice(start(first), end(item)))) {
+    if (item.checked == null && first?.type === "paragraph" && /^\+{3} [^\n]*$/.test(this.source.slice(start(first), end(first))) && item.children.slice(1).some((child) => child.type === "paragraph" && this.source.slice(start(child), end(child)) === "+++") && !/(?:^|\n)[ \t>]*\+{4}/.test(this.source.slice(start(first), end(item)))) {
       return `${marker} 
 
 ${lines2.join("\n")}`;
     }
+    if (first.type === "list") return `${marker} 
+${lines2.join("\n")}`;
     return `${marker} ${lines2.join("\n").slice(indent2.length)}`;
   }
   /**
@@ -27317,7 +27557,11 @@ ${lines2.join("\n")}`;
         this.cellStart = first ? start(first) : void 0;
         this.inCell = true;
         const inline = cell2 ? this.inline(cell2.children) : "";
-        const text6 = header2 ? inline.trim() : trimKeepingNbsp(inline);
+        let text6 = header2 ? inline.trim() : trimKeepingNbsp(inline);
+        const lead = text6.length - text6.trimStart().length;
+        const escape2 = header2 || unicodeSpaceLead(inline.replace(/^[ \t]+/, "")) === 0 ? void 0 : headingOrNumberEscape(text6.slice(lead));
+        if (escape2 !== void 0) text6 = `${text6.slice(0, lead + escape2)}\\${text6.slice(lead + escape2)}`;
+        if (!header2 && /^\d{1,9}\.$/.test(text6)) text6 += " ";
         this.inCell = false;
         this.cellStart = void 0;
         return text6 === "#" ? "\\#" : text6;
@@ -27354,12 +27598,23 @@ ${lines2.join("\n")}`;
       });
     }
     const paragraph2 = lineStarts === "none" ? void 0 : { texts, html: html2, first: lineStarts === "all" };
+    const moved = [...this.movedSpaces];
+    const spaceEdits = [...this.spaceEdits];
     const render3 = (rewriteAsterisks) => {
       const inline = { edits: [], rewriteAsterisks, changedAsterisks: false };
       const outer = this.inlineFrom;
+      const block = this.blockInline;
       this.inlineFrom = from;
+      this.blockInline ??= [from, to];
+      this.movedSpaces.clear();
+      for (const at of block === void 0 ? [] : moved) this.movedSpaces.add(at);
+      this.spaceEdits = block === void 0 ? [] : [...spaceEdits];
       this.inlineChildrenEdits(children, inline);
       this.inlineFrom = outer;
+      this.blockInline = block;
+      this.movedSpaces.clear();
+      for (const at of moved) this.movedSpaces.add(at);
+      if (block === void 0) this.spaceEdits = spaceEdits;
       return { text: this.rewritten(from, to, inline.edits, code4, paragraph2), changedAsterisks: inline.changedAsterisks };
     };
     const candidate = render3(this.rewriteAsterisks);
@@ -27380,6 +27635,11 @@ ${lines2.join("\n")}`;
     const inside2 = (ranges, at2) => ranges.some(([a, b]) => a <= at2 && at2 < b);
     if (paragraph2?.first) this.escapeLineStart(from, to, paragraph2.texts, edits);
     for (let at2 = this.source.indexOf("\n", from); at2 !== -1 && at2 < to; at2 = this.source.indexOf("\n", at2 + 1)) {
+      const marker = paragraph2 === void 0 || inside2(code4, at2) || inside2(paragraph2.html, at2) ? void 0 : this.bareMarkerLine(from, at2 + 1, to);
+      if (marker !== void 0) {
+        edits.push(...marker);
+        continue;
+      }
       const continuation = this.continuation(at2 + 1, inside2(code4, at2), paragraph2 !== void 0 && !inside2(paragraph2.html, at2));
       edits.push(continuation);
       if (paragraph2 === void 0 || continuation.underline) continue;
@@ -27405,6 +27665,10 @@ ${lines2.join("\n")}`;
    */
   escapeLineStart(at, limit, texts, edits, continuation = false, indented = false) {
     const char = this.source[at];
+    if (char !== void 0 && char !== " " && char !== "	" && /\s/.test(char)) {
+      this.escapeAfterUnicodeSpace(at, limit, texts, edits);
+      return false;
+    }
     if (this.rewriteEscapes && continuation && char === "\\" && this.source[at + 1] === "+" && /^[ \t]*$/.test(this.source.slice(at + 2, this.textLineAt(at).to)) && texts.some(([a, b]) => a <= at && at + 1 < b)) {
       edits.push({ from: at, to: at + 1, text: "" });
       this.compareEscapes = true;
@@ -27431,6 +27695,44 @@ ${lines2.join("\n")}`;
     edits.push({ from: at, to: at, text: "\\" });
     return true;
   }
+  /** Linear's escape in a paragraph line that starts with whitespace outside ASCII (`unicodeSpaceEscape`). */
+  escapeAfterUnicodeSpace(at, limit, texts, edits) {
+    const offset = unicodeSpaceEscape(this.source.slice(at, Math.min(limit, this.textLineAt(at).to)));
+    if (offset !== void 0 && texts.some(([a, b]) => a <= at + offset && at + offset < b)) edits.push({ from: at + offset, to: at + offset, text: "\\" });
+  }
+  /**
+   * The edits for the second and last line of an item's first paragraph,
+   * starting on the item's line, when that line holds only `N.` or `*`
+   * inside list items: an empty marker cannot interrupt a paragraph, so it
+   * is text, but Linear reads it as an empty item nested in the item and
+   * writes it at the item's content with a space after it (four or more
+   * columns past the content, it reads indented code there, which `fix`
+   * cannot write without changing the text: the same form keeps the text
+   * and is what Linear keeps of it). Under a quote, on a line that does not
+   * reach the item's content, with other lines before or after it, Linear
+   * reads the text: `undefined`, the line is written as before.
+   */
+  bareMarkerLine(from, lineStart, to) {
+    const item = this.containers.at(-1);
+    if (to !== this.wholeParagraphEnd) return void 0;
+    if (this.fileBlockIndent > 0 || item === void 0 || this.containers.some((container) => container.kind !== "item")) return void 0;
+    if (lineStartOf(this.source, item.content) !== lineStartOf(this.source, from) || this.source.indexOf("\n", from) !== lineStart - 1) return void 0;
+    const next = this.source.indexOf("\n", lineStart);
+    if (next !== -1 && next < to) return void 0;
+    const bare = /^[ \t]*(?:\d{1,9}\.|\*)$/.exec(this.source.slice(lineStart, to));
+    if (bare === null) return void 0;
+    const line2 = this.source.slice(lineStart, next === -1 ? void 0 : next);
+    if (this.prefixEnd(lineStart, line2).lazy) return void 0;
+    if (next !== -1) {
+      const after = this.source.indexOf("\n", next + 1);
+      const nextLine = this.source.slice(next + 1, after === -1 ? void 0 : after);
+      if (/^[ \t]*\d{1,9}[.)](?:[ \t]|$)/.test(nextLine) && !this.prefixEnd(next + 1, nextLine).lazy) return void 0;
+    }
+    const marker = lineStart + /^[ \t]*/.exec(line2)[0].length;
+    return [{ from: lineStart, to: marker, text: "" }, { from: to, to, text: " " }];
+  }
+  /** The end of the paragraph being written whole, which `bareMarkerLine` needs. */
+  wholeParagraphEnd;
   /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's text. */
   continuation(lineStart, inCode, paragraph2 = false) {
     const line2 = this.source.slice(lineStart, this.source.indexOf("\n", lineStart) === -1 ? void 0 : this.source.indexOf("\n", lineStart));
@@ -27447,11 +27749,26 @@ ${lines2.join("\n")}`;
       return { from: lineStart, to: at + underline[1].length, text: paragraph2 ? "\\" : " ".repeat(4 + this.fileBlockIndent), underline: true };
     }
     if (!inCode && this.fileBlockIndent > 0 && !startsBlock) return { from: lineStart, to: ownText, text: "" };
-    if (!inCode && startsBlock && this.containers.length > 0 && this.source.slice(at, ownText).includes("	")) {
+    const escapedNumber = paragraph2 && NUMBER_TEXT.test(this.source.slice(ownText, lineEnd));
+    if (!inCode && startsBlock && this.containers.length > 0 && this.source.slice(at, ownText).includes("	") && !escapedNumber && !this.samePrefixColumns(lineStart, at, pad)) {
       const column = (offset) => [...this.source.slice(lineStart, offset)].reduce(advanceColumn, 0);
       return { from: lineStart, to: ownText, text: " ".repeat(pad + column(ownText) - column(at)) };
     }
     return { from: lineStart, to: at, text: " ".repeat(pad) };
+  }
+  /**
+   * Whether the prefixes `fix` writes for the item containers end at the
+   * column where the source's prefixes end on the line (`at`, less the
+   * `pad` columns of a tab they took in part): then every tab after them
+   * spans the same columns. Under a quote it is not worked out: `false`.
+   */
+  samePrefixColumns(lineStart, at, pad) {
+    let written = 0;
+    for (const container of this.containers) {
+      if (container.kind !== "item" || container.written === void 0) return false;
+      written += container.written;
+    }
+    return written === [...this.source.slice(lineStart, at)].reduce(advanceColumn, 0) - pad;
   }
   /**
    * Where a continuation line's container prefixes end, outside a code
@@ -27536,7 +27853,9 @@ ${lines2.join("\n")}`;
     return at;
   }
   inlineChildrenEdits(children, inline, insideStrong = false) {
+    const merged = this.adjacentLinkEdits(children, inline.edits);
     for (const [index2, child] of children.entries()) {
+      if (merged.has(index2)) continue;
       if (child.type !== "strong") {
         this.inlineEdits(child, inline);
         continue;
@@ -27556,10 +27875,86 @@ ${lines2.join("\n")}`;
       this.inlineEdits(child, inline, joinLeft, joinRight);
     }
   }
+  /**
+   * Linear holds a link as a mark on its text, so links to the same
+   * destination with nothing between them become one link, with the marks
+   * around each part inside it: `[a](u)**[b](u)**` is `[a**b**](u)`. Edits
+   * write each such run of `children` as one link; returns the indexes they
+   * cover. A run whose joined link would read differently stays as it is.
+   */
+  adjacentLinkEdits(children, edits) {
+    const covered = /* @__PURE__ */ new Set();
+    if (this.literal) return covered;
+    let index2 = 0;
+    while (index2 < children.length) {
+      const first = this.wrappedLink(children[index2]);
+      let last = index2;
+      while (first !== void 0 && last + 1 < children.length && end(children[last]) === start(children[last + 1]) && this.wrappedLink(children[last + 1])?.url === first.url) last++;
+      const bang = this.source[start(children[index2]) - 1] === "!" && !escaped(this.source, start(children[index2]) - 1);
+      if (first !== void 0 && last > index2 && !bang) {
+        const parts = children.slice(index2, last + 1);
+        const text6 = this.joinedLink(parts, first.url);
+        if (text6 !== void 0) {
+          edits.push({ from: start(parts[0]), to: end(parts.at(-1)), text: text6 });
+          for (let at = index2; at <= last; at++) covered.add(at);
+        }
+      }
+      index2 = last + 1;
+    }
+    return covered;
+  }
+  /** The link inside `node` and its destination, when `node` is a link with only bold, italic or strikethrough around it. */
+  wrappedLink(node2) {
+    while ((node2.type === "strong" || node2.type === "emphasis" || node2.type === "delete") && node2.children.length === 1) node2 = node2.children[0];
+    if (node2.type === "link") return { url: node2.url };
+    if (node2.type === "linkReference") {
+      const definition3 = this.definitions.get(node2.identifier);
+      return definition3 ? { url: definition3.url } : void 0;
+    }
+    return void 0;
+  }
+  /** `parts` (wrapped links to `url`) written as one link, or undefined when that link would not read as their joined text and marks. */
+  joinedLink(parts, url) {
+    const spaceEdits = [...this.spaceEdits];
+    const text6 = this.joinedLinkText(parts, url);
+    if (text6 === void 0) this.spaceEdits = spaceEdits;
+    return text6;
+  }
+  joinedLinkText(parts, url) {
+    const labels = [];
+    const expected = [];
+    for (const part of parts) {
+      const opens = [];
+      const closes = [];
+      const wrap2 = (node2) => {
+        if (node2.type === "link" || node2.type === "linkReference") {
+          this.literal = node2.type === "link" && this.source[start(node2)] !== "[";
+          labels.push(opens.join("") + this.linkLabel(node2.children) + closes.reverse().join(""));
+          this.literal = false;
+          return node2.children;
+        }
+        if (node2.type !== "strong" && node2.type !== "emphasis" && node2.type !== "delete") return [node2];
+        const mark2 = node2.type === "strong" ? "**" : node2.type === "emphasis" ? "*" : /^~{1,2}/.exec(this.source.slice(start(node2), start(node2) + 2))[0];
+        opens.push(mark2);
+        closes.push(mark2);
+        return [{ ...node2, children: wrap2(node2.children[0]) }];
+      };
+      expected.push(...wrap2(part));
+    }
+    const shortcodes = (label) => [...emojiShortcodes(label)].length;
+    if (shortcodes(labels.join("")) > labels.reduce((sum, label) => sum + shortcodes(label), 0)) return void 0;
+    const text6 = `[${labels.join("")}](${linkDestination(url)})`;
+    const [paragraph2, ...others] = parse2(text6).children;
+    const [link2, ...rest] = paragraph2?.type === "paragraph" ? paragraph2.children : [];
+    if (others.length > 0 || rest.length > 0 || link2?.type !== "link" || link2.url !== url) return void 0;
+    const shape = (node2) => breakShape({ type: "root", children: [{ type: "paragraph", children: [node2] }] });
+    return isDeepStrictEqual2(shape({ ...link2, title: null }), shape({ type: "link", url, title: null, children: expected })) ? text6 : void 0;
+  }
   inlineEdits(node2, inline, joinLeft = false, joinRight = false) {
     const { edits, rewriteAsterisks } = inline;
     const from = start(node2);
     const to = end(node2);
+    if ((node2.type === "emphasis" || node2.type === "strong" || node2.type === "delete") && !this.literal) this.edgeSpaceEdits(node2, edits);
     switch (node2.type) {
       case "emphasis":
       case "strong": {
@@ -27605,6 +28000,10 @@ ${lines2.join("\n")}`;
           return true;
         }, !this.inCell);
         for (const edit of text6) edits.push(edit);
+        if (!this.literal) {
+          this.spaceReferenceEdits(from, to, edits);
+          for (const at of loneBackticks(this.source, from, to)) edits.push({ from: at, to: at, text: "\\" });
+        }
         if (!this.literal && this.rewriteEscapes && this.rewriteTildeUnderscore) {
           const escapes = tildeUnderscoreEdits(this.source.slice(from, to), from);
           for (const edit of escapes) edits.push(edit);
@@ -27637,6 +28036,11 @@ ${lines2.join("\n")}`;
   redundantLineEscape(at, char) {
     if (at === this.cellStart || !"#-=+>".includes(char)) return false;
     if (char === "#" && this.source[at - 1] === "&") return false;
+    if (char === "#") {
+      const line3 = this.textLineAt(at);
+      line3.unicodeLead ??= unicodeSpaceLead(this.source.slice(line3.first, line3.to));
+      if (at === line3.first + line3.unicodeLead && headingOrNumberEscape(this.source.slice(at + 1, line3.to)) === 0) return false;
+    }
     if ((char === "#" || char === "+") && (this.source[at - 1] === char || this.source.startsWith(`\\${char}`, at + 2))) return false;
     if (char === "+" && this.source[at + 2] === "+") return false;
     const line2 = this.textLineAt(at);
@@ -27695,14 +28099,103 @@ ${lines2.join("\n")}`;
     }
     for (const edit of brackets) edits.push(edit);
   }
+  /**
+   * Linear stores a space reference (`&#32;`) as a space. At the start or
+   * end of a block's text it stores the space until the next write, which
+   * drops it: there it goes. A reference next to a `*`, `_` or `~` run is
+   * left to `edgeSpaceEdits`. A reference keeps its spelling where the
+   * space would change what the block says (`keepsBlock`): a line break, a
+   * list item, a heading's closing hashes, an autolink.
+   */
+  spaceReferenceEdits(from, to, edits) {
+    const [blockFrom, blockTo] = this.blockInline ?? [-1, -1];
+    const groups = [];
+    for (const run of spaceReferenceRuns(this.source, from, to)) {
+      if (!sameFlanking(this.source, run.from, run.to, " ")) continue;
+      if (run.from === blockFrom && run.to === blockTo) continue;
+      const edge = run.from === blockFrom || run.to === blockTo;
+      groups.push([{ from: run.from, to: run.to, text: edge ? "" : " ".repeat(run.count) }]);
+    }
+    this.pushIfKept(groups, edits);
+  }
+  /**
+   * Linear moves a space at the inner edge of bold, italic or strikethrough
+   * out of it: `**&#32;Tip**` is ` **Tip**`. At the start or end of a
+   * block's text the space then goes, as `spaceReferenceEdits` says.
+   */
+  edgeSpaceEdits(node2, edits) {
+    const [blockFrom, blockTo] = this.blockInline ?? [-1, -1];
+    const edge = (side) => {
+      let child = node2;
+      while (child !== void 0 && (child.type === "strong" || child.type === "emphasis" || child.type === "delete")) child = side === "first" ? child.children[0] : child.children.at(-1);
+      return child?.type === "text" ? child : void 0;
+    };
+    const groups = [];
+    const first = edge("first");
+    const lead = first && spaceReferenceRuns(this.source, start(first), end(first)).find((run) => run.from === start(first));
+    if (lead && !this.movedSpaces.has(lead.from) && lead.to < end(first) && !/\s/u.test(this.source[lead.to])) {
+      this.movedSpaces.add(lead.from);
+      groups.push([{ from: start(node2), to: start(node2), text: start(node2) === blockFrom ? "" : " ".repeat(lead.count) }, { from: lead.from, to: lead.to, text: "" }]);
+    }
+    const last = edge("last");
+    const tail = last && spaceReferenceRuns(this.source, start(last), end(last)).find((run) => run.to === end(last));
+    if (tail && !this.movedSpaces.has(tail.from) && tail.from > start(last) && !/\s/u.test(this.source[tail.from - 1])) {
+      this.movedSpaces.add(tail.from);
+      groups.push([{ from: tail.from, to: tail.to, text: "" }, { from: end(node2), to: end(node2), text: end(node2) === blockTo ? "" : " ".repeat(tail.count) }]);
+    }
+    this.pushIfKept(groups, edits);
+  }
+  /**
+   * Pushes the groups of space edits whose block still says the same
+   * together with the space edits already made in it: all of them when
+   * they keep it together, else each group in turn that keeps it with
+   * those before, up to a bound, so a long block is not read again and again.
+   */
+  pushIfKept(groups, edits) {
+    if (groups.length === 0) return;
+    const accept = (group) => {
+      edits.push(...group);
+      this.spaceEdits.push(...group);
+    };
+    if (this.keepsBlock([...this.spaceEdits, ...groups.flat()])) {
+      for (const group of groups) accept(group);
+      return;
+    }
+    if (groups.length === 1 || groups.length > 16) return;
+    for (const group of groups) if (this.keepsBlock([...this.spaceEdits, ...group])) accept(group);
+  }
+  /**
+   * Whether the block being written reads the same with `edits` made,
+   * apart from what Linear does with a space (`spaceShape`). The block is
+   * read with its first line's prefixes, so a heading's closing hashes
+   * count; a cell is read alone.
+   */
+  keepsBlock(edits) {
+    if (this.blockInline === void 0) return false;
+    const [blockFrom, blockTo] = this.blockInline;
+    const lineEnd = this.source.indexOf("\n", blockTo);
+    const from = this.inCell ? blockFrom : lineStartOf(this.source, blockFrom);
+    const to = this.inCell ? blockTo : lineEnd === -1 ? this.source.length : lineEnd;
+    let edited2 = "";
+    let at = from;
+    for (const edit of [...edits].sort((a, b) => a.from - b.from)) {
+      edited2 += this.source.slice(at, edit.from) + edit.text;
+      at = edit.to;
+    }
+    edited2 += this.source.slice(at, to);
+    return isDeepStrictEqual2(spaceShape(parse2(edited2)), spaceShape(parse2(this.source.slice(from, to))));
+  }
   /** Linear writes every link destination in angle brackets, without a title. */
   link(children, url) {
-    let label = this.inline(children);
+    return `[${this.linkLabel(children)}](${linkDestination(url)})`;
+  }
+  linkLabel(children) {
+    const label = this.inline(children);
     const [child] = children;
     if (!this.literal && label.includes("\\_") && children.length === 1 && child?.type === "text" && URL_LABEL.test(child.value)) {
-      label = plainUrlUnderscores(label);
+      return plainUrlUnderscores(label);
     }
-    return `[${label}](${linkDestination(url)})`;
+    return label;
   }
   /**
    * The bracketed label that opens at `open` (a `[`) and closes before
@@ -27850,6 +28343,98 @@ function* emojiShortcodeStarts(label) {
   }
 }
 var NBSP = "\xA0";
+function loneBackticks(source, from, to) {
+  const runs = [];
+  const raw = source.slice(from, to);
+  for (let index2 = raw.indexOf("`"); index2 !== -1; index2 = raw.indexOf("`", index2)) {
+    let at = from + index2;
+    let end2 = at;
+    while (end2 < to && source[end2] === "`") end2++;
+    if (escaped(source, at)) at++;
+    if (end2 > at) runs.push({ at, length: end2 - at });
+    index2 = end2 - from;
+  }
+  const lone = [];
+  for (let index2 = 0; index2 < runs.length; index2++) {
+    const run = runs[index2];
+    const partner = runs.findIndex((other, later) => later > index2 && other.length === run.length);
+    if (partner !== -1) {
+      runs.splice(partner, 1);
+      continue;
+    }
+    for (let at = run.at; at < run.at + run.length; at++) lone.push(at);
+  }
+  return lone;
+}
+function spaceShape(tree) {
+  const phrasing3 = (children) => {
+    const out = [];
+    const text6 = (value) => {
+      if (value === "") return;
+      const previous3 = out.at(-1);
+      if (previous3?.type === "text") previous3.value += value;
+      else out.push({ type: "text", value });
+    };
+    for (const child of children) {
+      if (child.type === "text") {
+        text6(child.value);
+      } else if (child.type === "strong" || child.type === "emphasis" || child.type === "delete") {
+        const inner = phrasing3(child.children);
+        const lead = trimSpaces(inner, "start");
+        const tail = trimSpaces(inner, "end");
+        text6(lead);
+        out.push({ type: child.type, children: inner });
+        text6(tail);
+      } else {
+        out.push(shape(child));
+      }
+    }
+    for (const item of out) if (item.type === "text") item.value = item.value.replace(/[ \t]*\n[ \t]*/g, "\n");
+    return out;
+  };
+  const shape = (node2) => {
+    const { position: _position, ...rest } = node2;
+    if (!("children" in node2)) return rest;
+    if (node2.type === "paragraph" || node2.type === "heading" || node2.type === "tableCell") {
+      const children2 = phrasing3(node2.children);
+      trimSpaces(children2, "start");
+      trimSpaces(children2, "end");
+      return { ...rest, children: children2 };
+    }
+    const children = node2.children;
+    const inline = node2.type === "link" || node2.type === "linkReference" || node2.type === "strong" || node2.type === "emphasis" || node2.type === "delete";
+    return { ...rest, children: inline ? phrasing3(children) : children.map(shape) };
+  };
+  return shape(tree);
+}
+function trimSpaces(shapes, side) {
+  const index2 = side === "start" ? 0 : shapes.length - 1;
+  const edge = shapes[index2];
+  if (edge?.type !== "text") return "";
+  const value = edge.value;
+  let at = side === "start" ? 0 : value.length;
+  if (side === "start") while (value[at] === " ") at++;
+  else while (value[at - 1] === " ") at--;
+  edge.value = side === "start" ? value.slice(at) : value.slice(0, at);
+  if (edge.value === "") shapes.splice(index2, 1);
+  return side === "start" ? value.slice(0, at) : value.slice(at);
+}
+function spaceReferenceRuns(source, from, to) {
+  const runs = [];
+  if (!source.slice(from, to).includes("&#")) return runs;
+  for (const match of source.slice(from, to).matchAll(CHARACTER_REFERENCE)) {
+    const at = from + match.index;
+    if (escaped(source, at) || decodeEntity(match[0]) !== " ") continue;
+    const last = runs.at(-1);
+    if (last?.to === at) {
+      last.to += match[0].length;
+      last.count++;
+    } else {
+      runs.push({ from: at, to: at + match[0].length, count: 1 });
+    }
+  }
+  return runs;
+}
 var DELIMITER = /^[*_~]$/;
 var UNICODE_WHITESPACE = /^[\t\n\f\r\p{Zs}]$/u;
 var UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
@@ -28027,6 +28612,16 @@ function endsWithTable(tree) {
   }
   return node2?.type === "table";
 }
+function splitsAfter(item, next) {
+  return item.children.length === 0 && next.position.start.line - item.position.end.line > 2;
+}
+function listKind(list4, item) {
+  return item.checked != null ? "task" : list4.ordered ? "ordered" : "bullet";
+}
+function opensWithText(list4) {
+  const [item] = list4.children;
+  return item !== void 0 && item.children[0]?.type === "paragraph" && (listKind(list4, item) !== "ordered" || (list4.start ?? 1) === 1);
+}
 function startsWithFileBlock(list4) {
   const [item] = list4.children;
   if (item === void 0) return false;
@@ -28079,6 +28674,20 @@ function trimEndKeepingNbsp(text6) {
 }
 function trimmed(char) {
   return char !== NBSP && char.trim() === "";
+}
+function unicodeSpaceEscape(line2) {
+  const lead = unicodeSpaceLead(line2);
+  if (lead === 0) return void 0;
+  const escape2 = headingOrNumberEscape(line2.slice(lead));
+  return escape2 === void 0 ? void 0 : lead + escape2;
+}
+function unicodeSpaceLead(line2) {
+  return line2 === "" || line2[0] === " " || line2[0] === "	" || !/^\s/.test(line2) ? 0 : /^\s*/.exec(line2)[0].length;
+}
+function headingOrNumberEscape(rest) {
+  if (/^#{1,6}(?:\s|$)/.test(rest)) return 0;
+  const number = /^\d+(?=\.\s+\S)/.exec(rest);
+  return number === null ? void 0 : number[0].length;
 }
 function lineBreaks(text6) {
   let count4 = 0;
@@ -28365,7 +28974,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.1-rc.3" : packageJson.version;
+var VERSION2 = true ? "1.0.1-rc.4" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
