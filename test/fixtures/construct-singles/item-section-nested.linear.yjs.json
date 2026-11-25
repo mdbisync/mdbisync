@@ -1,0 +1,104 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Planting notes.","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Spring","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph"},
+                    {
+                      "type": "collapsible_section",
+                      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+                      "children": [
+                        {
+                          "type": "collapsible_heading",
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"Seed notes","marks":{"attribution":"user"}}]}
+                          ]
+                        },
+                        {
+                          "type": "ordered_list",
+                          "attrs": {"order":1},
+                          "children": [
+                            {
+                              "type": "list_item",
+                              "children": [
+                                {"type":"paragraph","children":[{"text":"Water","marks":{"attribution":"user","strong":{}}}]}
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Plant the beans","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Tools","marks":{"attribution":"user"}}]},
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph"},
+                    {
+                      "type": "collapsible_section",
+                      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+                      "children": [
+                        {
+                          "type": "collapsible_heading",
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"Shed","marks":{"attribution":"user"}}]}
+                          ]
+                        },
+                        {"type":"paragraph","children":[{"text":"Rake and hoe.","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Gloves","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-c0acae56","marks":{"attribution":"user"}}]}
+  ]
+}

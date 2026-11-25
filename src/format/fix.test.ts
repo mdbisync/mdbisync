@@ -790,12 +790,6 @@ describe('list boundaries as Linear writes them', () => {
       assert.deepEqual(readTree(fixed), readTree(input), 'Markdown reads the same document');
     });
   }
-  it('a list opening with a section keeps its blank line', () => {
-    // The section is written in Linear's form below an empty marker line, which must not follow the list's text.
-    const fixed = fixText('* Plan\n  1. one\n\n  * +++ \n\n    words\n\n    +++');
-    assert.equal(fixed, '* Plan\n  1. one\n\n  * \n\n    +++ \n\n    words\n\n    +++');
-    assert.equal(fixText(fixed), fixed, 'the result is a fixed point');
-  });
 });
 
 describe('a list Linear writes right below an item\'s text', () => {

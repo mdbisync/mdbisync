@@ -765,6 +765,20 @@ export function sameAsLinear(content: string, body: string): boolean {
   return body.includes('\\+++') && sameMarkdown(restored, linearSectionEnd(body));
 }
 
+/**
+ * Whether a `+++` line ends a section with a list going on right below it,
+ * in the section's item or an item around it, as Linear writes a list
+ * after a section in an item: Markdown reads a marker numbered other than
+ * 1, or an empty item's marker, as text of the `+++` paragraph. Only the
+ * markers Linear writes (`1.`, `*`, `-`) count.
+ */
+function closesAboveList(lines: readonly string[], index: number, last: number): boolean {
+  if (last <= index) return false;
+  const next = lines[index + 1]!;
+  const prefix = LINE_PREFIX.exec(next)![0];
+  return lines[index]!.startsWith(prefix) && /^(?:\d{1,9}\.[ \t]|[*-][ \t]*$)/.test(next.slice(prefix.length));
+}
+
 function linearSectionEnd(body: string): string {
   const lines = body.split(LINE_END);
   const closing = new Set<number>();
@@ -969,7 +983,7 @@ export function linearMarkersAsText(content: string, previous = ''): string {
             open.push({ at, literal: accepted.escapes.has('section:' + first) && accepted.escapes.has(blockLineKey('+++', true)) });
             sections.set(parent, open);
           }
-        } else if (first === '+++' && last === index) {
+        } else if (first === '+++' && (last === index || closesAboveList(lines, index, last))) {
           const open = sections.get(parent)?.pop();
           if (open?.literal) {
             escapes.add(open.at);

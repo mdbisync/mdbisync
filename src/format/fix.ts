@@ -75,6 +75,10 @@ export function fixText(text: string, options: FixOptions = {}): string {
   // Text split off at an image can be a paragraph of only a number (`3\.`),
   // which Linear writes back as an empty item (`number-paragraph`).
   if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText('', fixed).some((finding) => finding.rule === 'number-paragraph')) return text;
+  // A section that ends an empty item's text, as Linear writes it, can close
+  // right above a list numbered other than 1, which Linear writes on the next
+  // line, where Markdown reads it as text (`list-after-item-text`).
+  if (lf !== ended && lintText('', fixed, { linearExport: options.linearExport === true }).some((finding) => finding.rule === 'list-after-item-text')) return text;
   // After the rest: a lone plus sign can also reach an item's second line
   // when the item's text moves onto its marker line or a code span is joined.
   // Linear's own export is captured as it is: the no-break space is a character.

@@ -83,9 +83,11 @@ function parseForSections(body: string): Root {
  * starts a new section. A title-less line closes the innermost open one
  * even if it carries whitespace. Without a section to close, it opens
  * one if the container has a body or a closing line for it.
+ * `firstInItem` hears the offset of each marker that opens a section as
+ * the first block of a list item.
  */
-export function plusSectionsAsLinear(body: string): string {
-  return pairSections(body, new Map())!;
+export function plusSectionsAsLinear(body: string, firstInItem?: (at: number) => void): string {
+  return pairSections(body, new Map(), firstInItem)!;
 }
 
 /**
@@ -101,18 +103,9 @@ export function plusSectionsAsLinear(body: string): string {
  * closing line), or a title-less `>>>` line after a `+++` line closed its
  * sections (Linear opens a section there).
  */
-function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>): string | undefined {
+function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>, firstInItem?: (at: number) => void): string | undefined {
   if (!body.includes('+++')) return body;
-  let tree = parseForSections(body);
-  const joins: Edit[] = [];
-  const joined = joinSectionItemLines(body, tree, joins);
-  if (joined !== body) {
-    const lines = [...fromOpeners];
-    const moved = applyTrackedEdits(body, joins, lines.map(([at]) => at)).points;
-    fromOpeners = new Map(lines.map(([, line], index) => [moved[index]!, line]));
-    body = joined;
-    tree = parseForSections(body);
-  }
+  const tree = parseForSections(body);
   let unwritable = false;
   const edits: Edit[] = [];
   // Where each paragraph of the ordinary parse ends, by its start: a marker
@@ -141,6 +134,11 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
       return;
     }
     const depth = ancestors.length;
+    // A container this writer leaves to the author can still start an item
+    // with a section that Linear reads: report it before giving up.
+    const giveUp = (opens: boolean): void => {
+      if (opens && parent.type === 'listItem' && markers[0] !== null) firstInItem?.(start(blocks[0]!));
+    };
     const lastContent = markers.findLastIndex((marker, index) => marker === null && blocks[index]!.type !== 'definition');
     const open: number[] = [];
     const roles = new Map<number, string>();
@@ -194,6 +192,7 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
         // Linear keeps one of another width as text in the section. Leave
         // such a container to the author.
         if (markers[open[innermost]!]![1]!.length !== marker[1]!.length) {
+          giveUp(roles.has(0) || open[0] === 0);
           unwritable ||= mixed;
           return;
         }
@@ -236,6 +235,7 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
     });
     const last = blocks[lastKept]!;
     if (closes.length > 0 && last.type === 'html' && parse(`${last.value}\n\n+++`).children.at(-1)?.type !== 'paragraph') {
+      giveUp(roles.has(0));
       unwritable ||= mixed;
       return;
     }
@@ -262,6 +262,7 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
       const blank = line.prefix.trimEnd();
       const before = index > 0 || line.linePrefix === line.prefix && parent.type === 'root' && line.lineStart > 0;
       const written = [roles.get(index) ?? marker[0].trimEnd(), ...Array<string>(alsoCloses.get(index) ?? 0).fill('+++')].join(`\n${blank}\n${line.prefix}`);
+      if (index === 0 && parent.type === 'listItem' && roles.get(index)?.startsWith('+++ ') === true) firstInItem?.(at);
       const to = lineEndAt(body, at);
       // The marker ends a paragraph even when the next line is lazy.
       // Keep any enclosing quote that the next line continues.
@@ -295,24 +296,6 @@ function sharedQuotePrefix(first: string, next: string): string {
     if (first[index] === '>') lastQuote = index;
   }
   return first.slice(0, lastQuote + 1);
-}
-
-/** Read Linear's empty item paragraph and section below it as a single list item. */
-function joinSectionItemLines(body: string, tree: Nodes, edits: Edit[]): string {
-  if (!/(?:[*+.-]|\)) \n[ >]*\n[ >]*\+{3} /.test(body)) return body;
-  visit(tree, (node, ancestors) => {
-    if (node.type !== 'thematicBreak' || !body.startsWith('+++ ', start(node))) return;
-    const { lineStart, linePrefix } = prefixes(body, start(node));
-    if (lineStart === 0) return;
-    const blankStart = body.lastIndexOf('\n', lineStart - 2) + 1;
-    if (blankStart === 0) return;
-    const itemStart = body.lastIndexOf('\n', blankStart - 2) + 1;
-    const item = /^([ >]*)([*+-]|\d{1,9}[.)]) $/.exec(body.slice(itemStart, blankStart - 1));
-    if (item === null || body.slice(blankStart, lineStart - 1) !== item[1]!.trimEnd()) return;
-    if (linePrefix !== item[1] + ' '.repeat(item[2]!.length + 1)) return;
-    edits.push({ from: blankStart - 1, to: start(node), text: '', depth: ancestors.length });
-  });
-  return applyEdits(body, edits);
 }
 
 function sectionPrefix(body: string, parent: Root | Blockquote | ListItem, at: number): string {
@@ -372,6 +355,23 @@ export function sectionOpenersAsLinear(body: string): string | undefined {
   const plusLines = plusLineCount(body, openers);
   if (sectionLineCount(written) !== lines + plusLines) return undefined;
   return plusLines === 0 ? written : pairSections(written, marks);
+}
+
+/**
+ * The offsets of section markers (`+++` or `>>>`) that open a section as the
+ * first block of a list item. Linear writes such an item as its marker, a
+ * blank line and the section at the item's text column, and reads that back
+ * as an empty item with the section after it, outside the item.
+ */
+export function sectionsFirstInItem(body: string): number[] {
+  const found: number[] = [];
+  if (body.includes('>>>')) {
+    for (const { node, parent } of sectionOpeners(body)) {
+      if (parent.type === 'listItem' && parent.children[0] === node) found.push(start(node));
+    }
+  }
+  plusSectionsAsLinear(body, (at) => found.push(at));
+  return found.sort((a, b) => a - b);
 }
 
 /** The line (1-based) of the first `>>>` section line when `fix` cannot write the sections, else undefined. */

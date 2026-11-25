@@ -55,6 +55,27 @@ npm run test:template-install  # needs Python 3.11 to 3.14 with venv, and PyPI; 
 
 `pre-commit install` runs the same hooks on every commit and push.
 
+### Faster runs while you change the code
+
+The full `npm test` takes long: most sync tests run the engine against real
+Git repositories, and every Git call starts a process. While you change one
+area, run its tests, and run the full `npm test` before you push.
+
+```sh
+npm run test:format    # Markdown format: src/format, test/format and the corpus tests
+npm run test:format -- --test-name-pattern=table   # only the tests whose names match
+node tools/test-temp-cleanup.ts src/sync/write.test.ts   # one file
+npm test -- --test-concurrency=2   # leave CPUs to other work
+```
+
+Run `npm run check:fixtures` too when you change the fixture bank.
+`node tools/test-temp-cleanup.ts` takes the file patterns and options of
+`node --test` and fails when the tests leave temporary files behind. Options
+given after `--` need the `--name=value` form, unless they take no value.
+The runner runs as many test
+files at a time as the machine has CPUs, less one, and its test processes
+share a compile cache in `node_modules/.cache/test-compile-cache`.
+
 `npm test` needs no network or accounts. Scenarios that commit as a person
 go through released pre-commit hooks, which need npm 11.16.0 or newer; with
 an older npm those runs are reported as blocked by the environment.
