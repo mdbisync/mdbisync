@@ -224,6 +224,11 @@ Inline text:
   `**Birch\*\*\*\*Pine**`, and `**Inventory` becomes `\*\*Inventory`.
   Consecutive bold spans join when they can keep their formatting.
   Bold immediately inside another bold span is folded into the outer span.
+- Adjacent links to the same destination become one link, since Linear
+  holds a link as a mark on its text. Bold, italic or strikethrough around
+  a part goes inside the label: `[Shop](https://a.test)**[Sale](https://a.test)**`
+  becomes `[Shop**Sale**](<https://a.test>)`. A space, a line ending or
+  another destination keeps links apart, and so does a `!` before them.
 - Bold around a single link moves into the link label. For example,
   `**[Map](https://example.com)**` becomes `[**Map**](<https://example.com>)`.
   When bold spans multiple lines, `fix` closes it and reopens it on each line.
@@ -275,6 +280,14 @@ Inline text:
   it; spaces and tabs there go.
   Asterisk references such as `&#42;` become `\*`. Other ASCII references,
   such as `&lt;b&gt;`, `&quot;` and `&#65;`, stay as written.
+- A space reference (`&#32;`, `&#x20;`) becomes a space, as Linear stores
+  it; in a link label too. At the inner edge of bold, italic or
+  strikethrough the space moves out of it: `x **&#32;Tip** y` becomes
+  `x  **Tip** y`. At the start or end of a paragraph, heading, item, quote
+  or cell the space goes, since Linear drops it on its next write:
+  `**&#32;Tip** one` becomes `**Tip** one`. Where a space would change
+  what the text says (make a line break, a list item or HTML, or close a
+  heading), the reference stays.
 - Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes
   `Done 🎉`. An escaped reference or shortcode (`\&amp;`, `\:tada:`) stays
   as written.
@@ -309,6 +322,8 @@ Inline text:
   `é_é` becomes `é\_é`. An escape the rule does not need goes:
   `file\_name` becomes `file_name`. Link text follows the same rule;
   strikethrough and code keep their characters.
+- A backtick that opens no code span gets a backslash, as Linear writes it:
+  ``a ` b`` becomes ``a \` b``.
 - A continuation line of a paragraph keeps its own indentation, as Linear
   does: the quote's `>` or the item's indent is written in place of the
   source's, and spaces or tabs past it stay. A tab that the item's indent

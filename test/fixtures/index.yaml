@@ -75,6 +75,12 @@ rules:
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
+  - construct: space-reference
+    class: fixable
+  - construct: lone-backtick
+    class: fixable
+  - construct: adjacent-links
+    class: fixable
   - construct: line-start-escape
     class: fixable
   - construct: code-span-lazy-dash-line
@@ -3246,3 +3252,36 @@ fixtures:
     canary: kx-58a3f733
     corpus: false
     note: "Linear writes a code span that runs over lines on one line: each line ending becomes a space, container prefixes go, the line's own indentation stays"
+  - file: "construct-singles/space-reference.md"
+    group: construct-singles
+    construct: space-reference
+    class: fixable
+    basis: known
+    canary: kx-41710cf6
+    corpus: false
+    note: "Linear stores &#32; and &#x20; as a space outside code, moves one at a mark's inner edge out of the mark and keeps one in a link label"
+  - file: "construct-singles/space-reference-edges.md"
+    group: construct-singles
+    construct: space-reference
+    class: fixable
+    basis: known
+    git_form: captured
+    canary: kx-9c2d5e17
+    corpus: false
+    note: "Linear keeps a space reference at a block's start or end as a space, which its next write drops; fix writes the form without it"
+  - file: "construct-singles/lone-backtick.md"
+    group: construct-singles
+    construct: lone-backtick
+    class: fixable
+    basis: known
+    canary: kx-f3eef474
+    corpus: false
+    note: "Linear escapes a backtick that opens no code span, in every block"
+  - file: "links/adjacent-links.md"
+    group: links
+    construct: adjacent-links
+    class: fixable
+    basis: known
+    canary: kx-4eec1c8c
+    corpus: false
+    note: "Linear joins adjacent links to the same destination into one, with the marks around each part inside it; a space, another destination or a line ending keeps them apart"
