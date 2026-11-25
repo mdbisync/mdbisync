@@ -171,6 +171,18 @@ describe('NBSP as Linear stores it', () => {
     assert.equal(fixText('**&nbsp;a**'), '**&nbsp;a**');
   });
 
+  it('reads a character outside the Basic Multilingual Plane next to the run as one character', () => {
+    // An emoji is a symbol, which flanks like punctuation in CommonMark: as
+    // the character, the NBSP would keep the run from opening bold. The
+    // parser fix uses reads such a run as text and escapes it; the
+    // reference stays either way.
+    const fixed = fixText('\u{1F600}**&nbsp;a**');
+    assert.ok(fixed.includes('&nbsp;'), fixed);
+    assert.ok(sameMarkdown(fixed, '\u{1F600}**&nbsp;a**'));
+    assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
+    assert.equal(fixText('a&nbsp;**b**\u{1F600}'), 'a **b**\u{1F600}');
+  });
+
   it('text split off at an image keeps one at its edge', () => {
     assert.equal(fixText('Before&nbsp; ![a](x.png)&nbsp;after'), 'Before \n\n![a](x.png)\n\n after');
   });

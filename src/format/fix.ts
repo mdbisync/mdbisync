@@ -1378,15 +1378,32 @@ function sameFlanking(source: string, from: number, to: number, char: string): b
   if (delimiterBefore !== undefined && DELIMITER.test(delimiterBefore)) {
     let start = from - 1;
     while (start > 0 && source[start - 1] === delimiterBefore) start--;
-    if (reads(delimiterBefore, source[start - 1], source[from]) !== reads(delimiterBefore, source[start - 1], char)) return false;
+    if (reads(delimiterBefore, codePointBefore(source, start), source[from]) !== reads(delimiterBefore, codePointBefore(source, start), char)) return false;
   }
   const delimiterAfter = source[to];
   if (delimiterAfter !== undefined && DELIMITER.test(delimiterAfter)) {
     let end = to + 1;
     while (end < source.length && source[end] === delimiterAfter) end++;
-    if (reads(delimiterAfter, source[to - 1], source[end]) !== reads(delimiterAfter, char, source[end])) return false;
+    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end)) !== reads(delimiterAfter, char, codePointAt(source, end))) return false;
   }
   return true;
+}
+
+/** The whole character that ends right before `at`: an emoji is two UTF-16 units. */
+function codePointBefore(source: string, at: number): string | undefined {
+  if (at <= 0) return undefined;
+  const low = source.charCodeAt(at - 1);
+  if (low >= 0xdc00 && low <= 0xdfff && at >= 2) {
+    const high = source.charCodeAt(at - 2);
+    if (high >= 0xd800 && high <= 0xdbff) return source.slice(at - 2, at);
+  }
+  return source[at - 1];
+}
+
+/** The whole character that starts at `at`. */
+function codePointAt(source: string, at: number): string | undefined {
+  const code = source.codePointAt(at);
+  return code === undefined ? undefined : String.fromCodePoint(code);
 }
 /** A character reference as Markdown spells one; whether it names a character is decided apart. */
 const CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
