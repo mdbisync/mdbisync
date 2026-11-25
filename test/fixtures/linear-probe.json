@@ -97,6 +97,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/adjacent-bold-boundaries.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/backslash-block-end.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -174,6 +178,10 @@
       "fixedPoint": true
     },
     "construct-singles/code-span-lines.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/coextensive-bold-italic.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -717,7 +725,15 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "links/bare-url-endings.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "links/bare-url.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/bold-link-suffix.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

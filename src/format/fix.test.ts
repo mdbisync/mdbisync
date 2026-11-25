@@ -373,6 +373,26 @@ describe('Linear bold forms', () => {
     ['bold around an italic link', '**_[trail map](https://example.com/trails)_**', '[***trail map***](<https://example.com/trails>)'],
     ['italic around a link with a bold label', '*[**trail map**](https://example.com/trails)*', '[***trail map***](<https://example.com/trails>)'],
     ['mixed link and prose', '**Use the [trail map](https://example.com/trails)**', '**Use the [trail map](<https://example.com/trails>)**'],
+    ['ordered item link', '1. **[Guide](https://example.test)**', '1. [**Guide**](<https://example.test>)'],
+    ['bullet item link with colon', '* **[Guide](https://example.test):**', '* [**Guide**](<https://example.test>)**:**'],
+    ['punctuation and prose after a bold link', '**[Guide](https://example.test): Ready**', '[**Guide**](<https://example.test>)**: Ready**'],
+    ['spaced prose after a bold link', '**[Guide](https://example.test) now**', '**[Guide](<https://example.test>) now**'],
+    ['spaced prose after a bold italic link', '***[Guide](https://example.test) now***', '[***Guide***](<https://example.test>)*** now***'],
+    ['escaped punctuation in a spaced bold italic suffix', '***[Guide](https://example.test) a\\*b***', '[***Guide***](<https://example.test>)*** a\\*b***'],
+    ['italic suffix does not inherit bold from its link label', '**_guide_** and *[**Guide**](https://example.test) now*', '***guide*** and *[**Guide**](<https://example.test>) now*'],
+    ['strong outside a coextensive underscore italic link', '**_[Guide](https://example.test) now_**', '[***Guide***](<https://example.test>)*** now***'],
+    ['italic underscore inside bold', '**_guide_**', '***guide***'],
+    ['bold inside italic underscore', '_**guide**_', '***guide***'],
+    ['bold underscore inside italic', '*__guide__*', '***guide***'],
+    ['italic inside bold underscore', '__*guide*__', '***guide***'],
+    ['coextensive nested bold and italic', '**_**guide**_**', '***guide***'],
+    ['ordinary closing punctuation stays bold', '**(tip)** and **Tip.**', '**(tip)** and **Tip.**'],
+    ['three nominally adjacent bold runs', '**a****b****c**', '**ab**c'],
+    ['four nominally adjacent bold runs', '**a****b****c****d**', '**ab**c\\*\\*\\*\\*d'],
+    ['five nominally adjacent bold runs', '**a****b****c****d****e**', '**ab**c**d**e'],
+    ['spaces next to four-star boundaries', '**Note: ****important**** text**', '**Note: important** text'],
+    ['adjacent stars that would expose a URL', '**https:****//example.test****end**', '**https:****//example.test****end**'],
+    ['adjacent stars that would expose strikethrough', '**a~~****b~~****c**', '**a\\~\\~b\\~\\~c**'],
     ['file label in a list item', '* **[Trail map](trail.pdf)**', '* [**Trail map**](<trail.pdf>)'],
     ['soft breaks', '**Birch\nCedar\nMaple**', '**Birch**\n**Cedar**\n**Maple**'],
     ['hard break', '**Birch  \nCedar**', '**Birch**  \n**Cedar**'],
@@ -1404,6 +1424,34 @@ describe('what fix leaves alone', () => {
       assert.deepEqual(link.children.map((child) => [child.type, 'value' in child ? child.value : undefined]), [['text', text]], `${JSON.stringify(input)}: the link text is one text node equal to the URL`);
       // A backslash in the destination is percent-encoded, as Linear writes it: the link goes where the URL goes.
       assert.equal(normalizeUri(link.url), normalizeUri(text));
+    }
+  });
+
+  it("puts bare URL punctuation on Linear's side of the link boundary", () => {
+    const cases = [
+      ['https://example.test/p#tip_', '[https://example.test/p#tip\\_](<https://example.test/p#tip_>)'],
+      ['https://example.test?_', '[https://example.test?\\_](<https://example.test?_>)'],
+      ['https://example.test/p__~', '[https://example.test/p_\\_\\~](<https://example.test/p__~>)'],
+      ['https://example.test/p(foo', '[https://example.test/p](<https://example.test/p>)(foo'],
+      ['https://example.test/p(x~y~z', '[https://example.test/p](<https://example.test/p>)(x\\~y\\~z'],
+      ['https://example.test/p(x~~y~~z', '[https://example.test/p](<https://example.test/p>)(x~~y~~z'],
+      ["https://example.test/o'reilly/notes", "[https://example.test/o'reilly/notes](<https://example.test/o'reilly/notes>)"],
+      ["https://example.test/p'", "[https://example.test/p](<https://example.test/p>)'"],
+      ['https://example.test/p(foo)more', '[https://example.test/p(foo)more](<https://example.test/p(foo)more>)'],
+      ['(https://example.test/p)', '([https://example.test/p](<https://example.test/p>))'],
+      ['https://example.test/p(a(b)c)d', '[https://example.test/p(a(b)c](<https://example.test/p(a(b)c>))d'],
+      ['https://example.test/p[2]', '[https://example.test/p\\[2\\]](<https://example.test/p%5B2%5D>)'],
+      ['https://example.test/p?!', '[https://example.test/p?](<https://example.test/p?>)!'],
+      ['https://example.test/p:', '[https://example.test/p:](<https://example.test/p:>)'],
+      ['https://example.com_', 'https://example.com\\_'],
+      ['**https://example.test/p_**', '[**https://example.test/p\\_**](<https://example.test/p_>)'],
+      ['[Guide](<https://example.test/p(foo>)', '[Guide](<https://example.test/p(foo>)'],
+      ['`https://example.test/p_`', '`https://example.test/p_`'],
+    ] as const;
+    for (const [input, expected] of cases) {
+      assert.equal(fixText(input), expected, input);
+      assert.equal(fixText(expected), expected, input);
+      assert.deepEqual(lintText('guide.md', expected), [], input);
     }
   });
 

@@ -79,6 +79,14 @@ known_constructs:
     class: fixable
   - construct: list-first-in-item
     class: fixable
+  - construct: bare-url-endings
+    class: fixable
+  - construct: bold-link-suffix
+    class: fixable
+  - construct: adjacent-bold-boundaries
+    class: fixable
+  - construct: coextensive-bold-italic
+    class: fixable
   - construct: line-start-escape
     class: fixable
   - construct: code-span-lazy-dash-line
@@ -759,6 +767,34 @@ assets:
     kind: ogg
     corpus: false
 fixtures:
+  - file: links/bare-url-endings.md
+    group: links
+    construct: bare-url-endings
+    class: fixable
+    basis: known
+    canary: kx-73d145bc
+    corpus: false
+  - file: links/bold-link-suffix.md
+    group: links
+    construct: bold-link-suffix
+    class: fixable
+    basis: known
+    canary: kx-614f27ab
+    corpus: false
+  - file: construct-singles/adjacent-bold-boundaries.md
+    group: construct-singles
+    construct: adjacent-bold-boundaries
+    class: fixable
+    basis: known
+    canary: kx-0fac73b9
+    corpus: false
+  - file: construct-singles/coextensive-bold-italic.md
+    group: construct-singles
+    construct: coextensive-bold-italic
+    class: fixable
+    basis: known
+    canary: kx-ca327165
+    corpus: false
   - file: "construct-singles/heading-atx-h1.md"
     group: construct-singles
     construct: heading-atx-h1

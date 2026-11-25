@@ -16,7 +16,7 @@ import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
-import { ALERT, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -143,29 +143,31 @@ function fixBody(body: string, options: FixOptions): string | undefined {
   for (let pass = 0; pass < 5; pass++) {
     const source = pass === 0 ? current : plusSectionsAsLinear(current);
     rewroteSections ||= source !== current;
-    const tree = parse(source, [], true);
+    let tree = parse(source, [], true);
+    const adjacent = adjacentBoldAsLinear(source, tree);
+    if (adjacent !== source) tree = parse(adjacent, [], true);
     // Lint checked the source; a rewrite may expose a table or references it
     // did not see. Text split off at an image is escaped so it exposes none:
     // this guard keeps the limits for any rewrite that still does.
-    if (pass > 0 && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, source) !== undefined)) throw new MarkdownLimitError('nodes');
+    if ((pass > 0 || adjacent !== source) && (paddingOverLimit(tree) !== undefined || referencesOverLimit(tree, adjacent) !== undefined)) throw new MarkdownLimitError('nodes');
     // The writer copies text by source offset. A node the parser left
     // without one (a link the bare-URL search inside text found but could
     // not place, which lint reports as `unplaced-link`) would make it copy
     // the wrong text: leave the body as it came.
     if (hasUnplacedNode(tree)) return body;
-    let writer = new Writer(source, tree, options);
+    let writer = new Writer(adjacent, tree, options);
     let next = writer.root();
     let rewriteEscapes = true;
     let rewriteTildeUnderscore = true;
     if (writer.compareEscapes) {
-      const fallback = new Writer(source, tree, options, false);
+      const fallback = new Writer(adjacent, tree, options, false);
       const withOriginalEscapes = fallback.root();
       // Edits can expose syntax across inline nodes even when an edited
       // character would be safe in its own node or on its own line.
       if (!sameMarkdown(next, withOriginalEscapes)) {
         // An escaped `~` or `_` can move a link's end: give those up first,
         // and the other escapes only if the document still changes.
-        const withoutTildeUnderscore = new Writer(source, tree, options, true, true, false);
+        const withoutTildeUnderscore = new Writer(adjacent, tree, options, true, true, false);
         const partial = withoutTildeUnderscore.root();
         if (sameMarkdown(partial, withOriginalEscapes)) {
           rewriteTildeUnderscore = false;
@@ -180,11 +182,11 @@ function fixBody(body: string, options: FixOptions): string | undefined {
     }
     if (writer.rewroteAsterisks) {
       // The escapes given up above stay given up there.
-      const withOriginalAsterisks = new Writer(source, tree, options, rewriteEscapes, false, rewriteTildeUnderscore).root();
+      const withOriginalAsterisks = new Writer(adjacent, tree, options, rewriteEscapes, false, rewriteTildeUnderscore).root();
       // A locally equivalent edit can still affect a surrounding block.
       if (!sameMarkdown(next, withOriginalAsterisks)) next = withOriginalAsterisks;
     }
-    next = linearBoldForms(next, next === source ? tree : undefined);
+    next = linearBoldForms(next, next === adjacent ? tree : undefined);
     if (next === current) return next;
     current = next;
   }
@@ -192,9 +194,40 @@ function fixBody(body: string, options: FixOptions): string | undefined {
   return rewroteSections ? undefined : current;
 }
 
+/** Linear closes the first bold span at the second four-star boundary. */
+function adjacentBoldAsLinear(body: string, tree: Root): string {
+  if (!body.includes('****')) return body;
+  const groups = new Map<Nodes, Edit[]>();
+  visit(tree, (node, ancestors) => {
+    if (node.type !== 'strong' || node.position!.start.line !== node.position!.end.line
+      || ancestors.some((parent) => parent.type === 'strong' || parent.type === 'emphasis')) return;
+    if (body.slice(start(node), start(node) + 2) !== '**') return;
+    const [first, ...rest] = node.children;
+    if (first?.type !== 'text' || rest.at(-1)?.type !== 'text') return;
+    const boundaries = rest.filter((part) => part.type === 'strong');
+    if (boundaries.length === 0 || rest.some((part) => part.type !== 'text' && part.type !== 'strong')) return;
+    if (boundaries.some((part) =>
+      body.slice(start(part), start(part) + 4) !== '****' || body.slice(end(part) - 4, end(part)) !== '****'
+      || part.children.length !== 1 || part.children[0]?.type !== 'strong'
+      || part.children[0].children.some((child) => child.type !== 'text'))) return;
+    const block = ancestors[1] ?? node;
+    const edits = groups.get(block) ?? [];
+    for (const [index, part] of boundaries.entries()) {
+      edits.push(
+        { from: start(part), to: start(part) + (index === 0 ? 4 : 2), text: '' },
+        { from: end(part) - 2, to: end(part), text: '' },
+      );
+    }
+    edits.push({ from: end(node) - 2, to: end(node), text: '' });
+    groups.set(block, edits);
+  });
+  // Changing these bold marks must leave links, other styles and text intact.
+  return reSpellBold(body, groups, true) ?? body;
+}
+
 /** Re-spell bold across line breaks and around a single link in the written body. */
 function linearBoldForms(body: string, tree?: Root, splitLines = true): string {
-  if (!body.includes('**')) return body;
+  if (!body.includes('**') && !body.includes('__')) return body;
   const blocks = new Map<Nodes, { breaks: Edit[]; links: Edit[]; added: number }>();
   if (tree === undefined) {
     tree = parse(body, [], true);
@@ -213,7 +246,7 @@ function linearBoldForms(body: string, tree?: Root, splitLines = true): string {
     if (node.type === 'strong' || node.type === 'emphasis') {
       const parent = ancestors.at(-1);
       if (!((parent?.type === 'strong' || parent?.type === 'emphasis') && parent.children.length === 1)) {
-        const edit = boldLinkEdit(body, node);
+        const edit = boldLinkEdit(body, node) ?? boldItalicEdit(body, node);
         if (edit !== undefined) group().links.push(edit);
       }
     }
@@ -272,18 +305,44 @@ function linearBoldForms(body: string, tree?: Root, splitLines = true): string {
   return split === undefined ? reSpellBold(body, links) ?? body : linearBoldForms(split, undefined, false);
 }
 
-/** A single link carries its coextensive bold and italic marks in its label. */
+/** Coextensive bold and italic use one three-star delimiter on each side. */
+function boldItalicEdit(body: string, outer: PhrasingContent): Edit | undefined {
+  let node = outer;
+  let bold = false;
+  let italic = false;
+  while (node.type === 'strong' || node.type === 'emphasis') {
+    bold ||= node.type === 'strong';
+    italic ||= node.type === 'emphasis';
+    if (node.children.length !== 1 || (node.children[0]?.type !== 'strong' && node.children[0]?.type !== 'emphasis')) break;
+    node = node.children[0];
+  }
+  if (!bold || !italic || (node.type !== 'strong' && node.type !== 'emphasis')) return;
+  const width = node.type === 'strong' ? 2 : 1;
+  const text = '***' + body.slice(start(node) + width, end(node) - width) + '***';
+  if (text === body.slice(start(outer), end(outer))) return;
+  return { from: start(outer), to: end(outer), text };
+}
+
+/** A leading link can carry the marks in its label, with the remaining text marked separately. */
 function boldLinkEdit(body: string, outer: PhrasingContent): Edit | undefined {
   let node = outer;
   let bold = false;
   let italic = false;
-  while ((node.type === 'strong' || node.type === 'emphasis') && node.children.length === 1) {
+  let suffix = '';
+  while (node.type === 'strong' || node.type === 'emphasis') {
     bold ||= node.type === 'strong';
     italic ||= node.type === 'emphasis';
-    node = node.children[0]!;
+    const first = node.children[0];
+    if (first === undefined) return;
+    if (node.children.length > 1) {
+      if (first.type !== 'link' || !node.children.slice(1).every((child) => child.type === 'text')) return;
+      suffix = body.slice(end(first), end(node) - (node.type === 'strong' ? 2 : 1));
+    }
+    node = first;
   }
   if (node.type !== 'link' || body[start(node)] !== '[' || node.position!.start.line !== node.position!.end.line) return;
-  if (!bold && !(node.children.length === 1 && node.children[0]?.type === 'strong')) return;
+  if (!bold && (suffix !== '' || node.children.length !== 1 || node.children[0]?.type !== 'strong')) return;
+  if (suffix.includes('\n')) return;
   const last = node.children.at(-1);
   if (last === undefined) return;
   const label = body.slice(start(node) + 1, end(last));
@@ -291,16 +350,18 @@ function boldLinkEdit(body: string, outer: PhrasingContent): Edit | undefined {
   const text = node.children.map((child) => child.type === 'strong'
     ? body.slice(start(child) + 2, end(child) - 2) : body.slice(start(child), end(child))).join('');
   const mark = italic ? '***' : '**';
-  return { from: start(outer), to: end(outer), text: `[${mark}${text}${mark}${body.slice(end(last), end(node))}` };
+  const markedSuffix = suffix === '' ? '' : mark + suffix + mark;
+  if (/^\s/u.test(suffix) && (!italic || !LINKED_BOLD_ITALIC_SUFFIX.test(markedSuffix))) return;
+  return { from: start(outer), to: end(outer), text: `[${mark}${text}${mark}${body.slice(end(last), end(node))}${markedSuffix}` };
 }
 
-function reSpellBold(body: string, groups: ReadonlyMap<Nodes, Edit[]>): string | undefined {
+function reSpellBold(body: string, groups: ReadonlyMap<Nodes, Edit[]>, ignoreBold = false): string | undefined {
   if (groups.size === 0) return undefined;
   const equivalent = (from: number, to: number, edits: Edit[]): string | undefined => {
     const candidate = rewriteBoldRange(body, from, to, edits);
     if (candidate === undefined) return;
     try {
-      if (sameMarkdown(body.slice(from, to), candidate, { linearBoldForms: true })) return candidate;
+      if (sameMarkdown(body.slice(from, to), candidate, { linearBoldForms: !ignoreBold, ignoreBold })) return candidate;
     } catch (error) {
       if (!(error instanceof MarkdownLimitError)) throw error;
     }
