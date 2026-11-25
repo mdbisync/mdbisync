@@ -1175,6 +1175,15 @@ fixtures:
     line: 1
     basis: known
     canary: kx-0d10d55c
+  - file: "construct-singles/break-backslash-indented.md"
+    group: construct-singles
+    construct: hard-break-backslash
+    class: lint-error
+    rule: hard-break-backslash
+    line: 1
+    basis: known
+    canary: kx-5a6d18c5
+    note: "the line after a backslash break loses its own indentation in Linear, and its start is escaped as at a line's start"
   - file: "construct-singles/break-html.md"
     group: construct-singles
     construct: hard-break-html
@@ -3090,6 +3099,14 @@ fixtures:
     canary: kx-3c5e81a2
     corpus: false
     note: "a paragraph's last line of only a number and dot, or a bullet, under an item at or past its content is text; Linear writes it as an empty item at the innermost item's content, with a space after it"
+  - file: "list-items/list-form-empty-item-numbered-lines.md"
+    group: list-items
+    construct: empty-list-item
+    class: fixable
+    basis: known
+    canary: kx-066b2922
+    corpus: false
+    note: "numbered lines after a bare marker on an item's second line: Linear reads the empty item and a list nested in it, or after it in its list, and writes the numbers unescaped"
   - file: "list-items/list-form-ordered-ten.md"
     group: list-items
     construct: ordered-list-aligned-numbers
@@ -3194,6 +3211,22 @@ fixtures:
     canary: kx-b3c45fd3
     corpus: false
     note: "a lazy line keeps its indentation for a quote and loses what an item's content indent takes"
+  - file: "construct-singles/continuation-indent-glued-numbers.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-13cbfd09
+    corpus: false
+    note: "a number with a dot or parenthesis and no space after it keeps the tabs after the columns an item's prefix takes; a lazy line of a number is written under its prefix alone"
+  - file: "construct-singles/continuation-bare-number.md"
+    group: construct-singles
+    construct: continuation-indent
+    class: fixable
+    basis: known
+    canary: kx-aefaaff0
+    corpus: false
+    note: "a paragraph line of only a number and dot before the paragraph's last line: Linear escapes it after spaces, and keeps an escaped number with a space after it in an item"
   - file: "construct-singles/collapsible-opener.md"
     group: construct-singles
     construct: collapsible-section-opener

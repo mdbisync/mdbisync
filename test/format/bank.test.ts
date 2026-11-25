@@ -17,7 +17,7 @@ const markdown = bank.fixtures.filter((fixture) => fixture.synced !== false && f
 const read = (fixture: BankFixture): string => readFileSync(join(bank.dir, fixture.file), 'utf8');
 const golden = (fixture: BankFixture): string | undefined => readOptional(join(bank.dir, goldenMarkdownPath(fixture.file)));
 /** Lint-error fixtures `fix` rewrites into Linear's form (FIXED_RULES); the others of those rules stay as they are. */
-const FIXED_BY_FIX: ReadonlySet<string> = new Set(['construct-singles/break-backslash.md']);
+const FIXED_BY_FIX: ReadonlySet<string> = new Set(['construct-singles/break-backslash.md', 'construct-singles/break-backslash-indented.md']);
 const contentRules =(fixture: BankFixture): boolean => fixture.class === 'lint-error' && fixture.rule !== 'duplicate-title';
 
 describe('fix on the fixture bank', () => {

@@ -31,6 +31,12 @@ export interface FixOptions {
   linkedFileExists?: (url: string) => boolean;
 }
 
+/** What the writer also needs to know about the body it writes. */
+interface WriterOptions extends FixOptions {
+  /** The lines (0-based) that follow a backslash line break `fix` wrote as a plain line ending. */
+  breakLines?: ReadonlySet<number>;
+}
+
 /**
  * Returns the text in Linear's form, or the text itself when lint finds a
  * construct Linear would lose or alter. Throws `MarkdownLimitError` when a
@@ -44,9 +50,10 @@ export function fixText(text: string, options: FixOptions = {}): string {
   const sections = sectionOpenersAsLinear(normalized);
   const lf = sections === normalized ? plusSectionsAsLinear(sections) : sections;
   if (lf === undefined) return text;
-  const unbroken = backslashBreaksAsLinear(lf);
-  if (unbroken === undefined) return text;
-  const fixed = fixBody(unbroken, options);
+  const broken = backslashBreaksAsLinear(lf);
+  if (broken === undefined) return text;
+  const { body: unbroken, lines: breakLines } = broken;
+  const fixed = fixBody(unbroken, { ...options, breakLines });
   if (fixed === undefined) return text;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
@@ -78,10 +85,13 @@ function lineEndings(body: string): number {
  * beyond the break, so the file stays with its author: a break in a
  * heading, which `fix` writes on one line, or a line that reads
  * differently without its backslash (`#\`, `=\`, `***\`, a backslash alone
- * on its line).
+ * on its line). `lines` holds the lines that follow such a break: Linear
+ * reads a hard break with the indentation after it, so it drops that
+ * indentation.
  */
-function backslashBreaksAsLinear(body: string): string | undefined {
-  if (!body.includes('\\')) return body;
+function backslashBreaksAsLinear(body: string): { body: string; lines: Set<number> } | undefined {
+  const lines = new Set<number>();
+  if (!body.includes('\\')) return { body, lines };
   const tree = parse(body);
   const breaks: number[] = [];
   let unwritable = false;
@@ -94,16 +104,19 @@ function backslashBreaksAsLinear(body: string): string | undefined {
     if (leading || ancestors.some((a) => a.type === 'heading')) unwritable = true;
     breaks.push(start(node));
   });
-  if (breaks.length === 0) return body;
+  if (breaks.length === 0) return { body, lines };
   if (unwritable) return undefined;
   let written = '';
   let at = 0;
+  let line = 0;
   for (const backslash of breaks.sort((a, b) => a - b)) {
     written += body.slice(at, backslash);
+    for (let newline = body.indexOf('\n', at); newline !== -1 && newline < backslash; newline = body.indexOf('\n', newline + 1)) line++;
+    lines.add(line + 1);
     at = backslash + 1;
   }
   written += body.slice(at);
-  return isDeepStrictEqual(breakShape(parse(written)), breakShape(tree)) ? written : undefined;
+  return isDeepStrictEqual(breakShape(parse(written)), breakShape(tree)) ? { body: written, lines } : undefined;
 }
 
 /**
@@ -135,7 +148,7 @@ function breakShape(tree: Root): unknown {
   return shape(tree);
 }
 
-function fixBody(body: string, options: FixOptions): string | undefined {
+function fixBody(body: string, bodyOptions: WriterOptions): string | undefined {
   if (body.trim() === '' && !body.includes(NBSP)) return '';
   let current = body;
   let rewroteSections = false;
@@ -143,6 +156,9 @@ function fixBody(body: string, options: FixOptions): string | undefined {
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
     const source = pass === 0 ? current : plusSectionsAsLinear(current);
+    // A later pass writes the text the first one wrote: its break lines are written.
+    const { breakLines: _written, ...rest } = bodyOptions;
+    const options: WriterOptions = pass === 0 ? bodyOptions : rest;
     rewroteSections ||= source !== current;
     let tree = parse(source, [], true);
     const adjacent = adjacentBoldAsLinear(source, tree);
@@ -413,6 +429,11 @@ const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t\u00a0]))/;
 // A number with a dot and text after it, which `fix` escapes where it starts a paragraph line.
 const NUMBER_TEXT = /^\d+\\?\.[ \t\u00a0]+[^ \t\u00a0]/;
 
+// Block starts that `fix` escapes as Linear does where a line after a
+// former hard break starts without its indentation: a dash, a heading
+// mark, an asterisk and a number with a dot.
+const AFTER_BREAK_ESCAPED = /^(?:-|#{1,6}(?:[ \t]|$)|\*(?!\*)|\d{1,9}\.[ \t]+[^ \t])/;
+
 // A paragraph of `$$` lines around math, which `fix` writes as a `math` fence.
 const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
 
@@ -431,6 +452,8 @@ class Writer {
   private readonly source: string;
   private readonly tree: Root;
   private readonly options: FixOptions;
+  /** Where the lines that follow a former backslash break start. */
+  private readonly breakLineStarts = new Set<number>();
   private readonly rewriteEscapes: boolean;
   private readonly rewriteAsterisks: boolean;
   /** Whether literal `~` and `_` get Linear's escapes; the first part of the text's escapes to give up when they change the document. */
@@ -460,13 +483,19 @@ class Writer {
   /** A list's sibling block written right before it, when that is a list. */
   private readonly listBefore = new Map<List, List>();
 
-  constructor(source: string, tree: Root, options: FixOptions, rewriteEscapes = true, rewriteAsterisks = true, rewriteTildeUnderscore = true) {
+  constructor(source: string, tree: Root, options: WriterOptions, rewriteEscapes = true, rewriteAsterisks = true, rewriteTildeUnderscore = true) {
     this.source = source;
     this.tree = tree;
     this.options = options;
     this.rewriteEscapes = rewriteEscapes;
     this.rewriteAsterisks = rewriteAsterisks;
     this.rewriteTildeUnderscore = rewriteTildeUnderscore;
+    if (options.breakLines !== undefined && options.breakLines.size > 0) {
+      for (let line = 0, at = 0; at !== 0 || line === 0; line++) {
+        if (options.breakLines.has(line)) this.breakLineStarts.add(at);
+        at = source.indexOf('\n', at) + 1;
+      }
+    }
     visit(tree, (node) => {
       if (node.type === 'definition' && !this.definitions.has(node.identifier)) this.definitions.set(node.identifier, node);
       if (!('children' in node)) return;
@@ -890,7 +919,9 @@ class Writer {
         if (node.type === 'html') html.push([start(node), end(node)]);
       });
     }
-    const paragraph = lineStarts === 'none' ? undefined : { texts, html, first: lineStarts === 'all' };
+    // The text nodes that are the run's own children, not inside its markup.
+    const ownTexts = children.filter((child) => child.type === 'text').map((child): [number, number] => [start(child), end(child)]);
+    const paragraph = lineStarts === 'none' ? undefined : { texts, ownTexts, html, first: lineStarts === 'all' };
     // A render can be dropped (the other asterisk candidate, a link join
     // that does not read the same): each starts from the spaces moved before it.
     const moved = [...this.movedSpaces];
@@ -935,17 +966,18 @@ class Writer {
     to: number,
     edits: Edit[],
     code: ReadonlyArray<readonly [number, number]>,
-    paragraph?: { texts: ReadonlyArray<readonly [number, number]>; html: ReadonlyArray<readonly [number, number]>; first: boolean },
+    paragraph?: { texts: ReadonlyArray<readonly [number, number]>; ownTexts: ReadonlyArray<readonly [number, number]>; html: ReadonlyArray<readonly [number, number]>; first: boolean },
   ): string {
     const inside = (ranges: ReadonlyArray<readonly [number, number]>, at: number): boolean => ranges.some(([a, b]) => a <= at && at < b);
     if (paragraph?.first) this.escapeLineStart(from, to, paragraph.texts, edits);
     for (let at = this.source.indexOf('\n', from); at !== -1 && at < to; at = this.source.indexOf('\n', at + 1)) {
-      const marker = paragraph === undefined || inside(code, at) || inside(paragraph.html, at) ? undefined : this.bareMarkerLine(from, at + 1, to);
+      const marker = paragraph === undefined || inside(code, at) || inside(paragraph.html, at) ? undefined : this.bareMarkerLine(from, at + 1, to, paragraph.ownTexts);
       if (marker !== undefined) {
+        // Its edits take the paragraph's remaining lines too.
         edits.push(...marker);
-        continue;
+        break;
       }
-      const continuation = this.continuation(at + 1, inside(code, at), paragraph !== undefined && !inside(paragraph.html, at));
+      const continuation = this.continuation(at + 1, inside(code, at), paragraph !== undefined && !inside(paragraph.html, at), paragraph?.texts);
       edits.push(continuation);
       if (paragraph === undefined || continuation.underline) continue;
       // After indentation Linear escapes a `*` but leaves a `-` plain.
@@ -985,6 +1017,7 @@ class Writer {
       return false;
     }
     if (char !== undefined && char >= '0' && char <= '9') {
+      if (continuation) this.escapeLoneNumber(at, limit, texts, edits);
       const end = Math.min(limit, this.textLineAt(at).to);
       const number = /^(\d+)(\\?)\.([ \t\u00a0])(?=[ \t\u00a0]*[^ \t\u00a0])/.exec(this.source.slice(at, end));
       if (number) {
@@ -1008,6 +1041,32 @@ class Writer {
     return true;
   }
 
+  /**
+   * A paragraph line of only a number and a dot (`2.`), before the
+   * paragraph's last line. With spaces after the dot Linear escapes it
+   * (`2\. `), and keeps that form. Without them it reads `2.` inside a list
+   * item as an empty item that ends the paragraph, and writes an escaped
+   * `2\.` back without its escape: there `fix` writes `2\. `, which reads
+   * as the same text and which Linear keeps.
+   */
+  private escapeLoneNumber(at: number, limit: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[]): void {
+    const line = this.textLineAt(at);
+    const lone = /^(\d{1,9})(\\?)\.([ \t]*)$/.exec(this.source.slice(at, line.to));
+    if (lone === null || line.to >= limit) return;
+    const dot = at + lone[1]!.length;
+    if (!texts.some(([a, b]) => a <= at && dot < b)) return;
+    if (lone[3] !== '') {
+      if (lone[2] === '') edits.push({ from: dot, to: dot, text: '\\' });
+      return;
+    }
+    // Outside containers Linear reads text and writes the number unescaped,
+    // which the sync's comparison reads as a file block's marker: an escape
+    // stays as it is.
+    if (this.containers.length === 0) return;
+    if (this.containers.at(-1)?.kind !== 'item' || this.prefixEnd(line.from, this.source.slice(line.from, line.to)).lazy) return;
+    edits.push({ from: dot, to: dot + lone[2]!.length, text: '\\' }, { from: line.to, to: line.to, text: ' ' });
+  }
+
   /** Linear's escape in a paragraph line that starts with whitespace outside ASCII (`unicodeSpaceEscape`). */
   private escapeAfterUnicodeSpace(at: number, limit: number, texts: ReadonlyArray<readonly [number, number]>, edits: Edit[]): void {
     const offset = unicodeSpaceEscape(this.source.slice(at, Math.min(limit, this.textLineAt(at).to)));
@@ -1015,45 +1074,106 @@ class Writer {
   }
 
   /**
-   * The edits for the second and last line of an item's first paragraph,
-   * starting on the item's line, when that line holds only `N.` or `*`
-   * inside list items: an empty marker cannot interrupt a paragraph, so it
-   * is text, but Linear reads it as an empty item nested in the item and
-   * writes it at the item's content with a space after it (four or more
-   * columns past the content, it reads indented code there, which `fix`
-   * cannot write without changing the text: the same form keeps the text
-   * and is what Linear keeps of it). Under a quote, on a line that does not
-   * reach the item's content, with other lines before or after it, Linear
-   * reads the text: `undefined`, the line is written as before.
+   * The edits for the second line of an item's first paragraph, starting
+   * on the item's line, when that line holds only `N.` or `*` inside list
+   * items: an empty marker cannot interrupt a paragraph, so it is text, but
+   * Linear reads it as an empty item nested in the item and writes it at
+   * the item's content with a space after it (four or more columns past the
+   * content, it reads indented code there, which `fix` cannot write without
+   * changing the text: the same form keeps the text and is what Linear
+   * keeps of it). The line is the paragraph's last, or the lines after it
+   * are numbered lines Linear reads as list items (`numberedLines`). Under
+   * a quote, on a line that does not reach the item's content, after other
+   * lines, before other text or after a hard break, Linear reads the text:
+   * `undefined`, the line is written as before.
    */
-  private bareMarkerLine(from: number, lineStart: number, to: number): Edit[] | undefined {
+  private bareMarkerLine(from: number, lineStart: number, to: number, texts: ReadonlyArray<readonly [number, number]>): Edit[] | undefined {
     const item = this.containers.at(-1);
     // Only a paragraph written whole: text split off at an image does not end its paragraph.
     if (to !== this.wholeParagraphEnd) return undefined;
-    if (this.fileBlockIndent > 0 || item === undefined || this.containers.some((container) => container.kind !== 'item')) return undefined;
+    if (this.fileBlockIndent > 0 || item?.kind !== 'item' || this.containers.some((container) => container.kind !== 'item')) return undefined;
     if (lineStartOf(this.source, item.content) !== lineStartOf(this.source, from) || this.source.indexOf('\n', from) !== lineStart - 1) return undefined;
     const next = this.source.indexOf('\n', lineStart);
-    if (next !== -1 && next < to) return undefined;
-    const bare = /^[ \t]*(?:\d{1,9}\.|\*)$/.exec(this.source.slice(lineStart, to));
+    const lineEnd = next === -1 || next > to ? to : next;
+    const bare = /^[ \t]*(\d{1,9}\.|\*)[ \t]*$/.exec(this.source.slice(lineStart, lineEnd));
     if (bare === null) return undefined;
     const line = this.source.slice(lineStart, next === -1 ? undefined : next);
     if (this.prefixEnd(lineStart, line).lazy) return undefined;
-    // An ordered list on the next line inside the item would continue
-    // Linear's empty item and be renumbered.
-    if (next !== -1) {
-      const after = this.source.indexOf('\n', next + 1);
-      const nextLine = this.source.slice(next + 1, after === -1 ? undefined : after);
-      if (/^[ \t]*\d{1,9}[.)](?:[ \t]|$)/.test(nextLine) && !this.prefixEnd(next + 1, nextLine).lazy) return undefined;
+    // After a hard break Linear reads the lines as the paragraph's text.
+    for (let at = lineStart; at !== 0 && at <= to; at = this.source.indexOf('\n', at) + 1) {
+      if (this.breakLineStarts.has(at)) return undefined;
     }
     const marker = lineStart + /^[ \t]*/.exec(line)![0].length;
-    return [{ from: lineStart, to: marker, text: '' }, { from: to, to, text: ' ' }];
+    const edits: Edit[] = [{ from: lineStart, to: marker, text: '' }, { from: marker + bare[1]!.length, to: lineEnd, text: ' ' }];
+    if (lineEnd < to) {
+      const numbered = this.numberedLines(item, marker, bare[1]!, lineEnd, to, texts);
+      if (numbered === undefined) return undefined;
+      edits.push(...numbered);
+    }
+    // An ordered list on the next line inside the item would continue
+    // Linear's empty item and be renumbered.
+    const after = this.source.indexOf('\n', to);
+    if (after !== -1) {
+      const afterEnd = this.source.indexOf('\n', after + 1);
+      const nextLine = this.source.slice(after + 1, afterEnd === -1 ? undefined : afterEnd);
+      if (/^[ \t]*\d{1,9}[.)](?:[ \t]|$)/.test(nextLine) && !this.prefixEnd(after + 1, nextLine).lazy) return undefined;
+    }
+    return edits;
+  }
+
+  /**
+   * The edits for the lines after a bare marker line (`bareMarkerLine`:
+   * the marker `bare` at offset `marker`, its line ending at `lineEnd`) up
+   * to the paragraph's end `to`, when each is a number, a dot, one space
+   * and a word: Linear reads them as the items of a list, nested in the
+   * empty item where the lines reach its content (`1. Trip` / `   1. ` /
+   * `      2. step`), else after it in its list (`   2. ` / `   3. Pack`),
+   * and writes their numbers unescaped. Written so, a line still continues
+   * the paragraph text in Markdown: its number is not 1, and the empty item
+   * cannot interrupt the paragraph. The numbers must count on from the
+   * list's first, with as many digits and no leading zero, each line under
+   * four columns past the content it belongs to (past it Linear reads
+   * code), and no line ending inside markup (`ownTexts` holds the
+   * paragraph's own text nodes); otherwise `undefined`.
+   */
+  private numberedLines(item: Container, marker: number, bare: string, lineEnd: number, to: number, texts: ReadonlyArray<readonly [number, number]>): Edit[] | undefined {
+    const column = (offset: number): number => [...this.source.slice(lineStartOf(this.source, offset), offset)].reduce(advanceColumn, 0);
+    const markerColumn = column(marker);
+    const itemContent = column(item.content);
+    // Four columns past the item's content Linear reads the marker as code.
+    if (markerColumn - itemContent >= 4) return undefined;
+    const emptyContent = markerColumn + bare.length + 1;
+    const edits: Edit[] = [];
+    let nested: boolean | undefined;
+    let expected: number | undefined;
+    let digits: number | undefined;
+    for (let newline = lineEnd; newline !== -1 && newline < to; newline = this.source.indexOf('\n', newline + 1)) {
+      // A line ending inside other inline markup would be cut by Linear's items.
+      if (!texts.some(([a, b]) => a <= newline && newline < b)) return undefined;
+      const start = newline + 1;
+      const nextNewline = this.source.indexOf('\n', start);
+      const end = nextNewline === -1 || nextNewline > to ? to : nextNewline;
+      const numbered = /^([ \t]*)(\d{1,9})\. (?=[\p{L}\p{N}])(?:.*[^ \t])?$/u.exec(this.source.slice(start, end));
+      if (numbered === null || this.prefixEnd(start, this.source.slice(start, end)).lazy) return undefined;
+      const numberColumn = column(start + numbered[1]!.length);
+      const inside = numberColumn >= emptyContent;
+      if ((nested !== undefined && inside !== nested) || (bare === '*' && !inside)) return undefined;
+      if (numberColumn - (inside ? emptyContent : itemContent) >= 4 || numbered[2]!.startsWith('0')) return undefined;
+      nested = inside;
+      expected ??= nested ? Number(numbered[2]) : Number(bare.slice(0, -1)) + 1;
+      digits ??= nested ? numbered[2]!.length : bare.length - 1;
+      if (Number(numbered[2]) !== expected || expected < 2 || numbered[2]!.length !== digits) return undefined;
+      expected++;
+      edits.push({ from: start, to: start + numbered[1]!.length, text: nested ? ' '.repeat(bare.length + 1) : '' });
+    }
+    return edits;
   }
 
   /** The end of the paragraph being written whole, which `bareMarkerLine` needs. */
   private wholeParagraphEnd: number | undefined;
 
   /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's text. */
-  private continuation(lineStart: number, inCode: boolean, paragraph = false): Edit & { underline?: true } {
+  private continuation(lineStart: number, inCode: boolean, paragraph = false, texts: ReadonlyArray<readonly [number, number]> = []): Edit & { underline?: true } {
     const line = this.source.slice(lineStart, this.source.indexOf('\n', lineStart) === -1 ? undefined : this.source.indexOf('\n', lineStart));
     const lineEnd = lineStart + line.length;
     // Up to the first container the line does not match: where a lazy line's own text starts.
@@ -1061,11 +1181,22 @@ class Writer {
     const ownText = matched + /^[ \t]*/.exec(this.source.slice(matched, lineEnd))![0].length;
     const startsBlock = BLOCK_START.test(this.source.slice(ownText, lineEnd));
     let { at, pad, lazy } = inCode ? { at: matched, pad: 0, lazy: false } : this.prefixEnd(lineStart, line);
+    // A number with a dot that starts paragraph text is escaped, so it
+    // reads as text at any column, and a number with a dot or parenthesis
+    // and no space after it (`3.x`) opens no block at all: both in a text
+    // node only (in an HTML attribute or a link title the indentation is
+    // content, and no escape is written).
+    const inText = paragraph && texts.some(([a, b]) => a <= ownText && ownText < b);
+    const escapedNumber = inText && NUMBER_TEXT.test(this.source.slice(ownText, lineEnd));
+    const glued = inText && /^\d{1,9}[.)][^ \t\u00a0]/.test(this.source.slice(ownText, lineEnd));
     // A lazy line's indentation can be what keeps its text from opening a
     // block (four spaces before `#`), and so can a file block label's,
     // whose later lines carry no prefix for their item: such a line keeps
-    // all of its indentation past the prefixes it matches.
-    if (!inCode && (lazy || this.fileBlockIndent > 0) && startsBlock) ({ at, pad } = { at: matched, pad: 0 });
+    // all of its indentation past the prefixes it matches. Where the text
+    // is a number that cannot open a block, Linear writes a lazy line under
+    // its prefix alone, as any other lazy text.
+    const keepsIndent = this.fileBlockIndent > 0 || !(paragraph && (escapedNumber || glued));
+    if (!inCode && (lazy || this.fileBlockIndent > 0) && startsBlock && keepsIndent) ({ at, pad } = { at: matched, pad: 0 });
     // A lazy line of only `-` or `=` continues the paragraph text. Under
     // the prefix the caller writes, it would underline the paragraph as a
     // setext heading. In paragraph text Linear escapes it (`\--`, `\==`);
@@ -1086,17 +1217,21 @@ class Writer {
     // A file block label's later lines are written without the item's
     // prefix: their indentation goes, as before.
     if (!inCode && this.fileBlockIndent > 0 && !startsBlock) return { from: lineStart, to: ownText, text: '' };
+    // Linear reads a hard break with the spaces after it: a line after a
+    // former backslash break loses its own indentation, and its start is
+    // escaped as at the start of a line (`\--flag`, `\#`, `1\.`).
+    if (!inCode && paragraph && this.breakLineStarts.has(lineStart) && (!startsBlock || glued || AFTER_BREAK_ESCAPED.test(this.source.slice(ownText, lineEnd)))) {
+      return { from: lineStart, to: ownText, text: '' };
+    }
     // The rest of the line's indentation is its own: Linear keeps it, and
     // the columns of a tab the prefixes took only in part stay as spaces.
     // Under a written prefix that ends at another column than the source's
     // prefixes, a tab can span other columns than in the source; before
     // text that could open a block it becomes the spaces it spanned there.
     // Where the prefixes end at the source's column, the tabs span the same
-    // columns and stay, as Linear keeps them. A number with a dot that
-    // starts paragraph text is escaped, so it reads as text at any column:
-    // its tabs stay too.
-    const escapedNumber = paragraph && NUMBER_TEXT.test(this.source.slice(ownText, lineEnd));
-    if (!inCode && startsBlock && this.containers.length > 0 && this.source.slice(at, ownText).includes('\t') && !escapedNumber && !this.samePrefixColumns(lineStart, at, pad)) {
+    // columns and stay, as Linear keeps them. Before a number that reads
+    // as text at any column (`escapedNumber`, `glued`) its tabs stay too.
+    if (!inCode && startsBlock && !glued && this.containers.length > 0 && this.source.slice(at, ownText).includes('\t') && !escapedNumber && !this.samePrefixColumns(lineStart, at, pad)) {
       const column = (offset: number): number => [...this.source.slice(lineStart, offset)].reduce(advanceColumn, 0);
       return { from: lineStart, to: ownText, text: ' '.repeat(pad + column(ownText) - column(at)) };
     }

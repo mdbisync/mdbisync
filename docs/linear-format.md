@@ -145,9 +145,13 @@ Blocks:
   content with a space after it, as Linear does: `1. Plan` followed by
   `        2.` is written `1. Plan` and `   2. `. Indented four or more
   columns past the content, the line reads as indented code in Linear;
-  `fix` writes the same form there. Linear reads the line as text under a
-  quote, after more lines of the paragraph, before more text or an ordered
-  list in the item, and with `)` or `+`: there it stays as it is.
+  `fix` writes the same form there. Numbered lines after it (`2. step`,
+  `3. pack`, not `1.`) become the items of a list in Linear, nested in the
+  empty item where they reach its content: `fix` writes them that way,
+  unescaped, which still reads as the paragraph's text. Linear reads the
+  line as text under a quote, after more lines of the paragraph, before
+  other text or an ordered list in the item, and with `)` or `+`: there it
+  stays as it is.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
   `- [X] done`. A checkbox without a label keeps one space after it.
 - A paragraph's text that starts like a list marker gets its marker
@@ -156,7 +160,11 @@ Blocks:
   becomes `1. 3\. plum`. Text split off at an image gets the same escape.
   A literal number followed by a dot and whitespace also gets its dot
   escaped when it starts a paragraph line. A tab or nonbreaking space
-  immediately after that dot becomes a space.
+  immediately after that dot becomes a space. A number and dot alone on a
+  paragraph line before its last get the escape when spaces follow the dot,
+  as Linear writes them; in a list item a bare `2.` there is written
+  `2\. `, which Linear keeps as text where it would otherwise end the
+  paragraph with an empty item.
   Linear keeps such text but can return `4\) pear` and a lone `\+` without
   their escapes. The sync restores an escape where the text would read as
   a block. A lone `+` on a paragraph continuation line stays plain.
@@ -348,8 +356,11 @@ Inline text:
 - A backslash line break (`\` at the end of a line) loses its backslash,
   as Linear writes it; spaces or a tab before it stay. Linear holds every
   line ending of a paragraph as a line break, so the break stays one there
-  (see [`hard-break-backslash`](#hard-break-backslash)). A break written
-  with two or more trailing spaces stays as it is.
+  (see [`hard-break-backslash`](#hard-break-backslash)). The next line
+  loses its own indentation, as in Linear, and its start is escaped as at
+  a line's start: after `Run it \`, a line `  --flag` is written
+  `\--flag`. A break written with two or more trailing spaces stays as it
+  is.
 - A `-` or `*` that starts a line of a paragraph as text gets a backslash,
   as Linear writes it: `-- a remark` becomes `\-- a remark`, and `*note`
   becomes `\*note`. After a continuation line's own indentation only the
@@ -379,7 +390,11 @@ Inline text:
   tabs: under `1. Plan`, two tabs before `2. step` become four spaces and a
   tab before `2\. step`. Where `fix` writes a shorter prefix than the
   source's, a tab before text that could open a block becomes the spaces it
-  spanned, except before an escaped number, which reads as text anywhere.
+  spanned, except before an escaped number or a number with no space after
+  its dot or parenthesis (`3.x`), which read as text anywhere. A lazy line,
+  indented less than its item's content, whose text is such a number is
+  written under the prefix alone: under `10.  Plan`, a tab before `2. step`
+  becomes four spaces before `2\. step`.
 
 ## How documents look in Linear
 

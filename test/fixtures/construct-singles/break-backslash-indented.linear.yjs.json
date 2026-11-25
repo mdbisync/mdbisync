@@ -1,0 +1,78 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Run it ","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"--flag","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Then ","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"-x note","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"Text ","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"plain words","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"A heading mark ","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"# step","marks":{"attribution":"user"}}
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Run it ","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"--flag","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Next","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Run it ","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"-x","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-5a6d18c5","marks":{"attribution":"user"}}]}
+  ]
+}

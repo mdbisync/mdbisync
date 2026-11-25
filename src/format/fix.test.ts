@@ -359,15 +359,29 @@ describe('a backslash line break', () => {
     ['- Pack the tent\\\n  and the stove\n- Leave early', '* Pack the tent\n  and the stove\n* Leave early'],
     ['- [ ] Water the fern\\\n  on Sunday', '- [ ] Water the fern\n  on Sunday'],
     ['[two\\\nlines](https://example.com)', '[two\nlines](<https://example.com>)'],
-    ['Tabs after\\\n\tthe break', 'Tabs after\n\tthe break'],
+    // Linear reads the indentation after a hard break with the break: it goes,
+    // and the line's start is escaped as at the start of a line.
+    ['Tabs after\\\n\tthe break', 'Tabs after\nthe break'],
+    ['Run it \\\n  --flag', 'Run it \n\\--flag'],
+    ['Run it \\\n        -x note', 'Run it \n\\-x note'],
+    ['Run it \\\n\t-x', 'Run it \n\\-x'],
+    ['Run it \\\n  plain text', 'Run it \nplain text'],
+    ['Run it \\\n        # step', 'Run it \n\\# step'],
+    ['Run it \\\n        1. step', 'Run it \n1\\. step'],
+    ['Run it \\\n  3.x', 'Run it \n3.x'],
+    // A bare marker after a break is the paragraph's text, not Linear's empty item.
+    ['* Note\\\n    *\n      2. step', '* Note\n  \\*\n      2\\. step'],
+    ['* Run it \\\n      --flag', '* Run it \n  \\--flag'],
+    ['1. Run it \\\n       -x', '1. Run it \n   \\-x'],
     // The spaces or tab before the backslash stay, as Linear keeps them.
     ['Spaces before \\\nthe backslash', 'Spaces before \nthe backslash'],
     ['A tab before\t\\\nthe backslash', 'A tab before\t\nthe backslash'],
     ['A break\\\n-- then a dash line', 'A break\n\\-- then a dash line'],
     // Inline HTML cannot interrupt a paragraph, so this line stays text.
     ['Lanterns\n<b>\\\nabove', 'Lanterns\n<b>\nabove'],
-    // A list starting at 2 cannot interrupt a paragraph: `2.` is text, not a prefix.
-    ['Lanterns\n2. \\\nabove', 'Lanterns\n2. \nabove'],
+    // A list starting at 2 cannot interrupt a paragraph: `2.` is text, not a
+    // prefix. Before more lines Linear escapes it.
+    ['Lanterns\n2. \\\nabove', 'Lanterns\n2\\. \nabove'],
   ];
   for (const [input, expected] of written) {
     it(`is written as Linear writes it, without the backslash: ${JSON.stringify(input)}`, () => {
@@ -988,10 +1002,33 @@ describe('what fix leaves alone', () => {
       ['> 1. Plan\n>    2.', '> 1. Plan\n>    2.'],
       ['1. Plan\n   Note\n   2.', '1. Plan\n   Note\n   2.'],
       ['1. Plan\n\n   Note\n   2.', '1. Plan\n\n   Note\n   2.'],
-      ['1. Plan\n   2.\n   more', '1. Plan\n   2.\n   more'],
       ['* Plan\n  Note\n  *', '* Plan\n  Note\n  \\*'],
       ['1. Trip\n   1. Plan\n      3)', '1. Trip\n   1. Plan\n      3)'],
       ['1. Plan\n   +', '1. Plan\n   +'],
+      // Numbered lines after it: Linear reads the items of a list, nested in
+      // the empty item where they reach its content, else after it. Their
+      // numbers are not 1 and an empty item cannot interrupt the paragraph:
+      // Markdown still reads the paragraph's text.
+      ['1. Trip\n\t1. \n\t\t2. step', '1. Trip\n   1. \n      2. step'],
+      ['1. Trip\n\t1.\n\t\t2. step\n\t\t3. pack', '1. Trip\n   1. \n      2. step\n      3. pack'],
+      ['1. Trip\n\t2. \n\t\t3. step', '1. Trip\n   2. \n      3. step'],
+      ['* Trip\n\t*\n\t\t2. step', '* Trip\n  * \n    2. step'],
+      ['1. Trip\n\t1. Plan\n\t\t1. \n\t\t\t2. step', '1. Trip\n   1. Plan\n      1. \n         2. step'],
+      ['1. Trip\n   1. \n      2. step', '1. Trip\n   1. \n      2. step'],
+      ['1. Trip\n\t1. \n\t\t2. step\n2. Pack', '1. Trip\n   1. \n      2. step\n2. Pack'],
+      ['1. Trip\n\t2. \n\t3. Pack', '1. Trip\n   2. \n   3. Pack'],
+      // Other lines after it keep the paragraph text (see the next test).
+      ['1. Trip\n\t1. \n\t\t1. step', '1. Trip\n    1\\. \n    \t1\\. step'],
+      ['1. Trip\n\t1. \n\t\t2. step\n\t\t4. pack', '1. Trip\n    1\\. \n    \t2\\. step\n    \t4\\. pack'],
+      ['1. Trip\n\t1. \n\t\t- step', '1. Trip\n    1\\. \n    \t- step'],
+      // Not when a line ending falls inside markup, a number has a leading
+      // zero, a line is four columns past its content (code in Linear) or
+      // the lines follow a hard break.
+      ['1. Trip\n   1.\n      2. step *a\n      3. b* c', '1. Trip\n   1\\. \n      2\\. step *a\n      3\\. b* c'],
+      ['1. Trip\n   1.\n      02. step\n      03. pack', '1. Trip\n   1\\. \n      02\\. step\n      03\\. pack'],
+      ['1. Trip\n   1.\n          2. step', '1. Trip\n   1\\. \n          2\\. step'],
+      ['* Trip\n  *\n        2. step', '* Trip\n  \\*\n        2\\. step'],
+      ['1. Trip\n\t1. \n\t\t2. step\n\t\tmore', '1. Trip\n    1\\. \n    \t2\\. step\n    \tmore'],
       // An ordered list after it would continue Linear's empty item and be renumbered; a bullet list does not.
       ['1. Plan\n   2.\n   1. x', '1. Plan\n   2.\n   1. x'],
       ['* Plan\n  *\n  * x', '* Plan\n  * \n  * x'],
@@ -1010,6 +1047,58 @@ describe('what fix leaves alone', () => {
     const fixed = fixText(text, { linkedFileExists: () => true });
     assert.equal(fixed, '1. Plan\n   \\*\n\n   ![Diagram](d.png)');
     assert.equal(fixText(fixed, { linkedFileExists: () => true }), fixed);
+  });
+
+  it('escapes a bare number before more lines of its paragraph as Linear does', () => {
+    // With spaces after the dot Linear escapes it and keeps the escape. Without
+    // them it reads an empty item in a list item, and writes an escaped number
+    // back unescaped: `2\\. ` is the same text, and Linear keeps it. Outside
+    // containers Linear reads text there.
+    const cases: Array<[string, string]> = [
+      ['Note\n\t2. \nmore', 'Note\n\t2\\. \nmore'],
+      ['Note\n\t\t2.  \n\t3. Pack', 'Note\n\t\t2\\.  \n\t3\\. Pack'],
+      ['Note\n\t1. Plan\n\t2. \n\t3. Pack', 'Note\n\t1\\. Plan\n\t2\\. \n\t3\\. Pack'],
+      ['Note\n\t2.\nmore', 'Note\n\t2.\nmore'],
+      ['1. Plan\n   2.\n   more', '1. Plan\n   2\\. \n   more'],
+      ['1. Trip\n\t2.\nmore', '1. Trip\n    2\\. \n   more'],
+      ['1. Trip\n\t\t2.\nmore', '1. Trip\n    \t2\\. \n   more'],
+      ['* Trip\n\t\t2.\nmore', '* Trip\n    \t2\\. \n  more'],
+      // The paragraph's last line keeps its number as before.
+      ['Note\n\t2. ', 'Note\n\t2.'],
+    ];
+    for (const [text, expected] of cases) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, JSON.stringify(text));
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${JSON.stringify(text)}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${JSON.stringify(text)}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${JSON.stringify(text)}`);
+    }
+  });
+
+  it('keeps the tabs before a number without a space and writes a lazy number line under its prefix, as Linear does', () => {
+    const cases: Array<[string, string]> = [
+      // A number with a dot or parenthesis and no space after it opens no block: its tabs stay.
+      ['1. Trip\n\t1. Plan\n\t\t\t3.++++x', '1. Trip\n   1. Plan\n       \t3.++++x'],
+      ['1. Trip\n\t1. Plan\n\t\t\t\t3.++++x', '1. Trip\n   1. Plan\n       \t\t3.++++x'],
+      ['* Trip\n\t* Plan\n\t\t\t3.++++x', '* Trip\n  * Plan\n      \t3.++++x'],
+      ['1. Trip\n\t1. Plan\n\t\t\t3)x', '1. Trip\n   1. Plan\n       \t3)x'],
+      // A lazy line (indented less than the item's content) of such a number
+      // is written under the prefix alone, as other lazy text.
+      ['10.  Plan\n\t2. step', '10. Plan\n    2\\. step'],
+      ['10.  Plan\n  \t2. step', '10. Plan\n    2\\. step'],
+      ['10.  Load\n\t11.++x (y)', '10. Load\n    11.++x (y)'],
+      // In an HTML attribute or a link title the indentation is content.
+      ['*   Trail <span title="\n\t\t3.x">here</span>', '* Trail <span title="\n      3.x">here</span>'],
+      // Other text that could open a block keeps the indentation that kept it text.
+      ['10.  fern\n    # x', '10. fern\n        \\# x'],
+    ];
+    for (const [text, expected] of cases) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, JSON.stringify(text));
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${JSON.stringify(text)}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${JSON.stringify(text)}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${JSON.stringify(text)}`);
+    }
   });
 
   it('keeps the tabs of a numbered continuation line after the columns its item takes, as Linear does', () => {
