@@ -125,9 +125,23 @@ describe('triple-plus section markers', () => {
     ['list item boundary', '* Tray\n  +++\n  Seeds\n* Tools\n  +++', '* Tray\n\n  +++ \n\n  Seeds\n\n  +++\n* Tools\n\n  +++'],
     ['section first in item', '* +++\n\n  Seeds\n\n  +++\n* Tools', '* \n\n  +++ \n\n  Seeds\n\n  +++\n* Tools'],
     ['lazy list continuation', '* Tray\n+++\nSeeds\n+++', '* Tray\n\n+++ \n\nSeeds\n\n+++'],
+    ['literal marker in a lazy quote', '> +++\nSeeds', '> +++\n> Seeds'],
+    ['literal marker in a lazy item', '* +++\nSeeds', '* +++\n  Seeds'],
+    ['indent at the document root does not move the closer into a list', '  +++\n\n* Seeds', '+++ \n\n* Seeds\n\n+++'],
+    ['indent in a quote does not move the closer into a list', '>   +++\n>\n> * Seeds',
+      '> +++ \n>\n> * Seeds\n>\n> +++'],
     ['escaped marker', '\\+++\n\nSeeds', '\\+++\n\nSeeds'],
     ['fenced marker', '```\n+++\n```', '```\n+++\n```'],
+    ['multiline link label', 'Read [the\n+++\nnotes](/notes).', 'Read [the\n+++\nnotes](</notes>).'],
+    ['a code span does not affect a later marker', '`first\n+++\nlast`\n\n+++\n\nSeeds', '`first\n+++\nlast`\n\n+++ \n\nSeeds\n\n+++'],
+    ['marker inside display math', '$$\na\n+++\nb\n$$', '```math\na\n+++\nb\n```'],
+    ['marker inside a table row', '| a |\n| - |\n| b |\n+++\nSeeds', '| a |\n| -- |\n| b |\n| +++ |\n| Seeds |\n'],
     ['open code fence at end of section', '+++\n\n```\nSeeds', '+++ \n\n```\nSeeds\n```\n\n+++'],
+    ['indented backticks do not close the fence', '+++\n\n```\n    ```', '+++ \n\n````\n    ```\n````\n\n+++'],
+    ['open fence ends at the next item', '* Tray\n\n  +++\n\n   ```\n   Seeds\n* Tools',
+      '* Tray\n\n  +++ \n\n  ```\n  Seeds\n  ```\n\n  +++\n* Tools'],
+    ['open HTML would swallow the closer', '+++\n\n<pre>\nSeeds', '+++\n\n<pre>\nSeeds'],
+    ['unclosed section with only an empty nested section stays literal', '+++\n\n+++ Tray\n\n+++', '+++\n\n+++ Tray\n\n+++'],
   ] as const;
   for (const [label, input, expected] of cases) {
     it(label, () => {

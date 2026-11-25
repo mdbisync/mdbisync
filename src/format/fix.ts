@@ -15,7 +15,7 @@ import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
-import { joinSectionItemLines, plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
+import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
 import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
@@ -47,6 +47,7 @@ export function fixText(text: string, options: FixOptions = {}): string {
   const unbroken = backslashBreaksAsLinear(lf);
   if (unbroken === undefined) return text;
   const fixed = fixBody(unbroken, options);
+  if (fixed === undefined) return text;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
   // block): such a file stays with its author.
@@ -133,13 +134,15 @@ function breakShape(tree: Root): unknown {
   return shape(tree);
 }
 
-function fixBody(body: string, options: FixOptions): string {
+function fixBody(body: string, options: FixOptions): string | undefined {
   if (body.trim() === '') return '';
   let current = body;
+  let rewroteSections = false;
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    const source = pass === 0 ? current : joinSectionItemLines(current);
+    const source = pass === 0 ? current : plusSectionsAsLinear(current);
+    rewroteSections ||= source !== current;
     const tree = parse(source, [], true);
     // Lint checked the source; a rewrite may expose a table or references it
     // did not see. Text split off at an image is escaped so it exposes none
@@ -186,7 +189,8 @@ function fixBody(body: string, options: FixOptions): string {
     if (next === current) return next;
     current = next;
   }
-  return current;
+  // Any section edit still changing after the passes is ambiguous.
+  return rewroteSections ? undefined : current;
 }
 
 /** Re-spell bold across line breaks and around a single link in the written body. */
@@ -648,8 +652,10 @@ class Writer {
     const lines = content.split('\n').map((text, at) => (text === '' && !codeLines.has(at) ? '' : indent + text));
     // A section can be the first block of an item. Linear keeps an empty
     // paragraph on the marker line and puts the section on its own line.
-    if (item.checked == null && item.children.length > 1 && first?.type === 'paragraph'
-      && /^\+{3} /.test(this.source.slice(start(first), start(first) + 4))) {
+    if (item.checked == null && first?.type === 'paragraph'
+      && this.source.slice(start(first), end(first)) === '+++ '
+      && item.children.slice(1).some((child) => child.type === 'paragraph' && this.source.slice(start(child), end(child)) === '+++')
+      && !/(?:^|\n)[ \t>]*\+{4}/.test(this.source.slice(start(first), end(item)))) {
       return `${marker} \n\n${lines.join('\n')}`;
     }
     return `${marker} ${lines.join('\n').slice(indent.length)}`;

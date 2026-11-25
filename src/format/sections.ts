@@ -9,7 +9,7 @@
 // between the signs, stays a nested quote, as does `>>>` continuing a quote
 // that a line above opened (its first `>` belongs to that quote).
 
-import type { Nodes } from 'mdast';
+import type { Blockquote, Code, ListItem, Nodes, Root } from 'mdast';
 import { end, parse, start, visit, type MicromarkExtension } from './markdown.ts';
 
 /** `lines`: the section lines the edit writes. */
@@ -23,10 +23,11 @@ const PLUS_MARKER = /^\+{3}(?!\+)(.*)$/;
 // For this scan only, give a +++ line a block node so it can interrupt a
 // paragraph or end a lazy list/quote continuation. Fences and HTML blocks
 // still own their content. The ordinary Markdown parser writes the result.
-const plusSectionSyntax: MicromarkExtension = {
-  flow: {
+function plusSectionSyntax(ignored: ReadonlySet<number>): MicromarkExtension {
+  return { flow: {
     43: {
       tokenize(effects, ok, nok) {
+        if (ignored.has(this.now().offset)) return nok;
         let signs = 0;
         return opening;
 
@@ -50,8 +51,24 @@ const plusSectionSyntax: MicromarkExtension = {
         }
       },
     },
-  },
-};
+  } };
+}
+
+/** The ordinary parser already owns these markers inside another construct. */
+function parseForSections(body: string): Root {
+  const ignored = new Set<number>();
+  if (/[`$[|]/.test(body)) {
+    visit(parse(body), (node) => {
+      const enclosed = node.type === 'link' || node.type === 'linkReference' || node.type === 'image'
+        || node.type === 'imageReference' || node.type === 'definition' || node.type === 'inlineCode' || node.type === 'table';
+      if (!enclosed && node.type !== 'paragraph') return;
+      const raw = body.slice(start(node), end(node));
+      if (!enclosed && !/^\$\$\n[\s\S]*\n\$\$$/.test(raw)) return;
+      for (const match of raw.matchAll(/\n[ \t>]*\+{3}/g)) ignored.add(start(node) + match.index + match[0].length - 3);
+    });
+  }
+  return parse(body, [], false, [plusSectionSyntax(ignored)]);
+}
 
 /**
  * Pairs triple-plus lines within each Markdown container. A title always
@@ -61,11 +78,11 @@ const plusSectionSyntax: MicromarkExtension = {
  */
 export function plusSectionsAsLinear(body: string): string {
   if (!body.includes('+++')) return body;
-  let tree = parse(body, [], false, [plusSectionSyntax]);
+  let tree = parseForSections(body);
   const joined = joinSectionItemLines(body, tree);
   if (joined !== body) {
     body = joined;
-    tree = parse(body, [], false, [plusSectionSyntax]);
+    tree = parseForSections(body);
   }
   const edits: Edit[] = [];
   visit(tree, (parent, ancestors) => {
@@ -75,70 +92,99 @@ export function plusSectionsAsLinear(body: string): string {
     if (markers.every((marker) => marker === null)) return;
     // Longer delimiters pair by their own width. Their stored spelling
     // also uses three signs, so leave mixed-width containers to the author.
-    if (blocks.some((node) => node.type === 'paragraph' && /^\+{4}/.test(body.slice(start(node), start(node) + 4)))) return;
+    if (blocks.some((node) => node.type === 'paragraph' && /(?:^|\n)[ \t>]*\+{4}/.test(body.slice(start(node), end(node))))) return;
     const depth = ancestors.length;
-    const lastContent = markers.findLastIndex((marker) => marker === null);
+    const lastContent = markers.findLastIndex((marker, index) => marker === null && blocks[index]!.type !== 'definition');
     const open: number[] = [];
     const roles = new Map<number, string>();
-    let closedAfterContent = false;
+    let closedAfterContent = 0;
     for (const [index, marker] of markers.entries()) {
       if (marker === null) continue;
       const title = marker[1]!.trim();
       if (title === '' && open.length > 0) {
         const opener = open.pop()!;
-        if (opener > lastContent) closedAfterContent = true;
+        if (opener > lastContent) closedAfterContent++;
         roles.set(opener, `+++ ${markers[opener]![1]!.trim()}`);
         roles.set(index, '+++');
       } else if (index < blocks.length - 1) {
         open.push(index);
       }
     }
-    const implicit = open.filter((index) => index < lastContent);
-    const last = blocks.at(-1)!;
-    // The writer will close an open code fence. An inserted marker before
-    // that happens would land in the code, so supply its fence first.
-    const lastLineEnd = lineEndAt(body, end(last));
-    const fence = last.type === 'code' ? unclosedFence(body, last) : '';
+    // A lazy line after a final marker in a quote or item is ordinary
+    // paragraph text in Linear. Its readback carries the missing prefix,
+    // so it is indistinguishable from a tight, unpaired opener there.
+    const tightFirstBlock = (index: number): boolean => parent.type !== 'root' && index === 0
+      && blocks[index + 1] !== undefined
+      && blocks[index + 1]!.position!.start.line === blocks[index]!.position!.end.line + 1;
+    const implicit = open.filter((index) => index < lastContent && !tightFirstBlock(index));
     for (const index of implicit) roles.set(index, `+++ ${markers[index]![1]!.trim()}`);
+    // A final title-like paragraph exports just like the header of an empty
+    // inner section. Keep an already written outer opener in that case.
+    const closes = implicit.filter((index) => {
+      if (closedAfterContent === 0 || markers[index]![0] !== roles.get(index)) return true;
+      closedAfterContent--;
+      return false;
+    });
+    const last = blocks.at(-1)!;
+    if (closes.length > 0 && last.type === 'html' && parse(`${last.value}\n\n+++`).children.at(-1)?.type !== 'paragraph') return;
 
     for (const [index, marker] of markers.entries()) {
       if (marker === null) continue;
       const node = blocks[index]!;
       const at = start(node);
+      if (!roles.has(index) && parent.type !== 'root' && index === 0
+        && (index === blocks.length - 1 || tightFirstBlock(index))) continue;
+      const previous = blocks[index - 1];
+      // The image writer can split off a literal section title and escape
+      // its final marker. Keep those lines together for that rewrite.
+      if (!roles.has(index) && previous?.type === 'paragraph'
+        && previous.position!.end.line + 1 === node.position!.start.line
+        && (body.startsWith('\\+++', start(previous))
+          || previous.children.some((child) => child.type === 'image' || child.type === 'imageReference'))) continue;
       const line = prefixes(body, at);
       const blank = line.prefix.trimEnd();
       const before = index > 0 || line.linePrefix === line.prefix && parent.type === 'root' && line.lineStart > 0;
       const written = roles.get(index) ?? marker[0].trimEnd();
+      const to = lineEndAt(body, at);
+      // The marker ends a paragraph even when the next line is lazy.
+      // Keep any enclosing quote that the next line continues.
+      const next = body.slice(to + 1, lineEndAt(body, to + 1));
+      const after = index < blocks.length - 1 ? `\n${blank}`
+        : next.trim() === '' ? '' : `\n${sharedQuotePrefix(blank, next)}`;
       edits.push({
-        from: line.lineStart, to: lineEndAt(body, at),
-        text: `${before ? `${blank}\n` : ''}${line.linePrefix}${written}${index < blocks.length - 1 ? `\n${blank}` : ''}`,
+        from: line.lineStart, to,
+        text: `${before ? `${blank}\n` : ''}${line.linePrefix}${written}${after}`,
         depth,
       });
     }
-    if (implicit.length > 0) {
-      const prefix = prefixes(body, start(blocks[implicit[0]!]!)).prefix;
+    if (closes.length > 0) {
+      const prefix = sectionPrefix(body, parent, start(blocks[closes[0]!]!));
       const blank = prefix.trimEnd();
-      // A final title-like paragraph inside an untitled section exports
-      // just like the header of an empty inner section. Keep the written
-      // outer opener and final closer in this ambiguous form.
-      const count = implicit.filter((index) => {
-        const marker = markers[index]![0];
-        return !closedAfterContent || marker !== roles.get(index);
-      }).length;
-      if (count > 0) {
-        const closes = `\n${blank}\n${prefix}+++`.repeat(count);
-        edits.push({ from: lastLineEnd, to: lastLineEnd, text: (fence === '' ? '' : `\n${prefix}${fence}`) + closes, depth });
-      }
+      // An unclosed fence can end at the start of the next item's line.
+      // Insert after its own last line and supply its fence first.
+      const at = lineEndAt(body, Math.max(start(last), end(last) - 1));
+      const fence = last.type === 'code' ? unclosedFence(body, last) : '';
+      const markers = `\n${blank}\n${prefix}+++`.repeat(closes.length);
+      edits.push({ from: at, to: at, text: (fence === '' ? '' : `\n${prefix}${fence}`) + markers, depth });
     }
   });
   return applyEdits(body, edits);
 }
 
+/** The explicit quote markers the two lines share, through the last `>`. */
+function sharedQuotePrefix(first: string, next: string): string {
+  let lastQuote = -1;
+  for (let index = 0; index < first.length && first[index] === next[index]; index++) {
+    if (first[index] === '>') lastQuote = index;
+  }
+  return first.slice(0, lastQuote + 1);
+}
+
 /** Read Linear's empty item paragraph and section below it as a single list item. */
-export function joinSectionItemLines(body: string, tree?: Nodes): string {
+function joinSectionItemLines(body: string, tree: Nodes): string {
   if (!/(?:[*+.-]|\)) \n[ >]*\n[ >]*\+{3} /.test(body)) return body;
   const edits: Edit[] = [];
-  visit(tree ?? parse(body, [], false, [plusSectionSyntax]), (node, ancestors) => {
+  visit(tree, (node, ancestors) => {
     if (node.type !== 'thematicBreak' || !body.startsWith('+++ ', start(node))) return;
     const { lineStart, linePrefix } = prefixes(body, start(node));
     if (lineStart === 0) return;
@@ -153,12 +199,25 @@ export function joinSectionItemLines(body: string, tree?: Nodes): string {
   return applyEdits(body, edits);
 }
 
-function unclosedFence(body: string, code: Nodes): string {
+function sectionPrefix(body: string, parent: Root | Blockquote | ListItem, at: number): string {
+  if (parent.type === 'root') return '';
+  const { prefix } = prefixes(body, at);
+  if (parent.type === 'blockquote') return prefix.slice(0, prefix.lastIndexOf('>') + 1) + ' ';
+  // Use the item's content indent, excluding optional indent on this marker.
+  const marker = /^(?:[*+-]|\d{1,9}[.)])(?: {1,4}|\t)/.exec(body.slice(start(parent), start(parent) + 14));
+  return marker === null ? prefix : prefixes(body, start(parent)).prefix + ' '.repeat(marker[0].length);
+}
+
+function unclosedFence(body: string, code: Code): string {
   const opening = /^(`{3,}|~{3,})/.exec(body.slice(start(code), lineEndAt(body, start(code))))?.[1];
   if (opening === undefined) return '';
-  const lastStart = body.lastIndexOf('\n', end(code) - 1) + 1;
-  const closing = body.slice(lastStart, end(code)).replace(/^[\t >]*/, '');
-  return lastStart > start(code) && closing.trimEnd().startsWith(opening) && /^(`+|~+)[ \t]*$/.test(closing) ? '' : opening;
+  const position = code.position!;
+  const trailingBreak = body[end(code) - 1] === '\n';
+  const rows = position.end.line - position.start.line - Number(trailingBreak);
+  // The parser's literal has no closing line. Reading just the last
+  // source line as a fence would mistake indented code text for one.
+  const emptyClosed = code.value === '' && rows === 1 && !trailingBreak && body.slice(start(code), end(code)).trimEnd().endsWith(opening);
+  return emptyClosed || rows > code.value.split('\n').length ? '' : opening;
 }
 
 /**
