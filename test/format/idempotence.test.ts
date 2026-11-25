@@ -22,7 +22,7 @@ const markdown = corpus.files.filter((file) => file.synced && file.kind === 'mar
 const URL_LINES: ReadonlyArray<readonly [string, string]> = [
   ['https://example.com/a\\\nNext line.', '[https://example.com/a\\\\](<https://example.com/a%5C>)\nNext line.'],
   ['https://example.com/a?k=1\\_2\\_\\_3&t=4~5~6*7*8', '[https://example.com/a?k=1\\\\\\_2\\\\\\_\\\\\\_3&t=4\\~5\\~6\\*7\\*8](<https://example.com/a?k=1%5C_2%5C_%5C_3&t=4~5~6*7*8>)'],
-  ['Site:www.example.com, "www.example.com" and [https://example.com].', 'Site:[www.example.com](<http://www.example.com>), "[www.example.com](<http://www.example.com>)" and \\[[https://example.com](<https://example.com>)\\].'],
+  ['Site:www.example.com, "www.example.com" and [https://example.com].', 'Site:www.example.com, "[www.example.com](<http://www.example.com>)" and \\[[https://example.com](<https://example.com>)\\].'],
 ];
 
 describe('fix is idempotent over the corpus', () => {

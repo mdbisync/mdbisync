@@ -629,6 +629,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "links/bare-domain.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "links/bare-url-backslash.md": {
       "yjs": "recorded",
       "fixedPoint": true

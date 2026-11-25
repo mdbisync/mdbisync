@@ -1879,6 +1879,14 @@ fixtures:
     class: fixable
     basis: known
     canary: kx-748a202d
+  - file: "links/bare-domain.md"
+    group: links
+    construct: autolink-literal
+    class: fixable
+    basis: known
+    canary: kx-79a561ce
+    corpus: false
+    note: "A public bare domain becomes an HTTP link, including the URL tail. Relative paths and standalone Markdown filenames stay as text."
   - file: "links/bare-url.md"
     group: links
     construct: autolink-literal

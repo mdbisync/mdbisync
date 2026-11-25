@@ -1,0 +1,262 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Pricing catalog kx-79a561ce",
+          "marks": {
+            "attribution": "user"
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Read ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "example.com:8080/catalog",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://example.com:8080/catalog",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ", ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "archive.example.co.uk/parts",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://archive.example.co.uk/parts",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ", and ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "example.net?view=list#spring",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://example.net?view=list#spring",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ".",
+          "marks": {
+            "attribution": "user"
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Try +",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "example.com",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://example.com",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ", ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "url=example.com",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://url=example.com",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ", archive.md, handbook.md, and www.example.test/a].",
+          "marks": {
+            "attribution": "user"
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "For availability, see ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "example.com/?contact=team@example.net",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://example.com/?contact=team@example.net",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": " and ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "example.com/a",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://example.com/a",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ")",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "example.net",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://example.net",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ".",
+          "marks": {
+            "attribution": "user"
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "See ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "Café.com",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://xn--Caf-dma.com",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ", ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "Café.com",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://xn--Cafe-yvc.com",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": " and ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "example.中国",
+          "marks": {
+            "attribution": "user",
+            "link": {
+              "href": "http://example.xn--fiqs8s",
+              "noEmbed": null
+            }
+          }
+        },
+        {
+          "text": ".",
+          "marks": {
+            "attribution": "user"
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "The entry ",
+          "marks": {
+            "attribution": "user"
+          }
+        },
+        {
+          "text": "example.org",
+          "marks": {
+            "attribution": "user",
+            "code": {}
+          }
+        },
+        {
+          "text": " is shown as code.",
+          "marks": {
+            "attribution": "user"
+          }
+        }
+      ]
+    }
+  ]
+}
