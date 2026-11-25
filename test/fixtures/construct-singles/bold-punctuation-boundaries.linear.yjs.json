@@ -1,0 +1,13 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"(5 bags","marks":{"attribution":"user","strong":{}}},{"text":")","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"[5 bags","marks":{"attribution":"user","strong":{}}},{"text":"]","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"5 bags","marks":{"attribution":"user","strong":{}}},{"text":"**!**","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"See ","marks":{"attribution":"user"}},{"text":"(5 bags","marks":{"attribution":"user","strong":{}}},{"text":") today.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"(5 bags)","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-09b751c4","marks":{"attribution":"user"}}]}
+  ]
+}

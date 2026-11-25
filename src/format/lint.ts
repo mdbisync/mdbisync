@@ -8,11 +8,12 @@ import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, bracketedLabel, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
+import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'unplaced-link']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link']);
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
@@ -91,6 +92,8 @@ export function lintText(file: string, text: string, options: LintOptions = {}):
     return sorted();
   }
   lintTree(file, tree, content, report, options);
+  const { unsafeLine } = tabReferences(content);
+  if (unsafeLine !== undefined) report('tab-reference-layout', unsafeLine);
   return sorted();
 }
 

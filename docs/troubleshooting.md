@@ -387,6 +387,8 @@ three rules in [linear-format.md](linear-format.md#lint-rules).
 They also report `unplaced-link` when `fix` cannot write a web address found
 inside other text as a link; the sync sends such a file as it is. See
 [unplaced links](linear-format.md#unplaced-link).
+The same applies to [`tab-reference-layout`](linear-format.md#tab-reference-layout)
+when reading a literal tab would change the Markdown.
 
 `mdbisync lint` run on a folder also reports `upload-file-refused` for a
 file an earlier sync captured from Linear (named `<sha256>.<ext>`) that the
