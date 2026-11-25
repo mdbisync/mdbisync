@@ -119,7 +119,7 @@ function fixBody(body: string, options: FixOptions): string {
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    const tree = parse(current);
+    const tree = parse(current, [], true);
     // Lint checked the source; a rewrite may expose a table or references it
     // did not see. Text split off at an image is escaped so it exposes none
     // (a multi-line code span that opens like one is the exception): this
@@ -857,7 +857,9 @@ function literalEdits(source: string, from: number, to: number): Edit[] {
   for (const match of raw.matchAll(/(?<=[\p{L}\p{N}])_+(?=[\p{L}\p{N}])/gu)) {
     for (let at = match.index; at < match.index + match[0].length; at++) escape.delete(at);
   }
-  for (const match of raw.matchAll(CHARACTER_REFERENCE)) escape.add(match.index);
+  for (const match of raw.matchAll(CHARACTER_REFERENCE)) {
+    if (match[0][1] === '#' || decodeEntity(match[0]) !== undefined) escape.add(match.index);
+  }
   // Find shortcodes in the label the next run reads, after the edits above.
   const rawAt: number[] = [];
   let label = '';

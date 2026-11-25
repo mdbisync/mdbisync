@@ -350,6 +350,48 @@ describe('a body that opens with a rule pair', () => {
 });
 
 describe('what fix leaves alone', () => {
+  it('links bare domains Linear recognizes and keeps the other text', () => {
+    const cases = [
+      ['See example.com in the guide.', 'See [example.com](<http://example.com>) in the guide.'],
+      ['(EXAMPLE.ORG), example.net', '([EXAMPLE.ORG](<http://EXAMPLE.ORG>)), [example.net](<http://example.net>)'],
+      ['[example.com] and #example.org', '\\[[example.com](<http://example.com>)\\] and #[example.org](<http://example.org>)'],
+      ['> example.com\n> archive.example.co.uk/page', '> [example.com](<http://example.com>)\n> [archive.example.co.uk/page](<http://archive.example.co.uk/page>)'],
+      ['example.com:8080/path(foo)?view=list#parts.', '[example.com:8080/path(foo)?view=list#parts](<http://example.com:8080/path(foo)?view=list#parts>).'],
+      ['example.com/one(two(three)four)five', '[example.com/one(two(three)four](<http://example.com/one(two(three)four>))five'],
+      ['example.com/a)example.net', '[example.com/a](<http://example.com/a>))[example.net](<http://example.net>)'],
+      ['example.com/guide?.', '[example.com/guide?](<http://example.com/guide?>).'],
+      ['example.com/a%20b and example.com/a%zz', '[example.com/a%20b](<http://example.com/a%20b>) and [example.com/a%zz](<http://example.com/a%25zz>)'],
+      ['example.com/guide[public]/café', '[example.com/guide\\[public\\]/café](<http://example.com/guide%5Bpublic%5D/caf%C3%A9>)'],
+      ['café.com and example.中国', '[café.com](<http://xn--caf-dma.com>) and [example.中国](<http://example.xn--fiqs8s>)'],
+      ['EXAMplé.COM and Café.com', '[EXAMplé.COM](<http://xn--EXAMpl-gva.COM>) and [Café.com](<http://xn--Cafe-yvc.com>)'],
+      ['Café.com', '[Café.com](<http://xn--Cafe-yvc.com>)'],
+      ['catalog.测试 and catalog.xn--0zwm56d', 'catalog.测试 and [catalog.xn--0zwm56d](<http://catalog.xn--0zwm56d>)'],
+      ['archive.md and archive.md/page', 'archive.md and [archive.md/page](<http://archive.md/page>)'],
+      ['example.com&copy; and example.com/a\\b', '[example.com](<http://example.com>)© and [example.com/a](<http://example.com/a>)\\\\b'],
+      ['!example.com, `example.org` and [example.net](https://example.com)', '\\![example.com](<http://example.com>), `example.org` and [example.net](<https://example.com>)'],
+      ['example\\.com beside example.com', 'example\\.com beside [example.com](<http://example.com>)'],
+      ['exam&#112;le.com beside example.com', 'exam&#112;le.com beside [example.com](<http://example.com>)'],
+      ['&#91;www.example.com_', '\\[www.example.com_'],
+      ['See www.example.invalid/guide] here.', 'See www.example.invalid/guide\\] here.'],
+      ['> Notice\n> www.example.invalid/guide] here.', '> Notice\n> www.example.invalid/guide\\] here.'],
+      ['www.example.test/foo,example.com', 'www.example.test/foo,[example.com](<http://example.com>)'],
+      ['www.person@example.com', '[www.person@example.com](<mailto:www.person@example.com>)'],
+      ['example.com/?contact=team@example.net', '[example.com/?contact=team@example.net](<http://example.com/?contact=team@example.net>)'],
+      ['example.com/path?next=https://example.net/', '[example.com/path?next=](<http://example.com/path?next=>)[https://example.net/](<https://example.net/>)'],
+      ['url=example.com and foo+example.org', '[url=example.com](<http://url=example.com>) and [foo+example.org](<http://foo+example.org>)'],
+      ['example.com/?x=1&notanentity;=2', '[example.com/?x=1&notanentity;=2](<http://example.com/?x=1&notanentity;=2>)'],
+    ] as const;
+    for (const [input, expected] of cases) {
+      assert.equal(fixText(input), expected, input);
+      assert.equal(fixText(expected), expected, input);
+      assert.ok(sameMarkdown(input, expected), input);
+      assert.deepEqual(lintText('inventory.md', expected), [], input);
+    }
+
+    const text = 'example.test, www.example.test, example.invalid, x.example.com.md, www.archive.md, config.json, ./example.com, /example.org, src/example.net, example.com:00080, example.net:65536 and -x.example.org.';
+    assert.equal(fixText(text), text);
+  });
+
   const kept: Array<[string, string]> = [
     ['escapes that matter', 'Literal \\*stars\\* and \\[brackets\\]'],
     ['a two-space line break', 'one  \ntwo'],
@@ -945,7 +987,6 @@ describe('what fix leaves alone', () => {
   it('keeps brackets where escaping them would create a link from plain text', () => {
     for (const input of [
       '[https://example.com_',
-      '&#91;www.example.com_',
       '[https://example.com_ *shelf* blue] *jars* ](stock.md) [https://example.com_',
     ]) {
       const body = `# Supplies ###\n\n${input}`;
@@ -973,16 +1014,16 @@ describe('what fix leaves alone', () => {
     // The parser links none of these; Markdown's search for URLs inside text does.
     const cases: Array<[string, string]> = [
       ['Intro _a_.\n\nSee "www.example.com" and _more_.\n', 'Intro *a*.\n\nSee "[www.example.com](<http://www.example.com>)" and *more*.'],
-      ['Host:www.example.com and _more_.\n', 'Host:[www.example.com](<http://www.example.com>) and *more*.'],
+      ['Host:www.example.com and _more_.\n', 'Host:www.example.com and *more*.'],
       ['Open [https://example.com] and _more_.\n', 'Open \\[[https://example.com](<https://example.com>)\\] and *more*.'],
       ['> Quote "www.example.com/a_b".\n> _Next_ line\n', '> Quote "[www.example.com/a_b](<http://www.example.com/a_b>)".\n> *Next* line'],
       ['- Mail "team@example.com" or "www.example.com", "www.example.com".\n', '* Mail "[team@example.com](<mailto:team@example.com>)" or "[www.example.com](<http://www.example.com>)", "[www.example.com](<http://www.example.com>)".'],
       ['| Site | Note |\n| - | - |\n| "www.example.com" | _x_ |\n', '| Site | Note |\n| -- | -- |\n| "[www.example.com](<http://www.example.com>)" | *x* |'],
       ['# Notes on "www.example.com"\n', '# Notes on "[www.example.com](<http://www.example.com>)"'],
-      ['Skip xwww.example.com, then "www.example.com".\n', 'Skip xwww.example.com, then "[www.example.com](<http://www.example.com>)".'],
+      ['Skip xwww.example.com, then "www.example.com".\n', 'Skip [xwww.example.com](<http://xwww.example.com>), then "[www.example.com](<http://www.example.com>)".'],
       ['Mail "&amp;team@example.com" now.\n', 'Mail "&[team@example.com](<mailto:team@example.com>)" now.'],
       // `&notanentity;` names no character, so it is text as written.
-      ['See "www.example.com/?x=1&notanentity;=2" and _more_.\n', 'See "[www.example.com/?x=1\\&notanentity;=2](<http://www.example.com/?x=1&amp;notanentity;=2>)" and *more*.'],
+      ['See "www.example.com/?x=1&notanentity;=2" and _more_.\n', 'See "[www.example.com/?x=1&notanentity;=2](<http://www.example.com/?x=1&notanentity;=2>)" and *more*.'],
       // A `!` before the address stays text: written as is, it would make an image.
       ['See "!www.example.com" and _more_.\n', 'See "\\![www.example.com](<http://www.example.com>)" and *more*.'],
       ['See !https://example.com and _more_.\n', 'See \\![https://example.com](<https://example.com>) and *more*.'],

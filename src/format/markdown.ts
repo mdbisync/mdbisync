@@ -10,6 +10,7 @@ import { gfm } from 'micromark-extension-gfm';
 import { EditMap } from 'micromark-util-edit-map';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { posix } from 'node:path';
+import { bareDomains } from './bare-domain.ts';
 
 type ParserEvent = Parameters<EditMap['consume']>[0][number];
 
@@ -142,22 +143,91 @@ export class MarkdownLimitError extends Error {
   }
 }
 
-export function parse(body: string, mdastExtensions: Extension[] = []): Root {
+export function parse(body: string, mdastExtensions: Extension[] = [], linearDomains = false): Root {
   // GFM's tree transforms (its search for bare URLs inside text) run here,
   // after the parse, so the nodes they make get source positions.
   const gfmExtensions = gfmFromMarkdown();
   const transforms = gfmExtensions.flatMap((extension) => extension.transforms ?? []);
   const untransformed = gfmExtensions.map(({ transforms: _transforms, ...extension }) => extension);
-  const tree = fromMarkdown(body, { extensions: [gfm(), inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
+  const syntax = gfm();
+  if (linearDomains && syntax.text) {
+    // Treat www. like any other bare host in Linear mode. Prevent the
+    // tokenizer from splitting the source of an unsupported www. name.
+    for (const code of [87, 119]) {
+      const constructs = syntax.text[code];
+      if (Array.isArray(constructs)) syntax.text[code] = constructs.filter((construct) => construct.name !== 'wwwAutolink');
+    }
+  }
+  const tree = fromMarkdown(body, { extensions: [syntax, inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
   // The parser counts source offsets after one leading BOM.
-  placeTextLinks(tree, body.startsWith('\uFEFF') ? body.slice(1) : body, transforms);
+  const source = body.startsWith('\uFEFF') ? body.slice(1) : body;
+  placeTextLinks(tree, source, transforms, linearDomains);
+  if (linearDomains && BARE_DOMAIN_HINT.test(source)) placeLinearDomains(tree, source);
   // Validate before returning the tree to any recursive renderer or comparer.
   visit(tree, () => {});
   return tree;
 }
 
+function placeLinearDomains(tree: Root, source: string): void {
+  const points = new PointIndex(source);
+  visit(tree, (node, ancestors) => {
+    if (!('children' in node) || node.type === 'link' || node.type === 'linkReference'
+      || ancestors.some((ancestor) => ancestor.type === 'link' || ancestor.type === 'linkReference')) return;
+    let demoted = false;
+    const children = (node.children as Nodes[]).map((child, index, parts): Nodes => {
+      if (child.type !== 'link' || child.position === undefined || !child.url.startsWith('mailto:')) return child;
+      const opening = source[start(child)];
+      if (opening === '[' || opening === '<') return child;
+      if (!insideBareDomain(parts[index - 1], child, source)) return child;
+      const raw = source.slice(start(child), end(child));
+      demoted = true;
+      return { type: 'text', value: decodeTextLiteral(raw), position: child.position };
+    });
+    node.children = (demoted ? joinUnlinkedText(children) : children)
+      .flatMap((child) => child.type === 'text' && child.position !== undefined ? linkBareDomains(child, source, points) : [child]) as Parent['children'];
+  });
+}
+
+/** A bare address can include an email that GFM identified separately. */
+function insideBareDomain(before: Nodes | undefined, link: Nodes, source: string): boolean {
+  if (before?.type !== 'text' || before.position === undefined || end(before) !== start(link) || !/[/?#]/.test(before.value)) return false;
+  const raw = source.slice(start(before), end(link));
+  const boundary = start(link) - start(before);
+  for (const { from, to } of bareDomains(raw)) {
+    if (from < boundary && to === raw.length) return true;
+  }
+  return false;
+}
+
+/** Join adjoining text after an email becomes part of a bare address. */
+function joinUnlinkedText(children: Nodes[]): Nodes[] {
+  const joined: Nodes[] = [];
+  let run: Text[] = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    const first = run[0]!;
+    const last = run.at(-1)!;
+    const value = run.map((text) => text.value).join('');
+    joined.push({ type: 'text', value, position: { start: first.position!.start, end: last.position!.end } });
+    run = [];
+  };
+  for (const child of children) {
+    if (child.type === 'text' && child.position !== undefined) {
+      const previous = run.at(-1);
+      if (previous && end(previous) !== start(child)) flush();
+      run.push(child);
+    } else {
+      flush();
+      joined.push(child);
+    }
+  }
+  flush();
+  return joined;
+}
+
 /** What the bare-URL search can find in a text: a URL with a scheme, `www.`, or an email address. */
 const TEXT_LINK_HINT = /https?:\/\/|www\.|@/i;
+const BARE_DOMAIN_HINT = /[\p{L}\p{M}\p{N}\p{Extended_Pictographic}]\.[\p{L}\p{M}\p{N}]/u;
 
 /**
  * Runs `transforms`, the GFM search for bare URLs that the parser did not
@@ -172,7 +242,7 @@ const TEXT_LINK_HINT = /https?:\/\/|www\.|@/i;
  * running it per node gives the tree it gives on the whole document; text
  * nodes next to each other are merged.
  */
-function placeTextLinks(tree: Root, source: string, transforms: readonly Transform[]): void {
+function placeTextLinks(tree: Root, source: string, transforms: readonly Transform[], linearDomains: boolean): void {
   if (transforms.length === 0) return;
   const found = new Map<Parent, Text[]>();
   visit(tree, (node, ancestors) => {
@@ -190,13 +260,68 @@ function placeTextLinks(tree: Root, source: string, transforms: readonly Transfo
     for (const node of texts) {
       const paragraph: Paragraph = { type: 'paragraph', children: [{ type: 'text', value: node.value }] };
       for (const transform of transforms) transform({ type: 'root', children: [paragraph] });
-      const parts = mergedText(paragraph.children);
+      const parts = mergedText(linearDomains ? paragraph.children.flatMap((part) => {
+        if (part.type === 'link' && /^http:\/\/www\./i.test(part.url) && part.children[0]?.type === 'text' && /^www\./i.test(part.children[0].value)) {
+          return part.children;
+        }
+        return [part];
+      }) : paragraph.children);
       if (parts.length === 1 && parts[0]!.type === 'text') continue;
       placeParts(parts, node, source, points);
       replaced.set(node, parts);
     }
     if (replaced.size > 0) parent.children = parent.children.flatMap((child) => replaced.get(child) ?? [child]) as Parent['children'];
   }
+}
+
+function linkBareDomains(text: Text, source: string, points: PointIndex): PhrasingContent[] {
+  if (!BARE_DOMAIN_HINT.test(text.value)) return [text];
+  const offset = start(text);
+  const raw = source.slice(offset, end(text));
+  const position = (from: number, to: number) => ({ start: points.at(offset + from), end: points.at(offset + to) });
+  const parts: PhrasingContent[] = [];
+  const rawRanges: Array<{ from: number; to: number }> = [];
+  let at = 0;
+  let decoded = '';
+  const addText = (from: number, to: number) => {
+    const value = decodeTextLiteral(raw.slice(from, to));
+    decoded += value;
+    parts.push({ type: 'text', value, position: position(from, to) });
+  };
+  for (const { from, to, url } of bareDomains(raw)) {
+    // The end of a character reference can split a word in the source.
+    if (raw[from - 1] === ';' && /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});$/.test(raw.slice(Math.max(0, from - 34), from))) continue;
+    if (from > at) addText(at, from);
+    const value = raw.slice(from, to);
+    const range = position(from, to);
+    decoded += value;
+    parts.push({ type: 'link', url, title: null, position: range, children: [{ type: 'text', value, position: range }] });
+    rawRanges.push({ from, to });
+    at = to;
+  }
+  if (at === 0) return [text];
+  if (at < raw.length) addText(at, raw.length);
+  if (decoded === text.value) return parts;
+
+  // Continuation prefixes can appear between the node's source endpoints.
+  // Pair the literal domains in source order with those in the logical text.
+  const valueRanges = [...bareDomains(text.value)];
+  if (valueRanges.length !== rawRanges.length) return [text];
+  const logical: PhrasingContent[] = [];
+  at = 0;
+  let sourceAt = 0;
+  for (const [index, { from, to, url }] of valueRanges.entries()) {
+    const { from: rawFrom, to: rawTo } = rawRanges[index]!;
+    const value = text.value.slice(from, to);
+    if (raw.slice(rawFrom, rawTo) !== value) return [text];
+    if (from > at) logical.push({ type: 'text', value: text.value.slice(at, from), position: position(sourceAt, rawFrom) });
+    const range = position(rawFrom, rawTo);
+    logical.push({ type: 'link', url, title: null, position: range, children: [{ type: 'text', value, position: range }] });
+    at = to;
+    sourceAt = rawTo;
+  }
+  if (at < text.value.length) logical.push({ type: 'text', value: text.value.slice(at), position: position(sourceAt, raw.length) });
+  return logical;
 }
 
 /** Adjacent text nodes as one: the search can return a URL's trailing punctuation as a text node of its own. */
@@ -212,6 +337,17 @@ function mergedText(nodes: readonly PhrasingContent[]): PhrasingContent[] {
 
 /** A backslash escape or a character reference: source that can read as other characters. */
 const DECODED = /\\[!-/:-@[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]{1,31}));/g;
+
+/** Decode the source between domains. The parser's text value checks the result. */
+function decodeTextLiteral(raw: string): string {
+  return raw.replace(DECODED, (reference: string, name: string | undefined) => {
+    if (reference[0] === '\\') return reference[1]!;
+    if (name !== undefined) return decodeNamedCharacterReference(name) || reference;
+    const hex = reference[2]?.toLowerCase() === 'x';
+    const point = Number.parseInt(reference.slice(hex ? 3 : 2, -1), hex ? 16 : 10);
+    return point > 0 && point <= 0x10FFFF ? String.fromCodePoint(point) : reference;
+  });
+}
 
 /**
  * Gives `parts`, the search's split of `text`, the source offsets they come
@@ -754,7 +890,7 @@ function comparable(body: string, linearNumberSpacing = false): unknown {
   // in Linear (`* \n  [a](a.pdf)`), which Markdown reads as `* [a](a.pdf)`: keep that line apart too.
   const marked = markFileBlockStarts(nestedFileBlocksOnItemLine(body)
     .replace(/\\[$+]/g, (escape, at: number, text: string) => (escape === '\\+' && isLonePlus(text, at) ? escape : LINEAR_SYNTAX_ESCAPES[escape]!)));
-  const tree = parse(marked);
+  const tree = parse(marked, [], true);
   const strip = (node: Nodes, paragraphLine?: boolean): unknown => {
     const { position: _position, ...rest } = node;
     if ('url' in rest) rest.url = normalizeUri(rest.url);
@@ -991,7 +1127,8 @@ function destination(url: string): string {
   return url
     .replace(/ /g, '%20')
     .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
-    .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
+    .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|([A-Za-z][A-Za-z0-9]{1,31});)/g,
+      (ampersand, name: string | undefined) => name === undefined || decodeNamedCharacterReference(name) !== false ? '&amp;' : ampersand);
 }
 
 /**

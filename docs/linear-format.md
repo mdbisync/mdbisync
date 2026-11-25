@@ -213,6 +213,10 @@ Inline text:
   `Site: "[www.example.com](<http://www.example.com>)"`.
   In a URL label, underscores between letters or digits stay plain, as in
   `[https://example.com/shelf_4](<https://example.com/shelf_4>)`.
+- Bare addresses with recognized domain suffixes become HTTP links.
+  `example.com/guide` becomes `[example.com/guide](<http://example.com/guide>)`.
+  Relative paths, standalone Markdown filenames, and suffixes such as
+  `.test` stay as text.
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
   `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`. Other
