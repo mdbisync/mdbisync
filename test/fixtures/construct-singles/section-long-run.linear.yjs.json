@@ -1,0 +1,35 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "collapsible_section",
+      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+      "children": [
+        {
+          "type": "collapsible_heading",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Tip","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {"type":"paragraph","children":[{"text":"More words","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "collapsible_section",
+      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+      "children": [
+        {
+          "type": "collapsible_heading",
+          "children": [
+            {"type":"paragraph"}
+          ]
+        },
+        {"type":"paragraph","children":[{"text":"After.","marks":{"attribution":"user"}}]},
+        {"type":"paragraph","children":[{"text":"Ref kx-a7bb8e54","marks":{"attribution":"user"}}]}
+      ]
+    }
+  ]
+}

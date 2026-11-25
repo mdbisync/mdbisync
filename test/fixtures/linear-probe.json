@@ -333,6 +333,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/item-section-long-run.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/item-section-run-more.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -490,6 +494,10 @@
       "fixedPoint": true
     },
     "construct-singles/quote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/section-long-run.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -909,6 +917,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "lint-errors/number-paragraph.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "lint-errors/section-opener.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -985,6 +997,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/list-marker-in-item-text.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/list-split-after-empty-item.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -1026,6 +1042,10 @@
       "fixedPoint": true
     },
     "list-items/task-list-ordered.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/task-text-block-starts.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -1326,6 +1346,10 @@
       "fixedPoint": true
     },
     "tables/table-inline-marks.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-line-without-pipe.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

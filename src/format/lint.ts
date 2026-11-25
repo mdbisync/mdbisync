@@ -12,7 +12,8 @@ import { unwritableSectionLine } from './sections.ts';
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'unplaced-link']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'unplaced-link', 'number-paragraph']);
+const NUMBER_ONLY = /^\d{1,9}\\[.)]$/;
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
@@ -324,6 +325,17 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
       case 'html':
         if (hasUrlOrLinkAttribute(node.value)) report('url-in-html', line(node));
         break;
+      case 'paragraph': {
+        // Linear writes a paragraph of only a number and a dot or
+        // parenthesis without its escape (`7\.` comes back `7.`), which
+        // Markdown, and Linear on the next write, read as an empty item.
+        // A task item's text follows its checkbox, where Linear keeps the escape.
+        const item = ancestors.at(-1);
+        const afterCheckbox = item?.type === 'listItem' && item.checked != null && item.children[0] === node;
+        const [only] = node.children;
+        if (!afterCheckbox && node.children.length === 1 && only!.type === 'text' && NUMBER_ONLY.test(body.slice(start(node), end(node)))) report('number-paragraph', line(node));
+        break;
+      }
       default:
         break;
     }

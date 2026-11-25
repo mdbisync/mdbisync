@@ -149,11 +149,15 @@ Blocks:
   quote, after more lines of the paragraph, before more text or an ordered
   list in the item, and with `)` or `+`: there it stays as it is.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
-  `- [X] done`. A checkbox without a label keeps one space after it.
+  `- [X] done`. A checkbox without a label keeps one space after it. A
+  list marker followed by a space, `#` or `>` right after the checkbox gets
+  a backslash, as Linear writes it: `- [ ] 2. a` becomes `- [ ] 2\. a`.
+- A list marker at the start of an item's text opens a list nested in the
+  item, also where the item's list follows a paragraph: `Note` followed by
+  `1. 3. plum` is written `Note`, a blank line, `1. ` and `   3. plum`. A
+  marker with a backslash (`1. 3\. plum`) stays text.
 - A paragraph's text that starts like a list marker gets its marker
-  escaped, so it stays text: in `Note` followed by `1. 3. plum`, the
-  `3. plum` is text, and with the blank line `fix` writes before the list it
-  becomes `1. 3\. plum`. Text split off at an image gets the same escape.
+  escaped, so it stays text. Text split off at an image gets the same escape.
   A literal number followed by a dot and whitespace also gets its dot
   escaped when it starts a paragraph line. A tab or nonbreaking space
   immediately after that dot becomes a space.
@@ -172,6 +176,10 @@ Blocks:
   between the signs (`> > >`), or when the first sign continues a quote
   above, it stays a quote. A file that also has a `+++` line is left to
   you, since Linear would pair that line with the section.
+- A run of more than three `+` signs is a section marker too, and `fix`
+  writes it with three: `++++ Tip` and a closing `++++` become `+++ Tip`
+  and `+++`. A closing marker pairs only with an opener of its own width,
+  so a list item, quote or document that mixes widths is left to you.
 - A bare `+++` opens an untitled section when it has a body or a closing
   marker and there is no section open in the same document, list item or
   quote. `fix` writes that opener with one trailing space, as Linear does.
@@ -205,7 +213,9 @@ Blocks:
   writes it.
 - `$$` math becomes a `math` fence.
 - Tables get outer pipes and short separators (`| -- | -- |`), and a row
-  gets as many cells as the header. A cell containing only `#` is written
+  gets as many cells as the header. A line without `|` right after a table
+  ends it, as in Linear: `fix` writes a blank line before it, and it and the
+  lines below it become a paragraph (GFM reads them as rows). A cell containing only `#` is written
   as `\#`, preserving its text, and an escaped `#` that starts a cell keeps
   its escape (a bare one in a body cell is the
   [`table-hash-cell`](#table-hash-cell) rule). A line break tag in a cell
@@ -724,6 +734,21 @@ Above the gate
 ```
 
 A backslash break is reported as `hard-break-backslash`.
+
+### `number-paragraph`
+
+A paragraph that is only a number and a dot or parenthesis, such as 7\.,
+comes back from Linear without the backslash, which reads as an empty
+numbered list item. Add text after the number, or remove the line. Linear
+keeps the paragraph as text but writes it as `7.`, and the next write turns
+that into an empty item. The rule stops only `fix`; the sync sends such a
+file as it is.
+
+```markdown
+Steps
+
+7\.
+```
 
 ### `git-conflict-marker`
 

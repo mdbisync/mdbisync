@@ -29,6 +29,12 @@ export interface FixOptions {
    * file is taken to exist.
    */
   linkedFileExists?: (url: string) => boolean;
+  /**
+   * The text is Linear's export. Linear writes a list that starts an item
+   * below the item's marker line, so a marker on that line is text it
+   * wrote without its escape (`1. +`): it keeps its escape.
+   */
+  linearExport?: boolean;
 }
 
 /**
@@ -44,14 +50,15 @@ export function fixText(text: string, options: FixOptions = {}): string {
   const sections = sectionOpenersAsLinear(normalized);
   const lf = sections === normalized ? plusSectionsAsLinear(sections) : sections;
   if (lf === undefined) return text;
-  const unbroken = backslashBreaksAsLinear(lf);
+  const ended = tablesEndAsLinear(lf);
+  const unbroken = backslashBreaksAsLinear(ended);
   if (unbroken === undefined) return text;
   const fixed = fixBody(unbroken, options);
   if (fixed === undefined) return text;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
   // block): such a file stays with its author.
-  if (unbroken !== lf && lineEndings(fixed) < lineEndings(unbroken)) return text;
+  if (unbroken !== ended && lineEndings(fixed) < lineEndings(unbroken)) return text;
   return joinFile(head, fixed);
 }
 
@@ -104,6 +111,27 @@ function backslashBreaksAsLinear(body: string): string | undefined {
   }
   written += body.slice(at);
   return isDeepStrictEqual(breakShape(parse(written)), breakShape(tree)) ? written : undefined;
+}
+
+/**
+ * The body with each table ended where Linear ends it: at the first body
+ * row whose line has no `|`. GFM reads such a line as a row of one cell;
+ * Linear reads it, and the lines after it, as a paragraph below the table.
+ * A blank line, with the line's quote prefix, goes before it.
+ */
+function tablesEndAsLinear(body: string): string {
+  if (!body.includes('|')) return body;
+  const rows: number[] = [];
+  visit(parse(body), (node) => {
+    if (node.type !== 'table') return;
+    const row = node.children.slice(1).find((candidate) => !body.slice(start(candidate), end(candidate)).includes('|'));
+    if (row !== undefined) rows.push(start(row));
+  });
+  for (const at of rows.sort((a, b) => b - a)) {
+    const lineStart = lineStartOf(body, at);
+    body = `${body.slice(0, lineStart)}${body.slice(lineStart, at).trimEnd()}\n${body.slice(lineStart)}`;
+  }
+  return body;
 }
 
 /**
@@ -419,6 +447,8 @@ const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
 // A list marker that opens a text: a bullet or a number with its delimiter,
 // followed by a space, a tab or the end of the line.
 const LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
+/** Item text Linear reads as a nested list: a marker followed by text, or a lone bullet or number and dot. */
+const NESTED_MARKER_TEXT = /^(?:(?:[*+-]|\d{1,9}[.)])[ \t]+\S|[*+-]$|\d{1,9}\.$)/;
 
 const LINEAR_ALERT = /^\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i;
 
@@ -457,6 +487,8 @@ class Writer {
   private spaceEdits: Edit[] = [];
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
+  /** First paragraphs of items that Linear reads as a nested list (`nestsMarkerText`). */
+  private readonly nestedLists = new Set<Paragraph>();
   /** A list's sibling block written right before it, when that is a list. */
   private readonly listBefore = new Map<List, List>();
 
@@ -606,7 +638,9 @@ class Writer {
     const hasText = node.children.some((child) => !isImage(child) && !(child.type === 'text' && child.value.trim() === ''));
     if (images === 0 || (!hasText && images === 1)) {
       this.wholeParagraphEnd = node.children.length > 0 ? end(node.children.at(-1)!) : undefined;
-      const text = node === this.taskParagraph ? this.inline(node.children, 'continuation') : this.paragraphText(node.children);
+      // The text after a nested list's marker starts no line of its own.
+      const text = node === this.taskParagraph ? taskTextAsLinear(this.inline(node.children, 'continuation'))
+        : this.nestedLists.has(node) ? this.inline(node.children, 'continuation') : this.paragraphText(node.children);
       this.wholeParagraphEnd = undefined;
       return [escapeLiteralSectionEnd(text)];
     }
@@ -620,7 +654,7 @@ class Writer {
     return parts
       .map((part, index) => {
         const afterCheckbox = index === 0 && node === this.taskParagraph;
-        const text = afterCheckbox ? trimKeepingNbsp(this.inline(part, 'continuation')) : this.paragraphText(part, true);
+        const text = afterCheckbox ? taskTextAsLinear(trimKeepingNbsp(this.inline(part, 'continuation'))) : this.paragraphText(part, true);
         return escapeLiteralSectionEnd(paragraphPart(text, !afterCheckbox));
       })
       .filter((part) => part !== '');
@@ -686,7 +720,21 @@ class Writer {
    */
   private textOnMarkerLine(item: ListItem): boolean {
     const [first] = item.children;
-    return first?.type === 'paragraph' && itemAttachment(item) === undefined && !/^\+{3}[ \t]*$/.test(this.source.slice(start(first), end(first)));
+    return first?.type === 'paragraph' && !this.nestsMarkerText(item) && itemAttachment(item) === undefined && !/^\+{3}[ \t]*$/.test(this.source.slice(start(first), end(first)));
+  }
+
+  /**
+   * Whether the item's text starts with a list marker that Linear, like
+   * CommonMark, reads as a list nested in the item (`1. 2. a`). The parser
+   * `fix` uses reads it as text where the item's list interrupts a
+   * paragraph (`Note` / `1. 3. plum`, `* x` / `  1. 2. a`); an escaped
+   * marker stays text in both.
+   */
+  private nestsMarkerText(item: ListItem): boolean {
+    const [first] = item.children;
+    if (this.options.linearExport || item.checked != null || first?.type !== 'paragraph' || first.children[0]?.type !== 'text') return false;
+    if (lineStartOf(this.source, start(first)) !== lineStartOf(this.source, start(item))) return false;
+    return NESTED_MARKER_TEXT.test(this.source.slice(start(first), end(first)));
   }
 
   private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
@@ -729,6 +777,8 @@ class Writer {
     if (bareCheckbox) container.markerBrackets = [start(first!), start(first!) + 2];
     this.containers.push(container);
     if (item.checked !== null && item.checked !== undefined && first.type === 'paragraph') this.taskParagraph = first;
+    const nested = this.nestsMarkerText(item);
+    if (nested) this.nestedLists.add(first as Paragraph);
     // Blocks of an item are a blank line apart, but a nested list follows
     // its paragraph on the next line when it can interrupt that paragraph.
     // Ordered lists starting above or below 1, lists starting with an empty
@@ -742,7 +792,7 @@ class Writer {
       const previous = item.children[index - 1];
       const interrupts = child.type === 'list'
         && previous?.type === 'paragraph'
-        && opensWithText(child)
+        && opensWithText(child) && !this.nestsMarkerText(child.children[0]!)
         && !(child.position!.start.line > previous.position!.end.line + 1 && startsWithFileBlock(child));
       // Linear writes a list of another kind (bullet, numbered, task) right
       // below the list before it in the same item. A marker that cannot
@@ -772,7 +822,7 @@ class Writer {
     // Linear writes a list that starts an item below an empty marker line
     // (`1. 2.` becomes `1. ` and `   2. `), which Markdown reads as the
     // same nested list.
-    if (first.type === 'list') return `${marker} \n${lines.join('\n')}`;
+    if (first.type === 'list' || nested) return `${marker} \n${lines.join('\n')}`;
     return `${marker} ${lines.join('\n').slice(indent.length)}`;
   }
 
@@ -2016,6 +2066,15 @@ function paragraphPart(text: string, startsLine: boolean): string {
   return text;
 }
 
+/**
+ * A task item's text as Linear writes it after the checkbox: with a
+ * backslash before a list marker, `#` or `>` and the space after it
+ * (`- [ ] \\- a`, `- [ ] 2\\. a`). Linear leaves `3) a` and `12.` plain.
+ */
+function taskTextAsLinear(text: string): string {
+  return text.replace(/^(?:(\d{1,9})(?=\.[ \t])|(?=[-+#>][ \t]))/, (_, digits: string | undefined) => `${digits ?? ''}\\`);
+}
+
 /** An unescaped closing marker can open a section after a literal title. */
 function escapeLiteralSectionEnd(text: string): string {
   if (!/^\\\+{3}(?:[ \t]|\n)/.test(text)) return text;
@@ -2122,7 +2181,7 @@ export function fixLinearText(linearText: string, content: string, inRepository:
   const notUploaded = relativeUrls(content, new Set(['link', 'image']));
   const notUploadedUris = new Set([...notUploaded].map((url) => normalizeUri(url)));
   const uploaded = (url: string): boolean => !notUploadedUris.has(normalizeUri(url));
-  const linear = { linkedFileExists: uploaded };
+  const linear = { linkedFileExists: uploaded, linearExport: true };
   const fixed = fixText(text, linear);
   if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body, { linearNumberSpacing: true, linearBoldForms: true })) return text;
   // The hook cannot tell which files were uploaded. It can write a list item
@@ -2130,7 +2189,7 @@ export function fixLinearText(linearText: string, content: string, inRepository:
   // such a block as a link if it holds no upload for the file. Take the
   // hook's form only if sending it back still yields Linear's form.
   if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]!) && inRepository(url))) return fixed;
-  const hooked = fixText(text, { linkedFileExists: (url) => uploaded(url) || inRepository(url) });
+  const hooked = fixText(text, { linkedFileExists: (url) => uploaded(url) || inRepository(url), linearExport: true });
   return fixText(hooked, linear) === fixed ? hooked : fixed;
 }
 

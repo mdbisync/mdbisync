@@ -1,0 +1,141 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "ordered_list",
+              "attrs": {"order":3},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"plum","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "ordered_list",
+              "attrs": {"order":3},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"plum","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"pear","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "ordered_list",
+              "attrs": {"order":2},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"fig","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+        {
+          "type": "ordered_list",
+          "attrs": {"order":1},
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {
+                  "type": "ordered_list",
+                  "attrs": {"order":3},
+                  "children": [
+                    {
+                      "type": "list_item",
+                      "children": [
+                        {"type":"paragraph","children":[{"text":"plum","marks":{"attribution":"user"}}]}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Note","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "bullet_list",
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-833d1d0f","marks":{"attribution":"user"}}]}
+  ]
+}
