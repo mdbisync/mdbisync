@@ -1163,6 +1163,11 @@ export function start(node: Nodes): number {
   return node.position?.start.offset ?? 0;
 }
 
+/** The column after `char`, from `column`: a tab runs to the next multiple of four. */
+export function advanceColumn(column: number, char: string): number {
+  return char === '\t' ? column + 4 - (column % 4) : column + 1;
+}
+
 export function end(node: Nodes): number {
   return node.position?.end.offset ?? 0;
 }

@@ -16,7 +16,7 @@ import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
-import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { ALERT, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -1588,11 +1588,6 @@ function attachmentLink(paragraph: Paragraph): Link | undefined {
 /** The prefix `container` takes at the start of `rest`: a quote marker or up to its item's indent in spaces. */
 function prefixOf(container: Container, rest: string): RegExpExecArray | null {
   return container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
-}
-
-/** The column after `char`, from `column`: a tab runs to the next multiple of four. */
-function advanceColumn(column: number, char: string): number {
-  return char === '\t' ? column + 4 - (column % 4) : column + 1;
 }
 
 /** Where the line holding `at` starts. */

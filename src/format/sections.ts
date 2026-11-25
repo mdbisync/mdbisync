@@ -10,7 +10,7 @@
 // that a line above opened (its first `>` belongs to that quote).
 
 import type { Blockquote, Code, ListItem, Nodes, Root } from 'mdast';
-import { end, parse, start, visit, type MicromarkExtension } from './markdown.ts';
+import { advanceColumn, end, parse, start, visit, type MicromarkExtension } from './markdown.ts';
 
 /** `lines`: the section lines the edit writes. */
 type Edit = { from: number; to: number; text: string; depth: number; lines?: number };
@@ -204,8 +204,13 @@ function sectionPrefix(body: string, parent: Root | Blockquote | ListItem, at: n
   const { prefix } = prefixes(body, at);
   if (parent.type === 'blockquote') return prefix.slice(0, prefix.lastIndexOf('>') + 1) + ' ';
   // Use the item's content indent, excluding optional indent on this marker.
-  const marker = /^(?:[*+-]|\d{1,9}[.)])(?: {1,4}|\t)/.exec(body.slice(start(parent), start(parent) + 14));
-  return marker === null ? prefix : prefixes(body, start(parent)).prefix + ' '.repeat(marker[0].length);
+  const itemStart = start(parent);
+  const marker = /^([*+-]|\d{1,9}[.)])([ \t]+)/.exec(body.slice(itemStart, itemStart + 15));
+  if (marker === null) return prefix;
+  const item = prefixes(body, itemStart);
+  const markerColumn = [...item.linePrefix].reduce(advanceColumn, 0) + marker[1]!.length;
+  const gap = [...marker[2]!].reduce(advanceColumn, markerColumn) - markerColumn;
+  return item.prefix + ' '.repeat(marker[1]!.length + (gap <= 4 ? gap : 1));
 }
 
 function unclosedFence(body: string, code: Code): string {
