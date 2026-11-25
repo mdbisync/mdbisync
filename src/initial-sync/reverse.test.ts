@@ -1108,7 +1108,7 @@ describe('initial sync from Linear to the tracked branch', () => {
   it('records its own marker even when an earlier record from the other direction has the same tree', async () => {
     const world = fakeWorld();
     // Linear stores the text in a spelling of its own that `fix` keeps, so the record differs from the tracked branch.
-    world.linear.store = (content) => content.replace('kx-', 'kx\\-');
+    world.linear.store = (content) => content.replace('kx-', '&#107;x-');
     world.github.pullRequests = [];
     const gitToLinear = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
     assert.equal(gitToLinear.result.exitCode, 0, gitToLinear.result.stderr);
