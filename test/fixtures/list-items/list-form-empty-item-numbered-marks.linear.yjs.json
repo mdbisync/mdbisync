@@ -1,0 +1,87 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Only the number","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Trip","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph"}
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Book","marks":{"attribution":"user","strong":{}}},{"text":" the train","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Nested, with marks","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Pump","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {
+                      "type": "ordered_list",
+                      "attrs": {"order":2},
+                      "children": [
+                        {
+                          "type": "list_item",
+                          "children": [
+                            {"type":"paragraph"}
+                          ]
+                        },
+                        {
+                          "type": "list_item",
+                          "children": [
+                            {"type":"paragraph","children":[{"text":"soft","marks":{"attribution":"user","em":{}}},{"text":" (step) ","marks":{"attribution":"user"}},{"text":"code","marks":{"attribution":"user","code":{}}}]}
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-90e319f0","marks":{"attribution":"user"}}]}
+  ]
+}
