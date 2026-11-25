@@ -257,6 +257,10 @@ Inline text:
   Bold immediately inside another bold span is folded into the outer span.
   In a chain of four-asterisk boundaries such as `**a****b****c**`,
   Linear writes `**ab**c`.
+  In `**(**notes**)**`, Linear joins the first two bold runs and leaves
+  the closing punctuation outside, as `**(notes**)`. A pair of stars
+  enclosing italic spans separated by spaces goes, so `**a* *b**`
+  becomes `*a* *b*`.
 - Adjacent links to the same destination become one link, since Linear
   holds a link as a mark on its text. Bold, italic or strikethrough around
   a part goes inside the label: `[Shop](https://a.test)**[Sale](https://a.test)**`
@@ -307,7 +311,10 @@ Inline text:
   `[https://example.com/shelf_4](<https://example.com/shelf_4>)`.
   A trailing underscore in a URL path, query or fragment stays in the link.
   Matched parentheses can be part of the URL. An unmatched opening or
-  closing parenthesis ends it.
+  closing parenthesis ends it. Outside paired delimiters, a run of periods
+  before `*`, `~`, `_`, `,`, `;`, `!` or `?` ends the link before the
+  periods. A run of trailing commas or semicolons leaves its last character
+  outside the link.
 - Bare addresses with recognized domain suffixes become HTTP links.
   `example.com/guide` becomes `[example.com/guide](<http://example.com/guide>)`.
   Relative paths, standalone Markdown filenames, and suffixes such as
@@ -329,6 +336,10 @@ Inline text:
   `**&#32;Tip** one` becomes `**Tip** one`. Where a space would change
   what the text says (make a line break, a list item or HTML, or close a
   heading), the reference stays.
+- A tab reference (`&#9;`, `&#x9;`) becomes a literal tab in inline
+  text. At the inner edge of an emphasis mark it moves outside the mark.
+  Where the tab would change how Markdown reads the text, `fix` leaves
+  the file as written and reports [`tab-reference-layout`](#tab-reference-layout).
 - Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes
   `Done 🎉`. An escaped reference or shortcode (`\&amp;`, `\:tada:`) stays
   as written.
@@ -724,6 +735,19 @@ Above the gate
 ```
 
 A backslash break is reported as `hard-break-backslash`.
+
+### `tab-reference-layout`
+
+Linear writes tab character references as literal tabs. Fix leaves this
+document as-is because a tab would change how Markdown reads it. Reword the
+text or use ordinary spacing.
+
+In this example Markdown reads the tab as part of the list indentation.
+The sync sends the file as written.
+
+```markdown
+1. &#9;Collect the seeds.
+```
 
 ### `git-conflict-marker`
 
