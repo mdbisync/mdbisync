@@ -111,7 +111,7 @@ describe('configuration reference', () => {
   });
 
   it('lists exactly the secrets and variables the workflows read', () => {
-    const listed = table(PAGE, 'Environment secrets and repository variables').map(([kind, name]) => `${kind} ${name?.replace(/`/g, '')}`);
+    const listed = table(PAGE, 'Environment secrets and variables').map(([kind, name]) => `${kind} ${name?.replace(/`/g, '')}`);
     assert.deepEqual(listed.sort(), [...workflowSettings()].sort());
   });
 

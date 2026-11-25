@@ -95,7 +95,8 @@ on its page in Linear's settings
 Every team your folders name must be one the app reaches.
 
 In your docs repository, add the client ID under Settings → Secrets
-and variables → Actions → Variables. Add the client secret under
+and variables → Actions → Variables, or under Settings → Environments →
+`mdbisync` → Environment variables. Add the client secret under
 Settings → Environments → `mdbisync` → Environment secrets
 ([Sync environment](#sync-environment)).
 
@@ -154,7 +155,8 @@ organization that owns your docs repository → Install → Only select
 repositories → your docs repository → Install.
 
 In your docs repository, add the client ID under Settings → Secrets and
-variables → Actions → Variables → New repository variable. Add the key
+variables → Actions → Variables → New repository variable, or under
+Settings → Environments → `mdbisync` → Environment variables. Add the key
 under Settings → Environments → `mdbisync` → Environment secrets
 ([Sync environment](#sync-environment)).
 

@@ -50,13 +50,17 @@ can check its name and the app's access before continuing.
 | `hooks` | `security-step: stage` only: the script of the hooks step. |
 | `code` | Why the run stopped before writing, did not finish or is partial; empty when it finished. Every code is in [troubleshooting](troubleshooting.md). |
 
-## Environment secrets and repository variables
+## Environment secrets and variables
 
 The example workflows use the `mdbisync` environment. In Settings →
 Environments, set its deployment branches to **Selected branches and
 tags** with a single **Branch** rule for the tracked branch (`main` by
 default) and no required reviewers. Add the secrets below there. Set
-repository variables under Settings → Secrets and variables → Actions.
+`MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_APP_CLIENT_ID` there too (under
+Environment variables), or as repository variables under Settings →
+Secrets and variables → Actions; set each in one place only, since the
+environment's value wins. `MDBISYNC_CI_WORKFLOWS` must be a repository
+variable: the pre-commit workflow runs outside the environment.
 See [below](#moving-an-existing-installation-to-the-environment) for an
 installation that keeps its secrets as repository secrets.
 
@@ -85,7 +89,7 @@ repository secrets. To move such an installation, in this order:
    secret also signs the sync's state: if you rotate it instead, and the
    sync then reports `initial-sync-required`, follow
    [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync).
-3. Add the repository variable `MDBISYNC_LINEAR_CLIENT_ID` with the Linear
+3. Add the variable `MDBISYNC_LINEAR_CLIENT_ID` with the Linear
    app's client ID, next to `MDBISYNC_APP_CLIENT_ID`.
 4. In both `mdbisync.yml` and `mdbisync-initial-sync.yml`, add
    `environment: mdbisync` under the job, at the same indentation as
