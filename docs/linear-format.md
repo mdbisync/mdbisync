@@ -190,6 +190,10 @@ Inline text:
 
 - Underscore emphasis becomes asterisks: `__bold__ and _em_` becomes
   `**bold** and *em*`.
+- Asterisks that read as text are escaped. `**Birch****Pine**` becomes
+  `**Birch\*\*\*\*Pine**`, and `**Inventory` becomes `\*\*Inventory`.
+  Consecutive bold spans join when they can keep their formatting.
+  Bold immediately inside another bold span is folded into the outer span.
 - Link destinations go in angle brackets: `[a](https://example.com/x)`
   becomes `[a](<https://example.com/x>)`. A backslash, `|`, `^`, `{` and
   `}` in a destination are percent-encoded, as Linear writes them:
@@ -215,9 +219,9 @@ Inline text:
   `[https://example.com/shelf_4](<https://example.com/shelf_4>)`.
 - Character references to characters outside ASCII become the characters,
   and so does `&amp;` unless a reference follows it:
-  `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`. Other
-  references to ASCII characters stay, since some would make markup:
-  `&lt;b&gt;`, `&quot;` and `&#65;` are kept.
+  `Fish &amp; chips &mdash; &copy;` becomes `Fish & chips — ©`.
+  Asterisk references such as `&#42;` become `\*`. Other ASCII references,
+  such as `&lt;b&gt;`, `&quot;` and `&#65;`, stay as written.
 - Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes
   `Done 🎉`. An escaped reference or shortcode (`\&amp;`, `\:tada:`) stays
   as written.

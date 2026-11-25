@@ -610,12 +610,12 @@ describe('what fix leaves alone', () => {
       ['First\n\t*x third', 'First\n\t\\*x third'],
       ['> a\n>   -x', '> a\n>   -x'],
       ['* item\n    -x four', '* item\n    -x four'],
-      // A `*` that shares a delimiter run with emphasis keeps the run as it is.
-      ['***(important)*', '***(important)*'],
-      ['**x', '**x'],
-      // Already escaped, not a line start, or not text: nothing to add.
+      // Only the two literal stars of the run are escaped.
+      ['***(important)*', '\\*\\**(important)*'],
+      ['**x', '\\*\\*x'],
+      // Asterisks can be escaped anywhere in text. A dash is escaped at the line start.
       ['\\-x and \\*y', '\\-x and \\*y'],
-      ['a -x and *b', 'a -x and *b'],
+      ['a -x and *b', 'a -x and \\*b'],
       ['+x plus', '+x plus'],
       ['*x* emphasis', '*x* emphasis'],
       ['`a\n-x`', '`a\n-x`'],
@@ -626,6 +626,52 @@ describe('what fix leaves alone', () => {
       assert.equal(once, expected, JSON.stringify(input));
       assert.equal(fixText(once), once, `${JSON.stringify(input)}: a second fix changes nothing`);
       assert.ok(sameMarkdown(once, input), `${JSON.stringify(input)}: the document stays`);
+    }
+  });
+
+  it('matches Linear on literal asterisks and adjacent or nested bold', () => {
+    const cases = [
+      ['**Birch****Pine**', '**Birch\\*\\*\\*\\*Pine**'],
+      ['**Birch*****Pine**', '**Birch**\\***Pine**'],
+      ['**Birch***', '**Birch**\\*'],
+      ['***Birch**', '\\***Birch**'],
+      ['** Inventory', '\\*\\* Inventory'],
+      ['Birch ** Pine', 'Birch \\*\\* Pine'],
+      ['Birch &ast; &#42; &#x2A; Pine', 'Birch \\* \\* \\* Pine'],
+      ['Birch\\\\*Pine', 'Birch\\\\\\*Pine'],
+      ['**Birch**__Pine__', '**BirchPine**'],
+      ['__Birch__**Pine**__Cedar__', '**BirchPineCedar**'],
+      ['**Birch *shelves***__*Pine* racks__', '**Birch *shelvesPine* racks**'],
+      ['**Birch _shelves_**__*Pine* racks__', '**Birch *shelvesPine* racks**'],
+      ['__Birch **Pine**__', '**Birch Pine**'],
+      ['_Birch_*pine', '*Birch*\\*pine'],
+      ['_Birch_*pine*', '_Birch_*pine*'],
+      ['****Birch****', '**Birch**'],
+      ['**Birch** **Pine**', '**Birch** **Pine**'],
+      ['***Birch***', '***Birch***'],
+      ['[**Inventory](https://example.com)', '[\\*\\*Inventory](<https://example.com>)'],
+      ['| Shelf |\n| -- |\n| **Birch |', '| Shelf |\n| -- |\n| \\*\\*Birch |'],
+      ['> **Inventory', '> \\*\\*Inventory'],
+      ['`**Inventory`', '`**Inventory`'],
+    ] as const;
+    for (const [input, expected] of cases) {
+      assert.equal(fixText(input), expected, input);
+      assert.equal(fixText(expected), expected, input);
+      assert.deepEqual(lintText('inventory.md', expected), [], input);
+      assert.ok(sameMarkdown(input, expected), input);
+    }
+  });
+
+  it('preserves links and enclosing italics while still fixing other paragraphs', () => {
+    const splitUrl = '**https**__://example.com__';
+    assert.ok(!sameMarkdown(splitUrl, '**https://example.com**'));
+    for (const [first, formatted] of [[splitUrl, splitUrl], ['*Oak*___**Pine**___', '*Oak****Pine***']]) {
+      const input = [first, 'Birch ** Pine', '**Oak**__Elm__', '[https://example.com_', '[Shelf]'].join('\n\n');
+      const expected = [formatted, 'Birch \\*\\* Pine', '**OakElm**', '[https://example.com_', '\\[Shelf\\]'].join('\n\n');
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected);
+      assert.ok(sameMarkdown(input, expected));
+      assert.deepEqual(lintText('inventory.md', expected), []);
     }
   });
 
@@ -881,7 +927,7 @@ describe('what fix leaves alone', () => {
     const cases: Array<[string, string]> = [
       ['https://example.com/\\\nNext.', '[https://example.com/\\\\](<https://example.com/%5C>)\nNext.'],
       ['<https://example.com/\\>', '[https://example.com/\\\\](<https://example.com/%5C>)'],
-      ['See https://example.com/\\* now.', 'See [https://example.com/\\\\](<https://example.com/%5C>)* now.'],
+      ['See https://example.com/\\* now.', 'See [https://example.com/\\\\](<https://example.com/%5C>)\\* now.'],
       ['See https://example.com/a\\b now.', 'See [https://example.com/a\\\\b](<https://example.com/a%5Cb>) now.'],
       ['<https://example.com/a]b[c>', '[https://example.com/a\\]b\\[c](<https://example.com/a]b[c>)'],
       ['a <https://example.com/a\\`> b `c`', 'a [https://example.com/a\\\\\\`](<https://example.com/a%5C`>) b `c`'],
