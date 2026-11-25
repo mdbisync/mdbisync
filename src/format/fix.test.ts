@@ -678,6 +678,8 @@ describe('what fix leaves alone', () => {
       ['a_\\_b', 'a__b'],
       // Where an escape would change what Markdown reads, the text keeps its escapes as written.
       ['cost**~$5**', 'cost**~$5**'],
+      // Still when another paragraph's emphasis is rewritten.
+      ['cost**~$5**\n\n_italic_', 'cost**~$5**\n\n*italic*'],
       ['mail alice@example.com_', 'mail alice@example.com_'],
       ['Already \\_escaped and \\~too, a\\_b', 'Already \\_escaped and \\~too, a_b'],
     ];

@@ -133,6 +133,7 @@ function fixBody(body: string, options: FixOptions): string {
     let writer = new Writer(current, tree, options);
     let next = writer.root();
     let rewriteEscapes = true;
+    let rewriteTildeUnderscore = true;
     if (writer.compareEscapes) {
       const fallback = new Writer(current, tree, options, false);
       const withOriginalEscapes = fallback.root();
@@ -144,6 +145,7 @@ function fixBody(body: string, options: FixOptions): string {
         const withoutTildeUnderscore = new Writer(current, tree, options, true, true, false);
         const partial = withoutTildeUnderscore.root();
         if (sameMarkdown(partial, withOriginalEscapes)) {
+          rewriteTildeUnderscore = false;
           next = partial;
           writer = withoutTildeUnderscore;
         } else {
@@ -154,7 +156,8 @@ function fixBody(body: string, options: FixOptions): string {
       }
     }
     if (writer.rewroteAsterisks) {
-      const withOriginalAsterisks = new Writer(current, tree, options, rewriteEscapes, false).root();
+      // The escapes given up above stay given up there.
+      const withOriginalAsterisks = new Writer(current, tree, options, rewriteEscapes, false, rewriteTildeUnderscore).root();
       // A locally equivalent edit can still affect a surrounding block.
       if (!sameMarkdown(next, withOriginalAsterisks)) next = withOriginalAsterisks;
     }
