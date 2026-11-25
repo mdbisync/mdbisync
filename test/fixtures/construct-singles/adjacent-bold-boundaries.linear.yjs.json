@@ -1,0 +1,13 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"BirchPine","marks":{"attribution":"user","strong":{}}},{"text":"Cedar","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"BirchPine","marks":{"attribution":"user","strong":{}}},{"text":"Cedar****Ash","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"BirchPine","marks":{"attribution":"user","strong":{}}},{"text":"Cedar","marks":{"attribution":"user"}},{"text":"Ash","marks":{"attribution":"user","strong":{}}},{"text":"Maple","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Birch****Pine","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"(Tip)","marks":{"attribution":"user","strong":{}}},{"text":" and ","marks":{"attribution":"user"}},{"text":"Note.","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-0fac73b9","marks":{"attribution":"user"}}]}
+  ]
+}
