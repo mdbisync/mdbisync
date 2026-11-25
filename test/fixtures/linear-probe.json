@@ -945,6 +945,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "lint-errors/list-number-too-long.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "lint-errors/section-opener.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -1006,6 +1010,14 @@
       "fixedPoint": true
     },
     "list-items/item-text-block-starters.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-after-block-in-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/list-after-indented-code.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -1074,6 +1086,10 @@
       "fixedPoint": true
     },
     "list-items/release-notes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/task-check-below-marker.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

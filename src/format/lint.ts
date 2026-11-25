@@ -6,14 +6,14 @@
 import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
-import { allowedLink, bracketedLabel, listKind, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { allowedLink, bracketedLabel, listKind, listParts, MAX_LIST_NUMBER, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 import { unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'list-after-item-text', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link']);
+const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-in-heading', 'list-after-item-text', 'list-number-too-long', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'tab-reference-layout', 'unplaced-link']);
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
@@ -279,6 +279,15 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         // ends up in a bullet task list.
         const task = node.ordered ? node.children.find((item) => item.checked !== null && item.checked !== undefined) : undefined;
         if (task !== undefined) report('ordered-task-list', line(task));
+        // Linear numbers the items of each part of a list on from the
+        // part's first number; Markdown reads a number of more than nine
+        // digits as text of the item above.
+        if (node.ordered) {
+          for (const { items, first } of listParts(node, body)) {
+            const past = items[MAX_LIST_NUMBER - first + 1];
+            if (past !== undefined) report('list-number-too-long', line(past));
+          }
+        }
         break;
       }
       case 'heading': {

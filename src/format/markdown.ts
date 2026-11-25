@@ -161,9 +161,10 @@ export function parse(body: string, mdastExtensions: Extension[] = [], linearDom
       if (Array.isArray(constructs)) syntax.text[code] = constructs.filter((construct) => construct.name !== 'wwwAutolink');
     }
   }
-  const tree = fromMarkdown(body, { extensions: [syntax, ...extraSyntax, inlineBudget(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
+  const tree = fromMarkdown(body, { extensions: [syntax, ...extraSyntax, inlineBudget(), indentedCodeEnds(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
   // The parser counts source offsets after one leading BOM.
   const source = body.startsWith('\uFEFF') ? body.slice(1) : body;
+  taskChecksBelowMarkerLines(tree, source);
   placeTextLinks(tree, source, transforms, linearDomains);
   if (linearDomains && /https?:\/\//i.test(source)) placeLinearHttpEnds(tree, source);
   if (linearDomains && BARE_DOMAIN_HINT.test(source)) placeLinearDomains(tree, source);
@@ -584,6 +585,63 @@ function inlineBudget(): MicromarkExtension {
 }
 
 type Parser = TokenizeContext['parser'];
+
+/**
+ * A parser extension that lets indented code end like any other block that
+ * is not a paragraph. micromark reads the block after indented code as if it
+ * interrupted a paragraph, even after blank lines, so an ordered list that
+ * starts above 1 or an empty item there was text (`    code` / `2. b`).
+ * CommonMark and Linear read a list. The document step reads that state
+ * from the flow's construct still open (indented code waits for its next
+ * line) unless the flow carries micromark's own flag for a block that may
+ * be interrupted, which this construct sets while the code runs. It wraps
+ * micromark's indented code construct, so it reads the same code.
+ */
+function indentedCodeEnds(): MicromarkExtension {
+  const construct: Construct = {
+    name: 'indentedCodeEnds',
+    tokenize(this: TokenizeContext, effects, ok, nok) {
+      const code = [this.parser.constructs.flowInitial?.[32]].flat().find((candidate) => candidate?.name === 'codeIndented');
+      if (code === undefined || code === null) return nok;
+      const settled = (next: typeof ok): typeof ok => (character) => {
+        this._gfmTableDynamicInterruptHack = false;
+        return next(character);
+      };
+      this._gfmTableDynamicInterruptHack = true;
+      return code.tokenize.call(this, effects, settled(ok), settled(nok));
+    },
+  };
+  return { flowInitial: { [-2]: construct, [-1]: construct, [32]: construct } };
+}
+
+/**
+ * GFM reads a task checkbox at the start of an item's first text also when
+ * that text starts on the line below the marker, and so does Linear.
+ * micromark misses it when the marker's line holds spaces or tabs after the
+ * marker (`-␠␠` / `␠␠[ ] Pack`), and finds it without them. The item gets
+ * the tree micromark gives it without them: the check, and the text and its
+ * paragraph starting after the check and the space or tab after it. Only a
+ * check with text after it on its line: a check alone on its line is left
+ * as text. A `[x]` that a definition makes a link stays a link (Linear
+ * checks the item and keeps the link, which no Markdown reading gives).
+ */
+function taskChecksBelowMarkerLines(tree: Root, source: string): void {
+  visit(tree, (node) => {
+    if (node.type !== 'listItem' || (node.checked !== null && node.checked !== undefined)) return;
+    const [paragraph] = node.children;
+    if (paragraph?.type !== 'paragraph' || line(paragraph) === line(node)) return;
+    const check = /^\[([ xX])\][ \t]+[^\s]/.exec(source.slice(start(paragraph), end(paragraph)));
+    const [head] = paragraph.children;
+    if (check === null || head?.type !== 'text' || start(head) !== start(paragraph) || !head.value.startsWith(check[0].slice(0, 4))) return;
+    const from = paragraph.position!.start;
+    const after = { line: from.line, column: from.column + 4, offset: from.offset! + 4 };
+    node.checked = check[1] !== ' ';
+    head.value = head.value.slice(4);
+    if (head.value === '') paragraph.children.shift();
+    else head.position!.start = { ...after };
+    paragraph.position!.start = { ...after };
+  });
+}
 
 type FlowTokenizer = ReturnType<Parser['flow']>;
 
@@ -1581,4 +1639,37 @@ export function listKind(list: List, item: ListItem | undefined): 'task' | 'orde
 export function opensWithText(list: List): boolean {
   const [item] = list.children;
   return item !== undefined && item.children[0]?.type === 'paragraph' && (listKind(list, item) !== 'ordered' || (list.start ?? 1) === 1);
+}
+
+/** The largest list number Markdown reads: nine digits. */
+export const MAX_LIST_NUMBER = 999_999_999;
+
+/**
+ * The parts Linear holds a list in: two blank lines after an empty item
+ * start a new list. Each part after the first starts at the number its first
+ * item has in the source, as Linear keeps it, unless its numbers would then
+ * run past Markdown's nine digits: there it counts on from the part before.
+ */
+export function listParts(list: List, source: string): Array<{ items: ListItem[]; first: number }> {
+  const parts: Array<{ items: ListItem[]; first: number }> = [];
+  list.children.forEach((item, index) => {
+    const previous = parts.at(-1);
+    if (previous !== undefined && !splitsAfter(list.children[index - 1]!, item)) {
+      previous.items.push(item);
+      return;
+    }
+    const counted = previous === undefined ? list.start ?? 1 : previous.first + previous.items.length;
+    const own = Number(/^\d+/.exec(source.slice(start(item)))?.[0] ?? counted);
+    parts.push({ items: [item], first: previous === undefined ? counted : own + list.children.length - index - 1 <= MAX_LIST_NUMBER ? own : counted });
+  });
+  return parts;
+}
+
+/**
+ * Whether Linear ends the list after an item: two blank lines after an
+ * empty item start a new list, which Linear writes two blank lines below
+ * it. Markdown reads the same list either way.
+ */
+function splitsAfter(item: ListItem, next: ListItem): boolean {
+  return item.children.length === 0 && next.position!.start.line - item.position!.end.line > 2;
 }

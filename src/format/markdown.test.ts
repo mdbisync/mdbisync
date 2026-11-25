@@ -112,8 +112,41 @@ describe('the parser for the lazy-line budget', () => {
     const fromMarkdown = createRequire(import.meta.url).resolve('mdast-util-from-markdown');
     const micromark = createRequire(fromMarkdown).resolve('micromark');
     const installed = JSON.parse(readFileSync(join(dirname(micromark), 'package.json'), 'utf8')).version;
-    // A new version needs `lazyBudget` in markdown.ts reviewed against `writeToChild` in its `lib/initialize/document.js`.
+    // A new version needs `lazyBudget` in markdown.ts reviewed against `writeToChild` in its `lib/initialize/document.js`,
+    // and `indentedCodeEnds` against the flag that file reads to set `interrupt`.
     assert.equal(installed, '4.0.3');
+  });
+});
+
+describe('the parser where micromark and CommonMark differ', () => {
+  const kinds = (text: string): string[] => parse(text).children.map((node) => node.type === 'list' ? `list from ${node.start ?? 'bullet'}` : node.type);
+
+  it('reads a list right after indented code, also from a number above 1 or with an empty first item', () => {
+    assert.deepEqual(kinds('    code\n2. b\n3. c'), ['code', 'list from 2']);
+    assert.deepEqual(kinds('\tcode\n\n\n2) b'), ['code', 'list from 2']);
+    assert.deepEqual(kinds('    code\n-'), ['code', 'list from bullet']);
+    // Indented code continues over blank lines; a paragraph still takes such a line in.
+    assert.deepEqual(kinds('    code\n\n    more\n2. b'), ['code', 'list from 2']);
+    assert.deepEqual(kinds('Text\n2. b\n\n    code'), ['paragraph', 'code']);
+    assert.deepEqual(kinds('Text\n\n    code\nmore'), ['paragraph', 'code', 'paragraph']);
+  });
+
+  it('reads a checkbox that starts the line below a marker followed by spaces as a task item', () => {
+    for (const text of ['-   \n  [ ] Pack', '-\n  [ ] Pack', '- \t\n  [x] Pack now']) {
+      const list = parse(text).children[0];
+      assert.equal(list?.type, 'list', text);
+      const item = list.type === 'list' ? list.children[0]! : undefined;
+      assert.equal(item?.checked, text.includes('[x]'), text);
+      const paragraph = item?.children[0];
+      assert.equal(paragraph?.type, 'paragraph');
+      if (paragraph?.type !== 'paragraph') continue;
+      assert.equal(text.slice(paragraph.position!.start.offset, paragraph.position!.end.offset), text.includes('[x]') ? 'Pack now' : 'Pack', text);
+    }
+    // Not a checkbox: escaped, without text after it, or after the item's first text.
+    for (const text of ['-   \n  \\[ ] Pack', '-   \n  [ ]', '- Lead\n  [ ] Pack']) {
+      const list = parse(text).children[0];
+      assert.equal(list?.type === 'list' ? list.children[0]!.checked : 'no list', null, text);
+    }
   });
 });
 
@@ -192,12 +225,18 @@ describe('the bare-URL search inside text', () => {
       '\uFEFFSee "www.example.com" now.\n\n\uFEFF"www.example.com"',
     ];
     const fixtures = new URL('../../test/fixtures/', import.meta.url);
+    // Fixtures of the constructs `parse` reads as CommonMark does, where micromark does not.
+    const corrected = new Set(['list-items/task-check-below-marker.md', 'list-items/list-after-indented-code.md', 'list-items/list-after-block-in-item.md']);
+    const own = new Set<string>();
     for (const file of readdirSync(fixtures, { recursive: true, encoding: 'utf8' })) {
-      if (file.endsWith('.md')) texts.push(readFileSync(new URL(file, fixtures), 'utf8'));
+      if (!file.endsWith('.md')) continue;
+      const text = readFileSync(new URL(file, fixtures), 'utf8');
+      texts.push(text);
+      if (corrected.has(file)) own.add(text);
     }
     for (const text of texts) {
       const tree = parse(text);
-      assert.deepEqual(withoutPositions(tree), withoutPositions(upstream(text)), JSON.stringify(text.slice(0, 80)));
+      if (!own.has(text)) assert.deepEqual(withoutPositions(tree), withoutPositions(upstream(text)), JSON.stringify(text.slice(0, 80)));
       assert.deepEqual(unplaced(tree), [], JSON.stringify(text.slice(0, 80)));
     }
   });

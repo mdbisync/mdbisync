@@ -128,7 +128,8 @@ Blocks:
   list follows its paragraph on the next line (where Markdown would read
   its first marker as text, see [`list-after-item-text`](#list-after-item-text)). In a list item, a list of
   another kind (bullet, numbered, task) follows the list before it on the
-  next line too, where its first line can start a list there.
+  next line too, where its first line can start a list there, and so does
+  a list after code, a quote, a heading, a rule or a table.
 - Two or more blank lines after an empty item end the list in Linear:
   `fix` keeps two there (`2. `, two blank lines, `3. c`). Elsewhere they
   collapse like other blank lines between items. The list after them
@@ -156,7 +157,10 @@ Blocks:
   other text or an ordered list in the item, and with `)` or `+`: there it
   stays as it is.
 - Task items use `-` and an uppercase `X`: `* [x] done` becomes
-  `- [X] done`. A checkbox without a label keeps one space after it.
+  `- [X] done`. A checkbox without a label keeps one space after it. A
+  checkbox that starts the line below a bare marker makes a task item, as
+  in Linear, also when spaces follow the marker: `-` and `  [ ] Pack` on
+  the next line become `- [ ] Pack`.
 - A paragraph's text that starts like a list marker gets its marker
   escaped, so it stays text: in `Note` followed by `1. 3. plum`, the
   `3. plum` is text, and with the blank line `fix` writes before the list it
@@ -207,7 +211,8 @@ Blocks:
   stays directly above its callout, with no blank line between them.
 - Tilde fences and indented code become backtick fences. A fence whose info
   string holds a backtick stays a tilde fence, since a backtick fence cannot
-  carry one.
+  carry one. A list right after indented code is a list, as in Linear, also
+  when its first number is not 1 (`    code` and `2. b` below it).
 - A code block outside a quote or list item loses the blank lines before
   its closing fence. Linear returns such a block with one of them fewer
   each time it is written, so only a block without them comes back
@@ -845,6 +850,19 @@ only `fix`; the sync sends such a file as it is.
 
    2.
       * Call the team
+```
+
+### `list-number-too-long`
+
+An ordered list numbered past 999999999: Linear numbers its items on from
+the first number, and Markdown reads a number of more than nine digits as
+text of the item above it. Start the list at a smaller number. Linear keeps
+the items, so the rule stops only `fix`; the sync sends such a file as it
+is.
+
+```markdown
+999999999. Pear
+999999999. Plum
 ```
 
 ### `block-first-in-list-item`

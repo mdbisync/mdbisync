@@ -1,0 +1,63 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {"type":"paragraph","children":[{"text":"Pack the bags","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {"done":true},
+          "children": [
+            {"type":"paragraph","children":[{"text":"Water the plants","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "todo_list",
+          "children": [
+            {
+              "type": "todo_item",
+              "attrs": {"done":false},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Lock the door","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"[ ] Not a box","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-8f554e61","marks":{"attribution":"user"}}]}
+  ]
+}

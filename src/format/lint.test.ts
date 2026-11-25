@@ -59,6 +59,9 @@ const cases: Array<[LintRule, string, number]> = [
   ['unplaced-link', 'Intro.\n\n> Read "www.example.com/a&amp;b" now.', 3],
   ['unplaced-link', 'Intro.\n\nLine *one*\nline two "www.example.com/a\\_b" end.', 4],
   ['block-first-in-list-item', '* ## Heading\n* Plain', 1],
+  ['list-number-too-long', '999999999. Pear\n999999999. Plum', 2],
+  ['list-number-too-long', 'Intro.\n\n999999998. Pear\n2. Plum\n3. Fig', 5],
+  ['list-number-too-long', '* Note\n\n  999999999. Pear\n  999999999. Plum', 4],
   ['ordered-task-list', '1. [ ] alpha\n2. [x] beta', 1],
   ['ordered-task-list', '1. one\n2. [ ] two', 2],
   ['ordered-task-list', '* a\n\n  3. [X] b', 3],
@@ -127,6 +130,14 @@ describe('lint rules', () => {
       assert.equal(findings.find((f) => f.rule === rule)?.message, LINT_RULES[rule]);
     });
   }
+
+  it('list-number-too-long spares a list whose numbers stay within nine digits, and stops only fix', () => {
+    // A part after an empty item and two blank lines counts from its own number, as Linear and fix do.
+    for (const text of ['999999998. Pear\n999999998. Plum', '999999999. Pear', '* Pear\n* Plum\n* Fig', '999999999.\n\n\n5. Pear\n6. Plum']) {
+      assert.deepEqual(lintText('doc.md', text), [], text);
+    }
+    assert.deepEqual(lintInTree('doc.md', '999999999. Pear\n999999999. Plum', new Set()), []);
+  });
 
   it('leaves unplaced-link out of the sync, which sends the text as it is', () => {
     assert.deepEqual(lintInTree('doc.md', 'See "www.example.com/a\\_b" now.', new Set()), []);

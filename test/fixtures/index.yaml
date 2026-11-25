@@ -84,7 +84,17 @@ rules:
     title: "A table whose header row has no | is plain text in Linear. Write the header row between pipes, as | Total |."
   - id: list-after-item-text
     title: "In a list item, Linear writes a list on the line right below the text or the list of another kind before it, where Markdown reads a first marker that cannot interrupt a paragraph as text."
+  - id: list-number-too-long
+    title: "An ordered list numbered past 999999999: Linear numbers its items on, and Markdown reads a number of more than nine digits as text of the item above it."
 known_constructs:
+  - construct: task-check-below-marker
+    class: fixable
+  - construct: list-after-indented-code
+    class: fixable
+  - construct: list-after-block-in-item
+    class: fixable
+  - construct: list-number-too-long
+    class: lint-error
   - construct: heading-empty
     class: fixable
   - construct: quote-empty
@@ -3656,3 +3666,37 @@ fixtures:
     canary: kx-09b751d3
     corpus: false
     note: "Markdown reads the exported leading tabs as code indentation"
+  - file: "list-items/task-check-below-marker.md"
+    group: list-items
+    construct: task-check-below-marker
+    class: fixable
+    basis: known
+    canary: kx-8f554e61
+    corpus: false
+    note: "A checkbox that starts the line below a bare marker is a task item in Linear, also when spaces or a tab follow the marker"
+  - file: "list-items/list-after-indented-code.md"
+    group: list-items
+    construct: list-after-indented-code
+    class: fixable
+    basis: known
+    canary: kx-a7fe67bd
+    corpus: false
+    note: "A list right after indented code is a list in Linear and CommonMark, also from a number above 1 or with an empty first item"
+  - file: "list-items/list-after-block-in-item.md"
+    group: list-items
+    construct: list-after-block-in-item
+    class: fixable
+    basis: known
+    canary: kx-5a9354d8
+    corpus: false
+    note: "In a list item, Linear writes a list right below code, a quote, a heading, a rule or a table"
+  - file: "lint-errors/list-number-too-long.md"
+    group: lint-errors
+    construct: list-number-too-long
+    class: lint-error
+    basis: known
+    rule: list-number-too-long
+    line: 2
+    canary: kx-575a16ec
+    corpus: false
+    note: "Linear numbers the list on past nine digits, which Markdown reads as text of the item above"

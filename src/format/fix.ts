@@ -17,7 +17,7 @@ import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } fro
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
-import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, listKind, opensWithText, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, listKind, listParts, opensWithText, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -788,7 +788,11 @@ class Writer {
       const followsList = child.type === 'list' && previous?.type === 'list'
         && listKind(previous, previous.children.at(-1)!) !== listKind(child, child.children[0]!)
         && opensWithText(child) && this.textOnMarkerLine(child.children[0]!);
-      const separator = index === 0 ? '' : interrupts || followsList ? '\n' : '\n\n';
+      // Linear also writes a list right below code, a quote, a heading, a
+      // rule or a table in the same item, which no list marker continues.
+      const followsBlock = child.type === 'list' && previous !== undefined && LIST_ENDS_BLOCK.has(previous.type)
+        && !(child.position!.start.line > previous.position!.end.line + 1 && startsWithFileBlock(child));
+      const separator = index === 0 ? '' : interrupts || followsList || followsBlock ? '\n' : '\n\n';
       const written = child.type === 'list' ? this.list(child, interrupts) : this.block(child).join('\n\n');
       line += separator.length;
       const breaks = lineBreaks(written);
@@ -2339,29 +2343,8 @@ function lastNumber(list: List, source: string): number {
   return last.first + last.items.length - 1;
 }
 
-/**
- * The parts Linear holds a list in: two blank lines after an empty item
- * start a new list. Each part after the first starts at the number its first
- * item has in the source, as Linear keeps it, unless its numbers would then
- * run past Markdown's nine digits: there it counts on from the part before.
- */
-function listParts(list: List, source: string): Array<{ items: ListItem[]; first: number }> {
-  const parts: Array<{ items: ListItem[]; first: number }> = [];
-  list.children.forEach((item, index) => {
-    const previous = parts.at(-1);
-    if (previous !== undefined && !splitsAfter(list.children[index - 1]!, item)) {
-      previous.items.push(item);
-      return;
-    }
-    const counted = previous === undefined ? list.start ?? 1 : previous.first + previous.items.length;
-    const own = Number(/^\d+/.exec(source.slice(start(item)))?.[0] ?? counted);
-    parts.push({ items: [item], first: previous === undefined ? counted : own + list.children.length - index - 1 <= MAX_LIST_NUMBER ? own : counted });
-  });
-  return parts;
-}
-
-/** The largest list number Markdown reads: nine digits. */
-const MAX_LIST_NUMBER = 999_999_999;
+/** Blocks that end before a list on their next line: no list marker reads as their text. */
+const LIST_ENDS_BLOCK: ReadonlySet<string> = new Set(['code', 'blockquote', 'heading', 'thematicBreak', 'table']);
 
 /** Whether the last block written, inside the last quote or list item that ends the document, is a table. */
 function endsWithTable(tree: Root): boolean {
@@ -2372,14 +2355,6 @@ function endsWithTable(tree: Root): boolean {
   return node?.type === 'table';
 }
 
-/**
- * Whether Linear ends the list after an item: two blank lines after an
- * empty item start a new list, which Linear writes two blank lines below
- * it. Markdown reads the same list either way.
- */
-function splitsAfter(item: ListItem, next: ListItem): boolean {
-  return item.children.length === 0 && next.position!.start.line - item.position!.end.line > 2;
-}
 
 function startsWithFileBlock(list: List): boolean {
   const [item] = list.children;
