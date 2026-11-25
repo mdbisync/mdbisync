@@ -15,7 +15,7 @@ import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { FIXED_RULES, IMAGE_PLACE_RULES } from './rules.ts';
-import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit } from './markdown.ts';
+import { ALERT, MarkdownLimitError, bracketedLabel, codeSpans, decodedDestinationPath, end, imageDestination, isCallout, isCalloutComment, joinFile, linearMarkersAsText, linkDestination, nestedFileBlocksOnItemLine, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -240,6 +240,9 @@ const LIST_MARKER_START = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t\n]|$)/;
 
 const LINEAR_ALERT = /^\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i;
 
+// A `<br>` tag, in any case and with or without its slash.
+const CELL_BREAK = /^<br[ \t]*\/?>$/i;
+
 class Writer {
   private readonly definitions = new Map<string, Definition>();
   private readonly containers: Container[] = [];
@@ -254,6 +257,8 @@ class Writer {
   private textLine: { from: number; to: number; first: number; last: number; delimiter: boolean } | undefined;
   /** Where the table cell being written starts its text: an escape there stays. */
   private cellStart: number | undefined;
+  /** Whether the text being written is a table cell's. */
+  private inCell = false;
   /** The indent of the file block whose label is being written: its later lines carry no prefix for it. */
   private fileBlockIndent = 0;
   /** Whether the text being written is an autolink's, where a backslash escapes nothing. */
@@ -281,8 +286,10 @@ class Writer {
     });
   }
 
+  /** Linear ends a document whose last block is a table, also in a quote or list item, with a line break. */
   root(): string {
-    return this.blocks(this.tree.children);
+    const text = this.blocks(this.tree.children);
+    return endsWithTable(this.tree) ? `${text}\n` : text;
   }
 
   /**
@@ -360,12 +367,17 @@ class Writer {
       case 'list':
         return [this.list(node)];
       case 'code': {
+        // Linear writes a top-level code block with one line break fewer
+        // than it holds, so blank lines before its closing fence shrink on
+        // every new document: only none of them comes back as written. In a
+        // quote or list item they come back as written.
+        const value = this.containers.length === 0 ? withoutTrailingNewlines(node.value) : node.value;
         const info = [node.lang, node.meta].filter(Boolean).join(' ');
         // A backtick fence cannot carry a backtick in its info string; keep tildes then.
         const mark = info.includes('`') ? '~' : '`';
-        const longest = Math.max(0, ...[...node.value.matchAll(mark === '`' ? /`+/g : /~+/g)].map((m) => m[0].length));
+        const longest = Math.max(0, ...[...value.matchAll(mark === '`' ? /`+/g : /~+/g)].map((m) => m[0].length));
         const fence = mark.repeat(Math.max(3, longest + 1));
-        return [`${fence}${info}\n${node.value}${node.value === '' ? '' : '\n'}${fence}`];
+        return [`${fence}${info}\n${value}${value === '' ? '' : '\n'}${fence}`];
       }
       case 'html':
         return [node.value];
@@ -495,6 +507,9 @@ class Writer {
     // item and existing file blocks need their blank line to stay separate
     // from the preceding paragraph.
     let content = '';
+    // Lines (0-based) of the item's own code blocks: Linear indents their blank lines too.
+    const codeLines = new Set<number>();
+    let line = 0;
     item.children.forEach((child, index) => {
       const previous = item.children[index - 1];
       const interrupts = child.type === 'list'
@@ -502,11 +517,17 @@ class Writer {
         && (!child.ordered || (child.start ?? 1) === 1)
         && child.children[0]!.children.length > 0
         && !(child.position!.start.line > previous.position!.end.line + 1 && startsWithFileBlock(child));
-      if (index > 0) content += interrupts ? '\n' : '\n\n';
-      content += child.type === 'list' ? this.list(child, interrupts) : this.block(child).join('\n\n');
+      const separator = index === 0 ? '' : interrupts ? '\n' : '\n\n';
+      const written = child.type === 'list' ? this.list(child, interrupts) : this.block(child).join('\n\n');
+      line += separator.length;
+      const breaks = lineBreaks(written);
+      if (child.type === 'code') for (let at = line; at <= line + breaks; at++) codeLines.add(at);
+      line += breaks;
+      content += separator + written;
     });
     this.containers.pop();
-    return `${marker} ${prefixLines(content, indent, '').slice(indent.length)}`;
+    const lines = content.split('\n').map((text, at) => (text === '' && !codeLines.has(at) ? '' : indent + text));
+    return `${marker} ${lines.join('\n').slice(indent.length)}`;
   }
 
   /**
@@ -575,7 +596,9 @@ class Writer {
         // an escaped one keeps its escape (lint reports a bare one).
         const first = cell?.children[0];
         this.cellStart = first ? start(first) : undefined;
+        this.inCell = true;
         const text = cell ? this.inline(cell.children).trim() : '';
+        this.inCell = false;
         this.cellStart = undefined;
         // Linear writes a header cell containing only a hash as `\#`.
         return text === '#' ? '\\#' : text;
@@ -891,6 +914,10 @@ class Writer {
         if (!this.literal && this.rewriteEscapes) this.escapeTextBrackets(from, to, edits);
         return;
       }
+      case 'html':
+        // Linear writes a line break in a table cell as a character reference.
+        if (this.inCell && CELL_BREAK.test(node.value)) edits.push({ from, to, text: '&#10;' });
+        return;
       default:
         return;
     }
@@ -1332,6 +1359,15 @@ function itemIndent(list: List): number {
   return `${(list.start ?? 1) + list.children.length - 1}.`.length + 1;
 }
 
+/** Whether the last block written, inside the last quote or list item that ends the document, is a table. */
+function endsWithTable(tree: Root): boolean {
+  let node: Nodes | undefined = tree;
+  while (node !== undefined && (node.type === 'root' || node.type === 'blockquote' || node.type === 'list' || node.type === 'listItem')) {
+    node = (node.children as Nodes[]).findLast((child) => child.type !== 'definition');
+  }
+  return node?.type === 'table';
+}
+
 function startsWithFileBlock(list: List): boolean {
   const [item] = list.children;
   if (item === undefined) return false;
@@ -1360,7 +1396,6 @@ function attachmentLink(paragraph: Paragraph): Link | undefined {
   return only;
 }
 
-/** Prefixes every line; empty lines get `empty` instead. */
 /** The prefix `container` takes at the start of `rest`: a quote marker or up to its item's indent in spaces. */
 function prefixOf(container: Container, rest: string): RegExpExecArray | null {
   return container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
@@ -1374,13 +1409,6 @@ function advanceColumn(column: number, char: string): number {
 /** Where the line holding `at` starts. */
 function lineStartOf(source: string, at: number): number {
   return source.lastIndexOf('\n', at - 1) + 1;
-}
-
-function prefixLines(text: string, prefix: string, empty: string): string {
-  return text
-    .split('\n')
-    .map((line) => (line === '' ? empty : prefix + line))
-    .join('\n');
 }
 
 /**

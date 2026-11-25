@@ -1,0 +1,25 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "bullet_list",
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Step","marks":{"attribution":"user"}}]},
+                {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"x\n\ny\n","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-877287ad","marks":{"attribution":"user"}}]}
+  ]
+}

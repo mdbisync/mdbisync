@@ -59,7 +59,7 @@ describe('format docs', () => {
     const alternatives: Array<[string, string]> = [
       ['`H<sub>2</sub>O`', 'Water is H<sub>2</sub>O.'],
       ['`~~strikethrough~~`', 'A ~~strikethrough~~ word.'],
-      ['`` `a \\| b` ``', '| Expression | Meaning |\n| -- | -- |\n| `a \\| b` | either |'],
+      ['`` `a \\| b` ``', '| Expression | Meaning |\n| -- | -- |\n| `a \\| b` | either |\n'],
       ['end the line with two spaces', 'First line  \nSecond line'],
       ['`<br>`', 'First line<br>Second line'],
       ['`![Banner](images/banner.png)`', '![Banner](images/banner.png)'],

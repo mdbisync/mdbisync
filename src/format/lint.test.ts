@@ -153,8 +153,11 @@ describe('lint rules', () => {
     const text = raggedTable(200, 200);
     assert.deepEqual(lintText('doc.md', text), []);
     const fixed = fixText(text);
-    assert.equal(fixed.split('\n').length, 202);
-    assert.ok(fixed.split('\n').every((row) => row.split(' | ').length === 200), 'every row has the header width');
+    // A document that ends with a table ends with a line break.
+    assert.ok(fixed.endsWith(' |\n'));
+    const rows = fixed.slice(0, -1).split('\n');
+    assert.equal(rows.length, 202);
+    assert.ok(rows.every((row) => row.split(' | ').length === 200), 'every row has the header width');
   });
 
   // Many short references to one long definition: `fix` writes each with its own copy of the destination.
@@ -458,7 +461,7 @@ describe('lint and fix commands', () => {
   it('lint and fix agree on a hash header without losing cell text', () => {
     const path = join(dir, 'table.md');
     const source = '| # | Customer |\n| -- | -- |\n| 1 | Example |';
-    const fixed = '| \\# | Customer |\n| -- | -- |\n| 1 | Example |';
+    const fixed = '| \\# | Customer |\n| -- | -- |\n| 1 | Example |\n';
     try {
       writeFileSync(path, source);
       assert.deepEqual(runLint(['table.md'], dir), { exitCode: 1, stdout: "table.md: not in Linear's form; run fix\n", stderr: '' });

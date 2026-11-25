@@ -113,7 +113,9 @@ nothing.
 Blocks:
 
 - Line endings become LF, extra blank lines between blocks collapse to one,
-  and the final line break goes.
+  and the final line break goes. A document that ends with a table, also
+  one at the end of a quote or list item, keeps one final line break, as
+  Linear writes it.
 - Setext headings (text underlined with `===` or `---`) become `#`
   headings, and closing hashes go: `## Summary ##` becomes `## Summary`.
 - Thematic breaks become `---`: `***` becomes `---`.
@@ -151,12 +153,20 @@ Blocks:
 - Tilde fences and indented code become backtick fences. A fence whose info
   string holds a backtick stays a tilde fence, since a backtick fence cannot
   carry one.
+- A code block outside a quote or list item loses the blank lines before
+  its closing fence. Linear returns such a block with one of them fewer
+  each time it is written, so only a block without them comes back
+  unchanged. In a quote or list item the blank lines stay; in a list item
+  a blank line inside a code block keeps the item's indentation, as Linear
+  writes it.
 - `$$` math becomes a `math` fence.
 - Tables get outer pipes and short separators (`| -- | -- |`), and a row
   gets as many cells as the header. A cell containing only `#` is written
   as `\#`, preserving its text, and an escaped `#` that starts a cell keeps
   its escape (a bare one in a body cell is the
-  [`table-hash-cell`](#table-hash-cell) rule).
+  [`table-hash-cell`](#table-hash-cell) rule). A line break tag in a cell
+  (`<br>`, `<br/>`, `<br />`) is written as `&#10;`, as Linear writes it.
+  Linear shows it as a line break; GitHub shows it as a space.
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph. Where that text would start another block,
   a backslash escape keeps it text: in
@@ -734,8 +744,10 @@ toolchain or packages when they install or run.
 A hook that rewrites the same Markdown in another way fights `fix`, and
 the two never settle. The common ones are `end-of-file-fixer`, which adds
 back the final line break `fix` removes, and `trailing-whitespace`, which
-removes the two spaces of a line break. Keep them away from synchronized
-Markdown files:
+removes the two spaces of a line break and the indentation `fix` writes on
+a blank line inside a code block in a list item. An editor that trims
+trailing whitespace on save does the same. Keep them away from
+synchronized Markdown files:
 
 ```yaml
   - repo: https://github.com/pre-commit/pre-commit-hooks

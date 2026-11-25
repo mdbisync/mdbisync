@@ -113,6 +113,18 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "construct-singles/code-blank-lines-before-fence.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-blank-lines-document-end.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-blank-lines-quoted-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/code-fence-blank-lines.md": {
       "yjs": "recorded",
       "fixedPoint": true
@@ -1069,7 +1081,19 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "tables/table-cell-br.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "tables/table-code-pipe.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-document-end-item.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-document-end.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
