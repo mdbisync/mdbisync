@@ -1,0 +1,22 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Two ","marks":{"attribution":"user"}},{"text":" alpha beta ","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Three ","marks":{"attribution":"user"}},{"text":"  alpha beta  ","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Spaces ","marks":{"attribution":"user"}},{"text":" ","marks":{"attribution":"user","code":{}}},{"text":" end.","marks":{"attribution":"user"}}]},
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Item ","marks":{"attribution":"user"}},{"text":" alpha ","marks":{"attribution":"user","code":{}}},{"text":" end","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-1700a6e5","marks":{"attribution":"user"}}]}
+  ]
+}

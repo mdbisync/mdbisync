@@ -15,12 +15,23 @@ import { parse, visit } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
 const cases: Array<[LintRule, string, number]> = [
+  ['code-span-padding', 'Intro.\n\nTwo `  alpha  ` end.', 3],
+  ['code-span-padding', '* Item `   ` end', 1],
+  // A `>` and a tab in the code are code text, not a quote's prefix.
+  ['code-span-padding', 'Text `  a>\tb  ` end', 1],
+  // A quote's tab Linear keeps inside the code leaves its outer spaces unsafe.
+  ['code-span-padding', '> `  a\n>\tb  `', 1],
   ['tab-reference-layout', 'Seed&#9;order\n\n1. &#9;Collect', 3],
   ['space-reference-edge', 'Intro\n\n1. Seed order&#32;', 3],
   ['footnote', 'Text.\n\nA claim.[^1]\n\n[^1]: Source.', 3],
   ['footnote', 'An inline note.^[Text.]', 1],
   ['subscript', 'H~2~O', 1],
   ['table-escaped-pipe', '| A |\n| -- |\n| a \\| b |', 3],
+  ['table-escaped-pipe', '| A | B |\n| -- | -- |\n| a &#124; b | 1 |', 3],
+  ['table-escaped-pipe', '| A |\n| -- |\n| a&#x7C;b |', 3],
+  ['table-escaped-pipe', '| Left &#124; right |\n| -- |\n| a |', 1],
+  ['table-escaped-pipe', '| A |\n| -- |\n| **a &#124; b** |', 3],
+  ['table-escaped-pipe', '| A |\n| -- |\n| [a &#124; b](https://example.com) |', 3],
   ['table-hash-cell', '| A | B |\n| -- | -- |\n| 1 | 2 |\n| # | 3 |', 4],
   ['table-hash-cell', 'Intro.\n\n> | Name | No. |\n> | -- | -- |\n> | Example |  # |', 5],
   ['table-hash-cell', '| A |\n| -- |\n| ## |', 3],
@@ -63,6 +74,9 @@ const cases: Array<[LintRule, string, number]> = [
   ['unplaced-link', 'Intro.\n\n> Read "www.example.com/a&amp;b" now.', 3],
   ['unplaced-link', 'Intro.\n\nLine *one*\nline two "www.example.com/a\\_b" end.', 4],
   ['block-first-in-list-item', '* ## Heading\n* Plain', 1],
+  ['list-number-too-long', '999999999. Pear\n999999999. Plum', 2],
+  ['list-number-too-long', 'Intro.\n\n999999998. Pear\n2. Plum\n3. Fig', 5],
+  ['list-number-too-long', '* Note\n\n  999999999. Pear\n  999999999. Plum', 4],
   ['ordered-task-list', '1. [ ] alpha\n2. [x] beta', 1],
   ['ordered-task-list', '1. one\n2. [ ] two', 2],
   ['ordered-task-list', '* a\n\n  3. [X] b', 3],
@@ -147,6 +161,14 @@ describe('lint rules', () => {
       assert.equal(findings.find((f) => f.rule === rule)?.message, LINT_RULES[rule]);
     });
   }
+
+  it('list-number-too-long spares a list whose numbers stay within nine digits, and stops only fix', () => {
+    // A part after an empty item and two blank lines counts from its own number, as Linear and fix do.
+    for (const text of ['999999998. Pear\n999999998. Plum', '999999999. Pear', '* Pear\n* Plum\n* Fig', '999999999.\n\n\n5. Pear\n6. Plum']) {
+      assert.deepEqual(lintText('doc.md', text), [], text);
+    }
+    assert.deepEqual(lintInTree('doc.md', '999999999. Pear\n999999999. Plum', new Set()), []);
+  });
 
   it('leaves unplaced-link out of the sync, which sends the text as it is', () => {
     assert.deepEqual(lintInTree('doc.md', 'See "www.example.com/a\\_b" now.', new Set()), []);
@@ -332,6 +354,7 @@ describe('lint rules', () => {
       '**Sync conflict: git version**\n\nText.\n\n**Sync conflict: end**',
       '[`code`](https://example.com)',
       '| `a \\| b` | c |\n| -- | -- |\n| 1 | 2 |',
+      'Pick a &#124; b, or c \\| d.',
       '<details>\n<summary>More</summary>\n\nText.\n\n</details>',
     ]) {
       assert.deepEqual(lintText('doc.md', text), [], text);

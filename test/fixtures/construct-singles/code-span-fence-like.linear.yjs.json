@@ -1,0 +1,27 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Before","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"Banner","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/banner.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"js foo","marks":{"attribution":"user","code":{}}},{"text":" after","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Plain ","marks":{"attribution":"user"}},{"text":"js foo","marks":{"attribution":"user","code":{}}},{"text":" after","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Before","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"Banner","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/banner.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"sh run","marks":{"attribution":"user","code":{}}},{"text":" after","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Before","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"Banner","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/banner.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"js foo","marks":{"attribution":"user","code":{}}},{"text":" after","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-0413d122","marks":{"attribution":"user"}}]}
+  ]
+}

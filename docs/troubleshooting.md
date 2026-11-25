@@ -380,16 +380,18 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `mdbisync lint` and `mdbisync fix` also report `hard-break-in-heading`
 when converting a setext heading to one line would lose a hard break, and
 `setext-heading-lines`, `table-header-pipe`, `table-list-cell`,
-`list-after-item-text` and `number-paragraph` for text Linear reads
-differently from Markdown; the sync sends such a file as it is, since
-Linear's own export can hold that text. See
+`list-after-item-text`, `list-number-too-long` and `number-paragraph` for
+text Linear reads differently from Markdown; the sync sends such a file as
+it is, since Linear's own export can hold that text. See
 [hard breaks in headings](linear-format.md#hard-break-in-heading) and the
-five rules in [linear-format.md](linear-format.md#lint-rules).
+six rules in [linear-format.md](linear-format.md#lint-rules).
 They also report `unplaced-link` when `fix` cannot write a web address found
 inside other text as a link; the sync sends such a file as it is. See
 [unplaced links](linear-format.md#unplaced-link).
 The same applies to [`tab-reference-layout`](linear-format.md#tab-reference-layout)
 when reading a literal tab would change the Markdown, and to
+[`code-span-padding`](linear-format.md#code-span-padding) for inline code
+whose outer spaces Linear drops, and to
 [`space-reference-edge`](linear-format.md#space-reference-edge) for a space
 reference at the start or end of a block's text.
 
