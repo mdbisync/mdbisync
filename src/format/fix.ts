@@ -149,10 +149,73 @@ function fixBody(body: string, options: FixOptions): string {
       // A locally equivalent edit can still affect a surrounding block.
       if (!sameMarkdown(next, withOriginalAsterisks)) next = withOriginalAsterisks;
     }
+    next = linearBoldForms(next, next === current ? tree : undefined);
     if (next === current) return next;
     current = next;
   }
   return current;
+}
+
+/** Re-spell bold across line breaks and around a single link in the written body. */
+function linearBoldForms(body: string, tree?: Root): string {
+  if (!body.includes('**')) return body;
+  const breaks: Edit[] = [];
+  const links: Edit[] = [];
+  if (tree === undefined) {
+    tree = parse(body, [], true);
+    if (hasUnplacedNode(tree)) return body;
+  }
+  visit(tree, (node, ancestors) => {
+    if (node.type === 'strong' && node.children.length === 1 && node.children[0]?.type === 'link') {
+      const [link] = node.children;
+      const label = link.children.length > 0 ? body.slice(start(link) + 1, end(link.children.at(-1)!)) : '';
+      if (body[start(link)] === '[' && link.position!.start.line === link.position!.end.line && label !== '' && label === label.trim()) {
+        const text = link.children.map((child) => child.type === 'strong'
+          ? body.slice(start(child) + 2, end(child) - 2) : body.slice(start(child), end(child))).join('');
+        links.push({ from: start(node), to: end(node), text: `[**${text}**${body.slice(end(link.children.at(-1)!), end(link))}` });
+      }
+    }
+    if (node.type !== 'break' && (node.type !== 'text' || node.position!.start.line === node.position!.end.line)) return;
+    if (!ancestors.some((parent) => parent.type === 'strong')) return;
+    for (let at = body.indexOf('\n', start(node)); at !== -1 && at < end(node); at = body.indexOf('\n', at + 1)) {
+      let left = at;
+      while (isSpaceOrTab(body[left - 1]!)) left--;
+      let right = at + 1;
+      const opens: string[] = [];
+      const closes: string[] = [];
+      for (const parent of ancestors) {
+        // This body has already been written with explicit quote and item prefixes.
+        if (parent.type === 'blockquote') right += /^[ \t]*> ?/.exec(body.slice(right))?.[0].length ?? 0;
+        if (parent.type === 'strong' || parent.type === 'emphasis') {
+          const width = parent.type === 'strong' ? 2 : 1;
+          opens.push(body.slice(start(parent), start(parent) + width));
+          closes.push(body.slice(end(parent) - width, end(parent)));
+        }
+        if (parent.type === 'link') {
+          opens.push('[');
+          closes.push(body.slice(end(parent.children.at(-1)!), end(parent)));
+        }
+      }
+      while (isSpaceOrTab(body[right]!)) right++;
+      breaks.push({ from: left, to: left, text: closes.reverse().join('') }, { from: right, to: right, text: opens.join('') });
+    }
+  });
+  // Split the lines first. A link can then be the only content of one of
+  // the new bold spans, even if it was only part of the original span.
+  return reSpellBold(body, breaks) ?? reSpellBold(body, links) ?? body;
+}
+
+function reSpellBold(body: string, edits: Edit[]): string | undefined {
+  if (edits.length === 0) return undefined;
+  const parts: string[] = [];
+  let at = 0;
+  for (const edit of edits.sort((a, b) => a.from - b.from)) {
+    parts.push(body.slice(at, edit.from), edit.text);
+    at = edit.to;
+  }
+  parts.push(body.slice(at));
+  const candidate = parts.join('');
+  return sameMarkdown(body, candidate, { linearBoldForms: true }) ? candidate : undefined;
 }
 
 type Edit = { from: number; to: number; text: string };
@@ -1204,7 +1267,7 @@ export function fixLinearText(linearText: string, content: string, inRepository:
   const uploaded = (url: string): boolean => !notUploadedUris.has(normalizeUri(url));
   const linear = { linkedFileExists: uploaded };
   const fixed = fixText(text, linear);
-  if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body, { linearNumberSpacing: true })) return text;
+  if (fixed !== text && !sameMarkdown(splitFile(fixed).body, splitFile(text).body, { linearNumberSpacing: true, linearBoldForms: true })) return text;
   // The hook cannot tell which files were uploaded. It can write a list item
   // holding only a link to a repository file as a file block. Linear stores
   // such a block as a link if it holds no upload for the file. Take the
@@ -1278,7 +1341,14 @@ function startsWithFileBlock(list: List): boolean {
 
 function itemAttachment(item: ListItem): Link | undefined {
   const [first] = item.children;
-  return first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
+  const link = first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
+  if (link?.position!.start.line === item.position!.start.line) {
+    // Linear keeps a bold inline file label as a link on its item's line.
+    let label = link.children.length === 1 ? link.children[0] : undefined;
+    while (label?.type === 'emphasis' && label.children.length === 1) label = label.children[0];
+    if (label?.type === 'strong') return undefined;
+  }
+  return link;
 }
 
 /** A paragraph that holds only a link to a relative file other than Markdown: an attachment. */

@@ -44,6 +44,18 @@ it('writes byte-exact linked assets for bank and lint-error inputs without compa
   }
 });
 
+it('fixes bold links and bold continuation lines through the CLI', () => {
+  const dir = join(root, 'bold');
+  const path = 'trails.md';
+  writeInput(dir, new Map([[path, '**<https://example.com/trails>**\n\n**Birch\nCedar**']]));
+  const expected = '[**https://example.com/trails**](<https://example.com/trails>)\n\n**Birch**\n**Cedar**';
+  for (const [command, status] of [['fix', 1], ['lint', 0], ['fix', 0]] as const) {
+    const result = runFormatCommand(command, dir);
+    assert.equal(result.status, status, result.stderr || result.stdout);
+    assert.equal(readFileSync(join(dir, path), 'utf8'), expected);
+  }
+});
+
 it('keeps corpus assets at their rewritten link destinations with their original bytes', () => {
   const input = offlineInput('full');
   assert.ok(input.assets.has('eng/platform/assets/status-icon.png'));

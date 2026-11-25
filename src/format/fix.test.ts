@@ -111,7 +111,7 @@ describe('a backslash line break', () => {
     ['> Quiet hours\\\nbegin at nine', '> Quiet hours  \n> begin at nine'],
     ['- Pack the tent\\\n  and the stove\n- Leave early', '* Pack the tent  \n  and the stove\n* Leave early'],
     ['- [ ] Water the fern\\\n  on Sunday', '- [ ] Water the fern  \n  on Sunday'],
-    ['**Bold start\\\nbold end** and [two\\\nlines](https://example.com)', '**Bold start  \nbold end** and [two  \nlines](<https://example.com>)'],
+    ['[two\\\nlines](https://example.com)', '[two  \nlines](<https://example.com>)'],
     ['Tabs after\\\n\tthe break', 'Tabs after  \n\tthe break'],
     ['Spaces before \\\nthe backslash', 'Spaces before  \nthe backslash'],
     ['A break\\\n-- then a dash line', 'A break  \n\\-- then a dash line'],
@@ -166,6 +166,39 @@ describe('a backslash line break', () => {
 
   it('is not a break in a code span or at the end of a paragraph', () => {
     for (const input of ['`code\\\nspan`', 'Ends with a backslash\\']) assert.equal(fixText(input), input);
+  });
+});
+
+describe('Linear bold forms', () => {
+  const forms = [
+    ['angle autolink', '**<https://example.com/trails>**', '[**https://example.com/trails**](<https://example.com/trails>)'],
+    ['bare URL', '**https://example.com/trails**', '[**https://example.com/trails**](<https://example.com/trails>)'],
+    ['explicit label', '__[trail map](https://example.com/trails)__', '[**trail map**](<https://example.com/trails>)'],
+    ['partly bold label', '**[trail **map**](https://example.com/trails)**', '[**trail map**](<https://example.com/trails>)'],
+    ['italic label', '**[*trail map*](https://example.com/trails)**', '[***trail map***](<https://example.com/trails>)'],
+    ['mixed link and prose', '**Use the [trail map](https://example.com/trails)**', '**Use the [trail map](<https://example.com/trails>)**'],
+    ['file label in a list item', '* **[Trail map](trail.pdf)**', '* [**Trail map**](<trail.pdf>)'],
+    ['soft breaks', '**Birch\nCedar\nMaple**', '**Birch**\n**Cedar**\n**Maple**'],
+    ['hard break', '**Birch  \nCedar**', '**Birch**  \n**Cedar**'],
+    ['backslash hard break', '**Birch\\\nCedar**', '**Birch**  \n**Cedar**'],
+    ['continuation spaces', '**Birch \n  Cedar**', '**Birch** \n  **Cedar**'],
+    ['quote and list', '> * **Birch\n>   Cedar**', '> * **Birch**\n>   **Cedar**'],
+    ['bold and italic', '***Birch\nCedar***', '***Birch***\n***Cedar***'],
+    ['multiline link label', '**[Trail\nmap](https://example.com/trails)**', '[**Trail**](<https://example.com/trails>)\n[**map**](<https://example.com/trails>)'],
+    ['link takes up one line', '**Birch\n[Trail map](https://example.com/trails)**', '**Birch**\n[**Trail map**](<https://example.com/trails>)'],
+  ] as const;
+  for (const [name, input, expected] of forms) {
+    it(name, () => {
+      const fixed = fixText(input);
+      assert.equal(fixed, expected);
+      assert.equal(fixText(fixed), fixed);
+      assert.deepEqual(lintText('trails.md', fixed), []);
+    });
+  }
+
+  it('can normalize older read-back forms during sync', () => {
+    const content = '**[Trail map](<https://example.com/trails>)**\n\n**Birch\nCedar**';
+    assert.equal(fixLinearText(content, content, () => false), '[**Trail map**](<https://example.com/trails>)\n\n**Birch**\n**Cedar**');
   });
 });
 

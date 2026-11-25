@@ -595,9 +595,9 @@ export function markdownBaseline(body: string | undefined): string | undefined {
  * table cell, `*` for `_`), which changes nothing in the document; the sync
  * keeps the file's spelling for those.
  */
-export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean } = {}): boolean {
+export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean; linearBoldForms?: boolean } = {}): boolean {
   if (a === b) return true;
-  return isDeepStrictEqual(comparable(a, options.linearNumberSpacing), comparable(b, options.linearNumberSpacing));
+  return isDeepStrictEqual(comparable(a, options), comparable(b, options));
 }
 
 /**
@@ -895,8 +895,47 @@ function appendComparable(children: ComparableNode[], child: ComparableNode): vo
   }
 }
 
+/** A bold span and its link can exchange wrappers. Coextensive bold and italic can too. */
+function comparableBold(node: ComparableNode, children: ComparableNode[]): ComparableNode {
+  const [only] = children;
+  if (node.type !== 'strong' || children.length !== 1) return { ...node, children };
+  if (only?.type === 'emphasis') {
+    return { ...only, children: [comparableBold(node, only.children!)] };
+  }
+  if (only?.type === 'link') {
+    const label: ComparableNode[] = [];
+    for (const part of only.children!) {
+      for (const child of part.type === 'strong' ? part.children! : [part]) appendComparable(label, child);
+    }
+    return { ...only, children: [comparableBold(node, label)] };
+  }
+  return { ...node, children };
+}
+
+/** Linear writes inline wrappers on each side of a break independently. */
+function comparableLines(node: ComparableNode, children: ComparableNode[]): ComparableNode[] {
+  const parts: ComparableNode[] = [];
+  let line: ComparableNode[] = [];
+  const separate = (breakNode: ComparableNode): void => {
+    if (line.length > 0) parts.push(comparableBold(node, line));
+    parts.push(breakNode);
+    line = [];
+  };
+  for (const child of children) {
+    if (child.type === 'break') separate(child);
+    else if (child.type === 'text' && /[\r\n]/.test(child.value!)) {
+      for (const text of child.value!.split(/(\r\n?|\n)/)) {
+        if (/^[\r\n]/.test(text)) separate({ type: 'text', value: text });
+        else if (text !== '') appendComparable(line, { type: 'text', value: text });
+      }
+    } else appendComparable(line, child);
+  }
+  if (line.length > 0) parts.push(comparableBold(node, line));
+  return parts.length > 0 ? parts : [{ ...node, children }];
+}
+
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
-function comparable(body: string, linearNumberSpacing = false): unknown {
+function comparable(body: string, { linearNumberSpacing, linearBoldForms }: { linearNumberSpacing?: boolean; linearBoldForms?: boolean }): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
   // A lone `\+`, as `fix` writes for item text that is a bare `+`, cannot
   // be part of `+++`. Markdown reads it as a regular escape.
@@ -905,30 +944,34 @@ function comparable(body: string, linearNumberSpacing = false): unknown {
   const marked = markFileBlockStarts(nestedFileBlocksOnItemLine(body)
     .replace(/\\[$+]/g, (escape, at: number, text: string) => (escape === '\\+' && isLonePlus(text, at) ? escape : LINEAR_SYNTAX_ESCAPES[escape]!)));
   const tree = parse(marked, [], true);
-  const strip = (node: Nodes, paragraphLine?: boolean): ComparableNode => {
+  const strip = (node: Nodes, paragraphLine?: boolean): ComparableNode[] => {
     const { position: _position, ...rest } = node;
     if ('url' in rest) rest.url = normalizeUri(rest.url);
     if (linearNumberSpacing && node.type === 'text' && paragraphLine !== undefined) {
       // Linear substitutes one space after a literal number's dot. This is
       // only a re-spelling in a paragraph, after the parser resolved blocks.
       const separator = paragraphLine ? /(^|\n)([ \t]*\d+\.)[\t\u00a0]/g : /(\n)([ \t]*\d+\.)[\t\u00a0]/g;
-      return { ...rest, value: node.value.replace(separator, '$1$2 ') };
+      return [{ ...rest, value: node.value.replace(separator, '$1$2 ') }];
     }
     if ('children' in node) {
       const children: ComparableNode[] = [];
       for (const [index, child] of node.children.entries()) {
         const startsLine = node.type === 'paragraph' ? index === 0 || node.children[index - 1]?.type === 'break' : undefined;
-        const part = strip(child, startsLine);
-        // A strong span immediately inside another one adds no formatting.
-        if (node.type === 'strong' && part.type === 'strong') {
-          for (const nested of part.children!) appendComparable(children, nested);
-        } else {
-          appendComparable(children, part);
+        for (const part of strip(child, startsLine)) {
+          // A strong span immediately inside another one adds no formatting.
+          if (node.type === 'strong' && part.type === 'strong') {
+            for (const nested of part.children!) appendComparable(children, nested);
+          } else {
+            appendComparable(children, part);
+          }
         }
       }
-      return { ...rest, children };
+      if (linearBoldForms && (node.type === 'strong' || node.type === 'emphasis' || node.type === 'link')) {
+        return comparableLines(rest, children);
+      }
+      return [{ ...rest, children }];
     }
-    return rest;
+    return [rest];
   };
   return strip(tree);
 }

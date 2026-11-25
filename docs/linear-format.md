@@ -194,6 +194,9 @@ Inline text:
   `**Birch\*\*\*\*Pine**`, and `**Inventory` becomes `\*\*Inventory`.
   Consecutive bold spans join when they can keep their formatting.
   Bold immediately inside another bold span is folded into the outer span.
+- Bold around a single link moves into the link label. For example,
+  `**[Map](https://example.com)**` becomes `[**Map**](<https://example.com>)`.
+  When bold spans multiple lines, `fix` closes it and reopens it on each line.
 - Link destinations go in angle brackets: `[a](https://example.com/x)`
   becomes `[a](<https://example.com/x>)`. A backslash, `|`, `^`, `{` and
   `}` in a destination are percent-encoded, as Linear writes them:
