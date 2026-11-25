@@ -342,11 +342,14 @@ type InlineEdits = { edits: Edit[]; rewriteAsterisks: boolean; changedAsterisks:
 /** `content` is the source offset where the container's content starts on its first line. */
 type Container = (
   | { kind: 'quote'; content: number }
-  | { kind: 'item'; indent: number; content: number }
+  | { kind: 'item'; indent: number; content: number; written?: number }
 ) & { markerBrackets?: readonly [number, number] };
 
 // Characters that start a block when they open a line (`<` an HTML block).
 const BLOCK_START = /^(?:[<>#*+\-=_`~|]|\d{1,9}[.)]|\d+\\?\.(?=[ \t\u00a0]))/;
+
+// A number with a dot and text after it, which `fix` escapes where it starts a paragraph line.
+const NUMBER_TEXT = /^\d+\\?\.[ \t\u00a0]+[^ \t\u00a0]/;
 
 // A paragraph of `$$` lines around math, which `fix` writes as a `math` fence.
 const MATH_PARAGRAPH = /^\$\$\n([\s\S]*)\n\$\$$/;
@@ -529,7 +532,9 @@ class Writer {
     const images = node.children.filter(isImage).length;
     const hasText = node.children.some((child) => !isImage(child) && !(child.type === 'text' && child.value.trim() === ''));
     if (images === 0 || (!hasText && images === 1)) {
+      this.wholeParagraphEnd = node.children.length > 0 ? end(node.children.at(-1)!) : undefined;
       const text = node === this.taskParagraph ? this.inline(node.children, 'continuation') : this.paragraphText(node.children);
+      this.wholeParagraphEnd = undefined;
       return [escapeLiteralSectionEnd(text)];
     }
     // Linear holds images as blocks: text before and after an image becomes its own paragraph.
@@ -623,6 +628,8 @@ class Writer {
     // Linear writes an empty item's marker with the space that would precede its text.
     if (first === undefined) return `${marker} `;
     const container = this.itemContainer(item);
+    // The columns `fix` writes before the item's content lines.
+    if (container.kind === 'item') container.written = indent.length;
     if (bareCheckbox) container.markerBrackets = [start(first!), start(first!) + 2];
     this.containers.push(container);
     if (item.checked !== null && item.checked !== undefined && first.type === 'paragraph') this.taskParagraph = first;
@@ -806,6 +813,11 @@ class Writer {
     const inside = (ranges: ReadonlyArray<readonly [number, number]>, at: number): boolean => ranges.some(([a, b]) => a <= at && at < b);
     if (paragraph?.first) this.escapeLineStart(from, to, paragraph.texts, edits);
     for (let at = this.source.indexOf('\n', from); at !== -1 && at < to; at = this.source.indexOf('\n', at + 1)) {
+      const marker = paragraph === undefined || inside(code, at) || inside(paragraph.html, at) ? undefined : this.bareMarkerLine(from, at + 1, to);
+      if (marker !== undefined) {
+        edits.push(...marker);
+        continue;
+      }
       const continuation = this.continuation(at + 1, inside(code, at), paragraph !== undefined && !inside(paragraph.html, at));
       edits.push(continuation);
       if (paragraph === undefined || continuation.underline) continue;
@@ -865,6 +877,44 @@ class Writer {
     return true;
   }
 
+  /**
+   * The edits for the second and last line of an item's first paragraph,
+   * starting on the item's line, when that line holds only `N.` or `*`
+   * inside list items: an empty marker cannot interrupt a paragraph, so it
+   * is text, but Linear reads it as an empty item nested in the item and
+   * writes it at the item's content with a space after it (four or more
+   * columns past the content, it reads indented code there, which `fix`
+   * cannot write without changing the text: the same form keeps the text
+   * and is what Linear keeps of it). Under a quote, on a line that does not
+   * reach the item's content, with other lines before or after it, Linear
+   * reads the text: `undefined`, the line is written as before.
+   */
+  private bareMarkerLine(from: number, lineStart: number, to: number): Edit[] | undefined {
+    const item = this.containers.at(-1);
+    // Only a paragraph written whole: text split off at an image does not end its paragraph.
+    if (to !== this.wholeParagraphEnd) return undefined;
+    if (this.fileBlockIndent > 0 || item === undefined || this.containers.some((container) => container.kind !== 'item')) return undefined;
+    if (lineStartOf(this.source, item.content) !== lineStartOf(this.source, from) || this.source.indexOf('\n', from) !== lineStart - 1) return undefined;
+    const next = this.source.indexOf('\n', lineStart);
+    if (next !== -1 && next < to) return undefined;
+    const bare = /^[ \t]*(?:\d{1,9}\.|\*)$/.exec(this.source.slice(lineStart, to));
+    if (bare === null) return undefined;
+    const line = this.source.slice(lineStart, next === -1 ? undefined : next);
+    if (this.prefixEnd(lineStart, line).lazy) return undefined;
+    // An ordered list on the next line inside the item would continue
+    // Linear's empty item and be renumbered.
+    if (next !== -1) {
+      const after = this.source.indexOf('\n', next + 1);
+      const nextLine = this.source.slice(next + 1, after === -1 ? undefined : after);
+      if (/^[ \t]*\d{1,9}[.)](?:[ \t]|$)/.test(nextLine) && !this.prefixEnd(next + 1, nextLine).lazy) return undefined;
+    }
+    const marker = lineStart + /^[ \t]*/.exec(line)![0].length;
+    return [{ from: lineStart, to: marker, text: '' }, { from: to, to, text: ' ' }];
+  }
+
+  /** The end of the paragraph being written whole, which `bareMarkerLine` needs. */
+  private wholeParagraphEnd: number | undefined;
+
   /** The edit that removes a continuation line's container prefixes, starting at `lineStart`; `paragraph` when the line is a paragraph's text. */
   private continuation(lineStart: number, inCode: boolean, paragraph = false): Edit & { underline?: true } {
     const line = this.source.slice(lineStart, this.source.indexOf('\n', lineStart) === -1 ? undefined : this.source.indexOf('\n', lineStart));
@@ -901,14 +951,34 @@ class Writer {
     if (!inCode && this.fileBlockIndent > 0 && !startsBlock) return { from: lineStart, to: ownText, text: '' };
     // The rest of the line's indentation is its own: Linear keeps it, and
     // the columns of a tab the prefixes took only in part stay as spaces.
-    // Under a written prefix a tab can span other columns than in the
-    // source; before text that could open a block it becomes the spaces it
-    // spanned there.
-    if (!inCode && startsBlock && this.containers.length > 0 && this.source.slice(at, ownText).includes('\t')) {
+    // Under a written prefix that ends at another column than the source's
+    // prefixes, a tab can span other columns than in the source; before
+    // text that could open a block it becomes the spaces it spanned there.
+    // Where the prefixes end at the source's column, the tabs span the same
+    // columns and stay, as Linear keeps them. A number with a dot that
+    // starts paragraph text is escaped, so it reads as text at any column:
+    // its tabs stay too.
+    const escapedNumber = paragraph && NUMBER_TEXT.test(this.source.slice(ownText, lineEnd));
+    if (!inCode && startsBlock && this.containers.length > 0 && this.source.slice(at, ownText).includes('\t') && !escapedNumber && !this.samePrefixColumns(lineStart, at, pad)) {
       const column = (offset: number): number => [...this.source.slice(lineStart, offset)].reduce(advanceColumn, 0);
       return { from: lineStart, to: ownText, text: ' '.repeat(pad + column(ownText) - column(at)) };
     }
     return { from: lineStart, to: at, text: ' '.repeat(pad) };
+  }
+
+  /**
+   * Whether the prefixes `fix` writes for the item containers end at the
+   * column where the source's prefixes end on the line (`at`, less the
+   * `pad` columns of a tab they took in part): then every tab after them
+   * spans the same columns. Under a quote it is not worked out: `false`.
+   */
+  private samePrefixColumns(lineStart: number, at: number, pad: number): boolean {
+    let written = 0;
+    for (const container of this.containers) {
+      if (container.kind !== 'item' || container.written === undefined) return false;
+      written += container.written;
+    }
+    return written === [...this.source.slice(lineStart, at)].reduce(advanceColumn, 0) - pad;
   }
 
   /**
