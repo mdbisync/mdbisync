@@ -112,7 +112,7 @@ describe('a backslash line break', () => {
     ['- Pack the tent\\\n  and the stove\n- Leave early', '* Pack the tent  \n  and the stove\n* Leave early'],
     ['- [ ] Water the fern\\\n  on Sunday', '- [ ] Water the fern  \n  on Sunday'],
     ['**Bold start\\\nbold end** and [two\\\nlines](https://example.com)', '**Bold start  \nbold end** and [two  \nlines](<https://example.com>)'],
-    ['Tabs after\\\n\tthe break', 'Tabs after  \nthe break'],
+    ['Tabs after\\\n\tthe break', 'Tabs after  \n\tthe break'],
     ['Spaces before \\\nthe backslash', 'Spaces before  \nthe backslash'],
     ['A break\\\n-- then a dash line', 'A break  \n\\-- then a dash line'],
     // Inline HTML cannot interrupt a paragraph, so this line stays text.
@@ -477,6 +477,63 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('keeps a continuation line\'s own indentation past its container, as Linear does', () => {
+    // An item takes up to its content indent in columns; a tab it takes in
+    // part leaves its other columns as spaces. A quote takes `> `, and a
+    // lazy line keeps its indentation for the quote.
+    const continued: Array<[string, string]> = [
+      ['Fern\n  two spaces\n\ta tab\n    four spaces', 'Fern\n  two spaces\n\ta tab\n    four spaces'],
+      ['> Fern\n>   two spaces', '> Fern\n>   two spaces'],
+      ['> Fern\n  lazy two\n\tlazy tab', '> Fern\n>   lazy two\n> \tlazy tab'],
+      ['- fern\nlazy', '* fern\n  lazy'],
+      ['- fern\n  at the content', '* fern\n  at the content'],
+      ['- fern\n    two past it', '* fern\n    two past it'],
+      ['- fern\n\ta tab', '* fern\n    a tab'],
+      ['- fern\n  \ta tab past the prefix', '* fern\n  \ta tab past the prefix'],
+      ['1. fern\n  lazy two', '1. fern\n   lazy two'],
+      ['1. fern\n     two past it', '1. fern\n     two past it'],
+      ['1. fern\n\ta tab', '1. fern\n    a tab'],
+      ['- a\n  - b\n      two past b\n  lazy for b', '* a\n  * b\n      two past b\n    lazy for b'],
+      ['> - fern\n  lazy two\n\n> - moss\nlazy', '> * fern\n>   lazy two\n\n> * moss\n>   lazy'],
+      ['9. a\n10. fern\n    at the content\nlazy', ' 9. a\n10. fern\n    at the content\n    lazy'],
+    ];
+    for (const [text, expected] of continued) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), [], `lint finds nothing: ${text}`);
+    }
+  });
+
+  it('keeps a continuation line text where its indentation kept it from opening a block', () => {
+    const kept: Array<[string, string]> = [
+      // A lazy line: the item takes none of the spaces that kept it text.
+      ['> - fern\n    # x', '> * fern\n>       # x'],
+      ['> - fern\n    - x', '> * fern\n>       - x'],
+      ['10.  fern\n    # x', '10. fern\n        # x'],
+      ['*    a\n\n     > b\n    > c', '* a\n\n  > b\n  >     > c'],
+      // A tab before such text becomes the spaces it spanned in the source.
+      ['> foo\n\t- bar', '> foo\n>     - bar'],
+      ['-   a\n    \t- b', '* a\n      - b'],
+      // A nested item indented with a tab, a tab after `>` and after a marker count in columns.
+      ['* a\n\t* b\n\t\t  - x', '* a\n  * b\n        - x'],
+      ['* a\n\t* b\n\t\tc', '* a\n  * b\n      c'],
+      ['> - a\n>\tb', '> * a\n>   b'],
+      ['> - a\n>\t-x', '> * a\n>   \\-x'],
+      ['*\ta\n    b', '* a\n  b'],
+      // A file block label's later lines carry no prefix for their item: their indentation goes.
+      ['* [Doc\n            end](file.mp4)', '* [Doc\nend](file.mp4)'],
+    ];
+    for (const [text, expected] of kept) {
+      const fixed = fixText(text);
+      assert.equal(fixed, expected, text);
+      assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
+      assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+    }
+  });
+
   it('leaves an ordered task list to its author: Linear would drop its numbers', () => {
     for (const text of ['1. [ ] alpha\n2. [x] beta', '1. one\n2. [ ] two', '* a\n\n  3. [x] b']) {
       assert.equal(fixText(text), text, text);
@@ -545,10 +602,11 @@ describe('what fix leaves alone', () => {
       ['First\n-- second\n-x third', 'First\n\\-- second\n\\-x third'],
       ['* item\n  -- remark', '* item\n  \\-- remark'],
       ['> words\n> -x remark', '> words\n> \\-x remark'],
-      // Indentation of a continuation line does not count: the marker is escaped and the indentation goes.
-      ['First\n  -x third', 'First\n\\-x third'],
-      ['First\n\t*x third', 'First\n\\*x third'],
-      ['> a\n>   -x', '> a\n> \\-x'],
+      // A continuation line keeps its indentation; after it Linear escapes a `*` but not a `-`.
+      ['First\n  -x third', 'First\n  -x third'],
+      ['First\n\t*x third', 'First\n\t\\*x third'],
+      ['> a\n>   -x', '> a\n>   -x'],
+      ['* item\n    -x four', '* item\n    -x four'],
       // A `*` that shares a delimiter run with emphasis keeps the run as it is.
       ['***(important)*', '***(important)*'],
       ['**x', '**x'],
@@ -611,7 +669,7 @@ describe('what fix leaves alone', () => {
     const images: Array<[string, string]> = [
       ['> ![a\n> b](x.png)', '> ![a\n> b](x.png)'],
       ['> ![a\nb](x.png)', '> ![a\n> b](x.png)'],
-      ['> ![a\n>     b](x.png)', '> ![a\n> b](x.png)'],
+      ['> ![a\n>     b](x.png)', '> ![a\n>     b](x.png)'],
       ['- ![a\n  b](x.png)', '* ![a\n  b](x.png)'],
       ['> - ![a\n>   b](x.png)', '> * ![a\n>   b](x.png)'],
       ['> > ![a\n> b](x.png)', '> > ![a\n> > b](x.png)'],
