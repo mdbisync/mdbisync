@@ -2184,6 +2184,33 @@ describe('what fix leaves alone', () => {
     }
   });
 
+  it('replaces exactly the shortcodes Linear replaces', () => {
+    // Names Linear knows that GitHub's set lacks, in text and in link text.
+    assert.equal(fixText('Due :spiral_calendar_pad: soon :face_with_rolling_eyes:'), 'Due \u{1F5D3}\u{FE0F} soon \u{1F644}');
+    assert.equal(fixText('[:spiral_calendar_pad: plan](<https://example.com/a>)'), '[\u{1F5D3}\u{FE0F} plan](<https://example.com/a>)');
+    // Names Linear leaves as text: GitHub-only names, other aliases, emoji
+    // newer than Linear's set, other letter case.
+    for (const text of ['Flag :albania: :1st_place_medal:', 'Ok :thumbsup: :satisfied:', 'New :shaking_face:', 'Case :Smile:']) {
+      assert.equal(fixText(text), text, text);
+    }
+    assert.equal(fixText('[:albania: trip](<https://example.com/a>)'), '[:albania: trip](<https://example.com/a>)');
+    // Linear's emoji for a name GitHub maps to another one.
+    assert.equal(fixText('Mail :email:'), 'Mail \u{2709}\u{FE0F}');
+    // The keycap asterisk keeps its `*` escaped, as Linear writes it.
+    assert.equal(fixText('Star :keycap_star: and *me*'), 'Star \\*\u{FE0F}\u{20E3} and *me*');
+    // A shortcode next to an emphasis run stays when its emoji would change how the run reads.
+    assert.equal(fixText('Due :spiral_calendar_pad:**(tomorrow)**'), 'Due :spiral_calendar_pad:**(tomorrow)**');
+    assert.equal(fixText('Due **:tada:** now'), 'Due **\u{1F389}** now');
+    // Literal asterisks get Linear's escapes, so the emoji cannot make them emphasis.
+    assert.equal(fixText('*x :spiral_calendar_pad:*y'), '\\*x \u{1F5D3}\u{FE0F}\\*y');
+    assert.equal(fixText('\\*x \u{1F5D3}\u{FE0F}\\*y'), '\\*x \u{1F5D3}\u{FE0F}\\*y');
+    // A name with hyphens; escaped hyphens keep it text, however many there are.
+    assert.equal(fixText('Team :man-raising-hand: here'), 'Team \u{1F64B}\u{200D}\u{2642}\u{FE0F} here');
+    for (const text of ['Team :man\\-raising\\-hand: here', 'Team :man-raising\\-hand: here', 'Flag :flag\\-al: here']) {
+      assert.equal(fixText(text), text, text);
+    }
+  });
+
   it('keeps an escaped character reference or emoji shortcode in text as written', () => {
     for (const text of ['Plain \\&amp; text.', 'Plain \\:tada: text.']) assert.equal(fixText(text), text);
     // After an escaped backslash, the reference and the shortcode are read and rewritten.
