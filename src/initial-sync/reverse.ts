@@ -66,6 +66,7 @@ import {
   readUploads,
   stateRef,
   signObservation,
+  showCommit,
 } from '../state/index.ts';
 import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
@@ -845,7 +846,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     if (moveSync) updates.push({ ref: branchRef(options.config.syncBranch), expected: fetched.sync, next: commit, replace: true });
     const pushed = await pushAtomic(git, options.config, updates);
     if (!pushed.ok) return null;
-    const parents = (await git.text(['show', '-s', '--format=%P', commit])).split(' ').filter(Boolean);
+    const parents = (await showCommit(git, '%P', commit)).split(' ').filter(Boolean);
     return {
       linear: commit,
       moved: pushed.updated.length > 0,
@@ -875,7 +876,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
 
   /** Whether two commits have the same tree, parents and message (its signature included), so the newer one adds nothing. */
   async function sameRecord(a: Oid, b: Oid): Promise<boolean> {
-    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%B', oid]);
+    const describe = (oid: Oid) => showCommit(git, '%T %P%n%B', oid);
     return (await describe(a)) === (await describe(b));
   }
 
@@ -885,7 +886,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
    * made it may have had no App slug, or come from a release before it.
    */
   async function isOwnRecord(oid: Oid): Promise<boolean> {
-    const [subject, email, parents] = (await git.text(['show', '-s', '--format=%s%n%ae%n%P', oid])).split('\n');
+    const [subject, email, parents] = (await showCommit(git, '%s%n%ae%n%P', oid)).split('\n');
     return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? '').split(' ').filter(Boolean).length === 1;
   }
 }

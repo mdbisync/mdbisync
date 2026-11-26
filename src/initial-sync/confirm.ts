@@ -58,6 +58,7 @@ import {
   readUploads,
   stateRef,
   signObservation,
+  showCommit,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, placeKey, planInitialSync } from './plan.ts';
@@ -628,14 +629,14 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     ];
     const pushed = await pushAtomic(git, options.config, updates);
     if (!pushed.ok) return null;
-    const parents = (await git.text(['show', '-s', '--format=%P', linearCommit])).split(' ').filter(Boolean);
+    const parents = (await showCommit(git, '%P', linearCommit)).split(' ').filter(Boolean);
     const hasTrackedParent = parents.length === 1 && parents[0] === tracked;
     return { linear: linearCommit, moved: linearCommit !== expected.linear, reformatted, parents, hasTrackedParent };
   }
 
   /** Whether two record commits have the same tree, parents and message, so the newer one adds nothing. */
   async function sameRecord(a: Oid, b: Oid): Promise<boolean> {
-    const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%B', oid]);
+    const describe = (oid: Oid) => showCommit(git, '%T %P%n%B', oid);
     return (await describe(a)) === (await describe(b));
   }
 }

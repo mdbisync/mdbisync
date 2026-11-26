@@ -6,6 +6,7 @@
 // signed that tip, or when the tip holds a tree the tracked branch itself
 // held; a commit it did not write never becomes the base of a signed one.
 
+import { showCommit } from './commit-format.ts';
 import { type Git, type Oid } from './git.ts';
 import { type PushedKey } from './pushed.ts';
 
@@ -23,7 +24,7 @@ export function signObservation(key: PushedKey): (tree: Oid, parents: readonly O
 /** Whether the sync signed `commit` as a `linear` commit of this repository. */
 export async function signedObservation(git: Git, commit: Oid, key: PushedKey): Promise<boolean> {
   // The tree and parents as git reads them, whatever other headers the object carries.
-  const [tree = '', parents = ''] = (await git.text(['show', '-s', '--format=%T%n%P', commit])).split('\n');
+  const [tree = '', parents = ''] = (await showCommit(git, '%T%n%P', commit)).split('\n');
   const raw = (await git.run(['cat-file', 'commit', commit])).stdout.toString('utf8');
   const split = raw.indexOf('\n\n');
   if (split < 0) return false;
@@ -44,7 +45,7 @@ export async function signedObservation(git: Git, commit: Oid, key: PushedKey): 
  */
 export async function trustedObservation(git: Git, linear: Oid, tracked: Oid, key: PushedKey): Promise<boolean> {
   if (await signedObservation(git, linear, key)) return true;
-  const tree = await git.text(['rev-parse', `${linear}^{tree}`]);
+  const tree = await git.revParse(`${linear}^{tree}`);
   const trees = (await git.text(['log', '--first-parent', '--format=%T', tracked])).split('\n');
   return trees.includes(tree);
 }

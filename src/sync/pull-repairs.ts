@@ -88,9 +88,9 @@ export async function checkedPullView(git: Git, linear: Oid, ids: IdMap, zones: 
     for (const image of repair.images) notes.push(`- ${oneLine(path)}: image ${image.image} of ${image.total} (line ${image.line}).`);
   }
   if (changes.size === 0 && held.size === 0) return {commit: linear, notes};
-  let tree = changes.size === 0 ? await git.text(['rev-parse', `${linear}^{tree}`]) : await buildTree(git, linear, changes);
+  let tree = changes.size === 0 ? await git.revParse(`${linear}^{tree}`) : await buildTree(git, linear, changes);
   if (held.size > 0) tree = await takePaths(git, tree, hold, held);
-  if (tree === await git.text(['rev-parse', `${linear}^{tree}`])) return {commit: linear, notes};
+  if (tree === await git.revParse(`${linear}^{tree}`)) return {commit: linear, notes};
   const date = await git.text(['show', '-s', '--format=%cI', linear]);
   const commit = await git.text(['commit-tree', '--no-gpg-sign', tree, '-p', linear, '-m', 'Apply checked image and link repairs'], {env: {
     GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email,

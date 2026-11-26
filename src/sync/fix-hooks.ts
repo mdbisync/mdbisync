@@ -4,7 +4,7 @@ import { type Git, mapLimit } from '../state/git.ts';
 /** Hook ids recorded by CI on the latest commit that changed each left-out file. */
 export async function nameFixingHooks(git: Git, tracked: string, files: Array<{ path: string; hooks?: string[] }>): Promise<void> {
   if (files.length === 0) return;
-  const config = readHookConfig(await git.text(['show', `${tracked}:${PRE_COMMIT_CONFIG}`]));
+  const config = readHookConfig((await git.showBlob(`${tracked}:${PRE_COMMIT_CONFIG}`)).stdout.toString('utf8').replace(/\n$/, ''));
   const configured = new Set(config.hooks.map((hook) => hook.id));
   await mapLimit(files, 4, async (file) => {
     // Path history follows a merged PR to the commit that supplied its tree.

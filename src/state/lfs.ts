@@ -113,8 +113,8 @@ interface LfsSetting {
 }
 
 async function lfsSetting(git: Git, from: LfsRemote): Promise<LfsSetting> {
-  const found = await git.run(['cat-file', 'blob', `${from.tracked}:.lfsconfig`], { okCodes: [0, 128], maxOutputBytes: LFSCONFIG_LIMIT });
-  return { gitDir: await git.text(['rev-parse', '--absolute-git-dir']), lfsconfig: found.code === 0 ? found.stdout : Buffer.alloc(0) };
+  const found = await git.readBlob(`${from.tracked}:.lfsconfig`, LFSCONFIG_LIMIT);
+  return { gitDir: await git.text(['rev-parse', '--absolute-git-dir']), lfsconfig: found ?? Buffer.alloc(0) };
 }
 
 /**

@@ -4,20 +4,17 @@
 // it holds the merge result: a write, a rename or move, a create or a trash.
 
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { readAnnotation } from '../mapping/index.ts';
 import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, MappingBlobBudgetError, readableBlob } from '../mapping/blobs.ts';
 import { mapTree, requireReadableAnnotations } from '../mapping/mapping.ts';
-import { type TreeEntry, parseTreeListing } from '../state/objects.ts';
+import { type TreeEntry, listPaths } from '../state/objects.ts';
 import { lintInTree, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping } from '../mapping/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { type StructuralResult, type StructuralSummary, type Version, detectConflicts, mergeMarkdown, resolveStructural } from '../merge/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
-import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, NEUTRAL_IDENTITY, buildTree, checkRepoPath, commitTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
+import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, NEUTRAL_IDENTITY, buildTree, checkRepoPath, commitTree, isAncestor, listTree, placeEntries, readBlobs, readIds, showCommit } from '../state/index.ts';
 import { message } from '../messages.ts';
 import { type FileLeftOutRule } from '../codes.ts';
 
@@ -445,13 +442,12 @@ async function linkedFiles(git: Git, commits: readonly Oid[], path: string): Pro
   for (const commit of commits) {
     const object = `${commit}:${path}`;
     // The commit removed the file: that version links nothing.
-    const result = await git.run(['cat-file', '-s', object], { okCodes: [0, 128], maxOutputBytes: 64 });
-    const size = Number(result.stdout.toString('utf8'));
-    if (result.code !== 0 || !Number.isSafeInteger(size) || size < 0 || size > MAPPING_FILE_BYTES) continue;
-    const blob = await git.run(['cat-file', 'blob', object], { okCodes: [0, 128], maxOutputBytes: MAPPING_FILE_BYTES });
-    if (blob.code !== 0) continue;
+    const found = await git.objectInfo(object);
+    if (found === null || found.type !== 'blob' || found.size > MAPPING_FILE_BYTES) continue;
+    const blob = await git.readBlob(found.oid);
+    if (blob === null) continue;
     try {
-      for (const link of findFileLinks(path, splitFile(blob.stdout.toString('utf8')).body, () => true)) {
+      for (const link of findFileLinks(path, splitFile(blob.toString('utf8')).body, () => true)) {
         if (!link.target.endsWith(MARKDOWN_EXTENSION)) linked.add(link.target);
       }
     } catch (error) {
@@ -663,8 +659,7 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
 function echoedConflicts(git: Git, linear: Oid): (base: TreeEntry, tracked: TreeEntry, linearEntry: TreeEntry) => Promise<{ base: string; linear: string } | null> {
   const budget = new MappingBlobBudget();
   const entryAt = async (commit: Oid, path: string): Promise<TreeEntry | undefined> => {
-    const { stdout } = await git.run(['--literal-pathspecs', 'ls-tree', '-z', '-l', '--full-tree', commit, '--', path]);
-    return parseTreeListing(stdout).find((entry) => entry.path === path && entry.type === 'blob' && readableBlob(entry));
+    return (await listPaths(git, commit, [path])).find((entry) => entry.path === path && entry.type === 'blob' && readableBlob(entry));
   };
   const textOf = async (entry: TreeEntry) => (await budget.read(git, [entry])).get(entry.oid)!.toString('utf8');
   const versions = async (base: TreeEntry, tracked: TreeEntry, linearEntry: TreeEntry) => {
@@ -722,10 +717,10 @@ export async function alreadyMerged(git: Git, linear: Oid, tracked: Oid): Promis
  * nothing to write; the record stays the merge base of the next change.
  */
 export async function mergedInitialRecord(git: Git, linear: Oid, tracked: Oid): Promise<boolean> {
-  const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
+  const [subject] = (await showCommit(git, '%s', linear)).split('\n');
   if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
   if (!(await isAncestor(git, linear, tracked))) return false;
-  const [linearTree, trackedTree] = (await git.text(['rev-parse', `${linear}^{tree}`, `${tracked}^{tree}`])).split('\n');
+  const [linearTree, trackedTree] = await Promise.all([git.revParse(`${linear}^{tree}`), git.revParse(`${tracked}^{tree}`)]);
   return linearTree === trackedTree;
 }
 
@@ -743,19 +738,8 @@ export async function takePaths(git: Git, into: Oid, from: Oid, paths: ReadonlyS
   const entries = new Map((await listTree(git, from)).map((entry) => [entry.path, entry]));
   // A path absent from `from` is removed, which an older tree's path may be.
   for (const path of paths) checkRepoPath(path, { removal: !entries.has(path) });
-  // buildTree handles blobs; copy modes through a private index so images and symlinks stay exact.
-  const dir = await mkdtemp(join(tmpdir(), 'lane-index-'));
-  const env = { GIT_INDEX_FILE: join(dir, 'index') };
-  try {
-    await git.run(['read-tree', `${into}^{tree}`], { env });
-    const zero = '0'.repeat((await git.text(['rev-parse', '--show-object-format'])) === 'sha256' ? 64 : 40);
-    const input = [...paths].map((path) => {
-      const entry = entries.get(path);
-      return entry === undefined ? `0 ${zero}\t${path}\0` : `${entry.mode} ${entry.oid}\t${path}\0`;
-    }).join('');
-    if (input) await git.run(['update-index', '-z', '--index-info'], { env, input });
-    return await git.text(['write-tree'], { env });
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  // Entries are copied with their modes, so images and symlinks stay exact.
+  return placeEntries(git, into, new Map([...paths].map((path) => [path, entries.get(path) ?? null])));
 }
 
 /** A content-only side for a merge; never pushed or used as a real lane parent. */

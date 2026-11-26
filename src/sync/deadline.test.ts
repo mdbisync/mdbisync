@@ -29,7 +29,8 @@ describe('the checks a head must pass', () => {
   const github = { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) };
   /** A head GitHub knows checks for, right above the head the sync recorded pushing, which registered none. */
   const PUSHED = 'e'.repeat(40);
-  const alone = { git: { text: async (args: string[]) => `${args[4]}\n${PUSHED}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: PUSHED };
+  // A stand-in repository answers `git show` and `rev-list` from `text`; `plainMessages: false` sends commit messages there too.
+  const alone = { git: { plainMessages: async () => false, text: async (args: string[]) => `${args[4]}\n${PUSHED}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: PUSHED };
 
   it('notes the expected checks with the push time, and reads the same push time back', () => {
     const note = headNote(HEAD, since, [{ name: 'ci / build', publisher: ACTIONS }, { name: 'a -->b@run:1' }]);
@@ -139,7 +140,7 @@ describe('the checks a head must pass', () => {
       [HEAD, [{ name: 'tests', status: 'completed', conclusion: 'success' }]],
     ]);
     const repo = { ...github, fetch: fakeFetch(local) };
-    const history = { git: { text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40) };
+    const history = { git: { plainMessages: async () => false, text: async () => `${HEAD}\n${OTHER}` } as unknown as Git, base: 'f'.repeat(40) };
     for (const earlier of [{ pushedFrom: [OTHER] }, { body: undefined, ...history, pushed: OTHER }, { body: undefined, ...history, pushed: HEAD }] as EarlierHeads[]) {
       const expected = await expectedChecks(repo, HEAD, [], earlier);
       assert.deepEqual(expected.checks, [{ name: 'tests', ...RUN }]);
@@ -158,11 +159,11 @@ describe('the checks a head must pass', () => {
     // Another GitHub server's Actions App id, noted by an earlier version, reads as the Actions App.
     for (const id of [FAKE_ACTIONS_APP_ID, 999]) {
       const legacy = `<!-- head: sha=${HEAD} since=${since.toISOString()} checks=tests@run:${id}~${identity} -->`;
-      const read = await expectedChecks(repo, HEAD, [], { body: legacy, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
+      const read = await expectedChecks(repo, HEAD, [], { body: legacy, git: { plainMessages: async () => false, text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
       assert.deepEqual(read.checks, [{ name: 'tests', ...RUN }]);
     }
     const body = `<!-- head: sha=${HEAD} since=${since.toISOString()} checks=tests@run:${FAKE_ACTIONS_APP_ID}~${identity} -->`;
-    const expected = await expectedChecks(repo, HEAD, [], { body, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
+    const expected = await expectedChecks(repo, HEAD, [], { body, git: { plainMessages: async () => false, text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD });
     assert.deepEqual(expected.checks, [{ name: 'tests', ...RUN }]);
     assert.equal(headNote(HEAD, since, expected.checks), `<!-- head: sha=${HEAD} since=${since.toISOString()} checks=tests@run:${FAKE_ACTIONS_APP_ID} -->`);
   });
@@ -174,7 +175,7 @@ describe('the checks a head must pass', () => {
       local.github.checks = new Map([[HEAD, registered]]);
       const repo = { ...github, fetch: fakeFetch(local) };
       // A head the sync pushes in this run, and one it pushed in an earlier run, with no earlier heads below either.
-      const earlier: EarlierHeads[] = [{ pushedFrom: [] }, { body: undefined, git: { text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD }];
+      const earlier: EarlierHeads[] = [{ pushedFrom: [] }, { body: undefined, git: { plainMessages: async () => false, text: async () => `${HEAD}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: HEAD }];
       const [now, later] = await Promise.all(earlier.map(async (heads) => (await readChecks(repo, HEAD, checkExpectation({}, (await expectedChecks(repo, HEAD, required, heads)).checks))).state));
       assert.equal(now, later, 'a new head and the same head in a later run disagreed');
       return now;

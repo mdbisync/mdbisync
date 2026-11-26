@@ -160,10 +160,10 @@ describe('sync: pull request release', () => {
       const fetched = await fetchState(git, config);
       const mapping = await loadMapping(git, fetched.tracked);
       const fetch = fakeFetch(h.world);
-      const run = git.run.bind(git);
-      const runGit = t.mock.method(git, 'run', (args: Parameters<typeof run>[0], options?: Parameters<typeof run>[1]) =>
-        run(args, limit === 'output' && args[0] === 'ls-tree' && args.at(-1) === linear
-          ? { ...options, maxOutputBytes: 1 } : options));
+      const listTree = git.listTree.bind(git);
+      const listings = t.mock.method(git, 'listTree', (treeish: string, maxOutputBytes?: number) =>
+        listTree(treeish, limit === 'output' && treeish === linear ? 1 : maxOutputBytes));
+      const blobReads = t.mock.method(git, 'readBlobs');
       const result = await syncPullRequest({
         git, fetched, mapping, targets: { teams: new Map(), projects: new Map() },
         linear: new LinearClient({ token: 'test', fetch }), identity: IDENTITY, pushedKey: new PushedKey('test', 'owner/repo'),
@@ -182,9 +182,9 @@ describe('sync: pull request release', () => {
       assert.equal(await rev('refs/heads/main'), fetched.tracked);
       assert.equal(await rev(idsRef), heldIds);
       assert.equal(await rev(linearRef), linear);
-      assert.ok(runGit.mock.calls.some(({ arguments: [args, options] }) =>
-        args[0] === 'ls-tree' && args.at(-1) === linear && options?.maxOutputBytes === MAPPING_TREE_BYTES));
-      assert.ok(runGit.mock.calls.every(({ arguments: [args] }) => args[0] !== 'cat-file' || args[1] !== '--batch'));
+      assert.ok(listings.mock.calls.some(({ arguments: [treeish, maxOutputBytes] }) => treeish === linear && maxOutputBytes === MAPPING_TREE_BYTES));
+      // No blob is read: an empty batch reads nothing.
+      assert.ok(blobReads.mock.calls.every(({ arguments: [oids] }) => oids.length === 0));
 
       if (limit === 'file') {
         const restored = await commitTree(remote, {

@@ -145,8 +145,7 @@ export interface SecurityGateOptions {
 }
 
 async function trackedHookConfig(git: Git, tracked: Oid) {
-  const read = await git.run(['cat-file', 'blob', `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
-  const config = readHookConfig(read.code === 0 ? read.stdout.toString('utf8') : null);
+  const config = readHookConfig((await git.readBlob(`${tracked}:${PRE_COMMIT_CONFIG}`))?.toString('utf8') ?? null);
   if (config.invalid !== undefined) throw new Error(message('sync.invalid-security-config'));
   return config;
 }
@@ -248,7 +247,7 @@ async function reproduceTree(git: Git, tracked: Oid, entries: readonly TreeEntry
     await scratch.run(['update-index', '-z', '--index-info'], { input: gitlinks.map((entry) => `160000 ${entry.oid}\t${entry.path}\0`).join('') });
   }
   const tree = await scratch.text(['write-tree']);
-  if (tree !== await git.text(['rev-parse', `${tracked}^{tree}`])) throw new SecurityScratchTreeError();
+  if (tree !== await git.revParse(`${tracked}^{tree}`)) throw new SecurityScratchTreeError();
   return { tree, linkedSupport };
 }
 

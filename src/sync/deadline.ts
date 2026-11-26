@@ -12,7 +12,7 @@
 
 import { CommitNotFoundError } from '../pull-request/merge.ts';
 import { ACTIONS_APP, type CheckExpectation, type CheckFailure, type CheckPublisher, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, checkState, readChecks, readCommitChecks } from '../pull-request/index.ts';
-import { type Git, type Oid } from '../state/index.ts';
+import { type Git, type Oid, showCommit } from '../state/index.ts';
 
 export const DEFAULT_CHECK_DEADLINE_MINUTES = 60;
 export const MIN_CHECK_DEADLINE_MINUTES = 10;
@@ -173,7 +173,7 @@ async function earlierHeadChecks(git: Git, github: GitHubRepository, head: Oid, 
   const own = commits[0] === pushed;
   // A commit the sync pushed only to run the checks again expects what the heads below it did, down to the sync's push
   // before it, which its message names: its signed record covers its message too.
-  const until = own ? checksAgainFrom(await git.text(['show', '-s', '--format=%B', pushed])) : pushed;
+  const until = own ? checksAgainFrom(await showCommit(git, '%B', pushed)) : pushed;
   const checks: ExpectedCheck[] = [];
   for (const [index, commit] of commits.slice(1).entries()) {
     if (index === EARLIER_HEAD_DEPTH) return null;
@@ -269,7 +269,7 @@ export async function checksAgain(github: GitHubRepository, head: Oid, required:
   if (earlier.pushed === head) return null;
   const now = new Date();
   if (!pastDeadline(headSince(earlier.body, head, now), CHECKS_AGAIN_AFTER_MINUTES, now)) return null;
-  if ((await earlier.git.text(['show', '-s', '--format=%s', earlier.pushed])).startsWith(options.againMessage)) return null;
+  if ((await showCommit(earlier.git, '%s', earlier.pushed)).startsWith(options.againMessage)) return null;
   if (!(await options.verified())) return null;
   const expectation = checkExpectation(options, expected.checks);
   const checks = await readChecks(github, head, expectation);

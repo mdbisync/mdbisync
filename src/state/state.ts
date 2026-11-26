@@ -5,6 +5,7 @@
 // the other changes nothing.
 
 import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef, suspendedBranch } from './config.ts';
+import { showCommit } from './commit-format.ts';
 import { type Git, GitError, type Oid, mapLimit } from './git.ts';
 import { type LfsPointer, type LfsReadResult, lfsReader, lfsRemote, parseLfsPointer } from './lfs.ts';
 import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
@@ -44,14 +45,18 @@ export async function fetchState(git: Git, config: StateConfig): Promise<Fetched
   await git.run(['fetch', '--no-tags', '--no-write-fetch-head', '--quiet', config.remote, ...refspecs]);
   const read = async (ref: string): Promise<Oid | null> => {
     const local = localRef(config, ref);
-    if (advertised.has(ref)) return git.text(['rev-parse', '--verify', `${local}^{commit}`]);
-    await git.run(['update-ref', '-d', local]);
+    if (advertised.has(ref)) return (await git.objectInfo(`${local}^{commit}`))?.oid ?? git.text(['rev-parse', '--verify', `${local}^{commit}`]);
+    gone.push(local);
     return null;
   };
 
+  const gone: string[] = [];
   const state = {} as StateSnapshot;
   for (const store of STORES) state[store] = await read(stateRef(config, store));
-  return { tracked: (await read(tracked)) as Oid, sync: await read(sync), suspended: await read(suspended), state };
+  const fetched = { tracked: (await read(tracked)) as Oid, sync: await read(sync), suspended: await read(suspended), state };
+  // One call forgets them all, as `update-ref -d` does for each: a ref that is not there is no error.
+  if (gone.length > 0) await git.run(['update-ref', '--stdin'], { input: gone.map((ref) => `delete ${ref}\n`).join('') });
+  return fetched;
 }
 
 /** The remote's values of exactly these refs; a ref the remote lacks is absent. */
@@ -433,7 +438,7 @@ export function initialSyncProgressMessage(tracked: Oid): string {
 /** When `commit` is a progress commit of an unfinished initial sync, the tracked commit it names; otherwise null. */
 export async function readInitialSyncProgress(git: Git, commit: Oid | null): Promise<{ tracked: Oid | null } | null> {
   if (commit === null) return null;
-  const message = (await git.run(['show', '-s', '--format=%B', commit])).stdout.toString('utf8');
+  const message = `${await showCommit(git, '%B', commit)}\n`;
   const [subject] = message.split('\n');
   if (subject !== INITIAL_SYNC_PROGRESS) return null;
   return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message)?.[1] ?? null };
@@ -548,8 +553,7 @@ export function readSupersededIds(git: Git, commit: Oid | null): Promise<Superse
 /** A JSON object of non-empty strings beside `ids.json`; empty when the commit does not have the file. */
 async function readStringMap(git: Git, commit: Oid | null, file: string): Promise<Map<string, string>> {
   if (commit === null) return new Map();
-  const read = await git.run(['cat-file', 'blob', `${commit}:${file}`], { okCodes: [0, 128] });
-  if (read.code !== 0) return new Map();
+  if (await git.readBlob(`${commit}:${file}`) === null) return new Map();
   const data = await readJsonFile(git, commit, file);
   const map = new Map<string, string>();
   for (const [key, value] of Object.entries(data)) {
@@ -569,8 +573,7 @@ export const WRITTEN_FILE = 'written.json';
 
 export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<Map<string, string>> {
   if (commit === null) return new Map();
-  const read = await git.run(['cat-file', 'blob', `${commit}:${WRITTEN_FILE}`], { okCodes: [0, 128] });
-  if (read.code !== 0) return new Map();
+  if (await git.readBlob(`${commit}:${WRITTEN_FILE}`) === null) return new Map();
   const data = await readJsonFile(git, commit, WRITTEN_FILE);
   const map = new Map<string, string>();
   for (const [path, hash] of Object.entries(data)) {
@@ -594,11 +597,11 @@ export const SYNC_PUSHED_FILE = 'sync-pushed.json';
  */
 export async function readSyncPushed(git: Git, commit: Oid | null): Promise<PushedRecord | undefined> {
   if (commit === null) return undefined;
-  const read = await git.run(['cat-file', 'blob', `${commit}:${SYNC_PUSHED_FILE}`], { okCodes: [0, 128] });
-  if (read.code !== 0) return undefined;
+  const read = await git.readBlob(`${commit}:${SYNC_PUSHED_FILE}`);
+  if (read === null) return undefined;
   let data: { head?: unknown; mac?: unknown } | null;
   try {
-    data = JSON.parse(read.stdout.toString('utf8')) as { head?: unknown; mac?: unknown } | null;
+    data = JSON.parse(read.toString('utf8')) as { head?: unknown; mac?: unknown } | null;
   } catch {
     throw new Error(message('state.invalid-json', { file: SYNC_PUSHED_FILE, commit }));
   }
@@ -726,12 +729,11 @@ async function readJsonFile(git: Git, commit: Oid | null, file: string, options:
   if (commit === null) return {};
   // A state commit without its file is damaged state, not an empty map:
   // reading it as empty would make the sync forget every id.
-  const read = await git.run(['cat-file', 'blob', `${commit}:${file}`], { okCodes: [0, 128] });
-  if (read.code !== 0) {
+  const blob = await git.readBlob(`${commit}:${file}`);
+  if (blob === null) {
     if (options.optional) return {};
     throw new Error(message('state.file-missing', { file, commit }));
   }
-  const blob = read.stdout;
   let data: unknown;
   try {
     data = JSON.parse(blob.toString('utf8'));

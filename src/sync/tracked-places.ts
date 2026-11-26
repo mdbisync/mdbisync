@@ -13,7 +13,7 @@ import { MAPPING_BUDGET_BYTES, MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBl
 import { placeKey } from '../initial-sync/plan.ts';
 import { type LinearFacts } from '../linear/index.ts';
 import { type Git, GitOutputLimitError, type Oid, isAncestor } from '../state/index.ts';
-import { type TreeEntry, parseTreeListing } from '../state/objects.ts';
+import { type TreeEntry, listPaths } from '../state/objects.ts';
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import { type Side, type SideFile, baselineCommits, synchronizedAt } from './merge.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
@@ -264,11 +264,11 @@ async function* readmeHistory(git: Git, tracked: Oid, readmes: readonly string[]
 async function blobSizes(git: Git, oids: readonly Oid[]): Promise<Map<Oid, number | null>> {
   const sizes = new Map<Oid, number | null>();
   if (oids.length === 0) return sizes;
-  const lines = await git.text(['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], { input: `${oids.join('\n')}\n` });
-  for (const line of lines.split('\n')) {
-    const [oid, type, size] = line.split(' ');
-    if (oid !== undefined) sizes.set(oid, type === 'blob' && size !== undefined ? Number(size) : null);
-  }
+  const found = await Promise.all(oids.map((oid) => git.objectInfo(oid)));
+  oids.forEach((oid, index) => {
+    const info = found[index];
+    sizes.set(oid, info?.type === 'blob' ? info.size : null);
+  });
   return sizes;
 }
 
@@ -330,6 +330,5 @@ async function zonesAt(git: Git, commit: string, readmes: readonly string[]): Pr
 
 /** The blobs among `readmes` at `commit`, with their sizes. */
 async function blobEntries(git: Git, commit: string, readmes: readonly string[]): Promise<TreeEntry[]> {
-  const { stdout } = await git.run(['--literal-pathspecs', 'ls-tree', '-z', '-l', '--full-tree', commit, '--', ...readmes], { maxOutputBytes: MAPPING_TREE_BYTES });
-  return parseTreeListing(stdout).filter((entry) => entry.type === 'blob');
+  return (await listPaths(git, commit, readmes, MAPPING_TREE_BYTES)).filter((entry) => entry.type === 'blob');
 }

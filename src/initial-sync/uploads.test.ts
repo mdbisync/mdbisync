@@ -131,13 +131,11 @@ describe('uploads of linked files in an initial sync', () => {
         ...Object.fromEntries(attachments.map(({ name, content }) => [`eng/notes/${name}`, content])),
       });
       const readCalls: string[][] = [];
-      const gitRun = Git.prototype.run;
-      t.mock.method(Git.prototype, 'run', async function (this: Git, ...args: Parameters<Git['run']>) {
-        const result = await gitRun.apply(this, args);
-        if (args[0][0] === 'cat-file' && args[0][1] === '--batch') {
-          const ids = String(args[1]?.input).trim().split('\n');
-          readCalls.push(ids);
-        }
+      const readBlobs = Git.prototype.readBlobs;
+      t.mock.method(Git.prototype, 'readBlobs', async function (this: Git, ...args: Parameters<Git['readBlobs']>) {
+        const result = await readBlobs.apply(this, args);
+        // Each batch reads its ids once; an empty one reads nothing.
+        if (args[0].length > 0) readCalls.push([...new Set(args[0])]);
         return result;
       });
       const uploadCalls: { names: string[]; bytes: number }[] = [];
