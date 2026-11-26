@@ -7,7 +7,7 @@ import { normalizeUri } from 'micromark-util-sanitize-uri';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
-import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
+import { fixLinearText, fixText, linearForm, relativeFileBlocksAsLinks } from './fix.ts';
 import { CONTENT_LIMIT, FIXED_RULES } from './rules.ts';
 import { linkedFileCheck, lintInTree, lintText } from './lint.ts';
 import { MarkdownLimitError, parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
@@ -2226,6 +2226,25 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('Team :man-raising-hand: here'), 'Team \u{1F64B}\u{200D}\u{2642}\u{FE0F} here');
     for (const text of ['Team :man\\-raising\\-hand: here', 'Team :man-raising\\-hand: here', 'Flag :flag\\-al: here']) {
       assert.equal(fixText(text), text, text);
+    }
+  });
+
+  it('reads escaped signs after a colon in linear time', () => {
+    // Under the parser's limits, so the text reaches the shortcode check: `linearForm` gives up on text over them.
+    const text = ':' + '\\+'.repeat(8_000) + 'a'.repeat(230_000);
+    const started = performance.now();
+    assert.equal(linearForm(text), text);
+    assert.ok(performance.now() - started < 2000);
+  });
+
+  it('compares a long run of spaces in linear time', () => {
+    const spaces = ' '.repeat(240_000);
+    // A space reference, whose edit is checked against the block's text, and
+    // a backslash line break, whose rewrite is checked the same way.
+    for (const [text, expected] of [[`x&#32;y a${spaces}b`, `x y a${spaces}b`], [`a${spaces}b\\\nc`, `a${spaces}b\nc`]] as const) {
+      const started = performance.now();
+      assert.equal(fixText(text), expected);
+      assert.ok(performance.now() - started < 2000, text.slice(0, 8));
     }
   });
 

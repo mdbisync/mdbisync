@@ -11,7 +11,7 @@ import type { BlockContent, Definition, DefinitionContent, Delete, Emphasis, Lin
 import { isDeepStrictEqual } from 'node:util';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { LINEAR_EMOJI } from './linear-emoji.ts';
-import { emojiShortcodes, escaped, sameFlanking } from './shortcodes.ts';
+import { emojiShortcodes, escaped, LONGEST_EMOJI_NAME, sameFlanking } from './shortcodes.ts';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
@@ -292,7 +292,8 @@ function breakShape(tree: Root): unknown {
     const children: unknown[] = [];
     let text: string | undefined;
     const flush = () => {
-      if (text !== undefined && text !== '') children.push({ type: 'text', value: text.replace(/[ \t]+\n/g, '\n') });
+      // A run starts only after a character outside it, so a long run of spaces is read once, not once per space.
+      if (text !== undefined && text !== '') children.push({ type: 'text', value: text.replace(/(?<![ \t])[ \t]+\n/g, '\n') });
       text = undefined;
     };
     for (const child of node.children as Nodes[]) {
@@ -2131,6 +2132,11 @@ class Writer {
   }
 }
 
+// A `:name:` whose name may hold escaped `+` or `-`. Each character or
+// escape reads one way only and the name is no longer than Linear's longest,
+// so a colon without a closing one costs linear time, not quadratic.
+const ESCAPED_SHORTCODE = new RegExp(`:(?=((?:[a-z0-9_+-]|\\\\[+-]){1,${LONGEST_EMOJI_NAME}}):)`, 'g');
+
 /**
  * Rewrites inside plain text: entities, emoji shortcodes and backslashes
  * Linear spells differently. The writer decides which line escapes can go.
@@ -2163,7 +2169,7 @@ function textEdits(source: string, from: number, to: number, redundantEscape: (a
   // Keep escapes that would expose a shortcode on the next formatting pass.
   const shortcodeEscapes = new Set<number>();
   // A name can hold several escaped `+` or `-` (`:man\-raising\-hand:`); all of them stay.
-  for (const match of raw.matchAll(/:(?=((?:[a-z0-9_+-]|\\[+-])*\\[+-](?:[a-z0-9_+-]|\\[+-])*):)/g)) {
+  for (const match of raw.matchAll(ESCAPED_SHORTCODE)) {
     const name = match[1]!;
     if (!LINEAR_EMOJI.has(name.replace(/\\([+-])/g, '$1'))) continue;
     for (const escape of name.matchAll(/\\/g)) shortcodeEscapes.add(match.index + 1 + escape.index);
@@ -2374,7 +2380,9 @@ function spaceShape(tree: Root): Shape {
         out.push(shape(child));
       }
     }
-    for (const item of out) if (item.type === 'text') item.value = item.value!.replace(/[ \t]*\n[ \t]*/g, '\n');
+    // Spaces before a line ending start a match only where their run starts,
+    // so a long run of spaces is read once, not once per space.
+    for (const item of out) if (item.type === 'text') item.value = item.value!.replace(/(?:(?<![ \t])[ \t]+)?\n[ \t]*/g, '\n');
     return out;
   };
   const shape = (node: Nodes): Shape => {

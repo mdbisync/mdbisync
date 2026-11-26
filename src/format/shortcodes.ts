@@ -60,6 +60,9 @@ function codePointAt(source: string, at: number): string | undefined {
   return code === undefined ? undefined : String.fromCodePoint(code);
 }
 
+/** The length of the longest name Linear turns into an emoji. */
+export const LONGEST_EMOJI_NAME = Math.max(...[...LINEAR_EMOJI.keys()].map((name) => name.length));
+
 /** The `:name:` shortcodes in `raw` that name an emoji Linear knows, with their offsets. */
 export function* emojiShortcodes(raw: string): Generator<{ index: number; length: number; emoji: string }> {
   for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
