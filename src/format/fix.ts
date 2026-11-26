@@ -226,27 +226,57 @@ function backslashBreaksAsLinear(body: string): { body: string; lines: Set<numbe
 }
 
 /**
+ * Characters `tablesEndAsLinear` may parse beyond `TABLE_END_ROUNDS`
+ * parses of the body. The first round finds the tables to end and the last
+ * finds none left; each round between them ends a table that only ending
+ * another exposed (a table, a line without a pipe, another table, with no
+ * blank line between them), and parses the body from that chain on. A
+ * document may hold short chains of such tables, more when little text
+ * follows them; a body that repeats the pattern thousands of times would
+ * otherwise take minutes.
+ */
+const TABLE_END_EXTRA_WORK = 100_000;
+const TABLE_END_ROUNDS = 4;
+
+/**
  * The body with each table ended where Linear ends it: at the first body
  * row whose line has no `|`. GFM reads such a line as a row of one cell;
  * Linear reads it, and the lines after it, as a paragraph below the table.
  * A blank line, with the line's quote prefix, goes before it.
+ * Throws `MarkdownLimitError` past `TABLE_END_EXTRA_WORK` (see there).
  */
 function tablesEndAsLinear(body: string): string {
   if (!body.includes('|')) return body;
   // Ending a table can expose another in the lines it gives up: repeat
-  // until none ends. Each round adds a blank line, so the rounds are bounded.
+  // until none ends. The top-level blocks before the one that holds the
+  // first ended table read the same after it, so the next round parses from
+  // that block on. A chain of exposed tables still parses the rest of the
+  // body once per table, which would cost the square of the body: the
+  // rounds share one budget.
+  let work = -TABLE_END_ROUNDS * body.length;
+  let from = 0;
   for (;;) {
+    const rest = body.slice(from);
+    work += rest.length;
+    if (work > TABLE_END_EXTRA_WORK) throw new MarkdownLimitError('tables');
+    const tree = parse(rest);
     const rows: number[] = [];
-    visit(parse(body), (node) => {
+    visit(tree, (node) => {
       if (node.type !== 'table') return;
-      const row = endingRow(body, node);
-      if (row !== undefined) rows.push(start(row));
+      const row = endingRow(rest, node);
+      if (row !== undefined) rows.push(from + start(row));
     });
     if (rows.length === 0) return body;
-    for (const at of rows.sort((a, b) => b - a)) {
+    rows.sort((a, b) => b - a);
+    // The table's header is on a line above its ending row, so the block
+    // starts before the line that gets the blank line: its offset stays.
+    const first = rows.at(-1)!;
+    const block = tree.children.findLast((child) => from + start(child) <= first)!;
+    for (const at of rows) {
       const lineStart = lineStartOf(body, at);
       body = `${body.slice(0, lineStart)}${body.slice(lineStart, at).trimEnd()}\n${body.slice(lineStart)}`;
     }
+    from = lineStartOf(body, from + start(block));
   }
 }
 

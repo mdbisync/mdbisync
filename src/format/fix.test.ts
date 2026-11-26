@@ -10,7 +10,7 @@ import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
 import { CONTENT_LIMIT, FIXED_RULES } from './rules.ts';
 import { linkedFileCheck, lintInTree, lintText } from './lint.ts';
-import { parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
+import { MarkdownLimitError, parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
 
 /** Findings `fix` does not write away: what lint still reports after it. */
 const leftToAuthor = (findings: ReturnType<typeof lintText>): ReturnType<typeof lintText> => findings.filter(({ rule }) => !FIXED_RULES.has(rule));
@@ -759,6 +759,17 @@ describe('a line without a pipe after a table', () => {
       fixText('| A | B |\n| -- | -- |\nnote\n| C |\n| -- |\nmore\n| x | y |'),
       '| A | B |\n| -- | -- |\n\nnote\n\n| C |\n| -- |\n\nmore\n| x | y |',
     );
+  });
+
+  it('ends a chain of ten tables that each ending exposes', () => {
+    const block = (n: number) => `| Item ${n} | Owner |\n| -- | -- |\n| Task ${n} | Ann |\nNote ${n} on the plan for this part.\n`;
+    const ended = (n: number) => `| Item ${n} | Owner |\n| -- | -- |\n| Task ${n} | Ann |\n\nNote ${n} on the plan for this part.`;
+    const numbers = Array.from({ length: 10 }, (_, n) => n + 1);
+    assert.equal(fixText(numbers.map(block).join('')), numbers.map(ended).join('\n\n'));
+  });
+
+  it('stops with the tables limit when such a chain runs to thousands of tables', () => {
+    assert.throws(() => fixText('| A |\n| -- |\ntext\n'.repeat(2_000)), (error) => error instanceof MarkdownLimitError && error.limit === 'tables');
   });
 
   it('leaves the file to its author when the lines a table gives up form a block lint reports', () => {

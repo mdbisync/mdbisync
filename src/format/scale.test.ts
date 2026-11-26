@@ -80,6 +80,38 @@ describe('code spans', () => {
   });
 });
 
+describe('tables that ending another exposes', () => {
+  // A table, a line without a pipe and the next table, with no blank line
+  // between them: ending each table exposed the next one, and every round
+  // parsed the whole body again.
+  const limited = `let limit; try { fix.fixText(text); } catch (error) { limit = error.limit; } if (limit !== 'tables') throw new Error('expected the tables limit, got ' + limit)`;
+
+  it('stop with the tables limit for 3,000 of them in a few times a parse', { timeout: 160_000 }, () => {
+    // Four parses of the body and 100,000 characters more: seven parses here.
+    const timing = timed(`'| A |\\n| -- |\\ntext\\n'.repeat(3_000)`, limited);
+    assert.ok(timing.ms < 10 * timing.parseMs + 2_000, report(timing));
+  });
+
+  it('stop with the tables limit at the content limit in a few times a parse', { timeout: 160_000 }, () => {
+    const timing = timed(`fill('| A |\\n| -- |\\ntext\\n')`, limited);
+    assert.ok(timing.ms < 6 * timing.parseMs + 2_000, report(timing));
+  });
+
+  it('end a chain of three of them below text near the content limit', { timeout: 160_000 }, () => {
+    const chain = '| A | B |\\n| -- | -- |\\n| 1 | 2 |\\nNote one\\n| C |\\n| -- |\\nNote two\\n| D |\\n| -- |\\nNote three';
+    const ended = '| A | B |\\n| -- | -- |\\n| 1 | 2 |\\n\\nNote one\\n\\n| C |\\n| -- |\\n\\nNote two\\n\\n| D |\\n| -- |\\n\\nNote three';
+    timed(`fill('Plain words in a paragraph of a long document.\\n\\n', '${chain}')`, `if (!fix.fixText(text).endsWith('${ended}')) throw new Error('the chain did not end')`);
+  });
+
+  it('end a chain of ten of them below text near the content limit: later rounds parse from the chain on', { timeout: 160_000 }, () => {
+    const timing = timed(`(() => {
+      const chain = Array.from({ length: 10 }, (_, n) => '| T' + n + ' |\\n| -- |\\nNote ' + n + '\\n').join('');
+      return fill('Plain words in a paragraph of a long document.\\n\\n', chain);
+    })()`, `if (!fix.fixText(text).endsWith('| T9 |\\n| -- |\\n\\nNote 9')) throw new Error('the chain did not end')`);
+    assert.ok(timing.ms < 6 * timing.parseMs + 2_000, report(timing));
+  });
+});
+
 describe('file blocks', () => {
   it('join each file block onto its item line', () => {
     assert.equal(relativeFileBlocksAsLinks('-\n  [a](a.pdf)\n-\n  [b](b.pdf)\n\ntext\n'), '- [a](a.pdf)\n- [b](b.pdf)\n\ntext\n');

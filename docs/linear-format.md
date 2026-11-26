@@ -690,10 +690,11 @@ Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are
 tables whose short rows, padded to the header width, would add over 250,000
 characters or take the tree over that node limit, reference links whose
 destinations, each written in full, would take the text over 250,000
-characters, and paragraphs whose inline syntax, or whose many lines
-continued without their quote or list prefix, would take too long to
-parse. This keeps traversal and formatting bounded independently of the
-text length. `fix` writes every row of a table with as many cells as its
+characters, paragraphs whose inline syntax, or whose many lines continued
+without their quote or list prefix, would take too long to parse, and
+long chains of tables that each end at a line without a pipe right above
+the next table. This keeps traversal and formatting bounded independently
+of the text length. `fix` writes every row of a table with as many cells as its
 header, the form Linear stores, so a wide header over many short rows grows
 far beyond its source. It also writes every reference link (`[text][ref]`)
 inline with its own copy of the destination, so many short references to
@@ -707,7 +708,11 @@ such a paragraph with blank lines. The same holds for a paragraph in a
 block quote or list item that goes on over thousands of lines without the
 quote's `>` or the item's indent (lazy continuation lines): the parser
 looks back over the paragraph for each such line, so it counts that work
-too. Write the prefix on each line, or split the paragraph.
+too. Write the prefix on each line, or split the paragraph. `fix` ends a
+table at its first row without a pipe, as Linear does, which can expose a
+table in the lines below it; a chain of thousands of such tables would
+take it minutes, so it stops at a budget. Put a blank line after each
+table.
 For example, this generates a document that exceeds the nesting limit:
 
 ```javascript

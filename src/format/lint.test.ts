@@ -446,6 +446,17 @@ describe('lint and fix commands', () => {
     assert.deepEqual(runLint(['walk.md'], folder), { exitCode: 0, stdout: '', stderr: '' });
   });
 
+  it('reports a chain of thousands of tables that ending exposes as markdown-complexity and keeps the file', (t) => {
+    const folder = mkdtempSync(join(tmpdir(), 'table-chain-'));
+    t.after(() => rmSync(folder, { recursive: true, force: true }));
+    const text = '| A |\n| -- |\ntext\n'.repeat(2_000);
+    writeFileSync(join(folder, 'chain.md'), text);
+    const finding = `chain.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
+    assert.deepEqual(runLint([], folder), { exitCode: 1, stdout: finding, stderr: '' });
+    assert.deepEqual(runFix([], folder), { exitCode: 1, stdout: finding, stderr: '' });
+    assert.equal(readFileSync(join(folder, 'chain.md'), 'utf8'), text);
+  });
+
   it('reports hard breaks in setext headings and keeps the file through two fixes', (t) => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'heading-hard-break-'));
     t.after(() => rmSync(fixtureDir, { recursive: true, force: true }));

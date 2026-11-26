@@ -647,8 +647,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         }
         differs = written !== (await transformBody(tipTransforms, change.from, splitFile(textOf(previous)).body));
       } catch (error) {
-        // Left out or uncached: the write reports it, or stops before it.
-        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
+        // Left out, uncached or over the Markdown limits: the write reports it, or stops before it.
+        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError) && !(error instanceof MarkdownLimitError)) throw error;
         differs = true;
       }
       if (differs) markContent(change);
