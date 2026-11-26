@@ -405,6 +405,9 @@ the file again from Linear is blocked with a red mark and a comment. Remove
 or replace the file
 ([linear-format.md](linear-format.md#upload-file-refused)).
 
+The warning [`list-number-as-text`](linear-format.md#list-number-as-text),
+a number in a list item that reads as text, leaves no file out either.
+
 External http(s) and path images, and image uploads answering 404 or 410,
 become ordinary links in the sync pull request. Empty and `data:` images are
 removed. The pull request lists each image by place and line; after merge, the write

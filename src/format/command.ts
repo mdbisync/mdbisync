@@ -6,7 +6,8 @@ import { basename, join, relative, resolve, sep } from 'node:path';
 import { fixText } from './fix.ts';
 import { duplicateTitles, linkedFileCheck, lintText } from './lint.ts';
 import { MarkdownLimitError } from './markdown.ts';
-import { FIXED_RULES, LINT_RULES, type Finding } from './rules.ts';
+import { listTextWarnings } from './list-text.ts';
+import { FIXED_RULES, LINT_RULES, type Finding, type Warning } from './rules.ts';
 import { parseLfsPointer } from '../state/lfs.ts';
 import { lineText } from '../run/output.ts';
 import { admitsCapturedFile, isCaptureName } from '../sync/upload-type.ts';
@@ -94,6 +95,23 @@ function describe(findings: readonly Finding[]): string {
 }
 
 /**
+ * The warnings of the files, one line each; they never set the exit code. A
+ * file that cannot be read any more (renamed while the command ran) has none.
+ */
+function warnings(files: readonly string[], cwd: string): string {
+  const found: Warning[] = files.flatMap((file) => {
+    let text: string;
+    try {
+      text = readFileSync(join(cwd, file), 'utf8');
+    } catch {
+      return [];
+    }
+    return listTextWarnings(file, text);
+  });
+  return found.map((warning) => `${lineText(warning.file)}:${warning.line}: warning: ${warning.rule}: ${lineText(warning.message)}\n`).join('');
+}
+
+/**
  * The existence check for `lint` and `fix` on `file`, a path relative to `root` (the
  * repository's top folder, where the hook runs): a link resolves as the
  * sync resolves it, and must name a file there.
@@ -139,7 +157,11 @@ function complexity(file: string): Finding {
   return { file, line: 1, rule: 'markdown-complexity', message: LINT_RULES['markdown-complexity'] };
 }
 
-/** `lint`: exit 1 and one line per finding when Linear would lose or alter something, or a file is not in Linear's form. */
+/**
+ * `lint`: exit 1 and one line per finding when Linear would lose or alter
+ * something, or a file is not in Linear's form. Warnings are printed too, but
+ * alone they exit 0.
+ */
 export function runLint(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
   return withEscapedErrors(() => lint(paths, cwd));
 }
@@ -158,10 +180,14 @@ function lint(paths: readonly string[], cwd: string): CommandResult {
     return fixed !== undefined && fixed !== text;
   });
   const stdout = describe(findings) + unfixed.map((file) => `${lineText(file)}: not in Linear's form; run fix\n`).join('');
-  return { exitCode: stdout === '' ? 0 : 1, stdout, stderr: '' };
+  return { exitCode: stdout === '' ? 0 : 1, stdout: stdout + warnings(files, cwd), stderr: '' };
 }
 
-/** `fix`: rewrites files into Linear's form; exit 1 when a file changed or lint found a problem `fix` leaves to the author. */
+/**
+ * `fix`: rewrites files into Linear's form; exit 1 when a file changed or lint
+ * found a problem `fix` leaves to the author. The warnings of the files, as
+ * written, are printed too, but alone they exit 0.
+ */
 export function runFix(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
   return withEscapedErrors(() => fix(paths, cwd));
 }
@@ -190,7 +216,8 @@ function fix(paths: readonly string[], cwd: string): CommandResult {
   const stdout = changed.map((file) => `${lineText(file)}: fixed\n`).join('')
     + moved.map((file) => `${lineText(file)}: moved while fix ran; left unchanged\n`).join('')
     + describe(findings);
-  return { exitCode: stdout === '' ? 0 : 1, stdout, stderr: '' };
+  const kept = new Set(moved);
+  return { exitCode: stdout === '' ? 0 : 1, stdout: stdout + warnings(files.filter((file) => !kept.has(file)), cwd), stderr: '' };
 }
 
 /**

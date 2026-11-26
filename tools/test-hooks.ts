@@ -79,6 +79,12 @@ try {
   assert.equal(await readFile(page, 'utf8'), linked);
   hooks(0);
   assert.equal(await readFile(page, 'utf8'), linked);
+  // A warning is shown, but passes both hooks.
+  await writeFile(page, '1. Plan\n   2\\. Call');
+  assert.match(hooks(0), /page with spaces\.md:2: warning: list-number-as-text: /);
+  await writeFile(join(scratch, '.pre-commit-config.yaml'), config('linear-format-check'));
+  assert.match(hooks(0), /page with spaces\.md:2: warning: list-number-as-text: /);
+  await writeFile(join(scratch, '.pre-commit-config.yaml'), config('linear-format'));
 
   const url = 'https://example.com/garden';
   const prefix = 'x'.repeat(CONTENT_LIMIT - url.length - 3) + '\n\n';

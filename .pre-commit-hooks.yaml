@@ -5,6 +5,7 @@
   language_version: system
   types: [markdown]
   require_serial: true
+  verbose: true
 - id: linear-format-check
   name: Check Markdown for Linear
   entry: mdbisync lint
@@ -12,3 +13,4 @@
   language_version: system
   types: [markdown]
   require_serial: true
+  verbose: true

@@ -67,6 +67,9 @@ notes/plan.md:12: footnote: Footnotes are dropped.
 notes/setup.md: not in Linear's form; run fix
 ```
 
+Both commands also print [warnings](#lint-warnings), as
+`file:line: warning: rule: message`. A warning never changes the exit code.
+
 Control characters in a printed file name, line breaks and tabs included, and
 backslashes are written as `\uXXXX` escapes, so every finding stays on one
 line. When a file
@@ -1114,6 +1117,49 @@ guides/assets/notes.md
 
 Instead, move the document out of the `assets` folder.
 
+## Lint warnings
+
+A warning marks text that may not read as its author meant. `lint` and
+`fix` print it and keep the text as it is; a warning never fails a
+command, a hook or CI, and never leaves a file out of the sync.
+
+### `list-number-as-text`
+
+A line in a list item starts with a number that Markdown reads as text of
+the item, though it looks like a nested numbered list: a nested list
+numbered other than 1 cannot follow the item's text, and a list indented
+four or more columns past the item's text is part of it. To make it a
+list, renumber its first item to 1., move it one level up, or remove a
+doubled number such as 14. 13. in the line above, and remove the backslash
+fix writes after each of its numbers (2\.).
+
+`fix` writes such a number escaped (`2\.`), so it stays text in Linear; the
+warning finds it in either form. It covers numbers of up to three digits
+followed by `.` or `)`, and a tab counts to the next multiple of four
+columns. A numbered line right below another one at the same indentation
+belongs to the same list and is not reported on its own. Inline code and
+text in a quote are not checked.
+
+```markdown
+1. Plan
+   2. Call the team
+2. Review
+       1\. Read the notes
+3. 4. Ship
+      2\. Pack
+```
+
+Lines 2, 4 and 6 are reported. Written as lists:
+
+```text
+1. Plan
+   1. Call the team
+2. Review
+   1. Read the notes
+3. Ship
+   1. Pack
+```
+
 ## Install the hook
 
 The repository publishes two pre-commit hooks:
@@ -1124,7 +1170,7 @@ The repository publishes two pre-commit hooks:
 | `linear-format-check` | `mdbisync lint` | reports it without writing |
 
 Both report lint findings with file, line and rule and leave those files
-unchanged. Synchronization requires `linear-format`; `linear-format-check`
+unchanged. They also print [warnings](#lint-warnings), which pass. Synchronization requires `linear-format`; `linear-format-check`
 can follow it as an extra check. The hooks run one formatter process at a
 time, and see the files pre-commit selects: use `--all-files` to check the
 whole repository, existing files included.
