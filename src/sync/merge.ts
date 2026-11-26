@@ -808,7 +808,8 @@ async function keepOlderVersions(git: Git, tree: Oid, stages: readonly string[])
     const [, mode, oid, stage, path] = match as unknown as [string, string, Oid, string, string];
     byPath.set(path, (byPath.get(path) ?? new Map()).set(stage, { mode, oid }));
   }
-  const older = [...byPath].filter(([, entries]) => entries.has('1'));
+  // Only a path a side still holds: a rename conflict lists its source with the base's stage alone, and leaves it out.
+  const older = [...byPath].filter(([, entries]) => entries.has('1') && (entries.has('2') || entries.has('3')));
   if (older.length === 0) return tree;
   const current = new Map((await listPaths(git, tree, older.map(([path]) => path))).map((entry) => [entry.path, entry.oid]));
   const back = new Map<string, { mode: string; oid: Oid }>();

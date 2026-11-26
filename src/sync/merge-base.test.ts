@@ -140,6 +140,18 @@ describe('sync: the merge base of a criss-cross history', () => {
     }
   });
 
+  it('leaves out a file the merge bases renamed to different names, as git does', async () => {
+    // The bases rename the plan two ways; Linear removes both copies, the tracked branch keeps them and adds the
+    // plan back. git's merge of the bases holds neither the plan nor a reason to delete it: the plan stays.
+    const toA = await commitTree(git, { parents: [seed], base: seed, changes: new Map([['eng/plan.md', null], ['eng/plan-a.md', TREE['eng/plan.md'] as string]]), message: 'Rename the plan one way', identity: IDENTITY });
+    const toB = await commitTree(git, { parents: [seed], base: seed, changes: new Map([['eng/plan.md', null], ['eng/plan-b.md', TREE['eng/plan.md'] as string]]), message: 'Rename it the other way', identity: IDENTITY });
+    const linear = await commitTree(git, { parents: [toA, toB], base: toA, changes: new Map([['eng/plan-a.md', null]]), message: 'Remove both copies', identity: IDENTITY, skipIfUnchanged: false });
+    const tracked = await commitTree(git, { parents: [toB, toA], base: toB, changes: new Map([['eng/plan-a.md', TREE['eng/plan.md'] as string], ['eng/plan.md', TREE['eng/plan.md'] as string]]), message: 'Keep both and add the plan back', identity: IDENTITY });
+    const held = new Map([['eng/held.md', { id: 'doc-held', suspended: EPISODE }], ['eng/other.md', { id: 'doc-other' }]]);
+    const merged = await mergeLocally(git, linear, tracked, held);
+    assert.equal(await planOf(merged.tree), TREE['eng/plan.md']);
+  });
+
   it('gives the structural rules the merged base when git cannot merge a document', async () => {
     const { linear, tracked } = await crissCross();
     const edited = await commit([tracked], { 'eng/plan.md': '# Plan\n\n- Order the parts by Monday\n- Book the room\n' }, 'Change the edited line again');
