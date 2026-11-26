@@ -72,9 +72,12 @@ Run `npm run check:fixtures` too when you change the fixture bank.
 `node tools/test-temp-cleanup.ts` takes the file patterns and options of
 `node --test` and fails when the tests leave temporary files behind. Options
 given after `--` need the `--name=value` form, unless they take no value.
-The runner runs as many test
-files at a time as the machine has CPUs, less one, and its test processes
-share a compile cache in `node_modules/.cache/test-compile-cache`.
+It runs as many test files at a time as the machine has CPUs, and starts
+the files that took longest in the last run first; it keeps their durations
+in `node_modules/.cache/test-durations.json`, and its test processes share a
+compile cache in `node_modules/.cache/test-compile-cache`. With an option it
+does not take (`--experimental-test-coverage`, `--test-only`, ...), it runs
+`node --test` itself, with Node's file order and one CPU less.
 
 `npm test` needs no network or accounts. Scenarios that commit as a person
 go through released pre-commit hooks, which need npm 11.16.0 or newer; with

@@ -5,6 +5,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { constants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { plan } from './test-run.ts';
 
 // Every test file runs in its own process, which strips the TypeScript
 // sources it imports, and every git call forks that process. Node's compile
@@ -45,7 +46,9 @@ const cacheEnv = runnerArgs.includes('--experimental-test-coverage') ? {} : { NO
 
 const directory = mkdtempSync(join(tmpdir(), 'test-temp-cleanup-'));
 try {
-  const child = spawn(process.execPath, ['--test', ...runnerArgs], {
+  // Files run longest first where the runner takes the arguments, as `node --test` otherwise.
+  const command = plan(runnerArgs) === undefined ? ['--test', ...runnerArgs] : [fileURLToPath(new URL('./test-run.ts', import.meta.url)), ...runnerArgs];
+  const child = spawn(process.execPath, command, {
     env: { ...process.env, ...cacheEnv, TMPDIR: directory, TMP: directory, TEMP: directory },
     stdio: 'inherit',
   });
