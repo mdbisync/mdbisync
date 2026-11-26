@@ -399,7 +399,7 @@ var require_directives = __commonJS({
         return tag[0] === "!" ? tag : `!<${tag}>`;
       }
       toString(doc) {
-        const lines2 = this.yaml.explicit ? [`%YAML ${this.yaml.version || "1.2"}`] : [];
+        const lines3 = this.yaml.explicit ? [`%YAML ${this.yaml.version || "1.2"}`] : [];
         const tagEntries = Object.entries(this.tags);
         let tagNames;
         if (doc && tagEntries.length > 0 && identity.isNode(doc.contents)) {
@@ -415,9 +415,9 @@ var require_directives = __commonJS({
           if (handle2 === "!!" && prefix === "tag:yaml.org,2002:")
             continue;
           if (!doc || tagNames.some((tn) => tn.startsWith(prefix)))
-            lines2.push(`%TAG ${handle2} ${prefix}`);
+            lines3.push(`%TAG ${handle2} ${prefix}`);
         }
-        return lines2.join("\n");
+        return lines3.join("\n");
       }
     };
     Directives.defaultYaml = { explicit: false, version: "1.2" };
@@ -1878,22 +1878,22 @@ var require_stringifyCollection = __commonJS({
       const { indent: indent2, options: { commentString } } = ctx;
       const itemCtx = Object.assign({}, ctx, { indent: itemIndent2, type: null });
       let chompKeep = false;
-      const lines2 = [];
+      const lines3 = [];
       for (let i = 0; i < items.length; ++i) {
         const item = items[i];
         let comment2 = null;
         if (identity.isNode(item)) {
           if (!chompKeep && item.spaceBefore)
-            lines2.push("");
-          addCommentBefore(ctx, lines2, item.commentBefore, chompKeep);
+            lines3.push("");
+          addCommentBefore(ctx, lines3, item.commentBefore, chompKeep);
           if (item.comment)
             comment2 = item.comment;
         } else if (identity.isPair(item)) {
           const ik = identity.isNode(item.key) ? item.key : null;
           if (ik) {
             if (!chompKeep && ik.spaceBefore)
-              lines2.push("");
-            addCommentBefore(ctx, lines2, ik.commentBefore, chompKeep);
+              lines3.push("");
+            addCommentBefore(ctx, lines3, ik.commentBefore, chompKeep);
           }
         }
         chompKeep = false;
@@ -1902,15 +1902,15 @@ var require_stringifyCollection = __commonJS({
           str2 += stringifyComment.lineComment(str2, itemIndent2, commentString(comment2));
         if (chompKeep && comment2)
           chompKeep = false;
-        lines2.push(blockItemPrefix + str2);
+        lines3.push(blockItemPrefix + str2);
       }
       let str;
-      if (lines2.length === 0) {
+      if (lines3.length === 0) {
         str = flowChars.start + flowChars.end;
       } else {
-        str = lines2[0];
-        for (let i = 1; i < lines2.length; ++i) {
-          const line2 = lines2[i];
+        str = lines3[0];
+        for (let i = 1; i < lines3.length; ++i) {
+          const line2 = lines3[i];
           str += line2 ? `
 ${indent2}${line2}` : "\n";
         }
@@ -1933,22 +1933,22 @@ ${indent2}${line2}` : "\n";
       });
       let reqNewline = false;
       let linesAtValue = 0;
-      const lines2 = [];
+      const lines3 = [];
       for (let i = 0; i < items.length; ++i) {
         const item = items[i];
         let comment = null;
         if (identity.isNode(item)) {
           if (item.spaceBefore)
-            lines2.push("");
-          addCommentBefore(ctx, lines2, item.commentBefore, false);
+            lines3.push("");
+          addCommentBefore(ctx, lines3, item.commentBefore, false);
           if (item.comment)
             comment = item.comment;
         } else if (identity.isPair(item)) {
           const ik = identity.isNode(item.key) ? item.key : null;
           if (ik) {
             if (ik.spaceBefore)
-              lines2.push("");
-            addCommentBefore(ctx, lines2, ik.commentBefore, false);
+              lines3.push("");
+            addCommentBefore(ctx, lines3, ik.commentBefore, false);
             if (ik.comment)
               reqNewline = true;
           }
@@ -1965,12 +1965,12 @@ ${indent2}${line2}` : "\n";
         if (comment)
           reqNewline = true;
         let str = stringify2.stringify(item, itemCtx, () => comment = null);
-        reqNewline || (reqNewline = lines2.length > linesAtValue || str.includes("\n"));
+        reqNewline || (reqNewline = lines3.length > linesAtValue || str.includes("\n"));
         if (i < items.length - 1) {
           str += ",";
         } else if (ctx.options.trailingComma) {
           if (ctx.options.lineWidth > 0) {
-            reqNewline || (reqNewline = lines2.reduce((sum, line2) => sum + line2.length + 2, 2) + (str.length + 2) > ctx.options.lineWidth);
+            reqNewline || (reqNewline = lines3.reduce((sum, line2) => sum + line2.length + 2, 2) + (str.length + 2) > ctx.options.lineWidth);
           }
           if (reqNewline) {
             str += ",";
@@ -1978,35 +1978,35 @@ ${indent2}${line2}` : "\n";
         }
         if (comment)
           str += stringifyComment.lineComment(str, itemIndent2, commentString(comment));
-        lines2.push(str);
-        linesAtValue = lines2.length;
+        lines3.push(str);
+        linesAtValue = lines3.length;
       }
       const { start: start3, end: end2 } = flowChars;
-      if (lines2.length === 0) {
+      if (lines3.length === 0) {
         return start3 + end2;
       } else {
         if (!reqNewline) {
-          const len = lines2.reduce((sum, line2) => sum + line2.length + 2, 2);
+          const len = lines3.reduce((sum, line2) => sum + line2.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
           let str = start3;
-          for (const line2 of lines2)
+          for (const line2 of lines3)
             str += line2 ? `
 ${indentStep}${indent2}${line2}` : "\n";
           return `${str}
 ${indent2}${end2}`;
         } else {
-          return `${start3}${fcPadding}${lines2.join(" ")}${fcPadding}${end2}`;
+          return `${start3}${fcPadding}${lines3.join(" ")}${fcPadding}${end2}`;
         }
       }
     }
-    function addCommentBefore({ indent: indent2, options: { commentString } }, lines2, comment, chompKeep) {
+    function addCommentBefore({ indent: indent2, options: { commentString } }, lines3, comment, chompKeep) {
       if (comment && chompKeep)
         comment = comment.replace(/^\n+/, "");
       if (comment) {
         const ic = stringifyComment.indentComment(commentString(comment), indent2);
-        lines2.push(ic.trimStart());
+        lines3.push(ic.trimStart());
       }
     }
     exports.stringifyCollection = stringifyCollection;
@@ -2644,11 +2644,11 @@ var require_binary = __commonJS({
         if (type !== Scalar.Scalar.QUOTE_DOUBLE) {
           const lineWidth = Math.max(ctx.options.lineWidth - ctx.indent.length, ctx.options.minContentWidth);
           const n = Math.ceil(str.length / lineWidth);
-          const lines2 = new Array(n);
+          const lines3 = new Array(n);
           for (let i = 0, o = 0; i < n; ++i, o += lineWidth) {
-            lines2[i] = str.substr(o, lineWidth);
+            lines3[i] = str.substr(o, lineWidth);
           }
-          str = lines2.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
+          str = lines3.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
         }
         return stringifyString.stringifyString({ comment, type, value: str }, ctx, onComment, onChompKeep);
       }
@@ -3328,35 +3328,35 @@ var require_stringifyDocument = __commonJS({
     var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyDocument(doc, options) {
-      const lines2 = [];
+      const lines3 = [];
       let hasDirectives = options.directives === true;
       if (options.directives !== false && doc.directives) {
         const dir = doc.directives.toString(doc);
         if (dir) {
-          lines2.push(dir);
+          lines3.push(dir);
           hasDirectives = true;
         } else if (doc.directives.docStart)
           hasDirectives = true;
       }
       if (hasDirectives)
-        lines2.push("---");
+        lines3.push("---");
       const ctx = stringify2.createStringifyContext(doc, options);
       const { commentString } = ctx.options;
       if (doc.commentBefore) {
-        if (lines2.length !== 1)
-          lines2.unshift("");
+        if (lines3.length !== 1)
+          lines3.unshift("");
         const cs = commentString(doc.commentBefore);
-        lines2.unshift(stringifyComment.indentComment(cs, ""));
+        lines3.unshift(stringifyComment.indentComment(cs, ""));
       }
       let chompKeep = false;
       let contentComment = null;
       if (doc.contents) {
         if (identity.isNode(doc.contents)) {
           if (doc.contents.spaceBefore && hasDirectives)
-            lines2.push("");
+            lines3.push("");
           if (doc.contents.commentBefore) {
             const cs = commentString(doc.contents.commentBefore);
-            lines2.push(stringifyComment.indentComment(cs, ""));
+            lines3.push(stringifyComment.indentComment(cs, ""));
           }
           ctx.forceBlockIndent = !!doc.comment;
           contentComment = doc.contents.comment;
@@ -3365,36 +3365,36 @@ var require_stringifyDocument = __commonJS({
         let body2 = stringify2.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
         if (contentComment)
           body2 += stringifyComment.lineComment(body2, "", commentString(contentComment));
-        if ((body2[0] === "|" || body2[0] === ">") && lines2[lines2.length - 1] === "---") {
-          lines2[lines2.length - 1] = `--- ${body2}`;
+        if ((body2[0] === "|" || body2[0] === ">") && lines3[lines3.length - 1] === "---") {
+          lines3[lines3.length - 1] = `--- ${body2}`;
         } else
-          lines2.push(body2);
+          lines3.push(body2);
       } else {
-        lines2.push(stringify2.stringify(doc.contents, ctx));
+        lines3.push(stringify2.stringify(doc.contents, ctx));
       }
       if (doc.directives?.docEnd) {
         if (doc.comment) {
           const cs = commentString(doc.comment);
           if (cs.includes("\n")) {
-            lines2.push("...");
-            lines2.push(stringifyComment.indentComment(cs, ""));
+            lines3.push("...");
+            lines3.push(stringifyComment.indentComment(cs, ""));
           } else {
-            lines2.push(`... ${cs}`);
+            lines3.push(`... ${cs}`);
           }
         } else {
-          lines2.push("...");
+          lines3.push("...");
         }
       } else {
         let dc = doc.comment;
         if (dc && chompKeep)
           dc = dc.replace(/^\n+/, "");
         if (dc) {
-          if ((!chompKeep || contentComment) && lines2[lines2.length - 1] !== "")
-            lines2.push("");
-          lines2.push(stringifyComment.indentComment(commentString(dc), ""));
+          if ((!chompKeep || contentComment) && lines3[lines3.length - 1] !== "")
+            lines3.push("");
+          lines3.push(stringifyComment.indentComment(commentString(dc), ""));
         }
       }
-      return lines2.join("\n") + "\n";
+      return lines3.join("\n") + "\n";
     }
     exports.stringifyDocument = stringifyDocument;
   }
@@ -4456,17 +4456,17 @@ var require_resolve_block_scalar = __commonJS({
       if (!header)
         return { value: "", type: null, comment: "", range: [start3, start3, start3] };
       const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
-      const lines2 = scalar.source ? splitLines(scalar.source) : [];
-      let chompStart = lines2.length;
-      for (let i = lines2.length - 1; i >= 0; --i) {
-        const content4 = lines2[i][1];
+      const lines3 = scalar.source ? splitLines(scalar.source) : [];
+      let chompStart = lines3.length;
+      for (let i = lines3.length - 1; i >= 0; --i) {
+        const content4 = lines3[i][1];
         if (content4 === "" || content4 === "\r")
           chompStart = i;
         else
           break;
       }
       if (chompStart === 0) {
-        const value2 = header.chomp === "+" && lines2.length > 0 ? "\n".repeat(Math.max(1, lines2.length - 1)) : "";
+        const value2 = header.chomp === "+" && lines3.length > 0 ? "\n".repeat(Math.max(1, lines3.length - 1)) : "";
         let end3 = start3 + header.length;
         if (scalar.source)
           end3 += scalar.source.length;
@@ -4476,7 +4476,7 @@ var require_resolve_block_scalar = __commonJS({
       let offset = scalar.offset + header.length;
       let contentStart = 0;
       for (let i = 0; i < chompStart; ++i) {
-        const [indent2, content4] = lines2[i];
+        const [indent2, content4] = lines3[i];
         if (content4 === "" || content4 === "\r") {
           if (header.indent === 0 && indent2.length > trimIndent)
             trimIndent = indent2.length;
@@ -4496,17 +4496,17 @@ var require_resolve_block_scalar = __commonJS({
         }
         offset += indent2.length + content4.length + 1;
       }
-      for (let i = lines2.length - 1; i >= chompStart; --i) {
-        if (lines2[i][0].length > trimIndent)
+      for (let i = lines3.length - 1; i >= chompStart; --i) {
+        if (lines3[i][0].length > trimIndent)
           chompStart = i + 1;
       }
       let value = "";
       let sep5 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
-        value += lines2[i][0].slice(trimIndent) + "\n";
+        value += lines3[i][0].slice(trimIndent) + "\n";
       for (let i = contentStart; i < chompStart; ++i) {
-        let [indent2, content4] = lines2[i];
+        let [indent2, content4] = lines3[i];
         offset += indent2.length + content4.length + 1;
         const crlf = content4[content4.length - 1] === "\r";
         if (crlf)
@@ -4543,8 +4543,8 @@ var require_resolve_block_scalar = __commonJS({
         case "-":
           break;
         case "+":
-          for (let i = chompStart; i < lines2.length; ++i)
-            value += "\n" + lines2[i][0].slice(trimIndent);
+          for (let i = chompStart; i < lines3.length; ++i)
+            value += "\n" + lines3[i][0].slice(trimIndent);
           if (value[value.length - 1] !== "\n")
             value += "\n";
           break;
@@ -4619,10 +4619,10 @@ var require_resolve_block_scalar = __commonJS({
       const first = split[0];
       const m = first.match(/^( *)/);
       const line0 = m?.[1] ? [m[1], first.slice(m[1].length)] : ["", first];
-      const lines2 = [line0];
+      const lines3 = [line0];
       for (let i = 1; i < split.length; i += 2)
-        lines2.push([split[i], split[i + 1]]);
-      return lines2;
+        lines3.push([split[i], split[i + 1]]);
+      return lines3;
     }
     exports.resolveBlockScalar = resolveBlockScalar;
   }
@@ -9668,7 +9668,8 @@ async function commitTree(git, spec) {
       GIT_AUTHOR_NAME: spec.identity.name,
       GIT_AUTHOR_EMAIL: spec.identity.email,
       GIT_COMMITTER_NAME: spec.identity.name,
-      GIT_COMMITTER_EMAIL: spec.identity.email
+      GIT_COMMITTER_EMAIL: spec.identity.email,
+      ...spec.date === void 0 ? {} : { GIT_AUTHOR_DATE: spec.date, GIT_COMMITTER_DATE: spec.date }
     }
   });
 }
@@ -9711,13 +9712,13 @@ async function buildTreeInIndex(git, base, changes) {
     else await git.run(["read-tree", `${base}^{tree}`], { env });
     const modes = base !== null && changes.size > 0 ? await listModes(git, base) : /* @__PURE__ */ new Map();
     const nullOid = "0".repeat(await git.objectFormat() === "sha256" ? 64 : 40);
-    const lines2 = await mapLimit([...changes.entries()], 8, async ([path2, placement]) => {
+    const lines3 = await mapLimit([...changes.entries()], 8, async ([path2, placement]) => {
       if (placement === null) return `0 ${nullOid}	${path2}\0`;
       const oid = await placement.oid;
       const mode = modes.get(path2) === "100755" ? "100755" : "100644";
       return `${mode} ${oid}	${path2}\0`;
     });
-    if (lines2.length > 0) await git.run(["update-index", "-z", "--index-info"], { input: lines2.join(""), env });
+    if (lines3.length > 0) await git.run(["update-index", "-z", "--index-info"], { input: lines3.join(""), env });
     return await git.text(["write-tree"], { env });
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -9884,8 +9885,8 @@ var Git = class {
   layout() {
     this.layoutRead ??= this.text(["rev-parse", "--show-object-format", "--path-format=absolute", "--git-path", "objects", "--git-common-dir"]).then(
       async (text6) => {
-        const lines2 = text6.split("\n");
-        if (lines2.length === 3) return { format: lines2[0], objects: lines2[1], common: lines2[2] };
+        const lines3 = text6.split("\n");
+        if (lines3.length === 3) return { format: lines3[0], objects: lines3[1], common: lines3[2] };
         const [format, objects, common] = await Promise.all([
           this.text(["rev-parse", "--show-object-format"]),
           this.text(["rev-parse", "--path-format=absolute", "--git-path", "objects"]),
@@ -10094,14 +10095,14 @@ async function readCommit(git, name) {
   const text6 = found.content.toString("utf8");
   const end2 = text6.indexOf("\n\n");
   if (end2 < 0) return void 0;
-  const lines2 = text6.slice(0, end2).split("\n");
-  const tree = /^tree ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines2[0] ?? "")?.[1];
+  const lines3 = text6.slice(0, end2).split("\n");
+  const tree = /^tree ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines3[0] ?? "")?.[1];
   let at = 1;
   const parents = [];
-  for (let parent; (parent = /^parent ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines2[at] ?? "")) !== null; at++) parents.push(parent[1]);
-  const author = lines2[at] ?? "";
-  if (tree === void 0 || !author.startsWith("author ") || !(lines2[at + 1] ?? "").startsWith("committer ")) return void 0;
-  const rest = lines2.slice(at + 2);
+  for (let parent; (parent = /^parent ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines3[at] ?? "")) !== null; at++) parents.push(parent[1]);
+  const author = lines3[at] ?? "";
+  if (tree === void 0 || !author.startsWith("author ") || !(lines3[at + 1] ?? "").startsWith("committer ")) return void 0;
+  const rest = lines3.slice(at + 2);
   if (rest.some((line2) => /^(?:tree|parent|author|committer|encoding) /.test(line2))) return void 0;
   const authorEmail = email(author);
   if (authorEmail === void 0) return void 0;
@@ -10113,9 +10114,9 @@ function email(line2) {
   return open3 < 0 || close < 0 ? void 0 : line2.slice(open3 + 1, close);
 }
 function subject(message2) {
-  const lines2 = message2.split("\n");
-  if (lines2.at(-1) === "") lines2.pop();
-  const trimmed2 = lines2.map((line2) => line2.replace(/[ \t\n\r]+$/, ""));
+  const lines3 = message2.split("\n");
+  if (lines3.at(-1) === "") lines3.pop();
+  const trimmed2 = lines3.map((line2) => line2.replace(/[ \t\n\r]+$/, ""));
   let first = 0;
   while (first < trimmed2.length && trimmed2[first] === "") first++;
   const taken = [];
@@ -10226,12 +10227,12 @@ function parseLfsPointer(blob) {
   }
   const text6 = blob.toString("utf8");
   if (!text6.endsWith("\n")) return null;
-  const lines2 = text6.slice(0, -1).split("\n");
-  if (lines2[0] !== POINTER_VERSION) return null;
+  const lines3 = text6.slice(0, -1).split("\n");
+  if (lines3[0] !== POINTER_VERSION) return null;
   let oid = null;
   let size = null;
   let extensions = false;
-  for (const line2 of lines2.slice(1)) {
+  for (const line2 of lines3.slice(1)) {
     const space = line2.indexOf(" ");
     if (space <= 0) return null;
     const key = line2.slice(0, space);
@@ -10444,21 +10445,21 @@ async function pushAtomic(git, config, updates) {
   for (const update of updates) args.push(`${update.next}:${update.ref}`);
   const result = await git.run(args, { okCodes: [0, 1] });
   const stdout = result.stdout.toString("utf8");
-  const lines2 = parsePorcelain(stdout);
+  const lines3 = parsePorcelain(stdout);
   if (result.code === 0) {
     const input = changing.map((update) => `update ${localRef(config, update.ref)} ${update.next}
 `).join("");
     await git.run(["update-ref", "--stdin"], { input, okCodes: [0, 1, 128] });
-    const unchanged = new Set(lines2.filter((line2) => line2.flag === "=").map((line2) => line2.ref));
+    const unchanged = new Set(lines3.filter((line2) => line2.flag === "=").map((line2) => line2.ref));
     logMoves(git, config, changing.map((update) => update.ref).filter((ref) => !unchanged.has(ref)));
     return { ok: true, updated: changing.map((update) => update.ref) };
   }
-  const rejected = lines2.filter((line2) => line2.flag === "!");
+  const rejected = lines3.filter((line2) => line2.flag === "!");
   if (rejected.length === 0) throw new GitError(args, result.code, result.stderr);
   const remote = rejected.some((line2) => line2.summary.includes("stale info")) ? void 0 : await lsRemote(git, config.remote, updates.map((update) => update.ref));
   const stale = remote === void 0 || updates.some((update) => (remote.get(update.ref) ?? null) !== update.expected);
   if (stale) {
-    const moved = lines2.filter((line2) => line2.flag !== "!" && line2.flag !== "=").map((line2) => line2.ref);
+    const moved = lines3.filter((line2) => line2.flag !== "!" && line2.flag !== "=").map((line2) => line2.ref);
     const sent = updates.map((update) => update.ref);
     const after = moved.length === 0 ? void 0 : remote ?? await lsRemote(git, config.remote, sent).catch(() => null);
     logRefusal(git, {
@@ -10484,14 +10485,14 @@ function outputLines(stdout, stderr) {
   return [...stdout.split("\n"), ...stderr.split("\n")].map((line2) => line2.trimEnd()).filter((line2) => line2 !== "");
 }
 function parsePorcelain(output) {
-  const lines2 = [];
+  const lines3 = [];
   for (const line2 of output.split("\n")) {
     const parts = line2.split("	");
     if (parts.length < 3 || parts[0].length !== 1) continue;
     const refs = parts[1];
-    lines2.push({ flag: parts[0], ref: refs.slice(refs.lastIndexOf(":") + 1), summary: parts.slice(2).join("	") });
+    lines3.push({ flag: parts[0], ref: refs.slice(refs.lastIndexOf(":") + 1), summary: parts.slice(2).join("	") });
   }
-  return lines2;
+  return lines3;
 }
 var IDS_FILE = "ids.json";
 var UPLOADS_FILE = "uploads.json";
@@ -10789,6 +10790,8 @@ var LINT_RULES = {
   "list-number-too-long": "An ordered list numbered past 999999999: Linear numbers its items on from the first number, and Markdown reads a number of more than nine digits as text of the item above it. Start the list at a smaller number.",
   "block-first-in-list-item": "A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
   "section-marker-text": "A line that starts with +++ and text right after it (+++Plan) is text, but Linear opens a collapsible section from it when more of its list item, quote or document follows. Run fix to write it as \\+++Plan, or put a space after +++ to make it a section.",
+  "plus-line-in-item": "A line of only + right below a list item's first line is text of the item in Markdown, but Linear reads it as an empty list item and the text after it moves. Run fix to write it as + followed by a no-break space, which Linear keeps as text, or remove the line.",
+  "tab-indentation": "A tab in the indentation of a list item, a quote or a code block, or after a list, heading or quote marker, is laid out differently by Linear, and text moves or is lost. Run fix to write the indentation with spaces, or replace the tabs with spaces yourself.",
   "ordered-task-list": "An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.",
   "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path, or run fix to write an HTTP(S) image as a link.",
   "image-file-missing": "An image must name a file that exists in the repository, not a folder or a Markdown document.",
@@ -10800,7 +10803,7 @@ var LINT_WARNINGS = {
   "link-text-from-url": "fix wrote the URL of a link without text as its text: Linear drops a link without text. To show other words, replace the text.",
   "list-number-as-text": "A line in a list item starts with a number that Markdown reads as text of the item, though it looks like a nested numbered list: a nested list numbered other than 1 cannot follow the item's text, and a list indented four or more columns past the item's text is part of it. To make it a list, renumber its first item to 1., move it one level up, or remove a doubled number such as 14. 13. in the line above, and remove the backslash fix writes after each of its numbers (2\\.)."
 };
-var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash", "link-without-text", "section-marker-text", "table-quote-cell"]);
+var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash", "link-without-text", "plus-line-in-item", "section-marker-text", "tab-indentation", "table-quote-cell"]);
 var IMAGE_PLACE_RULES = /* @__PURE__ */ new Set(["image-not-in-repository", "image-file-missing"]);
 
 // src/setup/report.ts
@@ -15320,6 +15323,62 @@ var linear_emoji_default = {
 
 // src/format/linear-emoji.ts
 var LINEAR_EMOJI = new Map(Object.entries(linear_emoji_default));
+
+// src/format/shortcodes.ts
+var DELIMITER = /^[*_~]$/;
+var UNICODE_WHITESPACE = /^\s$/u;
+var UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
+function sameFlanking(source, from, to, text6) {
+  const chars = [...text6];
+  const first = chars[0];
+  const last = chars.at(-1);
+  const kind = (c) => c === void 0 || UNICODE_WHITESPACE.test(c) ? "space" : UNICODE_PUNCTUATION.test(c) ? "punctuation" : "other";
+  const reads = (delimiter, before, after) => {
+    const b = kind(before);
+    const a = kind(after);
+    const left = a !== "space" && (a !== "punctuation" || b !== "other");
+    const right = b !== "space" && (b !== "punctuation" || a !== "other");
+    if (delimiter !== "_") return `${left} ${right}`;
+    return `${left && (!right || b === "punctuation")} ${right && (!left || a === "punctuation")}`;
+  };
+  const delimiterBefore = source[from - 1];
+  if (delimiterBefore !== void 0 && DELIMITER.test(delimiterBefore)) {
+    let start3 = from - 1;
+    while (start3 > 0 && source[start3 - 1] === delimiterBefore) start3--;
+    if (reads(delimiterBefore, codePointBefore(source, start3), source[from]) !== reads(delimiterBefore, codePointBefore(source, start3), first)) return false;
+  }
+  const delimiterAfter = source[to];
+  if (delimiterAfter !== void 0 && DELIMITER.test(delimiterAfter)) {
+    let end2 = to + 1;
+    while (end2 < source.length && source[end2] === delimiterAfter) end2++;
+    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end2)) !== reads(delimiterAfter, last, codePointAt(source, end2))) return false;
+  }
+  return true;
+}
+function codePointBefore(source, at) {
+  if (at <= 0) return void 0;
+  const low = source.charCodeAt(at - 1);
+  if (low >= 56320 && low <= 57343 && at >= 2) {
+    const high = source.charCodeAt(at - 2);
+    if (high >= 55296 && high <= 56319) return source.slice(at - 2, at);
+  }
+  return source[at - 1];
+}
+function codePointAt(source, at) {
+  const code4 = source.codePointAt(at);
+  return code4 === void 0 ? void 0 : String.fromCodePoint(code4);
+}
+function* emojiShortcodes(raw) {
+  for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
+    const emoji = LINEAR_EMOJI.get(match[1]);
+    if (emoji) yield { index: match.index, length: match[0].length, emoji: emoji.startsWith("*") ? `\\${emoji}` : emoji };
+  }
+}
+function escaped(text6, at) {
+  let run = 0;
+  while (text6[at - 1 - run] === "\\") run++;
+  return run % 2 === 1;
+}
 
 // node_modules/micromark-util-character/index.js
 var asciiAlpha = regexCheck(/[A-Za-z]/);
@@ -25022,29 +25081,50 @@ function sameMarkdown(a, b, options = {}) {
 }
 function sameAsLinear(content4, body2) {
   if (content4 === body2) return true;
-  const restored = linearMarkersAsText(content4, body2);
-  if (sameMarkdown(restored, body2)) return true;
-  return body2.includes("\\+++") && sameMarkdown(restored, linearSectionEnd(body2));
+  const restored = linearMarkersAsText(linearShortcodesAsEmoji(content4), body2);
+  if (sameMarkdown(restored, body2, { linearShortcodes: true })) return true;
+  return body2.includes("\\+++") && sameMarkdown(restored, linearSectionEnd(body2), { linearShortcodes: true });
 }
-function closesAboveList(lines2, index2, last) {
+function linearShortcodesAsEmoji(body2) {
+  if (!/:[a-z0-9_+-]+:/.test(body2)) return body2;
+  const bom = body2.startsWith(BOM) ? 1 : 0;
+  const parts = [];
+  let done = 0;
+  visit2(parse3(body2, [], true), (node2, ancestors) => {
+    if (node2.type !== "text") return;
+    const parent = ancestors.at(-1);
+    if (parent?.type === "link" && body2[start2(parent) + bom] !== "[") return;
+    const from = start2(node2) + bom;
+    const raw = body2.slice(from, end(node2) + bom);
+    for (const { index: index2, length, emoji } of emojiShortcodes(raw)) {
+      const at = from + index2;
+      if (escaped(raw, index2) || !sameFlanking(body2, at, at + length, emoji)) continue;
+      parts.push(body2.slice(done, at), emoji);
+      done = at + length;
+    }
+  });
+  parts.push(body2.slice(done));
+  return parts.join("");
+}
+function closesAboveList(lines3, index2, last) {
   if (last <= index2) return false;
-  const next = lines2[index2 + 1];
+  const next = lines3[index2 + 1];
   const prefix = LINE_PREFIX.exec(next)[0];
-  return lines2[index2].startsWith(prefix) && /^(?:\d{1,9}\.[ \t]|[*-][ \t]*$)/.test(next.slice(prefix.length));
+  return lines3[index2].startsWith(prefix) && /^(?:\d{1,9}\.[ \t]|[*-][ \t]*$)/.test(next.slice(prefix.length));
 }
 function linearSectionEnd(body2) {
-  const lines2 = body2.split(LINE_END);
+  const lines3 = body2.split(LINE_END);
   const closing = /* @__PURE__ */ new Set();
   visit2(parse3(body2), (node2) => {
     if (node2.type !== "paragraph") return;
     const first = line(node2) - 1;
     const last = (node2.position?.end.line ?? first + 1) - 1;
     const column = (node2.position?.start.column ?? 1) - 1;
-    if (last > first && lines2[first].slice(column).startsWith("\\+++ ") && linearLineText(lines2[last]) === "+++") {
+    if (last > first && lines3[first].slice(column).startsWith("\\+++ ") && linearLineText(lines3[last]) === "+++") {
       closing.add(last);
     }
   });
-  return lines2.flatMap((row, index2) => closing.has(index2) ? [LINE_PREFIX.exec(row)[0].trimEnd(), row] : [row]).join("\n");
+  return lines3.flatMap((row, index2) => closing.has(index2) ? [LINE_PREFIX.exec(row)[0].trimEnd(), row] : [row]).join("\n");
 }
 var NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
 var LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,2}(?:[ \t\r]|$)|\+{3}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\||(?:-+|=+)[ \t]*\r?$)/m;
@@ -25065,10 +25145,10 @@ function tableKey(header, delimiter) {
   const text6 = linearLineText(header).replace(/^(?:[*+-]|\d{1,9}[.)])[ \t]+/, "");
   return text6 + "\n" + delimiter;
 }
-function tableRowsKey(lines2, from, to) {
+function tableRowsKey(lines3, from, to) {
   const rows = [];
   for (let index2 = from; index2 < to; index2++) {
-    const row = linearLineText(lines2[index2]);
+    const row = linearLineText(lines3[index2]);
     if (!row.startsWith("|")) break;
     rows.push(row);
   }
@@ -25083,14 +25163,14 @@ function acceptedBlockStarts(previous3) {
   const tableHeaders = /* @__PURE__ */ new Set();
   const html2 = /* @__PURE__ */ new Set();
   if (!/\\[<|$+]|<div\b|^[ \t>]*\|/im.test(previous3)) return { escapes, tables, tableHeaders, html: html2 };
-  const lines2 = previous3.split(LINE_END);
+  const lines3 = previous3.split(LINE_END);
   const plain = /* @__PURE__ */ new Set();
   visit2(parse3(previous3), (node2, ancestors) => {
     const first = line(node2) - 1;
     if (node2.type === "table") {
-      const key = tableKey(lines2[first], linearLineText(lines2[first + 1] ?? ""));
+      const key = tableKey(lines3[first], linearLineText(lines3[first + 1] ?? ""));
       tableHeaders.add(key);
-      tables.add(key + "\n" + tableRowsKey(lines2, first + 2, node2.position?.end.line ?? first + 2));
+      tables.add(key + "\n" + tableRowsKey(lines3, first + 2, node2.position?.end.line ?? first + 2));
       return;
     }
     if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
@@ -25100,7 +25180,7 @@ function acceptedBlockStarts(previous3) {
     if (node2.type !== "text" || ancestors.at(-1)?.type !== "paragraph") return;
     const column = (node2.position?.start.column ?? 1) - 1;
     for (let index2 = first; index2 < (node2.position?.end.line ?? 0); index2++) {
-      const row = lines2[index2];
+      const row = lines3[index2];
       const raw = linearLineText(index2 === first ? row.slice(column) : row);
       const paragraph2 = ancestors.at(-1);
       const lineStart = index2 > first || paragraph2.children[0] === node2;
@@ -25108,9 +25188,9 @@ function acceptedBlockStarts(previous3) {
       if (!ESCAPED_BLOCK_START.test(raw)) continue;
       const literal = raw.slice(1);
       if (literal.startsWith("|")) {
-        const key = tableKey(lines2[index2 - 1] ?? "", literal);
+        const key = tableKey(lines3[index2 - 1] ?? "", literal);
         escapes.add(key);
-        escapes.add(key + "\n" + tableRowsKey(lines2, index2 + 1, paragraph2.position?.end.line ?? index2 + 1));
+        escapes.add(key + "\n" + tableRowsKey(lines3, index2 + 1, paragraph2.position?.end.line ?? index2 + 1));
       } else {
         escapes.add(blockLineKey(literal, index2 === line(paragraph2) - 1));
         if (SECTION_TITLE.test(literal) && line(paragraph2) === index2 + 1 && paragraph2.position?.end.line === index2 + 1) {
@@ -25148,13 +25228,13 @@ function linearMarkersAsText(content4, previous3 = "") {
   for (let pass = 0; pass <= MARKDOWN_MAX_DEPTH; pass++) {
     const escapes = /* @__PURE__ */ new Set();
     const escapedItems = /* @__PURE__ */ new Set();
-    const lines2 = text6.split(LINE_END);
+    const lines3 = text6.split(LINE_END);
     const offsets = [0];
     for (const match of text6.matchAll(/\r\n?|\n/g)) offsets.push(match.index + match[0].length);
-    const lineEnd = (index2) => offsets[index2] + lines2[index2].length;
-    const rowAt = (index2) => linearLineText(lines2[index2] ?? "");
+    const lineEnd = (index2) => offsets[index2] + lines3[index2].length;
+    const rowAt = (index2) => linearLineText(lines3[index2] ?? "");
     const sections = /* @__PURE__ */ new Map();
-    const rowStart = (index2) => offsets[index2] + LINE_PREFIX.exec(lines2[index2])[0].length;
+    const rowStart = (index2) => offsets[index2] + LINE_PREFIX.exec(lines3[index2])[0].length;
     const tree = parse3(text6);
     const pairedDivs = divsClosedInAnotherBlock(tree, text6);
     visit2(tree, (node2, ancestors) => {
@@ -25170,8 +25250,8 @@ function linearMarkersAsText(content4, previous3 = "") {
         const delimiter = rowAt(index2 + 1);
         if (!delimiter.startsWith("|")) return;
         const canonical = /^\|(?: -- \|)+$/.test(delimiter);
-        const key = tableKey(lines2[index2], delimiter);
-        const table = key + "\n" + tableRowsKey(lines2, index2 + 2, node2.position?.end.line ?? index2 + 2);
+        const key = tableKey(lines3[index2], delimiter);
+        const table = key + "\n" + tableRowsKey(lines3, index2 + 2, node2.position?.end.line ?? index2 + 2);
         if (accepted.tables.has(table)) return;
         const knownLiteral = accepted.tableHeaders.has(key) ? accepted.escapes.has(table) : accepted.escapes.has(key);
         const literal = knownLiteral || !canonical || end(node2) === text6.length || ancestors.at(-1)?.type === "listItem" && at2 > rowStart(index2);
@@ -25218,7 +25298,7 @@ function linearMarkersAsText(content4, previous3 = "") {
             open3.push({ at: at2, literal: accepted.escapes.has("section:" + first) && accepted.escapes.has(blockLineKey("+++", true)), itemText });
             sections.set(parent, open3);
           }
-        } else if (first === "+++" && (last === index2 || closesAboveList(lines2, index2, last))) {
+        } else if (first === "+++" && (last === index2 || closesAboveList(lines3, index2, last))) {
           const open3 = sections.get(parent)?.pop();
           if (open3?.literal) {
             escapes.add(open3.at);
@@ -25403,10 +25483,11 @@ function linearDropsCodeSpaces(code4) {
   if (code4.includes("`")) return false;
   return /^ {3,}$/.test(code4) || code4.length > 2 && code4.startsWith(" ") && code4.endsWith(" ");
 }
-function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldForms2, ignoreBold }) {
+function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldForms2, ignoreBold, linearShortcodes }) {
   const nested = nestedFileBlocksOnItemLine(body2);
   const plainPlus = plainPlusEscapes(nested);
-  const marked = markFileBlockStarts(nested.replace(/\\[$+]/g, (escape2, at) => escape2 === "\\+" && plainPlus(at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]));
+  const escapes = markFileBlockStarts(nested.replace(/\\[$+]/g, (escape2, at) => escape2 === "\\+" && plainPlus(at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]));
+  const marked = linearShortcodes ? linearShortcodesAsEmoji(escapes) : escapes;
   const tree = parse3(marked, [], true);
   for (const child of tree.children) if (child.type === "code") child.value = withoutTrailingNewlines(child.value);
   const escapedPlus = LINEAR_SYNTAX_ESCAPES["\\+"];
@@ -25468,9 +25549,9 @@ function opensIndentedBracket(line2) {
   while (line2[at] === " ") at++;
   return line2[at] === "[";
 }
-function maybeNestedBlock(lines2) {
-  for (let index2 = 1; index2 + 1 < lines2.length; index2++) {
-    if (/\S/.test(lines2[index2 - 1]) && opensIndentedBracket(lines2[index2 + 1]) && bareMarker(lines2[index2]) !== null) return true;
+function maybeNestedBlock(lines3) {
+  for (let index2 = 1; index2 + 1 < lines3.length; index2++) {
+    if (/\S/.test(lines3[index2 - 1]) && opensIndentedBracket(lines3[index2 + 1]) && bareMarker(lines3[index2]) !== null) return true;
   }
   return false;
 }
@@ -25480,8 +25561,8 @@ function trimLineEnd(line2) {
   return line2.slice(0, end2);
 }
 function nestedFileBlocksOnItemLine(body2) {
-  const lines2 = body2.split("\n");
-  if (!maybeNestedBlock(lines2)) return body2;
+  const lines3 = body2.split("\n");
+  if (!maybeNestedBlock(lines3)) return body2;
   const joins = /* @__PURE__ */ new Map();
   visit2(parse3(body2), (node2) => {
     if (node2.type !== "paragraph") return;
@@ -25491,11 +25572,11 @@ function nestedFileBlocksOnItemLine(body2) {
       const linkLine = link2.position.start.line - 1;
       const markerLine = linkLine - 1;
       if (markerLine < node2.position.start.line || before.position.start.line - 1 > markerLine) continue;
-      const marker = bareMarker(lines2[markerLine]);
+      const marker = bareMarker(lines3[markerLine]);
       if (marker === null) continue;
       const { prefix, spaces, bullet } = marker;
       const column = prefix.length + spaces.length + bullet.length + 1;
-      const line2 = lines2[linkLine];
+      const line2 = lines3[linkLine];
       if (link2.position.start.column - 1 !== column || line2.slice(0, column) !== prefix + " ".repeat(column - prefix.length)) continue;
       if (link2.position.end.line - 1 !== linkLine || line2.slice(link2.position.end.column - 1).trim() !== "") continue;
       joins.set(markerLine, column);
@@ -25504,13 +25585,13 @@ function nestedFileBlocksOnItemLine(body2) {
   });
   if (joins.size === 0) return body2;
   const result = [];
-  for (let index2 = 0; index2 < lines2.length; index2++) {
+  for (let index2 = 0; index2 < lines3.length; index2++) {
     const column = joins.get(index2);
     if (column === void 0) {
-      result.push(lines2[index2]);
+      result.push(lines3[index2]);
       continue;
     }
-    result.push(`${trimLineEnd(lines2[index2])} ${lines2[index2 + 1].slice(column)}`);
+    result.push(`${trimLineEnd(lines3[index2])} ${lines3[index2 + 1].slice(column)}`);
     index2++;
   }
   return result.join("\n");
@@ -27497,10 +27578,10 @@ function sectionOpenersAsLinear(body2) {
   for (const opener of openers) containers.set(opener.parent, [...containers.get(opener.parent) ?? [], opener]);
   const edits = [...containers.values()].flatMap((group) => containerEdits(body2, group));
   const { body: written, marks } = applyTrackedEdits(body2, edits);
-  const lines2 = edits.reduce((count4, edit) => count4 + (edit.lines ?? 0), 0);
-  const plusLines = plusLineCount(body2, openers);
-  if (sectionLineCount(written) !== lines2 + plusLines) return void 0;
-  return plusLines === 0 ? written : pairSections(written, marks);
+  const lines3 = edits.reduce((count4, edit) => count4 + (edit.lines ?? 0), 0);
+  const plusLines2 = plusLineCount(body2, openers);
+  if (sectionLineCount(written) !== lines3 + plusLines2) return void 0;
+  return plusLines2 === 0 ? written : pairSections(written, marks);
 }
 function plusTextLines(body2) {
   const found = [];
@@ -27594,19 +27675,19 @@ function containerEdits(body2, openers) {
 ${blank}
 ${prefix}`;
     let written;
-    let lines2 = 1;
+    let lines3 = 1;
     if (title === "" && open3 > 0) {
       written = Array.from({ length: open3 }, () => "+++").join(between2);
-      lines2 = open3;
+      lines3 = open3;
       open3 = 0;
     } else {
       open3++;
       written = `+++ ${title}`;
     }
-    const starts = Array.from({ length: lines2 }, (_, index2) => lead.length + index2 * ("+++".length + between2.length));
+    const starts = Array.from({ length: lines3 }, (_, index2) => lead.length + index2 * ("+++".length + between2.length));
     const role = written.startsWith("+++ ") ? "open" : "close";
     edits.push({ from: line2.lineStart, to: lineEnd, text: `${lead}${written}
-${blank}`, depth: depth2, lines: lines2, marks: { at: starts, role } });
+${blank}`, depth: depth2, lines: lines3, marks: { at: starts, role } });
   }
   if (open3 > 0) {
     const parent = openers[0].parent;
@@ -27655,6 +27736,188 @@ function sectionLineCount(body2, skip = () => false) {
 function plusLineCount(body2, openers) {
   const titles = openers.map(({ node: node2 }) => [start2(node2), lineEndAt(body2, start2(node2))]);
   return sectionLineCount(body2, (at) => titles.some(([from, to]) => from <= at && at <= to));
+}
+
+// src/format/marker-lines.ts
+var PLUS_ONLY = /^[ \t]*(\\?\+)([ \t]*)$/;
+var PLUS_LINE = /\n[ \t]*\\?\+[ \t]*(?:\n|$)/;
+function plusLinesAsLinear(body2) {
+  if (!PLUS_LINE.test(body2)) return body2;
+  const edits = plusLineMatches(body2, parse3(body2), false);
+  if (edits.length === 0) return body2;
+  let out = "";
+  let at = 0;
+  for (const edit of edits) {
+    out += body2.slice(at, edit.from) + `${" ".repeat(itemTextColumn(body2, start2(edit.item)))}+\xA0${edit.trailing}`;
+    at = edit.to;
+  }
+  out += body2.slice(at);
+  return overContentLimit(out) ? body2 : out;
+}
+function plusLines(body2, tree) {
+  return plusLineMatches(body2, tree, true).map((match) => match.line);
+}
+function plusLineMatches(body2, tree, belowMarker) {
+  if (!PLUS_LINE.test(body2)) return [];
+  const found = [];
+  visit2(tree, (node2, ancestors) => {
+    if (node2.type !== "paragraph") return;
+    const item = ancestors.at(-1);
+    if (item?.type !== "listItem" || item.children[0] !== node2 || !belowMarker && line(node2) !== line(item)) return;
+    if (ancestors.some((ancestor) => ancestor.type === "blockquote")) return;
+    const firstEnd = body2.indexOf("\n", start2(node2));
+    if (firstEnd === -1 || firstEnd >= end(node2)) return;
+    const from = firstEnd + 1;
+    const newline = Math.min(...[body2.indexOf("\n", from), end(node2)].filter((at) => at !== -1));
+    const plus = PLUS_ONLY.exec(body2.slice(from, newline));
+    if (plus === null || !inText(node2, from + plus[0].indexOf(plus[1]))) return;
+    found.push({ item, from, to: newline, trailing: plus[2], line: line(node2) + 1 });
+  });
+  return found.sort((a, b) => a.from - b.from);
+}
+function itemTextColumn(body2, at) {
+  const lineStart = body2.lastIndexOf("\n", at - 1) + 1;
+  const marker = /^(?:\d{1,9}[.)]|[*+-])/.exec(body2.slice(at))[0];
+  const markerEnd = [...body2.slice(lineStart, at)].reduce(advanceColumn, 0) + marker.length;
+  const gap = /^[ \t]*/.exec(body2.slice(at + marker.length))[0];
+  const width = [...gap].reduce(advanceColumn, markerEnd) - markerEnd;
+  return markerEnd + (width >= 1 && width <= 4 ? width : 1);
+}
+function inText(paragraph2, offset) {
+  let found = false;
+  visit2(paragraph2, (node2) => {
+    if (node2.type === "text" && start2(node2) <= offset && offset < end(node2)) found = true;
+  });
+  return found;
+}
+
+// src/format/tab-indentation.ts
+var CONTAINER_LIKE = /* @__PURE__ */ new Set(["root", "list", "listItem", "blockquote", "paragraph", "heading", "table", "tableRow"]);
+var BLOCK_PARENTS = /* @__PURE__ */ new Set(["root", "list", "listItem", "blockquote", "table", "tableRow"]);
+var FENCE = /^(?:`{3}|~{3})/;
+var LIST_MARKER = /^(?:\d{1,9}[.)]|[*+-])/;
+function structuralTabLines(tree, body2) {
+  if (!body2.includes("	")) return [];
+  const lineStarts = [0];
+  for (let at = body2.indexOf("\n"); at !== -1; at = body2.indexOf("\n", at + 1)) lineStarts.push(at + 1);
+  const lineText3 = (line2) => body2.slice(lineStarts[line2], line2 + 1 < lineStarts.length ? lineStarts[line2 + 1] - 1 : body2.length);
+  const tabLines = lineStarts.map((_, line2) => line2).filter((line2) => {
+    const text6 = lineText3(line2);
+    return text6.includes("	") && !/^[ \t]*$/.test(text6);
+  });
+  if (tabLines.length === 0) return [];
+  const tabLineSet = new Set(tabLines);
+  const linesIn = (first, last) => {
+    let low = 0;
+    let high = tabLines.length;
+    while (low < high) {
+      const middle = low + high >> 1;
+      if (tabLines[middle] < first) low = middle + 1;
+      else high = middle;
+    }
+    const lines3 = [];
+    for (let index2 = low; index2 < tabLines.length && tabLines[index2] <= last; index2++) lines3.push(tabLines[index2]);
+    return lines3;
+  };
+  const columnOf2 = (line2, offset) => [...body2.slice(lineStarts[line2], offset)].reduce(advanceColumn, 0);
+  const chains = /* @__PURE__ */ new Map();
+  const blockStarts = /* @__PURE__ */ new Set();
+  const leafStarts = /* @__PURE__ */ new Map();
+  const indentedCode = /* @__PURE__ */ new Set();
+  visit2(tree, (node2, ancestors) => {
+    if (node2.position === void 0) return;
+    const first = node2.position.start.line - 1;
+    const last = node2.position.end.line - 1;
+    if (node2.type === "listItem" || node2.type === "blockquote") {
+      const lines3 = linesIn(first + 1, last);
+      if (lines3.length > 0) {
+        const prefix = node2.type === "blockquote" ? void 0 : contentColumn(node2, body2, columnOf2(first, start2(node2)));
+        for (const line2 of lines3) chains.set(line2, [...chains.get(line2) ?? [], prefix]);
+      }
+    }
+    if (node2.type === "code" && isIndented(node2, body2)) for (const line2 of linesIn(first, last)) indentedCode.add(line2);
+    if (!tabLineSet.has(first)) return;
+    const parent = ancestors.at(-1);
+    if (parent === void 0 || BLOCK_PARENTS.has(parent.type)) blockStarts.add(first);
+    if (!CONTAINER_LIKE.has(node2.type)) leafStarts.set(first, Math.min(leafStarts.get(first) ?? Infinity, start2(node2)));
+  });
+  const found = [];
+  for (const line2 of tabLines) {
+    const lineStart = lineStarts[line2];
+    const text6 = lineText3(line2);
+    const prefix = prefixEnd(text6, chains.get(line2) ?? []);
+    if (/^[ \t]*$/.test(text6.slice(prefix.at)) && !indentedCode.has(line2)) continue;
+    let structural = prefix.tab;
+    const leaf = leafStarts.get(line2);
+    if (!structural && blockStarts.has(line2) && leaf !== void 0) structural = body2.slice(lineStart + prefix.at, leaf).includes("	");
+    if (!structural && indentedCode.has(line2)) {
+      let column = prefix.column;
+      for (let at = prefix.at; at < text6.length && column < prefix.column + 4 && (text6[at] === " " || text6[at] === "	"); at++) {
+        if (text6[at] === "	") structural = true;
+        column = advanceColumn(column, text6[at]);
+      }
+    }
+    if (structural) found.push(line2 + 1);
+  }
+  return found;
+}
+function prefixEnd(text6, containers) {
+  let at = 0;
+  let column = 0;
+  let tab = false;
+  for (const content4 of containers) {
+    if (content4 === void 0) {
+      let marker = at;
+      let markerColumn = column;
+      let indentTab2 = false;
+      while ((text6[marker] === " " || text6[marker] === "	") && advanceColumn(markerColumn, text6[marker]) - column <= 3) {
+        indentTab2 ||= text6[marker] === "	";
+        markerColumn = advanceColumn(markerColumn, text6[marker]);
+        marker++;
+      }
+      if (text6[marker] !== ">") break;
+      tab ||= indentTab2;
+      at = marker + 1;
+      column = markerColumn + 1;
+      if (text6[at] === " " || text6[at] === "	") {
+        tab ||= text6[at] === "	";
+        column = advanceColumn(column, text6[at]);
+        at++;
+      }
+      continue;
+    }
+    let next = at;
+    let nextColumn = column;
+    let lazy = false;
+    let indentTab = false;
+    while (nextColumn < content4) {
+      if (text6[next] !== " " && text6[next] !== "	") {
+        lazy = true;
+        break;
+      }
+      indentTab ||= text6[next] === "	";
+      nextColumn = advanceColumn(nextColumn, text6[next]);
+      next++;
+    }
+    tab ||= indentTab;
+    if (lazy) break;
+    at = next;
+    column = nextColumn;
+  }
+  return { at, column, tab };
+}
+function contentColumn(item, body2, markerColumn) {
+  const marker = LIST_MARKER.exec(body2.slice(start2(item), start2(item) + 11))?.[0] ?? "";
+  const markerEnd = markerColumn + marker.length;
+  const lineEnd = body2.indexOf("\n", start2(item));
+  const rest = body2.slice(start2(item) + marker.length, lineEnd === -1 ? end(item) : Math.min(lineEnd, end(item)));
+  const gap = /^[ \t]*/.exec(rest)[0];
+  if (gap.length === rest.length) return markerEnd + 1;
+  const width = [...gap].reduce(advanceColumn, markerEnd) - markerEnd;
+  return markerEnd + (width >= 1 && width <= 4 ? width : 1);
+}
+function isIndented(node2, body2) {
+  return !FENCE.test(body2.slice(start2(node2), start2(node2) + 3));
 }
 
 // src/format/tab-reference.ts
@@ -27864,13 +28127,16 @@ function lintText(file, text6, options = {}) {
     return sorted();
   }
   lintTree(file, tree, content4, report, options);
+  const source = content4.replace(/^\uFEFF/, "");
+  for (const at of structuralTabLines(tree, source)) report("tab-indentation", at);
+  if (options.linearExport !== true) for (const at of plusLines(source, tree)) report("plus-line-in-item", at);
   const { unsafeLine } = tabReferences(content4);
   if (unsafeLine !== void 0) report("tab-reference-layout", unsafeLine);
   for (const at of spaceReferenceEdges(tree, content4)) report("space-reference-edge", at);
   return sorted();
 }
 function spaceReferenceEdges(tree, body2) {
-  const lines2 = [];
+  const lines3 = [];
   const blank = (node2) => node2.type === "text" && node2.position !== void 0 && /^[ \t\n]*$/.test(body2.slice(start2(node2), end(node2)));
   const edgeText = (child, side) => {
     while (child !== void 0 && (child.type === "strong" || child.type === "emphasis" || child.type === "delete")) child = side === "first" ? child.children[0] : child.children.at(-1);
@@ -27888,9 +28154,9 @@ function spaceReferenceEdges(tree, body2) {
       while (at - slashes - 1 >= 0 && body2[at - slashes - 1] === "\\") slashes++;
       return slashes % 2 === 1;
     };
-    if (side === "first" && SPACE_REFERENCE_START.test(body2.slice(from, from + 16)) && !escaped2(from)) lines2.push(line(text6));
+    if (side === "first" && SPACE_REFERENCE_START.test(body2.slice(from, from + 16)) && !escaped2(from)) lines3.push(line(text6));
     const ending = SPACE_REFERENCE_END.exec(body2.slice(Math.max(from, to - 16), to));
-    if (side === "last" && ending !== null && !escaped2(to - ending[0].length)) lines2.push(text6.position.end.line);
+    if (side === "last" && ending !== null && !escaped2(to - ending[0].length)) lines3.push(text6.position.end.line);
   };
   visit2(tree, (node2) => {
     if (node2.type !== "paragraph" && node2.type !== "heading") return;
@@ -27905,7 +28171,7 @@ function spaceReferenceEdges(tree, body2) {
       check2(kept.at(-1), "last");
     }
   });
-  return lines2;
+  return lines3;
 }
 var SPACE_REFERENCE_START = /^&#(?:0*32|[xX]0*20);/;
 var SPACE_REFERENCE_END = /&#(?:0*32|[xX]0*20);$/;
@@ -28228,51 +28494,6 @@ function endsWithParagraph(node2) {
   return node2?.type === "paragraph";
 }
 
-// src/format/marker-lines.ts
-var PLUS_ONLY = /^[ \t]*(\\?\+)([ \t]*)$/;
-var PLUS_LINE = /\n[ \t]*\\?\+[ \t]*(?:\n|$)/;
-function plusLinesAsLinear(body2) {
-  if (!PLUS_LINE.test(body2)) return body2;
-  const edits = [];
-  visit2(parse3(body2), (node2, ancestors) => {
-    if (node2.type !== "paragraph") return;
-    const item = ancestors.at(-1);
-    if (item?.type !== "listItem" || item.children[0] !== node2 || line(node2) !== line(item)) return;
-    if (ancestors.some((ancestor) => ancestor.type === "blockquote")) return;
-    const firstEnd = body2.indexOf("\n", start2(node2));
-    if (firstEnd === -1 || firstEnd >= end(node2)) return;
-    const from = firstEnd + 1;
-    const newline = Math.min(...[body2.indexOf("\n", from), end(node2)].filter((at2) => at2 !== -1));
-    const plus = PLUS_ONLY.exec(body2.slice(from, newline));
-    if (plus === null || !inText(node2, from + plus[0].indexOf(plus[1]))) return;
-    edits.push({ from, to: newline, text: `${" ".repeat(itemTextColumn(body2, start2(item)))}+\xA0${plus[2]}` });
-  });
-  if (edits.length === 0) return body2;
-  let out = "";
-  let at = 0;
-  for (const edit of edits.sort((a, b) => a.from - b.from)) {
-    out += body2.slice(at, edit.from) + edit.text;
-    at = edit.to;
-  }
-  out += body2.slice(at);
-  return overContentLimit(out) ? body2 : out;
-}
-function itemTextColumn(body2, at) {
-  const lineStart = body2.lastIndexOf("\n", at - 1) + 1;
-  const marker = /^(?:\d{1,9}[.)]|[*+-])/.exec(body2.slice(at))[0];
-  const markerEnd = [...body2.slice(lineStart, at)].reduce(advanceColumn, 0) + marker.length;
-  const gap = /^[ \t]*/.exec(body2.slice(at + marker.length))[0];
-  const width = [...gap].reduce(advanceColumn, markerEnd) - markerEnd;
-  return markerEnd + (width >= 1 && width <= 4 ? width : 1);
-}
-function inText(paragraph2, offset) {
-  let found = false;
-  visit2(paragraph2, (node2) => {
-    if (node2.type === "text" && start2(node2) <= offset && offset < end(node2)) found = true;
-  });
-  return found;
-}
-
 // src/format/fix.ts
 function fixText(text6, options = {}) {
   return linearForm(text6, options) ?? text6;
@@ -28359,8 +28580,8 @@ function lineEndings(body2) {
   return count4;
 }
 function backslashBreaksAsLinear(body2) {
-  const lines2 = /* @__PURE__ */ new Set();
-  if (!body2.includes("\\")) return { body: body2, lines: lines2 };
+  const lines3 = /* @__PURE__ */ new Set();
+  if (!body2.includes("\\")) return { body: body2, lines: lines3 };
   const tree = parse3(body2);
   const breaks = [];
   let unwritable = false;
@@ -28372,7 +28593,7 @@ function backslashBreaksAsLinear(body2) {
     if (leading || ancestors.some((a) => a.type === "heading")) unwritable = true;
     breaks.push(start2(node2));
   });
-  if (breaks.length === 0) return { body: body2, lines: lines2 };
+  if (breaks.length === 0) return { body: body2, lines: lines3 };
   if (unwritable) return void 0;
   let written = "";
   let at = 0;
@@ -28380,11 +28601,11 @@ function backslashBreaksAsLinear(body2) {
   for (const backslash of breaks.sort((a, b) => a - b)) {
     written += body2.slice(at, backslash);
     for (let newline = body2.indexOf("\n", at); newline !== -1 && newline < backslash; newline = body2.indexOf("\n", newline + 1)) line2++;
-    lines2.add(line2 + 1);
+    lines3.add(line2 + 1);
     at = backslash + 1;
   }
   written += body2.slice(at);
-  return isDeepStrictEqual3(breakShape(parse3(written)), breakShape(tree)) ? { body: written, lines: lines2 } : void 0;
+  return isDeepStrictEqual3(breakShape(parse3(written)), breakShape(tree)) ? { body: written, lines: lines3 } : void 0;
 }
 function tablesEndAsLinear(body2) {
   if (!body2.includes("|")) return body2;
@@ -29006,15 +29227,15 @@ ${indent2}[${label}](${destination2})`;
       content4 += separator + written;
     });
     this.containers.pop();
-    const lines2 = content4.split("\n").map((text6, at) => text6 === "" && !codeLines.has(at) ? "" : indent2 + text6);
+    const lines3 = content4.split("\n").map((text6, at) => text6 === "" && !codeLines.has(at) ? "" : indent2 + text6);
     if (item.checked == null && first?.type === "paragraph" && /^\+{3} [^\n]*$/.test(this.source.slice(start2(first), end(first))) && item.children.slice(1).some((child) => child.type === "paragraph" && this.source.slice(start2(child), end(child)) === "+++") && !/(?:^|\n)[ \t>]*\+{4}/.test(this.source.slice(start2(first), end(item)))) {
       return `${marker} 
 
-${lines2.join("\n")}`;
+${lines3.join("\n")}`;
     }
     if (first.type === "list" || nested) return `${marker} 
-${lines2.join("\n")}`;
-    return `${marker} ${lines2.join("\n").slice(indent2.length)}`;
+${lines3.join("\n")}`;
+    return `${marker} ${lines3.join("\n").slice(indent2.length)}`;
   }
   /**
    * An item's container. A continuation line belongs to the item's content
@@ -30113,62 +30334,8 @@ function spaceReferenceRuns(source, from, to, wide = false) {
   }
   return runs;
 }
-var DELIMITER = /^[*_~]$/;
-var UNICODE_WHITESPACE = /^\s$/u;
-var UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
-function sameFlanking(source, from, to, text6) {
-  const chars = [...text6];
-  const first = chars[0];
-  const last = chars.at(-1);
-  const kind = (c) => c === void 0 || UNICODE_WHITESPACE.test(c) ? "space" : UNICODE_PUNCTUATION.test(c) ? "punctuation" : "other";
-  const reads = (delimiter, before, after) => {
-    const b = kind(before);
-    const a = kind(after);
-    const left = a !== "space" && (a !== "punctuation" || b !== "other");
-    const right = b !== "space" && (b !== "punctuation" || a !== "other");
-    if (delimiter !== "_") return `${left} ${right}`;
-    return `${left && (!right || b === "punctuation")} ${right && (!left || a === "punctuation")}`;
-  };
-  const delimiterBefore = source[from - 1];
-  if (delimiterBefore !== void 0 && DELIMITER.test(delimiterBefore)) {
-    let start3 = from - 1;
-    while (start3 > 0 && source[start3 - 1] === delimiterBefore) start3--;
-    if (reads(delimiterBefore, codePointBefore(source, start3), source[from]) !== reads(delimiterBefore, codePointBefore(source, start3), first)) return false;
-  }
-  const delimiterAfter = source[to];
-  if (delimiterAfter !== void 0 && DELIMITER.test(delimiterAfter)) {
-    let end2 = to + 1;
-    while (end2 < source.length && source[end2] === delimiterAfter) end2++;
-    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end2)) !== reads(delimiterAfter, last, codePointAt(source, end2))) return false;
-  }
-  return true;
-}
-function codePointBefore(source, at) {
-  if (at <= 0) return void 0;
-  const low = source.charCodeAt(at - 1);
-  if (low >= 56320 && low <= 57343 && at >= 2) {
-    const high = source.charCodeAt(at - 2);
-    if (high >= 55296 && high <= 56319) return source.slice(at - 2, at);
-  }
-  return source[at - 1];
-}
-function codePointAt(source, at) {
-  const code4 = source.codePointAt(at);
-  return code4 === void 0 ? void 0 : String.fromCodePoint(code4);
-}
 var CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
 var ASTERISK_SPELLING = new RegExp(String.raw`\\.|[*]|` + CHARACTER_REFERENCE.source, "g");
-function* emojiShortcodes(raw) {
-  for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
-    const emoji = LINEAR_EMOJI.get(match[1]);
-    if (emoji) yield { index: match.index, length: match[0].length, emoji: emoji.startsWith("*") ? `\\${emoji}` : emoji };
-  }
-}
-function escaped(text6, at) {
-  let run = 0;
-  while (text6[at - 1 - run] === "\\") run++;
-  return run % 2 === 1;
-}
 function paragraphPart(text6, startsLine) {
   for (let round = 0; round <= lineBreaks(text6) + 2; round++) {
     const spans = codeSpans(text6, 0, text6.length);
@@ -30265,7 +30432,7 @@ function fixLinearText(linearText, content4, inRepository, previousBody) {
   const uploaded = (url) => !notUploadedUris.has(normalizeUri(url));
   const linear = { linkedFileExists: uploaded, linearExport: true };
   const fixed = fixText(text6, linear);
-  if (fixed !== text6 && !sameMarkdown(splitFile(fixed).body, splitFile(text6).body, { linearNumberSpacing: true, linearBoldForms: true })) return text6;
+  if (fixed !== text6 && !sameMarkdown(splitFile(fixed).body, splitFile(text6).body, { linearNumberSpacing: true, linearBoldForms: true, linearShortcodes: true })) return text6;
   if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]) && inRepository(url))) return fixed;
   const hooked = fixText(text6, { linkedFileExists: (url) => uploaded(url) || inRepository(url), linearExport: true });
   return fixText(hooked, linear) === fixed ? hooked : fixed;
@@ -30365,12 +30532,12 @@ function lineStartOf(source, at) {
 }
 function joinLines(text6) {
   if (!text6.includes("\n")) return text6;
-  const lines2 = text6.split("\n");
-  return lines2.map((line2, index2) => {
+  const lines3 = text6.split("\n");
+  return lines3.map((line2, index2) => {
     let start3 = 0;
     let end2 = line2.length;
     if (index2 > 0) while (start3 < end2 && isSpaceOrTab(line2[start3])) start3 += 1;
-    if (index2 < lines2.length - 1) while (end2 > start3 && isSpaceOrTab(line2[end2 - 1])) end2 -= 1;
+    if (index2 < lines3.length - 1) while (end2 > start3 && isSpaceOrTab(line2[end2 - 1])) end2 -= 1;
     return line2.slice(start3, end2);
   }).join(" ");
 }
@@ -30431,21 +30598,21 @@ function listTextWarnings(file, text6) {
     if (error instanceof MarkdownLimitError) return [];
     throw error;
   }
-  const lines2 = content4.split("\n");
+  const lines3 = content4.split("\n");
   const lineStarts = [];
-  for (let at = 0, offset2 = 0; at < lines2.length; offset2 += lines2[at].length + 1, at++) lineStarts.push(offset2);
+  for (let at = 0, offset2 = 0; at < lines3.length; offset2 += lines3[at].length + 1, at++) lineStarts.push(offset2);
   const reported = /* @__PURE__ */ new Set();
   visit2(tree, (node2, ancestors) => {
     const item = ancestors.at(-1);
     if (node2.type !== "paragraph" || item?.type !== "listItem" || ancestors.some((a) => a.type === "blockquote")) return;
-    const textColumn = contentColumn(content4, start2(item));
+    const textColumn = contentColumn2(content4, start2(item));
     const code4 = [];
     visit2(node2, (child) => {
       if (child.type === "inlineCode") code4.push([start2(child), end(child)]);
     });
     let listIndent = /^1\\[.)](?=[ \t]|$)/m.test(content4.slice(start2(node2), start2(node2) + 4)) ? columnOf(content4, start2(node2)) : void 0;
     for (let at = line(node2) + 1; at <= (node2.position?.end.line ?? 0); at++) {
-      const { indent: indent2, rest, width } = indentation(lines2[at - 1]);
+      const { indent: indent2, rest, width } = indentation(lines3[at - 1]);
       const number = NUMBERED.exec(rest);
       const marker = lineStarts[at - 1] + width;
       if (number === null || code4.some(([from, to]) => marker > from && marker < to)) {
@@ -30462,16 +30629,16 @@ function listTextWarnings(file, text6) {
   const offset = lineCount(head);
   return [...reported].sort((a, b) => a - b).map((at) => ({ file, line: at + offset, rule: "list-number-as-text", message: LINT_WARNINGS["list-number-as-text"] }));
 }
-function contentColumn(text6, offset) {
+function contentColumn2(text6, offset) {
   let column = columnOf(text6, offset);
-  let at = offset + (LIST_MARKER.exec(text6.slice(offset, offset + 11))?.[0].length ?? 1);
+  let at = offset + (LIST_MARKER2.exec(text6.slice(offset, offset + 11))?.[0].length ?? 1);
   for (let from = offset; from < at; from++) column = advanceColumn(column, text6[from]);
   const markerEnd = column;
   while (text6[at] === " " || text6[at] === "	") column = advanceColumn(column, text6[at++]);
   const blank = at >= text6.length || text6[at] === "\n";
   return blank || column - markerEnd > 4 ? markerEnd + 1 : column;
 }
-var LIST_MARKER = /^(?:[*+-]|\d{1,9}[.)])/;
+var LIST_MARKER2 = /^(?:[*+-]|\d{1,9}[.)])/;
 function columnOf(text6, offset) {
   let column = 0;
   for (let at = text6.lastIndexOf("\n", offset - 1) + 1; at < offset; at++) column = advanceColumn(column, text6[at]);
@@ -31045,7 +31212,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.1-rc.9" : packageJson.version;
+var VERSION2 = true ? "1.0.1-rc.10" : packageJson.version;
 function olderVersion(version, than) {
   if (version === void 0) return true;
   const a = parseVersion(version);
@@ -31882,7 +32049,7 @@ function checkSyncState(state, config, findings = {}) {
 var MARK = { passed: "passed", failed: "FAILED", warning: "warning", "not-checked": "not checked" };
 function renderSetupSummary(report) {
   const fix3 = fixUrl(report.code);
-  const lines2 = [
+  const lines3 = [
     "## Setup check",
     "",
     report.ok ? "Every required item passed." : `Stopped before any write: \`${report.code}\`.${fix3 === void 0 ? "" : ` How to fix it: ${fix3}`}`,
@@ -31895,7 +32062,7 @@ function renderSetupSummary(report) {
     }),
     ""
   ];
-  return lines2.join("\n");
+  return lines3.join("\n");
 }
 function renderStateRefusal(refusal) {
   return ["## Sync", "", `Stopped before any write: \`${refusal.code}\`.`, "", refusal.message, "", `How to fix it: ${QUICKSTART_URL}#${FIX_ANCHORS[refusal.code]}`, ""].join("\n");
@@ -32762,8 +32929,8 @@ async function securityGate(git, tracked, options = {}) {
             const escaped2 = [...files.keys()].map((path2) => path2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
             const located = new RegExp(`(?:${escaped2.join("|")}):(\\d+)(?::|\\b)`, "g");
             const matches = [...result.output.matchAll(located)];
-            const lines2 = matches.map((match) => Number(match[1])).filter((line2) => Number.isSafeInteger(line2) && line2 > 0);
-            for (const hook of failed2.length > 0 ? failed2 : [SECURITY_ALIAS]) findings.push({ hook, line: lines2[0] ?? 1 });
+            const lines3 = matches.map((match) => Number(match[1])).filter((line2) => Number.isSafeInteger(line2) && line2 > 0);
+            for (const hook of failed2.length > 0 ? failed2 : [SECURITY_ALIAS]) findings.push({ hook, line: lines3[0] ?? 1 });
           }
         }
         if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
@@ -33154,7 +33321,7 @@ async function mergeLocally(git, linear, tracked, ids, facts = LINEAR_FACTS, opt
   const frozen = new Set([...ids].flatMap(([path2, entry]) => entry.suspended === void 0 ? [] : [path2, ...entry.suspended.paths]));
   const released = [...ids].filter(([, entry]) => entry.releaseBase !== void 0);
   if (frozen.size > 0 || released.length > 0) {
-    mergeBase ??= await git.text(["merge-base", linear, tracked]);
+    mergeBase ??= await mergeBaseOf(git, linear, tracked);
     let baseTree = mergeBase;
     const releaseGroups = /* @__PURE__ */ new Map();
     for (const [path2, entry] of released) {
@@ -33295,7 +33462,7 @@ function knownIdLookup(git, idsCommit, ids) {
   };
 }
 async function mergeWithMarkers(git, linearSide, gitSide, ids, knownId, explicitBase, echo = false) {
-  const base = explicitBase ?? await git.text(["merge-base", linearSide, gitSide]);
+  const base = explicitBase ?? await mergeBaseOf(git, linearSide, gitSide);
   const merged = await git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ...explicitBase === void 0 ? [] : [`--merge-base=${explicitBase}`], linearSide, gitSide], { okCodes: [0, 1] });
   const [gitTree, ...rest] = merged.stdout.toString("utf8").split("\0");
   if (gitTree === void 0 || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message("sync.no-merge-tree"));
@@ -33499,11 +33666,18 @@ function echoedConflicts(git, linear) {
     if (previous3 === void 0 || recordGit?.oid !== base.oid) return null;
     const previousText = await textOf(previous3);
     if (detectConflicts(previousText).length > 0) return null;
-    const merged = await git.run(["merge-base", parent, second], { okCodes: [0, 1] });
-    if (merged.code !== 0) return null;
-    const older = await entryAt(merged.stdout.toString("utf8").trim(), path2);
-    const olderText = older === void 0 ? "" : await textOf(older);
-    if ((await mergeMarkdown(olderText, baseText, previousText)).text !== linearText) return null;
+    const bases = lines2((await git.run(["merge-base", "--all", parent, second], { okCodes: [0, 1] })).stdout.toString("utf8"));
+    if (bases.length === 0) return null;
+    let olderText;
+    for (const candidate of /* @__PURE__ */ new Set([await mergedBases(git, bases), bases[0]])) {
+      const older = await entryAt(candidate, path2);
+      const text6 = older === void 0 ? "" : await textOf(older);
+      if ((await mergeMarkdown(text6, baseText, previousText)).text === linearText) {
+        olderText = text6;
+        break;
+      }
+    }
+    if (olderText === void 0) return null;
     const result = (await mergeMarkdown(olderText, trackedText, previousText)).text;
     if ((await mergeMarkdown(baseText, trackedText, result)).text !== result) return null;
     return { base: olderText, linear: previousText };
@@ -33548,8 +33722,50 @@ async function takePaths(git, into, from, paths) {
   for (const path2 of paths) checkRepoPath(path2, { removal: !entries.has(path2) });
   return placeEntries(git, into, new Map([...paths].map((path2) => [path2, entries.get(path2) ?? null])));
 }
-function treeCommit(git, tree, parent) {
-  return commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [parent], message: "Merge input", identity: NEUTRAL_IDENTITY });
+async function treeCommit(git, tree, parent) {
+  return commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [parent], message: "Merge input", identity: NEUTRAL_IDENTITY, date: await newestDate(git, [parent]) });
+}
+async function mergeBaseOf(git, a, b) {
+  return mergedBases(git, lines2(await git.text(["merge-base", "--all", a, b])));
+}
+async function mergedBases(git, bases) {
+  const [first, ...rest] = [...bases].reverse();
+  let merged = first;
+  for (const next of rest) {
+    const lower = lines2((await git.run(["merge-base", "--all", merged, next], { okCodes: [0, 1] })).stdout.toString("utf8"));
+    const inner = lower.length > 0 ? await mergedBases(git, lower) : await commitTree(git, { base: null, changes: /* @__PURE__ */ new Map(), parents: [], message: "Empty merge base", identity: NEUTRAL_IDENTITY, date: await newestDate(git, [merged, next]) });
+    const result = await git.run(["merge-tree", "--write-tree", "--no-messages", "-z", `--merge-base=${inner}`, merged, next], { okCodes: [0, 1] });
+    const [written, ...unmerged] = result.stdout.toString("utf8").split("\0");
+    if (written === void 0 || !/^[0-9a-f]{40,64}$/.test(written)) throw new Error(message("sync.no-merge-tree"));
+    const tree = result.code === 0 ? written : await keepOlderVersions(git, written, unmerged);
+    merged = await commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [merged, next], message: "Merged merge bases", identity: NEUTRAL_IDENTITY, skipIfUnchanged: false, date: await newestDate(git, [merged, next]) });
+  }
+  return merged;
+}
+async function keepOlderVersions(git, tree, stages) {
+  const byPath = /* @__PURE__ */ new Map();
+  for (const line2 of stages) {
+    const match = /^(\d+) ([0-9a-f]{40,64}) ([123])\t(.+)$/s.exec(line2);
+    if (match === null) continue;
+    const [, mode, oid, stage, path2] = match;
+    byPath.set(path2, (byPath.get(path2) ?? /* @__PURE__ */ new Map()).set(stage, { mode, oid }));
+  }
+  const older = [...byPath].filter(([, entries]) => entries.has("1") && (entries.has("2") || entries.has("3")));
+  if (older.length === 0) return tree;
+  const current = new Map((await listPaths(git, tree, older.map(([path2]) => path2))).map((entry) => [entry.path, entry.oid]));
+  const back = /* @__PURE__ */ new Map();
+  for (const [path2, entries] of older) {
+    const now = current.get(path2);
+    if (now === void 0 || now === entries.get("2")?.oid || now === entries.get("3")?.oid) back.set(path2, entries.get("1"));
+  }
+  return back.size === 0 ? tree : placeEntries(git, tree, back);
+}
+async function newestDate(git, commits) {
+  const seconds = lines2(await git.text(["show", "--no-patch", "--no-show-signature", "--format=%ct", ...commits])).map(Number);
+  return `@${Math.max(...seconds)} +0000`;
+}
+function lines2(text6) {
+  return text6.split("\n").filter(Boolean);
 }
 function isReadme(path2) {
   return path2 === "README.md" || path2.endsWith("/README.md");
@@ -35552,21 +35768,21 @@ function annotationLine(annotation, runs) {
 }
 function holdComment(checks, timedOut, annotations, text6) {
   let runs;
-  const lines2 = [];
+  const lines3 = [];
   for (const check2 of checks) {
     const name = `Check \`${checkName(check2.name)}\``;
-    lines2.push(check2.url === void 0 ? `- ${name}.` : `- ${name}: [run](${linkTarget(check2.url)})`);
+    lines3.push(check2.url === void 0 ? `- ${name}.` : `- ${name}: [run](${linkTarget(check2.url)})`);
     const own6 = annotations.get(check2.name) ?? [];
     if (own6.length > 0) runs ??= documentRuns(text6);
-    for (const annotation of own6.slice(0, ANNOTATIONS_PER_CHECK)) lines2.push(`  - ${annotationLine(annotation, runs)}`);
-    if (own6.length > ANNOTATIONS_PER_CHECK) lines2.push(`  - and ${own6.length - ANNOTATIONS_PER_CHECK} more.`);
+    for (const annotation of own6.slice(0, ANNOTATIONS_PER_CHECK)) lines3.push(`  - ${annotationLine(annotation, runs)}`);
+    if (own6.length > ANNOTATIONS_PER_CHECK) lines3.push(`  - and ${own6.length - ANNOTATIONS_PER_CHECK} more.`);
   }
-  for (const name of timedOut) lines2.push(`- Check \`${checkName(name)}\` did not finish in time.`);
-  if (lines2.length === 0) lines2.push(`- ${HOLD_UNNAMED}`);
+  for (const name of timedOut) lines3.push(`- Check \`${checkName(name)}\` did not finish in time.`);
+  if (lines3.length === 0) lines3.push(`- ${HOLD_UNNAMED}`);
   const lead = checks.length === 0 && timedOut.length > 0 ? HOLD_TIMED_OUT : HOLD_FAILED;
   return `${lead}
 
-${lines2.join("\n")}
+${lines3.join("\n")}
 
 ${HOLD_FOOTER}`;
 }
@@ -36376,30 +36592,30 @@ function commitMerge(git, tree, parents, message2, identity) {
   });
 }
 function pullRequestBody(paths, refusal, notes) {
-  const lines2 = [
+  const lines3 = [
     "Changes made in Linear, on their way to this branch.",
     "",
     "The sync merges this pull request with a merge commit once every check on its head has finished and passed, and adds later Linear changes while checks run. A head with passing checks gets a merge attempt before fresh captures join the next batch.",
     "",
     `Files changed: ${paths.length}.`
   ];
-  if (paths.length > 0) lines2.push("", ...paths.slice(0, LISTED_PATHS).map((path2) => `- ${oneLine(path2)}`));
-  else if (notes.recordMove === true) lines2.push("", "It records that the sync took in a folder moved to another Linear place, so later syncs read only the new place.");
-  if (paths.length > LISTED_PATHS) lines2.push(`- and ${paths.length - LISTED_PATHS} more`);
-  if (notes.rewriteNotes?.length) lines2.push("", "Images converted to links or removed:", ...notes.rewriteNotes);
+  if (paths.length > 0) lines3.push("", ...paths.slice(0, LISTED_PATHS).map((path2) => `- ${oneLine(path2)}`));
+  else if (notes.recordMove === true) lines3.push("", "It records that the sync took in a folder moved to another Linear place, so later syncs read only the new place.");
+  if (paths.length > LISTED_PATHS) lines3.push(`- and ${paths.length - LISTED_PATHS} more`);
+  if (notes.rewriteNotes?.length) lines3.push("", "Images converted to links or removed:", ...notes.rewriteNotes);
   if (refusal !== null) {
-    lines2.push(
+    lines3.push(
       "",
       `GitHub refused to merge head \`${refusal.head.slice(0, 12)}\` (${refusalText(refusal)}). If it refuses this head again for the same reason, the sync reports a setup error.`,
       `<!-- merge refused: head=${refusal.head} base=${refusal.base} status=${refusal.status} reason=${encodeURIComponent(refusal.reason)} -->`
     );
   }
-  if (notes.unverified !== void 0 && notes.unverified.length > 0) lines2.push("", unverifiedNote(notes.unverified));
+  if (notes.unverified !== void 0 && notes.unverified.length > 0) lines3.push("", unverifiedNote(notes.unverified));
   if (notes.held !== null) {
-    lines2.push("", `Waiting: ${codeNames(notes.held.checks)} also failed on the tracked branch's tip, so this change is not to blame. The sync merges the tracked branch in once it passes there.`, redMainNote(notes.held));
+    lines3.push("", `Waiting: ${codeNames(notes.held.checks)} also failed on the tracked branch's tip, so this change is not to blame. The sync merges the tracked branch in once it passes there.`, redMainNote(notes.held));
   }
-  lines2.push("", headNote(notes.head, notes.since, notes.checks));
-  return `${lines2.join("\n")}
+  lines3.push("", headNote(notes.head, notes.since, notes.checks));
+  return `${lines3.join("\n")}
 `;
 }
 var REFUSAL_NOTE = /^<!-- merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m;
@@ -36435,43 +36651,43 @@ function holdFailureText(code4, failure) {
   return `${span(code4)}, ${span(failure.operation)}${where}, ${span(failure.error)}${said}`;
 }
 function renderPullRequest(result) {
-  const lines2 = ["### Linear to the tracked branch", ""];
+  const lines3 = ["### Linear to the tracked branch", ""];
   if (result.suspended !== void 0) {
     const hold3 = result.suspended;
     const link3 = hold3.pullRequest === void 0 ? "" : ` [#${hold3.pullRequest.number}](${hold3.pullRequest.url})`;
-    lines2.push(hold3.released ? "Released the suspended batch." : `Suspended changes${link3}: ${hold3.paths.map((path2) => `\`${path2}\``).join(", ")}.`, "");
-    if (hold3.code === "head-unverified") lines2.push(`The suspended pull request also changes files that are not synchronized documents or their assets: ${unverifiedList(hold3.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from its branch.`, "");
-    if (hold3.code === "merge-refused" || hold3.code === "merge-blocked") lines2.push(`GitHub refused the suspended merge (${refusalText(hold3)}).`, "");
-    if (hold3.code === "merge-misplaced") lines2.push(`Setup error: ${misplacedSummary("the suspended pull request", link3, hold3.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, "");
-    if (hold3.code === "checks-missing") lines2.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold3.missing ?? [])}).`, CHECKS_MISSING_ADVICE, "");
-    if (hold3.code === "suspended-asset-discovery") lines2.push(`The batch stays suspended (${hold3.code}). ${hold3.reason ?? ""}`, "");
-    if (hold3.normalClosePending === true) lines2.push("The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.", "");
-    if (hold3.code === "github-failed" && hold3.normalClosePending !== true) lines2.push("A GitHub request for the suspended lane failed; the normal lane still runs.", "");
-    if (hold3.conflicts !== void 0) lines2.push(`Suspended files waiting for a manual merge: ${hold3.conflicts.map((path2) => `\`${path2}\``).join(", ")}.`, "");
-    if (hold3.checks.length > 0) lines2.push(`Failed checks: ${codeNames(hold3.checks)}.`, "");
-    if (hold3.timedOut !== void 0 && hold3.timedOut.length > 0) lines2.push(`Checks that did not finish in time: ${codeNames(hold3.timedOut)}.`, "");
-    if (hold3.redMain !== void 0) lines2.push(`The suspended documents' comments in Linear stay as they are: ${checkRuns(hold3.redMain)} also failed on the tracked branch's tip.`, "");
-    if (hold3.mainPending !== void 0) lines2.push(`The suspended documents' comments in Linear wait: ${codeNames(hold3.mainPending)} failed on the suspended pull request and still runs on the tracked branch's tip.`, "");
+    lines3.push(hold3.released ? "Released the suspended batch." : `Suspended changes${link3}: ${hold3.paths.map((path2) => `\`${path2}\``).join(", ")}.`, "");
+    if (hold3.code === "head-unverified") lines3.push(`The suspended pull request also changes files that are not synchronized documents or their assets: ${unverifiedList(hold3.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from its branch.`, "");
+    if (hold3.code === "merge-refused" || hold3.code === "merge-blocked") lines3.push(`GitHub refused the suspended merge (${refusalText(hold3)}).`, "");
+    if (hold3.code === "merge-misplaced") lines3.push(`Setup error: ${misplacedSummary("the suspended pull request", link3, hold3.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, "");
+    if (hold3.code === "checks-missing") lines3.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold3.missing ?? [])}).`, CHECKS_MISSING_ADVICE, "");
+    if (hold3.code === "suspended-asset-discovery") lines3.push(`The batch stays suspended (${hold3.code}). ${hold3.reason ?? ""}`, "");
+    if (hold3.normalClosePending === true) lines3.push("The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.", "");
+    if (hold3.code === "github-failed" && hold3.normalClosePending !== true) lines3.push("A GitHub request for the suspended lane failed; the normal lane still runs.", "");
+    if (hold3.conflicts !== void 0) lines3.push(`Suspended files waiting for a manual merge: ${hold3.conflicts.map((path2) => `\`${path2}\``).join(", ")}.`, "");
+    if (hold3.checks.length > 0) lines3.push(`Failed checks: ${codeNames(hold3.checks)}.`, "");
+    if (hold3.timedOut !== void 0 && hold3.timedOut.length > 0) lines3.push(`Checks that did not finish in time: ${codeNames(hold3.timedOut)}.`, "");
+    if (hold3.redMain !== void 0) lines3.push(`The suspended documents' comments in Linear stay as they are: ${checkRuns(hold3.redMain)} also failed on the tracked branch's tip.`, "");
+    if (hold3.mainPending !== void 0) lines3.push(`The suspended documents' comments in Linear wait: ${codeNames(hold3.mainPending)} failed on the suspended pull request and still runs on the tracked branch's tip.`, "");
   }
   const marks = result.holdMarks;
   if (marks !== void 0) {
     const counts2 = [[marks.set.length, "marked"], [marks.updated.length, "comments updated"], [marks.cleared.length, "cleared"]].filter(([count4]) => count4 > 0).map(([count4, what]) => `${count4} ${what}`);
-    if (counts2.length > 0) lines2.push(`Suspended documents in Linear: ${counts2.join(", ")}.`, "");
-    if (marks.deferred > 0) lines2.push(`${marks.deferred} more suspended documents get their mark or comment in a later run (at most ${HOLD_MARK_LIMIT} per run).`, "");
-    if (marks.removed.length > 0) lines2.push(`Suspended documents in Linear's trash, archived or outside the configured places, without a mark: ${marks.removed.map((path2) => `\`${path2}\``).join(", ")}.`, "");
-    if (marks.unresolved !== void 0) lines2.push(`Linear refused to resolve the suspension comment of released documents: ${marks.unresolved.map(({ path: path2, error }) => `\`${path2}\` (${error})`).join(", ")}. The comment stays as it is, and no later run tries again.`, "");
-    if (marks.unreadAnnotations !== void 0) lines2.push(`GitHub did not give the annotations of ${marks.unreadAnnotations.map((name) => `\`${name}\``).join(", ")}; the comments name those checks without them.`, "");
-    if (marks.code !== void 0) lines2.push(`The suspended marks did not finish (${holdFailureText(marks.code, marks.failure)}); a later run goes on.`, "");
+    if (counts2.length > 0) lines3.push(`Suspended documents in Linear: ${counts2.join(", ")}.`, "");
+    if (marks.deferred > 0) lines3.push(`${marks.deferred} more suspended documents get their mark or comment in a later run (at most ${HOLD_MARK_LIMIT} per run).`, "");
+    if (marks.removed.length > 0) lines3.push(`Suspended documents in Linear's trash, archived or outside the configured places, without a mark: ${marks.removed.map((path2) => `\`${path2}\``).join(", ")}.`, "");
+    if (marks.unresolved !== void 0) lines3.push(`Linear refused to resolve the suspension comment of released documents: ${marks.unresolved.map(({ path: path2, error }) => `\`${path2}\` (${error})`).join(", ")}. The comment stays as it is, and no later run tries again.`, "");
+    if (marks.unreadAnnotations !== void 0) lines3.push(`GitHub did not give the annotations of ${marks.unreadAnnotations.map((name) => `\`${name}\``).join(", ")}; the comments name those checks without them.`, "");
+    if (marks.code !== void 0) lines3.push(`The suspended marks did not finish (${holdFailureText(marks.code, marks.failure)}); a later run goes on.`, "");
   }
   const pr = result.pullRequest;
   const link2 = pr === null ? "" : `[#${pr.number}](${pr.url})`;
   const names = (list4) => codeNames(list4 ?? []);
   if (result.redMain !== void 0) {
-    lines2.push(`The sync pull request ${link2} is held: ${checkRuns(result.redMain)} also failed on the tracked branch's tip, so the change is not to blame. Nothing is suspended and nothing is written to Linear about it; once the check passes on the tracked branch, the sync merges it into the sync branch and the checks run again.`);
+    lines3.push(`The sync pull request ${link2} is held: ${checkRuns(result.redMain)} also failed on the tracked branch's tip, so the change is not to blame. Nothing is suspended and nothing is written to Linear about it; once the check passes on the tracked branch, the sync merges it into the sync branch and the checks run again.`);
   } else if (result.mainPending !== void 0) {
-    lines2.push(`${codeNames(result.mainPending)} failed on the sync pull request ${link2} and still runs on the tracked branch's tip; the sync waits for that result before it suspends anything.`);
+    lines3.push(`${codeNames(result.mainPending)} failed on the sync pull request ${link2} and still runs on the tracked branch's tip; the sync waits for that result before it suspends anything.`);
   } else if (result.waitsForSuspended === true) {
-    lines2.push(`Every check on the sync pull request ${link2} passed; it merges after the suspended pull request, whose checks still run.`);
+    lines3.push(`Every check on the sync pull request ${link2} passed; it merges after the suspended pull request, whose checks still run.`);
   }
   const explained = result.redMain !== void 0 || result.mainPending !== void 0 || result.waitsForSuspended === true || result.suspended?.normalClosePending === true;
   const code4 = result.code === "head-unverified" && result.unverified === void 0 ? void 0 : result.code;
@@ -36480,66 +36696,66 @@ function renderPullRequest(result) {
       break;
     // The suspended section describes the hold.
     case "conflict":
-      lines2.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
+      lines3.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
       break;
     case "merge-refused":
-      lines2.push(`GitHub did not merge the sync pull request ${link2} (${refusalText(result)}); a later run tries again.`);
+      lines3.push(`GitHub did not merge the sync pull request ${link2} (${refusalText(result)}); a later run tries again.`);
       break;
     case "merge-misplaced":
-      lines2.push(`Setup error: ${misplacedSummary("the sync pull request", ` ${link2}`, result.misplaced)}`, MISPLACED_ADVICE);
+      lines3.push(`Setup error: ${misplacedSummary("the sync pull request", ` ${link2}`, result.misplaced)}`, MISPLACED_ADVICE);
       break;
     case "merge-blocked":
-      lines2.push(
+      lines3.push(
         `Setup error: GitHub refused again to merge the sync pull request ${link2}, on the same head and for the same reason as an earlier run (${refusalText(result)}).`,
         "Nothing changes until a person does: when GitHub names a required check that is expected, make that check run on the sync pull request (check workflow filters and the required check's name); otherwise let the sync's GitHub App merge into the tracked branch (for example, adjust the branch's rules). A later run merges."
       );
       break;
     case "checks-missing":
-      lines2.push(
+      lines3.push(
         `Setup error: the sync pull request ${link2} has waited past the check deadline for checks that never started on its head (${missingText(result.checks?.missing ?? [])}).`,
         CHECKS_MISSING_ADVICE
       );
       break;
     case "initial-pull-request-pending":
-      lines2.push("The sync branch holds an initial sync from Linear that a person has not merged yet. The sync adds nothing to it and writes nothing to Linear until it is merged.");
+      lines3.push("The sync branch holds an initial sync from Linear that a person has not merged yet. The sync adds nothing to it and writes nothing to Linear until it is merged.");
       break;
     case "head-unverified":
-      lines2.push(`The sync pull request ${link2} also changes files that are not synchronized documents or their assets: ${unverifiedList(result.unverified ?? [])}. The sync does not push or merge those changes; a person reviews and merges it, or removes those changes from the sync branch.`);
+      lines3.push(`The sync pull request ${link2} also changes files that are not synchronized documents or their assets: ${unverifiedList(result.unverified ?? [])}. The sync does not push or merge those changes; a person reviews and merges it, or removes those changes from the sync branch.`);
       break;
     case "state-moved":
-      lines2.push("The sync branch moved while this run worked, or the sync pull request no longer targeted the tracked branch at the commit the sync checked right before its merge; the next run updates the sync pull request.");
+      lines3.push("The sync branch moved while this run worked, or the sync pull request no longer targeted the tracked branch at the commit the sync checked right before its merge; the next run updates the sync pull request.");
       break;
     case "github-failed":
-      lines2.push(
+      lines3.push(
         result.status === void 0 ? "A request to GitHub for the sync pull request got no answer (the connection broke or timed out); the next run tries again." : transientGitHubFailure(result) ? `GitHub ${result.rateLimited === true ? "limited the rate of" : "failed"} a request for the sync pull request (HTTP ${result.status}); the next run tries again.` : `Setup error: GitHub refused a request for the sync pull request (HTTP ${result.status}). The next run sends the same request: a person checks what GitHub refuses, for example a repository rule or the App's access.`
       );
       break;
     case "push-rejected":
-      lines2.push(`Setup error: GitHub refused the push to the sync branch (\`${(result.reason ?? "").replace(/[`\r\n]/g, " ")}\`). Nothing reaches the sync pull request until a person lets the sync's GitHub App push to that branch, for example on the bypass list of the rule that refuses it.`);
+      lines3.push(`Setup error: GitHub refused the push to the sync branch (\`${(result.reason ?? "").replace(/[`\r\n]/g, " ")}\`). Nothing reaches the sync pull request until a person lets the sync's GitHub App push to that branch, for example on the bypass list of the rule that refuses it.`);
       break;
     default:
       if (explained) break;
-      if (result.merged !== null) lines2.push("Merged the sync pull request with a merge commit: every check on its head passed.");
-      else if (pr === null) lines2.push("The tracked branch already holds every change from Linear: no pull request is needed.");
-      else if (pr.opened) lines2.push(`Opened the sync pull request ${link2}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : "A later run merges it when every check on its head has passed."}`);
-      else if (result.branchMoved) lines2.push(`Added new Linear changes to the sync pull request ${link2}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : "A later run merges it when every check on its head has passed."}`);
-      else lines2.push(`The sync pull request ${link2} waits for ${names(result.checks?.pending) || "its checks"}; a later run merges it.`);
+      if (result.merged !== null) lines3.push("Merged the sync pull request with a merge commit: every check on its head passed.");
+      else if (pr === null) lines3.push("The tracked branch already holds every change from Linear: no pull request is needed.");
+      else if (pr.opened) lines3.push(`Opened the sync pull request ${link2}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : "A later run merges it when every check on its head has passed."}`);
+      else if (result.branchMoved) lines3.push(`Added new Linear changes to the sync pull request ${link2}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : "A later run merges it when every check on its head has passed."}`);
+      else lines3.push(`The sync pull request ${link2} waits for ${names(result.checks?.pending) || "its checks"}; a later run merges it.`);
   }
-  if (result.paths.length > 0) lines2.push("", `Files it changes on the tracked branch: ${result.paths.length}.`);
+  if (result.paths.length > 0) lines3.push("", `Files it changes on the tracked branch: ${result.paths.length}.`);
   if (result.marked.length > 0) {
-    lines2.push(
+    lines3.push(
       "",
       `Pending edits on the sync branch and later edits change the same lines in ${result.marked.length === 1 ? "1 document" : `${result.marked.length} documents`}: ${names(result.marked)}. Both versions are kept between conflict markers; edit the text on either side to resolve it.`
     );
   }
   if (result.decided.length > 0) {
-    lines2.push(
+    lines3.push(
       "",
       `Pending deletes or renames on the sync branch met later edits or renames in ${result.decided.length === 1 ? "1 document" : `${result.decided.length} documents`}: ${names(result.decided)}. The sync decided them by its structural conflict rules, as for any other conflict: an edited document is kept.`
     );
   }
-  lines2.push("");
-  return lines2;
+  lines3.push("");
+  return lines3;
 }
 function checkRuns(checks) {
   return checks.map((check2) => `${codeNames([check2.name])}${check2.url === void 0 ? "" : ` ([run](${linkTarget(check2.url)}))`}`).join(", ");
@@ -36679,8 +36895,8 @@ function keptAnnotationsTrailers(kept) {
 async function readKeptAnnotations(git, ids) {
   if (ids === null) return /* @__PURE__ */ new Set();
   const log = await git.text(["log", "--format=%B", "--fixed-strings", `--grep=${FINAL_IDS_MESSAGE}`, `--grep=${KEPT_ANNOTATIONS_RECORDED}`, "-1", ids]);
-  const lines2 = log.split("\n");
-  if (lines2[0] !== FINAL_IDS_MESSAGE && !lines2.includes(KEPT_ANNOTATIONS_RECORDED)) return /* @__PURE__ */ new Set();
+  const lines3 = log.split("\n");
+  if (lines3[0] !== FINAL_IDS_MESSAGE && !lines3.includes(KEPT_ANNOTATIONS_RECORDED)) return /* @__PURE__ */ new Set();
   return new Set([...log.matchAll(KEPT_ANNOTATION)].map((match) => JSON.parse(match[1])));
 }
 var RECORD_MESSAGE = "Initial sync: Linear's state";
@@ -38070,7 +38286,7 @@ function pullRequestBody2(plan, result) {
   const out = new Set(result.leftOutAtRecord.map((entry) => entry.path));
   const overwritten = plan.overwrite.filter((entry) => !out.has(entry.path)).length;
   const created = plan.create.filter((entry) => !out.has(entry.path)).length;
-  const lines2 = [
+  const lines3 = [
     "This pull request makes the synchronized folders equal to Linear, as an initial sync from Linear asked.",
     "",
     `- ${count(overwritten, "file")} take Linear's text (front matter kept);`,
@@ -38080,11 +38296,11 @@ function pullRequestBody2(plan, result) {
     "Review it and merge it with a merge commit. The sync does not merge it, because it removes files, and it does not run until this pull request is merged. Removed files stay in the history."
   ];
   if (plan.remove.length > 0) {
-    lines2.push("", "### Removed files", "");
-    for (const path2 of plan.remove.slice(0, 100)) lines2.push(`- \`${path2.replace(/`/g, "'")}\``);
-    if (plan.remove.length > 100) lines2.push(`- and ${plan.remove.length - 100} more`);
+    lines3.push("", "### Removed files", "");
+    for (const path2 of plan.remove.slice(0, 100)) lines3.push(`- \`${path2.replace(/`/g, "'")}\``);
+    if (plan.remove.length > 100) lines3.push(`- and ${plan.remove.length - 100} more`);
   }
-  return `${lines2.join("\n")}
+  return `${lines3.join("\n")}
 `;
 }
 function entryOf(entry) {
@@ -38118,7 +38334,7 @@ function toPlanReport(plan, direction, confirm) {
   };
 }
 function renderDryRun(plan) {
-  const lines2 = [
+  const lines3 = [
     "## Initial sync from git to Linear: dry run",
     "",
     "Nothing was written. Run again with `confirm` set to `true` to make Linear equal to the tracked branch:",
@@ -38129,15 +38345,15 @@ function renderDryRun(plan) {
     `- leave out ${count2(plan.leftOut.length, "file")}, which stay in git only until they are fixed.`,
     ""
   ];
-  pushTable(lines2, "Create", ["Path", "In Linear"], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]), true);
-  pushTable(lines2, "Overwrite", ["Path", "In Linear", "Document"], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Move to trash", ["Path", "In Linear", "Document"], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
-  return lines2.join("\n") + renderCapacity(plan.capacity ?? []);
+  pushTable(lines3, "Create", ["Path", "In Linear"], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]), true);
+  pushTable(lines3, "Overwrite", ["Path", "In Linear", "Document"], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines3, "Move to trash", ["Path", "In Linear", "Document"], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines3, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
+  return lines3.join("\n") + renderCapacity(plan.capacity ?? []);
 }
 function renderConfirmed(plan, result) {
   const outcome2 = result.complete ? "Linear now equals the tracked branch, and the sync state is recorded." : result.code === "container-cap" ? "Nothing was written. Reduce planned additions or increase document-cap after checking the container limit." : result.code === "state-moved" ? "A state ref moved while this run was writing, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done." : "The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already written are skipped.";
-  const lines2 = [
+  const lines3 = [
     "## Initial sync from git to Linear",
     "",
     outcome2,
@@ -38152,24 +38368,24 @@ function renderConfirmed(plan, result) {
   ];
   if (result.stopped !== void 0) {
     const why = result.stopped.kind === "test-threshold" ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
-    lines2.push(`Stopped: ${why}. Not written yet: ${count2(result.notAttempted.length, "item")}.`, "");
+    lines3.push(`Stopped: ${why}. Not written yet: ${count2(result.notAttempted.length, "item")}.`, "");
   }
-  pushTable(lines2, "Failed", ["Path", "Operation", "Error"], result.failed.map((entry) => [entry.path, entry.operation, entry.error]), false);
-  pushTable(lines2, "Moved to trash", ["Path"], result.trashed.map((path2) => [path2]), false);
+  pushTable(lines3, "Failed", ["Path", "Operation", "Error"], result.failed.map((entry) => [entry.path, entry.operation, entry.error]), false);
+  pushTable(lines3, "Moved to trash", ["Path"], result.trashed.map((path2) => [path2]), false);
   pushTable(
-    lines2,
+    lines3,
     "Left out",
     ["Path", "Rules", "Lines", "Collides with, or the files"],
     [...leftOutRows(plan.leftOut), ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, "", (entry.files ?? []).join(", ")])],
     false
   );
   if (result.record !== null && result.record.reformatted.length > 0) {
-    lines2.push(
+    lines3.push(
       `Linear stores ${count2(result.record.reformatted.length, "file")} in a different form than the tracked branch; the next sync proposes that form in its pull request.`,
       ""
     );
   }
-  return lines2.join("\n") + renderCapacity(plan.capacity ?? []);
+  return lines3.join("\n") + renderCapacity(plan.capacity ?? []);
 }
 function toReversePlanReport(plan, confirm) {
   const paths = (entries) => entries.map((entry) => entry.path);
@@ -38191,7 +38407,7 @@ function toReversePlanReport(plan, confirm) {
   };
 }
 function renderReverseDryRun(plan) {
-  const lines2 = [
+  const lines3 = [
     "## Initial sync from Linear to the tracked branch: dry run",
     "",
     "Nothing was written. Run again with `confirm` set to `true` to open one pull request that makes the synchronized folders equal to Linear. A person merges it; the sync never does, because it removes files:",
@@ -38203,16 +38419,16 @@ function renderReverseDryRun(plan) {
     `- leave out ${count2(plan.leftOut.length, "file or document", "files or documents")}.`,
     ""
   ];
-  pushTable(lines2, "Overwrite", ["Path", "Document"], plan.overwrite.map((entry) => [entry.path, entry.documentId]), true);
-  pushTable(lines2, "Create", ["Path", "From Linear", "Document"], plan.create.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Remove", ["Path"], plan.remove.map((path2) => [path2]), true);
-  pushTable(lines2, "Kept", ["Path", "Why"], plan.kept.map((entry) => [entry.path, "holds the annotation of its folder"]), false);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
-  return lines2.join("\n");
+  pushTable(lines3, "Overwrite", ["Path", "Document"], plan.overwrite.map((entry) => [entry.path, entry.documentId]), true);
+  pushTable(lines3, "Create", ["Path", "From Linear", "Document"], plan.create.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines3, "Remove", ["Path"], plan.remove.map((path2) => [path2]), true);
+  pushTable(lines3, "Kept", ["Path", "Why"], plan.kept.map((entry) => [entry.path, "holds the annotation of its folder"]), false);
+  pushTable(lines3, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
+  return lines3.join("\n");
 }
 function renderReverseConfirmed(plan, result) {
   const outcome2 = result.complete ? result.pullRequest === null ? `The tracked branch already equals Linear: no pull request is needed. The sync state is recorded.${result.closedPullRequest === void 0 ? "" : ` Pull request #${result.closedPullRequest} of an earlier run had nothing left to carry and is closed.`}` : `The sync state is recorded and pull request #${result.pullRequest.number} ${result.pullRequest.opened ? "is open" : "was already open"}. A person reviews and merges it; the sync does not run until it is merged.` : result.code === "state-moved" ? "A state ref moved while this run was working, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done." : result.code === "pull-request-failed" ? `The sync state is recorded, but the pull request could not be opened (${result.pullRequestStatus === void 0 ? "GitHub could not be reached" : `GitHub answered HTTP ${result.pullRequestStatus}`}). Run initial sync again with the same inputs to open it.` : result.code === "sync-branch-changed" ? "The sync branch holds commits this sync did not make, so nothing was recorded. Merge or close its pull request and delete the branch, then run initial sync again." : "The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already taken are skipped.";
-  const lines2 = [
+  const lines3 = [
     "## Initial sync from Linear to the tracked branch",
     "",
     outcome2,
@@ -38225,11 +38441,11 @@ function renderReverseConfirmed(plan, result) {
   ];
   if (result.stopped !== void 0) {
     const why = result.stopped.kind === "test-threshold" ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
-    lines2.push(`Stopped: ${why}. Not taken yet: ${count2(result.notAttempted.length, "document")}.`, "");
+    lines3.push(`Stopped: ${why}. Not taken yet: ${count2(result.notAttempted.length, "document")}.`, "");
   }
-  pushTable(lines2, "Remove", ["Path"], plan.remove.map((path2) => [path2]), false);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtRecord.map((entry) => [entry.path, entry.rule, "", ""])], false);
-  return lines2.join("\n");
+  pushTable(lines3, "Remove", ["Path"], plan.remove.map((path2) => [path2]), false);
+  pushTable(lines3, "Left out", LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtRecord.map((entry) => [entry.path, entry.rule, "", ""])], false);
+  return lines3.join("\n");
 }
 var LEFT_OUT_HEAD = ["Path", "Rules", "Lines", "Collides with, or the files"];
 function leftOutRows(entries) {
@@ -38239,16 +38455,16 @@ function leftOutRows(entries) {
     return [entry.path, entry.rules.join(", "), entry.lines.join(", "), others];
   });
 }
-function pushTable(lines2, title, head, rows, always) {
+function pushTable(lines3, title, head, rows, always) {
   if (rows.length === 0 && !always) return;
-  lines2.push(`### ${title} (${rows.length})`, "");
+  lines3.push(`### ${title} (${rows.length})`, "");
   if (rows.length === 0) {
-    lines2.push("None.", "");
+    lines3.push("None.", "");
     return;
   }
-  lines2.push(`| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
-  for (const row of rows) lines2.push(`| ${row.map(cell).join(" | ")} |`);
-  lines2.push("");
+  lines3.push(`| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
+  for (const row of rows) lines3.push(`| ${row.map(cell).join(" | ")} |`);
+  lines3.push("");
 }
 function count2(n, noun, plural = `${noun}s`) {
   return `${n} ${n === 1 ? noun : plural}`;
@@ -38332,8 +38548,8 @@ function readInputs(get, env = process.env, options = {}) {
   return inputs;
 }
 function checkList(list4) {
-  const lines2 = [...new Set(list4.split(/\r?\n/).map((line2) => line2.trim()).filter(Boolean))];
-  return lines2.map((line2) => {
+  const lines3 = [...new Set(list4.split(/\r?\n/).map((line2) => line2.trim()).filter(Boolean))];
+  return lines3.map((line2) => {
     const check2 = requiredCheck(line2);
     if (check2 === void 0) throw new InputError(message("inputs.required-checks", { line: line2 }));
     return check2;
@@ -38558,10 +38774,10 @@ function planInitialSync(input) {
   const facts = input.facts ?? LINEAR_FACTS;
   const { mapping } = input;
   const leftOut = /* @__PURE__ */ new Map();
-  const leaveOut = (path2, rules, lines2 = [], collidesWith, collidesWithMore) => {
+  const leaveOut = (path2, rules, lines3 = [], collidesWith, collidesWithMore) => {
     const entry = leftOut.get(path2) ?? { path: path2, rules: [], lines: [] };
     entry.rules = [.../* @__PURE__ */ new Set([...entry.rules, ...rules])].sort();
-    entry.lines = [.../* @__PURE__ */ new Set([...entry.lines, ...lines2])].sort((a, b) => a - b);
+    entry.lines = [.../* @__PURE__ */ new Set([...entry.lines, ...lines3])].sort((a, b) => a - b);
     if (collidesWith !== void 0) entry.collidesWith = [...collidesWith].sort(compare8);
     if (collidesWithMore !== void 0) entry.collidesWithMore = collidesWithMore;
     leftOut.set(path2, entry);
@@ -38696,14 +38912,14 @@ function compare8(a, b) {
 var PARTIAL = message("run.partial");
 function renderStop(stop) {
   const why = stop.kind === "test-threshold" ? `the test threshold of ${stop.documents} documents` : describeStop(stop);
-  const lines2 = [`Stopped: ${why}.`, ""];
+  const lines3 = [`Stopped: ${why}.`, ""];
   const limits = stop.kind === "test-threshold" ? void 0 : stop.limits;
   if (limits !== void 0) {
-    lines2.push("Linear's rate-limit headers at the stop:", "", "| Header | Value |", "| --- | --- |");
-    for (const name of Object.keys(limits).sort()) lines2.push(`| ${cell(name)} | ${cell(limits[name] ?? "")} |`);
-    lines2.push("");
+    lines3.push("Linear's rate-limit headers at the stop:", "", "| Header | Value |", "| --- | --- |");
+    for (const name of Object.keys(limits).sort()) lines3.push(`| ${cell(name)} | ${cell(limits[name] ?? "")} |`);
+    lines3.push("");
   }
-  return lines2;
+  return lines3;
 }
 function renderStoppedBeforeWriting(stop, partial) {
   const when = stop.kind !== "test-threshold" && stop.operation === "CreateProject" ? "while creating projects" : "before any write";
@@ -39727,18 +39943,18 @@ var SKIP_REASON_TEXTS = {
 };
 function renderSync(result) {
   const write = result.write;
-  const lines2 = ["## Sync", "", result.capture.summary, ""];
-  if (result.pullRequest !== void 0) lines2.push(...renderPullRequest(result.pullRequest));
+  const lines3 = ["## Sync", "", result.capture.summary, ""];
+  if (result.pullRequest !== void 0) lines3.push(...renderPullRequest(result.pullRequest));
   if (write === void 0) {
-    if (result.pullRequest === void 0) lines2.push("Capture did not finish; no tracked-branch changes were written.", "");
-    return lines2.join("\n");
+    if (result.pullRequest === void 0) lines3.push("Capture did not finish; no tracked-branch changes were written.", "");
+    return lines3.join("\n");
   }
-  lines2.push("### Tracked branch to Linear", "");
+  lines3.push("### Tracked branch to Linear", "");
   if (write.complete && write.record === null && !write.changed) {
-    lines2.push("Linear already holds the tracked branch: nothing to write.", "");
+    lines3.push("Linear already holds the tracked branch: nothing to write.", "");
   } else {
     const outcome2 = write.code === "container-cap" ? "Nothing was written. Reduce planned additions or increase document-cap after checking the container limit." : write.code === "state-moved" ? "A state ref moved while this run was writing, so it recorded nothing. Another run may be working on this repository; the next run writes again what is still missing." : write.complete ? "Linear now holds the tracked branch." : "Some documents were not written; the next run writes them.";
-    lines2.push(
+    lines3.push(
       outcome2,
       "",
       `- wrote ${count3(write.updated.length, "document")} with the file's new text;`,
@@ -39752,16 +39968,16 @@ function renderSync(result) {
       ""
     );
   }
-  if (write.code === "state-moved") lines2.push(`This run is ${PARTIAL}: the next run writes again what is still missing.`, "");
-  else if (write.code !== void 0 && write.code !== "container-cap") lines2.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, "");
+  if (write.code === "state-moved") lines3.push(`This run is ${PARTIAL}: the next run writes again what is still missing.`, "");
+  else if (write.code !== void 0 && write.code !== "container-cap") lines3.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, "");
   if (write.stopped !== void 0) {
-    lines2.push(...renderStop(write.stopped), `Not written yet: ${count3(write.notAttempted.length, "item")}.`, "");
+    lines3.push(...renderStop(write.stopped), `Not written yet: ${count3(write.notAttempted.length, "item")}.`, "");
   }
   const table = (title, head, rows) => {
     if (rows.length === 0) return;
-    lines2.push(`#### ${title} (${rows.length})`, "", `| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
-    for (const row of rows) lines2.push(`| ${row.map(cell).join(" | ")} |`);
-    lines2.push("");
+    lines3.push(`#### ${title} (${rows.length})`, "", `| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
+    for (const row of rows) lines3.push(`| ${row.map(cell).join(" | ")} |`);
+    lines3.push("");
   };
   table("Failed", ["Path", "Operation", "Error"], write.failed.map((entry) => [entry.path, entry.operation, entry.error]));
   table("Skipped", ["Path", "Why"], write.skipped.map((entry) => [entry.path, SKIP_REASON_TEXTS[entry.reason]]));
@@ -39771,7 +39987,7 @@ function renderSync(result) {
   table("Moved to trash", ["Path"], write.trashed.map((path2) => [path2]));
   table("Left out", ["Path", "Rules"], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(", ")]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);
   table("CI fixes not written", ["Path", "Hooks on the fixing commit", "Rules"], write.leftOut.filter((entry) => entry.hooks?.length).map((entry) => [entry.path, entry.hooks.join(", "), entry.rules.join(", ")]));
-  return lines2.join("\n") + renderCapacity(write.capacity ?? []);
+  return lines3.join("\n") + renderCapacity(write.capacity ?? []);
 }
 function count3(n, noun) {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -40062,10 +40278,10 @@ function stoppedBeforeWritingMessage(command, outcome2) {
   return fix3 === void 0 ? explained : message("run.how-to-fix", { message: explained.replace(/\.$/, ""), url: fix3 });
 }
 function oneLine2(text6) {
-  const lines2 = text6.split(/[\r\n]+/);
-  if (lines2.length === 1) return text6;
-  const last = lines2.length - 1;
-  return lines2.map((line2, index2) => index2 === 0 ? line2.trimEnd() : index2 === last ? line2.trimStart() : line2.trim()).filter((line2, index2) => line2 !== "" || index2 === 0 || index2 === last).join(" ");
+  const lines3 = text6.split(/[\r\n]+/);
+  if (lines3.length === 1) return text6;
+  const last = lines3.length - 1;
+  return lines3.map((line2, index2) => index2 === 0 ? line2.trimEnd() : index2 === last ? line2.trimStart() : line2.trim()).filter((line2, index2) => line2 !== "" || index2 === 0 || index2 === last).join(" ");
 }
 function containerCapMessage(command) {
   return message("run.container-cap", { command });
@@ -41274,12 +41490,12 @@ ${INIT_USAGE}` };
 // src/cli.ts
 function usage() {
   const width = Math.max(...Object.keys(COMMANDS).map((name) => name.length));
-  const lines2 = Object.entries(COMMANDS).map(([name, info]) => `  ${name.padEnd(width)}  ${info.summary}`);
+  const lines3 = Object.entries(COMMANDS).map(([name, info]) => `  ${name.padEnd(width)}  ${info.summary}`);
   return [
     "Usage: mdbisync <command> [paths...]",
     "",
     "Commands:",
-    ...lines2,
+    ...lines3,
     "",
     "init --help lists the repository setup flags.",
     "",

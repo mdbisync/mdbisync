@@ -19512,7 +19512,7 @@ var require_directives = __commonJS({
         return tag[0] === "!" ? tag : `!<${tag}>`;
       }
       toString(doc) {
-        const lines2 = this.yaml.explicit ? [`%YAML ${this.yaml.version || "1.2"}`] : [];
+        const lines3 = this.yaml.explicit ? [`%YAML ${this.yaml.version || "1.2"}`] : [];
         const tagEntries = Object.entries(this.tags);
         let tagNames;
         if (doc && tagEntries.length > 0 && identity.isNode(doc.contents)) {
@@ -19528,9 +19528,9 @@ var require_directives = __commonJS({
           if (handle2 === "!!" && prefix === "tag:yaml.org,2002:")
             continue;
           if (!doc || tagNames.some((tn) => tn.startsWith(prefix)))
-            lines2.push(`%TAG ${handle2} ${prefix}`);
+            lines3.push(`%TAG ${handle2} ${prefix}`);
         }
-        return lines2.join("\n");
+        return lines3.join("\n");
       }
     };
     Directives.defaultYaml = { explicit: false, version: "1.2" };
@@ -20991,22 +20991,22 @@ var require_stringifyCollection = __commonJS({
       const { indent: indent2, options: { commentString } } = ctx;
       const itemCtx = Object.assign({}, ctx, { indent: itemIndent2, type: null });
       let chompKeep = false;
-      const lines2 = [];
+      const lines3 = [];
       for (let i = 0; i < items.length; ++i) {
         const item = items[i];
         let comment2 = null;
         if (identity.isNode(item)) {
           if (!chompKeep && item.spaceBefore)
-            lines2.push("");
-          addCommentBefore(ctx, lines2, item.commentBefore, chompKeep);
+            lines3.push("");
+          addCommentBefore(ctx, lines3, item.commentBefore, chompKeep);
           if (item.comment)
             comment2 = item.comment;
         } else if (identity.isPair(item)) {
           const ik = identity.isNode(item.key) ? item.key : null;
           if (ik) {
             if (!chompKeep && ik.spaceBefore)
-              lines2.push("");
-            addCommentBefore(ctx, lines2, ik.commentBefore, chompKeep);
+              lines3.push("");
+            addCommentBefore(ctx, lines3, ik.commentBefore, chompKeep);
           }
         }
         chompKeep = false;
@@ -21015,15 +21015,15 @@ var require_stringifyCollection = __commonJS({
           str2 += stringifyComment.lineComment(str2, itemIndent2, commentString(comment2));
         if (chompKeep && comment2)
           chompKeep = false;
-        lines2.push(blockItemPrefix + str2);
+        lines3.push(blockItemPrefix + str2);
       }
       let str;
-      if (lines2.length === 0) {
+      if (lines3.length === 0) {
         str = flowChars.start + flowChars.end;
       } else {
-        str = lines2[0];
-        for (let i = 1; i < lines2.length; ++i) {
-          const line2 = lines2[i];
+        str = lines3[0];
+        for (let i = 1; i < lines3.length; ++i) {
+          const line2 = lines3[i];
           str += line2 ? `
 ${indent2}${line2}` : "\n";
         }
@@ -21046,22 +21046,22 @@ ${indent2}${line2}` : "\n";
       });
       let reqNewline = false;
       let linesAtValue = 0;
-      const lines2 = [];
+      const lines3 = [];
       for (let i = 0; i < items.length; ++i) {
         const item = items[i];
         let comment = null;
         if (identity.isNode(item)) {
           if (item.spaceBefore)
-            lines2.push("");
-          addCommentBefore(ctx, lines2, item.commentBefore, false);
+            lines3.push("");
+          addCommentBefore(ctx, lines3, item.commentBefore, false);
           if (item.comment)
             comment = item.comment;
         } else if (identity.isPair(item)) {
           const ik = identity.isNode(item.key) ? item.key : null;
           if (ik) {
             if (ik.spaceBefore)
-              lines2.push("");
-            addCommentBefore(ctx, lines2, ik.commentBefore, false);
+              lines3.push("");
+            addCommentBefore(ctx, lines3, ik.commentBefore, false);
             if (ik.comment)
               reqNewline = true;
           }
@@ -21078,12 +21078,12 @@ ${indent2}${line2}` : "\n";
         if (comment)
           reqNewline = true;
         let str = stringify2.stringify(item, itemCtx, () => comment = null);
-        reqNewline || (reqNewline = lines2.length > linesAtValue || str.includes("\n"));
+        reqNewline || (reqNewline = lines3.length > linesAtValue || str.includes("\n"));
         if (i < items.length - 1) {
           str += ",";
         } else if (ctx.options.trailingComma) {
           if (ctx.options.lineWidth > 0) {
-            reqNewline || (reqNewline = lines2.reduce((sum, line2) => sum + line2.length + 2, 2) + (str.length + 2) > ctx.options.lineWidth);
+            reqNewline || (reqNewline = lines3.reduce((sum, line2) => sum + line2.length + 2, 2) + (str.length + 2) > ctx.options.lineWidth);
           }
           if (reqNewline) {
             str += ",";
@@ -21091,35 +21091,35 @@ ${indent2}${line2}` : "\n";
         }
         if (comment)
           str += stringifyComment.lineComment(str, itemIndent2, commentString(comment));
-        lines2.push(str);
-        linesAtValue = lines2.length;
+        lines3.push(str);
+        linesAtValue = lines3.length;
       }
       const { start: start3, end: end2 } = flowChars;
-      if (lines2.length === 0) {
+      if (lines3.length === 0) {
         return start3 + end2;
       } else {
         if (!reqNewline) {
-          const len = lines2.reduce((sum, line2) => sum + line2.length + 2, 2);
+          const len = lines3.reduce((sum, line2) => sum + line2.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
           let str = start3;
-          for (const line2 of lines2)
+          for (const line2 of lines3)
             str += line2 ? `
 ${indentStep}${indent2}${line2}` : "\n";
           return `${str}
 ${indent2}${end2}`;
         } else {
-          return `${start3}${fcPadding}${lines2.join(" ")}${fcPadding}${end2}`;
+          return `${start3}${fcPadding}${lines3.join(" ")}${fcPadding}${end2}`;
         }
       }
     }
-    function addCommentBefore({ indent: indent2, options: { commentString } }, lines2, comment, chompKeep) {
+    function addCommentBefore({ indent: indent2, options: { commentString } }, lines3, comment, chompKeep) {
       if (comment && chompKeep)
         comment = comment.replace(/^\n+/, "");
       if (comment) {
         const ic = stringifyComment.indentComment(commentString(comment), indent2);
-        lines2.push(ic.trimStart());
+        lines3.push(ic.trimStart());
       }
     }
     exports.stringifyCollection = stringifyCollection;
@@ -21757,11 +21757,11 @@ var require_binary = __commonJS({
         if (type !== Scalar.Scalar.QUOTE_DOUBLE) {
           const lineWidth = Math.max(ctx.options.lineWidth - ctx.indent.length, ctx.options.minContentWidth);
           const n = Math.ceil(str.length / lineWidth);
-          const lines2 = new Array(n);
+          const lines3 = new Array(n);
           for (let i = 0, o = 0; i < n; ++i, o += lineWidth) {
-            lines2[i] = str.substr(o, lineWidth);
+            lines3[i] = str.substr(o, lineWidth);
           }
-          str = lines2.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
+          str = lines3.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
         }
         return stringifyString.stringifyString({ comment, type, value: str }, ctx, onComment, onChompKeep);
       }
@@ -22441,35 +22441,35 @@ var require_stringifyDocument = __commonJS({
     var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyDocument(doc, options) {
-      const lines2 = [];
+      const lines3 = [];
       let hasDirectives = options.directives === true;
       if (options.directives !== false && doc.directives) {
         const dir = doc.directives.toString(doc);
         if (dir) {
-          lines2.push(dir);
+          lines3.push(dir);
           hasDirectives = true;
         } else if (doc.directives.docStart)
           hasDirectives = true;
       }
       if (hasDirectives)
-        lines2.push("---");
+        lines3.push("---");
       const ctx = stringify2.createStringifyContext(doc, options);
       const { commentString } = ctx.options;
       if (doc.commentBefore) {
-        if (lines2.length !== 1)
-          lines2.unshift("");
+        if (lines3.length !== 1)
+          lines3.unshift("");
         const cs = commentString(doc.commentBefore);
-        lines2.unshift(stringifyComment.indentComment(cs, ""));
+        lines3.unshift(stringifyComment.indentComment(cs, ""));
       }
       let chompKeep = false;
       let contentComment = null;
       if (doc.contents) {
         if (identity.isNode(doc.contents)) {
           if (doc.contents.spaceBefore && hasDirectives)
-            lines2.push("");
+            lines3.push("");
           if (doc.contents.commentBefore) {
             const cs = commentString(doc.contents.commentBefore);
-            lines2.push(stringifyComment.indentComment(cs, ""));
+            lines3.push(stringifyComment.indentComment(cs, ""));
           }
           ctx.forceBlockIndent = !!doc.comment;
           contentComment = doc.contents.comment;
@@ -22478,36 +22478,36 @@ var require_stringifyDocument = __commonJS({
         let body2 = stringify2.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
         if (contentComment)
           body2 += stringifyComment.lineComment(body2, "", commentString(contentComment));
-        if ((body2[0] === "|" || body2[0] === ">") && lines2[lines2.length - 1] === "---") {
-          lines2[lines2.length - 1] = `--- ${body2}`;
+        if ((body2[0] === "|" || body2[0] === ">") && lines3[lines3.length - 1] === "---") {
+          lines3[lines3.length - 1] = `--- ${body2}`;
         } else
-          lines2.push(body2);
+          lines3.push(body2);
       } else {
-        lines2.push(stringify2.stringify(doc.contents, ctx));
+        lines3.push(stringify2.stringify(doc.contents, ctx));
       }
       if (doc.directives?.docEnd) {
         if (doc.comment) {
           const cs = commentString(doc.comment);
           if (cs.includes("\n")) {
-            lines2.push("...");
-            lines2.push(stringifyComment.indentComment(cs, ""));
+            lines3.push("...");
+            lines3.push(stringifyComment.indentComment(cs, ""));
           } else {
-            lines2.push(`... ${cs}`);
+            lines3.push(`... ${cs}`);
           }
         } else {
-          lines2.push("...");
+          lines3.push("...");
         }
       } else {
         let dc = doc.comment;
         if (dc && chompKeep)
           dc = dc.replace(/^\n+/, "");
         if (dc) {
-          if ((!chompKeep || contentComment) && lines2[lines2.length - 1] !== "")
-            lines2.push("");
-          lines2.push(stringifyComment.indentComment(commentString(dc), ""));
+          if ((!chompKeep || contentComment) && lines3[lines3.length - 1] !== "")
+            lines3.push("");
+          lines3.push(stringifyComment.indentComment(commentString(dc), ""));
         }
       }
-      return lines2.join("\n") + "\n";
+      return lines3.join("\n") + "\n";
     }
     exports.stringifyDocument = stringifyDocument;
   }
@@ -23569,17 +23569,17 @@ var require_resolve_block_scalar = __commonJS({
       if (!header)
         return { value: "", type: null, comment: "", range: [start3, start3, start3] };
       const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
-      const lines2 = scalar.source ? splitLines(scalar.source) : [];
-      let chompStart = lines2.length;
-      for (let i = lines2.length - 1; i >= 0; --i) {
-        const content4 = lines2[i][1];
+      const lines3 = scalar.source ? splitLines(scalar.source) : [];
+      let chompStart = lines3.length;
+      for (let i = lines3.length - 1; i >= 0; --i) {
+        const content4 = lines3[i][1];
         if (content4 === "" || content4 === "\r")
           chompStart = i;
         else
           break;
       }
       if (chompStart === 0) {
-        const value2 = header.chomp === "+" && lines2.length > 0 ? "\n".repeat(Math.max(1, lines2.length - 1)) : "";
+        const value2 = header.chomp === "+" && lines3.length > 0 ? "\n".repeat(Math.max(1, lines3.length - 1)) : "";
         let end3 = start3 + header.length;
         if (scalar.source)
           end3 += scalar.source.length;
@@ -23589,7 +23589,7 @@ var require_resolve_block_scalar = __commonJS({
       let offset = scalar.offset + header.length;
       let contentStart = 0;
       for (let i = 0; i < chompStart; ++i) {
-        const [indent2, content4] = lines2[i];
+        const [indent2, content4] = lines3[i];
         if (content4 === "" || content4 === "\r") {
           if (header.indent === 0 && indent2.length > trimIndent)
             trimIndent = indent2.length;
@@ -23609,17 +23609,17 @@ var require_resolve_block_scalar = __commonJS({
         }
         offset += indent2.length + content4.length + 1;
       }
-      for (let i = lines2.length - 1; i >= chompStart; --i) {
-        if (lines2[i][0].length > trimIndent)
+      for (let i = lines3.length - 1; i >= chompStart; --i) {
+        if (lines3[i][0].length > trimIndent)
           chompStart = i + 1;
       }
       let value = "";
       let sep6 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
-        value += lines2[i][0].slice(trimIndent) + "\n";
+        value += lines3[i][0].slice(trimIndent) + "\n";
       for (let i = contentStart; i < chompStart; ++i) {
-        let [indent2, content4] = lines2[i];
+        let [indent2, content4] = lines3[i];
         offset += indent2.length + content4.length + 1;
         const crlf = content4[content4.length - 1] === "\r";
         if (crlf)
@@ -23656,8 +23656,8 @@ var require_resolve_block_scalar = __commonJS({
         case "-":
           break;
         case "+":
-          for (let i = chompStart; i < lines2.length; ++i)
-            value += "\n" + lines2[i][0].slice(trimIndent);
+          for (let i = chompStart; i < lines3.length; ++i)
+            value += "\n" + lines3[i][0].slice(trimIndent);
           if (value[value.length - 1] !== "\n")
             value += "\n";
           break;
@@ -23732,10 +23732,10 @@ var require_resolve_block_scalar = __commonJS({
       const first = split[0];
       const m = first.match(/^( *)/);
       const line0 = m?.[1] ? [m[1], first.slice(m[1].length)] : ["", first];
-      const lines2 = [line0];
+      const lines3 = [line0];
       for (let i = 1; i < split.length; i += 2)
-        lines2.push([split[i], split[i + 1]]);
-      return lines2;
+        lines3.push([split[i], split[i + 1]]);
+      return lines3;
     }
     exports.resolveBlockScalar = resolveBlockScalar;
   }
@@ -29023,7 +29023,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.1-rc.9" : packageJson.version;
+var VERSION = true ? "1.0.1-rc.10" : packageJson.version;
 function olderVersion(version, than) {
   if (version === void 0) return true;
   const a = parseVersion(version);
@@ -29107,13 +29107,15 @@ var LINT_RULES = {
   "list-number-too-long": "An ordered list numbered past 999999999: Linear numbers its items on from the first number, and Markdown reads a number of more than nine digits as text of the item above it. Start the list at a smaller number.",
   "block-first-in-list-item": "A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
   "section-marker-text": "A line that starts with +++ and text right after it (+++Plan) is text, but Linear opens a collapsible section from it when more of its list item, quote or document follows. Run fix to write it as \\+++Plan, or put a space after +++ to make it a section.",
+  "plus-line-in-item": "A line of only + right below a list item's first line is text of the item in Markdown, but Linear reads it as an empty list item and the text after it moves. Run fix to write it as + followed by a no-break space, which Linear keeps as text, or remove the line.",
+  "tab-indentation": "A tab in the indentation of a list item, a quote or a code block, or after a list, heading or quote marker, is laid out differently by Linear, and text moves or is lost. Run fix to write the indentation with spaces, or replace the tabs with spaces yourself.",
   "ordered-task-list": "An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.",
   "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path, or run fix to write an HTTP(S) image as a link.",
   "image-file-missing": "An image must name a file that exists in the repository, not a folder or a Markdown document.",
   "upload-file-refused": "A file named as the sync names a captured upload fails the upload check: documents that link it are blocked when they change in Linear.",
   "document-in-assets-folder": "A Markdown document cannot be inside a folder named assets, which holds the files documents embed."
 };
-var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash", "link-without-text", "section-marker-text", "table-quote-cell"]);
+var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash", "link-without-text", "plus-line-in-item", "section-marker-text", "tab-indentation", "table-quote-cell"]);
 var IMAGE_PLACE_RULES = /* @__PURE__ */ new Set(["image-not-in-repository", "image-file-missing"]);
 
 // src/setup/report.ts
@@ -40531,4304 +40533,6 @@ xn--zfr164b xxx xyz yachts yahoo yamaxun yandex ye yodobashi yoga yokohama you y
 zappos zara zero zip zm zone zuerich zw
 `.trim().split(/\s+/));
 
-// src/format/markdown.ts
-EditMap.prototype.consume = function consume(events2) {
-  this.map.sort((a, b) => a[0] - b[0]);
-  const pieces = [];
-  for (let index2 = this.map.length - 1; index2 >= 0; index2--) {
-    const [at, remove, add] = this.map[index2];
-    pieces.push(events2.slice(at + remove), add);
-    events2.length = at;
-  }
-  for (let piece = pieces.pop(); piece !== void 0; piece = pieces.pop()) {
-    for (const event of piece) events2.push(event);
-  }
-  this.map.length = 0;
-  this.index.clear();
-};
-var BOM = "\uFEFF";
-var FRONT_MATTER = /^---[ \t]*\r?\n(?:[^\n]*\n)*?---[ \t]*(?:\r?\n|$)/;
-var LEADING_BLANK_LINES = /^(?:[ \t]*\r?\n)+/;
-function splitFile(text6) {
-  const bom = text6.startsWith(BOM) ? BOM : "";
-  const rest = text6.slice(bom.length);
-  const match = FRONT_MATTER.exec(rest);
-  if (!match) return { head: bom, body: rest };
-  const afterBlock = rest.slice(match[0].length);
-  const blank = LEADING_BLANK_LINES.exec(afterBlock)?.[0] ?? "";
-  return { head: bom + match[0] + blank, body: afterBlock.slice(blank.length) };
-}
-function joinFile(head, body2) {
-  if (FRONT_MATTER.test(head.startsWith(BOM) ? head.slice(BOM.length) : head)) {
-    if (body2 === "" || head.endsWith("\n")) return head + body2;
-    return head + (head.includes("\r\n") ? "\r\n" : "\n") + body2;
-  }
-  const text6 = head + body2;
-  const at = text6.startsWith(BOM) ? BOM.length : 0;
-  if (!FRONT_MATTER.test(text6.slice(at))) return text6;
-  return text6.slice(0, at) + "***" + text6.slice(at + "---".length);
-}
-function lineCount(text6) {
-  let count4 = 0;
-  for (const char of text6) if (char === "\n") count4++;
-  return count4;
-}
-var MARKDOWN_MAX_DEPTH = 128;
-var MARKDOWN_MAX_NODES = 5e5;
-var INLINE_WORK_LIMIT = 25e7;
-var LAZY_WORK_LIMIT = 2e7;
-var MarkdownLimitError = class extends Error {
-  limit;
-  constructor(limit) {
-    super(`Markdown exceeds the ${limit} limit.`);
-    this.name = "MarkdownLimitError";
-    this.limit = limit;
-  }
-};
-function parse2(body2, mdastExtensions = [], linearDomains = false, extraSyntax = []) {
-  const gfmExtensions = gfmFromMarkdown();
-  const transforms = gfmExtensions.flatMap((extension2) => extension2.transforms ?? []);
-  const untransformed = gfmExtensions.map(({ transforms: _transforms, ...extension2 }) => extension2);
-  const syntax = gfm({ singleTilde: !linearDomains });
-  if (linearDomains && syntax.text) {
-    for (const code4 of [87, 119]) {
-      const constructs2 = syntax.text[code4];
-      if (Array.isArray(constructs2)) syntax.text[code4] = constructs2.filter((construct) => construct.name !== "wwwAutolink");
-    }
-  }
-  const tree = fromMarkdown(body2, { extensions: [syntax, ...extraSyntax, inlineBudget(), indentedCodeEnds(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
-  const source = body2.startsWith("\uFEFF") ? body2.slice(1) : body2;
-  taskChecksBelowMarkerLines(tree, source);
-  placeTextLinks(tree, source, transforms, linearDomains);
-  if (linearDomains && /https?:\/\//i.test(source)) placeLinearHttpEnds(tree, source);
-  if (linearDomains && BARE_DOMAIN_HINT.test(source)) placeLinearDomains(tree, source);
-  if (linearDomains && source.includes(")*** ")) placeLinkedBoldItalicSuffixes(tree, source);
-  visit2(tree, () => {
-  });
-  return tree;
-}
-var LINKED_BOLD_ITALIC_SUFFIX = /^\*{3}( (?:\\[^\r\n]|[^*\\\r\n])+)\*{3}(?!\*)/;
-function placeLinkedBoldItalicSuffixes(tree, source) {
-  const points = new PointIndex(source);
-  visit2(tree, (node2) => {
-    if (!("children" in node2)) return;
-    node2.children = node2.children.flatMap((text6, index2, children) => {
-      const link2 = children[index2 - 1];
-      if (link2?.type !== "link" || link2.position === void 0 || link2.children.length !== 1 || link2.children[0]?.type !== "emphasis" || link2.children[0].children.length !== 1 || link2.children[0].children[0]?.type !== "strong") return [text6];
-      if (text6.type !== "text" || text6.position === void 0 || end(link2) !== start(text6)) return [text6];
-      const from = start(text6);
-      if (!text6.value.startsWith("*** ")) return [text6];
-      const match = LINKED_BOLD_ITALIC_SUFFIX.exec(source.slice(from, end(text6)));
-      if (!match) return [text6];
-      const decoded = decodeTextLiteral(match[0]);
-      if (!text6.value.startsWith(decoded)) return [text6];
-      const to = from + match[0].length;
-      const position2 = (start3, end2) => ({ start: points.at(start3), end: points.at(end2) });
-      const marked = {
-        type: "emphasis",
-        position: position2(from, to),
-        children: [{
-          type: "strong",
-          position: position2(from + 1, to - 1),
-          children: [{ type: "text", value: decodeTextLiteral(match[1]), position: position2(from + 3, to - 3) }]
-        }]
-      };
-      if (to === end(text6)) return [marked];
-      return [marked, { ...text6, value: text6.value.slice(decoded.length), position: { ...text6.position, start: points.at(to) } }];
-    });
-  });
-}
-function placeLinearHttpEnds(tree, source) {
-  const points = new PointIndex(source);
-  visit2(tree, (node2) => {
-    if (!("children" in node2)) return;
-    const children = node2.children;
-    const adjusted = [];
-    for (let index2 = 0; index2 < children.length; index2++) {
-      const link2 = children[index2];
-      adjusted.push(link2);
-      if (link2.type !== "link" || link2.position === void 0 || !/^https?:\/\//i.test(link2.url)) continue;
-      const from = start(link2);
-      if (!/[hH]/.test(source[from] ?? "")) continue;
-      const originalEnd = end(link2);
-      const raw = source.slice(from, originalEnd);
-      const next = children[index2 + 1];
-      const following = next?.type === "text" && next.position !== void 0 && start(next) === originalEnd ? next : void 0;
-      const suffix = following === void 0 ? "" : /^[_.~:#?!,;)\]}'"]+/.exec(source.slice(originalEnd, end(following)))?.[0] ?? "";
-      const candidate = raw + suffix;
-      if (!/^https?:\/\/[^/?#]+[/?#]/i.test(candidate)) {
-        if (source[from - 1] !== "[" && following?.value.startsWith("_") && /^\\?_/.test(source.slice(originalEnd, originalEnd + 2))) {
-          adjusted[adjusted.length - 1] = {
-            type: "text",
-            value: decodeTextLiteral(raw.replace(/\\$/, "")) + following.value,
-            position: { start: link2.position.start, end: following.position.end }
-          };
-          index2++;
-        }
-        continue;
-      }
-      const length = httpUrlEnd(candidate);
-      const written = candidate.slice(0, length);
-      if (length === raw.length && !/[\[\]]/.test(written)) continue;
-      const to = from + length;
-      const consumed = to > originalEnd ? decodeTextLiteral(source.slice(originalEnd, to)) : "";
-      if (consumed !== "" && !following?.value.startsWith(consumed)) continue;
-      const url = normalizeUri(written).replace(/\[/g, "%5B").replace(/\]/g, "%5D");
-      const position2 = { start: link2.position.start, end: points.at(to) };
-      adjusted[adjusted.length - 1] = { ...link2, url, position: position2, children: [{ type: "text", value: written, position: position2 }] };
-      if (to < originalEnd) {
-        const remainder = decodeTextLiteral(source.slice(to, originalEnd));
-        adjusted.push({ type: "text", value: remainder, position: { start: position2.end, end: link2.position.end } });
-      } else if (to > originalEnd && following !== void 0) {
-        index2++;
-        if (consumed.length < following.value.length) {
-          adjusted.push({ ...following, value: following.value.slice(consumed.length), position: { ...following.position, start: position2.end } });
-        }
-      }
-    }
-    node2.children = adjusted;
-  });
-}
-function placeLinearDomains(tree, source) {
-  const points = new PointIndex(source);
-  visit2(tree, (node2, ancestors) => {
-    if (!("children" in node2) || node2.type === "link" || node2.type === "linkReference" || ancestors.some((ancestor) => ancestor.type === "link" || ancestor.type === "linkReference")) return;
-    let demoted = false;
-    const children = node2.children.map((child2, index2, parts) => {
-      if (child2.type !== "link" || child2.position === void 0 || !child2.url.startsWith("mailto:")) return child2;
-      const opening = source[start(child2)];
-      if (opening === "[" || opening === "<") return child2;
-      if (!insideBareDomain(parts[index2 - 1], child2, source)) return child2;
-      const raw = source.slice(start(child2), end(child2));
-      demoted = true;
-      return { type: "text", value: decodeTextLiteral(raw), position: child2.position };
-    });
-    node2.children = (demoted ? joinUnlinkedText(children) : children).flatMap((child2) => child2.type === "text" && child2.position !== void 0 ? linkBareDomains(child2, source, points) : [child2]);
-  });
-}
-function insideBareDomain(before, link2, source) {
-  if (before?.type !== "text" || before.position === void 0 || end(before) !== start(link2) || !/[/?#]/.test(before.value)) return false;
-  const raw = source.slice(start(before), end(link2));
-  const boundary = start(link2) - start(before);
-  for (const { from, to } of bareDomains(raw)) {
-    if (from < boundary && to === raw.length) return true;
-  }
-  return false;
-}
-function joinUnlinkedText(children) {
-  const joined = [];
-  let run2 = [];
-  const flush = () => {
-    if (run2.length === 0) return;
-    const first = run2[0];
-    const last = run2.at(-1);
-    const value = run2.map((text6) => text6.value).join("");
-    joined.push({ type: "text", value, position: { start: first.position.start, end: last.position.end } });
-    run2 = [];
-  };
-  for (const child2 of children) {
-    if (child2.type === "text" && child2.position !== void 0) {
-      const previous3 = run2.at(-1);
-      if (previous3 && end(previous3) !== start(child2)) flush();
-      run2.push(child2);
-    } else {
-      flush();
-      joined.push(child2);
-    }
-  }
-  flush();
-  return joined;
-}
-var TEXT_LINK_HINT = /https?:\/\/|www\.|@/i;
-var BARE_DOMAIN_HINT = /[\p{L}\p{M}\p{N}\p{Extended_Pictographic}]\.[\p{L}\p{M}\p{N}]/u;
-function placeTextLinks(tree, source, transforms, linearDomains) {
-  if (transforms.length === 0) return;
-  const found = /* @__PURE__ */ new Map();
-  visit2(tree, (node2, ancestors) => {
-    const parent = ancestors.at(-1);
-    if (node2.type !== "text" || parent === void 0 || !("children" in parent) || !TEXT_LINK_HINT.test(node2.value)) return;
-    if (ancestors.some((ancestor) => ancestor.type === "link" || ancestor.type === "linkReference")) return;
-    const texts = found.get(parent);
-    if (texts === void 0) found.set(parent, [node2]);
-    else texts.push(node2);
-  });
-  if (found.size === 0) return;
-  const points = new PointIndex(source);
-  for (const [parent, texts] of found) {
-    const replaced = /* @__PURE__ */ new Map();
-    for (const node2 of texts) {
-      const paragraph2 = { type: "paragraph", children: [{ type: "text", value: node2.value }] };
-      for (const transform of transforms) transform({ type: "root", children: [paragraph2] });
-      const parts = mergedText(linearDomains ? paragraph2.children.flatMap((part) => {
-        if (part.type === "link" && /^http:\/\/www\./i.test(part.url) && part.children[0]?.type === "text" && /^www\./i.test(part.children[0].value)) {
-          return part.children;
-        }
-        return [part];
-      }) : paragraph2.children);
-      if (parts.length === 1 && parts[0].type === "text") continue;
-      placeParts(parts, node2, source, points);
-      replaced.set(node2, parts);
-    }
-    if (replaced.size > 0) parent.children = parent.children.flatMap((child2) => replaced.get(child2) ?? [child2]);
-  }
-}
-function linkBareDomains(text6, source, points) {
-  if (!BARE_DOMAIN_HINT.test(text6.value)) return [text6];
-  const offset = start(text6);
-  const raw = source.slice(offset, end(text6));
-  const position2 = (from, to) => ({ start: points.at(offset + from), end: points.at(offset + to) });
-  const parts = [];
-  const rawRanges = [];
-  let at = 0;
-  let decoded = "";
-  const addText = (from, to) => {
-    const value = decodeTextLiteral(raw.slice(from, to));
-    decoded += value;
-    parts.push({ type: "text", value, position: position2(from, to) });
-  };
-  for (const { from, to, url } of bareDomains(raw)) {
-    if (raw[from - 1] === ";" && /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});$/.test(raw.slice(Math.max(0, from - 34), from))) continue;
-    if (from > at) addText(at, from);
-    const value = raw.slice(from, to);
-    const range = position2(from, to);
-    decoded += value;
-    parts.push({ type: "link", url, title: null, position: range, children: [{ type: "text", value, position: range }] });
-    rawRanges.push({ from, to });
-    at = to;
-  }
-  if (at === 0) return [text6];
-  if (at < raw.length) addText(at, raw.length);
-  if (decoded === text6.value) return parts;
-  const valueRanges = [...bareDomains(text6.value)];
-  if (valueRanges.length !== rawRanges.length) return [text6];
-  const logical = [];
-  at = 0;
-  let sourceAt = 0;
-  for (const [index2, { from, to, url }] of valueRanges.entries()) {
-    const { from: rawFrom, to: rawTo } = rawRanges[index2];
-    const value = text6.value.slice(from, to);
-    if (raw.slice(rawFrom, rawTo) !== value) return [text6];
-    if (from > at) logical.push({ type: "text", value: text6.value.slice(at, from), position: position2(sourceAt, rawFrom) });
-    const range = position2(rawFrom, rawTo);
-    logical.push({ type: "link", url, title: null, position: range, children: [{ type: "text", value, position: range }] });
-    at = to;
-    sourceAt = rawTo;
-  }
-  if (at < text6.value.length) logical.push({ type: "text", value: text6.value.slice(at), position: position2(sourceAt, raw.length) });
-  return logical;
-}
-function mergedText(nodes) {
-  const merged = [];
-  for (const node2 of nodes) {
-    const last = merged.at(-1);
-    if (node2.type === "text" && last?.type === "text") last.value += node2.value;
-    else merged.push(node2);
-  }
-  return merged;
-}
-var DECODED = /\\[!-/:-@[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]{1,31}));/g;
-function decodeTextLiteral(raw) {
-  return raw.replace(DECODED, (reference, name) => {
-    if (reference[0] === "\\") return reference[1];
-    if (name !== void 0) return decodeNamedCharacterReference(name) || reference;
-    const hex = reference[2]?.toLowerCase() === "x";
-    const point3 = Number.parseInt(reference.slice(hex ? 3 : 2, -1), hex ? 16 : 10);
-    return point3 > 0 && point3 <= 1114111 ? String.fromCodePoint(point3) : reference;
-  });
-}
-function placeParts(parts, text6, source, points) {
-  const from = start(text6);
-  const raw = source.slice(from, end(text6));
-  const decoded = new Uint32Array(raw.length + 1);
-  for (const match of raw.matchAll(DECODED)) {
-    if (match[1] !== void 0 && decodeNamedCharacterReference(match[1]) === false) continue;
-    decoded.fill(1, match.index + 1, match.index + match[0].length + 1);
-  }
-  for (let at2 = 1; at2 <= raw.length; at2++) decoded[at2] = decoded[at2 - 1] + decoded[at2];
-  const literal = (at2, length) => decoded[at2 + length] === decoded[at2];
-  const labels = /* @__PURE__ */ new Map();
-  const ranges = [];
-  let valueAt = 0;
-  for (const part of parts) {
-    if (part.type === "text") {
-      valueAt += part.value.length;
-      continue;
-    }
-    if (part.type !== "link" || part.children.length !== 1 || part.children[0].type !== "text") return;
-    const label = part.children[0].value;
-    let found = labels.get(label);
-    if (found === void 0) {
-      found = { value: occurrences(text6.value, label), source: occurrences(raw, label).filter((at3) => literal(at3, label.length)), next: 0 };
-      if (found.value.length !== found.source.length) return;
-      labels.set(label, found);
-    }
-    while (found.next < found.value.length && found.value[found.next] < valueAt) found.next++;
-    const at2 = found.source[found.next];
-    if (at2 === void 0 || at2 < (ranges.at(-1)?.[1] ?? 0)) return;
-    ranges.push([at2, at2 + label.length]);
-    valueAt += label.length;
-  }
-  const position2 = (a, b) => ({ start: points.at(from + a), end: points.at(from + b) });
-  let link2 = 0;
-  let at = 0;
-  for (const part of parts) {
-    if (part.type === "link") {
-      const [a, b] = ranges[link2++];
-      part.position = position2(a, b);
-      part.children[0].position = position2(a, b);
-      at = b;
-      continue;
-    }
-    const next = ranges[link2]?.[0] ?? raw.length;
-    part.position = position2(at, next);
-    at = next;
-  }
-}
-function occurrences(haystack, needle) {
-  const found = [];
-  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) found.push(at);
-  return found;
-}
-var PointIndex = class {
-  lineStarts = [0];
-  constructor(source) {
-    for (const match of source.matchAll(/\r\n?|\n/g)) this.lineStarts.push(match.index + match[0].length);
-  }
-  at(offset) {
-    let low = 0;
-    let high = this.lineStarts.length - 1;
-    while (low < high) {
-      const middle = low + high + 1 >> 1;
-      if (this.lineStarts[middle] <= offset) low = middle;
-      else high = middle - 1;
-    }
-    return { line: low + 1, column: offset - this.lineStarts[low] + 1, offset };
-  }
-};
-var isAsciiAlphanumeric = (code4) => code4 !== null && (code4 >= 48 && code4 <= 57 || code4 >= 65 && code4 <= 90 || code4 >= 97 && code4 <= 122);
-var SPLIT_CODES = [33, 38, 42, 60, 91, 92, 93, 95, 96, 126, -5, -4, -3];
-var WORD_CODES = [43, 45, 46];
-for (let code4 = 48; code4 <= 122; code4++) if (isAsciiAlphanumeric(code4)) WORD_CODES.push(code4);
-function inlineBudget() {
-  let work = 0;
-  const bracketed = /* @__PURE__ */ new WeakSet();
-  const count4 = function() {
-    work += this.events.length;
-    if (work > INLINE_WORK_LIMIT) throw new MarkdownLimitError("inline");
-    return false;
-  };
-  const split = { name: "inlineBudget", tokenize: (_effects, _ok, nok) => nok, previous: count4 };
-  const bracket = {
-    ...split,
-    previous() {
-      bracketed.add(this);
-      return count4.call(this);
-    }
-  };
-  const word = {
-    ...split,
-    previous(previous3) {
-      return bracketed.has(this) && !isAsciiAlphanumeric(previous3) ? count4.call(this) : false;
-    }
-  };
-  const text6 = {};
-  for (const code4 of SPLIT_CODES) text6[code4] = split;
-  for (const code4 of WORD_CODES) text6[code4] = word;
-  text6[91] = bracket;
-  return { text: text6 };
-}
-function indentedCodeEnds() {
-  const construct = {
-    name: "indentedCodeEnds",
-    tokenize(effects, ok3, nok) {
-      const code4 = [this.parser.constructs.flowInitial?.[32]].flat().find((candidate) => candidate?.name === "codeIndented");
-      if (code4 === void 0 || code4 === null) return nok;
-      const settled = (next) => (character) => {
-        this._gfmTableDynamicInterruptHack = false;
-        return next(character);
-      };
-      this._gfmTableDynamicInterruptHack = true;
-      return code4.tokenize.call(this, effects, settled(ok3), settled(nok));
-    }
-  };
-  return { flowInitial: { [-2]: construct, [-1]: construct, [32]: construct } };
-}
-function taskChecksBelowMarkerLines(tree, source) {
-  visit2(tree, (node2) => {
-    if (node2.type !== "listItem" || node2.checked !== null && node2.checked !== void 0) return;
-    const [paragraph2] = node2.children;
-    if (paragraph2?.type !== "paragraph" || line(paragraph2) === line(node2)) return;
-    const check2 = /^\[([ xX])\][ \t]+[^\s]/.exec(source.slice(start(paragraph2), end(paragraph2)));
-    const [head] = paragraph2.children;
-    if (check2 === null || head?.type !== "text" || start(head) !== start(paragraph2) || !head.value.startsWith(check2[0].slice(0, 4))) return;
-    const from = paragraph2.position.start;
-    const after = { line: from.line, column: from.column + 4, offset: from.offset + 4 };
-    node2.checked = check2[1] !== " ";
-    head.value = head.value.slice(4);
-    if (head.value === "") paragraph2.children.shift();
-    else head.position.start = { ...after };
-    paragraph2.position.start = { ...after };
-  });
-}
-function lazyBudget() {
-  let work = 0;
-  let watching = false;
-  let writing;
-  const blocks = /* @__PURE__ */ new WeakMap();
-  const watch = (parser) => {
-    watching = true;
-    const create = parser.flow;
-    parser.flow = (from) => {
-      const flow3 = create(from);
-      const { defineSkip, write } = flow3;
-      let line2;
-      flow3.defineSkip = (point3) => {
-        line2 = point3.line;
-        return defineSkip(point3);
-      };
-      flow3.write = (slice) => {
-        const chunkLine = line2;
-        line2 = void 0;
-        writing = flow3;
-        let events2;
-        try {
-          events2 = write(slice);
-        } finally {
-          writing = void 0;
-        }
-        if (chunkLine !== void 0 && parser.lazy[chunkLine]) {
-          const block2 = blocks.get(flow3);
-          const open4 = flow3.currentConstruct !== void 0 && block2 !== void 0 && block2.line < chunkLine;
-          work += flow3.events.length - (open4 ? block2.from : 0);
-          if (work > LAZY_WORK_LIMIT) throw new MarkdownLimitError("lazy");
-        }
-        return events2;
-      };
-      return flow3;
-    };
-  };
-  const container = {
-    name: "lazyBudget",
-    partial: true,
-    tokenize(_effects, _ok, nok) {
-      if (!watching) watch(this.parser);
-      return nok;
-    }
-  };
-  const block = {
-    name: "lazyBudgetBlock",
-    partial: true,
-    tokenize(_effects, _ok, nok) {
-      if (writing !== void 0) blocks.set(writing, { from: this.events.length, line: this.now().line });
-      return nok;
-    }
-  };
-  return { document: { null: container }, flowInitial: { null: block, [-2]: block, [-1]: block, [32]: block } };
-}
-function markdownBaseline(body2) {
-  if (body2 === void 0) return void 0;
-  try {
-    parse2(body2);
-    return body2;
-  } catch (error2) {
-    if (!(error2 instanceof MarkdownLimitError)) throw error2;
-    return void 0;
-  }
-}
-function sameMarkdown(a, b, options = {}) {
-  if (a === b) return true;
-  return isDeepStrictEqual(comparable(a, options), comparable(b, options));
-}
-function sameAsLinear(content4, body2) {
-  if (content4 === body2) return true;
-  const restored = linearMarkersAsText(content4, body2);
-  if (sameMarkdown(restored, body2)) return true;
-  return body2.includes("\\+++") && sameMarkdown(restored, linearSectionEnd(body2));
-}
-function closesAboveList(lines2, index2, last) {
-  if (last <= index2) return false;
-  const next = lines2[index2 + 1];
-  const prefix = LINE_PREFIX.exec(next)[0];
-  return lines2[index2].startsWith(prefix) && /^(?:\d{1,9}\.[ \t]|[*-][ \t]*$)/.test(next.slice(prefix.length));
-}
-function linearSectionEnd(body2) {
-  const lines2 = body2.split(LINE_END);
-  const closing = /* @__PURE__ */ new Set();
-  visit2(parse2(body2), (node2) => {
-    if (node2.type !== "paragraph") return;
-    const first = line(node2) - 1;
-    const last = (node2.position?.end.line ?? first + 1) - 1;
-    const column = (node2.position?.start.column ?? 1) - 1;
-    if (last > first && lines2[first].slice(column).startsWith("\\+++ ") && linearLineText(lines2[last]) === "+++") {
-      closing.add(last);
-    }
-  });
-  return lines2.flatMap((row, index2) => closing.has(index2) ? [LINE_PREFIX.exec(row)[0].trimEnd(), row] : [row]).join("\n");
-}
-var NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
-var LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,2}(?:[ \t\r]|$)|\+{3}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\||(?:-+|=+)[ \t]*\r?$)/m;
-var LINE_END = /\r\n?|\n/;
-var LINE_PREFIX = /^[ \t>]*/;
-var CONFLICT_START = /^<{7}(?: |$)/;
-var DIV_START = /^<div(?:[ \t][^>\n]*)?>/i;
-var DIV_END = /<\/div[ \t]*>/i;
-var DIV_END_START = /^<\/div[ \t]*>/i;
-var SECTION_TITLE = /^\+{3}[ \t]/;
-var LONG_PLUS_RUN = /^\+{4}/;
-var ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3})/;
-var PLAIN_PLUS_TEXT = /^\+{3,}[^+\s]/;
-function linearLineText(row) {
-  return row.replace(LINE_PREFIX, "").trimEnd();
-}
-function tableKey(header, delimiter3) {
-  const text6 = linearLineText(header).replace(/^(?:[*+-]|\d{1,9}[.)])[ \t]+/, "");
-  return text6 + "\n" + delimiter3;
-}
-function tableRowsKey(lines2, from, to) {
-  const rows = [];
-  for (let index2 = from; index2 < to; index2++) {
-    const row = linearLineText(lines2[index2]);
-    if (!row.startsWith("|")) break;
-    rows.push(row);
-  }
-  return rows.join("\n");
-}
-function blockLineKey(text6, startsParagraph) {
-  return (startsParagraph ? "first:" : "next:") + text6;
-}
-function acceptedBlockStarts(previous3) {
-  const escapes = /* @__PURE__ */ new Set();
-  const tables = /* @__PURE__ */ new Set();
-  const tableHeaders = /* @__PURE__ */ new Set();
-  const html2 = /* @__PURE__ */ new Set();
-  if (!/\\[<|$+]|<div\b|^[ \t>]*\|/im.test(previous3)) return { escapes, tables, tableHeaders, html: html2 };
-  const lines2 = previous3.split(LINE_END);
-  const plain = /* @__PURE__ */ new Set();
-  visit2(parse2(previous3), (node2, ancestors) => {
-    const first = line(node2) - 1;
-    if (node2.type === "table") {
-      const key = tableKey(lines2[first], linearLineText(lines2[first + 1] ?? ""));
-      tableHeaders.add(key);
-      tables.add(key + "\n" + tableRowsKey(lines2, first + 2, node2.position?.end.line ?? first + 2));
-      return;
-    }
-    if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
-      html2.add(previous3.slice(start(node2), end(node2)));
-      return;
-    }
-    if (node2.type !== "text" || ancestors.at(-1)?.type !== "paragraph") return;
-    const column = (node2.position?.start.column ?? 1) - 1;
-    for (let index2 = first; index2 < (node2.position?.end.line ?? 0); index2++) {
-      const row = lines2[index2];
-      const raw = linearLineText(index2 === first ? row.slice(column) : row);
-      const paragraph2 = ancestors.at(-1);
-      const lineStart = index2 > first || paragraph2.children[0] === node2;
-      if (lineStart && PLAIN_PLUS_TEXT.test(raw)) plain.add(blockLineKey(raw, index2 === line(paragraph2) - 1));
-      if (!ESCAPED_BLOCK_START.test(raw)) continue;
-      const literal = raw.slice(1);
-      if (literal.startsWith("|")) {
-        const key = tableKey(lines2[index2 - 1] ?? "", literal);
-        escapes.add(key);
-        escapes.add(key + "\n" + tableRowsKey(lines2, index2 + 1, paragraph2.position?.end.line ?? index2 + 1));
-      } else {
-        escapes.add(blockLineKey(literal, index2 === line(paragraph2) - 1));
-        if (SECTION_TITLE.test(literal) && line(paragraph2) === index2 + 1 && paragraph2.position?.end.line === index2 + 1) {
-          escapes.add("section:" + literal);
-        }
-      }
-    }
-  });
-  for (const key of plain) escapes.delete(key);
-  return { escapes, tables, tableHeaders, html: html2 };
-}
-function divsClosedInAnotherBlock(tree, source) {
-  const paired = /* @__PURE__ */ new Set();
-  if (!DIV_END.test(source)) return paired;
-  const open4 = /* @__PURE__ */ new Map();
-  visit2(tree, (node2, ancestors) => {
-    if (node2.type !== "html") return;
-    const parent = ancestors.at(-1);
-    if (parent.type === "paragraph") return;
-    if (DIV_END_START.test(node2.value)) {
-      const opening = open4.get(parent)?.pop();
-      if (opening !== void 0) paired.add(opening);
-    } else if (DIV_START.test(node2.value) && !DIV_END.test(node2.value)) {
-      const siblings = open4.get(parent) ?? [];
-      siblings.push(node2);
-      open4.set(parent, siblings);
-    }
-  });
-  return paired;
-}
-function linearMarkersAsText(content4, previous3 = "") {
-  if (!LINEAR_BLOCK_START.test(content4)) return content4;
-  const accepted = acceptedBlockStarts(previous3);
-  let text6 = content4;
-  for (let pass = 0; pass <= MARKDOWN_MAX_DEPTH; pass++) {
-    const escapes = /* @__PURE__ */ new Set();
-    const escapedItems = /* @__PURE__ */ new Set();
-    const lines2 = text6.split(LINE_END);
-    const offsets = [0];
-    for (const match of text6.matchAll(/\r\n?|\n/g)) offsets.push(match.index + match[0].length);
-    const lineEnd = (index2) => offsets[index2] + lines2[index2].length;
-    const rowAt = (index2) => linearLineText(lines2[index2] ?? "");
-    const sections = /* @__PURE__ */ new Map();
-    const rowStart = (index2) => offsets[index2] + LINE_PREFIX.exec(lines2[index2])[0].length;
-    const tree = parse2(text6);
-    const pairedDivs = divsClosedInAnotherBlock(tree, text6);
-    visit2(tree, (node2, ancestors) => {
-      if (ancestors.some((ancestor) => escapedItems.has(ancestor))) return;
-      const at2 = start(node2);
-      const index2 = line(node2) - 1;
-      if (node2.type === "listItem") {
-        const marker = NOT_LINEAR_MARKER.exec(text6.slice(at2, at2 + 11));
-        if (marker === null) return;
-        escapedItems.add(node2);
-        escapes.add(at2 + marker[0].length - 1);
-      } else if (node2.type === "table") {
-        const delimiter3 = rowAt(index2 + 1);
-        if (!delimiter3.startsWith("|")) return;
-        const canonical = /^\|(?: -- \|)+$/.test(delimiter3);
-        const key = tableKey(lines2[index2], delimiter3);
-        const table = key + "\n" + tableRowsKey(lines2, index2 + 2, node2.position?.end.line ?? index2 + 2);
-        if (accepted.tables.has(table)) return;
-        const knownLiteral = accepted.tableHeaders.has(key) ? accepted.escapes.has(table) : accepted.escapes.has(key);
-        const literal = knownLiteral || !canonical || end(node2) === text6.length || ancestors.at(-1)?.type === "listItem" && at2 > rowStart(index2);
-        if (literal) escapes.add(rowStart(index2 + 1));
-      } else if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
-        const raw = text6.slice(at2, end(node2));
-        const first = text6.slice(at2, lineEnd(index2)).trimEnd();
-        if (pairedDivs.has(node2) || accepted.html.has(raw) && !CONFLICT_START.test(raw)) return;
-        const completeDiv = DIV_START.test(first) && DIV_END.test(raw);
-        const literal = accepted.escapes.has(blockLineKey(first, true)) || accepted.escapes.has(blockLineKey(first, false));
-        const incompleteDiv = DIV_START.test(first) && !completeDiv;
-        if (CONFLICT_START.test(raw) || literal || incompleteDiv) {
-          escapes.add(at2);
-          const spans = codeSpans(text6, at2, end(node2));
-          let span = 0;
-          const last = (node2.position?.end.line ?? index2 + 1) - 1;
-          for (let row = index2 + 1; row <= last; row++) {
-            const offset = rowStart(row);
-            while (span < spans.length && spans[span][1] <= offset) span++;
-            if (span < spans.length && spans[span][0] <= offset) continue;
-            const rowText = rowAt(row);
-            if (accepted.escapes.has(blockLineKey(rowText, false)) || incompleteDiv && DIV_START.test(rowText)) escapes.add(offset);
-          }
-        }
-      } else if (node2.type === "heading" && (node2.position?.end.line ?? index2 + 1) - 1 > index2) {
-        const underline = (node2.position?.end.line ?? index2 + 1) - 1;
-        if (rowStart(underline) - offsets[underline] > at2 - offsets[index2]) escapes.add(rowStart(underline));
-      } else if (node2.type === "paragraph") {
-        const rawFirst = text6.slice(at2, lineEnd(index2));
-        const first = rawFirst.trimEnd();
-        const last = (node2.position?.end.line ?? index2 + 1) - 1;
-        const literal = accepted.escapes.has(blockLineKey(first, true));
-        if (CONFLICT_START.test(first) || literal && first !== "+++" && !SECTION_TITLE.test(rawFirst)) escapes.add(at2);
-        if (LONG_PLUS_RUN.test(first) && last > index2) escapes.add(at2);
-        if (first === "$$" && last > index2 + 1 && rowAt(last) === "$$") escapes.add(at2);
-        const parent = ancestors.at(-1);
-        if (SECTION_TITLE.test(rawFirst)) {
-          if (last > index2) {
-            escapes.add(at2);
-            if (rowAt(last) === "+++") escapes.add(rowStart(last));
-          } else {
-            const open4 = sections.get(parent) ?? [];
-            const itemText = parent.type === "listItem" && parent.children.length === 1;
-            open4.push({ at: at2, literal: accepted.escapes.has("section:" + first) && accepted.escapes.has(blockLineKey("+++", true)), itemText });
-            sections.set(parent, open4);
-          }
-        } else if (first === "+++" && (last === index2 || closesAboveList(lines2, index2, last))) {
-          const open4 = sections.get(parent)?.pop();
-          if (open4?.literal) {
-            escapes.add(open4.at);
-            escapes.add(at2);
-          } else if (open4 === void 0 && literal) {
-            escapes.add(at2);
-          }
-        }
-      } else if (node2.type === "text" && ancestors.at(-1)?.type === "paragraph") {
-        for (let row = index2; row < (node2.position?.end.line ?? 0); row++) {
-          const offset = rowStart(row);
-          if (offset < at2 || offset >= end(node2)) continue;
-          const raw = rowAt(row);
-          if (row === line(ancestors.at(-1)) - 1) continue;
-          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false)) || LONG_PLUS_RUN.test(raw)) escapes.add(offset);
-        }
-      }
-    });
-    for (const open4 of sections.values()) for (const section of open4) if (!section.itemText || section.literal) escapes.add(section.at);
-    if (escapes.size === 0) return text6;
-    const parts = [];
-    let at = 0;
-    for (const escape2 of [...escapes].sort((a, b) => a - b)) {
-      parts.push(text6.slice(at, escape2), "\\");
-      at = escape2;
-    }
-    parts.push(text6.slice(at));
-    text6 = parts.join("");
-  }
-  throw new MarkdownLimitError("depth");
-}
-var LINEAR_SYNTAX_ESCAPES = { "\\$": "\uE000", "\\+": "\uE001" };
-function plainPlusEscapes(text6) {
-  let runEnd = -1;
-  let plain = false;
-  return (at) => {
-    if (at < runEnd) return plain;
-    let from = at;
-    while (from > 0 && text6[from - 1] === "+") from--;
-    let signs = 0;
-    let end2 = from;
-    for (; ; ) {
-      if (text6[end2] === "+") end2++;
-      else if (text6[end2] === "\\" && text6[end2 + 1] === "+") end2 += 2;
-      else break;
-      signs++;
-    }
-    runEnd = end2;
-    const after = text6[end2];
-    plain = signs < 3 || after !== void 0 && !/\s/.test(after);
-    return plain;
-  };
-}
-function markFileBlockStarts(body2) {
-  let plusItems;
-  return body2.replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, (line2, marker, at) => {
-    if (marker.endsWith("+")) {
-      if (plusItems === void 0) {
-        const starts = /* @__PURE__ */ new Set();
-        const bom = body2.startsWith(BOM) ? 1 : 0;
-        visit2(parse2(body2), (node2) => {
-          if (node2.type !== "listItem" || body2[start(node2) + bom] !== "+") return;
-          starts.add(body2.lastIndexOf("\n", start(node2) + bom - 1) + 1);
-        });
-        plusItems = starts;
-      }
-      if (!plusItems.has(at)) return line2;
-    }
-    return marker + " \uE002";
-  });
-}
-function appendComparable(children, child2) {
-  const previous3 = children.at(-1);
-  if (child2.type === "text" && previous3?.type === "text") {
-    previous3.value += child2.value;
-  } else if ((child2.type === "strong" || child2.type === "emphasis") && previous3?.type === child2.type) {
-    for (const part of child2.children) appendComparable(previous3.children, part);
-  } else {
-    children.push(child2);
-  }
-}
-function comparableBold(node2, children) {
-  const [only] = children;
-  if (children.length !== 1) return { ...node2, children };
-  if (node2.type === "emphasis" && only?.type === "link" && only.children?.length === 1 && only.children[0]?.type === "strong") {
-    return { ...only, children: [{ ...node2, children: only.children }] };
-  }
-  if (node2.type !== "strong") return { ...node2, children };
-  if (only?.type === "emphasis" || only?.type === "delete") {
-    return comparableBold(only, [comparableBold(node2, only.children)]);
-  }
-  if (only?.type === "link") {
-    const label = [];
-    for (const part of only.children) {
-      for (const child2 of part.type === "strong" ? part.children : [part]) appendComparable(label, child2);
-    }
-    return { ...only, children: [comparableBold(node2, label)] };
-  }
-  return { ...node2, children };
-}
-function comparableLines(node2, children) {
-  const parts = [];
-  let line2 = [];
-  const separate = (breakNode) => {
-    if (line2.length > 0) parts.push(comparableBold(node2, line2));
-    parts.push(breakNode);
-    line2 = [];
-  };
-  for (const child2 of children) {
-    if (child2.type === "break") separate(child2);
-    else if (child2.type === "text" && /[\r\n]/.test(child2.value)) {
-      let at = 0;
-      const value = child2.value;
-      for (const newline of value.matchAll(/\r\n?|\n/g)) {
-        let from = newline.index;
-        let to = from + newline[0].length;
-        while (from > at && /[^\S\r\n \t]/u.test(value[from - 1])) from--;
-        while (/[^\S\r\n \t]/u.test(value[to] ?? "")) to++;
-        if (from > at) appendComparable(line2, { type: "text", value: value.slice(at, from) });
-        separate({ type: "text", value: value.slice(from, to) });
-        at = to;
-      }
-      if (at < value.length) appendComparable(line2, { type: "text", value: value.slice(at) });
-    } else if (child2.type === "link" && (node2.type === "strong" || node2.type === "emphasis" && child2.children?.length === 1 && child2.children[0]?.type === "strong")) {
-      if (line2.length > 0) parts.push(comparableBold(node2, line2));
-      parts.push(comparableBold(node2, [child2]));
-      line2 = [];
-    } else appendComparable(line2, child2);
-  }
-  if (line2.length > 0) parts.push(comparableBold(node2, line2));
-  return parts.length > 0 ? parts : [{ ...node2, children }];
-}
-function containsStrong(node2) {
-  return node2.type === "strong" || (node2.children?.some(containsStrong) ?? false);
-}
-function comparableBoldForms(node2, insideStrong = false) {
-  if (node2.children === void 0) return [node2];
-  if (node2.type === "strong" || node2.type === "emphasis") node2 = coextensiveBoldForms(node2);
-  const children = [];
-  for (const child2 of node2.children) {
-    for (const part of comparableBoldForms(child2, insideStrong || node2.type === "strong")) appendComparable(children, part);
-  }
-  switch (node2.type) {
-    case "strong":
-      return comparableLines(node2, children);
-    case "emphasis":
-    case "link":
-    case "delete":
-      if (insideStrong || children.some(containsStrong)) return comparableLines(node2, children);
-      break;
-  }
-  return [{ ...node2, children }];
-}
-function hasOuterStars(body2, node2) {
-  if (node2.type !== "emphasis" || node2.position === void 0) return false;
-  const { children } = node2;
-  return body2.slice(start(node2), start(node2) + 2) === "**" && body2.slice(end(node2) - 2, end(node2)) === "**" && children.length >= 3 && children.length % 2 === 1 && children.every((child2, index2) => index2 % 2 === 0 ? child2.type === "emphasis" && child2.children.every((part) => part.type === "text") : child2.type === "text" && /^[ \t]+$/.test(child2.value));
-}
-function coextensiveBoldForms(node2) {
-  let inner = node2;
-  let strong2 = false;
-  let emphasis2 = false;
-  for (; ; ) {
-    strong2 ||= inner.type === "strong";
-    emphasis2 ||= inner.type === "emphasis";
-    const child2 = inner.children[0];
-    if (inner.children.length !== 1 || child2?.type !== "strong" && child2?.type !== "emphasis") break;
-    inner = child2;
-  }
-  if (strong2 && emphasis2) return { type: "emphasis", children: [{ type: "strong", children: inner.children }] };
-  return inner;
-}
-function withoutTrailingNewlines(text6) {
-  let end2 = text6.length;
-  while (end2 > 0 && text6[end2 - 1] === "\n") end2--;
-  return end2 === text6.length ? text6 : text6.slice(0, end2);
-}
-function codeSpanText(inner) {
-  return inner.length > 2 && inner.startsWith(" ") && inner.endsWith(" ") && /[^ ]/.test(inner) ? inner.slice(1, -1) : inner;
-}
-function linearDropsCodeSpaces(code4) {
-  if (code4.includes("`")) return false;
-  return /^ {3,}$/.test(code4) || code4.length > 2 && code4.startsWith(" ") && code4.endsWith(" ");
-}
-function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldForms2, ignoreBold }) {
-  const nested = nestedFileBlocksOnItemLine(body2);
-  const plainPlus = plainPlusEscapes(nested);
-  const marked = markFileBlockStarts(nested.replace(/\\[$+]/g, (escape2, at) => escape2 === "\\+" && plainPlus(at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]));
-  const tree = parse2(marked, [], true);
-  for (const child2 of tree.children) if (child2.type === "code") child2.value = withoutTrailingNewlines(child2.value);
-  const escapedPlus = LINEAR_SYNTAX_ESCAPES["\\+"];
-  visit2(tree, (node2) => {
-    if (node2.type !== "listItem" || node2.children.length !== 1) return;
-    const [paragraph2] = node2.children;
-    if (paragraph2?.type !== "paragraph" || paragraph2.position?.start.line !== paragraph2.position?.end.line) return;
-    const [text6] = paragraph2.children;
-    if (text6?.type === "text" && text6.value.startsWith(escapedPlus) && SECTION_TITLE.test("+" + text6.value.slice(1))) {
-      text6.value = "+" + text6.value.slice(1);
-    }
-  });
-  const strip = (node2, paragraphLine) => {
-    const { position: _position, ...rest } = node2;
-    if ("url" in rest) rest.url = normalizeUri(rest.url);
-    if (node2.type === "inlineCode") return { ...rest, value: node2.value.replace(/\r\n?|\n/g, " ") };
-    if (linearNumberSpacing && node2.type === "text" && paragraphLine !== void 0) {
-      const separator = paragraphLine ? /(^|\n)([ \t]*\d+\.)[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g : /(\n)([ \t]*\d+\.)[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g;
-      return { ...rest, value: node2.value.replace(separator, "$1$2 ") };
-    }
-    if ("children" in node2) {
-      const children = [];
-      for (const [index2, child2] of node2.children.entries()) {
-        const startsLine = node2.type === "paragraph" ? index2 === 0 || node2.children[index2 - 1]?.type === "break" : void 0;
-        const part = strip(child2, startsLine);
-        if ((ignoreBold || node2.type === "strong") && part.type === "strong" || linearBoldForms2 && hasOuterStars(marked, child2)) {
-          for (const nested2 of part.children) appendComparable(children, nested2);
-        } else {
-          appendComparable(children, part);
-        }
-      }
-      return { ...rest, children };
-    }
-    return rest;
-  };
-  const comparableTree = strip(tree);
-  return linearBoldForms2 ? comparableBoldForms(comparableTree)[0] : comparableTree;
-}
-function quotePrefix(line2) {
-  let end2 = 0;
-  let lastQuote = 0;
-  for (; ; ) {
-    let at = end2;
-    while (at - end2 < 3 && line2[at] === " ") at++;
-    if (line2[at] !== ">") return { end: end2, lastQuote };
-    lastQuote = at + 1;
-    end2 = line2[lastQuote] === " " ? lastQuote + 1 : lastQuote;
-  }
-}
-var MARKER_REST = /^( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
-function bareMarker(line2) {
-  const { end: end2 } = quotePrefix(line2);
-  const marker = MARKER_REST.exec(line2.slice(end2));
-  return marker === null ? null : { prefix: line2.slice(0, end2), spaces: marker[1], bullet: marker[2] };
-}
-function opensIndentedBracket(line2) {
-  let at = quotePrefix(line2).lastQuote;
-  if (line2[at] !== " ") return false;
-  while (line2[at] === " ") at++;
-  return line2[at] === "[";
-}
-function maybeNestedBlock(lines2) {
-  for (let index2 = 1; index2 + 1 < lines2.length; index2++) {
-    if (/\S/.test(lines2[index2 - 1]) && opensIndentedBracket(lines2[index2 + 1]) && bareMarker(lines2[index2]) !== null) return true;
-  }
-  return false;
-}
-function trimLineEnd(line2) {
-  let end2 = line2.length;
-  while (end2 > 0 && (line2[end2 - 1] === " " || line2[end2 - 1] === "	" || line2[end2 - 1] === "\r")) end2--;
-  return line2.slice(0, end2);
-}
-function nestedFileBlocksOnItemLine(body2) {
-  const lines2 = body2.split("\n");
-  if (!maybeNestedBlock(lines2)) return body2;
-  const joins = /* @__PURE__ */ new Map();
-  visit2(parse2(body2), (node2) => {
-    if (node2.type !== "paragraph") return;
-    for (const [index2, link2] of node2.children.entries()) {
-      const before = node2.children[index2 - 1];
-      if (link2.type !== "link" || before?.type !== "text") continue;
-      const linkLine = link2.position.start.line - 1;
-      const markerLine = linkLine - 1;
-      if (markerLine < node2.position.start.line || before.position.start.line - 1 > markerLine) continue;
-      const marker = bareMarker(lines2[markerLine]);
-      if (marker === null) continue;
-      const { prefix, spaces, bullet } = marker;
-      const column = prefix.length + spaces.length + bullet.length + 1;
-      const line2 = lines2[linkLine];
-      if (link2.position.start.column - 1 !== column || line2.slice(0, column) !== prefix + " ".repeat(column - prefix.length)) continue;
-      if (link2.position.end.line - 1 !== linkLine || line2.slice(link2.position.end.column - 1).trim() !== "") continue;
-      joins.set(markerLine, column);
-      break;
-    }
-  });
-  if (joins.size === 0) return body2;
-  const result = [];
-  for (let index2 = 0; index2 < lines2.length; index2++) {
-    const column = joins.get(index2);
-    if (column === void 0) {
-      result.push(lines2[index2]);
-      continue;
-    }
-    result.push(`${trimLineEnd(lines2[index2])} ${lines2[index2 + 1].slice(column)}`);
-    index2++;
-  }
-  return result.join("\n");
-}
-function isCalloutComment(node2) {
-  return node2?.type === "html" && /^<!--\s*linear:callout\b[^]*?-->$/.test(node2.value);
-}
-var ALERT = /^\[!\w+\][ \t]*$/;
-var calloutSource;
-function isCallout(node2, source) {
-  if (node2.type !== "blockquote" || !node2.position) return false;
-  if (calloutSource?.source !== source) calloutSource = { source, lines: source.split("\n") };
-  const first = calloutSource.lines[node2.position.start.line - 1] ?? "";
-  return ALERT.test(first.replace(/\r$/, "").replace(/^ {0,3}> ?/, ""));
-}
-function quoteLines(text6, codeLines) {
-  return text6.split("\n").map((line2, index2) => line2 === "" && !codeLines.has(index2 + 1) ? ">" : `> ${line2}`).join("\n");
-}
-function start(node2) {
-  return node2.position?.start.offset ?? 0;
-}
-function advanceColumn(column, char) {
-  return char === "	" ? column + 4 - column % 4 : column + 1;
-}
-function end(node2) {
-  return node2.position?.end.offset ?? 0;
-}
-var NESTED_MARKER_TEXT = /^(?:(?:[*+-]|\d{1,9}[.)])[ \t]+\S|(?:[*+-]|\d{1,9}\.)[ \t]*$)/;
-function nestsMarkerText(body2, item) {
-  const [first] = item.children;
-  if (item.checked != null || first?.type !== "paragraph" || first.children[0]?.type !== "text") return false;
-  if (body2.slice(start(item), start(first)).includes("\n")) return false;
-  return NESTED_MARKER_TEXT.test(body2.slice(start(first), end(first)));
-}
-function endingRow(body2, table) {
-  return table.children.slice(1).find((row) => !body2.slice(start(row), end(row)).includes("|"));
-}
-function line(node2) {
-  return node2.position?.start.line ?? 1;
-}
-function visit2(node2, enter, ancestors = []) {
-  const parents = [...ancestors];
-  const stack = [];
-  let count4 = 0;
-  for (; ; ) {
-    if (parents.length > MARKDOWN_MAX_DEPTH) throw new MarkdownLimitError("depth");
-    if (++count4 > MARKDOWN_MAX_NODES) throw new MarkdownLimitError("nodes");
-    enter(node2, parents);
-    if ("children" in node2 && node2.children.length > 0) {
-      stack.push({ node: node2, next: 1 });
-      parents.push(node2);
-      node2 = node2.children[0];
-      continue;
-    }
-    while (stack.length > 0) {
-      const frame = stack.at(-1);
-      if ("children" in frame.node && frame.next < frame.node.children.length) {
-        node2 = frame.node.children[frame.next++];
-        break;
-      }
-      stack.pop();
-      parents.pop();
-    }
-    if (stack.length === 0) return;
-  }
-}
-function decodedDestinationPath(url) {
-  const cut = url.search(/[?#]/);
-  const path7 = cut === -1 ? url : url.slice(0, cut);
-  try {
-    return decodeURIComponent(path7);
-  } catch {
-    return path7;
-  }
-}
-function resolveTarget(documentPath2, url) {
-  if (url === "" || url.startsWith("#") || url.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
-  const path7 = decodedDestinationPath(url);
-  if (path7 === "") return null;
-  const joined = posix.normalize(posix.join(posix.dirname(documentPath2), path7));
-  if (joined === "." || joined === ".." || joined.startsWith("../") || joined.endsWith("/")) return null;
-  return joined;
-}
-function allowedLink(url) {
-  const normalized = url.replace(/[\u0000-\u0020\u007f]/g, "");
-  return !/^[a-z][a-z\d+.-]*:/i.test(normalized) || /^(?:https?|mailto):/i.test(normalized);
-}
-function destination(url) {
-  return url.replace(/ /g, "%20").replace(/\\(?=[!-/:-@[-`{-~])/g, "\\\\").replace(
-    /&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|([A-Za-z][A-Za-z0-9]{1,31});)/g,
-    (ampersand, name) => name === void 0 || decodeNamedCharacterReference(name) !== false ? "&amp;" : ampersand
-  );
-}
-function linkDestination(url) {
-  const cut = url.search(/[?#]/);
-  const path7 = asciiHost(cut === -1 ? url : url.slice(0, cut));
-  const rest = cut === -1 ? "" : url.slice(cut);
-  const literal = !/^[a-z][a-z0-9+.-]*:/i.test(url) && !decodes(path7);
-  const encode2 = (text6, percent) => text6.replace(new RegExp(`[<>\\r\\n\\\\|^{}]|${percent.source}`, "g"), (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`).replace(/[^\0-\x7f]/gu, (char) => [...UTF8.encode(char)].map((byte) => `%${byte.toString(16).toUpperCase()}`).join(""));
-  const lone = /%(?![0-9A-Fa-f]{2})/;
-  return `<${destination(encode2(path7, literal ? /%/ : lone) + encode2(rest, lone))}>`;
-}
-var UTF8 = new TextEncoder();
-function asciiHost(path7) {
-  const match = /^([a-z][a-z0-9+.-]*:\/\/(?:[^/\\@]*@)?)([^/\\:]*)/i.exec(path7);
-  if (match === null || /^[\0-\x7f]*$/.test(match[2])) return path7;
-  const host = domainToASCII2(match[2]);
-  return host === "" ? path7 : match[1] + host + path7.slice(match[0].length);
-}
-function decodes(text6) {
-  try {
-    decodeURIComponent(text6);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function imageDestination(url) {
-  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-function bracketedLabel(source, open4, limit) {
-  const end2 = Math.min(limit, source.length);
-  const closing = (spans) => {
-    let depth2 = 0;
-    for (let at = open4; at < end2; at++) {
-      const char = source[at];
-      if (char === "\\") at++;
-      else if (spans.has(at)) at = spans.get(at) - 1;
-      else if (char === "[") depth2++;
-      else if (char === "]" && --depth2 === 0) return at;
-    }
-    return -1;
-  };
-  let close = closing(new Map(codeSpans(source, open4, end2)));
-  if (!(close !== -1 && (close === end2 - 1 || source[close + 1] === "(" || source[close + 1] === "["))) close = closing(/* @__PURE__ */ new Map());
-  return close === -1 ? "" : source.slice(open4 + 1, close);
-}
-function codeSpans(source, from, to) {
-  const htmlEnd = inlineHtmlEnds(source, from, to);
-  const runEnd = (at) => {
-    while (at < to && source[at] === "`") at++;
-    return at;
-  };
-  const runs = /* @__PURE__ */ new Map();
-  for (let at = from; at < to; ) {
-    if (source[at] !== "`") {
-      at++;
-      continue;
-    }
-    const after = runEnd(at);
-    const starts = runs.get(after - at) ?? [];
-    starts.push(at);
-    runs.set(after - at, starts);
-    at = after;
-  }
-  const spans = [];
-  for (let at = from; at < to; ) {
-    if (source[at] === "\\") {
-      at += 2;
-      continue;
-    }
-    if (source[at] === "<") {
-      at = htmlEnd(at) ?? at + 1;
-      continue;
-    }
-    if (source[at] !== "`") {
-      at++;
-      continue;
-    }
-    const open4 = runEnd(at);
-    const width = open4 - at;
-    const close = firstAtOrAfter(runs.get(width) ?? [], open4);
-    if (close === void 0) {
-      at = open4;
-    } else {
-      spans.push([at, close + width]);
-      at = close + width;
-    }
-  }
-  return spans;
-}
-var AUTOLINK_OR_TAG = new RegExp([
-  /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/.source,
-  /<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>/.source,
-  /<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>/.source,
-  /<\/[A-Za-z][A-Za-z0-9-]*\s*>/.source
-].join("|"), "y");
-var HTML_UNTIL = [
-  [/<!--(?:-?>)?/y, "-->"],
-  [/<\?/y, "?>"],
-  [/<![A-Za-z]/y, ">"],
-  [/<!\[CDATA\[/y, "]]>"]
-];
-function inlineHtmlEnds(source, from, to) {
-  let text6;
-  const next = /* @__PURE__ */ new Map();
-  const closer = (marker, start3) => {
-    let found = next.get(marker);
-    if (found === void 0 || found !== -1 && found < start3) {
-      found = text6.indexOf(marker, start3);
-      next.set(marker, found);
-    }
-    return found;
-  };
-  return (at) => {
-    text6 ??= source.slice(from, to);
-    const offset = at - from;
-    for (const [open4, marker] of HTML_UNTIL) {
-      open4.lastIndex = offset;
-      const opened = open4.exec(text6);
-      if (!opened) continue;
-      if (opened[0].endsWith(">")) return at + opened[0].length;
-      const close = closer(marker, offset + opened[0].length);
-      return close === -1 ? void 0 : from + close + marker.length;
-    }
-    AUTOLINK_OR_TAG.lastIndex = offset;
-    const match = AUTOLINK_OR_TAG.exec(text6);
-    return match ? at + match[0].length : void 0;
-  };
-}
-function firstAtOrAfter(values, min) {
-  let low = 0;
-  let high = values.length;
-  while (low < high) {
-    const middle = low + high >>> 1;
-    if (values[middle] < min) low = middle + 1;
-    else high = middle;
-  }
-  return values[low];
-}
-function listKind(list4, item) {
-  return item?.checked != null ? "task" : list4.ordered ? "ordered" : "bullet";
-}
-function opensWithText(list4) {
-  const [item] = list4.children;
-  return item !== void 0 && item.children[0]?.type === "paragraph" && (listKind(list4, item) !== "ordered" || (list4.start ?? 1) === 1);
-}
-var MAX_LIST_NUMBER = 999999999;
-function listParts(list4, source) {
-  const parts = [];
-  list4.children.forEach((item, index2) => {
-    const previous3 = parts.at(-1);
-    if (previous3 !== void 0 && !splitsAfter(list4.children[index2 - 1], item)) {
-      previous3.items.push(item);
-      return;
-    }
-    const counted = previous3 === void 0 ? list4.start ?? 1 : previous3.first + previous3.items.length;
-    const own6 = Number(/^\d+/.exec(source.slice(start(item)))?.[0] ?? counted);
-    parts.push({ items: [item], first: previous3 === void 0 ? counted : own6 + list4.children.length - index2 - 1 <= MAX_LIST_NUMBER ? own6 : counted });
-  });
-  return parts;
-}
-function splitsAfter(item, next) {
-  return item.children.length === 0 && next.position.start.line - item.position.end.line > 2;
-}
-
-// src/mapping/front-matter.ts
-var OPENING_FENCE = /^﻿?---[ \t]*\r?\n/;
-var CLOSING_FENCE = /^---[ \t]*(?:\r?\n|$)/m;
-function findFrontMatter(text6) {
-  const { head } = splitFile(text6);
-  const opening = OPENING_FENCE.exec(head);
-  if (opening === null) return null;
-  const rest = head.slice(opening[0].length);
-  const closing = CLOSING_FENCE.exec(rest);
-  return closing === null ? null : { yaml: rest.slice(0, closing.index) };
-}
-function parseQuietly(yaml) {
-  return (0, import_yaml.parse)(yaml, { logLevel: "error", prettyErrors: false });
-}
-
-// src/mapping/annotations.ts
-var ANNOTATION_FILE = "README.md";
-var TEAM_KEY = "linear-team";
-var PROJECT_KEY = "linear-project";
-var MENTIONS_KEY = new RegExp(`^[ \\t]*["']?(?:${TEAM_KEY}|${PROJECT_KEY})["']?[ \\t]*:`, "m");
-function readAnnotation(readme, text6) {
-  const folder = folderOf(readme);
-  const frontMatter = findFrontMatter(text6);
-  if (frontMatter === null) return { annotation: null };
-  let data;
-  try {
-    data = parseQuietly(frontMatter.yaml);
-  } catch {
-    if (!MENTIONS_KEY.test(frontMatter.yaml)) return { annotation: null };
-    return { problem: { readme, kind: "invalid-annotation", message: message("annotations.invalid-yaml", { readme, teamKey: TEAM_KEY, projectKey: PROJECT_KEY }) } };
-  }
-  if (data === null || typeof data !== "object" || Array.isArray(data)) return { annotation: null };
-  const annotation = { folder, readme };
-  for (const [key, field] of [[TEAM_KEY, "team"], [PROJECT_KEY, "project"]]) {
-    if (!Object.hasOwn(data, key)) continue;
-    const value = data[key];
-    if (typeof value !== "string" || value.trim() === "") {
-      return { problem: { readme, kind: "invalid-annotation", message: message("annotations.empty-name", { readme, key }) } };
-    }
-    annotation[field] = value.trim();
-  }
-  return { annotation: annotation.team === void 0 && annotation.project === void 0 ? null : annotation };
-}
-function resolveZones(annotations) {
-  const zones = /* @__PURE__ */ new Map();
-  const problems = [];
-  const ordered = annotations.map((annotation) => ({ annotation, depth: depth(annotation.folder) })).sort((a, b) => a.depth - b.depth || compare(a.annotation.folder, b.annotation.folder)).map(({ annotation }) => annotation);
-  const tree = new ZoneTree();
-  for (const annotation of ordered) {
-    const inherited = tree.nearest(parentOf(annotation.folder));
-    const { readme } = annotation;
-    if (annotation.team !== void 0 && inherited !== void 0) {
-      problems.push({ readme, kind: "nested-team", message: message("annotations.nested-team", { readme, team: inherited.team, folder: display(inherited.teamFolder) }) });
-      continue;
-    }
-    if (annotation.project !== void 0 && inherited?.project !== void 0) {
-      problems.push({
-        readme,
-        kind: "nested-project",
-        message: message("annotations.nested-project", { readme, project: inherited.project, folder: display(inherited.projectFolder ?? "") })
-      });
-      continue;
-    }
-    if (annotation.team === void 0 && inherited === void 0) {
-      problems.push({ readme, kind: "project-without-team", message: message("annotations.project-without-team", { readme }) });
-      continue;
-    }
-    const zone = annotation.team !== void 0 ? { team: annotation.team, teamFolder: annotation.folder } : { ...inherited };
-    if (annotation.project !== void 0) {
-      zone.project = annotation.project;
-      zone.projectFolder = annotation.folder;
-    }
-    zones.set(annotation.folder, zone);
-    tree.add(annotation.folder, zone);
-  }
-  return { zones, problems };
-}
-var ZoneTree = class {
-  root = { children: /* @__PURE__ */ new Map() };
-  add(folder, zone) {
-    let node2 = this.root;
-    if (folder !== "") {
-      for (const name of folder.split("/")) {
-        let child2 = node2.children.get(name);
-        if (child2 === void 0) {
-          child2 = { children: /* @__PURE__ */ new Map() };
-          node2.children.set(name, child2);
-        }
-        node2 = child2;
-      }
-    }
-    node2.zone = zone;
-    node2.folder = folder;
-  }
-  /** The zone of the nearest annotated folder at or above `folder`. */
-  nearest(folder) {
-    return this.nearestNode(folder)?.zone;
-  }
-  /** The node of the nearest annotated folder at or above `folder`. */
-  nearestNode(folder) {
-    if (folder === null) return void 0;
-    let node2 = this.root;
-    let found = node2.zone === void 0 ? void 0 : node2;
-    if (folder === "") return found;
-    for (let start3 = 0; ; ) {
-      const slash = folder.indexOf("/", start3);
-      node2 = node2.children.get(slash === -1 ? folder.slice(start3) : folder.slice(start3, slash));
-      if (node2 === void 0) return found;
-      if (node2.zone !== void 0) found = node2;
-      if (slash === -1) return found;
-      start3 = slash + 1;
-    }
-  }
-};
-var zoneTrees = /* @__PURE__ */ new WeakMap();
-function nearestZone(zones, folder) {
-  const cached = zoneTrees.get(zones);
-  if (cached !== void 0 && cached.size === zones.size) {
-    const found = cached.tree.nearestNode(folder);
-    if (found === void 0 || zones.get(found.folder) === found.zone) return found?.zone;
-  }
-  const tree = new ZoneTree();
-  for (const [annotated, zone] of zones) tree.add(annotated, zone);
-  zoneTrees.set(zones, { size: zones.size, tree });
-  return tree.nearest(folder);
-}
-function folderOf(path7) {
-  const slash = path7.lastIndexOf("/");
-  return slash === -1 ? "" : path7.slice(0, slash);
-}
-function parentOf(folder) {
-  return folder === "" ? null : folderOf(folder);
-}
-function depth(folder) {
-  return folder === "" ? 0 : folder.split("/").length;
-}
-function compare(a, b) {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-function display(folder) {
-  return folder === "" ? "the repository root" : `${folder}/`;
-}
-
-// src/state/git.ts
-import { existsSync as existsSync2 } from "node:fs";
-import { join as join7 } from "node:path";
-
-// src/state/batch.ts
-import { spawn as spawn2 } from "node:child_process";
-import { statSync } from "node:fs";
-var IDLE_MS = 1e3;
-var Queue = class {
-  items = [];
-  head = 0;
-  get size() {
-    return this.items.length - this.head;
-  }
-  push(item) {
-    this.items.push(item);
-  }
-  first() {
-    return this.items[this.head];
-  }
-  shift() {
-    this.head++;
-    if (this.head > 1024 && this.head * 2 > this.items.length) {
-      this.items = this.items.slice(this.head);
-      this.head = 0;
-    }
-  }
-  drain() {
-    const rest = this.items.slice(this.head);
-    this.items = [];
-    this.head = 0;
-    return rest;
-  }
-};
-var BatchProcess = class {
-  options;
-  running;
-  starting;
-  directory;
-  constructor(options) {
-    this.options = options;
-  }
-  /** Writes `input` and waits for its answer. */
-  async request(input, request2) {
-    let running = this.running;
-    if (running === void 0 || this.directory === void 0 || identityOf(this.directory) !== running.identity) running = await this.start();
-    const current = running;
-    return new Promise((resolve3, reject) => {
-      if (current.idle !== void 0) clearTimeout(current.idle);
-      current.idle = void 0;
-      if (current.pending.size === 0) hold(current.child, true);
-      current.pending.push({ request: request2, resolve: resolve3, reject });
-      current.child.stdin.write(input);
-    });
-  }
-  /** Ends the process; the next request starts a new one. */
-  close() {
-    const running = this.running;
-    this.running = void 0;
-    if (running === void 0) return;
-    if (running.idle !== void 0) clearTimeout(running.idle);
-    running.child.stdin.end();
-  }
-  start() {
-    if (this.starting === void 0) {
-      const starting = (async () => {
-        this.close();
-        this.directory ??= await this.options.objectDirectory();
-        const running = this.spawn(this.directory);
-        this.running = running;
-        return running;
-      })();
-      this.starting = starting;
-      const clear = () => {
-        if (this.starting === starting) this.starting = void 0;
-      };
-      starting.then(clear, clear);
-    }
-    return this.starting;
-  }
-  spawn(directory) {
-    const { dir, args, env } = this.options;
-    const child2 = spawn2("git", args, { cwd: dir, env: { ...env(), GIT_FLUSH: "1" }, stdio: ["pipe", "pipe", "pipe"] });
-    const running = { child: child2, identity: identityOf(directory), pending: new Queue(), chunks: [], length: 0, need: 0, stderr: "", idle: void 0 };
-    child2.stdout.on("data", (chunk) => this.receive(running, chunk));
-    child2.stderr.on("data", (chunk) => {
-      if (running.stderr.length < 64 * 1024) running.stderr += chunk.toString("utf8");
-    });
-    child2.stdin.on("error", () => {
-    });
-    let ended = false;
-    const end2 = (code4) => {
-      if (ended) return;
-      ended = true;
-      if (running.idle !== void 0) clearTimeout(running.idle);
-      if (this.running === running) this.running = void 0;
-      const error2 = new GitError(args, code4, running.stderr);
-      const waiting = running.pending.drain();
-      for (const request2 of waiting) request2.reject(error2);
-      if (waiting.length > 0) this.options.onIdle?.();
-    };
-    child2.on("error", () => end2(-1));
-    child2.on("close", (code4) => end2(code4 ?? -1));
-    hold(child2, false);
-    return running;
-  }
-  receive(running, chunk) {
-    running.chunks.push(chunk);
-    running.length += chunk.length;
-    if (running.length < running.need) return;
-    let buffered = running.chunks.length === 1 ? running.chunks[0] : Buffer.concat(running.chunks);
-    running.chunks = [buffered];
-    while (running.pending.size > 0) {
-      const waiting = running.pending.first();
-      let parsed;
-      try {
-        parsed = this.options.parse(buffered, waiting.request);
-      } catch (error2) {
-        this.broken(running, error2);
-        return;
-      }
-      if (parsed === void 0 || "need" in parsed) {
-        running.need = parsed === void 0 ? buffered.length + 1 : parsed.need;
-        break;
-      }
-      buffered = buffered.subarray(parsed.bytes);
-      running.chunks = buffered.length === 0 ? [] : [buffered];
-      running.length = buffered.length;
-      running.need = 0;
-      running.pending.shift();
-      if (running.pending.size === 0) this.rest(running);
-      waiting.resolve(parsed.answer);
-    }
-  }
-  /** Nothing waits: the process must not keep the program running, and it ends unless a request comes soon. */
-  rest(running) {
-    hold(running.child, false);
-    running.idle = setTimeout(() => {
-      if (this.running === running) this.close();
-    }, IDLE_MS);
-    running.idle.unref();
-    this.options.onIdle?.();
-  }
-  broken(running, cause) {
-    if (this.running === running) this.running = void 0;
-    const error2 = new GitError(this.options.args, -1, cause.message);
-    for (const waiting of running.pending.drain()) waiting.reject(error2);
-    running.child.kill("SIGKILL");
-    this.options.onIdle?.();
-  }
-};
-function parseLine(buffer) {
-  const newline = buffer.indexOf(10);
-  return newline < 0 ? void 0 : { answer: buffer.subarray(0, newline).toString("utf8"), bytes: newline + 1 };
-}
-function hold(child2, waiting) {
-  for (const handle2 of [child2, child2.stdin, child2.stdout, child2.stderr]) {
-    if (waiting) handle2.ref();
-    else handle2.unref();
-  }
-}
-function identityOf(directory) {
-  try {
-    const stat2 = statSync(directory);
-    return `${stat2.dev}:${stat2.ino}`;
-  } catch {
-    return "missing";
-  }
-}
-
-// src/state/object-reader.ts
-var HEADER = /^([0-9a-f]{40}|[0-9a-f]{64}) ([a-z]+) ([0-9]+)$/;
-function batchName(name) {
-  return name !== "" && !/[\n\r\0]/.test(name) && name.trim() === name;
-}
-var ObjectReader = class {
-  process;
-  /**
-   * @param dir the directory the process runs in
-   * @param env the environment of the process
-   * @param objectDirectory gives the absolute path of the repository's object directory
-   */
-  constructor(dir, env, objectDirectory) {
-    this.process = new BatchProcess({ dir, args: ["cat-file", "--batch-command"], env, objectDirectory, parse: parse4 });
-  }
-  /** The object a name resolves to, with its content; null when the name resolves to no object. */
-  contents(name) {
-    return this.ask(name, true);
-  }
-  /** The id, type and size of the object a name resolves to; null when it resolves to no object. */
-  info(name) {
-    return this.ask(name, false);
-  }
-  async ask(name, contents) {
-    if (!batchName(name)) throw new Error(message("objects.batch-name", { name: JSON.stringify(name) }));
-    return this.process.request(`${contents ? "contents" : "info"} ${name}
-`, { name, contents });
-  }
-};
-function parse4(buffer, request2) {
-  const newline = buffer.indexOf(10);
-  if (newline < 0) return void 0;
-  const header = buffer.subarray(0, newline).toString("utf8");
-  const match = HEADER.exec(header);
-  if (match === null) {
-    if (header === `${request2.name} missing` || header === `${request2.name} ambiguous`) return { answer: null, bytes: newline + 1 };
-    throw new Error(message("git.unreadable-answer", { command: "cat-file" }));
-  }
-  const info2 = { oid: match[1], type: match[2], size: Number(match[3]) };
-  if (!request2.contents) return { answer: info2, bytes: newline + 1 };
-  const end2 = newline + 1 + info2.size;
-  if (buffer.length < end2 + 1) return { need: end2 + 1 };
-  return { answer: { ...info2, content: Buffer.from(buffer.subarray(newline + 1, end2)) }, bytes: end2 + 1 };
-}
-
-// src/state/object-writer.ts
-import { mkdtempSync as mkdtempSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { tmpdir as tmpdir2 } from "node:os";
-import { join as join5 } from "node:path";
-var ObjectWriter = class {
-  blobs;
-  trees;
-  /** Blob content waits in a file here while git reads it; the folder is there only while blobs are being written. */
-  folder;
-  files = 0;
-  writing = 0;
-  /** Writes waiting for one of the `BLOBS_AT_ONCE` places, so the folder holds a bounded number of blobs. */
-  waiting = [];
-  /**
-   * @param dir the directory the processes run in
-   * @param env the environment of the processes
-   * @param objectDirectory gives the absolute path of the repository's object directory
-   */
-  constructor(dir, env, objectDirectory) {
-    const oid = (buffer) => parseLine(buffer);
-    this.blobs = new BatchProcess({
-      dir,
-      env,
-      objectDirectory,
-      parse: oid,
-      args: ["-c", "core.fsyncMethod=fsync", "-c", `core.bigFileThreshold=${Number.MAX_SAFE_INTEGER}`, "hash-object", "-w", "--no-filters", "--stdin-paths"]
-    });
-    this.trees = new BatchProcess({ dir, env, objectDirectory, parse: oid, args: ["mktree", "-z", "--batch"] });
-  }
-  /**
-   * Stores content as a blob, exactly as given (no clean filters, no LFS).
-   * Content given as a function is read only when the blob's turn comes.
-   */
-  async blob(content4) {
-    if (this.writing >= BLOBS_AT_ONCE) await new Promise((resolve3) => this.waiting.push(resolve3));
-    else this.writing++;
-    let path7;
-    try {
-      this.folder ??= mkdtempSync2(join5(tmpdir2(), "blob-"));
-      path7 = join5(this.folder, String(this.files++));
-      writeFileSync2(path7, typeof content4 === "function" ? content4() : content4, { mode: 384 });
-      return checkOid(await this.blobs.request(`${path7}
-`, path7), "hash-object");
-    } finally {
-      if (path7 !== void 0) rmSync2(path7, { force: true });
-      const next = this.waiting.shift();
-      if (next !== void 0) next();
-      else if (--this.writing === 0) this.clearFolder();
-    }
-  }
-  /** Stores a tree of these entries; git sorts them. */
-  async tree(entries) {
-    const records = entries.map((entry) => {
-      if (entry.name.length === 0 || entry.name.includes(0) || entry.name.includes(47)) throw new Error(message("objects.invalid-entry-name", { name: JSON.stringify(entry.name.toString("utf8")) }));
-      return Buffer.concat([Buffer.from(`${entry.mode} ${entry.type} ${entry.oid}	`), entry.name, NUL]);
-    });
-    const input = Buffer.concat([...records, NUL]);
-    try {
-      return checkOid(await this.trees.request(input, null), "mktree");
-    } catch (error2) {
-      if (!(error2 instanceof GitError && error2.stderr.includes("is unavailable"))) throw error2;
-      return checkOid(await this.trees.request(input, null), "mktree");
-    }
-  }
-  clearFolder() {
-    const folder = this.folder;
-    this.folder = void 0;
-    if (folder !== void 0) rmSync2(folder, { recursive: true, force: true });
-  }
-};
-var NUL = Buffer.from([0]);
-var BLOBS_AT_ONCE = 8;
-function checkOid(line2, command) {
-  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(line2)) throw new Error(message("git.unreadable-answer", { command }));
-  return line2;
-}
-
-// src/state/spawner.ts
-import { spawn as spawn3 } from "node:child_process";
-var HELPER = String.raw`
-'use strict';
-const { spawn } = require('node:child_process');
-const { createWriteStream } = require('node:fs');
-const { pipeline } = require('node:stream/promises');
-const failure = (error) => ({ message: String(error && error.message), code: error && error.code, errno: error && error.errno, syscall: error && error.syscall, path: error && error.path });
-const reply = (message) => { if (process.connected) process.send(message); };
-function run(id, request) {
-  const child = spawn('git', request.args, { cwd: request.cwd, env: request.env, stdio: [request.file ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
-  const out = [];
-  const err = [];
-  let exceeded;
-  const collector = (chunks, limit) => {
-    let bytes = 0;
-    return (chunk) => {
-      if (exceeded !== undefined) return;
-      bytes += chunk.length;
-      if (limit !== undefined && bytes > limit) {
-        exceeded = limit;
-        child.kill('SIGKILL');
-        return;
-      }
-      chunks.push(chunk);
-    };
-  };
-  // A bounded call stops the command when its standard error passes 64 KiB as well; a call that streams to a file
-  // keeps the first 64 KiB of it and lets the command finish.
-  let kept = 0;
-  const firstPart = (chunk) => { if (kept < 64 * 1024) { kept += chunk.length; err.push(chunk); } };
-  if (!request.file) child.stdout.on('data', collector(out, request.maxOutputBytes));
-  child.stderr.on('data', request.file ? firstPart : collector(err, request.maxOutputBytes !== undefined ? 64 * 1024 : undefined));
-  let failed;
-  const exited = new Promise((resolve) => {
-    child.on('error', (error) => { failed = error; resolve(-1); });
-    child.on('close', (code) => resolve(code === null ? -1 : code));
-  });
-  if (!request.file) {
-    child.stdin.on('error', () => {});
-    child.stdin.end(request.input === undefined ? '' : request.input);
-  }
-  const copied = request.file
-    ? pipeline(child.stdout, createWriteStream(request.file.path, { flags: 'wx', mode: request.file.mode })).catch((error) => { child.kill('SIGKILL'); throw error; })
-    : Promise.resolve();
-  copied.then(() => exited).then((code) => {
-    if (failed !== undefined) return reply({ id, failure: failure(failed) });
-    reply({ id, result: { code, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8'), exceeded } });
-  }, (error) => exited.then(() => reply({ id, failure: failure(failed === undefined ? error : failed) })));
-}
-process.on('message', ({ id, request }) => {
-  // A command that cannot even start (an argument with a NUL in it) fails alone.
-  try { run(id, request); } catch (error) { reply({ id, failure: failure(error) }); }
-});
-process.on('disconnect', () => process.exit(0));
-`;
-var helper;
-var pending = /* @__PURE__ */ new Map();
-var nextId = 0;
-function start2() {
-  const { NODE_OPTIONS: _options, ...env } = process.env;
-  const child2 = spawn3(process.execPath, ["-e", HELPER], { stdio: ["ignore", "ignore", "inherit", "ipc"], serialization: "advanced", env });
-  child2.on("message", (message2) => {
-    const waiting = pending.get(message2.id);
-    if (waiting === void 0) return;
-    pending.delete(message2.id);
-    if (pending.size === 0) hold2(child2, false);
-    if ("result" in message2) waiting.resolve({ ...message2.result, stdout: Buffer.from(message2.result.stdout) });
-    else waiting.reject(Object.assign(new Error(message2.failure.message), withoutUndefined(message2.failure)));
-  });
-  const end2 = (error2) => {
-    if (helper === child2) helper = void 0;
-    for (const [id, waiting] of pending) {
-      pending.delete(id);
-      waiting.reject(error2);
-    }
-  };
-  child2.on("error", end2);
-  child2.on("exit", (code4, signal) => end2(new Error(message("git.starter-ended", { reason: String(signal ?? code4) }))));
-  hold2(child2, false);
-  return child2;
-}
-function hold2(child2, waiting) {
-  const channel = child2.channel;
-  if (waiting) {
-    child2.ref();
-    channel?.ref();
-  } else {
-    child2.unref();
-    channel?.unref();
-  }
-}
-function withoutUndefined(failure) {
-  return Object.fromEntries(Object.entries(failure).filter(([key, value]) => key !== "message" && value !== void 0 && value !== null));
-}
-function spawnGit(request2) {
-  helper ??= start2();
-  const child2 = helper;
-  const id = nextId++;
-  return new Promise((resolve3, reject) => {
-    if (pending.size === 0) hold2(child2, true);
-    pending.set(id, { resolve: resolve3, reject });
-    child2.send({ id, request: request2 });
-  });
-}
-
-// src/state/objects.ts
-import { mkdtemp, rm as rm2 } from "node:fs/promises";
-import { tmpdir as tmpdir3 } from "node:os";
-import { join as join6 } from "node:path";
-var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
-function listTree(git, treeish, maxOutputBytes) {
-  return git.listTree(treeish, maxOutputBytes);
-}
-async function readTreeListing(git, treeish, maxOutputBytes) {
-  let files;
-  try {
-    files = await walkTree(git, treeish, maxOutputBytes === void 0 ? void 0 : { maxOutputBytes, sized: true });
-  } catch (error2) {
-    if (!(error2 instanceof TreeOverLimit)) throw error2;
-    const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
-    return parseTreeListing(stdout);
-  }
-  const sizes = await Promise.all(files.map((file) => file.type === "blob" ? git.objectInfo(file.oid) : null));
-  let bytes = 0;
-  return files.map((file, index2) => {
-    const size = file.type === "blob" ? sizes[index2]?.size ?? Number.NaN : null;
-    if (maxOutputBytes !== void 0) {
-      bytes += file.bytes + Math.max(7, size === null ? 1 : Number.isNaN(size) ? 3 : String(size).length);
-      if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
-    }
-    return { path: file.path, mode: file.mode, type: file.type, oid: file.oid, size };
-  });
-}
-async function listPaths(git, treeish, paths, maxOutputBytes) {
-  const unique = [...new Set(paths)];
-  const inside2 = (path7) => unique.some((other) => other.startsWith(`${path7}/`));
-  if (unique.some((path7) => inside2(path7) || path7.split("/").some((part) => part === "" || part === "." || part === ".."))) {
-    const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", treeish, "--", ...paths], { maxOutputBytes });
-    return parseTreeListing(stdout);
-  }
-  try {
-    return await listPathsInTrees(git, treeish, unique, maxOutputBytes);
-  } catch (error2) {
-    if (!(error2 instanceof TreeOverLimit)) throw error2;
-    const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", treeish, "--", ...paths], { maxOutputBytes });
-    return parseTreeListing(stdout);
-  }
-}
-async function listPathsInTrees(git, treeish, unique, maxOutputBytes) {
-  const root2 = await readTree(git, `${treeish}^{tree}`, maxOutputBytes);
-  if (root2 === null || root2.type !== "tree") throw new GitError(["ls-tree", "--full-tree", treeish], 128, `fatal: not a tree object: ${treeish}`);
-  const rawLength = root2.oid.length / 2;
-  const folders = /* @__PURE__ */ new Map([["", Promise.resolve(parseTree(root2.content, rawLength))]]);
-  const folder = (path7) => {
-    let found2 = folders.get(path7);
-    if (found2 === void 0) {
-      const slash = path7.lastIndexOf("/");
-      found2 = (async () => {
-        const entry = await entryIn(folder(slash < 0 ? "" : path7.slice(0, slash)), path7.slice(slash + 1));
-        if (entry?.mode !== "040000") return null;
-        const tree = await readTree(git, entry.oid, maxOutputBytes);
-        return tree?.type === "tree" ? parseTree(tree.content, rawLength) : null;
-      })();
-      folders.set(path7, found2);
-    }
-    return found2;
-  };
-  const entryIn = async (entries, name) => {
-    const bytes = Buffer.from(name, "utf8");
-    return (await entries)?.find((entry) => entry.name.equals(bytes));
-  };
-  const found = await Promise.all(unique.map(async (path7) => {
-    const slash = path7.lastIndexOf("/");
-    const entry = await entryIn(folder(slash < 0 ? "" : path7.slice(0, slash)), path7.slice(slash + 1));
-    if (entry === void 0) return void 0;
-    const type = entry.mode === "040000" ? "tree" : entry.mode === "160000" ? "commit" : "blob";
-    const size = type === "blob" ? (await git.objectInfo(entry.oid))?.size ?? Number.NaN : null;
-    return { path: path7, bytes: Buffer.from(path7, "utf8"), mode: entry.mode, type, oid: entry.oid, size };
-  }));
-  const listed = found.filter((entry) => entry !== void 0).sort((a, b) => a.bytes.compare(b.bytes));
-  if (maxOutputBytes !== void 0) {
-    let bytes = 0;
-    for (const entry of listed) {
-      bytes += entry.mode.length + entry.type.length + entry.oid.length + entry.bytes.length + 5 + Math.max(7, entry.size === null ? 1 : Number.isNaN(entry.size) ? 3 : String(entry.size).length);
-    }
-    if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
-  }
-  return listed.flatMap(({ path: path7, mode, type, oid, size }) => type === "tree" ? [] : [{ path: path7, mode, type, oid, size }]);
-}
-async function walkTree(git, treeish, limit) {
-  const root2 = await readTree(git, `${treeish}^{tree}`, limit?.maxOutputBytes);
-  if (root2 === null || root2.type !== "tree") throw new GitError(["ls-tree", "-r", "--full-tree", treeish], 128, `fatal: not a tree object: ${treeish}`);
-  const rawLength = root2.oid.length / 2;
-  const files = [];
-  let bytes = 0;
-  const walk = async (content4, prefix) => {
-    const entries = parseTree(content4, rawLength);
-    const subtrees = entries.map((entry) => limit === void 0 && entry.mode === "040000" ? git.readObject(entry.oid) : void 0);
-    for (const read of subtrees) read?.catch(() => {
-    });
-    for (const [index2, entry] of entries.entries()) {
-      const path7 = prefix.length === 0 ? entry.name : Buffer.concat([prefix, SLASH, entry.name]);
-      if (entry.mode === "040000") {
-        const tree = await (subtrees[index2] ?? readTree(git, entry.oid, limit === void 0 ? void 0 : limit.maxOutputBytes - bytes));
-        if (tree === null || tree === void 0 || tree.type !== "tree") throw new GitError(["ls-tree", "-r", "--full-tree", treeish], 128, `fatal: not a tree object: ${entry.oid}`);
-        await walk(tree.content, path7);
-        continue;
-      }
-      const type = entry.mode === "160000" ? "commit" : "blob";
-      const record = entry.mode.length + type.length + entry.oid.length + path7.length + 5;
-      if (limit !== void 0) {
-        bytes += record + (limit.sized ? 7 : -1);
-        if (bytes > limit.maxOutputBytes) throw new GitOutputLimitError(limit.maxOutputBytes);
-      }
-      files.push({ path: path7.toString("utf8"), mode: entry.mode, type, oid: entry.oid, bytes: record });
-    }
-  };
-  await walk(root2.content, Buffer.alloc(0));
-  return files;
-}
-var SLASH = Buffer.from("/");
-var TreeOverLimit = class extends Error {
-};
-async function readTree(git, name, budget) {
-  if (budget === void 0) return git.readObject(name);
-  const info2 = await git.objectInfo(name);
-  if (info2 === null) return null;
-  if (info2.type === "tree" && info2.size > budget) throw new TreeOverLimit();
-  return git.readObject(info2.oid);
-}
-function parseTree(content4, rawLength) {
-  const entries = [];
-  let offset = 0;
-  while (offset < content4.length) {
-    const space = content4.indexOf(32, offset);
-    const nul = content4.indexOf(0, space + 1);
-    if (space < 0 || nul < 0 || nul + 1 + rawLength > content4.length) throw new Error(message("objects.bad-tree"));
-    const mode = canonicalMode(Number.parseInt(content4.subarray(offset, space).toString("latin1"), 8));
-    entries.push({ mode, name: content4.subarray(space + 1, nul), oid: content4.subarray(nul + 1, nul + 1 + rawLength).toString("hex") });
-    offset = nul + 1 + rawLength;
-  }
-  return entries;
-}
-function canonicalMode(mode) {
-  const kind = mode & 61440;
-  const canonical = kind === 32768 ? 32768 | (mode & 64 ? 493 : 420) : kind === 40960 ? 40960 : kind === 16384 ? 16384 : 57344;
-  return canonical.toString(8).padStart(6, "0");
-}
-function parseTreeListing(stdout) {
-  const entries = [];
-  for (const record of stdout.toString("utf8").split("\0")) {
-    if (record === "") continue;
-    const tab = record.indexOf("	");
-    const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
-    if (type !== "blob" && type !== "commit") continue;
-    entries.push({
-      path: record.slice(tab + 1),
-      mode,
-      type,
-      oid,
-      size: size === "-" || size === void 0 ? null : Number(size)
-    });
-  }
-  return entries;
-}
-function readBlobs(git, oids, maxOutputBytes) {
-  return git.readBlobs(oids, maxOutputBytes);
-}
-async function readBlobBatch(git, oids, maxOutputBytes) {
-  const unique = [...new Set(oids)];
-  const result = /* @__PURE__ */ new Map();
-  if (unique.length === 0) return result;
-  if (maxOutputBytes !== void 0) {
-    const infos = await Promise.all(unique.map((oid) => git.objectInfo(oid)));
-    let bytes = 0;
-    infos.forEach((info2, index2) => {
-      bytes += info2 === null ? `${unique[index2]} missing
-`.length : `${info2.oid} ${info2.type} ${info2.size}
-`.length + info2.size + 1;
-    });
-    if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
-  }
-  const objects = await Promise.all(unique.map((oid) => git.readObject(oid)));
-  unique.forEach((oid, index2) => {
-    const found = objects[index2];
-    if (found === null || found === void 0) throw new Error(message("objects.missing", { oid }));
-    if (found.type !== "blob") throw new Error(message("objects.not-blob", { oid, type: found.type }));
-    result.set(oid, found.content);
-  });
-  return result;
-}
-function isGitDirectoryName(part) {
-  return /^(?:\.git|git~[0-9]+)[. ]*(?::|$)/i.test(part.replace(HFS_IGNORED, ""));
-}
-var HFS_IGNORED = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
-function checkRepoPath(path7, { removal = false } = {}) {
-  const parts = path7.split("/");
-  if (path7 === "" || path7.includes("\0") || path7.includes("\\")) throw new Error(message("objects.invalid-path", { path: JSON.stringify(path7) }));
-  for (const part of parts) {
-    if (part === "" || part === "." || part === ".." || !removal && isGitDirectoryName(part)) {
-      throw new Error(message("objects.invalid-path", { path: JSON.stringify(path7) }));
-    }
-  }
-}
-async function commitTree(git, spec) {
-  for (const [path7, content4] of spec.changes) checkRepoPath(path7, { removal: content4 === null });
-  const tree = await buildTree(git, spec.base, spec.changes);
-  if ((spec.skipIfUnchanged ?? true) && spec.parents.length === 1) {
-    const parentTree = await git.revParse(`${spec.parents[0]}^{tree}`);
-    if (parentTree === tree) return spec.parents[0];
-  }
-  const args = ["-c", "i18n.commitEncoding=UTF-8", "commit-tree", "--no-gpg-sign", tree];
-  const parents = [...new Set(spec.parents)];
-  for (const parent of parents) args.push("-p", parent);
-  args.push("-F", "-");
-  const text6 = spec.sign === void 0 ? spec.message : spec.sign(tree, parents, spec.message);
-  return git.text(args, {
-    input: text6.endsWith("\n") ? text6 : `${text6}
-`,
-    env: {
-      GIT_AUTHOR_NAME: spec.identity.name,
-      GIT_AUTHOR_EMAIL: spec.identity.email,
-      GIT_COMMITTER_NAME: spec.identity.name,
-      GIT_COMMITTER_EMAIL: spec.identity.email
-    }
-  });
-}
-async function buildTree(git, base, changes) {
-  const writer = git.objectWriter();
-  const placed = /* @__PURE__ */ new Map();
-  for (const [path7, content4] of changes) {
-    const oid = content4 === null ? void 0 : writer.blob(() => contentBytes(content4));
-    oid?.catch(() => {
-    });
-    placed.set(path7, oid === void 0 ? null : { oid });
-  }
-  try {
-    return await placeInTrees(git, base, placed) ?? await buildTreeInIndex(git, base, placed);
-  } finally {
-    await Promise.all([...placed.values()].map((placement) => placement?.oid));
-  }
-}
-async function placeEntries(git, base, entries) {
-  const placed = new Map([...entries].map(([path7, entry]) => [path7, entry === null ? null : { oid: Promise.resolve(entry.oid), mode: entry.mode }]));
-  const built = await placeInTrees(git, base, placed);
-  if (built !== void 0) return built;
-  const dir = await mkdtemp(join6(tmpdir3(), "lane-index-"));
-  const env = { GIT_INDEX_FILE: join6(dir, "index") };
-  try {
-    await git.run(["read-tree", `${base}^{tree}`], { env });
-    const zero = "0".repeat(await git.objectFormat() === "sha256" ? 64 : 40);
-    const input = [...entries].map(([path7, entry]) => entry === null ? `0 ${zero}	${path7}\0` : `${entry.mode} ${entry.oid}	${path7}\0`).join("");
-    if (input) await git.run(["update-index", "-z", "--index-info"], { env, input });
-    return await git.text(["write-tree"], { env });
-  } finally {
-    await rm2(dir, { recursive: true, force: true });
-  }
-}
-async function buildTreeInIndex(git, base, changes) {
-  const dir = await mkdtemp(join6(tmpdir3(), "state-index-"));
-  const env = { GIT_INDEX_FILE: join6(dir, "index") };
-  try {
-    if (base === null) await git.run(["read-tree", "--empty"], { env });
-    else await git.run(["read-tree", `${base}^{tree}`], { env });
-    const modes = base !== null && changes.size > 0 ? await listModes(git, base) : /* @__PURE__ */ new Map();
-    const nullOid = "0".repeat(await git.objectFormat() === "sha256" ? 64 : 40);
-    const lines2 = await mapLimit([...changes.entries()], 8, async ([path7, placement]) => {
-      if (placement === null) return `0 ${nullOid}	${path7}\0`;
-      const oid = await placement.oid;
-      const mode = modes.get(path7) === "100755" ? "100755" : "100644";
-      return `${mode} ${oid}	${path7}\0`;
-    });
-    if (lines2.length > 0) await git.run(["update-index", "-z", "--index-info"], { input: lines2.join(""), env });
-    return await git.text(["write-tree"], { env });
-  } finally {
-    await rm2(dir, { recursive: true, force: true });
-  }
-}
-var NeedsIndex = class extends Error {
-};
-async function placeInTrees(git, base, changes) {
-  const root2 = { below: /* @__PURE__ */ new Map() };
-  for (const [path7, change] of changes) {
-    const parts = path7.split("/");
-    if (parts.some((part) => part === "" || part === "." || part === ".." || isGitDirectoryName(part))) return void 0;
-    let node2 = root2;
-    for (const part of parts) {
-      let next = node2.below.get(part);
-      if (next === void 0) node2.below.set(part, next = { below: /* @__PURE__ */ new Map() });
-      node2 = next;
-    }
-    node2.change = change;
-  }
-  let tree = null;
-  if (base !== null) {
-    const found = await git.readObject(`${base}^{tree}`);
-    if (found === null || found.type !== "tree") return void 0;
-    if (changes.size === 0) return found.oid;
-    tree = found.content;
-  }
-  const context = { rawLength: await git.objectFormat() === "sha256" ? 32 : 20, holdsFiles: /* @__PURE__ */ new Map() };
-  try {
-    return await rebuild(git, tree, root2, context) ?? await git.objectWriter().tree([]);
-  } catch (error2) {
-    if (error2 instanceof NeedsIndex) return void 0;
-    throw error2;
-  }
-}
-async function rebuild(git, content4, node2, context) {
-  const entries = /* @__PURE__ */ new Map();
-  if (content4 !== null) {
-    let previous3;
-    for (const entry of parseTree(content4, context.rawLength)) {
-      if (previous3 !== void 0 && compareEntries(previous3, entry) >= 0) throw new NeedsIndex();
-      const name = entry.name.toString("latin1");
-      if (name === "." || name === ".." || isGitDirectoryName(entry.name.toString("utf8"))) throw new NeedsIndex();
-      previous3 = entry;
-      entries.set(name, { mode: entry.mode, type: entryType(entry.mode), oid: entry.oid, name: entry.name });
-    }
-  }
-  const changedKeys = new Set([...node2.below.keys()].map((name) => Buffer.from(name, "utf8").toString("latin1")));
-  const changed2 = await Promise.all([...node2.below.entries()].map(async ([name, below]) => {
-    const bytes = Buffer.from(name, "utf8");
-    const existing = entries.get(bytes.toString("latin1"));
-    if (below.change !== void 0) {
-      if (below.below.size > 0 || existing?.type === "tree") throw new NeedsIndex();
-      if (below.change === null) return null;
-      const mode = below.change.mode ?? (existing?.mode === "100755" ? "100755" : "100644");
-      return { mode, type: entryType(mode), oid: await below.change.oid, name: bytes };
-    }
-    if (existing !== void 0 && existing.type !== "tree") {
-      if (adds(below)) throw new NeedsIndex();
-      return existing;
-    }
-    if (existing === void 0 && !adds(below)) return null;
-    let subtree = null;
-    if (existing !== void 0) {
-      const found = await git.readObject(existing.oid);
-      if (found === null || found.type !== "tree") throw new NeedsIndex();
-      subtree = found.content;
-    }
-    const oid = await rebuild(git, subtree, below, context);
-    return oid === null ? null : { mode: "040000", type: "tree", oid, name: bytes };
-  }));
-  const kept = [...entries.entries()].filter(([key]) => !changedKeys.has(key)).map(([, entry]) => entry);
-  const holds = await Promise.all(kept.map((entry) => entry.type === "tree" ? holdsFile(git, entry.oid, context) : true));
-  const result = [...kept.filter((_, index2) => holds[index2]), ...changed2.filter((entry) => entry !== null)];
-  if (result.length === 0) return null;
-  return git.objectWriter().tree(result);
-}
-function adds(node2) {
-  if (node2.change !== void 0 && node2.change !== null) return true;
-  for (const next of node2.below.values()) if (adds(next)) return true;
-  return false;
-}
-function holdsFile(git, oid, context) {
-  let known = context.holdsFiles.get(oid);
-  if (known === void 0) {
-    known = (async () => {
-      const found = await git.readObject(oid);
-      if (found === null || found.type !== "tree") throw new NeedsIndex();
-      const entries = parseTree(found.content, context.rawLength);
-      if (entries.some((entry) => entry.mode !== "040000")) return true;
-      for (const entry of entries) if (await holdsFile(git, entry.oid, context)) return true;
-      return false;
-    })();
-    context.holdsFiles.set(oid, known);
-  }
-  return known;
-}
-function entryType(mode) {
-  return mode === "040000" ? "tree" : mode === "160000" ? "commit" : "blob";
-}
-function compareEntries(a, b) {
-  const length = Math.min(a.name.length, b.name.length);
-  const common = a.name.subarray(0, length).compare(b.name.subarray(0, length));
-  if (common !== 0) return common;
-  const next = (entry) => entry.name.length > length ? entry.name[length] : entry.mode === "040000" ? 47 : 0;
-  return next(a) - next(b);
-}
-async function listModes(git, treeish) {
-  return new Map((await walkTree(git, treeish)).map((file) => [file.path, file.mode]));
-}
-
-// src/state/git.ts
-var GitError = class extends Error {
-  args;
-  code;
-  stderr;
-  constructor(args, code4, stderr) {
-    super(message("git.failed", { args: args.join(" "), code: code4, stderr: stderr.trim() }));
-    this.name = "GitError";
-    this.args = args;
-    this.code = code4;
-    this.stderr = stderr;
-  }
-};
-var GitOutputLimitError = class extends Error {
-  bytes;
-  constructor(bytes) {
-    super(message("git.output-limit", { bytes }));
-    this.name = "GitOutputLimitError";
-    this.bytes = bytes;
-  }
-};
-var BASE_ENV = {
-  GIT_TERMINAL_PROMPT: "0",
-  GIT_LFS_SKIP_SMUDGE: "1",
-  LC_ALL: "C"
-};
-var Git = class {
-  dir;
-  env;
-  /**
-   * @param dir a directory inside the repository (a working tree or a bare repository)
-   * @param env environment added to every call
-   */
-  constructor(dir, env = {}) {
-    this.dir = dir;
-    this.env = env;
-  }
-  environment(options) {
-    const env = options.onlyEnv !== void 0 ? { ...BASE_ENV, ...options.onlyEnv } : { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
-    for (const key of Object.keys(env)) {
-      if (env[key] === void 0) delete env[key];
-    }
-    return env;
-  }
-  reader;
-  writer;
-  /** The absolute path of the repository's object directory, for the long-lived processes to notice a repository made again. */
-  objectDirectory = () => {
-    return this.layout().then(({ objects }) => objects);
-  };
-  layoutRead;
-  /** The repository's object format and folders, from one `rev-parse`; they do not change while the repository exists. */
-  layout() {
-    this.layoutRead ??= this.text(["rev-parse", "--show-object-format", "--path-format=absolute", "--git-path", "objects", "--git-common-dir"]).then(
-      async (text6) => {
-        const lines2 = text6.split("\n");
-        if (lines2.length === 3) return { format: lines2[0], objects: lines2[1], common: lines2[2] };
-        const [format, objects, common] = await Promise.all([
-          this.text(["rev-parse", "--show-object-format"]),
-          this.text(["rev-parse", "--path-format=absolute", "--git-path", "objects"]),
-          this.text(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        ]);
-        return { format, objects, common };
-      },
-      (error2) => {
-        this.layoutRead = void 0;
-        throw error2;
-      }
-    );
-    return this.layoutRead;
-  }
-  /**
-   * Reads objects through one long-lived git process instead of a process
-   * per read. Names are revisions as `git cat-file` takes them (`<oid>`,
-   * `<commit>:<path>`, `<ref>^{commit}`).
-   */
-  objects() {
-    this.reader ??= new ObjectReader(this.dir, () => this.environment({}), this.objectDirectory);
-    return this.reader;
-  }
-  /** Writes blobs and trees through long-lived git processes instead of a process per object. */
-  objectWriter() {
-    this.writer ??= new ObjectWriter(this.dir, () => this.environment({}), this.objectDirectory);
-    return this.writer;
-  }
-  /** The object a name resolves to, with its content; null when it resolves to none. */
-  async readObject(name) {
-    if (batchName(name)) return this.objects().contents(name);
-    const found = await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", name], { okCodes: [0, 1, 128] });
-    if (found.code !== 0) return null;
-    const oid = found.stdout.toString("utf8").trim();
-    return this.objects().contents(oid);
-  }
-  /**
-   * Every file of a commit or tree, recursively, as `git ls-tree -r -l`
-   * lists them (see `listTree` in objects.ts).
-   */
-  listTree(treeish, maxOutputBytes) {
-    return readTreeListing(this, treeish, maxOutputBytes);
-  }
-  /** Blobs by id, one batch (see `readBlobs` in objects.ts). */
-  readBlobs(oids, maxOutputBytes) {
-    return readBlobBatch(this, oids, maxOutputBytes);
-  }
-  /** The content of the blob a name resolves to, as `git cat-file blob` gives it; null when it resolves to no blob. */
-  async readBlob(name, maxBytes) {
-    if (maxBytes === void 0) {
-      const found = await this.readObject(name);
-      return found?.type === "blob" ? found.content : null;
-    }
-    const info2 = await this.objectInfo(name);
-    if (info2?.type !== "blob") return null;
-    if (info2.size > maxBytes) throw new GitOutputLimitError(maxBytes);
-    return (await this.objects().contents(info2.oid))?.content ?? null;
-  }
-  /**
-   * The id a name resolves to, as `git rev-parse <name>` gives it: read
-   * through the object reader, and from `rev-parse` itself (with its error)
-   * when the reader finds no object.
-   */
-  async revParse(name) {
-    return (await this.objectInfo(name))?.oid ?? this.text(["rev-parse", name]);
-  }
-  /**
-   * What `git show <name>` gives: for a blob its content, read through the
-   * object reader; anything else, and a name that resolves to nothing, is
-   * left to `git show` itself.
-   */
-  async showBlob(name, options = {}) {
-    const found = await this.readObject(name);
-    if (found?.type === "blob") return { code: 0, stdout: found.content, stderr: "" };
-    return this.run(["show", name], options);
-  }
-  /** The id, type and size of the object a name resolves to; null when it resolves to none. */
-  async objectInfo(name) {
-    if (batchName(name)) return this.objects().info(name);
-    const found = await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", name], { okCodes: [0, 1, 128] });
-    if (found.code !== 0) return null;
-    return this.objects().info(found.stdout.toString("utf8").trim());
-  }
-  plain;
-  /**
-   * True when git prints commit messages as stored, without re-encoding:
-   * the repository sets no message encoding other than UTF-8
-   * (`i18n.commitEncoding`, `i18n.logOutputEncoding`).
-   */
-  plainMessages() {
-    this.plain ??= this.run(["config", "--get-regexp", "^i18n\\.(commitencoding|logoutputencoding)$"], { okCodes: [0, 1] }).then(
-      ({ stdout }) => stdout.toString("utf8").split("\n").filter(Boolean).every((line2) => /^\S+ utf-?8$/i.test(line2)),
-      (error2) => {
-        this.plain = void 0;
-        throw error2;
-      }
-    );
-    return this.plain;
-  }
-  /**
-   * True when git reads some commits' parents other than as stored: a
-   * shallow repository cuts history at its boundary, and grafts replace
-   * parents. Checked on every call, as a fetch can make a repository shallow.
-   */
-  async rewritesHistory() {
-    const env = this.environment({});
-    if (env.GIT_SHALLOW_FILE !== void 0 || env.GIT_GRAFT_FILE !== void 0) return true;
-    const { common } = await this.layout();
-    return existsSync2(join7(common, "shallow")) || existsSync2(join7(common, "info", "grafts"));
-  }
-  /** The repository's object format, `sha1` or `sha256`; it does not change while the repository exists. */
-  objectFormat() {
-    return this.layout().then(({ format }) => format);
-  }
-  async run(args, options = {}) {
-    const okCodes = options.okCodes ?? [0];
-    const result = await spawnGit({ args, cwd: this.dir, env: this.environment(options), input: options.input ?? "", ...options.maxOutputBytes === void 0 ? {} : { maxOutputBytes: options.maxOutputBytes } });
-    if (result.exceeded !== void 0) throw new GitOutputLimitError(result.exceeded);
-    const { code: code4, stdout, stderr } = result;
-    if (!okCodes.includes(code4)) throw new GitError(args, code4, stderr);
-    return { code: code4, stdout, stderr };
-  }
-  /**
-   * Runs git and writes its standard output to a new file at `path` as it
-   * arrives, so output of any size is never held in memory. Standard error
-   * is capped at 64 KiB. A failing exit is a `GitError`.
-   */
-  async runToFile(args, path7, fileMode) {
-    const { code: code4, stderr } = await spawnGit({ args, cwd: this.dir, env: this.environment({}), file: { path: path7, mode: fileMode } });
-    if (code4 !== 0) throw new GitError(args, code4, stderr);
-  }
-  /** Runs git and returns standard output as text without the final newline. */
-  async text(args, options = {}) {
-    const { stdout } = await this.run(args, options);
-    return stdout.toString("utf8").replace(/\n$/, "");
-  }
-};
-async function mapLimit(items, limit, fn) {
-  const results = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const index2 = next++;
-      results[index2] = await fn(items[index2]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
-
-// src/state/lfs.ts
-import { createHash as createHash2 } from "node:crypto";
-import { mkdtemp as mkdtemp2, rm as rm3, writeFile as writeFile2 } from "node:fs/promises";
-import { tmpdir as tmpdir4 } from "node:os";
-import { join as join8 } from "node:path";
-
-// src/state/config.ts
-var STORES = ["linear", "ids", "uploads"];
-var DEFAULT_STATE_CONFIG = Object.freeze({
-  remote: "origin",
-  trackedBranch: "main",
-  syncBranch: "mdbisync/linear",
-  refPrefix: "refs/mdbisync"
-});
-var StateConfigError = class extends Error {
-  constructor(message2) {
-    super(message2);
-    this.name = "StateConfigError";
-  }
-};
-function resolveStateConfig(input = {}) {
-  const pick = (key) => {
-    const value = input[key];
-    return value === void 0 || value.trim() === "" ? DEFAULT_STATE_CONFIG[key] : value.trim();
-  };
-  const config = {
-    remote: pick("remote"),
-    trackedBranch: pick("trackedBranch"),
-    syncBranch: pick("syncBranch"),
-    refPrefix: pick("refPrefix").replace(/\/+$/, "")
-  };
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.remote)) {
-    throw new StateConfigError(message("config.invalid-remote", { remote: config.remote }));
-  }
-  for (const key of ["trackedBranch", "syncBranch"]) {
-    const problem = refNameProblem(`refs/heads/${config[key]}`) ?? (config[key].startsWith("-") ? message("config.starts-with-dash") : null);
-    if (problem !== null) throw new StateConfigError(message("config.invalid-branch", { key, branch: config[key], problem }));
-  }
-  const suspended = suspendedBranch(config);
-  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended) {
-    throw new StateConfigError(message("config.same-branches"));
-  }
-  if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
-    throw new StateConfigError(message("config.nested-branches"));
-  }
-  if (suspended.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${suspended}/`)) throw new StateConfigError(message("config.nested-branches"));
-  const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
-  if (prefixProblem !== null) {
-    throw new StateConfigError(message("config.invalid-prefix", { prefix: config.refPrefix, problem: prefixProblem }));
-  }
-  if (!/^refs\/[^/]/.test(config.refPrefix)) {
-    throw new StateConfigError(message("config.prefix-outside-refs", { prefix: config.refPrefix }));
-  }
-  if (/^refs\/(heads|tags|remotes)(\/|$)/.test(config.refPrefix)) {
-    throw new StateConfigError(message("config.prefix-reserved", { prefix: config.refPrefix }));
-  }
-  return config;
-}
-function stateRef(config, store) {
-  return `${config.refPrefix}/${store}`;
-}
-function branchRef(branch) {
-  return `refs/heads/${branch}`;
-}
-function localRef(config, remoteRef) {
-  return remoteRef.startsWith("refs/heads/") ? `refs/remotes/${config.remote}/${remoteRef.slice("refs/heads/".length)}` : remoteRef;
-}
-function refNameProblem(name) {
-  if (!name.startsWith("refs/")) return 'does not start with "refs/"';
-  if (name.endsWith("/")) return 'ends with "/"';
-  if (name.endsWith(".")) return 'ends with "."';
-  if (name.includes("//")) return 'contains "//"';
-  if (name.includes("..")) return 'contains ".."';
-  if (name.includes("@{")) return 'contains "@{"';
-  if (/[\x00-\x20\x7f~^:?*[\\]/.test(name)) return "contains a character git does not allow";
-  for (const part of name.split("/")) {
-    if (part.startsWith(".")) return 'has a part starting with "."';
-    if (part.endsWith(".lock")) return 'has a part ending with ".lock"';
-  }
-  return null;
-}
-function suspendedBranch(config) {
-  return !config.syncBranch.includes("/") || config.syncBranch.endsWith("/suspended") ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, "suspended");
-}
-
-// src/state/lfs.ts
-var POINTER_VERSION = "version https://git-lfs.github.com/spec/v1";
-var MAX_POINTER_SIZE = 1024;
-function parseLfsPointer(blob) {
-  if (blob.length >= MAX_POINTER_SIZE || !blob.subarray(0, POINTER_VERSION.length).equals(Buffer.from(POINTER_VERSION))) {
-    return null;
-  }
-  const text6 = blob.toString("utf8");
-  if (!text6.endsWith("\n")) return null;
-  const lines2 = text6.slice(0, -1).split("\n");
-  if (lines2[0] !== POINTER_VERSION) return null;
-  let oid = null;
-  let size = null;
-  let extensions = false;
-  for (const line2 of lines2.slice(1)) {
-    const space = line2.indexOf(" ");
-    if (space <= 0) return null;
-    const key = line2.slice(0, space);
-    const value = line2.slice(space + 1);
-    if (key === "oid") {
-      const match = /^sha256:([0-9a-f]{64})$/.exec(value);
-      if (match === null) return null;
-      oid = match[1];
-    } else if (key === "size") {
-      if (!/^(0|[1-9][0-9]*)$/.test(value)) return null;
-      size = Number(value);
-    } else if (!/^[a-z0-9.-]+$/.test(key)) {
-      return null;
-    } else if (key.startsWith("ext-")) {
-      extensions = true;
-    }
-  }
-  return oid !== null && size !== null ? { oid, size, extensions } : null;
-}
-async function lfsReader(git, from) {
-  const remoteArgs = ["-c", `remote.lfsdefault=${from.remote}`, "-c", "lfs.fetchinclude=", "-c", "lfs.fetchexclude="];
-  const branch = await git.run(["symbolic-ref", "--quiet", "--short", "HEAD"], { okCodes: [0, 1, 128] });
-  if (branch.code === 0) remoteArgs.push("-c", `branch.${branch.stdout.toString("utf8").trim()}.remote=${from.remote}`);
-  let setting;
-  let installed;
-  const runs = () => installed ??= gitLfsRuns(git);
-  return async (pointer, path7) => withLfsconfig(await (setting ??= lfsSetting(git, from)), (env) => readLfsObject(git, remoteArgs, env, pointer, path7, runs));
-}
-function lfsRemote(config) {
-  return { remote: config.remote, tracked: localRef(config, branchRef(config.trackedBranch)) };
-}
-async function lfsPush(git, to, oids) {
-  if (oids.length === 0) return;
-  await withLfsconfig(await lfsSetting(git, to), (env) => git.run(["lfs", "push", "--object-id", to.remote, ...oids], { env }));
-}
-var LFSCONFIG_LIMIT = 64 * 1024;
-async function lfsSetting(git, from) {
-  const found = await git.readBlob(`${from.tracked}:.lfsconfig`, LFSCONFIG_LIMIT);
-  return { gitDir: await git.text(["rev-parse", "--absolute-git-dir"]), lfsconfig: found ?? Buffer.alloc(0) };
-}
-async function withLfsconfig(setting, work) {
-  const tree = await mkdtemp2(join8(tmpdir4(), "mdbisync-lfs-"));
-  try {
-    await writeFile2(join8(tree, ".lfsconfig"), setting.lfsconfig);
-    return await work({ GIT_DIR: setting.gitDir, GIT_WORK_TREE: tree });
-  } finally {
-    await rm3(tree, { recursive: true, force: true });
-  }
-}
-var GitLfsMissingError = class extends Error {
-  constructor() {
-    super(message("lfs.needs-git-lfs"));
-    this.name = "GitLfsMissingError";
-  }
-};
-async function gitLfsRuns(git) {
-  try {
-    await git.run(["lfs", "version"]);
-    return true;
-  } catch (error2) {
-    if (error2 instanceof GitError) return false;
-    throw error2;
-  }
-}
-async function requireGitLfs(git) {
-  if (!await gitLfsRuns(git)) throw new GitLfsMissingError();
-}
-async function missingLfsObjects(git, from, blobs) {
-  const missing = /* @__PURE__ */ new Set();
-  if (blobs.length === 0) return missing;
-  const entries = [...new Set(blobs)].map((blob, index2) => `100644 blob ${blob}	${index2}
-`).join("");
-  const tree = await git.text(["mktree"], { input: entries });
-  const settings = ["-c", "lfs.fetchinclude=", "-c", "lfs.fetchexclude=", "-c", "lfs.fetchrecentalways=false"];
-  const setting = await lfsSetting(git, from);
-  let stderr;
-  try {
-    stderr = (await withLfsconfig(setting, (env) => git.run([...settings, "lfs", "fetch", "--dry-run", from.remote, tree], { okCodes: [0, 2], env }))).stderr;
-  } catch (error2) {
-    if (!(error2 instanceof GitError)) throw error2;
-    await requireGitLfs(git);
-    return missing;
-  }
-  for (const match of stderr.matchAll(/^\[([0-9a-f]{64})\] [^\n]*\[(404|410)\]/gm)) missing.add(match[1]);
-  return missing;
-}
-async function readLfsObject(git, remoteArgs, env, pointer, path7, runs) {
-  if (pointer.extensions) {
-    return { ok: false, reason: `LFS object ${pointer.oid} uses LFS extensions, which are not supported` };
-  }
-  const pointerText = `${POINTER_VERSION}
-oid sha256:${pointer.oid}
-size ${pointer.size}
-`;
-  let content4;
-  try {
-    const result = await git.run([...remoteArgs, "lfs", "smudge", "--", path7], {
-      input: pointerText,
-      env: { ...env, GIT_LFS_SKIP_SMUDGE: void 0 },
-      // A failed smudge may return the pointer itself.
-      maxOutputBytes: Math.max(pointer.size, MAX_POINTER_SIZE)
-    });
-    content4 = result.stdout;
-  } catch (error2) {
-    if (error2 instanceof GitOutputLimitError) {
-      return { ok: false, reason: `LFS object ${pointer.oid} could not be read (output limit exceeded)` };
-    }
-    if (!(error2 instanceof GitError)) throw error2;
-    if (!await runs()) throw new GitLfsMissingError();
-    return { ok: false, reason: `LFS object ${pointer.oid} could not be read (exit code ${error2.code})` };
-  }
-  if (content4.length !== pointer.size || createHash2("sha256").update(content4).digest("hex") !== pointer.oid) {
-    return { ok: false, reason: `LFS object ${pointer.oid} is missing or does not match its pointer` };
-  }
-  return { ok: true, content: content4 };
-}
-
-// src/mapping/blobs.ts
-var MAPPING_FILE_BYTES = 4 * CONTENT_LIMIT;
-var MAPPING_TREE_BYTES = 16 * 1024 * 1024;
-var MAPPING_BUDGET_BYTES = 64 * 1024 * 1024;
-var BATCH_BYTES = 4 * 1024 * 1024;
-var MappingBlobBudgetError = class extends Error {
-  code = "mapping-blob-budget";
-  constructor() {
-    super(message("mapping.blob-budget", { bytes: MAPPING_BUDGET_BYTES }));
-    this.name = "MappingBlobBudgetError";
-  }
-};
-function readableBlob(entry) {
-  return entry.size !== null && Number.isSafeInteger(entry.size) && entry.size >= 0 && entry.size <= MAPPING_FILE_BYTES;
-}
-var MappingBlobBudget = class {
-  remaining = MAPPING_BUDGET_BYTES;
-  charged = /* @__PURE__ */ new Set();
-  cache = /* @__PURE__ */ new Map();
-  /** Reuse the same entry objects for each pass over the tree. */
-  check(entries) {
-    for (const entry of entries) {
-      if (!readableBlob(entry) || this.charged.has(entry)) continue;
-      this.charged.add(entry);
-      this.remaining -= entry.size;
-      if (this.remaining < 0) throw new MappingBlobBudgetError();
-    }
-  }
-  async read(git, entries) {
-    this.check(entries);
-    const unique = /* @__PURE__ */ new Map();
-    for (const entry of entries) {
-      if (!readableBlob(entry)) continue;
-      unique.set(entry.oid, entry.oid.length + String(entry.size).length + 8 + entry.size);
-    }
-    let batch = [];
-    let bytes = 0;
-    const readBatch = async () => {
-      for (const [oid, content4] of await readBlobs(git, batch, bytes)) this.cache.set(oid, content4);
-      batch = [];
-      bytes = 0;
-    };
-    for (const [oid, size] of unique) {
-      if (this.cache.has(oid)) continue;
-      if (bytes + size > BATCH_BYTES) await readBatch();
-      batch.push(oid);
-      bytes += size;
-    }
-    await readBatch();
-    return new Map([...unique.keys()].map((oid) => [oid, this.cache.get(oid)]));
-  }
-};
-
-// src/mapping/mapping.ts
-var MARKDOWN_EXTENSION = ".md";
-function annotationFiles(entries) {
-  return entries.filter((entry) => entry.type === "blob" && baseName(entry.path) === ANNOTATION_FILE);
-}
-function collectAnnotations(readmes) {
-  const annotations = [];
-  const problems = [];
-  for (const [path7, text6] of readmes) {
-    const result = readAnnotation(path7, text6);
-    if ("problem" in result) problems.push(result.problem);
-    else if (result.annotation !== null) annotations.push(result.annotation);
-  }
-  return { annotations, problems };
-}
-function candidateFiles(entries, zones) {
-  return entries.filter((entry) => isMarkdown(entry) && isRegularFile(entry) && nearestZone(zones, folderOf(entry.path)) !== void 0);
-}
-function mapFiles(entries, zones, contents) {
-  const mapped = [];
-  const unsynced = [];
-  for (const entry of entries) {
-    if (!isMarkdown(entry)) continue;
-    const zone = nearestZone(zones, folderOf(entry.path));
-    if (zone === void 0) {
-      unsynced.push({ path: entry.path, reason: "outside-annotations" });
-      continue;
-    }
-    if (!isRegularFile(entry)) {
-      unsynced.push({ path: entry.path, reason: "not-a-regular-file", title: titleOf(entry.path, zone), place: placeOf(zone) });
-      continue;
-    }
-    if (!readableBlob(entry)) {
-      unsynced.push({ path: entry.path, reason: "blob-too-large", title: titleOf(entry.path, zone), place: placeOf(zone) });
-      continue;
-    }
-    const content4 = contents.get(entry.oid);
-    if (content4 === void 0) throw new Error(message("mapping.content-not-read", { path: entry.path }));
-    const problem = contentProblem(content4);
-    if (problem !== null) {
-      unsynced.push({ path: entry.path, reason: problem, title: titleOf(entry.path, zone), place: placeOf(zone) });
-      continue;
-    }
-    mapped.push({ path: entry.path, oid: entry.oid, title: titleOf(entry.path, zone), place: placeOf(zone) });
-  }
-  const { documents, leftOut } = separateCollisions(mapped);
-  const files = new Set(entries.filter(isRegularFile).map((entry) => entry.path));
-  return { documents, unsynced, leftOut, files };
-}
-async function loadMapping(git, commit2) {
-  return mapTree(git, await listTree(git, commit2, MAPPING_TREE_BYTES), new MappingBlobBudget());
-}
-async function mapTree(git, entries, budget) {
-  const annotations = await readTreeAnnotations(git, entries, budget);
-  const contents = await budget.read(git, candidateFiles(entries, annotations.zones));
-  return { ...annotations, ...mapFiles(entries, annotations.zones, contents) };
-}
-async function checkMappingBudget(git, commit2, knownPaths) {
-  const entries = await listTree(git, commit2, MAPPING_TREE_BYTES);
-  requireReadableAnnotations(entries);
-  const budget = new MappingBlobBudget();
-  const { zones } = await readTreeAnnotations(git, entries, budget);
-  budget.check(candidateFiles(entries, zones));
-  budget.check(entries.filter((entry) => entry.type === "blob" && knownPaths.has(entry.path)));
-}
-var UnreadableAnnotationError = class extends Error {
-};
-function requireReadableAnnotations(entries) {
-  const entry = annotationFiles(entries).find((entry2) => !readableBlob(entry2));
-  if (entry !== void 0) throw new UnreadableAnnotationError(oversizedAnnotation(entry.path).message);
-}
-function oversizedAnnotation(readme) {
-  return { readme, kind: "invalid-annotation", message: message("annotations.blob-too-large", { readme, bytes: MAPPING_FILE_BYTES }) };
-}
-async function readTreeAnnotations(git, entries, budget) {
-  const readmeEntries = annotationFiles(entries);
-  const readmeBlobs = await budget.read(git, readmeEntries);
-  const unreadableAnnotations = [];
-  const readmes = /* @__PURE__ */ new Map();
-  for (const entry of readmeEntries) {
-    if (readableBlob(entry)) {
-      readmes.set(entry.path, readmeBlobs.get(entry.oid).toString("utf8"));
-    } else {
-      unreadableAnnotations.push(oversizedAnnotation(entry.path));
-    }
-  }
-  const { annotations, problems: readProblems } = collectAnnotations(readmes);
-  const { zones, problems: zoneProblems } = resolveZones(annotations);
-  return { annotations, zones, problems: [...unreadableAnnotations, ...readProblems, ...zoneProblems] };
-}
-function titleKey(place, title) {
-  const where = place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
-  return `${where}\0${title.normalize("NFC").toLowerCase()}`;
-}
-var COLLISIONS_NAMED = 3;
-function separateCollisions(mapped) {
-  const groups = /* @__PURE__ */ new Map();
-  for (const document3 of mapped) {
-    const key = titleKey(document3.place, document3.title);
-    const group2 = groups.get(key);
-    if (group2 === void 0) groups.set(key, [document3]);
-    else group2.push(document3);
-  }
-  const documents = [];
-  const leftOut = [];
-  for (const group2 of groups.values()) {
-    if (group2.length === 1) {
-      documents.push(group2[0]);
-      continue;
-    }
-    const named = group2.slice(0, COLLISIONS_NAMED + 1);
-    group2.forEach((document3, index2) => {
-      const collidesWith = named.filter((_, other) => other !== index2).slice(0, COLLISIONS_NAMED).map((other) => other.path);
-      const more = group2.length - 1 - collidesWith.length;
-      leftOut.push({
-        path: document3.path,
-        oid: document3.oid,
-        rule: "duplicate-title",
-        title: document3.title,
-        place: document3.place,
-        collidesWith,
-        ...more > 0 ? { collidesWithMore: more } : {}
-      });
-    });
-  }
-  return { documents, leftOut };
-}
-function titleOf(path7, zone) {
-  const base = zone.projectFolder ?? zone.teamFolder;
-  const relative3 = base === "" ? path7 : path7.slice(base.length + 1);
-  return relative3.slice(0, -MARKDOWN_EXTENSION.length);
-}
-function placeOf(zone) {
-  return zone.project !== void 0 ? { kind: "project", team: zone.team, project: zone.project } : { kind: "team", team: zone.team };
-}
-var UTF82 = new TextDecoder("utf-8", { fatal: true });
-function contentProblem(content4) {
-  if (parseLfsPointer(content4) !== null) return "stored-in-lfs";
-  if (content4.includes(0)) return "binary";
-  try {
-    UTF82.decode(content4);
-  } catch {
-    return "binary";
-  }
-  return null;
-}
-function isMarkdown(entry) {
-  return isMarkdownPath(entry.path);
-}
-function isMarkdownPath(path7) {
-  return path7.endsWith(MARKDOWN_EXTENSION) && path7.length > MARKDOWN_EXTENSION.length && !path7.endsWith(`/${MARKDOWN_EXTENSION}`);
-}
-function isRegularFile(entry) {
-  return entry.type === "blob" && (entry.mode === "100644" || entry.mode === "100755");
-}
-function baseName(path7) {
-  return path7.slice(path7.lastIndexOf("/") + 1);
-}
-
-// src/setup/linear.ts
-import { setTimeout as setTimeout3 } from "node:timers/promises";
-
-// src/linear/errors.ts
-var LinearError = class extends Error {
-  operation;
-  constructor(operation, message2, options) {
-    super(message2, options);
-    this.name = new.target.name;
-    this.operation = operation;
-  }
-};
-var LinearStoppedError = class extends LinearError {
-  reason;
-  constructor(operation, reason) {
-    super(operation, message("linear.stopped", { operation, reason: describeStop(reason) }));
-    this.reason = reason;
-  }
-};
-var LinearGraphQLError = class extends LinearError {
-  code;
-  type;
-  httpStatus;
-  /** The referenced entity does not exist (for example a document removed from trash). */
-  notFound;
-  /** Linear's `x-request-id` of the answer. */
-  requestId;
-  /** Linear's own message, as it sent it; it may quote the request, so a caller checks it before it reports it. */
-  detail;
-  constructor(operation, httpStatus, error2, requestId) {
-    const code4 = stringOrUndefined(error2.extensions?.code);
-    const type = stringOrUndefined(error2.extensions?.type);
-    super(
-      operation,
-      message("linear.error", { operation, code: code4 ?? "unknown", status: httpStatus, request: requestId ?? "unknown", detail: error2.message ?? "" }).trim()
-    );
-    this.code = code4;
-    this.type = type;
-    this.httpStatus = httpStatus;
-    this.requestId = requestId;
-    this.detail = stringOrUndefined(error2.message);
-    this.notFound = typeof error2.message === "string" && error2.message.startsWith("Entity not found");
-  }
-};
-var LinearHttpError = class extends LinearError {
-  httpStatus;
-  requestId;
-  constructor(operation, httpStatus, requestId) {
-    super(operation, message("linear.answered", { operation, status: httpStatus, request: requestId ?? "unknown" }));
-    this.httpStatus = httpStatus;
-    this.requestId = requestId;
-  }
-};
-var LinearNetworkError = class extends LinearError {
-  constructor(operation, cause) {
-    super(operation, message("linear.request-failed", { operation, cause: causeName(cause) }), { cause });
-  }
-};
-var LinearTokenError = class extends LinearError {
-  /** Linear's HTTP status; undefined when the request did not complete. */
-  httpStatus;
-  constructor(operation, message2, options) {
-    super(operation, message2, options);
-    this.httpStatus = options?.httpStatus;
-  }
-  /** Linear answered and refused the client credentials, as opposed to an outage or a lost request. */
-  get credentialsRefused() {
-    return this.operation === "oauth.token" && (this.httpStatus === 400 || this.httpStatus === 401);
-  }
-};
-var DocumentTooLongError = class extends LinearError {
-  field;
-  length;
-  limit;
-  constructor(operation, refusal) {
-    super(operation, message("linear.too-long", { operation, field: refusal.field, length: refusal.length, limit: refusal.limit }));
-    this.field = refusal.field;
-    this.length = refusal.length;
-    this.limit = refusal.limit;
-  }
-};
-var LinearReadBackError = class extends LinearError {
-  document;
-  constructor(operation, document3, cause) {
-    super(operation, message("linear.read-back-failed", { operation }), { cause });
-    this.document = document3;
-  }
-};
-var LinearResponseLimitError = class extends LinearError {
-  code;
-  limit;
-  constructor(operation, code4, limit) {
-    super(operation, message(code4 === "linear-body-budget" ? "linear.body-budget" : "linear.response-too-large", { operation, bytes: limit }));
-    this.code = code4;
-    this.limit = limit;
-  }
-};
-var LinearUploadError = class extends LinearError {
-};
-function describeLinearError(error2) {
-  const code4 = error2.code;
-  const status = error2.httpStatus;
-  return [error2.name, typeof code4 === "string" ? code4 : void 0, typeof status === "number" ? `HTTP ${status}` : void 0].filter(Boolean).join(" ");
-}
-function isTransientLinearError(error2) {
-  if (error2 instanceof LinearNetworkError) return true;
-  const status = error2.httpStatus;
-  return typeof status === "number" && status >= 500;
-}
-function describeStop(reason) {
-  if (reason.kind === "rate-limited") {
-    return reason.retryAfterSeconds === void 0 ? message("linear.rate-limited") : message("linear.rate-limited-retry", { seconds: reason.retryAfterSeconds });
-  }
-  return message("linear.budget-low", { header: reason.header, remaining: reason.remaining, threshold: reason.threshold });
-}
-function stringOrUndefined(value) {
-  return typeof value === "string" ? value : void 0;
-}
-function causeName(cause) {
-  if (cause instanceof Error) {
-    const code4 = cause.code ?? cause.cause?.code;
-    return typeof code4 === "string" ? `${cause.name} ${code4}` : cause.name;
-  }
-  return "unknown error";
-}
-
-// src/linear/rate-limit.ts
-var DEFAULT_BUDGET_FLOOR = {
-  minRequestsRemaining: 100,
-  minComplexityRemaining: 5e4,
-  minEndpointRequestsRemaining: 5
-};
-function readRateLimitHeaders(headers) {
-  const raw = {};
-  for (const [name, value] of headers) {
-    const key = name.toLowerCase();
-    if (key.startsWith("x-ratelimit-") || key === "x-complexity") {
-      raw[key] = value;
-    }
-  }
-  const num = (key) => {
-    const value = raw[key];
-    if (value === void 0) return void 0;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : void 0;
-  };
-  return {
-    requestsLimit: num("x-ratelimit-requests-limit"),
-    requestsRemaining: num("x-ratelimit-requests-remaining"),
-    requestsReset: num("x-ratelimit-requests-reset"),
-    complexityLimit: num("x-ratelimit-complexity-limit"),
-    complexityRemaining: num("x-ratelimit-complexity-remaining"),
-    complexityReset: num("x-ratelimit-complexity-reset"),
-    complexity: num("x-complexity"),
-    endpointName: raw["x-ratelimit-endpoint-name"],
-    endpointRequestsLimit: num("x-ratelimit-endpoint-requests-limit"),
-    endpointRequestsRemaining: num("x-ratelimit-endpoint-requests-remaining"),
-    endpointRequestsReset: num("x-ratelimit-endpoint-requests-reset"),
-    headers: raw
-  };
-}
-function findLowBudget(operation, snapshot, floor) {
-  const checks = [
-    ["x-ratelimit-requests-remaining", snapshot.requestsRemaining, floor.minRequestsRemaining],
-    ["x-ratelimit-complexity-remaining", snapshot.complexityRemaining, floor.minComplexityRemaining],
-    ["x-ratelimit-endpoint-requests-remaining", snapshot.endpointRequestsRemaining, floor.minEndpointRequestsRemaining]
-  ];
-  for (const [header, remaining, threshold] of checks) {
-    if (remaining !== void 0 && remaining < threshold) {
-      return { kind: "budget-low", operation, header, remaining, threshold, ...limitsOf(snapshot) };
-    }
-  }
-  return void 0;
-}
-function parseRetryAfter(value, now = Date.now()) {
-  if (value === null || value.trim() === "") return void 0;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) return Math.max(0, seconds);
-  const date = Date.parse(value);
-  if (Number.isNaN(date)) return void 0;
-  return Math.max(0, Math.ceil((date - now) / 1e3));
-}
-function limitsOf(snapshot) {
-  return Object.keys(snapshot.headers).length === 0 ? {} : { limits: { ...snapshot.headers } };
-}
-
-// src/linear/diagnostics.ts
-function authMetadata(context) {
-  return context === void 0 ? void 0 : {
-    grantType: context.grantType,
-    requestedScopes: [...context.requestedScopes],
-    returnedScopes: [...context.returnedScopes]
-  };
-}
-function requestTiming(started) {
-  const finished = Date.now();
-  return {
-    startedAt: new Date(started).toISOString(),
-    finishedAt: new Date(finished).toISOString(),
-    durationMs: finished - started
-  };
-}
-function emitLog(log, entry) {
-  try {
-    void Promise.resolve(log?.(entry)).catch(() => {
-    });
-  } catch {
-  }
-}
-
-// src/linear/stats.ts
-var RequestStats = class {
-  /** Requests sent to Linear's API, including retries and OAuth token calls. */
-  total = 0;
-  /** Requests per operation name. */
-  byOperation = /* @__PURE__ */ new Map();
-  /** Upload PUTs to file storage; these do not count against Linear's API budget. */
-  storagePuts = 0;
-  /** Writes the run tried after the client stopped; each was refused without a request. */
-  writesAfterStop = 0;
-  /**
-   * Writes Linear accepted, by operation: a mutation once its answer reports
-   * success, a file upload (`FileUpload`) once storage took its bytes. A
-   * refused, failed or unanswered write is not counted.
-   */
-  writes = /* @__PURE__ */ new Map();
-  count(operation) {
-    this.total += 1;
-    this.byOperation.set(operation, (this.byOperation.get(operation) ?? 0) + 1);
-  }
-  /** Counts a write Linear accepted. */
-  wrote(operation) {
-    this.writes.set(operation, (this.writes.get(operation) ?? 0) + 1);
-  }
-  toJSON() {
-    return {
-      total: this.total,
-      storagePuts: this.storagePuts,
-      writesAfterStop: this.writesAfterStop,
-      byOperation: Object.fromEntries([...this.byOperation].sort(([a], [b]) => a.localeCompare(b)))
-    };
-  }
-};
-
-// src/linear/reads.ts
-import { createHash as createHash3 } from "node:crypto";
-import { mkdir as mkdir2, open as open2, readFile, writeFile as writeFile3 } from "node:fs/promises";
-import { join as join9 } from "node:path";
-var VERSION2 = 2;
-var INDEX = "index.json";
-var BODIES = "bodies";
-var sha256 = (data) => createHash3("sha256").update(data).digest("hex");
-var graphqlReadKey = (body2) => sha256(`graphql
-${body2}`);
-var uploadReadKey = (url) => sha256(`upload
-${url}`);
-var LinearReads = class _LinearReads {
-  mode;
-  /** Kept answers by key, each key's in the order they were kept. */
-  #answers = /* @__PURE__ */ new Map();
-  #spool = new ContentSpool(512 * 1024 * 1024, 8192);
-  #order = [];
-  #token = null;
-  #ended = false;
-  constructor(mode) {
-    this.mode = mode;
-  }
-  /** The stage step: keeps every answer it is given. */
-  static recording() {
-    return new _LinearReads("record");
-  }
-  /**
-   * The apply step: the stage step's record, or null when there is none it
-   * can use (that step did not run, ran another version, or left the record
-   * unfinished); the apply step then reads Linear itself.
-   */
-  static async replaying(folder) {
-    try {
-      const index2 = JSON.parse(await readFile(join9(folder, INDEX), "utf8"));
-      if (index2.version !== VERSION2 || index2.token === null || !Array.isArray(index2.answers)) return null;
-      const reads = new _LinearReads("replay");
-      reads.#token = index2.token;
-      if (index2.answers.length > 8192) return null;
-      let total = 0;
-      for (const { key, status, type, body: body2 } of index2.answers) {
-        if (!/^[0-9a-f]{64}$/.test(body2)) return null;
-        const file = join9(folder, BODIES, body2);
-        const handle2 = await open2(file, "r");
-        try {
-          const info2 = await handle2.stat();
-          const size = info2.size;
-          total += size;
-          if (!info2.isFile() || total > 512 * 1024 * 1024) return null;
-          const bytes = Buffer.alloc(size);
-          let offset = 0;
-          while (offset < size) {
-            const { bytesRead } = await handle2.read(bytes, offset, size - offset, offset);
-            if (bytesRead === 0) return null;
-            offset += bytesRead;
-          }
-          const extra = await handle2.read(Buffer.alloc(1), 0, 1, size);
-          if (extra.bytesRead !== 0 || sha256(bytes) !== body2) return null;
-          reads.#add(key, { status, type, body: { file, hash: body2, size } });
-        } finally {
-          await handle2.close();
-        }
-      }
-      return reads;
-    } catch {
-      return null;
-    }
-  }
-  /** The stage step's token, as the apply step's setup check sees it; null while recording. */
-  get token() {
-    return this.mode === "replay" ? this.#token : null;
-  }
-  /** Records the scopes of the token the stage step reads with. */
-  tokenMinted(scope, context) {
-    if (this.mode === "record") this.#token = { scope: [...scope], context: authMetadata(context) };
-  }
-  /** The kept answer to this read, taken so it answers once; none while recording or after the capture ended. */
-  take(key) {
-    if (this.mode !== "replay" || this.#ended) return void 0;
-    const answer = this.#answers.get(key)?.shift();
-    return answer === void 0 ? void 0 : { ...answer, body: contentBytes(answer.body) };
-  }
-  /** Keeps a successful answer while recording. */
-  keep(key, answer) {
-    if (this.mode !== "record" || this.#ended || answer.status < 200 || answer.status >= 300) return;
-    this.#add(key, { ...answer, body: this.#spool.put(answer.body) });
-  }
-  /** A mark of what is kept so far, for `dropSince`. */
-  mark() {
-    return this.#order.length;
-  }
-  /**
-   * Drops the answers kept since `mark`: reads whose result the caller threw
-   * away (a listing it started again), so the next step never takes them.
-   */
-  dropSince(mark2) {
-    if (this.mode !== "record") return;
-    for (const key of this.#order.splice(mark2).reverse()) this.#answers.get(key)?.pop();
-  }
-  /** The capture ended: nothing more is kept or answered. */
-  end() {
-    this.#ended = true;
-  }
-  /** Writes the record into `folder`, which only the job's own steps share. */
-  async save(folder) {
-    await mkdir2(join9(folder, BODIES), { recursive: true, mode: 448 });
-    const index2 = { version: VERSION2, token: this.#token, answers: [] };
-    const queues = new Map([...this.#answers].map(([key, answers]) => [key, [...answers]]));
-    for (const key of this.#order) {
-      const answer = queues.get(key)?.shift();
-      if (answer === void 0) continue;
-      const body2 = answer.body.hash;
-      await writeFile3(join9(folder, BODIES, body2), contentBytes(answer.body), { mode: 384 });
-      index2.answers.push({ key, status: answer.status, type: answer.type, body: body2 });
-    }
-    await writeFile3(join9(folder, INDEX), JSON.stringify(index2), { mode: 384 });
-  }
-  close() {
-    this.#spool.close();
-    this.#answers.clear();
-    this.#order = [];
-  }
-  #add(key, answer) {
-    const queue = this.#answers.get(key);
-    if (queue === void 0) this.#answers.set(key, [answer]);
-    else queue.push(answer);
-    this.#order.push(key);
-  }
-};
-
-// src/linear/transport.ts
-var DEFAULT_BASE_URL = "https://api.linear.app";
-var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
-var DOCUMENT_BODY_BUDGET_BYTES = 256 * 1024 * 1024;
-var GraphQLTransport = class {
-  stats;
-  baseUrl;
-  fetch;
-  reads;
-  #token;
-  #auth;
-  #floor;
-  #maxRetryAfterSeconds;
-  #timeoutMs;
-  #hooks;
-  #sleep;
-  #stopped;
-  #lastRateLimit;
-  #limits;
-  #bodyBytesRead = 0;
-  constructor(options) {
-    this.#token = options.token;
-    if (options.reads !== void 0) this.reads = options.reads;
-    this.#auth = authMetadata(options.auth);
-    this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
-    this.#floor = { ...DEFAULT_BUDGET_FLOOR, ...options.budgetFloor };
-    this.#limits = { responseBytes: MAX_RESPONSE_BYTES, bodyBytes: DOCUMENT_BODY_BUDGET_BYTES, ...options.limits };
-    this.#maxRetryAfterSeconds = options.maxRetryAfterSeconds ?? 10;
-    this.#timeoutMs = options.timeoutMs ?? 6e4;
-    this.#hooks = options.hooks ?? {};
-    this.stats = options.stats ?? new RequestStats();
-    this.fetch = options.fetch ?? defaultFetch;
-    this.#sleep = options.sleep ?? ((ms) => new Promise((resolve3) => setTimeout(resolve3, ms)));
-  }
-  /** Authenticated storage GET, restricted to Linear's documented upload host. */
-  async fetchUpload(url, init = {}) {
-    const target = new URL(url);
-    if (target.protocol !== "https:" || target.hostname !== "uploads.linear.app" || target.username !== "" || target.password !== "" || target.port !== "") {
-      throw new Error(message("linear.upload-not-allowed"));
-    }
-    return this.fetch(url, { ...init, method: "GET", redirect: "manual", headers: { authorization: `Bearer ${await this.#accessToken()}` } });
-  }
-  #accessToken() {
-    return typeof this.#token === "string" ? Promise.resolve(this.#token) : this.#token();
-  }
-  /** Why the client stopped, or undefined while it is running. */
-  get stopped() {
-    return this.#stopped;
-  }
-  /** Rate-limit headers of the latest response. */
-  get lastRateLimit() {
-    return this.#lastRateLimit;
-  }
-  async request(operation, kind, query, variables = {}) {
-    return kind === "mutation" ? this.mutate(operation, query, variables) : this.query(operation, query, variables);
-  }
-  /**
-   * Reads alone can consume or record a saved answer. With `bodies`, the
-   * answer carries document bodies and counts toward the run's body budget,
-   * a kept answer too.
-   */
-  async query(operation, query, variables = {}, { bodies = false } = {}) {
-    if (this.#stopped) throw this.#refuse(operation, "query", this.#stopped);
-    const requestBody = JSON.stringify({ query, variables, operationName: operation });
-    const key = this.reads === void 0 ? void 0 : graphqlReadKey(requestBody);
-    const kept = key === void 0 ? void 0 : this.reads?.take(key);
-    if (kept !== void 0) {
-      if (kept.body.length > this.#limits.responseBytes) throw new LinearResponseLimitError(operation, "linear-response-too-large", this.#limits.responseBytes);
-      if (bodies) this.#chargeBodies(operation, kept.body.length);
-      return keptData(operation, kept.status, kept.body);
-    }
-    const answer = await this.#network(operation, "query", requestBody, bodies);
-    if (key !== void 0) this.reads?.keep(key, { status: answer.status, type: "application/json", body: Buffer.from(answer.text, "utf8") });
-    return answer.data;
-  }
-  /** A read that must reflect the token as it is now: never answered from the read store, never kept in it. */
-  async queryLive(operation, query, variables = {}) {
-    if (this.#stopped) throw this.#refuse(operation, "query", this.#stopped);
-    return (await this.#network(operation, "query", JSON.stringify({ query, variables, operationName: operation }))).data;
-  }
-  /** Every write obtains its answer directly from the network, never the read store. */
-  async mutate(operation, query, variables = {}) {
-    const requestBody = JSON.stringify({ query, variables, operationName: operation });
-    return (await this.#network(operation, "mutation", requestBody)).data;
-  }
-  /** Network execution shared by reads and writes; has no read-store access. */
-  async #network(operation, kind, requestBody, bodies = false) {
-    for (let attempt = 1; ; attempt += 1) {
-      if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
-      const info2 = { operation, kind, attempt };
-      await this.#hooks.beforeRequest?.(info2);
-      if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
-      const token = await this.#accessToken();
-      const started = Date.now();
-      this.stats.count(operation);
-      let response;
-      try {
-        response = await this.fetch(`${this.baseUrl}/graphql`, {
-          method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-          body: requestBody,
-          signal: AbortSignal.timeout(this.#timeoutMs)
-        });
-      } catch (error2) {
-        this.#log({ ...info2, ...authMetadata(this.#auth), ...requestTiming(started), status: "network-error", rateLimitHeaders: {} });
-        throw new LinearNetworkError(operation, error2);
-      }
-      const rateLimit = readRateLimitHeaders(response.headers);
-      const requestId = response.headers.get("x-request-id") ?? void 0;
-      const durationMs = Date.now() - started;
-      if (Object.keys(rateLimit.headers).length > 0) this.#lastRateLimit = rateLimit;
-      try {
-        await this.#hooks.afterResponse?.({ ...info2, status: response.status, durationMs, rateLimit });
-      } catch (error2) {
-        await response.body?.cancel().catch(() => {
-        });
-        this.#log({
-          ...info2,
-          ...authMetadata(this.#auth),
-          ...requestTiming(started),
-          status: response.status,
-          requestId,
-          rateLimitHeaders: rateLimit.headers,
-          responseHookFailed: true,
-          ...error2 instanceof LinearStoppedError ? { stop: error2.reason } : {}
-        });
-        throw error2;
-      }
-      let body2;
-      let text6 = "";
-      let bodyError;
-      let over = false;
-      let bytes = 0;
-      try {
-        const read = await readText(response, this.#limits.responseBytes);
-        if (read === void 0) over = true;
-        else {
-          text6 = read.text;
-          bytes = read.bytes;
-          body2 = JSON.parse(text6);
-        }
-      } catch (error2) {
-        body2 = void 0;
-        bodyError = error2;
-      }
-      const errorCodes = body2?.errors?.map((error2) => String(error2.extensions?.code ?? "unknown"));
-      const entry = {
-        ...info2,
-        ...authMetadata(this.#auth),
-        ...requestTiming(started),
-        status: response.status,
-        rateLimitHeaders: rateLimit.headers,
-        ...requestId === void 0 ? {} : { requestId },
-        ...errorCodes === void 0 ? {} : { errorCodes }
-      };
-      if (isRateLimited(response.status, body2?.errors)) {
-        const retryAfterSeconds = parseRetryAfter(response.headers.get("retry-after"));
-        const shortWait = retryAfterSeconds !== void 0 && retryAfterSeconds <= this.#maxRetryAfterSeconds;
-        if (attempt === 1 && shortWait && !findLowBudget(operation, rateLimit, this.#floor)) {
-          this.#log({ ...entry, retryAfterSeconds });
-          await this.#sleep(retryAfterSeconds * 1e3);
-          continue;
-        }
-        this.#stopped = { kind: "rate-limited", operation, retryAfterSeconds, ...limitsOf(rateLimit) };
-        this.#log({ ...entry, retryAfterSeconds, stop: this.#stopped });
-        throw new LinearStoppedError(operation, this.#stopped);
-      }
-      const low = findLowBudget(operation, rateLimit, this.#floor);
-      if (low) this.#stopped = low;
-      this.#log(low ? { ...entry, stop: low } : entry);
-      if (over) {
-        const error2 = new LinearResponseLimitError(operation, "linear-response-too-large", this.#limits.responseBytes);
-        throw kind === "mutation" ? new LinearNetworkError(operation, error2) : error2;
-      }
-      const firstError = body2?.errors?.[0];
-      if (firstError) throw new LinearGraphQLError(operation, response.status, firstError, requestId);
-      if (response.ok && body2 === void 0) throw new LinearNetworkError(operation, bodyError);
-      if (!response.ok || body2 === void 0 || body2.data === void 0 || body2.data === null) {
-        throw new LinearHttpError(operation, response.status, requestId);
-      }
-      if (bodies) this.#chargeBodies(operation, bytes);
-      return { data: body2.data, text: text6, status: response.status };
-    }
-  }
-  /** Counts an answer with document bodies toward the run's budget, or refuses it before its bodies are kept. */
-  #chargeBodies(operation, bytes) {
-    if (this.#bodyBytesRead + bytes > this.#limits.bodyBytes) throw new LinearResponseLimitError(operation, "linear-body-budget", this.#limits.bodyBytes);
-    this.#bodyBytesRead += bytes;
-  }
-  /** A request after the stop is refused without being sent; a refused write is counted, so a run can show it stopped writing. */
-  #refuse(operation, kind, reason) {
-    if (kind === "mutation") this.stats.writesAfterStop += 1;
-    return new LinearStoppedError(operation, reason);
-  }
-  #log(entry) {
-    emitLog(this.#hooks.log, entry);
-  }
-};
-function keptData(operation, status, bytes) {
-  let body2;
-  try {
-    body2 = JSON.parse(bytes.toString("utf8"));
-  } catch {
-    body2 = void 0;
-  }
-  const errors = body2?.errors;
-  if (body2 === void 0 || body2 === null || (Array.isArray(errors) ? errors.length > 0 : errors !== void 0) || body2.data === void 0 || body2.data === null) {
-    throw new LinearHttpError(operation, status, void 0);
-  }
-  return body2.data;
-}
-async function readText(response, limit) {
-  if (response.body === null) return { text: "", bytes: 0 };
-  const reader = response.body.getReader();
-  const chunks = [];
-  let bytes = 0;
-  for (; ; ) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    bytes += value.byteLength;
-    if (bytes > limit) {
-      await reader.cancel().catch(() => {
-      });
-      return void 0;
-    }
-    chunks.push(value);
-  }
-  return { text: new TextDecoder().decode(Buffer.concat(chunks, bytes)), bytes };
-}
-function isRateLimited(status, errors) {
-  return status === 429 || (errors ?? []).some((error2) => error2.extensions?.code === "RATELIMITED");
-}
-var defaultFetch = (input, init) => globalThis.fetch(input, init);
-function trimSlash(url) {
-  return url.replace(/\/+$/, "");
-}
-
-// src/linear/client.ts
-var MAX_PAGE_SIZE = 250;
-var DEFAULT_PAGE_SIZE = MAX_PAGE_SIZE;
-var CREATE_ATTEMPTS = 3;
-var UPLOAD_TIMEOUT_MS = 12e4;
-var LISTING_ATTEMPTS = 3;
-var DOCUMENT_FIELDS = `
-  id title slugId icon color trashed archivedAt createdAt updatedAt documentContentId
-  content @include(if: $withContent)
-  project { id }
-  team { id }`;
-var LinearClient = class {
-  transport;
-  /** What the client assumes about Linear; the measured `LINEAR_FACTS` unless a test or the probe sets others. */
-  facts;
-  constructor(options, facts = LINEAR_FACTS) {
-    this.transport = options instanceof GraphQLTransport ? options : new GraphQLTransport(options);
-    this.facts = facts;
-  }
-  get stats() {
-    return this.transport.stats;
-  }
-  /** Why the client stopped, or undefined while it runs. */
-  get stopped() {
-    return this.transport.stopped;
-  }
-  /** Sends any GraphQL document; for setup checks and tests. */
-  request(operation, kind, query, variables) {
-    return kind === "mutation" ? this.mutate(operation, query, variables) : this.transport.query(operation, query, variables);
-  }
-  /** Sends a write through the network-only transport path. */
-  mutate(operation, query, variables) {
-    return this.transport.mutate(operation, query, variables);
-  }
-  async rateLimitStatus() {
-    const data = await this.request(
-      "RateLimitStatus",
-      "query",
-      `query RateLimitStatus {
-        rateLimitStatus { identifier kind limits { type allowedAmount remainingAmount requestedAmount period reset } }
-      }`
-    );
-    return data.rateLimitStatus;
-  }
-  /**
-   * Lists every document of a project, or of a team zone (the team's
-   * documents outside projects), page by page. Trashed documents are listed
-   * only with `includeArchived`, then with `trashed` and `archivedAt` set.
-   */
-  async listDocuments(place, options = {}) {
-    if (place.projectId !== void 0) {
-      return this.#pagedDocuments("ListDocuments", { project: { id: { eq: place.projectId } } }, options);
-    }
-    const documents = await this.#pagedDocuments("ListDocuments", { team: { id: { eq: place.teamId } } }, options);
-    return documents.filter((d) => d.projectId === null);
-  }
-  /** Lists mapped places together, using the same pagination and document parser. */
-  async listDocumentsInPlaces(places, options = {}) {
-    if (places.length === 0) return [];
-    const filters = places.map((place) => place.projectId !== void 0 ? { project: { id: { eq: place.projectId } } } : { team: { id: { eq: place.teamId } } });
-    const documents = await this.#pagedDocuments("ListDocuments", { or: filters }, options);
-    return documents.filter((doc) => places.some((place) => place.projectId !== void 0 ? doc.projectId === place.projectId : doc.projectId === null && doc.teamId === place.teamId));
-  }
-  /**
-   * Reads documents by id, one request per page of ids (one request for up
-   * to `pageSize` ids). Trashed documents are included; ids that no longer
-   * exist are absent from the result. Bodies read here count toward the
-   * run's body budget: the caller holds them together.
-   */
-  async getDocuments(ids, options = {}) {
-    return this.#documentsById(ids, options, true);
-  }
-  async #documentsById(ids, options, counted) {
-    const withContent = options.withContent ?? false;
-    const pageSize = clampPageSize(options.pageSize);
-    const result = [];
-    const pages = [];
-    for (let start3 = 0; start3 < ids.length; start3 += pageSize) pages.push(ids.slice(start3, start3 + pageSize));
-    for (let chunk = pages.shift(); chunk !== void 0; chunk = pages.shift()) {
-      let data;
-      try {
-        data = await this.transport.query(
-          "GetDocuments",
-          `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
-            documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
-              nodes { ${DOCUMENT_FIELDS} }
-            }
-          }`,
-          { ids: chunk, first: chunk.length, withContent },
-          { bodies: withContent && counted }
-        );
-      } catch (error2) {
-        if (!pageTooLarge(error2, chunk.length)) throw error2;
-        const half = Math.ceil(chunk.length / 2);
-        pages.unshift(chunk.slice(0, half), chunk.slice(half));
-        continue;
-      }
-      result.push(...data.documents.nodes.map(toDocument));
-    }
-    return result;
-  }
-  /**
-   * Reads one document by id with `document(id:)`, which answers for trashed
-   * and archived documents too; null when Linear no longer has the id. Its
-   * body is not counted toward the run's body budget: one document at a
-   * time, bounded by Linear's content limit and the per-answer limit, read
-   * by the write step just before it writes that document.
-   */
-  async getDocument(id, { withContent = false } = {}) {
-    try {
-      const data = await this.transport.query(
-        "GetDocument",
-        `query GetDocument($id: String!, $withContent: Boolean!) {
-          document(id: $id) { ${DOCUMENT_FIELDS} }
-        }`,
-        { id, withContent }
-      );
-      return data.document === null ? null : toDocument(data.document);
-    } catch (error2) {
-      if (error2 instanceof LinearGraphQLError && error2.notFound) return null;
-      throw error2;
-    }
-  }
-  /**
-   * Creates a document and returns its record with the stored content. A
-   * title or content longer than Linear accepts throws `DocumentTooLongError`
-   * without a request. When `facts.mutationsReturnStoredContent` holds (as
-   * measured), the payload is the stored record and this is one request;
-   * otherwise a second request reads the document back. A failed read-back
-   * throws `LinearReadBackError`: the document was created.
-   *
-   * With a client-chosen `id`, a create whose answer was lost (no answer, a
-   * server error) is not given up at once: the document is read back by its
-   * id, and when Linear does not have it, the create is sent again with the
-   * same id, at most `CREATE_ATTEMPTS` times in all. The id makes the retry
-   * safe: Linear cannot hold two documents with it.
-   */
-  async createDocument(place, input) {
-    this.#refuseTooLong("CreateDocument", input);
-    const { id } = input;
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        return await this.#createDocumentOnce(place, input);
-      } catch (error2) {
-        if (id === void 0 || !(error2 instanceof LinearError) || error2 instanceof LinearStoppedError || error2 instanceof LinearReadBackError) throw error2;
-        const transient = isTransientLinearError(error2);
-        if (!transient && attempt === 1) throw error2;
-        const found = await this.#findCreated(id, place, input.title, error2);
-        if (found !== void 0) {
-          this.stats.wrote("CreateDocument");
-          return found;
-        }
-        if (!transient || attempt >= CREATE_ATTEMPTS) throw error2;
-      }
-    }
-  }
-  async #createDocumentOnce(place, input) {
-    const data = await this.mutate(
-      "CreateDocument",
-      `mutation CreateDocument($input: DocumentCreateInput!, $withContent: Boolean!) {
-        documentCreate(input: $input) { success document { ${DOCUMENT_FIELDS} } }
-      }`,
-      { input: { ...input, ...place }, withContent: true }
-    );
-    const created = toDocument(succeeded("CreateDocument", data.documentCreate).document);
-    this.stats.wrote("CreateDocument");
-    return this.#storedRecord("CreateDocument", created);
-  }
-  /**
-   * Updates a document: content, rename (title), move (projectId or teamId),
-   * icon and color. Like `createDocument`, refuses a too-long title or
-   * content without a request and returns the stored content of a content
-   * change: one request as measured, two when the facts call for a read-back.
-   */
-  async updateDocument(id, patch, withContent = false) {
-    this.#refuseTooLong("UpdateDocument", patch);
-    const data = await this.mutate(
-      "UpdateDocument",
-      `mutation UpdateDocument($id: String!, $input: DocumentUpdateInput!, $withContent: Boolean!) {
-        documentUpdate(id: $id, input: $input) { success document { ${DOCUMENT_FIELDS} } }
-      }`,
-      { id, input: patch, withContent: withContent || patch.content !== void 0 }
-    );
-    const updated = toDocument(succeeded("UpdateDocument", data.documentUpdate).document);
-    this.stats.wrote("UpdateDocument");
-    return patch.content === void 0 ? updated : this.#storedRecord("UpdateDocument", updated);
-  }
-  /** Moves a document to trash; it can be restored. Never deletes for good. */
-  async trashDocument(id) {
-    const data = await this.mutate(
-      "TrashDocument",
-      `mutation TrashDocument($id: String!) { documentDelete(id: $id) { success } }`,
-      { id }
-    );
-    succeeded("TrashDocument", data.documentDelete);
-    this.stats.wrote("TrashDocument");
-  }
-  async restoreDocument(id) {
-    const data = await this.mutate(
-      "RestoreDocument",
-      `mutation RestoreDocument($id: String!) { documentUnarchive(id: $id) { success } }`,
-      { id }
-    );
-    succeeded("RestoreDocument", data.documentUnarchive);
-    this.stats.wrote("RestoreDocument");
-  }
-  /** Comments on a document; `documentContentId` comes from the document. */
-  async commentOnDocument(documentContentId, body2, id) {
-    const data = await this.mutate(
-      "CommentOnDocument",
-      `mutation CommentOnDocument($input: CommentCreateInput!) {
-        commentCreate(input: $input) { success comment { id } }
-      }`,
-      { input: { documentContentId, body: body2, ...id === void 0 ? {} : { id } } }
-    );
-    const comment = succeeded("CommentOnDocument", data.commentCreate).comment;
-    this.stats.wrote("CommentOnDocument");
-    return comment;
-  }
-  /** Update a previously posted notice without adding another comment. */
-  async updateDocumentComment(id, body2) {
-    const data = await this.mutate(
-      "UpdateDocumentComment",
-      `mutation UpdateDocumentComment($id: String!, $input: CommentUpdateInput!) {
-        commentUpdate(id: $id, input: $input) { success comment { id } }
-      }`,
-      { id, input: { body: body2 } }
-    );
-    const comment = succeeded("UpdateDocumentComment", data.commentUpdate).comment;
-    this.stats.wrote("UpdateDocumentComment");
-    return comment;
-  }
-  /** Whether an integration comment exists on this document (including archived comments). */
-  async commentExists(id, documentId) {
-    return (await this.#documentCommentIds(/* @__PURE__ */ new Map([[id, documentId]]), "FindComment")).has(id);
-  }
-  /** Authorize a batch before any notice mutation, without a read per hold. */
-  async documentCommentIds(expected) {
-    return this.#documentCommentIds(expected, "FindComments");
-  }
-  async #documentCommentIds(expected, operation) {
-    const found = /* @__PURE__ */ new Set();
-    const ids = [...expected.keys()];
-    for (let offset = 0; offset < ids.length; offset += MAX_PAGE_SIZE) {
-      const batch = ids.slice(offset, offset + MAX_PAGE_SIZE);
-      const requested = new Set(batch);
-      const data = await this.request(
-        operation,
-        "query",
-        `query ${operation}($ids: [ID!]!, $first: Int!) {
-          viewer { id }
-          comments(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
-            nodes { id user { id } documentContent { document { id } } }
-          }
-        }`,
-        { ids: batch, first: batch.length }
-      );
-      for (const comment of data.comments.nodes) {
-        if (!requested.has(comment.id) || found.has(comment.id) || comment.documentContent?.document?.id !== expected.get(comment.id) || !data.viewer?.id || comment.user?.id !== data.viewer.id) {
-          throw new LinearError(operation, message("linear.comment-mismatch"));
-        }
-        found.add(comment.id);
-      }
-    }
-    return found;
-  }
-  /**
-   * Resolves a comment, the way a person marks a thread resolved: it stays
-   * on the document, folded. Resolving one that is already resolved is not
-   * an error to the caller.
-   */
-  async resolveComment(id) {
-    const data = await this.mutate(
-      "ResolveComment",
-      `mutation ResolveComment($id: String!) { commentResolve(id: $id) { success } }`,
-      { id }
-    );
-    succeeded("ResolveComment", data.commentResolve);
-    this.stats.wrote("ResolveComment");
-  }
-  /**
-   * Ensure one notice exists, including recovery after a lost create response.
-   * With `createFirst`, a notice this caller has never seen posted is created
-   * without a lookup: an id Linear already holds refuses the create, and the
-   * lookup after that refusal finds it.
-   */
-  async ensureDocumentComment(documentContentId, body2, id, updateExisting = false, createFirst = false) {
-    const find = async () => {
-      const data = await this.request(
-        "FindDocumentComment",
-        "query",
-        `query FindDocumentComment($id: ID!) {
-          viewer { id }
-          comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id documentContentId user { id } } }
-        }`,
-        { id }
-      );
-      const comment2 = data.comments.nodes[0];
-      if (!comment2) return false;
-      if (comment2.id !== id || comment2.documentContentId !== documentContentId || !data.viewer?.id || comment2.user?.id !== data.viewer.id) {
-        throw new LinearError("FindDocumentComment", message("linear.comment-mismatch"));
-      }
-      return true;
-    };
-    const existing = async () => {
-      if (updateExisting) {
-        const comment2 = await this.updateDocumentComment(id, body2);
-        if (comment2.id !== id) throw new LinearError("UpdateDocumentComment", message("linear.updated-comment-mismatch"));
-      }
-      return { id, created: false };
-    };
-    if (!createFirst && await find()) return existing();
-    let comment;
-    try {
-      comment = await this.commentOnDocument(documentContentId, body2, id);
-    } catch (error2) {
-      if (error2 instanceof LinearError && this.stopped === void 0) {
-        let found = false;
-        try {
-          found = await find();
-        } catch {
-        }
-        if (found) {
-          const lost = error2 instanceof LinearNetworkError || (error2 instanceof LinearHttpError || error2 instanceof LinearGraphQLError) && error2.httpStatus >= 500;
-          if (lost) this.stats.wrote("CommentOnDocument");
-          return existing();
-        }
-      }
-      throw error2;
-    }
-    if (comment.id !== id) throw new LinearError("CommentOnDocument", message("linear.created-comment-mismatch"));
-    return { id, created: true };
-  }
-  /**
-   * Uploads a file: `fileUpload` returns a signed storage URL, the bytes go
-   * there with one PUT, and the returned asset URL is what documents embed.
-   * Measured: Linear issues an upload target for a declared 10 MiB and for
-   * 10 MiB + 1 byte, and refuses a declared 100 MiB (INPUT_ERROR).
-   */
-  async uploadFile(input) {
-    const data = await this.mutate(
-      "FileUpload",
-      `mutation FileUpload($contentType: String!, $filename: String!, $size: Int!) {
-        fileUpload(contentType: $contentType, filename: $filename, size: $size) {
-          success uploadFile { uploadUrl assetUrl headers { key value } }
-        }
-      }`,
-      { contentType: input.contentType, filename: input.filename, size: input.bytes.byteLength }
-    );
-    const target = succeeded("FileUpload", data.fileUpload).uploadFile;
-    if (!target) throw new LinearUploadError("FileUpload", message("linear.no-upload-target", { operation: "FileUpload" }));
-    await this.#putUpload("FileUpload.put", target, input);
-    return { assetUrl: target.assetUrl };
-  }
-  /**
-   * Uploads several files with one API request: one `fileUpload` per file,
-   * aliased in a single mutation, then one storage PUT per file. Linear's
-   * request budget is the scarce one (5,000 an hour); each `fileUpload`
-   * still counts against the complexity budget. Returns the asset URLs in
-   * the order of `inputs`; throws when any file fails, after uploading the
-   * ones before it (their URLs are lost to the caller, which uploads them
-   * again one by one).
-   */
-  async uploadFiles(inputs) {
-    if (inputs.length === 0) return [];
-    const declarations = inputs.map((_, index2) => `$contentType${index2}: String!, $filename${index2}: String!, $size${index2}: Int!`).join(", ");
-    const fields = inputs.map((_, index2) => `f${index2}: fileUpload(contentType: $contentType${index2}, filename: $filename${index2}, size: $size${index2}) {
-          success uploadFile { uploadUrl assetUrl headers { key value } }
-        }`).join("\n        ");
-    const variables = {};
-    inputs.forEach((input, index2) => {
-      variables[`contentType${index2}`] = input.contentType;
-      variables[`filename${index2}`] = input.filename;
-      variables[`size${index2}`] = input.bytes.byteLength;
-    });
-    const data = await this.mutate("FileUploads", `mutation FileUploads(${declarations}) {
-        ${fields}
-      }`, variables);
-    const targets = inputs.map((_, index2) => {
-      const payload = data[`f${index2}`];
-      const target = payload === void 0 ? null : succeeded("FileUploads", payload).uploadFile;
-      if (!target) throw new LinearUploadError("FileUploads", message("linear.no-upload-target", { operation: "FileUploads" }));
-      return target;
-    });
-    const result = [];
-    for (const [index2, input] of inputs.entries()) {
-      const target = targets[index2];
-      await this.#putUpload("FileUploads.put", target, input);
-      result.push({ assetUrl: target.assetUrl });
-    }
-    return result;
-  }
-  /** Sends a file's bytes to the storage URL Linear issued for it. */
-  async #putUpload(operation, target, input) {
-    const headers = new Headers({ "content-type": input.contentType, "cache-control": "public, max-age=31536000" });
-    for (const { key, value } of target.headers) headers.set(key, value);
-    this.stats.storagePuts += 1;
-    let response;
-    try {
-      response = await this.transport.fetch(target.uploadUrl, {
-        method: "PUT",
-        headers,
-        body: input.bytes,
-        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS)
-      });
-    } catch (error2) {
-      throw new LinearUploadError(operation, message("linear.storage-failed", { operation }), { cause: error2 });
-    }
-    if (!response.ok) {
-      throw new LinearUploadError(operation, message("linear.storage-answered", { operation, status: response.status }));
-    }
-    this.stats.wrote("FileUpload");
-  }
-  #refuseTooLong(operation, document3) {
-    const refusal = lengthRefusal(document3, this.facts);
-    if (refusal) throw new DocumentTooLongError(operation, refusal);
-  }
-  /**
-   * The document a lost create made, read back with its stored content, or
-   * undefined when Linear does not have the id. A document with the id in
-   * another place or under another title is not this create's: the create's
-   * own error is thrown. A read Linear fails throws that error too, so the
-   * caller reports the create; a stop and any other failure are thrown as they are.
-   */
-  async #findCreated(id, place, title, createError) {
-    let found;
-    try {
-      [found] = await this.#documentsById([id], { withContent: true }, false);
-    } catch (error2) {
-      if (error2 instanceof LinearStoppedError || !(error2 instanceof LinearError)) throw error2;
-      throw createError;
-    }
-    if (found === void 0) return void 0;
-    const samePlace = place.projectId !== void 0 ? found.projectId === place.projectId : found.teamId === place.teamId && found.projectId === null;
-    if (!samePlace || found.title !== title || found.trashed) throw createError;
-    return found;
-  }
-  /** The written document's record with its stored content: the payload, or a read-back when the payload may differ. */
-  async #storedRecord(operation, written) {
-    if (this.facts.mutationsReturnStoredContent) return written;
-    let stored;
-    try {
-      [stored] = await this.#documentsById([written.id], { withContent: true }, false);
-    } catch (error2) {
-      if (error2 instanceof LinearStoppedError || !(error2 instanceof LinearError)) throw error2;
-      throw new LinearReadBackError(operation, written, error2);
-    }
-    if (!stored) throw new LinearReadBackError(operation, written);
-    return stored;
-  }
-  /**
-   * Every document the filter matches, page by page. When Linear forgets the
-   * cursor of a later page, the listing restarts from the first page, at most
-   * `LISTING_ATTEMPTS` listings in all; the last refusal is then thrown as is,
-   * also when the client stopped meanwhile, so the run names Linear's detail.
-   */
-  async #pagedDocuments(operation, filter, options) {
-    for (let attempt = 1; ; attempt += 1) {
-      const kept = this.transport.reads?.mark();
-      try {
-        return await this.#listPages(operation, filter, options);
-      } catch (error2) {
-        if (!isCursorNotFound(error2) || attempt >= LISTING_ATTEMPTS || this.stopped) throw error2;
-        if (kept !== void 0) this.transport.reads?.dropSince(kept);
-      }
-    }
-  }
-  async #listPages(operation, filter, options) {
-    const result = [];
-    const withContent = options.withContent ?? false;
-    let first = clampPageSize(options.pageSize);
-    let after = null;
-    for (; ; ) {
-      let data;
-      try {
-        data = await this.transport.query(
-          operation,
-          `query ${operation}($filter: DocumentFilter, $first: Int!, $after: String, $includeArchived: Boolean!, $withContent: Boolean!) {
-            documents(filter: $filter, first: $first, after: $after, includeArchived: $includeArchived, orderBy: createdAt) {
-              nodes { ${DOCUMENT_FIELDS} }
-              pageInfo { hasNextPage endCursor }
-            }
-          }`,
-          { filter, first, after, includeArchived: options.includeArchived ?? false, withContent },
-          { bodies: withContent }
-        );
-      } catch (error2) {
-        if (!pageTooLarge(error2, first)) throw error2;
-        first = Math.ceil(first / 2);
-        continue;
-      }
-      result.push(...data.documents.nodes.map(toDocument));
-      const { hasNextPage, endCursor } = data.documents.pageInfo;
-      if (hasNextPage && endCursor === null) {
-        throw new LinearError(operation, message("linear.page-without-cursor", { operation }));
-      }
-      if (!hasNextPage) return result;
-      after = endCursor;
-    }
-  }
-};
-function succeeded(operation, payload) {
-  if (payload.success !== true) throw new LinearError(operation, message("linear.not-success", { operation }));
-  return payload;
-}
-function toDocument(raw) {
-  const { project, team, trashed, ...rest } = raw;
-  return { ...rest, projectId: project?.id ?? null, teamId: team?.id ?? null, trashed: trashed === true };
-}
-function isCursorNotFound(error2) {
-  return error2 instanceof LinearGraphQLError && error2.code === "INPUT_ERROR" && /cursor not found/i.test(error2.detail ?? "");
-}
-function clampPageSize(pageSize) {
-  return Math.max(1, Math.min(MAX_PAGE_SIZE, Math.floor(pageSize ?? DEFAULT_PAGE_SIZE)));
-}
-function pageTooLarge(error2, documents) {
-  return documents > 1 && error2 instanceof LinearResponseLimitError && error2.code === "linear-response-too-large";
-}
-
-// src/linear/token.ts
-async function mintAppToken(credentials, options = {}) {
-  const requestedScopes = credentials.scopes ?? ["read", "write"];
-  const body2 = new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: credentials.clientId,
-    client_secret: credentials.clientSecret,
-    scope: requestedScopes.join(",")
-  });
-  const { response, json } = await oauthPost("oauth.token", "/oauth/token", body2, options, requestedScopes);
-  if (!response.ok || typeof json.access_token !== "string") {
-    const reason = oauthErrorCode(json.error) ?? `HTTP ${response.status}`;
-    throw new LinearTokenError("oauth.token", message("linear.token-refused", { reason }), { httpStatus: response.status });
-  }
-  const scope = readScopes(json.scope);
-  return {
-    accessToken: json.access_token,
-    expiresIn: typeof json.expires_in === "number" ? json.expires_in : 0,
-    scope,
-    context: { grantType: "client_credentials", requestedScopes: [...requestedScopes], returnedScopes: [...scope] }
-  };
-}
-async function revokeToken(accessToken, options = {}) {
-  const { response, json } = await oauthPost("oauth.revoke", "/oauth/revoke", new URLSearchParams({ token: accessToken }), options);
-  if (!response.ok || json.success === false) {
-    throw new LinearTokenError("oauth.revoke", message("linear.revoke-unconfirmed", { status: response.status }), {
-      httpStatus: response.status
-    });
-  }
-}
-async function withRunToken(credentials, options, work) {
-  const token = await mintAppToken(credentials, options);
-  try {
-    options.lifecycle?.minted(token.accessToken);
-    return await work(token);
-  } finally {
-    await endRunToken(token, options);
-  }
-}
-async function endRunToken(token, options) {
-  let revoked = false;
-  try {
-    await revokeToken(token.accessToken, { ...options, auth: token.context });
-    revoked = true;
-  } catch (revokeError) {
-    options.onRevokeError(revokeError);
-  }
-  if (revoked) {
-    try {
-      options.lifecycle?.revoked();
-    } catch {
-    }
-  }
-}
-async function withDeferredRunToken(credentials, known, options, work) {
-  let minting;
-  let access2;
-  const token = {
-    scope: [...known.scope],
-    context: known.context,
-    accessToken() {
-      if (access2 === void 0) {
-        const mint = mintAppToken(credentials, options);
-        minting = mint;
-        access2 = mint.then((minted) => {
-          options.lifecycle?.minted(minted.accessToken);
-          return minted.accessToken;
-        });
-      }
-      return access2;
-    }
-  };
-  try {
-    return await work(token);
-  } finally {
-    const minted = minting === void 0 ? void 0 : await minting.catch(() => void 0);
-    if (minted !== void 0) await endRunToken(minted, options);
-  }
-}
-async function oauthPost(operation, path7, body2, options, requestedScopes) {
-  const fetchImpl = options.fetch ?? defaultFetch;
-  const started = Date.now();
-  const info2 = {
-    operation,
-    kind: "oauth",
-    attempt: 1,
-    ...requestedScopes ? { grantType: "client_credentials", requestedScopes: [...requestedScopes] } : authMetadata(options.auth)
-  };
-  options.stats?.count(operation);
-  let response;
-  try {
-    response = await fetchImpl(`${trimSlash(options.baseUrl ?? DEFAULT_BASE_URL)}${path7}`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: body2,
-      signal: AbortSignal.timeout(options.timeoutMs ?? 3e4)
-    });
-  } catch (error2) {
-    emitLog(options.hooks?.log, { ...info2, ...requestTiming(started), status: "network-error", rateLimitHeaders: {} });
-    throw new LinearTokenError(operation, message("linear.token-request-failed", { operation }), { cause: error2 });
-  }
-  const json = await readJson(response);
-  emitLog(options.hooks?.log, {
-    ...info2,
-    ...requestTiming(started),
-    status: response.status,
-    ...requestedScopes ? { returnedScopes: readScopes(json.scope) } : {},
-    requestId: response.headers.get("x-request-id") ?? void 0,
-    errorCodes: json.error === void 0 ? [] : [oauthErrorCode(json.error) ?? "unknown"],
-    ...operation === "oauth.revoke" ? { revocationConfirmed: response.ok && json.success !== false } : {},
-    rateLimitHeaders: readRateLimitHeaders(response.headers).headers
-  });
-  return { response, json };
-}
-function oauthErrorCode(error2) {
-  return typeof error2 === "string" && [
-    "invalid_request",
-    "invalid_client",
-    "invalid_grant",
-    "unauthorized_client",
-    "unsupported_grant_type",
-    "invalid_scope",
-    "access_denied",
-    "server_error",
-    "temporarily_unavailable",
-    "Error"
-  ].includes(error2) ? error2 : void 0;
-}
-function readScopes(scope) {
-  return Array.isArray(scope) ? scope.filter((s) => typeof s === "string") : typeof scope === "string" ? scope.split(/[ ,]+/).filter(Boolean) : [];
-}
-async function readJson(response) {
-  try {
-    const json = await response.json();
-    return json !== null && typeof json === "object" ? json : {};
-  } catch {
-    return {};
-  }
-}
-
-// src/sync/stable-id.ts
-import { createHash as createHash4 } from "node:crypto";
-function stableId(...parts) {
-  const hex = createHash4("sha256").update(parts.join("\0")).digest("hex");
-  const variant = (parseInt(hex[16], 16) & 3 | 8).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
-
-// src/setup/linear.ts
-var REQUIRED_SCOPES = ["read", "write"];
-var TEAM_REFS_PER_REQUEST = 125;
-var PROJECT_TEAMS_PAGE_SIZE = 20;
-var TEAMS_RETRY_DELAY_MS = 3e3;
-function projectKey(team, project) {
-  return `${team}\0${project}`;
-}
-function pendingProject(targets, place) {
-  return place.kind === "project" && targets.pendingProjects?.has(projectKey(place.team, place.project)) === true;
-}
-function isCredentialError(error2) {
-  if (error2 instanceof LinearTokenError) return error2.credentialsRefused;
-  if (error2 instanceof LinearGraphQLError) {
-    return error2.httpStatus === 401 || error2.code === "AUTHENTICATION_ERROR";
-  }
-  return error2 instanceof LinearHttpError && error2.httpStatus === 401;
-}
-function checkLinearScopes(scope) {
-  if (scope === void 0) return passed("linear-credentials", "Linear token accepted");
-  const missing = REQUIRED_SCOPES.filter((wanted) => !scope.includes(wanted));
-  return missing.length === 0 ? passed("linear-credentials", `Linear token accepted with scopes ${scope.join(", ")}`) : failed("linear-credentials", "linear-credential-failed", message("setup.linear-scope", { scopes: missing.join(", ") }));
-}
-function linearCredentialFailure(detail) {
-  return failed("linear-credentials", "linear-credential-failed", detail);
-}
-async function resolveTargets(client, zones, { retryDelayMs = TEAMS_RETRY_DELAY_MS, createProjects = false, live = false } = {}) {
-  const zoneList = [...zones];
-  const teamRefs = /* @__PURE__ */ new Set();
-  const projectRefs = /* @__PURE__ */ new Map();
-  for (const zone of zoneList) {
-    teamRefs.add(zone.team);
-    if (zone.project !== void 0) projectRefs.set(projectKey(zone.team, zone.project), { team: zone.team, project: zone.project });
-  }
-  if (teamRefs.size === 0) return { result: notChecked("annotation-targets", "no annotated folders") };
-  const refs = [...teamRefs];
-  const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
-  const query = live ? client.transport.queryLive.bind(client.transport) : client.transport.query.bind(client.transport);
-  const lookUp = async () => {
-    const teamNodes2 = [];
-    let projectNodes2 = [];
-    let seesTeams;
-    for (let start3 = 0; start3 < refs.length; start3 += TEAM_REFS_PER_REQUEST) {
-      const batch = refs.slice(start3, start3 + TEAM_REFS_PER_REQUEST);
-      const first = start3 === 0;
-      const withProjects = first && names.length > 0;
-      const data = await query(
-        "SetupTargets",
-        `query SetupTargets($refs: [String!]!, $first: Int!${withProjects ? ", $names: [String!]!" : ""}) {
-          teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
-          ${withProjects ? `projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: ${PROJECT_TEAMS_PAGE_SIZE}) { nodes { id } pageInfo { hasNextPage } } } pageInfo { hasNextPage } }` : ""}
-          ${first ? "visible: teams(first: 1) { nodes { id } }" : ""}
-        }`,
-        withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 }
-      );
-      teamNodes2.push(...data.teams.nodes.filter((team) => !teamNodes2.some((known) => known.id === team.id)));
-      if (data.projects !== void 0) {
-        if (data.projects.pageInfo.hasNextPage) throw new Error(message("setup.too-many-projects"));
-        projectNodes2 = data.projects.nodes;
-      }
-      if (data.visible !== void 0) seesTeams = data.visible.nodes.length > 0;
-    }
-    return { teamNodes: teamNodes2, projectNodes: projectNodes2, seesTeams };
-  };
-  let teamNodes;
-  let projectNodes;
-  try {
-    let found = await lookUp();
-    if (found.seesTeams === false) {
-      await setTimeout3(retryDelayMs);
-      found = await lookUp();
-      if (found.seesTeams === false) {
-        return {
-          result: failed(
-            "annotation-targets",
-            "linear-teams-not-visible",
-            message("setup.no-team-visible", { teams: [...refs].sort().map((ref) => `"${ref}"`).join(", ") })
-          )
-        };
-      }
-    }
-    ({ teamNodes, projectNodes } = found);
-  } catch (error2) {
-    if (!isCredentialError(error2)) throw error2;
-    return {
-      result: notChecked("annotation-targets", "needs working Linear credentials"),
-      credentials: linearCredentialFailure(message("setup.linear-refused-teams"))
-    };
-  }
-  const targets = { teams: /* @__PURE__ */ new Map(), projects: /* @__PURE__ */ new Map() };
-  const missing = [];
-  const ambiguous = [];
-  for (const ref of [...teamRefs].sort()) {
-    const matches = teamNodes.filter((team) => team.key === ref || team.name === ref);
-    if (matches.length === 1) targets.teams.set(ref, matches[0]);
-    else (matches.length === 0 ? missing : ambiguous).push(`team "${ref}"`);
-  }
-  for (const [key, ref] of [...projectRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
-    const team = targets.teams.get(ref.team);
-    if (team === void 0) continue;
-    const matches = [];
-    for (const project of projectNodes) {
-      if (project.name !== ref.project) continue;
-      if (project.teams.nodes.some((node2) => node2.id === team.id)) {
-        matches.push(project);
-      } else if (project.teams.pageInfo.hasNextPage) {
-        const membership = await query(
-          "SetupProjectTeam",
-          "query SetupProjectTeam($project: String!, $team: ID!) { project(id: $project) { teams(first: 1, filter: { id: { eq: $team } }) { nodes { id } } } }",
-          { project: project.id, team: team.id }
-        );
-        if (membership.project.teams.nodes.some((node2) => node2.id === team.id)) matches.push(project);
-      }
-    }
-    if (matches.length === 1) {
-      const { id, name } = matches[0];
-      targets.projects.set(key, { id, name });
-    } else if (matches.length === 0 && createProjects) {
-      const id = stableId("project", team.id, ref.project);
-      targets.pendingProjects ??= /* @__PURE__ */ new Map();
-      targets.pendingProjects.set(key, { id, name: ref.project, teamId: team.id, team: ref.team });
-    } else {
-      (matches.length === 0 ? missing : ambiguous).push(`project "${ref.project}" of team "${ref.team}"`);
-    }
-  }
-  if (missing.length > 0) {
-    return { result: failed("annotation-targets", "annotation-target-not-found", message("setup.target-not-found", { targets: missing.join(", ") })) };
-  }
-  if (ambiguous.length > 0) {
-    return { result: failed("annotation-targets", "annotation-target-ambiguous", message("setup.target-ambiguous", { targets: ambiguous.join(", ") })) };
-  }
-  const shared = sharedDestinations(zoneList, targets);
-  if (shared.length > 0) {
-    return { result: failed("annotation-targets", "annotation-target-shared", message("setup.target-shared", { targets: shared.join("; ") })) };
-  }
-  return {
-    result: passed("annotation-targets", `found in Linear: ${targets.teams.size} teams, ${targets.projects.size} projects` + (targets.pendingProjects === void 0 ? "" : `; ${targets.pendingProjects.size} missing projects eligible for creation`)),
-    targets
-  };
-}
-async function createPendingProjects(client, targets) {
-  const pending2 = targets.pendingProjects;
-  if (!pending2?.size) return false;
-  for (const [key, { id, name, teamId, team }] of pending2) {
-    try {
-      targets.projects.set(key, await createProject(client, id, name, teamId));
-    } catch (error2) {
-      if (error2 instanceof LinearStoppedError || !(error2 instanceof LinearError)) throw error2;
-      throw new ProjectCreationError(name, team, error2);
-    }
-    pending2.delete(key);
-  }
-  return true;
-}
-async function createProject(client, firstId, name, teamId) {
-  for (let id = firstId; ; id = stableId("project", id)) {
-    let failure;
-    try {
-      const { projectCreate } = await client.mutate(
-        "CreateProject",
-        "mutation CreateProject($input: ProjectCreateInput!) { projectCreate(input: $input) { success project { id name } } }",
-        { input: { id, name, teamIds: [teamId] } }
-      );
-      if (projectCreate.success && projectCreate.project?.id === id) {
-        client.stats.wrote("CreateProject");
-        if (projectCreate.project.name === name) return projectCreate.project;
-        throw new LinearError("CreateProject", message("setup.project-name-changed"));
-      }
-      failure = new LinearError("CreateProject", message("setup.project-create-failed"));
-    } catch (error2) {
-      if (!(error2 instanceof LinearGraphQLError) || isCredentialError(error2)) throw error2;
-      failure = error2;
-    }
-    const { projects } = await client.transport.queryLive(
-      "ProjectByCreationId",
-      "query ProjectByCreationId($id: ID!) { projects(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id name } } }",
-      { id }
-    );
-    const existing = projects.nodes.find((project) => project.id === id);
-    if (existing === void 0 || existing.name === name) throw failure;
-  }
-}
-var ProjectCreationError = class extends Error {
-  project;
-  team;
-  cause;
-  constructor(project, team, cause) {
-    super(message("setup.project-create-failed"), { cause });
-    this.project = project;
-    this.team = team;
-    this.cause = cause;
-  }
-};
-function sharedDestinations(zones, targets) {
-  const folders = /* @__PURE__ */ new Map();
-  for (const zone of zones) {
-    const team = targets.teams.get(zone.team);
-    const key = zone.project === void 0 ? void 0 : projectKey(zone.team, zone.project);
-    const [id, label, folder] = zone.project === void 0 ? [`team\0${team.id}`, `the documents of team "${team.name}"`, zone.teamFolder] : [`project\0${(targets.projects.get(key) ?? targets.pendingProjects?.get(key)).id}`, `project "${zone.project}"`, zone.projectFolder];
-    const entry = folders.get(id) ?? { label, folders: /* @__PURE__ */ new Set() };
-    entry.folders.add(folder === "" ? "the repository root" : `${folder}/`);
-    folders.set(id, entry);
-  }
-  return [...folders.values()].filter((entry) => entry.folders.size > 1).map((entry) => `${entry.label} (${[...entry.folders].sort().join(", ")})`);
-}
-
-// src/format/fix.ts
-import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
-
 // src/vendor/emoji-mart-data/linear-emoji.json
 var linear_emoji_default = {
   "100": "\u{1F4AF}",
@@ -46685,6 +42389,4383 @@ var linear_emoji_default = {
 // src/format/linear-emoji.ts
 var LINEAR_EMOJI = new Map(Object.entries(linear_emoji_default));
 
+// src/format/shortcodes.ts
+var DELIMITER = /^[*_~]$/;
+var UNICODE_WHITESPACE = /^\s$/u;
+var UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
+function sameFlanking(source, from, to, text6) {
+  const chars = [...text6];
+  const first = chars[0];
+  const last = chars.at(-1);
+  const kind = (c) => c === void 0 || UNICODE_WHITESPACE.test(c) ? "space" : UNICODE_PUNCTUATION.test(c) ? "punctuation" : "other";
+  const reads = (delimiter3, before, after) => {
+    const b = kind(before);
+    const a = kind(after);
+    const left = a !== "space" && (a !== "punctuation" || b !== "other");
+    const right = b !== "space" && (b !== "punctuation" || a !== "other");
+    if (delimiter3 !== "_") return `${left} ${right}`;
+    return `${left && (!right || b === "punctuation")} ${right && (!left || a === "punctuation")}`;
+  };
+  const delimiterBefore = source[from - 1];
+  if (delimiterBefore !== void 0 && DELIMITER.test(delimiterBefore)) {
+    let start3 = from - 1;
+    while (start3 > 0 && source[start3 - 1] === delimiterBefore) start3--;
+    if (reads(delimiterBefore, codePointBefore(source, start3), source[from]) !== reads(delimiterBefore, codePointBefore(source, start3), first)) return false;
+  }
+  const delimiterAfter = source[to];
+  if (delimiterAfter !== void 0 && DELIMITER.test(delimiterAfter)) {
+    let end2 = to + 1;
+    while (end2 < source.length && source[end2] === delimiterAfter) end2++;
+    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end2)) !== reads(delimiterAfter, last, codePointAt(source, end2))) return false;
+  }
+  return true;
+}
+function codePointBefore(source, at) {
+  if (at <= 0) return void 0;
+  const low = source.charCodeAt(at - 1);
+  if (low >= 56320 && low <= 57343 && at >= 2) {
+    const high = source.charCodeAt(at - 2);
+    if (high >= 55296 && high <= 56319) return source.slice(at - 2, at);
+  }
+  return source[at - 1];
+}
+function codePointAt(source, at) {
+  const code4 = source.codePointAt(at);
+  return code4 === void 0 ? void 0 : String.fromCodePoint(code4);
+}
+function* emojiShortcodes(raw) {
+  for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
+    const emoji = LINEAR_EMOJI.get(match[1]);
+    if (emoji) yield { index: match.index, length: match[0].length, emoji: emoji.startsWith("*") ? `\\${emoji}` : emoji };
+  }
+}
+function escaped(text6, at) {
+  let run2 = 0;
+  while (text6[at - 1 - run2] === "\\") run2++;
+  return run2 % 2 === 1;
+}
+
+// src/format/markdown.ts
+EditMap.prototype.consume = function consume(events2) {
+  this.map.sort((a, b) => a[0] - b[0]);
+  const pieces = [];
+  for (let index2 = this.map.length - 1; index2 >= 0; index2--) {
+    const [at, remove, add] = this.map[index2];
+    pieces.push(events2.slice(at + remove), add);
+    events2.length = at;
+  }
+  for (let piece = pieces.pop(); piece !== void 0; piece = pieces.pop()) {
+    for (const event of piece) events2.push(event);
+  }
+  this.map.length = 0;
+  this.index.clear();
+};
+var BOM = "\uFEFF";
+var FRONT_MATTER = /^---[ \t]*\r?\n(?:[^\n]*\n)*?---[ \t]*(?:\r?\n|$)/;
+var LEADING_BLANK_LINES = /^(?:[ \t]*\r?\n)+/;
+function splitFile(text6) {
+  const bom = text6.startsWith(BOM) ? BOM : "";
+  const rest = text6.slice(bom.length);
+  const match = FRONT_MATTER.exec(rest);
+  if (!match) return { head: bom, body: rest };
+  const afterBlock = rest.slice(match[0].length);
+  const blank = LEADING_BLANK_LINES.exec(afterBlock)?.[0] ?? "";
+  return { head: bom + match[0] + blank, body: afterBlock.slice(blank.length) };
+}
+function joinFile(head, body2) {
+  if (FRONT_MATTER.test(head.startsWith(BOM) ? head.slice(BOM.length) : head)) {
+    if (body2 === "" || head.endsWith("\n")) return head + body2;
+    return head + (head.includes("\r\n") ? "\r\n" : "\n") + body2;
+  }
+  const text6 = head + body2;
+  const at = text6.startsWith(BOM) ? BOM.length : 0;
+  if (!FRONT_MATTER.test(text6.slice(at))) return text6;
+  return text6.slice(0, at) + "***" + text6.slice(at + "---".length);
+}
+function lineCount(text6) {
+  let count4 = 0;
+  for (const char of text6) if (char === "\n") count4++;
+  return count4;
+}
+var MARKDOWN_MAX_DEPTH = 128;
+var MARKDOWN_MAX_NODES = 5e5;
+var INLINE_WORK_LIMIT = 25e7;
+var LAZY_WORK_LIMIT = 2e7;
+var MarkdownLimitError = class extends Error {
+  limit;
+  constructor(limit) {
+    super(`Markdown exceeds the ${limit} limit.`);
+    this.name = "MarkdownLimitError";
+    this.limit = limit;
+  }
+};
+function parse2(body2, mdastExtensions = [], linearDomains = false, extraSyntax = []) {
+  const gfmExtensions = gfmFromMarkdown();
+  const transforms = gfmExtensions.flatMap((extension2) => extension2.transforms ?? []);
+  const untransformed = gfmExtensions.map(({ transforms: _transforms, ...extension2 }) => extension2);
+  const syntax = gfm({ singleTilde: !linearDomains });
+  if (linearDomains && syntax.text) {
+    for (const code4 of [87, 119]) {
+      const constructs2 = syntax.text[code4];
+      if (Array.isArray(constructs2)) syntax.text[code4] = constructs2.filter((construct) => construct.name !== "wwwAutolink");
+    }
+  }
+  const tree = fromMarkdown(body2, { extensions: [syntax, ...extraSyntax, inlineBudget(), indentedCodeEnds(), lazyBudget()], mdastExtensions: [...untransformed, ...mdastExtensions] });
+  const source = body2.startsWith("\uFEFF") ? body2.slice(1) : body2;
+  taskChecksBelowMarkerLines(tree, source);
+  placeTextLinks(tree, source, transforms, linearDomains);
+  if (linearDomains && /https?:\/\//i.test(source)) placeLinearHttpEnds(tree, source);
+  if (linearDomains && BARE_DOMAIN_HINT.test(source)) placeLinearDomains(tree, source);
+  if (linearDomains && source.includes(")*** ")) placeLinkedBoldItalicSuffixes(tree, source);
+  visit2(tree, () => {
+  });
+  return tree;
+}
+var LINKED_BOLD_ITALIC_SUFFIX = /^\*{3}( (?:\\[^\r\n]|[^*\\\r\n])+)\*{3}(?!\*)/;
+function placeLinkedBoldItalicSuffixes(tree, source) {
+  const points = new PointIndex(source);
+  visit2(tree, (node2) => {
+    if (!("children" in node2)) return;
+    node2.children = node2.children.flatMap((text6, index2, children) => {
+      const link2 = children[index2 - 1];
+      if (link2?.type !== "link" || link2.position === void 0 || link2.children.length !== 1 || link2.children[0]?.type !== "emphasis" || link2.children[0].children.length !== 1 || link2.children[0].children[0]?.type !== "strong") return [text6];
+      if (text6.type !== "text" || text6.position === void 0 || end(link2) !== start(text6)) return [text6];
+      const from = start(text6);
+      if (!text6.value.startsWith("*** ")) return [text6];
+      const match = LINKED_BOLD_ITALIC_SUFFIX.exec(source.slice(from, end(text6)));
+      if (!match) return [text6];
+      const decoded = decodeTextLiteral(match[0]);
+      if (!text6.value.startsWith(decoded)) return [text6];
+      const to = from + match[0].length;
+      const position2 = (start3, end2) => ({ start: points.at(start3), end: points.at(end2) });
+      const marked = {
+        type: "emphasis",
+        position: position2(from, to),
+        children: [{
+          type: "strong",
+          position: position2(from + 1, to - 1),
+          children: [{ type: "text", value: decodeTextLiteral(match[1]), position: position2(from + 3, to - 3) }]
+        }]
+      };
+      if (to === end(text6)) return [marked];
+      return [marked, { ...text6, value: text6.value.slice(decoded.length), position: { ...text6.position, start: points.at(to) } }];
+    });
+  });
+}
+function placeLinearHttpEnds(tree, source) {
+  const points = new PointIndex(source);
+  visit2(tree, (node2) => {
+    if (!("children" in node2)) return;
+    const children = node2.children;
+    const adjusted = [];
+    for (let index2 = 0; index2 < children.length; index2++) {
+      const link2 = children[index2];
+      adjusted.push(link2);
+      if (link2.type !== "link" || link2.position === void 0 || !/^https?:\/\//i.test(link2.url)) continue;
+      const from = start(link2);
+      if (!/[hH]/.test(source[from] ?? "")) continue;
+      const originalEnd = end(link2);
+      const raw = source.slice(from, originalEnd);
+      const next = children[index2 + 1];
+      const following = next?.type === "text" && next.position !== void 0 && start(next) === originalEnd ? next : void 0;
+      const suffix = following === void 0 ? "" : /^[_.~:#?!,;)\]}'"]+/.exec(source.slice(originalEnd, end(following)))?.[0] ?? "";
+      const candidate = raw + suffix;
+      if (!/^https?:\/\/[^/?#]+[/?#]/i.test(candidate)) {
+        if (source[from - 1] !== "[" && following?.value.startsWith("_") && /^\\?_/.test(source.slice(originalEnd, originalEnd + 2))) {
+          adjusted[adjusted.length - 1] = {
+            type: "text",
+            value: decodeTextLiteral(raw.replace(/\\$/, "")) + following.value,
+            position: { start: link2.position.start, end: following.position.end }
+          };
+          index2++;
+        }
+        continue;
+      }
+      const length = httpUrlEnd(candidate);
+      const written = candidate.slice(0, length);
+      if (length === raw.length && !/[\[\]]/.test(written)) continue;
+      const to = from + length;
+      const consumed = to > originalEnd ? decodeTextLiteral(source.slice(originalEnd, to)) : "";
+      if (consumed !== "" && !following?.value.startsWith(consumed)) continue;
+      const url = normalizeUri(written).replace(/\[/g, "%5B").replace(/\]/g, "%5D");
+      const position2 = { start: link2.position.start, end: points.at(to) };
+      adjusted[adjusted.length - 1] = { ...link2, url, position: position2, children: [{ type: "text", value: written, position: position2 }] };
+      if (to < originalEnd) {
+        const remainder = decodeTextLiteral(source.slice(to, originalEnd));
+        adjusted.push({ type: "text", value: remainder, position: { start: position2.end, end: link2.position.end } });
+      } else if (to > originalEnd && following !== void 0) {
+        index2++;
+        if (consumed.length < following.value.length) {
+          adjusted.push({ ...following, value: following.value.slice(consumed.length), position: { ...following.position, start: position2.end } });
+        }
+      }
+    }
+    node2.children = adjusted;
+  });
+}
+function placeLinearDomains(tree, source) {
+  const points = new PointIndex(source);
+  visit2(tree, (node2, ancestors) => {
+    if (!("children" in node2) || node2.type === "link" || node2.type === "linkReference" || ancestors.some((ancestor) => ancestor.type === "link" || ancestor.type === "linkReference")) return;
+    let demoted = false;
+    const children = node2.children.map((child2, index2, parts) => {
+      if (child2.type !== "link" || child2.position === void 0 || !child2.url.startsWith("mailto:")) return child2;
+      const opening = source[start(child2)];
+      if (opening === "[" || opening === "<") return child2;
+      if (!insideBareDomain(parts[index2 - 1], child2, source)) return child2;
+      const raw = source.slice(start(child2), end(child2));
+      demoted = true;
+      return { type: "text", value: decodeTextLiteral(raw), position: child2.position };
+    });
+    node2.children = (demoted ? joinUnlinkedText(children) : children).flatMap((child2) => child2.type === "text" && child2.position !== void 0 ? linkBareDomains(child2, source, points) : [child2]);
+  });
+}
+function insideBareDomain(before, link2, source) {
+  if (before?.type !== "text" || before.position === void 0 || end(before) !== start(link2) || !/[/?#]/.test(before.value)) return false;
+  const raw = source.slice(start(before), end(link2));
+  const boundary = start(link2) - start(before);
+  for (const { from, to } of bareDomains(raw)) {
+    if (from < boundary && to === raw.length) return true;
+  }
+  return false;
+}
+function joinUnlinkedText(children) {
+  const joined = [];
+  let run2 = [];
+  const flush = () => {
+    if (run2.length === 0) return;
+    const first = run2[0];
+    const last = run2.at(-1);
+    const value = run2.map((text6) => text6.value).join("");
+    joined.push({ type: "text", value, position: { start: first.position.start, end: last.position.end } });
+    run2 = [];
+  };
+  for (const child2 of children) {
+    if (child2.type === "text" && child2.position !== void 0) {
+      const previous3 = run2.at(-1);
+      if (previous3 && end(previous3) !== start(child2)) flush();
+      run2.push(child2);
+    } else {
+      flush();
+      joined.push(child2);
+    }
+  }
+  flush();
+  return joined;
+}
+var TEXT_LINK_HINT = /https?:\/\/|www\.|@/i;
+var BARE_DOMAIN_HINT = /[\p{L}\p{M}\p{N}\p{Extended_Pictographic}]\.[\p{L}\p{M}\p{N}]/u;
+function placeTextLinks(tree, source, transforms, linearDomains) {
+  if (transforms.length === 0) return;
+  const found = /* @__PURE__ */ new Map();
+  visit2(tree, (node2, ancestors) => {
+    const parent = ancestors.at(-1);
+    if (node2.type !== "text" || parent === void 0 || !("children" in parent) || !TEXT_LINK_HINT.test(node2.value)) return;
+    if (ancestors.some((ancestor) => ancestor.type === "link" || ancestor.type === "linkReference")) return;
+    const texts = found.get(parent);
+    if (texts === void 0) found.set(parent, [node2]);
+    else texts.push(node2);
+  });
+  if (found.size === 0) return;
+  const points = new PointIndex(source);
+  for (const [parent, texts] of found) {
+    const replaced = /* @__PURE__ */ new Map();
+    for (const node2 of texts) {
+      const paragraph2 = { type: "paragraph", children: [{ type: "text", value: node2.value }] };
+      for (const transform of transforms) transform({ type: "root", children: [paragraph2] });
+      const parts = mergedText(linearDomains ? paragraph2.children.flatMap((part) => {
+        if (part.type === "link" && /^http:\/\/www\./i.test(part.url) && part.children[0]?.type === "text" && /^www\./i.test(part.children[0].value)) {
+          return part.children;
+        }
+        return [part];
+      }) : paragraph2.children);
+      if (parts.length === 1 && parts[0].type === "text") continue;
+      placeParts(parts, node2, source, points);
+      replaced.set(node2, parts);
+    }
+    if (replaced.size > 0) parent.children = parent.children.flatMap((child2) => replaced.get(child2) ?? [child2]);
+  }
+}
+function linkBareDomains(text6, source, points) {
+  if (!BARE_DOMAIN_HINT.test(text6.value)) return [text6];
+  const offset = start(text6);
+  const raw = source.slice(offset, end(text6));
+  const position2 = (from, to) => ({ start: points.at(offset + from), end: points.at(offset + to) });
+  const parts = [];
+  const rawRanges = [];
+  let at = 0;
+  let decoded = "";
+  const addText = (from, to) => {
+    const value = decodeTextLiteral(raw.slice(from, to));
+    decoded += value;
+    parts.push({ type: "text", value, position: position2(from, to) });
+  };
+  for (const { from, to, url } of bareDomains(raw)) {
+    if (raw[from - 1] === ";" && /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});$/.test(raw.slice(Math.max(0, from - 34), from))) continue;
+    if (from > at) addText(at, from);
+    const value = raw.slice(from, to);
+    const range = position2(from, to);
+    decoded += value;
+    parts.push({ type: "link", url, title: null, position: range, children: [{ type: "text", value, position: range }] });
+    rawRanges.push({ from, to });
+    at = to;
+  }
+  if (at === 0) return [text6];
+  if (at < raw.length) addText(at, raw.length);
+  if (decoded === text6.value) return parts;
+  const valueRanges = [...bareDomains(text6.value)];
+  if (valueRanges.length !== rawRanges.length) return [text6];
+  const logical = [];
+  at = 0;
+  let sourceAt = 0;
+  for (const [index2, { from, to, url }] of valueRanges.entries()) {
+    const { from: rawFrom, to: rawTo } = rawRanges[index2];
+    const value = text6.value.slice(from, to);
+    if (raw.slice(rawFrom, rawTo) !== value) return [text6];
+    if (from > at) logical.push({ type: "text", value: text6.value.slice(at, from), position: position2(sourceAt, rawFrom) });
+    const range = position2(rawFrom, rawTo);
+    logical.push({ type: "link", url, title: null, position: range, children: [{ type: "text", value, position: range }] });
+    at = to;
+    sourceAt = rawTo;
+  }
+  if (at < text6.value.length) logical.push({ type: "text", value: text6.value.slice(at), position: position2(sourceAt, raw.length) });
+  return logical;
+}
+function mergedText(nodes) {
+  const merged = [];
+  for (const node2 of nodes) {
+    const last = merged.at(-1);
+    if (node2.type === "text" && last?.type === "text") last.value += node2.value;
+    else merged.push(node2);
+  }
+  return merged;
+}
+var DECODED = /\\[!-/:-@[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|([A-Za-z][A-Za-z0-9]{1,31}));/g;
+function decodeTextLiteral(raw) {
+  return raw.replace(DECODED, (reference, name) => {
+    if (reference[0] === "\\") return reference[1];
+    if (name !== void 0) return decodeNamedCharacterReference(name) || reference;
+    const hex = reference[2]?.toLowerCase() === "x";
+    const point3 = Number.parseInt(reference.slice(hex ? 3 : 2, -1), hex ? 16 : 10);
+    return point3 > 0 && point3 <= 1114111 ? String.fromCodePoint(point3) : reference;
+  });
+}
+function placeParts(parts, text6, source, points) {
+  const from = start(text6);
+  const raw = source.slice(from, end(text6));
+  const decoded = new Uint32Array(raw.length + 1);
+  for (const match of raw.matchAll(DECODED)) {
+    if (match[1] !== void 0 && decodeNamedCharacterReference(match[1]) === false) continue;
+    decoded.fill(1, match.index + 1, match.index + match[0].length + 1);
+  }
+  for (let at2 = 1; at2 <= raw.length; at2++) decoded[at2] = decoded[at2 - 1] + decoded[at2];
+  const literal = (at2, length) => decoded[at2 + length] === decoded[at2];
+  const labels = /* @__PURE__ */ new Map();
+  const ranges = [];
+  let valueAt = 0;
+  for (const part of parts) {
+    if (part.type === "text") {
+      valueAt += part.value.length;
+      continue;
+    }
+    if (part.type !== "link" || part.children.length !== 1 || part.children[0].type !== "text") return;
+    const label = part.children[0].value;
+    let found = labels.get(label);
+    if (found === void 0) {
+      found = { value: occurrences(text6.value, label), source: occurrences(raw, label).filter((at3) => literal(at3, label.length)), next: 0 };
+      if (found.value.length !== found.source.length) return;
+      labels.set(label, found);
+    }
+    while (found.next < found.value.length && found.value[found.next] < valueAt) found.next++;
+    const at2 = found.source[found.next];
+    if (at2 === void 0 || at2 < (ranges.at(-1)?.[1] ?? 0)) return;
+    ranges.push([at2, at2 + label.length]);
+    valueAt += label.length;
+  }
+  const position2 = (a, b) => ({ start: points.at(from + a), end: points.at(from + b) });
+  let link2 = 0;
+  let at = 0;
+  for (const part of parts) {
+    if (part.type === "link") {
+      const [a, b] = ranges[link2++];
+      part.position = position2(a, b);
+      part.children[0].position = position2(a, b);
+      at = b;
+      continue;
+    }
+    const next = ranges[link2]?.[0] ?? raw.length;
+    part.position = position2(at, next);
+    at = next;
+  }
+}
+function occurrences(haystack, needle) {
+  const found = [];
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) found.push(at);
+  return found;
+}
+var PointIndex = class {
+  lineStarts = [0];
+  constructor(source) {
+    for (const match of source.matchAll(/\r\n?|\n/g)) this.lineStarts.push(match.index + match[0].length);
+  }
+  at(offset) {
+    let low = 0;
+    let high = this.lineStarts.length - 1;
+    while (low < high) {
+      const middle = low + high + 1 >> 1;
+      if (this.lineStarts[middle] <= offset) low = middle;
+      else high = middle - 1;
+    }
+    return { line: low + 1, column: offset - this.lineStarts[low] + 1, offset };
+  }
+};
+var isAsciiAlphanumeric = (code4) => code4 !== null && (code4 >= 48 && code4 <= 57 || code4 >= 65 && code4 <= 90 || code4 >= 97 && code4 <= 122);
+var SPLIT_CODES = [33, 38, 42, 60, 91, 92, 93, 95, 96, 126, -5, -4, -3];
+var WORD_CODES = [43, 45, 46];
+for (let code4 = 48; code4 <= 122; code4++) if (isAsciiAlphanumeric(code4)) WORD_CODES.push(code4);
+function inlineBudget() {
+  let work = 0;
+  const bracketed = /* @__PURE__ */ new WeakSet();
+  const count4 = function() {
+    work += this.events.length;
+    if (work > INLINE_WORK_LIMIT) throw new MarkdownLimitError("inline");
+    return false;
+  };
+  const split = { name: "inlineBudget", tokenize: (_effects, _ok, nok) => nok, previous: count4 };
+  const bracket = {
+    ...split,
+    previous() {
+      bracketed.add(this);
+      return count4.call(this);
+    }
+  };
+  const word = {
+    ...split,
+    previous(previous3) {
+      return bracketed.has(this) && !isAsciiAlphanumeric(previous3) ? count4.call(this) : false;
+    }
+  };
+  const text6 = {};
+  for (const code4 of SPLIT_CODES) text6[code4] = split;
+  for (const code4 of WORD_CODES) text6[code4] = word;
+  text6[91] = bracket;
+  return { text: text6 };
+}
+function indentedCodeEnds() {
+  const construct = {
+    name: "indentedCodeEnds",
+    tokenize(effects, ok3, nok) {
+      const code4 = [this.parser.constructs.flowInitial?.[32]].flat().find((candidate) => candidate?.name === "codeIndented");
+      if (code4 === void 0 || code4 === null) return nok;
+      const settled = (next) => (character) => {
+        this._gfmTableDynamicInterruptHack = false;
+        return next(character);
+      };
+      this._gfmTableDynamicInterruptHack = true;
+      return code4.tokenize.call(this, effects, settled(ok3), settled(nok));
+    }
+  };
+  return { flowInitial: { [-2]: construct, [-1]: construct, [32]: construct } };
+}
+function taskChecksBelowMarkerLines(tree, source) {
+  visit2(tree, (node2) => {
+    if (node2.type !== "listItem" || node2.checked !== null && node2.checked !== void 0) return;
+    const [paragraph2] = node2.children;
+    if (paragraph2?.type !== "paragraph" || line(paragraph2) === line(node2)) return;
+    const check2 = /^\[([ xX])\][ \t]+[^\s]/.exec(source.slice(start(paragraph2), end(paragraph2)));
+    const [head] = paragraph2.children;
+    if (check2 === null || head?.type !== "text" || start(head) !== start(paragraph2) || !head.value.startsWith(check2[0].slice(0, 4))) return;
+    const from = paragraph2.position.start;
+    const after = { line: from.line, column: from.column + 4, offset: from.offset + 4 };
+    node2.checked = check2[1] !== " ";
+    head.value = head.value.slice(4);
+    if (head.value === "") paragraph2.children.shift();
+    else head.position.start = { ...after };
+    paragraph2.position.start = { ...after };
+  });
+}
+function lazyBudget() {
+  let work = 0;
+  let watching = false;
+  let writing;
+  const blocks = /* @__PURE__ */ new WeakMap();
+  const watch = (parser) => {
+    watching = true;
+    const create = parser.flow;
+    parser.flow = (from) => {
+      const flow3 = create(from);
+      const { defineSkip, write } = flow3;
+      let line2;
+      flow3.defineSkip = (point3) => {
+        line2 = point3.line;
+        return defineSkip(point3);
+      };
+      flow3.write = (slice) => {
+        const chunkLine = line2;
+        line2 = void 0;
+        writing = flow3;
+        let events2;
+        try {
+          events2 = write(slice);
+        } finally {
+          writing = void 0;
+        }
+        if (chunkLine !== void 0 && parser.lazy[chunkLine]) {
+          const block2 = blocks.get(flow3);
+          const open4 = flow3.currentConstruct !== void 0 && block2 !== void 0 && block2.line < chunkLine;
+          work += flow3.events.length - (open4 ? block2.from : 0);
+          if (work > LAZY_WORK_LIMIT) throw new MarkdownLimitError("lazy");
+        }
+        return events2;
+      };
+      return flow3;
+    };
+  };
+  const container = {
+    name: "lazyBudget",
+    partial: true,
+    tokenize(_effects, _ok, nok) {
+      if (!watching) watch(this.parser);
+      return nok;
+    }
+  };
+  const block = {
+    name: "lazyBudgetBlock",
+    partial: true,
+    tokenize(_effects, _ok, nok) {
+      if (writing !== void 0) blocks.set(writing, { from: this.events.length, line: this.now().line });
+      return nok;
+    }
+  };
+  return { document: { null: container }, flowInitial: { null: block, [-2]: block, [-1]: block, [32]: block } };
+}
+function markdownBaseline(body2) {
+  if (body2 === void 0) return void 0;
+  try {
+    parse2(body2);
+    return body2;
+  } catch (error2) {
+    if (!(error2 instanceof MarkdownLimitError)) throw error2;
+    return void 0;
+  }
+}
+function sameMarkdown(a, b, options = {}) {
+  if (a === b) return true;
+  return isDeepStrictEqual(comparable(a, options), comparable(b, options));
+}
+function sameAsLinear(content4, body2) {
+  if (content4 === body2) return true;
+  const restored = linearMarkersAsText(linearShortcodesAsEmoji(content4), body2);
+  if (sameMarkdown(restored, body2, { linearShortcodes: true })) return true;
+  return body2.includes("\\+++") && sameMarkdown(restored, linearSectionEnd(body2), { linearShortcodes: true });
+}
+function linearShortcodesAsEmoji(body2) {
+  if (!/:[a-z0-9_+-]+:/.test(body2)) return body2;
+  const bom = body2.startsWith(BOM) ? 1 : 0;
+  const parts = [];
+  let done = 0;
+  visit2(parse2(body2, [], true), (node2, ancestors) => {
+    if (node2.type !== "text") return;
+    const parent = ancestors.at(-1);
+    if (parent?.type === "link" && body2[start(parent) + bom] !== "[") return;
+    const from = start(node2) + bom;
+    const raw = body2.slice(from, end(node2) + bom);
+    for (const { index: index2, length, emoji } of emojiShortcodes(raw)) {
+      const at = from + index2;
+      if (escaped(raw, index2) || !sameFlanking(body2, at, at + length, emoji)) continue;
+      parts.push(body2.slice(done, at), emoji);
+      done = at + length;
+    }
+  });
+  parts.push(body2.slice(done));
+  return parts.join("");
+}
+function closesAboveList(lines3, index2, last) {
+  if (last <= index2) return false;
+  const next = lines3[index2 + 1];
+  const prefix = LINE_PREFIX.exec(next)[0];
+  return lines3[index2].startsWith(prefix) && /^(?:\d{1,9}\.[ \t]|[*-][ \t]*$)/.test(next.slice(prefix.length));
+}
+function linearSectionEnd(body2) {
+  const lines3 = body2.split(LINE_END);
+  const closing = /* @__PURE__ */ new Set();
+  visit2(parse2(body2), (node2) => {
+    if (node2.type !== "paragraph") return;
+    const first = line(node2) - 1;
+    const last = (node2.position?.end.line ?? first + 1) - 1;
+    const column = (node2.position?.start.column ?? 1) - 1;
+    if (last > first && lines3[first].slice(column).startsWith("\\+++ ") && linearLineText(lines3[last]) === "+++") {
+      closing.add(last);
+    }
+  });
+  return lines3.flatMap((row, index2) => closing.has(index2) ? [LINE_PREFIX.exec(row)[0].trimEnd(), row] : [row]).join("\n");
+}
+var NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
+var LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,2}(?:[ \t\r]|$)|\+{3}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\||(?:-+|=+)[ \t]*\r?$)/m;
+var LINE_END = /\r\n?|\n/;
+var LINE_PREFIX = /^[ \t>]*/;
+var CONFLICT_START = /^<{7}(?: |$)/;
+var DIV_START = /^<div(?:[ \t][^>\n]*)?>/i;
+var DIV_END = /<\/div[ \t]*>/i;
+var DIV_END_START = /^<\/div[ \t]*>/i;
+var SECTION_TITLE = /^\+{3}[ \t]/;
+var LONG_PLUS_RUN = /^\+{4}/;
+var ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3})/;
+var PLAIN_PLUS_TEXT = /^\+{3,}[^+\s]/;
+function linearLineText(row) {
+  return row.replace(LINE_PREFIX, "").trimEnd();
+}
+function tableKey(header, delimiter3) {
+  const text6 = linearLineText(header).replace(/^(?:[*+-]|\d{1,9}[.)])[ \t]+/, "");
+  return text6 + "\n" + delimiter3;
+}
+function tableRowsKey(lines3, from, to) {
+  const rows = [];
+  for (let index2 = from; index2 < to; index2++) {
+    const row = linearLineText(lines3[index2]);
+    if (!row.startsWith("|")) break;
+    rows.push(row);
+  }
+  return rows.join("\n");
+}
+function blockLineKey(text6, startsParagraph) {
+  return (startsParagraph ? "first:" : "next:") + text6;
+}
+function acceptedBlockStarts(previous3) {
+  const escapes = /* @__PURE__ */ new Set();
+  const tables = /* @__PURE__ */ new Set();
+  const tableHeaders = /* @__PURE__ */ new Set();
+  const html2 = /* @__PURE__ */ new Set();
+  if (!/\\[<|$+]|<div\b|^[ \t>]*\|/im.test(previous3)) return { escapes, tables, tableHeaders, html: html2 };
+  const lines3 = previous3.split(LINE_END);
+  const plain = /* @__PURE__ */ new Set();
+  visit2(parse2(previous3), (node2, ancestors) => {
+    const first = line(node2) - 1;
+    if (node2.type === "table") {
+      const key = tableKey(lines3[first], linearLineText(lines3[first + 1] ?? ""));
+      tableHeaders.add(key);
+      tables.add(key + "\n" + tableRowsKey(lines3, first + 2, node2.position?.end.line ?? first + 2));
+      return;
+    }
+    if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
+      html2.add(previous3.slice(start(node2), end(node2)));
+      return;
+    }
+    if (node2.type !== "text" || ancestors.at(-1)?.type !== "paragraph") return;
+    const column = (node2.position?.start.column ?? 1) - 1;
+    for (let index2 = first; index2 < (node2.position?.end.line ?? 0); index2++) {
+      const row = lines3[index2];
+      const raw = linearLineText(index2 === first ? row.slice(column) : row);
+      const paragraph2 = ancestors.at(-1);
+      const lineStart = index2 > first || paragraph2.children[0] === node2;
+      if (lineStart && PLAIN_PLUS_TEXT.test(raw)) plain.add(blockLineKey(raw, index2 === line(paragraph2) - 1));
+      if (!ESCAPED_BLOCK_START.test(raw)) continue;
+      const literal = raw.slice(1);
+      if (literal.startsWith("|")) {
+        const key = tableKey(lines3[index2 - 1] ?? "", literal);
+        escapes.add(key);
+        escapes.add(key + "\n" + tableRowsKey(lines3, index2 + 1, paragraph2.position?.end.line ?? index2 + 1));
+      } else {
+        escapes.add(blockLineKey(literal, index2 === line(paragraph2) - 1));
+        if (SECTION_TITLE.test(literal) && line(paragraph2) === index2 + 1 && paragraph2.position?.end.line === index2 + 1) {
+          escapes.add("section:" + literal);
+        }
+      }
+    }
+  });
+  for (const key of plain) escapes.delete(key);
+  return { escapes, tables, tableHeaders, html: html2 };
+}
+function divsClosedInAnotherBlock(tree, source) {
+  const paired = /* @__PURE__ */ new Set();
+  if (!DIV_END.test(source)) return paired;
+  const open4 = /* @__PURE__ */ new Map();
+  visit2(tree, (node2, ancestors) => {
+    if (node2.type !== "html") return;
+    const parent = ancestors.at(-1);
+    if (parent.type === "paragraph") return;
+    if (DIV_END_START.test(node2.value)) {
+      const opening = open4.get(parent)?.pop();
+      if (opening !== void 0) paired.add(opening);
+    } else if (DIV_START.test(node2.value) && !DIV_END.test(node2.value)) {
+      const siblings = open4.get(parent) ?? [];
+      siblings.push(node2);
+      open4.set(parent, siblings);
+    }
+  });
+  return paired;
+}
+function linearMarkersAsText(content4, previous3 = "") {
+  if (!LINEAR_BLOCK_START.test(content4)) return content4;
+  const accepted = acceptedBlockStarts(previous3);
+  let text6 = content4;
+  for (let pass = 0; pass <= MARKDOWN_MAX_DEPTH; pass++) {
+    const escapes = /* @__PURE__ */ new Set();
+    const escapedItems = /* @__PURE__ */ new Set();
+    const lines3 = text6.split(LINE_END);
+    const offsets = [0];
+    for (const match of text6.matchAll(/\r\n?|\n/g)) offsets.push(match.index + match[0].length);
+    const lineEnd = (index2) => offsets[index2] + lines3[index2].length;
+    const rowAt = (index2) => linearLineText(lines3[index2] ?? "");
+    const sections = /* @__PURE__ */ new Map();
+    const rowStart = (index2) => offsets[index2] + LINE_PREFIX.exec(lines3[index2])[0].length;
+    const tree = parse2(text6);
+    const pairedDivs = divsClosedInAnotherBlock(tree, text6);
+    visit2(tree, (node2, ancestors) => {
+      if (ancestors.some((ancestor) => escapedItems.has(ancestor))) return;
+      const at2 = start(node2);
+      const index2 = line(node2) - 1;
+      if (node2.type === "listItem") {
+        const marker = NOT_LINEAR_MARKER.exec(text6.slice(at2, at2 + 11));
+        if (marker === null) return;
+        escapedItems.add(node2);
+        escapes.add(at2 + marker[0].length - 1);
+      } else if (node2.type === "table") {
+        const delimiter3 = rowAt(index2 + 1);
+        if (!delimiter3.startsWith("|")) return;
+        const canonical = /^\|(?: -- \|)+$/.test(delimiter3);
+        const key = tableKey(lines3[index2], delimiter3);
+        const table = key + "\n" + tableRowsKey(lines3, index2 + 2, node2.position?.end.line ?? index2 + 2);
+        if (accepted.tables.has(table)) return;
+        const knownLiteral = accepted.tableHeaders.has(key) ? accepted.escapes.has(table) : accepted.escapes.has(key);
+        const literal = knownLiteral || !canonical || end(node2) === text6.length || ancestors.at(-1)?.type === "listItem" && at2 > rowStart(index2);
+        if (literal) escapes.add(rowStart(index2 + 1));
+      } else if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
+        const raw = text6.slice(at2, end(node2));
+        const first = text6.slice(at2, lineEnd(index2)).trimEnd();
+        if (pairedDivs.has(node2) || accepted.html.has(raw) && !CONFLICT_START.test(raw)) return;
+        const completeDiv = DIV_START.test(first) && DIV_END.test(raw);
+        const literal = accepted.escapes.has(blockLineKey(first, true)) || accepted.escapes.has(blockLineKey(first, false));
+        const incompleteDiv = DIV_START.test(first) && !completeDiv;
+        if (CONFLICT_START.test(raw) || literal || incompleteDiv) {
+          escapes.add(at2);
+          const spans = codeSpans(text6, at2, end(node2));
+          let span = 0;
+          const last = (node2.position?.end.line ?? index2 + 1) - 1;
+          for (let row = index2 + 1; row <= last; row++) {
+            const offset = rowStart(row);
+            while (span < spans.length && spans[span][1] <= offset) span++;
+            if (span < spans.length && spans[span][0] <= offset) continue;
+            const rowText = rowAt(row);
+            if (accepted.escapes.has(blockLineKey(rowText, false)) || incompleteDiv && DIV_START.test(rowText)) escapes.add(offset);
+          }
+        }
+      } else if (node2.type === "heading" && (node2.position?.end.line ?? index2 + 1) - 1 > index2) {
+        const underline = (node2.position?.end.line ?? index2 + 1) - 1;
+        if (rowStart(underline) - offsets[underline] > at2 - offsets[index2]) escapes.add(rowStart(underline));
+      } else if (node2.type === "paragraph") {
+        const rawFirst = text6.slice(at2, lineEnd(index2));
+        const first = rawFirst.trimEnd();
+        const last = (node2.position?.end.line ?? index2 + 1) - 1;
+        const literal = accepted.escapes.has(blockLineKey(first, true));
+        if (CONFLICT_START.test(first) || literal && first !== "+++" && !SECTION_TITLE.test(rawFirst)) escapes.add(at2);
+        if (LONG_PLUS_RUN.test(first) && last > index2) escapes.add(at2);
+        if (first === "$$" && last > index2 + 1 && rowAt(last) === "$$") escapes.add(at2);
+        const parent = ancestors.at(-1);
+        if (SECTION_TITLE.test(rawFirst)) {
+          if (last > index2) {
+            escapes.add(at2);
+            if (rowAt(last) === "+++") escapes.add(rowStart(last));
+          } else {
+            const open4 = sections.get(parent) ?? [];
+            const itemText = parent.type === "listItem" && parent.children.length === 1;
+            open4.push({ at: at2, literal: accepted.escapes.has("section:" + first) && accepted.escapes.has(blockLineKey("+++", true)), itemText });
+            sections.set(parent, open4);
+          }
+        } else if (first === "+++" && (last === index2 || closesAboveList(lines3, index2, last))) {
+          const open4 = sections.get(parent)?.pop();
+          if (open4?.literal) {
+            escapes.add(open4.at);
+            escapes.add(at2);
+          } else if (open4 === void 0 && literal) {
+            escapes.add(at2);
+          }
+        }
+      } else if (node2.type === "text" && ancestors.at(-1)?.type === "paragraph") {
+        for (let row = index2; row < (node2.position?.end.line ?? 0); row++) {
+          const offset = rowStart(row);
+          if (offset < at2 || offset >= end(node2)) continue;
+          const raw = rowAt(row);
+          if (row === line(ancestors.at(-1)) - 1) continue;
+          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false)) || LONG_PLUS_RUN.test(raw)) escapes.add(offset);
+        }
+      }
+    });
+    for (const open4 of sections.values()) for (const section of open4) if (!section.itemText || section.literal) escapes.add(section.at);
+    if (escapes.size === 0) return text6;
+    const parts = [];
+    let at = 0;
+    for (const escape2 of [...escapes].sort((a, b) => a - b)) {
+      parts.push(text6.slice(at, escape2), "\\");
+      at = escape2;
+    }
+    parts.push(text6.slice(at));
+    text6 = parts.join("");
+  }
+  throw new MarkdownLimitError("depth");
+}
+var LINEAR_SYNTAX_ESCAPES = { "\\$": "\uE000", "\\+": "\uE001" };
+function plainPlusEscapes(text6) {
+  let runEnd = -1;
+  let plain = false;
+  return (at) => {
+    if (at < runEnd) return plain;
+    let from = at;
+    while (from > 0 && text6[from - 1] === "+") from--;
+    let signs = 0;
+    let end2 = from;
+    for (; ; ) {
+      if (text6[end2] === "+") end2++;
+      else if (text6[end2] === "\\" && text6[end2 + 1] === "+") end2 += 2;
+      else break;
+      signs++;
+    }
+    runEnd = end2;
+    const after = text6[end2];
+    plain = signs < 3 || after !== void 0 && !/\s/.test(after);
+    return plain;
+  };
+}
+function markFileBlockStarts(body2) {
+  let plusItems;
+  return body2.replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, (line2, marker, at) => {
+    if (marker.endsWith("+")) {
+      if (plusItems === void 0) {
+        const starts = /* @__PURE__ */ new Set();
+        const bom = body2.startsWith(BOM) ? 1 : 0;
+        visit2(parse2(body2), (node2) => {
+          if (node2.type !== "listItem" || body2[start(node2) + bom] !== "+") return;
+          starts.add(body2.lastIndexOf("\n", start(node2) + bom - 1) + 1);
+        });
+        plusItems = starts;
+      }
+      if (!plusItems.has(at)) return line2;
+    }
+    return marker + " \uE002";
+  });
+}
+function appendComparable(children, child2) {
+  const previous3 = children.at(-1);
+  if (child2.type === "text" && previous3?.type === "text") {
+    previous3.value += child2.value;
+  } else if ((child2.type === "strong" || child2.type === "emphasis") && previous3?.type === child2.type) {
+    for (const part of child2.children) appendComparable(previous3.children, part);
+  } else {
+    children.push(child2);
+  }
+}
+function comparableBold(node2, children) {
+  const [only] = children;
+  if (children.length !== 1) return { ...node2, children };
+  if (node2.type === "emphasis" && only?.type === "link" && only.children?.length === 1 && only.children[0]?.type === "strong") {
+    return { ...only, children: [{ ...node2, children: only.children }] };
+  }
+  if (node2.type !== "strong") return { ...node2, children };
+  if (only?.type === "emphasis" || only?.type === "delete") {
+    return comparableBold(only, [comparableBold(node2, only.children)]);
+  }
+  if (only?.type === "link") {
+    const label = [];
+    for (const part of only.children) {
+      for (const child2 of part.type === "strong" ? part.children : [part]) appendComparable(label, child2);
+    }
+    return { ...only, children: [comparableBold(node2, label)] };
+  }
+  return { ...node2, children };
+}
+function comparableLines(node2, children) {
+  const parts = [];
+  let line2 = [];
+  const separate = (breakNode) => {
+    if (line2.length > 0) parts.push(comparableBold(node2, line2));
+    parts.push(breakNode);
+    line2 = [];
+  };
+  for (const child2 of children) {
+    if (child2.type === "break") separate(child2);
+    else if (child2.type === "text" && /[\r\n]/.test(child2.value)) {
+      let at = 0;
+      const value = child2.value;
+      for (const newline of value.matchAll(/\r\n?|\n/g)) {
+        let from = newline.index;
+        let to = from + newline[0].length;
+        while (from > at && /[^\S\r\n \t]/u.test(value[from - 1])) from--;
+        while (/[^\S\r\n \t]/u.test(value[to] ?? "")) to++;
+        if (from > at) appendComparable(line2, { type: "text", value: value.slice(at, from) });
+        separate({ type: "text", value: value.slice(from, to) });
+        at = to;
+      }
+      if (at < value.length) appendComparable(line2, { type: "text", value: value.slice(at) });
+    } else if (child2.type === "link" && (node2.type === "strong" || node2.type === "emphasis" && child2.children?.length === 1 && child2.children[0]?.type === "strong")) {
+      if (line2.length > 0) parts.push(comparableBold(node2, line2));
+      parts.push(comparableBold(node2, [child2]));
+      line2 = [];
+    } else appendComparable(line2, child2);
+  }
+  if (line2.length > 0) parts.push(comparableBold(node2, line2));
+  return parts.length > 0 ? parts : [{ ...node2, children }];
+}
+function containsStrong(node2) {
+  return node2.type === "strong" || (node2.children?.some(containsStrong) ?? false);
+}
+function comparableBoldForms(node2, insideStrong = false) {
+  if (node2.children === void 0) return [node2];
+  if (node2.type === "strong" || node2.type === "emphasis") node2 = coextensiveBoldForms(node2);
+  const children = [];
+  for (const child2 of node2.children) {
+    for (const part of comparableBoldForms(child2, insideStrong || node2.type === "strong")) appendComparable(children, part);
+  }
+  switch (node2.type) {
+    case "strong":
+      return comparableLines(node2, children);
+    case "emphasis":
+    case "link":
+    case "delete":
+      if (insideStrong || children.some(containsStrong)) return comparableLines(node2, children);
+      break;
+  }
+  return [{ ...node2, children }];
+}
+function hasOuterStars(body2, node2) {
+  if (node2.type !== "emphasis" || node2.position === void 0) return false;
+  const { children } = node2;
+  return body2.slice(start(node2), start(node2) + 2) === "**" && body2.slice(end(node2) - 2, end(node2)) === "**" && children.length >= 3 && children.length % 2 === 1 && children.every((child2, index2) => index2 % 2 === 0 ? child2.type === "emphasis" && child2.children.every((part) => part.type === "text") : child2.type === "text" && /^[ \t]+$/.test(child2.value));
+}
+function coextensiveBoldForms(node2) {
+  let inner = node2;
+  let strong2 = false;
+  let emphasis2 = false;
+  for (; ; ) {
+    strong2 ||= inner.type === "strong";
+    emphasis2 ||= inner.type === "emphasis";
+    const child2 = inner.children[0];
+    if (inner.children.length !== 1 || child2?.type !== "strong" && child2?.type !== "emphasis") break;
+    inner = child2;
+  }
+  if (strong2 && emphasis2) return { type: "emphasis", children: [{ type: "strong", children: inner.children }] };
+  return inner;
+}
+function withoutTrailingNewlines(text6) {
+  let end2 = text6.length;
+  while (end2 > 0 && text6[end2 - 1] === "\n") end2--;
+  return end2 === text6.length ? text6 : text6.slice(0, end2);
+}
+function codeSpanText(inner) {
+  return inner.length > 2 && inner.startsWith(" ") && inner.endsWith(" ") && /[^ ]/.test(inner) ? inner.slice(1, -1) : inner;
+}
+function linearDropsCodeSpaces(code4) {
+  if (code4.includes("`")) return false;
+  return /^ {3,}$/.test(code4) || code4.length > 2 && code4.startsWith(" ") && code4.endsWith(" ");
+}
+function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldForms2, ignoreBold, linearShortcodes }) {
+  const nested = nestedFileBlocksOnItemLine(body2);
+  const plainPlus = plainPlusEscapes(nested);
+  const escapes = markFileBlockStarts(nested.replace(/\\[$+]/g, (escape2, at) => escape2 === "\\+" && plainPlus(at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]));
+  const marked = linearShortcodes ? linearShortcodesAsEmoji(escapes) : escapes;
+  const tree = parse2(marked, [], true);
+  for (const child2 of tree.children) if (child2.type === "code") child2.value = withoutTrailingNewlines(child2.value);
+  const escapedPlus = LINEAR_SYNTAX_ESCAPES["\\+"];
+  visit2(tree, (node2) => {
+    if (node2.type !== "listItem" || node2.children.length !== 1) return;
+    const [paragraph2] = node2.children;
+    if (paragraph2?.type !== "paragraph" || paragraph2.position?.start.line !== paragraph2.position?.end.line) return;
+    const [text6] = paragraph2.children;
+    if (text6?.type === "text" && text6.value.startsWith(escapedPlus) && SECTION_TITLE.test("+" + text6.value.slice(1))) {
+      text6.value = "+" + text6.value.slice(1);
+    }
+  });
+  const strip = (node2, paragraphLine) => {
+    const { position: _position, ...rest } = node2;
+    if ("url" in rest) rest.url = normalizeUri(rest.url);
+    if (node2.type === "inlineCode") return { ...rest, value: node2.value.replace(/\r\n?|\n/g, " ") };
+    if (linearNumberSpacing && node2.type === "text" && paragraphLine !== void 0) {
+      const separator = paragraphLine ? /(^|\n)([ \t]*\d+\.)[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g : /(\n)([ \t]*\d+\.)[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g;
+      return { ...rest, value: node2.value.replace(separator, "$1$2 ") };
+    }
+    if ("children" in node2) {
+      const children = [];
+      for (const [index2, child2] of node2.children.entries()) {
+        const startsLine = node2.type === "paragraph" ? index2 === 0 || node2.children[index2 - 1]?.type === "break" : void 0;
+        const part = strip(child2, startsLine);
+        if ((ignoreBold || node2.type === "strong") && part.type === "strong" || linearBoldForms2 && hasOuterStars(marked, child2)) {
+          for (const nested2 of part.children) appendComparable(children, nested2);
+        } else {
+          appendComparable(children, part);
+        }
+      }
+      return { ...rest, children };
+    }
+    return rest;
+  };
+  const comparableTree = strip(tree);
+  return linearBoldForms2 ? comparableBoldForms(comparableTree)[0] : comparableTree;
+}
+function quotePrefix(line2) {
+  let end2 = 0;
+  let lastQuote = 0;
+  for (; ; ) {
+    let at = end2;
+    while (at - end2 < 3 && line2[at] === " ") at++;
+    if (line2[at] !== ">") return { end: end2, lastQuote };
+    lastQuote = at + 1;
+    end2 = line2[lastQuote] === " " ? lastQuote + 1 : lastQuote;
+  }
+}
+var MARKER_REST = /^( *)([*+-]|\d{1,9}[.)])[ \t]*\r?$/;
+function bareMarker(line2) {
+  const { end: end2 } = quotePrefix(line2);
+  const marker = MARKER_REST.exec(line2.slice(end2));
+  return marker === null ? null : { prefix: line2.slice(0, end2), spaces: marker[1], bullet: marker[2] };
+}
+function opensIndentedBracket(line2) {
+  let at = quotePrefix(line2).lastQuote;
+  if (line2[at] !== " ") return false;
+  while (line2[at] === " ") at++;
+  return line2[at] === "[";
+}
+function maybeNestedBlock(lines3) {
+  for (let index2 = 1; index2 + 1 < lines3.length; index2++) {
+    if (/\S/.test(lines3[index2 - 1]) && opensIndentedBracket(lines3[index2 + 1]) && bareMarker(lines3[index2]) !== null) return true;
+  }
+  return false;
+}
+function trimLineEnd(line2) {
+  let end2 = line2.length;
+  while (end2 > 0 && (line2[end2 - 1] === " " || line2[end2 - 1] === "	" || line2[end2 - 1] === "\r")) end2--;
+  return line2.slice(0, end2);
+}
+function nestedFileBlocksOnItemLine(body2) {
+  const lines3 = body2.split("\n");
+  if (!maybeNestedBlock(lines3)) return body2;
+  const joins = /* @__PURE__ */ new Map();
+  visit2(parse2(body2), (node2) => {
+    if (node2.type !== "paragraph") return;
+    for (const [index2, link2] of node2.children.entries()) {
+      const before = node2.children[index2 - 1];
+      if (link2.type !== "link" || before?.type !== "text") continue;
+      const linkLine = link2.position.start.line - 1;
+      const markerLine = linkLine - 1;
+      if (markerLine < node2.position.start.line || before.position.start.line - 1 > markerLine) continue;
+      const marker = bareMarker(lines3[markerLine]);
+      if (marker === null) continue;
+      const { prefix, spaces, bullet } = marker;
+      const column = prefix.length + spaces.length + bullet.length + 1;
+      const line2 = lines3[linkLine];
+      if (link2.position.start.column - 1 !== column || line2.slice(0, column) !== prefix + " ".repeat(column - prefix.length)) continue;
+      if (link2.position.end.line - 1 !== linkLine || line2.slice(link2.position.end.column - 1).trim() !== "") continue;
+      joins.set(markerLine, column);
+      break;
+    }
+  });
+  if (joins.size === 0) return body2;
+  const result = [];
+  for (let index2 = 0; index2 < lines3.length; index2++) {
+    const column = joins.get(index2);
+    if (column === void 0) {
+      result.push(lines3[index2]);
+      continue;
+    }
+    result.push(`${trimLineEnd(lines3[index2])} ${lines3[index2 + 1].slice(column)}`);
+    index2++;
+  }
+  return result.join("\n");
+}
+function isCalloutComment(node2) {
+  return node2?.type === "html" && /^<!--\s*linear:callout\b[^]*?-->$/.test(node2.value);
+}
+var ALERT = /^\[!\w+\][ \t]*$/;
+var calloutSource;
+function isCallout(node2, source) {
+  if (node2.type !== "blockquote" || !node2.position) return false;
+  if (calloutSource?.source !== source) calloutSource = { source, lines: source.split("\n") };
+  const first = calloutSource.lines[node2.position.start.line - 1] ?? "";
+  return ALERT.test(first.replace(/\r$/, "").replace(/^ {0,3}> ?/, ""));
+}
+function quoteLines(text6, codeLines) {
+  return text6.split("\n").map((line2, index2) => line2 === "" && !codeLines.has(index2 + 1) ? ">" : `> ${line2}`).join("\n");
+}
+function start(node2) {
+  return node2.position?.start.offset ?? 0;
+}
+function advanceColumn(column, char) {
+  return char === "	" ? column + 4 - column % 4 : column + 1;
+}
+function end(node2) {
+  return node2.position?.end.offset ?? 0;
+}
+var NESTED_MARKER_TEXT = /^(?:(?:[*+-]|\d{1,9}[.)])[ \t]+\S|(?:[*+-]|\d{1,9}\.)[ \t]*$)/;
+function nestsMarkerText(body2, item) {
+  const [first] = item.children;
+  if (item.checked != null || first?.type !== "paragraph" || first.children[0]?.type !== "text") return false;
+  if (body2.slice(start(item), start(first)).includes("\n")) return false;
+  return NESTED_MARKER_TEXT.test(body2.slice(start(first), end(first)));
+}
+function endingRow(body2, table) {
+  return table.children.slice(1).find((row) => !body2.slice(start(row), end(row)).includes("|"));
+}
+function line(node2) {
+  return node2.position?.start.line ?? 1;
+}
+function visit2(node2, enter, ancestors = []) {
+  const parents = [...ancestors];
+  const stack = [];
+  let count4 = 0;
+  for (; ; ) {
+    if (parents.length > MARKDOWN_MAX_DEPTH) throw new MarkdownLimitError("depth");
+    if (++count4 > MARKDOWN_MAX_NODES) throw new MarkdownLimitError("nodes");
+    enter(node2, parents);
+    if ("children" in node2 && node2.children.length > 0) {
+      stack.push({ node: node2, next: 1 });
+      parents.push(node2);
+      node2 = node2.children[0];
+      continue;
+    }
+    while (stack.length > 0) {
+      const frame = stack.at(-1);
+      if ("children" in frame.node && frame.next < frame.node.children.length) {
+        node2 = frame.node.children[frame.next++];
+        break;
+      }
+      stack.pop();
+      parents.pop();
+    }
+    if (stack.length === 0) return;
+  }
+}
+function decodedDestinationPath(url) {
+  const cut = url.search(/[?#]/);
+  const path7 = cut === -1 ? url : url.slice(0, cut);
+  try {
+    return decodeURIComponent(path7);
+  } catch {
+    return path7;
+  }
+}
+function resolveTarget(documentPath2, url) {
+  if (url === "" || url.startsWith("#") || url.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
+  const path7 = decodedDestinationPath(url);
+  if (path7 === "") return null;
+  const joined = posix.normalize(posix.join(posix.dirname(documentPath2), path7));
+  if (joined === "." || joined === ".." || joined.startsWith("../") || joined.endsWith("/")) return null;
+  return joined;
+}
+function allowedLink(url) {
+  const normalized = url.replace(/[\u0000-\u0020\u007f]/g, "");
+  return !/^[a-z][a-z\d+.-]*:/i.test(normalized) || /^(?:https?|mailto):/i.test(normalized);
+}
+function destination(url) {
+  return url.replace(/ /g, "%20").replace(/\\(?=[!-/:-@[-`{-~])/g, "\\\\").replace(
+    /&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|([A-Za-z][A-Za-z0-9]{1,31});)/g,
+    (ampersand, name) => name === void 0 || decodeNamedCharacterReference(name) !== false ? "&amp;" : ampersand
+  );
+}
+function linkDestination(url) {
+  const cut = url.search(/[?#]/);
+  const path7 = asciiHost(cut === -1 ? url : url.slice(0, cut));
+  const rest = cut === -1 ? "" : url.slice(cut);
+  const literal = !/^[a-z][a-z0-9+.-]*:/i.test(url) && !decodes(path7);
+  const encode2 = (text6, percent) => text6.replace(new RegExp(`[<>\\r\\n\\\\|^{}]|${percent.source}`, "g"), (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`).replace(/[^\0-\x7f]/gu, (char) => [...UTF8.encode(char)].map((byte) => `%${byte.toString(16).toUpperCase()}`).join(""));
+  const lone = /%(?![0-9A-Fa-f]{2})/;
+  return `<${destination(encode2(path7, literal ? /%/ : lone) + encode2(rest, lone))}>`;
+}
+var UTF8 = new TextEncoder();
+function asciiHost(path7) {
+  const match = /^([a-z][a-z0-9+.-]*:\/\/(?:[^/\\@]*@)?)([^/\\:]*)/i.exec(path7);
+  if (match === null || /^[\0-\x7f]*$/.test(match[2])) return path7;
+  const host = domainToASCII2(match[2]);
+  return host === "" ? path7 : match[1] + host + path7.slice(match[0].length);
+}
+function decodes(text6) {
+  try {
+    decodeURIComponent(text6);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function imageDestination(url) {
+  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+function bracketedLabel(source, open4, limit) {
+  const end2 = Math.min(limit, source.length);
+  const closing = (spans) => {
+    let depth2 = 0;
+    for (let at = open4; at < end2; at++) {
+      const char = source[at];
+      if (char === "\\") at++;
+      else if (spans.has(at)) at = spans.get(at) - 1;
+      else if (char === "[") depth2++;
+      else if (char === "]" && --depth2 === 0) return at;
+    }
+    return -1;
+  };
+  let close = closing(new Map(codeSpans(source, open4, end2)));
+  if (!(close !== -1 && (close === end2 - 1 || source[close + 1] === "(" || source[close + 1] === "["))) close = closing(/* @__PURE__ */ new Map());
+  return close === -1 ? "" : source.slice(open4 + 1, close);
+}
+function codeSpans(source, from, to) {
+  const htmlEnd = inlineHtmlEnds(source, from, to);
+  const runEnd = (at) => {
+    while (at < to && source[at] === "`") at++;
+    return at;
+  };
+  const runs = /* @__PURE__ */ new Map();
+  for (let at = from; at < to; ) {
+    if (source[at] !== "`") {
+      at++;
+      continue;
+    }
+    const after = runEnd(at);
+    const starts = runs.get(after - at) ?? [];
+    starts.push(at);
+    runs.set(after - at, starts);
+    at = after;
+  }
+  const spans = [];
+  for (let at = from; at < to; ) {
+    if (source[at] === "\\") {
+      at += 2;
+      continue;
+    }
+    if (source[at] === "<") {
+      at = htmlEnd(at) ?? at + 1;
+      continue;
+    }
+    if (source[at] !== "`") {
+      at++;
+      continue;
+    }
+    const open4 = runEnd(at);
+    const width = open4 - at;
+    const close = firstAtOrAfter(runs.get(width) ?? [], open4);
+    if (close === void 0) {
+      at = open4;
+    } else {
+      spans.push([at, close + width]);
+      at = close + width;
+    }
+  }
+  return spans;
+}
+var AUTOLINK_OR_TAG = new RegExp([
+  /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/.source,
+  /<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>/.source,
+  /<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>/.source,
+  /<\/[A-Za-z][A-Za-z0-9-]*\s*>/.source
+].join("|"), "y");
+var HTML_UNTIL = [
+  [/<!--(?:-?>)?/y, "-->"],
+  [/<\?/y, "?>"],
+  [/<![A-Za-z]/y, ">"],
+  [/<!\[CDATA\[/y, "]]>"]
+];
+function inlineHtmlEnds(source, from, to) {
+  let text6;
+  const next = /* @__PURE__ */ new Map();
+  const closer = (marker, start3) => {
+    let found = next.get(marker);
+    if (found === void 0 || found !== -1 && found < start3) {
+      found = text6.indexOf(marker, start3);
+      next.set(marker, found);
+    }
+    return found;
+  };
+  return (at) => {
+    text6 ??= source.slice(from, to);
+    const offset = at - from;
+    for (const [open4, marker] of HTML_UNTIL) {
+      open4.lastIndex = offset;
+      const opened = open4.exec(text6);
+      if (!opened) continue;
+      if (opened[0].endsWith(">")) return at + opened[0].length;
+      const close = closer(marker, offset + opened[0].length);
+      return close === -1 ? void 0 : from + close + marker.length;
+    }
+    AUTOLINK_OR_TAG.lastIndex = offset;
+    const match = AUTOLINK_OR_TAG.exec(text6);
+    return match ? at + match[0].length : void 0;
+  };
+}
+function firstAtOrAfter(values, min) {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = low + high >>> 1;
+    if (values[middle] < min) low = middle + 1;
+    else high = middle;
+  }
+  return values[low];
+}
+function listKind(list4, item) {
+  return item?.checked != null ? "task" : list4.ordered ? "ordered" : "bullet";
+}
+function opensWithText(list4) {
+  const [item] = list4.children;
+  return item !== void 0 && item.children[0]?.type === "paragraph" && (listKind(list4, item) !== "ordered" || (list4.start ?? 1) === 1);
+}
+var MAX_LIST_NUMBER = 999999999;
+function listParts(list4, source) {
+  const parts = [];
+  list4.children.forEach((item, index2) => {
+    const previous3 = parts.at(-1);
+    if (previous3 !== void 0 && !splitsAfter(list4.children[index2 - 1], item)) {
+      previous3.items.push(item);
+      return;
+    }
+    const counted = previous3 === void 0 ? list4.start ?? 1 : previous3.first + previous3.items.length;
+    const own6 = Number(/^\d+/.exec(source.slice(start(item)))?.[0] ?? counted);
+    parts.push({ items: [item], first: previous3 === void 0 ? counted : own6 + list4.children.length - index2 - 1 <= MAX_LIST_NUMBER ? own6 : counted });
+  });
+  return parts;
+}
+function splitsAfter(item, next) {
+  return item.children.length === 0 && next.position.start.line - item.position.end.line > 2;
+}
+
+// src/mapping/front-matter.ts
+var OPENING_FENCE = /^﻿?---[ \t]*\r?\n/;
+var CLOSING_FENCE = /^---[ \t]*(?:\r?\n|$)/m;
+function findFrontMatter(text6) {
+  const { head } = splitFile(text6);
+  const opening = OPENING_FENCE.exec(head);
+  if (opening === null) return null;
+  const rest = head.slice(opening[0].length);
+  const closing = CLOSING_FENCE.exec(rest);
+  return closing === null ? null : { yaml: rest.slice(0, closing.index) };
+}
+function parseQuietly(yaml) {
+  return (0, import_yaml.parse)(yaml, { logLevel: "error", prettyErrors: false });
+}
+
+// src/mapping/annotations.ts
+var ANNOTATION_FILE = "README.md";
+var TEAM_KEY = "linear-team";
+var PROJECT_KEY = "linear-project";
+var MENTIONS_KEY = new RegExp(`^[ \\t]*["']?(?:${TEAM_KEY}|${PROJECT_KEY})["']?[ \\t]*:`, "m");
+function readAnnotation(readme, text6) {
+  const folder = folderOf(readme);
+  const frontMatter = findFrontMatter(text6);
+  if (frontMatter === null) return { annotation: null };
+  let data;
+  try {
+    data = parseQuietly(frontMatter.yaml);
+  } catch {
+    if (!MENTIONS_KEY.test(frontMatter.yaml)) return { annotation: null };
+    return { problem: { readme, kind: "invalid-annotation", message: message("annotations.invalid-yaml", { readme, teamKey: TEAM_KEY, projectKey: PROJECT_KEY }) } };
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return { annotation: null };
+  const annotation = { folder, readme };
+  for (const [key, field] of [[TEAM_KEY, "team"], [PROJECT_KEY, "project"]]) {
+    if (!Object.hasOwn(data, key)) continue;
+    const value = data[key];
+    if (typeof value !== "string" || value.trim() === "") {
+      return { problem: { readme, kind: "invalid-annotation", message: message("annotations.empty-name", { readme, key }) } };
+    }
+    annotation[field] = value.trim();
+  }
+  return { annotation: annotation.team === void 0 && annotation.project === void 0 ? null : annotation };
+}
+function resolveZones(annotations) {
+  const zones = /* @__PURE__ */ new Map();
+  const problems = [];
+  const ordered = annotations.map((annotation) => ({ annotation, depth: depth(annotation.folder) })).sort((a, b) => a.depth - b.depth || compare(a.annotation.folder, b.annotation.folder)).map(({ annotation }) => annotation);
+  const tree = new ZoneTree();
+  for (const annotation of ordered) {
+    const inherited = tree.nearest(parentOf(annotation.folder));
+    const { readme } = annotation;
+    if (annotation.team !== void 0 && inherited !== void 0) {
+      problems.push({ readme, kind: "nested-team", message: message("annotations.nested-team", { readme, team: inherited.team, folder: display(inherited.teamFolder) }) });
+      continue;
+    }
+    if (annotation.project !== void 0 && inherited?.project !== void 0) {
+      problems.push({
+        readme,
+        kind: "nested-project",
+        message: message("annotations.nested-project", { readme, project: inherited.project, folder: display(inherited.projectFolder ?? "") })
+      });
+      continue;
+    }
+    if (annotation.team === void 0 && inherited === void 0) {
+      problems.push({ readme, kind: "project-without-team", message: message("annotations.project-without-team", { readme }) });
+      continue;
+    }
+    const zone = annotation.team !== void 0 ? { team: annotation.team, teamFolder: annotation.folder } : { ...inherited };
+    if (annotation.project !== void 0) {
+      zone.project = annotation.project;
+      zone.projectFolder = annotation.folder;
+    }
+    zones.set(annotation.folder, zone);
+    tree.add(annotation.folder, zone);
+  }
+  return { zones, problems };
+}
+var ZoneTree = class {
+  root = { children: /* @__PURE__ */ new Map() };
+  add(folder, zone) {
+    let node2 = this.root;
+    if (folder !== "") {
+      for (const name of folder.split("/")) {
+        let child2 = node2.children.get(name);
+        if (child2 === void 0) {
+          child2 = { children: /* @__PURE__ */ new Map() };
+          node2.children.set(name, child2);
+        }
+        node2 = child2;
+      }
+    }
+    node2.zone = zone;
+    node2.folder = folder;
+  }
+  /** The zone of the nearest annotated folder at or above `folder`. */
+  nearest(folder) {
+    return this.nearestNode(folder)?.zone;
+  }
+  /** The node of the nearest annotated folder at or above `folder`. */
+  nearestNode(folder) {
+    if (folder === null) return void 0;
+    let node2 = this.root;
+    let found = node2.zone === void 0 ? void 0 : node2;
+    if (folder === "") return found;
+    for (let start3 = 0; ; ) {
+      const slash = folder.indexOf("/", start3);
+      node2 = node2.children.get(slash === -1 ? folder.slice(start3) : folder.slice(start3, slash));
+      if (node2 === void 0) return found;
+      if (node2.zone !== void 0) found = node2;
+      if (slash === -1) return found;
+      start3 = slash + 1;
+    }
+  }
+};
+var zoneTrees = /* @__PURE__ */ new WeakMap();
+function nearestZone(zones, folder) {
+  const cached = zoneTrees.get(zones);
+  if (cached !== void 0 && cached.size === zones.size) {
+    const found = cached.tree.nearestNode(folder);
+    if (found === void 0 || zones.get(found.folder) === found.zone) return found?.zone;
+  }
+  const tree = new ZoneTree();
+  for (const [annotated, zone] of zones) tree.add(annotated, zone);
+  zoneTrees.set(zones, { size: zones.size, tree });
+  return tree.nearest(folder);
+}
+function folderOf(path7) {
+  const slash = path7.lastIndexOf("/");
+  return slash === -1 ? "" : path7.slice(0, slash);
+}
+function parentOf(folder) {
+  return folder === "" ? null : folderOf(folder);
+}
+function depth(folder) {
+  return folder === "" ? 0 : folder.split("/").length;
+}
+function compare(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+function display(folder) {
+  return folder === "" ? "the repository root" : `${folder}/`;
+}
+
+// src/state/git.ts
+import { existsSync as existsSync2 } from "node:fs";
+import { join as join7 } from "node:path";
+
+// src/state/batch.ts
+import { spawn as spawn2 } from "node:child_process";
+import { statSync } from "node:fs";
+var IDLE_MS = 1e3;
+var Queue = class {
+  items = [];
+  head = 0;
+  get size() {
+    return this.items.length - this.head;
+  }
+  push(item) {
+    this.items.push(item);
+  }
+  first() {
+    return this.items[this.head];
+  }
+  shift() {
+    this.head++;
+    if (this.head > 1024 && this.head * 2 > this.items.length) {
+      this.items = this.items.slice(this.head);
+      this.head = 0;
+    }
+  }
+  drain() {
+    const rest = this.items.slice(this.head);
+    this.items = [];
+    this.head = 0;
+    return rest;
+  }
+};
+var BatchProcess = class {
+  options;
+  running;
+  starting;
+  directory;
+  constructor(options) {
+    this.options = options;
+  }
+  /** Writes `input` and waits for its answer. */
+  async request(input, request2) {
+    let running = this.running;
+    if (running === void 0 || this.directory === void 0 || identityOf(this.directory) !== running.identity) running = await this.start();
+    const current = running;
+    return new Promise((resolve3, reject) => {
+      if (current.idle !== void 0) clearTimeout(current.idle);
+      current.idle = void 0;
+      if (current.pending.size === 0) hold(current.child, true);
+      current.pending.push({ request: request2, resolve: resolve3, reject });
+      current.child.stdin.write(input);
+    });
+  }
+  /** Ends the process; the next request starts a new one. */
+  close() {
+    const running = this.running;
+    this.running = void 0;
+    if (running === void 0) return;
+    if (running.idle !== void 0) clearTimeout(running.idle);
+    running.child.stdin.end();
+  }
+  start() {
+    if (this.starting === void 0) {
+      const starting = (async () => {
+        this.close();
+        this.directory ??= await this.options.objectDirectory();
+        const running = this.spawn(this.directory);
+        this.running = running;
+        return running;
+      })();
+      this.starting = starting;
+      const clear = () => {
+        if (this.starting === starting) this.starting = void 0;
+      };
+      starting.then(clear, clear);
+    }
+    return this.starting;
+  }
+  spawn(directory) {
+    const { dir, args, env } = this.options;
+    const child2 = spawn2("git", args, { cwd: dir, env: { ...env(), GIT_FLUSH: "1" }, stdio: ["pipe", "pipe", "pipe"] });
+    const running = { child: child2, identity: identityOf(directory), pending: new Queue(), chunks: [], length: 0, need: 0, stderr: "", idle: void 0 };
+    child2.stdout.on("data", (chunk) => this.receive(running, chunk));
+    child2.stderr.on("data", (chunk) => {
+      if (running.stderr.length < 64 * 1024) running.stderr += chunk.toString("utf8");
+    });
+    child2.stdin.on("error", () => {
+    });
+    let ended = false;
+    const end2 = (code4) => {
+      if (ended) return;
+      ended = true;
+      if (running.idle !== void 0) clearTimeout(running.idle);
+      if (this.running === running) this.running = void 0;
+      const error2 = new GitError(args, code4, running.stderr);
+      const waiting = running.pending.drain();
+      for (const request2 of waiting) request2.reject(error2);
+      if (waiting.length > 0) this.options.onIdle?.();
+    };
+    child2.on("error", () => end2(-1));
+    child2.on("close", (code4) => end2(code4 ?? -1));
+    hold(child2, false);
+    return running;
+  }
+  receive(running, chunk) {
+    running.chunks.push(chunk);
+    running.length += chunk.length;
+    if (running.length < running.need) return;
+    let buffered = running.chunks.length === 1 ? running.chunks[0] : Buffer.concat(running.chunks);
+    running.chunks = [buffered];
+    while (running.pending.size > 0) {
+      const waiting = running.pending.first();
+      let parsed;
+      try {
+        parsed = this.options.parse(buffered, waiting.request);
+      } catch (error2) {
+        this.broken(running, error2);
+        return;
+      }
+      if (parsed === void 0 || "need" in parsed) {
+        running.need = parsed === void 0 ? buffered.length + 1 : parsed.need;
+        break;
+      }
+      buffered = buffered.subarray(parsed.bytes);
+      running.chunks = buffered.length === 0 ? [] : [buffered];
+      running.length = buffered.length;
+      running.need = 0;
+      running.pending.shift();
+      if (running.pending.size === 0) this.rest(running);
+      waiting.resolve(parsed.answer);
+    }
+  }
+  /** Nothing waits: the process must not keep the program running, and it ends unless a request comes soon. */
+  rest(running) {
+    hold(running.child, false);
+    running.idle = setTimeout(() => {
+      if (this.running === running) this.close();
+    }, IDLE_MS);
+    running.idle.unref();
+    this.options.onIdle?.();
+  }
+  broken(running, cause) {
+    if (this.running === running) this.running = void 0;
+    const error2 = new GitError(this.options.args, -1, cause.message);
+    for (const waiting of running.pending.drain()) waiting.reject(error2);
+    running.child.kill("SIGKILL");
+    this.options.onIdle?.();
+  }
+};
+function parseLine(buffer) {
+  const newline = buffer.indexOf(10);
+  return newline < 0 ? void 0 : { answer: buffer.subarray(0, newline).toString("utf8"), bytes: newline + 1 };
+}
+function hold(child2, waiting) {
+  for (const handle2 of [child2, child2.stdin, child2.stdout, child2.stderr]) {
+    if (waiting) handle2.ref();
+    else handle2.unref();
+  }
+}
+function identityOf(directory) {
+  try {
+    const stat2 = statSync(directory);
+    return `${stat2.dev}:${stat2.ino}`;
+  } catch {
+    return "missing";
+  }
+}
+
+// src/state/object-reader.ts
+var HEADER = /^([0-9a-f]{40}|[0-9a-f]{64}) ([a-z]+) ([0-9]+)$/;
+function batchName(name) {
+  return name !== "" && !/[\n\r\0]/.test(name) && name.trim() === name;
+}
+var ObjectReader = class {
+  process;
+  /**
+   * @param dir the directory the process runs in
+   * @param env the environment of the process
+   * @param objectDirectory gives the absolute path of the repository's object directory
+   */
+  constructor(dir, env, objectDirectory) {
+    this.process = new BatchProcess({ dir, args: ["cat-file", "--batch-command"], env, objectDirectory, parse: parse4 });
+  }
+  /** The object a name resolves to, with its content; null when the name resolves to no object. */
+  contents(name) {
+    return this.ask(name, true);
+  }
+  /** The id, type and size of the object a name resolves to; null when it resolves to no object. */
+  info(name) {
+    return this.ask(name, false);
+  }
+  async ask(name, contents) {
+    if (!batchName(name)) throw new Error(message("objects.batch-name", { name: JSON.stringify(name) }));
+    return this.process.request(`${contents ? "contents" : "info"} ${name}
+`, { name, contents });
+  }
+};
+function parse4(buffer, request2) {
+  const newline = buffer.indexOf(10);
+  if (newline < 0) return void 0;
+  const header = buffer.subarray(0, newline).toString("utf8");
+  const match = HEADER.exec(header);
+  if (match === null) {
+    if (header === `${request2.name} missing` || header === `${request2.name} ambiguous`) return { answer: null, bytes: newline + 1 };
+    throw new Error(message("git.unreadable-answer", { command: "cat-file" }));
+  }
+  const info2 = { oid: match[1], type: match[2], size: Number(match[3]) };
+  if (!request2.contents) return { answer: info2, bytes: newline + 1 };
+  const end2 = newline + 1 + info2.size;
+  if (buffer.length < end2 + 1) return { need: end2 + 1 };
+  return { answer: { ...info2, content: Buffer.from(buffer.subarray(newline + 1, end2)) }, bytes: end2 + 1 };
+}
+
+// src/state/object-writer.ts
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import { join as join5 } from "node:path";
+var ObjectWriter = class {
+  blobs;
+  trees;
+  /** Blob content waits in a file here while git reads it; the folder is there only while blobs are being written. */
+  folder;
+  files = 0;
+  writing = 0;
+  /** Writes waiting for one of the `BLOBS_AT_ONCE` places, so the folder holds a bounded number of blobs. */
+  waiting = [];
+  /**
+   * @param dir the directory the processes run in
+   * @param env the environment of the processes
+   * @param objectDirectory gives the absolute path of the repository's object directory
+   */
+  constructor(dir, env, objectDirectory) {
+    const oid = (buffer) => parseLine(buffer);
+    this.blobs = new BatchProcess({
+      dir,
+      env,
+      objectDirectory,
+      parse: oid,
+      args: ["-c", "core.fsyncMethod=fsync", "-c", `core.bigFileThreshold=${Number.MAX_SAFE_INTEGER}`, "hash-object", "-w", "--no-filters", "--stdin-paths"]
+    });
+    this.trees = new BatchProcess({ dir, env, objectDirectory, parse: oid, args: ["mktree", "-z", "--batch"] });
+  }
+  /**
+   * Stores content as a blob, exactly as given (no clean filters, no LFS).
+   * Content given as a function is read only when the blob's turn comes.
+   */
+  async blob(content4) {
+    if (this.writing >= BLOBS_AT_ONCE) await new Promise((resolve3) => this.waiting.push(resolve3));
+    else this.writing++;
+    let path7;
+    try {
+      this.folder ??= mkdtempSync2(join5(tmpdir2(), "blob-"));
+      path7 = join5(this.folder, String(this.files++));
+      writeFileSync2(path7, typeof content4 === "function" ? content4() : content4, { mode: 384 });
+      return checkOid(await this.blobs.request(`${path7}
+`, path7), "hash-object");
+    } finally {
+      if (path7 !== void 0) rmSync2(path7, { force: true });
+      const next = this.waiting.shift();
+      if (next !== void 0) next();
+      else if (--this.writing === 0) this.clearFolder();
+    }
+  }
+  /** Stores a tree of these entries; git sorts them. */
+  async tree(entries) {
+    const records = entries.map((entry) => {
+      if (entry.name.length === 0 || entry.name.includes(0) || entry.name.includes(47)) throw new Error(message("objects.invalid-entry-name", { name: JSON.stringify(entry.name.toString("utf8")) }));
+      return Buffer.concat([Buffer.from(`${entry.mode} ${entry.type} ${entry.oid}	`), entry.name, NUL]);
+    });
+    const input = Buffer.concat([...records, NUL]);
+    try {
+      return checkOid(await this.trees.request(input, null), "mktree");
+    } catch (error2) {
+      if (!(error2 instanceof GitError && error2.stderr.includes("is unavailable"))) throw error2;
+      return checkOid(await this.trees.request(input, null), "mktree");
+    }
+  }
+  clearFolder() {
+    const folder = this.folder;
+    this.folder = void 0;
+    if (folder !== void 0) rmSync2(folder, { recursive: true, force: true });
+  }
+};
+var NUL = Buffer.from([0]);
+var BLOBS_AT_ONCE = 8;
+function checkOid(line2, command) {
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(line2)) throw new Error(message("git.unreadable-answer", { command }));
+  return line2;
+}
+
+// src/state/spawner.ts
+import { spawn as spawn3 } from "node:child_process";
+var HELPER = String.raw`
+'use strict';
+const { spawn } = require('node:child_process');
+const { createWriteStream } = require('node:fs');
+const { pipeline } = require('node:stream/promises');
+const failure = (error) => ({ message: String(error && error.message), code: error && error.code, errno: error && error.errno, syscall: error && error.syscall, path: error && error.path });
+const reply = (message) => { if (process.connected) process.send(message); };
+function run(id, request) {
+  const child = spawn('git', request.args, { cwd: request.cwd, env: request.env, stdio: [request.file ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+  const out = [];
+  const err = [];
+  let exceeded;
+  const collector = (chunks, limit) => {
+    let bytes = 0;
+    return (chunk) => {
+      if (exceeded !== undefined) return;
+      bytes += chunk.length;
+      if (limit !== undefined && bytes > limit) {
+        exceeded = limit;
+        child.kill('SIGKILL');
+        return;
+      }
+      chunks.push(chunk);
+    };
+  };
+  // A bounded call stops the command when its standard error passes 64 KiB as well; a call that streams to a file
+  // keeps the first 64 KiB of it and lets the command finish.
+  let kept = 0;
+  const firstPart = (chunk) => { if (kept < 64 * 1024) { kept += chunk.length; err.push(chunk); } };
+  if (!request.file) child.stdout.on('data', collector(out, request.maxOutputBytes));
+  child.stderr.on('data', request.file ? firstPart : collector(err, request.maxOutputBytes !== undefined ? 64 * 1024 : undefined));
+  let failed;
+  const exited = new Promise((resolve) => {
+    child.on('error', (error) => { failed = error; resolve(-1); });
+    child.on('close', (code) => resolve(code === null ? -1 : code));
+  });
+  if (!request.file) {
+    child.stdin.on('error', () => {});
+    child.stdin.end(request.input === undefined ? '' : request.input);
+  }
+  const copied = request.file
+    ? pipeline(child.stdout, createWriteStream(request.file.path, { flags: 'wx', mode: request.file.mode })).catch((error) => { child.kill('SIGKILL'); throw error; })
+    : Promise.resolve();
+  copied.then(() => exited).then((code) => {
+    if (failed !== undefined) return reply({ id, failure: failure(failed) });
+    reply({ id, result: { code, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8'), exceeded } });
+  }, (error) => exited.then(() => reply({ id, failure: failure(failed === undefined ? error : failed) })));
+}
+process.on('message', ({ id, request }) => {
+  // A command that cannot even start (an argument with a NUL in it) fails alone.
+  try { run(id, request); } catch (error) { reply({ id, failure: failure(error) }); }
+});
+process.on('disconnect', () => process.exit(0));
+`;
+var helper;
+var pending = /* @__PURE__ */ new Map();
+var nextId = 0;
+function start2() {
+  const { NODE_OPTIONS: _options, ...env } = process.env;
+  const child2 = spawn3(process.execPath, ["-e", HELPER], { stdio: ["ignore", "ignore", "inherit", "ipc"], serialization: "advanced", env });
+  child2.on("message", (message2) => {
+    const waiting = pending.get(message2.id);
+    if (waiting === void 0) return;
+    pending.delete(message2.id);
+    if (pending.size === 0) hold2(child2, false);
+    if ("result" in message2) waiting.resolve({ ...message2.result, stdout: Buffer.from(message2.result.stdout) });
+    else waiting.reject(Object.assign(new Error(message2.failure.message), withoutUndefined(message2.failure)));
+  });
+  const end2 = (error2) => {
+    if (helper === child2) helper = void 0;
+    for (const [id, waiting] of pending) {
+      pending.delete(id);
+      waiting.reject(error2);
+    }
+  };
+  child2.on("error", end2);
+  child2.on("exit", (code4, signal) => end2(new Error(message("git.starter-ended", { reason: String(signal ?? code4) }))));
+  hold2(child2, false);
+  return child2;
+}
+function hold2(child2, waiting) {
+  const channel = child2.channel;
+  if (waiting) {
+    child2.ref();
+    channel?.ref();
+  } else {
+    child2.unref();
+    channel?.unref();
+  }
+}
+function withoutUndefined(failure) {
+  return Object.fromEntries(Object.entries(failure).filter(([key, value]) => key !== "message" && value !== void 0 && value !== null));
+}
+function spawnGit(request2) {
+  helper ??= start2();
+  const child2 = helper;
+  const id = nextId++;
+  return new Promise((resolve3, reject) => {
+    if (pending.size === 0) hold2(child2, true);
+    pending.set(id, { resolve: resolve3, reject });
+    child2.send({ id, request: request2 });
+  });
+}
+
+// src/state/objects.ts
+import { mkdtemp, rm as rm2 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join6 } from "node:path";
+var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
+function listTree(git, treeish, maxOutputBytes) {
+  return git.listTree(treeish, maxOutputBytes);
+}
+async function readTreeListing(git, treeish, maxOutputBytes) {
+  let files;
+  try {
+    files = await walkTree(git, treeish, maxOutputBytes === void 0 ? void 0 : { maxOutputBytes, sized: true });
+  } catch (error2) {
+    if (!(error2 instanceof TreeOverLimit)) throw error2;
+    const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
+  const sizes = await Promise.all(files.map((file) => file.type === "blob" ? git.objectInfo(file.oid) : null));
+  let bytes = 0;
+  return files.map((file, index2) => {
+    const size = file.type === "blob" ? sizes[index2]?.size ?? Number.NaN : null;
+    if (maxOutputBytes !== void 0) {
+      bytes += file.bytes + Math.max(7, size === null ? 1 : Number.isNaN(size) ? 3 : String(size).length);
+      if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
+    }
+    return { path: file.path, mode: file.mode, type: file.type, oid: file.oid, size };
+  });
+}
+async function listPaths(git, treeish, paths, maxOutputBytes) {
+  const unique = [...new Set(paths)];
+  const inside2 = (path7) => unique.some((other) => other.startsWith(`${path7}/`));
+  if (unique.some((path7) => inside2(path7) || path7.split("/").some((part) => part === "" || part === "." || part === ".."))) {
+    const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", treeish, "--", ...paths], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
+  try {
+    return await listPathsInTrees(git, treeish, unique, maxOutputBytes);
+  } catch (error2) {
+    if (!(error2 instanceof TreeOverLimit)) throw error2;
+    const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", treeish, "--", ...paths], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
+}
+async function listPathsInTrees(git, treeish, unique, maxOutputBytes) {
+  const root2 = await readTree(git, `${treeish}^{tree}`, maxOutputBytes);
+  if (root2 === null || root2.type !== "tree") throw new GitError(["ls-tree", "--full-tree", treeish], 128, `fatal: not a tree object: ${treeish}`);
+  const rawLength = root2.oid.length / 2;
+  const folders = /* @__PURE__ */ new Map([["", Promise.resolve(parseTree(root2.content, rawLength))]]);
+  const folder = (path7) => {
+    let found2 = folders.get(path7);
+    if (found2 === void 0) {
+      const slash = path7.lastIndexOf("/");
+      found2 = (async () => {
+        const entry = await entryIn(folder(slash < 0 ? "" : path7.slice(0, slash)), path7.slice(slash + 1));
+        if (entry?.mode !== "040000") return null;
+        const tree = await readTree(git, entry.oid, maxOutputBytes);
+        return tree?.type === "tree" ? parseTree(tree.content, rawLength) : null;
+      })();
+      folders.set(path7, found2);
+    }
+    return found2;
+  };
+  const entryIn = async (entries, name) => {
+    const bytes = Buffer.from(name, "utf8");
+    return (await entries)?.find((entry) => entry.name.equals(bytes));
+  };
+  const found = await Promise.all(unique.map(async (path7) => {
+    const slash = path7.lastIndexOf("/");
+    const entry = await entryIn(folder(slash < 0 ? "" : path7.slice(0, slash)), path7.slice(slash + 1));
+    if (entry === void 0) return void 0;
+    const type = entry.mode === "040000" ? "tree" : entry.mode === "160000" ? "commit" : "blob";
+    const size = type === "blob" ? (await git.objectInfo(entry.oid))?.size ?? Number.NaN : null;
+    return { path: path7, bytes: Buffer.from(path7, "utf8"), mode: entry.mode, type, oid: entry.oid, size };
+  }));
+  const listed = found.filter((entry) => entry !== void 0).sort((a, b) => a.bytes.compare(b.bytes));
+  if (maxOutputBytes !== void 0) {
+    let bytes = 0;
+    for (const entry of listed) {
+      bytes += entry.mode.length + entry.type.length + entry.oid.length + entry.bytes.length + 5 + Math.max(7, entry.size === null ? 1 : Number.isNaN(entry.size) ? 3 : String(entry.size).length);
+    }
+    if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
+  }
+  return listed.flatMap(({ path: path7, mode, type, oid, size }) => type === "tree" ? [] : [{ path: path7, mode, type, oid, size }]);
+}
+async function walkTree(git, treeish, limit) {
+  const root2 = await readTree(git, `${treeish}^{tree}`, limit?.maxOutputBytes);
+  if (root2 === null || root2.type !== "tree") throw new GitError(["ls-tree", "-r", "--full-tree", treeish], 128, `fatal: not a tree object: ${treeish}`);
+  const rawLength = root2.oid.length / 2;
+  const files = [];
+  let bytes = 0;
+  const walk = async (content4, prefix) => {
+    const entries = parseTree(content4, rawLength);
+    const subtrees = entries.map((entry) => limit === void 0 && entry.mode === "040000" ? git.readObject(entry.oid) : void 0);
+    for (const read of subtrees) read?.catch(() => {
+    });
+    for (const [index2, entry] of entries.entries()) {
+      const path7 = prefix.length === 0 ? entry.name : Buffer.concat([prefix, SLASH, entry.name]);
+      if (entry.mode === "040000") {
+        const tree = await (subtrees[index2] ?? readTree(git, entry.oid, limit === void 0 ? void 0 : limit.maxOutputBytes - bytes));
+        if (tree === null || tree === void 0 || tree.type !== "tree") throw new GitError(["ls-tree", "-r", "--full-tree", treeish], 128, `fatal: not a tree object: ${entry.oid}`);
+        await walk(tree.content, path7);
+        continue;
+      }
+      const type = entry.mode === "160000" ? "commit" : "blob";
+      const record = entry.mode.length + type.length + entry.oid.length + path7.length + 5;
+      if (limit !== void 0) {
+        bytes += record + (limit.sized ? 7 : -1);
+        if (bytes > limit.maxOutputBytes) throw new GitOutputLimitError(limit.maxOutputBytes);
+      }
+      files.push({ path: path7.toString("utf8"), mode: entry.mode, type, oid: entry.oid, bytes: record });
+    }
+  };
+  await walk(root2.content, Buffer.alloc(0));
+  return files;
+}
+var SLASH = Buffer.from("/");
+var TreeOverLimit = class extends Error {
+};
+async function readTree(git, name, budget) {
+  if (budget === void 0) return git.readObject(name);
+  const info2 = await git.objectInfo(name);
+  if (info2 === null) return null;
+  if (info2.type === "tree" && info2.size > budget) throw new TreeOverLimit();
+  return git.readObject(info2.oid);
+}
+function parseTree(content4, rawLength) {
+  const entries = [];
+  let offset = 0;
+  while (offset < content4.length) {
+    const space = content4.indexOf(32, offset);
+    const nul = content4.indexOf(0, space + 1);
+    if (space < 0 || nul < 0 || nul + 1 + rawLength > content4.length) throw new Error(message("objects.bad-tree"));
+    const mode = canonicalMode(Number.parseInt(content4.subarray(offset, space).toString("latin1"), 8));
+    entries.push({ mode, name: content4.subarray(space + 1, nul), oid: content4.subarray(nul + 1, nul + 1 + rawLength).toString("hex") });
+    offset = nul + 1 + rawLength;
+  }
+  return entries;
+}
+function canonicalMode(mode) {
+  const kind = mode & 61440;
+  const canonical = kind === 32768 ? 32768 | (mode & 64 ? 493 : 420) : kind === 40960 ? 40960 : kind === 16384 ? 16384 : 57344;
+  return canonical.toString(8).padStart(6, "0");
+}
+function parseTreeListing(stdout) {
+  const entries = [];
+  for (const record of stdout.toString("utf8").split("\0")) {
+    if (record === "") continue;
+    const tab = record.indexOf("	");
+    const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
+    if (type !== "blob" && type !== "commit") continue;
+    entries.push({
+      path: record.slice(tab + 1),
+      mode,
+      type,
+      oid,
+      size: size === "-" || size === void 0 ? null : Number(size)
+    });
+  }
+  return entries;
+}
+function readBlobs(git, oids, maxOutputBytes) {
+  return git.readBlobs(oids, maxOutputBytes);
+}
+async function readBlobBatch(git, oids, maxOutputBytes) {
+  const unique = [...new Set(oids)];
+  const result = /* @__PURE__ */ new Map();
+  if (unique.length === 0) return result;
+  if (maxOutputBytes !== void 0) {
+    const infos = await Promise.all(unique.map((oid) => git.objectInfo(oid)));
+    let bytes = 0;
+    infos.forEach((info2, index2) => {
+      bytes += info2 === null ? `${unique[index2]} missing
+`.length : `${info2.oid} ${info2.type} ${info2.size}
+`.length + info2.size + 1;
+    });
+    if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
+  }
+  const objects = await Promise.all(unique.map((oid) => git.readObject(oid)));
+  unique.forEach((oid, index2) => {
+    const found = objects[index2];
+    if (found === null || found === void 0) throw new Error(message("objects.missing", { oid }));
+    if (found.type !== "blob") throw new Error(message("objects.not-blob", { oid, type: found.type }));
+    result.set(oid, found.content);
+  });
+  return result;
+}
+function isGitDirectoryName(part) {
+  return /^(?:\.git|git~[0-9]+)[. ]*(?::|$)/i.test(part.replace(HFS_IGNORED, ""));
+}
+var HFS_IGNORED = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
+function checkRepoPath(path7, { removal = false } = {}) {
+  const parts = path7.split("/");
+  if (path7 === "" || path7.includes("\0") || path7.includes("\\")) throw new Error(message("objects.invalid-path", { path: JSON.stringify(path7) }));
+  for (const part of parts) {
+    if (part === "" || part === "." || part === ".." || !removal && isGitDirectoryName(part)) {
+      throw new Error(message("objects.invalid-path", { path: JSON.stringify(path7) }));
+    }
+  }
+}
+async function commitTree(git, spec) {
+  for (const [path7, content4] of spec.changes) checkRepoPath(path7, { removal: content4 === null });
+  const tree = await buildTree(git, spec.base, spec.changes);
+  if ((spec.skipIfUnchanged ?? true) && spec.parents.length === 1) {
+    const parentTree = await git.revParse(`${spec.parents[0]}^{tree}`);
+    if (parentTree === tree) return spec.parents[0];
+  }
+  const args = ["-c", "i18n.commitEncoding=UTF-8", "commit-tree", "--no-gpg-sign", tree];
+  const parents = [...new Set(spec.parents)];
+  for (const parent of parents) args.push("-p", parent);
+  args.push("-F", "-");
+  const text6 = spec.sign === void 0 ? spec.message : spec.sign(tree, parents, spec.message);
+  return git.text(args, {
+    input: text6.endsWith("\n") ? text6 : `${text6}
+`,
+    env: {
+      GIT_AUTHOR_NAME: spec.identity.name,
+      GIT_AUTHOR_EMAIL: spec.identity.email,
+      GIT_COMMITTER_NAME: spec.identity.name,
+      GIT_COMMITTER_EMAIL: spec.identity.email,
+      ...spec.date === void 0 ? {} : { GIT_AUTHOR_DATE: spec.date, GIT_COMMITTER_DATE: spec.date }
+    }
+  });
+}
+async function buildTree(git, base, changes) {
+  const writer = git.objectWriter();
+  const placed = /* @__PURE__ */ new Map();
+  for (const [path7, content4] of changes) {
+    const oid = content4 === null ? void 0 : writer.blob(() => contentBytes(content4));
+    oid?.catch(() => {
+    });
+    placed.set(path7, oid === void 0 ? null : { oid });
+  }
+  try {
+    return await placeInTrees(git, base, placed) ?? await buildTreeInIndex(git, base, placed);
+  } finally {
+    await Promise.all([...placed.values()].map((placement) => placement?.oid));
+  }
+}
+async function placeEntries(git, base, entries) {
+  const placed = new Map([...entries].map(([path7, entry]) => [path7, entry === null ? null : { oid: Promise.resolve(entry.oid), mode: entry.mode }]));
+  const built = await placeInTrees(git, base, placed);
+  if (built !== void 0) return built;
+  const dir = await mkdtemp(join6(tmpdir3(), "lane-index-"));
+  const env = { GIT_INDEX_FILE: join6(dir, "index") };
+  try {
+    await git.run(["read-tree", `${base}^{tree}`], { env });
+    const zero = "0".repeat(await git.objectFormat() === "sha256" ? 64 : 40);
+    const input = [...entries].map(([path7, entry]) => entry === null ? `0 ${zero}	${path7}\0` : `${entry.mode} ${entry.oid}	${path7}\0`).join("");
+    if (input) await git.run(["update-index", "-z", "--index-info"], { env, input });
+    return await git.text(["write-tree"], { env });
+  } finally {
+    await rm2(dir, { recursive: true, force: true });
+  }
+}
+async function buildTreeInIndex(git, base, changes) {
+  const dir = await mkdtemp(join6(tmpdir3(), "state-index-"));
+  const env = { GIT_INDEX_FILE: join6(dir, "index") };
+  try {
+    if (base === null) await git.run(["read-tree", "--empty"], { env });
+    else await git.run(["read-tree", `${base}^{tree}`], { env });
+    const modes = base !== null && changes.size > 0 ? await listModes(git, base) : /* @__PURE__ */ new Map();
+    const nullOid = "0".repeat(await git.objectFormat() === "sha256" ? 64 : 40);
+    const lines3 = await mapLimit([...changes.entries()], 8, async ([path7, placement]) => {
+      if (placement === null) return `0 ${nullOid}	${path7}\0`;
+      const oid = await placement.oid;
+      const mode = modes.get(path7) === "100755" ? "100755" : "100644";
+      return `${mode} ${oid}	${path7}\0`;
+    });
+    if (lines3.length > 0) await git.run(["update-index", "-z", "--index-info"], { input: lines3.join(""), env });
+    return await git.text(["write-tree"], { env });
+  } finally {
+    await rm2(dir, { recursive: true, force: true });
+  }
+}
+var NeedsIndex = class extends Error {
+};
+async function placeInTrees(git, base, changes) {
+  const root2 = { below: /* @__PURE__ */ new Map() };
+  for (const [path7, change] of changes) {
+    const parts = path7.split("/");
+    if (parts.some((part) => part === "" || part === "." || part === ".." || isGitDirectoryName(part))) return void 0;
+    let node2 = root2;
+    for (const part of parts) {
+      let next = node2.below.get(part);
+      if (next === void 0) node2.below.set(part, next = { below: /* @__PURE__ */ new Map() });
+      node2 = next;
+    }
+    node2.change = change;
+  }
+  let tree = null;
+  if (base !== null) {
+    const found = await git.readObject(`${base}^{tree}`);
+    if (found === null || found.type !== "tree") return void 0;
+    if (changes.size === 0) return found.oid;
+    tree = found.content;
+  }
+  const context = { rawLength: await git.objectFormat() === "sha256" ? 32 : 20, holdsFiles: /* @__PURE__ */ new Map() };
+  try {
+    return await rebuild(git, tree, root2, context) ?? await git.objectWriter().tree([]);
+  } catch (error2) {
+    if (error2 instanceof NeedsIndex) return void 0;
+    throw error2;
+  }
+}
+async function rebuild(git, content4, node2, context) {
+  const entries = /* @__PURE__ */ new Map();
+  if (content4 !== null) {
+    let previous3;
+    for (const entry of parseTree(content4, context.rawLength)) {
+      if (previous3 !== void 0 && compareEntries(previous3, entry) >= 0) throw new NeedsIndex();
+      const name = entry.name.toString("latin1");
+      if (name === "." || name === ".." || isGitDirectoryName(entry.name.toString("utf8"))) throw new NeedsIndex();
+      previous3 = entry;
+      entries.set(name, { mode: entry.mode, type: entryType(entry.mode), oid: entry.oid, name: entry.name });
+    }
+  }
+  const changedKeys = new Set([...node2.below.keys()].map((name) => Buffer.from(name, "utf8").toString("latin1")));
+  const changed2 = await Promise.all([...node2.below.entries()].map(async ([name, below]) => {
+    const bytes = Buffer.from(name, "utf8");
+    const existing = entries.get(bytes.toString("latin1"));
+    if (below.change !== void 0) {
+      if (below.below.size > 0 || existing?.type === "tree") throw new NeedsIndex();
+      if (below.change === null) return null;
+      const mode = below.change.mode ?? (existing?.mode === "100755" ? "100755" : "100644");
+      return { mode, type: entryType(mode), oid: await below.change.oid, name: bytes };
+    }
+    if (existing !== void 0 && existing.type !== "tree") {
+      if (adds(below)) throw new NeedsIndex();
+      return existing;
+    }
+    if (existing === void 0 && !adds(below)) return null;
+    let subtree = null;
+    if (existing !== void 0) {
+      const found = await git.readObject(existing.oid);
+      if (found === null || found.type !== "tree") throw new NeedsIndex();
+      subtree = found.content;
+    }
+    const oid = await rebuild(git, subtree, below, context);
+    return oid === null ? null : { mode: "040000", type: "tree", oid, name: bytes };
+  }));
+  const kept = [...entries.entries()].filter(([key]) => !changedKeys.has(key)).map(([, entry]) => entry);
+  const holds = await Promise.all(kept.map((entry) => entry.type === "tree" ? holdsFile(git, entry.oid, context) : true));
+  const result = [...kept.filter((_, index2) => holds[index2]), ...changed2.filter((entry) => entry !== null)];
+  if (result.length === 0) return null;
+  return git.objectWriter().tree(result);
+}
+function adds(node2) {
+  if (node2.change !== void 0 && node2.change !== null) return true;
+  for (const next of node2.below.values()) if (adds(next)) return true;
+  return false;
+}
+function holdsFile(git, oid, context) {
+  let known = context.holdsFiles.get(oid);
+  if (known === void 0) {
+    known = (async () => {
+      const found = await git.readObject(oid);
+      if (found === null || found.type !== "tree") throw new NeedsIndex();
+      const entries = parseTree(found.content, context.rawLength);
+      if (entries.some((entry) => entry.mode !== "040000")) return true;
+      for (const entry of entries) if (await holdsFile(git, entry.oid, context)) return true;
+      return false;
+    })();
+    context.holdsFiles.set(oid, known);
+  }
+  return known;
+}
+function entryType(mode) {
+  return mode === "040000" ? "tree" : mode === "160000" ? "commit" : "blob";
+}
+function compareEntries(a, b) {
+  const length = Math.min(a.name.length, b.name.length);
+  const common = a.name.subarray(0, length).compare(b.name.subarray(0, length));
+  if (common !== 0) return common;
+  const next = (entry) => entry.name.length > length ? entry.name[length] : entry.mode === "040000" ? 47 : 0;
+  return next(a) - next(b);
+}
+async function listModes(git, treeish) {
+  return new Map((await walkTree(git, treeish)).map((file) => [file.path, file.mode]));
+}
+
+// src/state/git.ts
+var GitError = class extends Error {
+  args;
+  code;
+  stderr;
+  constructor(args, code4, stderr) {
+    super(message("git.failed", { args: args.join(" "), code: code4, stderr: stderr.trim() }));
+    this.name = "GitError";
+    this.args = args;
+    this.code = code4;
+    this.stderr = stderr;
+  }
+};
+var GitOutputLimitError = class extends Error {
+  bytes;
+  constructor(bytes) {
+    super(message("git.output-limit", { bytes }));
+    this.name = "GitOutputLimitError";
+    this.bytes = bytes;
+  }
+};
+var BASE_ENV = {
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_LFS_SKIP_SMUDGE: "1",
+  LC_ALL: "C"
+};
+var Git = class {
+  dir;
+  env;
+  /**
+   * @param dir a directory inside the repository (a working tree or a bare repository)
+   * @param env environment added to every call
+   */
+  constructor(dir, env = {}) {
+    this.dir = dir;
+    this.env = env;
+  }
+  environment(options) {
+    const env = options.onlyEnv !== void 0 ? { ...BASE_ENV, ...options.onlyEnv } : { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
+    for (const key of Object.keys(env)) {
+      if (env[key] === void 0) delete env[key];
+    }
+    return env;
+  }
+  reader;
+  writer;
+  /** The absolute path of the repository's object directory, for the long-lived processes to notice a repository made again. */
+  objectDirectory = () => {
+    return this.layout().then(({ objects }) => objects);
+  };
+  layoutRead;
+  /** The repository's object format and folders, from one `rev-parse`; they do not change while the repository exists. */
+  layout() {
+    this.layoutRead ??= this.text(["rev-parse", "--show-object-format", "--path-format=absolute", "--git-path", "objects", "--git-common-dir"]).then(
+      async (text6) => {
+        const lines3 = text6.split("\n");
+        if (lines3.length === 3) return { format: lines3[0], objects: lines3[1], common: lines3[2] };
+        const [format, objects, common] = await Promise.all([
+          this.text(["rev-parse", "--show-object-format"]),
+          this.text(["rev-parse", "--path-format=absolute", "--git-path", "objects"]),
+          this.text(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        ]);
+        return { format, objects, common };
+      },
+      (error2) => {
+        this.layoutRead = void 0;
+        throw error2;
+      }
+    );
+    return this.layoutRead;
+  }
+  /**
+   * Reads objects through one long-lived git process instead of a process
+   * per read. Names are revisions as `git cat-file` takes them (`<oid>`,
+   * `<commit>:<path>`, `<ref>^{commit}`).
+   */
+  objects() {
+    this.reader ??= new ObjectReader(this.dir, () => this.environment({}), this.objectDirectory);
+    return this.reader;
+  }
+  /** Writes blobs and trees through long-lived git processes instead of a process per object. */
+  objectWriter() {
+    this.writer ??= new ObjectWriter(this.dir, () => this.environment({}), this.objectDirectory);
+    return this.writer;
+  }
+  /** The object a name resolves to, with its content; null when it resolves to none. */
+  async readObject(name) {
+    if (batchName(name)) return this.objects().contents(name);
+    const found = await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", name], { okCodes: [0, 1, 128] });
+    if (found.code !== 0) return null;
+    const oid = found.stdout.toString("utf8").trim();
+    return this.objects().contents(oid);
+  }
+  /**
+   * Every file of a commit or tree, recursively, as `git ls-tree -r -l`
+   * lists them (see `listTree` in objects.ts).
+   */
+  listTree(treeish, maxOutputBytes) {
+    return readTreeListing(this, treeish, maxOutputBytes);
+  }
+  /** Blobs by id, one batch (see `readBlobs` in objects.ts). */
+  readBlobs(oids, maxOutputBytes) {
+    return readBlobBatch(this, oids, maxOutputBytes);
+  }
+  /** The content of the blob a name resolves to, as `git cat-file blob` gives it; null when it resolves to no blob. */
+  async readBlob(name, maxBytes) {
+    if (maxBytes === void 0) {
+      const found = await this.readObject(name);
+      return found?.type === "blob" ? found.content : null;
+    }
+    const info2 = await this.objectInfo(name);
+    if (info2?.type !== "blob") return null;
+    if (info2.size > maxBytes) throw new GitOutputLimitError(maxBytes);
+    return (await this.objects().contents(info2.oid))?.content ?? null;
+  }
+  /**
+   * The id a name resolves to, as `git rev-parse <name>` gives it: read
+   * through the object reader, and from `rev-parse` itself (with its error)
+   * when the reader finds no object.
+   */
+  async revParse(name) {
+    return (await this.objectInfo(name))?.oid ?? this.text(["rev-parse", name]);
+  }
+  /**
+   * What `git show <name>` gives: for a blob its content, read through the
+   * object reader; anything else, and a name that resolves to nothing, is
+   * left to `git show` itself.
+   */
+  async showBlob(name, options = {}) {
+    const found = await this.readObject(name);
+    if (found?.type === "blob") return { code: 0, stdout: found.content, stderr: "" };
+    return this.run(["show", name], options);
+  }
+  /** The id, type and size of the object a name resolves to; null when it resolves to none. */
+  async objectInfo(name) {
+    if (batchName(name)) return this.objects().info(name);
+    const found = await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", name], { okCodes: [0, 1, 128] });
+    if (found.code !== 0) return null;
+    return this.objects().info(found.stdout.toString("utf8").trim());
+  }
+  plain;
+  /**
+   * True when git prints commit messages as stored, without re-encoding:
+   * the repository sets no message encoding other than UTF-8
+   * (`i18n.commitEncoding`, `i18n.logOutputEncoding`).
+   */
+  plainMessages() {
+    this.plain ??= this.run(["config", "--get-regexp", "^i18n\\.(commitencoding|logoutputencoding)$"], { okCodes: [0, 1] }).then(
+      ({ stdout }) => stdout.toString("utf8").split("\n").filter(Boolean).every((line2) => /^\S+ utf-?8$/i.test(line2)),
+      (error2) => {
+        this.plain = void 0;
+        throw error2;
+      }
+    );
+    return this.plain;
+  }
+  /**
+   * True when git reads some commits' parents other than as stored: a
+   * shallow repository cuts history at its boundary, and grafts replace
+   * parents. Checked on every call, as a fetch can make a repository shallow.
+   */
+  async rewritesHistory() {
+    const env = this.environment({});
+    if (env.GIT_SHALLOW_FILE !== void 0 || env.GIT_GRAFT_FILE !== void 0) return true;
+    const { common } = await this.layout();
+    return existsSync2(join7(common, "shallow")) || existsSync2(join7(common, "info", "grafts"));
+  }
+  /** The repository's object format, `sha1` or `sha256`; it does not change while the repository exists. */
+  objectFormat() {
+    return this.layout().then(({ format }) => format);
+  }
+  async run(args, options = {}) {
+    const okCodes = options.okCodes ?? [0];
+    const result = await spawnGit({ args, cwd: this.dir, env: this.environment(options), input: options.input ?? "", ...options.maxOutputBytes === void 0 ? {} : { maxOutputBytes: options.maxOutputBytes } });
+    if (result.exceeded !== void 0) throw new GitOutputLimitError(result.exceeded);
+    const { code: code4, stdout, stderr } = result;
+    if (!okCodes.includes(code4)) throw new GitError(args, code4, stderr);
+    return { code: code4, stdout, stderr };
+  }
+  /**
+   * Runs git and writes its standard output to a new file at `path` as it
+   * arrives, so output of any size is never held in memory. Standard error
+   * is capped at 64 KiB. A failing exit is a `GitError`.
+   */
+  async runToFile(args, path7, fileMode) {
+    const { code: code4, stderr } = await spawnGit({ args, cwd: this.dir, env: this.environment({}), file: { path: path7, mode: fileMode } });
+    if (code4 !== 0) throw new GitError(args, code4, stderr);
+  }
+  /** Runs git and returns standard output as text without the final newline. */
+  async text(args, options = {}) {
+    const { stdout } = await this.run(args, options);
+    return stdout.toString("utf8").replace(/\n$/, "");
+  }
+};
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index2 = next++;
+      results[index2] = await fn(items[index2]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+// src/state/lfs.ts
+import { createHash as createHash2 } from "node:crypto";
+import { mkdtemp as mkdtemp2, rm as rm3, writeFile as writeFile2 } from "node:fs/promises";
+import { tmpdir as tmpdir4 } from "node:os";
+import { join as join8 } from "node:path";
+
+// src/state/config.ts
+var STORES = ["linear", "ids", "uploads"];
+var DEFAULT_STATE_CONFIG = Object.freeze({
+  remote: "origin",
+  trackedBranch: "main",
+  syncBranch: "mdbisync/linear",
+  refPrefix: "refs/mdbisync"
+});
+var StateConfigError = class extends Error {
+  constructor(message2) {
+    super(message2);
+    this.name = "StateConfigError";
+  }
+};
+function resolveStateConfig(input = {}) {
+  const pick = (key) => {
+    const value = input[key];
+    return value === void 0 || value.trim() === "" ? DEFAULT_STATE_CONFIG[key] : value.trim();
+  };
+  const config = {
+    remote: pick("remote"),
+    trackedBranch: pick("trackedBranch"),
+    syncBranch: pick("syncBranch"),
+    refPrefix: pick("refPrefix").replace(/\/+$/, "")
+  };
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.remote)) {
+    throw new StateConfigError(message("config.invalid-remote", { remote: config.remote }));
+  }
+  for (const key of ["trackedBranch", "syncBranch"]) {
+    const problem = refNameProblem(`refs/heads/${config[key]}`) ?? (config[key].startsWith("-") ? message("config.starts-with-dash") : null);
+    if (problem !== null) throw new StateConfigError(message("config.invalid-branch", { key, branch: config[key], problem }));
+  }
+  const suspended = suspendedBranch(config);
+  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended) {
+    throw new StateConfigError(message("config.same-branches"));
+  }
+  if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
+    throw new StateConfigError(message("config.nested-branches"));
+  }
+  if (suspended.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${suspended}/`)) throw new StateConfigError(message("config.nested-branches"));
+  const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
+  if (prefixProblem !== null) {
+    throw new StateConfigError(message("config.invalid-prefix", { prefix: config.refPrefix, problem: prefixProblem }));
+  }
+  if (!/^refs\/[^/]/.test(config.refPrefix)) {
+    throw new StateConfigError(message("config.prefix-outside-refs", { prefix: config.refPrefix }));
+  }
+  if (/^refs\/(heads|tags|remotes)(\/|$)/.test(config.refPrefix)) {
+    throw new StateConfigError(message("config.prefix-reserved", { prefix: config.refPrefix }));
+  }
+  return config;
+}
+function stateRef(config, store) {
+  return `${config.refPrefix}/${store}`;
+}
+function branchRef(branch) {
+  return `refs/heads/${branch}`;
+}
+function localRef(config, remoteRef) {
+  return remoteRef.startsWith("refs/heads/") ? `refs/remotes/${config.remote}/${remoteRef.slice("refs/heads/".length)}` : remoteRef;
+}
+function refNameProblem(name) {
+  if (!name.startsWith("refs/")) return 'does not start with "refs/"';
+  if (name.endsWith("/")) return 'ends with "/"';
+  if (name.endsWith(".")) return 'ends with "."';
+  if (name.includes("//")) return 'contains "//"';
+  if (name.includes("..")) return 'contains ".."';
+  if (name.includes("@{")) return 'contains "@{"';
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(name)) return "contains a character git does not allow";
+  for (const part of name.split("/")) {
+    if (part.startsWith(".")) return 'has a part starting with "."';
+    if (part.endsWith(".lock")) return 'has a part ending with ".lock"';
+  }
+  return null;
+}
+function suspendedBranch(config) {
+  return !config.syncBranch.includes("/") || config.syncBranch.endsWith("/suspended") ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, "suspended");
+}
+
+// src/state/lfs.ts
+var POINTER_VERSION = "version https://git-lfs.github.com/spec/v1";
+var MAX_POINTER_SIZE = 1024;
+function parseLfsPointer(blob) {
+  if (blob.length >= MAX_POINTER_SIZE || !blob.subarray(0, POINTER_VERSION.length).equals(Buffer.from(POINTER_VERSION))) {
+    return null;
+  }
+  const text6 = blob.toString("utf8");
+  if (!text6.endsWith("\n")) return null;
+  const lines3 = text6.slice(0, -1).split("\n");
+  if (lines3[0] !== POINTER_VERSION) return null;
+  let oid = null;
+  let size = null;
+  let extensions = false;
+  for (const line2 of lines3.slice(1)) {
+    const space = line2.indexOf(" ");
+    if (space <= 0) return null;
+    const key = line2.slice(0, space);
+    const value = line2.slice(space + 1);
+    if (key === "oid") {
+      const match = /^sha256:([0-9a-f]{64})$/.exec(value);
+      if (match === null) return null;
+      oid = match[1];
+    } else if (key === "size") {
+      if (!/^(0|[1-9][0-9]*)$/.test(value)) return null;
+      size = Number(value);
+    } else if (!/^[a-z0-9.-]+$/.test(key)) {
+      return null;
+    } else if (key.startsWith("ext-")) {
+      extensions = true;
+    }
+  }
+  return oid !== null && size !== null ? { oid, size, extensions } : null;
+}
+async function lfsReader(git, from) {
+  const remoteArgs = ["-c", `remote.lfsdefault=${from.remote}`, "-c", "lfs.fetchinclude=", "-c", "lfs.fetchexclude="];
+  const branch = await git.run(["symbolic-ref", "--quiet", "--short", "HEAD"], { okCodes: [0, 1, 128] });
+  if (branch.code === 0) remoteArgs.push("-c", `branch.${branch.stdout.toString("utf8").trim()}.remote=${from.remote}`);
+  let setting;
+  let installed;
+  const runs = () => installed ??= gitLfsRuns(git);
+  return async (pointer, path7) => withLfsconfig(await (setting ??= lfsSetting(git, from)), (env) => readLfsObject(git, remoteArgs, env, pointer, path7, runs));
+}
+function lfsRemote(config) {
+  return { remote: config.remote, tracked: localRef(config, branchRef(config.trackedBranch)) };
+}
+async function lfsPush(git, to, oids) {
+  if (oids.length === 0) return;
+  await withLfsconfig(await lfsSetting(git, to), (env) => git.run(["lfs", "push", "--object-id", to.remote, ...oids], { env }));
+}
+var LFSCONFIG_LIMIT = 64 * 1024;
+async function lfsSetting(git, from) {
+  const found = await git.readBlob(`${from.tracked}:.lfsconfig`, LFSCONFIG_LIMIT);
+  return { gitDir: await git.text(["rev-parse", "--absolute-git-dir"]), lfsconfig: found ?? Buffer.alloc(0) };
+}
+async function withLfsconfig(setting, work) {
+  const tree = await mkdtemp2(join8(tmpdir4(), "mdbisync-lfs-"));
+  try {
+    await writeFile2(join8(tree, ".lfsconfig"), setting.lfsconfig);
+    return await work({ GIT_DIR: setting.gitDir, GIT_WORK_TREE: tree });
+  } finally {
+    await rm3(tree, { recursive: true, force: true });
+  }
+}
+var GitLfsMissingError = class extends Error {
+  constructor() {
+    super(message("lfs.needs-git-lfs"));
+    this.name = "GitLfsMissingError";
+  }
+};
+async function gitLfsRuns(git) {
+  try {
+    await git.run(["lfs", "version"]);
+    return true;
+  } catch (error2) {
+    if (error2 instanceof GitError) return false;
+    throw error2;
+  }
+}
+async function requireGitLfs(git) {
+  if (!await gitLfsRuns(git)) throw new GitLfsMissingError();
+}
+async function missingLfsObjects(git, from, blobs) {
+  const missing = /* @__PURE__ */ new Set();
+  if (blobs.length === 0) return missing;
+  const entries = [...new Set(blobs)].map((blob, index2) => `100644 blob ${blob}	${index2}
+`).join("");
+  const tree = await git.text(["mktree"], { input: entries });
+  const settings = ["-c", "lfs.fetchinclude=", "-c", "lfs.fetchexclude=", "-c", "lfs.fetchrecentalways=false"];
+  const setting = await lfsSetting(git, from);
+  let stderr;
+  try {
+    stderr = (await withLfsconfig(setting, (env) => git.run([...settings, "lfs", "fetch", "--dry-run", from.remote, tree], { okCodes: [0, 2], env }))).stderr;
+  } catch (error2) {
+    if (!(error2 instanceof GitError)) throw error2;
+    await requireGitLfs(git);
+    return missing;
+  }
+  for (const match of stderr.matchAll(/^\[([0-9a-f]{64})\] [^\n]*\[(404|410)\]/gm)) missing.add(match[1]);
+  return missing;
+}
+async function readLfsObject(git, remoteArgs, env, pointer, path7, runs) {
+  if (pointer.extensions) {
+    return { ok: false, reason: `LFS object ${pointer.oid} uses LFS extensions, which are not supported` };
+  }
+  const pointerText = `${POINTER_VERSION}
+oid sha256:${pointer.oid}
+size ${pointer.size}
+`;
+  let content4;
+  try {
+    const result = await git.run([...remoteArgs, "lfs", "smudge", "--", path7], {
+      input: pointerText,
+      env: { ...env, GIT_LFS_SKIP_SMUDGE: void 0 },
+      // A failed smudge may return the pointer itself.
+      maxOutputBytes: Math.max(pointer.size, MAX_POINTER_SIZE)
+    });
+    content4 = result.stdout;
+  } catch (error2) {
+    if (error2 instanceof GitOutputLimitError) {
+      return { ok: false, reason: `LFS object ${pointer.oid} could not be read (output limit exceeded)` };
+    }
+    if (!(error2 instanceof GitError)) throw error2;
+    if (!await runs()) throw new GitLfsMissingError();
+    return { ok: false, reason: `LFS object ${pointer.oid} could not be read (exit code ${error2.code})` };
+  }
+  if (content4.length !== pointer.size || createHash2("sha256").update(content4).digest("hex") !== pointer.oid) {
+    return { ok: false, reason: `LFS object ${pointer.oid} is missing or does not match its pointer` };
+  }
+  return { ok: true, content: content4 };
+}
+
+// src/mapping/blobs.ts
+var MAPPING_FILE_BYTES = 4 * CONTENT_LIMIT;
+var MAPPING_TREE_BYTES = 16 * 1024 * 1024;
+var MAPPING_BUDGET_BYTES = 64 * 1024 * 1024;
+var BATCH_BYTES = 4 * 1024 * 1024;
+var MappingBlobBudgetError = class extends Error {
+  code = "mapping-blob-budget";
+  constructor() {
+    super(message("mapping.blob-budget", { bytes: MAPPING_BUDGET_BYTES }));
+    this.name = "MappingBlobBudgetError";
+  }
+};
+function readableBlob(entry) {
+  return entry.size !== null && Number.isSafeInteger(entry.size) && entry.size >= 0 && entry.size <= MAPPING_FILE_BYTES;
+}
+var MappingBlobBudget = class {
+  remaining = MAPPING_BUDGET_BYTES;
+  charged = /* @__PURE__ */ new Set();
+  cache = /* @__PURE__ */ new Map();
+  /** Reuse the same entry objects for each pass over the tree. */
+  check(entries) {
+    for (const entry of entries) {
+      if (!readableBlob(entry) || this.charged.has(entry)) continue;
+      this.charged.add(entry);
+      this.remaining -= entry.size;
+      if (this.remaining < 0) throw new MappingBlobBudgetError();
+    }
+  }
+  async read(git, entries) {
+    this.check(entries);
+    const unique = /* @__PURE__ */ new Map();
+    for (const entry of entries) {
+      if (!readableBlob(entry)) continue;
+      unique.set(entry.oid, entry.oid.length + String(entry.size).length + 8 + entry.size);
+    }
+    let batch = [];
+    let bytes = 0;
+    const readBatch = async () => {
+      for (const [oid, content4] of await readBlobs(git, batch, bytes)) this.cache.set(oid, content4);
+      batch = [];
+      bytes = 0;
+    };
+    for (const [oid, size] of unique) {
+      if (this.cache.has(oid)) continue;
+      if (bytes + size > BATCH_BYTES) await readBatch();
+      batch.push(oid);
+      bytes += size;
+    }
+    await readBatch();
+    return new Map([...unique.keys()].map((oid) => [oid, this.cache.get(oid)]));
+  }
+};
+
+// src/mapping/mapping.ts
+var MARKDOWN_EXTENSION = ".md";
+function annotationFiles(entries) {
+  return entries.filter((entry) => entry.type === "blob" && baseName(entry.path) === ANNOTATION_FILE);
+}
+function collectAnnotations(readmes) {
+  const annotations = [];
+  const problems = [];
+  for (const [path7, text6] of readmes) {
+    const result = readAnnotation(path7, text6);
+    if ("problem" in result) problems.push(result.problem);
+    else if (result.annotation !== null) annotations.push(result.annotation);
+  }
+  return { annotations, problems };
+}
+function candidateFiles(entries, zones) {
+  return entries.filter((entry) => isMarkdown(entry) && isRegularFile(entry) && nearestZone(zones, folderOf(entry.path)) !== void 0);
+}
+function mapFiles(entries, zones, contents) {
+  const mapped = [];
+  const unsynced = [];
+  for (const entry of entries) {
+    if (!isMarkdown(entry)) continue;
+    const zone = nearestZone(zones, folderOf(entry.path));
+    if (zone === void 0) {
+      unsynced.push({ path: entry.path, reason: "outside-annotations" });
+      continue;
+    }
+    if (!isRegularFile(entry)) {
+      unsynced.push({ path: entry.path, reason: "not-a-regular-file", title: titleOf(entry.path, zone), place: placeOf(zone) });
+      continue;
+    }
+    if (!readableBlob(entry)) {
+      unsynced.push({ path: entry.path, reason: "blob-too-large", title: titleOf(entry.path, zone), place: placeOf(zone) });
+      continue;
+    }
+    const content4 = contents.get(entry.oid);
+    if (content4 === void 0) throw new Error(message("mapping.content-not-read", { path: entry.path }));
+    const problem = contentProblem(content4);
+    if (problem !== null) {
+      unsynced.push({ path: entry.path, reason: problem, title: titleOf(entry.path, zone), place: placeOf(zone) });
+      continue;
+    }
+    mapped.push({ path: entry.path, oid: entry.oid, title: titleOf(entry.path, zone), place: placeOf(zone) });
+  }
+  const { documents, leftOut } = separateCollisions(mapped);
+  const files = new Set(entries.filter(isRegularFile).map((entry) => entry.path));
+  return { documents, unsynced, leftOut, files };
+}
+async function loadMapping(git, commit2) {
+  return mapTree(git, await listTree(git, commit2, MAPPING_TREE_BYTES), new MappingBlobBudget());
+}
+async function mapTree(git, entries, budget) {
+  const annotations = await readTreeAnnotations(git, entries, budget);
+  const contents = await budget.read(git, candidateFiles(entries, annotations.zones));
+  return { ...annotations, ...mapFiles(entries, annotations.zones, contents) };
+}
+async function checkMappingBudget(git, commit2, knownPaths) {
+  const entries = await listTree(git, commit2, MAPPING_TREE_BYTES);
+  requireReadableAnnotations(entries);
+  const budget = new MappingBlobBudget();
+  const { zones } = await readTreeAnnotations(git, entries, budget);
+  budget.check(candidateFiles(entries, zones));
+  budget.check(entries.filter((entry) => entry.type === "blob" && knownPaths.has(entry.path)));
+}
+var UnreadableAnnotationError = class extends Error {
+};
+function requireReadableAnnotations(entries) {
+  const entry = annotationFiles(entries).find((entry2) => !readableBlob(entry2));
+  if (entry !== void 0) throw new UnreadableAnnotationError(oversizedAnnotation(entry.path).message);
+}
+function oversizedAnnotation(readme) {
+  return { readme, kind: "invalid-annotation", message: message("annotations.blob-too-large", { readme, bytes: MAPPING_FILE_BYTES }) };
+}
+async function readTreeAnnotations(git, entries, budget) {
+  const readmeEntries = annotationFiles(entries);
+  const readmeBlobs = await budget.read(git, readmeEntries);
+  const unreadableAnnotations = [];
+  const readmes = /* @__PURE__ */ new Map();
+  for (const entry of readmeEntries) {
+    if (readableBlob(entry)) {
+      readmes.set(entry.path, readmeBlobs.get(entry.oid).toString("utf8"));
+    } else {
+      unreadableAnnotations.push(oversizedAnnotation(entry.path));
+    }
+  }
+  const { annotations, problems: readProblems } = collectAnnotations(readmes);
+  const { zones, problems: zoneProblems } = resolveZones(annotations);
+  return { annotations, zones, problems: [...unreadableAnnotations, ...readProblems, ...zoneProblems] };
+}
+function titleKey(place, title) {
+  const where = place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
+  return `${where}\0${title.normalize("NFC").toLowerCase()}`;
+}
+var COLLISIONS_NAMED = 3;
+function separateCollisions(mapped) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const document3 of mapped) {
+    const key = titleKey(document3.place, document3.title);
+    const group2 = groups.get(key);
+    if (group2 === void 0) groups.set(key, [document3]);
+    else group2.push(document3);
+  }
+  const documents = [];
+  const leftOut = [];
+  for (const group2 of groups.values()) {
+    if (group2.length === 1) {
+      documents.push(group2[0]);
+      continue;
+    }
+    const named = group2.slice(0, COLLISIONS_NAMED + 1);
+    group2.forEach((document3, index2) => {
+      const collidesWith = named.filter((_, other) => other !== index2).slice(0, COLLISIONS_NAMED).map((other) => other.path);
+      const more = group2.length - 1 - collidesWith.length;
+      leftOut.push({
+        path: document3.path,
+        oid: document3.oid,
+        rule: "duplicate-title",
+        title: document3.title,
+        place: document3.place,
+        collidesWith,
+        ...more > 0 ? { collidesWithMore: more } : {}
+      });
+    });
+  }
+  return { documents, leftOut };
+}
+function titleOf(path7, zone) {
+  const base = zone.projectFolder ?? zone.teamFolder;
+  const relative3 = base === "" ? path7 : path7.slice(base.length + 1);
+  return relative3.slice(0, -MARKDOWN_EXTENSION.length);
+}
+function placeOf(zone) {
+  return zone.project !== void 0 ? { kind: "project", team: zone.team, project: zone.project } : { kind: "team", team: zone.team };
+}
+var UTF82 = new TextDecoder("utf-8", { fatal: true });
+function contentProblem(content4) {
+  if (parseLfsPointer(content4) !== null) return "stored-in-lfs";
+  if (content4.includes(0)) return "binary";
+  try {
+    UTF82.decode(content4);
+  } catch {
+    return "binary";
+  }
+  return null;
+}
+function isMarkdown(entry) {
+  return isMarkdownPath(entry.path);
+}
+function isMarkdownPath(path7) {
+  return path7.endsWith(MARKDOWN_EXTENSION) && path7.length > MARKDOWN_EXTENSION.length && !path7.endsWith(`/${MARKDOWN_EXTENSION}`);
+}
+function isRegularFile(entry) {
+  return entry.type === "blob" && (entry.mode === "100644" || entry.mode === "100755");
+}
+function baseName(path7) {
+  return path7.slice(path7.lastIndexOf("/") + 1);
+}
+
+// src/setup/linear.ts
+import { setTimeout as setTimeout3 } from "node:timers/promises";
+
+// src/linear/errors.ts
+var LinearError = class extends Error {
+  operation;
+  constructor(operation, message2, options) {
+    super(message2, options);
+    this.name = new.target.name;
+    this.operation = operation;
+  }
+};
+var LinearStoppedError = class extends LinearError {
+  reason;
+  constructor(operation, reason) {
+    super(operation, message("linear.stopped", { operation, reason: describeStop(reason) }));
+    this.reason = reason;
+  }
+};
+var LinearGraphQLError = class extends LinearError {
+  code;
+  type;
+  httpStatus;
+  /** The referenced entity does not exist (for example a document removed from trash). */
+  notFound;
+  /** Linear's `x-request-id` of the answer. */
+  requestId;
+  /** Linear's own message, as it sent it; it may quote the request, so a caller checks it before it reports it. */
+  detail;
+  constructor(operation, httpStatus, error2, requestId) {
+    const code4 = stringOrUndefined(error2.extensions?.code);
+    const type = stringOrUndefined(error2.extensions?.type);
+    super(
+      operation,
+      message("linear.error", { operation, code: code4 ?? "unknown", status: httpStatus, request: requestId ?? "unknown", detail: error2.message ?? "" }).trim()
+    );
+    this.code = code4;
+    this.type = type;
+    this.httpStatus = httpStatus;
+    this.requestId = requestId;
+    this.detail = stringOrUndefined(error2.message);
+    this.notFound = typeof error2.message === "string" && error2.message.startsWith("Entity not found");
+  }
+};
+var LinearHttpError = class extends LinearError {
+  httpStatus;
+  requestId;
+  constructor(operation, httpStatus, requestId) {
+    super(operation, message("linear.answered", { operation, status: httpStatus, request: requestId ?? "unknown" }));
+    this.httpStatus = httpStatus;
+    this.requestId = requestId;
+  }
+};
+var LinearNetworkError = class extends LinearError {
+  constructor(operation, cause) {
+    super(operation, message("linear.request-failed", { operation, cause: causeName(cause) }), { cause });
+  }
+};
+var LinearTokenError = class extends LinearError {
+  /** Linear's HTTP status; undefined when the request did not complete. */
+  httpStatus;
+  constructor(operation, message2, options) {
+    super(operation, message2, options);
+    this.httpStatus = options?.httpStatus;
+  }
+  /** Linear answered and refused the client credentials, as opposed to an outage or a lost request. */
+  get credentialsRefused() {
+    return this.operation === "oauth.token" && (this.httpStatus === 400 || this.httpStatus === 401);
+  }
+};
+var DocumentTooLongError = class extends LinearError {
+  field;
+  length;
+  limit;
+  constructor(operation, refusal) {
+    super(operation, message("linear.too-long", { operation, field: refusal.field, length: refusal.length, limit: refusal.limit }));
+    this.field = refusal.field;
+    this.length = refusal.length;
+    this.limit = refusal.limit;
+  }
+};
+var LinearReadBackError = class extends LinearError {
+  document;
+  constructor(operation, document3, cause) {
+    super(operation, message("linear.read-back-failed", { operation }), { cause });
+    this.document = document3;
+  }
+};
+var LinearResponseLimitError = class extends LinearError {
+  code;
+  limit;
+  constructor(operation, code4, limit) {
+    super(operation, message(code4 === "linear-body-budget" ? "linear.body-budget" : "linear.response-too-large", { operation, bytes: limit }));
+    this.code = code4;
+    this.limit = limit;
+  }
+};
+var LinearUploadError = class extends LinearError {
+};
+function describeLinearError(error2) {
+  const code4 = error2.code;
+  const status = error2.httpStatus;
+  return [error2.name, typeof code4 === "string" ? code4 : void 0, typeof status === "number" ? `HTTP ${status}` : void 0].filter(Boolean).join(" ");
+}
+function isTransientLinearError(error2) {
+  if (error2 instanceof LinearNetworkError) return true;
+  const status = error2.httpStatus;
+  return typeof status === "number" && status >= 500;
+}
+function describeStop(reason) {
+  if (reason.kind === "rate-limited") {
+    return reason.retryAfterSeconds === void 0 ? message("linear.rate-limited") : message("linear.rate-limited-retry", { seconds: reason.retryAfterSeconds });
+  }
+  return message("linear.budget-low", { header: reason.header, remaining: reason.remaining, threshold: reason.threshold });
+}
+function stringOrUndefined(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function causeName(cause) {
+  if (cause instanceof Error) {
+    const code4 = cause.code ?? cause.cause?.code;
+    return typeof code4 === "string" ? `${cause.name} ${code4}` : cause.name;
+  }
+  return "unknown error";
+}
+
+// src/linear/rate-limit.ts
+var DEFAULT_BUDGET_FLOOR = {
+  minRequestsRemaining: 100,
+  minComplexityRemaining: 5e4,
+  minEndpointRequestsRemaining: 5
+};
+function readRateLimitHeaders(headers) {
+  const raw = {};
+  for (const [name, value] of headers) {
+    const key = name.toLowerCase();
+    if (key.startsWith("x-ratelimit-") || key === "x-complexity") {
+      raw[key] = value;
+    }
+  }
+  const num = (key) => {
+    const value = raw[key];
+    if (value === void 0) return void 0;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : void 0;
+  };
+  return {
+    requestsLimit: num("x-ratelimit-requests-limit"),
+    requestsRemaining: num("x-ratelimit-requests-remaining"),
+    requestsReset: num("x-ratelimit-requests-reset"),
+    complexityLimit: num("x-ratelimit-complexity-limit"),
+    complexityRemaining: num("x-ratelimit-complexity-remaining"),
+    complexityReset: num("x-ratelimit-complexity-reset"),
+    complexity: num("x-complexity"),
+    endpointName: raw["x-ratelimit-endpoint-name"],
+    endpointRequestsLimit: num("x-ratelimit-endpoint-requests-limit"),
+    endpointRequestsRemaining: num("x-ratelimit-endpoint-requests-remaining"),
+    endpointRequestsReset: num("x-ratelimit-endpoint-requests-reset"),
+    headers: raw
+  };
+}
+function findLowBudget(operation, snapshot, floor) {
+  const checks = [
+    ["x-ratelimit-requests-remaining", snapshot.requestsRemaining, floor.minRequestsRemaining],
+    ["x-ratelimit-complexity-remaining", snapshot.complexityRemaining, floor.minComplexityRemaining],
+    ["x-ratelimit-endpoint-requests-remaining", snapshot.endpointRequestsRemaining, floor.minEndpointRequestsRemaining]
+  ];
+  for (const [header, remaining, threshold] of checks) {
+    if (remaining !== void 0 && remaining < threshold) {
+      return { kind: "budget-low", operation, header, remaining, threshold, ...limitsOf(snapshot) };
+    }
+  }
+  return void 0;
+}
+function parseRetryAfter(value, now = Date.now()) {
+  if (value === null || value.trim() === "") return void 0;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds);
+  const date = Date.parse(value);
+  if (Number.isNaN(date)) return void 0;
+  return Math.max(0, Math.ceil((date - now) / 1e3));
+}
+function limitsOf(snapshot) {
+  return Object.keys(snapshot.headers).length === 0 ? {} : { limits: { ...snapshot.headers } };
+}
+
+// src/linear/diagnostics.ts
+function authMetadata(context) {
+  return context === void 0 ? void 0 : {
+    grantType: context.grantType,
+    requestedScopes: [...context.requestedScopes],
+    returnedScopes: [...context.returnedScopes]
+  };
+}
+function requestTiming(started) {
+  const finished = Date.now();
+  return {
+    startedAt: new Date(started).toISOString(),
+    finishedAt: new Date(finished).toISOString(),
+    durationMs: finished - started
+  };
+}
+function emitLog(log, entry) {
+  try {
+    void Promise.resolve(log?.(entry)).catch(() => {
+    });
+  } catch {
+  }
+}
+
+// src/linear/stats.ts
+var RequestStats = class {
+  /** Requests sent to Linear's API, including retries and OAuth token calls. */
+  total = 0;
+  /** Requests per operation name. */
+  byOperation = /* @__PURE__ */ new Map();
+  /** Upload PUTs to file storage; these do not count against Linear's API budget. */
+  storagePuts = 0;
+  /** Writes the run tried after the client stopped; each was refused without a request. */
+  writesAfterStop = 0;
+  /**
+   * Writes Linear accepted, by operation: a mutation once its answer reports
+   * success, a file upload (`FileUpload`) once storage took its bytes. A
+   * refused, failed or unanswered write is not counted.
+   */
+  writes = /* @__PURE__ */ new Map();
+  count(operation) {
+    this.total += 1;
+    this.byOperation.set(operation, (this.byOperation.get(operation) ?? 0) + 1);
+  }
+  /** Counts a write Linear accepted. */
+  wrote(operation) {
+    this.writes.set(operation, (this.writes.get(operation) ?? 0) + 1);
+  }
+  toJSON() {
+    return {
+      total: this.total,
+      storagePuts: this.storagePuts,
+      writesAfterStop: this.writesAfterStop,
+      byOperation: Object.fromEntries([...this.byOperation].sort(([a], [b]) => a.localeCompare(b)))
+    };
+  }
+};
+
+// src/linear/reads.ts
+import { createHash as createHash3 } from "node:crypto";
+import { mkdir as mkdir2, open as open2, readFile, writeFile as writeFile3 } from "node:fs/promises";
+import { join as join9 } from "node:path";
+var VERSION2 = 2;
+var INDEX = "index.json";
+var BODIES = "bodies";
+var sha256 = (data) => createHash3("sha256").update(data).digest("hex");
+var graphqlReadKey = (body2) => sha256(`graphql
+${body2}`);
+var uploadReadKey = (url) => sha256(`upload
+${url}`);
+var LinearReads = class _LinearReads {
+  mode;
+  /** Kept answers by key, each key's in the order they were kept. */
+  #answers = /* @__PURE__ */ new Map();
+  #spool = new ContentSpool(512 * 1024 * 1024, 8192);
+  #order = [];
+  #token = null;
+  #ended = false;
+  constructor(mode) {
+    this.mode = mode;
+  }
+  /** The stage step: keeps every answer it is given. */
+  static recording() {
+    return new _LinearReads("record");
+  }
+  /**
+   * The apply step: the stage step's record, or null when there is none it
+   * can use (that step did not run, ran another version, or left the record
+   * unfinished); the apply step then reads Linear itself.
+   */
+  static async replaying(folder) {
+    try {
+      const index2 = JSON.parse(await readFile(join9(folder, INDEX), "utf8"));
+      if (index2.version !== VERSION2 || index2.token === null || !Array.isArray(index2.answers)) return null;
+      const reads = new _LinearReads("replay");
+      reads.#token = index2.token;
+      if (index2.answers.length > 8192) return null;
+      let total = 0;
+      for (const { key, status, type, body: body2 } of index2.answers) {
+        if (!/^[0-9a-f]{64}$/.test(body2)) return null;
+        const file = join9(folder, BODIES, body2);
+        const handle2 = await open2(file, "r");
+        try {
+          const info2 = await handle2.stat();
+          const size = info2.size;
+          total += size;
+          if (!info2.isFile() || total > 512 * 1024 * 1024) return null;
+          const bytes = Buffer.alloc(size);
+          let offset = 0;
+          while (offset < size) {
+            const { bytesRead } = await handle2.read(bytes, offset, size - offset, offset);
+            if (bytesRead === 0) return null;
+            offset += bytesRead;
+          }
+          const extra = await handle2.read(Buffer.alloc(1), 0, 1, size);
+          if (extra.bytesRead !== 0 || sha256(bytes) !== body2) return null;
+          reads.#add(key, { status, type, body: { file, hash: body2, size } });
+        } finally {
+          await handle2.close();
+        }
+      }
+      return reads;
+    } catch {
+      return null;
+    }
+  }
+  /** The stage step's token, as the apply step's setup check sees it; null while recording. */
+  get token() {
+    return this.mode === "replay" ? this.#token : null;
+  }
+  /** Records the scopes of the token the stage step reads with. */
+  tokenMinted(scope, context) {
+    if (this.mode === "record") this.#token = { scope: [...scope], context: authMetadata(context) };
+  }
+  /** The kept answer to this read, taken so it answers once; none while recording or after the capture ended. */
+  take(key) {
+    if (this.mode !== "replay" || this.#ended) return void 0;
+    const answer = this.#answers.get(key)?.shift();
+    return answer === void 0 ? void 0 : { ...answer, body: contentBytes(answer.body) };
+  }
+  /** Keeps a successful answer while recording. */
+  keep(key, answer) {
+    if (this.mode !== "record" || this.#ended || answer.status < 200 || answer.status >= 300) return;
+    this.#add(key, { ...answer, body: this.#spool.put(answer.body) });
+  }
+  /** A mark of what is kept so far, for `dropSince`. */
+  mark() {
+    return this.#order.length;
+  }
+  /**
+   * Drops the answers kept since `mark`: reads whose result the caller threw
+   * away (a listing it started again), so the next step never takes them.
+   */
+  dropSince(mark2) {
+    if (this.mode !== "record") return;
+    for (const key of this.#order.splice(mark2).reverse()) this.#answers.get(key)?.pop();
+  }
+  /** The capture ended: nothing more is kept or answered. */
+  end() {
+    this.#ended = true;
+  }
+  /** Writes the record into `folder`, which only the job's own steps share. */
+  async save(folder) {
+    await mkdir2(join9(folder, BODIES), { recursive: true, mode: 448 });
+    const index2 = { version: VERSION2, token: this.#token, answers: [] };
+    const queues = new Map([...this.#answers].map(([key, answers]) => [key, [...answers]]));
+    for (const key of this.#order) {
+      const answer = queues.get(key)?.shift();
+      if (answer === void 0) continue;
+      const body2 = answer.body.hash;
+      await writeFile3(join9(folder, BODIES, body2), contentBytes(answer.body), { mode: 384 });
+      index2.answers.push({ key, status: answer.status, type: answer.type, body: body2 });
+    }
+    await writeFile3(join9(folder, INDEX), JSON.stringify(index2), { mode: 384 });
+  }
+  close() {
+    this.#spool.close();
+    this.#answers.clear();
+    this.#order = [];
+  }
+  #add(key, answer) {
+    const queue = this.#answers.get(key);
+    if (queue === void 0) this.#answers.set(key, [answer]);
+    else queue.push(answer);
+    this.#order.push(key);
+  }
+};
+
+// src/linear/transport.ts
+var DEFAULT_BASE_URL = "https://api.linear.app";
+var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
+var DOCUMENT_BODY_BUDGET_BYTES = 256 * 1024 * 1024;
+var GraphQLTransport = class {
+  stats;
+  baseUrl;
+  fetch;
+  reads;
+  #token;
+  #auth;
+  #floor;
+  #maxRetryAfterSeconds;
+  #timeoutMs;
+  #hooks;
+  #sleep;
+  #stopped;
+  #lastRateLimit;
+  #limits;
+  #bodyBytesRead = 0;
+  constructor(options) {
+    this.#token = options.token;
+    if (options.reads !== void 0) this.reads = options.reads;
+    this.#auth = authMetadata(options.auth);
+    this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
+    this.#floor = { ...DEFAULT_BUDGET_FLOOR, ...options.budgetFloor };
+    this.#limits = { responseBytes: MAX_RESPONSE_BYTES, bodyBytes: DOCUMENT_BODY_BUDGET_BYTES, ...options.limits };
+    this.#maxRetryAfterSeconds = options.maxRetryAfterSeconds ?? 10;
+    this.#timeoutMs = options.timeoutMs ?? 6e4;
+    this.#hooks = options.hooks ?? {};
+    this.stats = options.stats ?? new RequestStats();
+    this.fetch = options.fetch ?? defaultFetch;
+    this.#sleep = options.sleep ?? ((ms) => new Promise((resolve3) => setTimeout(resolve3, ms)));
+  }
+  /** Authenticated storage GET, restricted to Linear's documented upload host. */
+  async fetchUpload(url, init = {}) {
+    const target = new URL(url);
+    if (target.protocol !== "https:" || target.hostname !== "uploads.linear.app" || target.username !== "" || target.password !== "" || target.port !== "") {
+      throw new Error(message("linear.upload-not-allowed"));
+    }
+    return this.fetch(url, { ...init, method: "GET", redirect: "manual", headers: { authorization: `Bearer ${await this.#accessToken()}` } });
+  }
+  #accessToken() {
+    return typeof this.#token === "string" ? Promise.resolve(this.#token) : this.#token();
+  }
+  /** Why the client stopped, or undefined while it is running. */
+  get stopped() {
+    return this.#stopped;
+  }
+  /** Rate-limit headers of the latest response. */
+  get lastRateLimit() {
+    return this.#lastRateLimit;
+  }
+  async request(operation, kind, query, variables = {}) {
+    return kind === "mutation" ? this.mutate(operation, query, variables) : this.query(operation, query, variables);
+  }
+  /**
+   * Reads alone can consume or record a saved answer. With `bodies`, the
+   * answer carries document bodies and counts toward the run's body budget,
+   * a kept answer too.
+   */
+  async query(operation, query, variables = {}, { bodies = false } = {}) {
+    if (this.#stopped) throw this.#refuse(operation, "query", this.#stopped);
+    const requestBody = JSON.stringify({ query, variables, operationName: operation });
+    const key = this.reads === void 0 ? void 0 : graphqlReadKey(requestBody);
+    const kept = key === void 0 ? void 0 : this.reads?.take(key);
+    if (kept !== void 0) {
+      if (kept.body.length > this.#limits.responseBytes) throw new LinearResponseLimitError(operation, "linear-response-too-large", this.#limits.responseBytes);
+      if (bodies) this.#chargeBodies(operation, kept.body.length);
+      return keptData(operation, kept.status, kept.body);
+    }
+    const answer = await this.#network(operation, "query", requestBody, bodies);
+    if (key !== void 0) this.reads?.keep(key, { status: answer.status, type: "application/json", body: Buffer.from(answer.text, "utf8") });
+    return answer.data;
+  }
+  /** A read that must reflect the token as it is now: never answered from the read store, never kept in it. */
+  async queryLive(operation, query, variables = {}) {
+    if (this.#stopped) throw this.#refuse(operation, "query", this.#stopped);
+    return (await this.#network(operation, "query", JSON.stringify({ query, variables, operationName: operation }))).data;
+  }
+  /** Every write obtains its answer directly from the network, never the read store. */
+  async mutate(operation, query, variables = {}) {
+    const requestBody = JSON.stringify({ query, variables, operationName: operation });
+    return (await this.#network(operation, "mutation", requestBody)).data;
+  }
+  /** Network execution shared by reads and writes; has no read-store access. */
+  async #network(operation, kind, requestBody, bodies = false) {
+    for (let attempt = 1; ; attempt += 1) {
+      if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
+      const info2 = { operation, kind, attempt };
+      await this.#hooks.beforeRequest?.(info2);
+      if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
+      const token = await this.#accessToken();
+      const started = Date.now();
+      this.stats.count(operation);
+      let response;
+      try {
+        response = await this.fetch(`${this.baseUrl}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: requestBody,
+          signal: AbortSignal.timeout(this.#timeoutMs)
+        });
+      } catch (error2) {
+        this.#log({ ...info2, ...authMetadata(this.#auth), ...requestTiming(started), status: "network-error", rateLimitHeaders: {} });
+        throw new LinearNetworkError(operation, error2);
+      }
+      const rateLimit = readRateLimitHeaders(response.headers);
+      const requestId = response.headers.get("x-request-id") ?? void 0;
+      const durationMs = Date.now() - started;
+      if (Object.keys(rateLimit.headers).length > 0) this.#lastRateLimit = rateLimit;
+      try {
+        await this.#hooks.afterResponse?.({ ...info2, status: response.status, durationMs, rateLimit });
+      } catch (error2) {
+        await response.body?.cancel().catch(() => {
+        });
+        this.#log({
+          ...info2,
+          ...authMetadata(this.#auth),
+          ...requestTiming(started),
+          status: response.status,
+          requestId,
+          rateLimitHeaders: rateLimit.headers,
+          responseHookFailed: true,
+          ...error2 instanceof LinearStoppedError ? { stop: error2.reason } : {}
+        });
+        throw error2;
+      }
+      let body2;
+      let text6 = "";
+      let bodyError;
+      let over = false;
+      let bytes = 0;
+      try {
+        const read = await readText(response, this.#limits.responseBytes);
+        if (read === void 0) over = true;
+        else {
+          text6 = read.text;
+          bytes = read.bytes;
+          body2 = JSON.parse(text6);
+        }
+      } catch (error2) {
+        body2 = void 0;
+        bodyError = error2;
+      }
+      const errorCodes = body2?.errors?.map((error2) => String(error2.extensions?.code ?? "unknown"));
+      const entry = {
+        ...info2,
+        ...authMetadata(this.#auth),
+        ...requestTiming(started),
+        status: response.status,
+        rateLimitHeaders: rateLimit.headers,
+        ...requestId === void 0 ? {} : { requestId },
+        ...errorCodes === void 0 ? {} : { errorCodes }
+      };
+      if (isRateLimited(response.status, body2?.errors)) {
+        const retryAfterSeconds = parseRetryAfter(response.headers.get("retry-after"));
+        const shortWait = retryAfterSeconds !== void 0 && retryAfterSeconds <= this.#maxRetryAfterSeconds;
+        if (attempt === 1 && shortWait && !findLowBudget(operation, rateLimit, this.#floor)) {
+          this.#log({ ...entry, retryAfterSeconds });
+          await this.#sleep(retryAfterSeconds * 1e3);
+          continue;
+        }
+        this.#stopped = { kind: "rate-limited", operation, retryAfterSeconds, ...limitsOf(rateLimit) };
+        this.#log({ ...entry, retryAfterSeconds, stop: this.#stopped });
+        throw new LinearStoppedError(operation, this.#stopped);
+      }
+      const low = findLowBudget(operation, rateLimit, this.#floor);
+      if (low) this.#stopped = low;
+      this.#log(low ? { ...entry, stop: low } : entry);
+      if (over) {
+        const error2 = new LinearResponseLimitError(operation, "linear-response-too-large", this.#limits.responseBytes);
+        throw kind === "mutation" ? new LinearNetworkError(operation, error2) : error2;
+      }
+      const firstError = body2?.errors?.[0];
+      if (firstError) throw new LinearGraphQLError(operation, response.status, firstError, requestId);
+      if (response.ok && body2 === void 0) throw new LinearNetworkError(operation, bodyError);
+      if (!response.ok || body2 === void 0 || body2.data === void 0 || body2.data === null) {
+        throw new LinearHttpError(operation, response.status, requestId);
+      }
+      if (bodies) this.#chargeBodies(operation, bytes);
+      return { data: body2.data, text: text6, status: response.status };
+    }
+  }
+  /** Counts an answer with document bodies toward the run's budget, or refuses it before its bodies are kept. */
+  #chargeBodies(operation, bytes) {
+    if (this.#bodyBytesRead + bytes > this.#limits.bodyBytes) throw new LinearResponseLimitError(operation, "linear-body-budget", this.#limits.bodyBytes);
+    this.#bodyBytesRead += bytes;
+  }
+  /** A request after the stop is refused without being sent; a refused write is counted, so a run can show it stopped writing. */
+  #refuse(operation, kind, reason) {
+    if (kind === "mutation") this.stats.writesAfterStop += 1;
+    return new LinearStoppedError(operation, reason);
+  }
+  #log(entry) {
+    emitLog(this.#hooks.log, entry);
+  }
+};
+function keptData(operation, status, bytes) {
+  let body2;
+  try {
+    body2 = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    body2 = void 0;
+  }
+  const errors = body2?.errors;
+  if (body2 === void 0 || body2 === null || (Array.isArray(errors) ? errors.length > 0 : errors !== void 0) || body2.data === void 0 || body2.data === null) {
+    throw new LinearHttpError(operation, status, void 0);
+  }
+  return body2.data;
+}
+async function readText(response, limit) {
+  if (response.body === null) return { text: "", bytes: 0 };
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > limit) {
+      await reader.cancel().catch(() => {
+      });
+      return void 0;
+    }
+    chunks.push(value);
+  }
+  return { text: new TextDecoder().decode(Buffer.concat(chunks, bytes)), bytes };
+}
+function isRateLimited(status, errors) {
+  return status === 429 || (errors ?? []).some((error2) => error2.extensions?.code === "RATELIMITED");
+}
+var defaultFetch = (input, init) => globalThis.fetch(input, init);
+function trimSlash(url) {
+  return url.replace(/\/+$/, "");
+}
+
+// src/linear/client.ts
+var MAX_PAGE_SIZE = 250;
+var DEFAULT_PAGE_SIZE = MAX_PAGE_SIZE;
+var CREATE_ATTEMPTS = 3;
+var UPLOAD_TIMEOUT_MS = 12e4;
+var LISTING_ATTEMPTS = 3;
+var DOCUMENT_FIELDS = `
+  id title slugId icon color trashed archivedAt createdAt updatedAt documentContentId
+  content @include(if: $withContent)
+  project { id }
+  team { id }`;
+var LinearClient = class {
+  transport;
+  /** What the client assumes about Linear; the measured `LINEAR_FACTS` unless a test or the probe sets others. */
+  facts;
+  constructor(options, facts = LINEAR_FACTS) {
+    this.transport = options instanceof GraphQLTransport ? options : new GraphQLTransport(options);
+    this.facts = facts;
+  }
+  get stats() {
+    return this.transport.stats;
+  }
+  /** Why the client stopped, or undefined while it runs. */
+  get stopped() {
+    return this.transport.stopped;
+  }
+  /** Sends any GraphQL document; for setup checks and tests. */
+  request(operation, kind, query, variables) {
+    return kind === "mutation" ? this.mutate(operation, query, variables) : this.transport.query(operation, query, variables);
+  }
+  /** Sends a write through the network-only transport path. */
+  mutate(operation, query, variables) {
+    return this.transport.mutate(operation, query, variables);
+  }
+  async rateLimitStatus() {
+    const data = await this.request(
+      "RateLimitStatus",
+      "query",
+      `query RateLimitStatus {
+        rateLimitStatus { identifier kind limits { type allowedAmount remainingAmount requestedAmount period reset } }
+      }`
+    );
+    return data.rateLimitStatus;
+  }
+  /**
+   * Lists every document of a project, or of a team zone (the team's
+   * documents outside projects), page by page. Trashed documents are listed
+   * only with `includeArchived`, then with `trashed` and `archivedAt` set.
+   */
+  async listDocuments(place, options = {}) {
+    if (place.projectId !== void 0) {
+      return this.#pagedDocuments("ListDocuments", { project: { id: { eq: place.projectId } } }, options);
+    }
+    const documents = await this.#pagedDocuments("ListDocuments", { team: { id: { eq: place.teamId } } }, options);
+    return documents.filter((d) => d.projectId === null);
+  }
+  /** Lists mapped places together, using the same pagination and document parser. */
+  async listDocumentsInPlaces(places, options = {}) {
+    if (places.length === 0) return [];
+    const filters = places.map((place) => place.projectId !== void 0 ? { project: { id: { eq: place.projectId } } } : { team: { id: { eq: place.teamId } } });
+    const documents = await this.#pagedDocuments("ListDocuments", { or: filters }, options);
+    return documents.filter((doc) => places.some((place) => place.projectId !== void 0 ? doc.projectId === place.projectId : doc.projectId === null && doc.teamId === place.teamId));
+  }
+  /**
+   * Reads documents by id, one request per page of ids (one request for up
+   * to `pageSize` ids). Trashed documents are included; ids that no longer
+   * exist are absent from the result. Bodies read here count toward the
+   * run's body budget: the caller holds them together.
+   */
+  async getDocuments(ids, options = {}) {
+    return this.#documentsById(ids, options, true);
+  }
+  async #documentsById(ids, options, counted) {
+    const withContent = options.withContent ?? false;
+    const pageSize = clampPageSize(options.pageSize);
+    const result = [];
+    const pages = [];
+    for (let start3 = 0; start3 < ids.length; start3 += pageSize) pages.push(ids.slice(start3, start3 + pageSize));
+    for (let chunk = pages.shift(); chunk !== void 0; chunk = pages.shift()) {
+      let data;
+      try {
+        data = await this.transport.query(
+          "GetDocuments",
+          `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
+            documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
+              nodes { ${DOCUMENT_FIELDS} }
+            }
+          }`,
+          { ids: chunk, first: chunk.length, withContent },
+          { bodies: withContent && counted }
+        );
+      } catch (error2) {
+        if (!pageTooLarge(error2, chunk.length)) throw error2;
+        const half = Math.ceil(chunk.length / 2);
+        pages.unshift(chunk.slice(0, half), chunk.slice(half));
+        continue;
+      }
+      result.push(...data.documents.nodes.map(toDocument));
+    }
+    return result;
+  }
+  /**
+   * Reads one document by id with `document(id:)`, which answers for trashed
+   * and archived documents too; null when Linear no longer has the id. Its
+   * body is not counted toward the run's body budget: one document at a
+   * time, bounded by Linear's content limit and the per-answer limit, read
+   * by the write step just before it writes that document.
+   */
+  async getDocument(id, { withContent = false } = {}) {
+    try {
+      const data = await this.transport.query(
+        "GetDocument",
+        `query GetDocument($id: String!, $withContent: Boolean!) {
+          document(id: $id) { ${DOCUMENT_FIELDS} }
+        }`,
+        { id, withContent }
+      );
+      return data.document === null ? null : toDocument(data.document);
+    } catch (error2) {
+      if (error2 instanceof LinearGraphQLError && error2.notFound) return null;
+      throw error2;
+    }
+  }
+  /**
+   * Creates a document and returns its record with the stored content. A
+   * title or content longer than Linear accepts throws `DocumentTooLongError`
+   * without a request. When `facts.mutationsReturnStoredContent` holds (as
+   * measured), the payload is the stored record and this is one request;
+   * otherwise a second request reads the document back. A failed read-back
+   * throws `LinearReadBackError`: the document was created.
+   *
+   * With a client-chosen `id`, a create whose answer was lost (no answer, a
+   * server error) is not given up at once: the document is read back by its
+   * id, and when Linear does not have it, the create is sent again with the
+   * same id, at most `CREATE_ATTEMPTS` times in all. The id makes the retry
+   * safe: Linear cannot hold two documents with it.
+   */
+  async createDocument(place, input) {
+    this.#refuseTooLong("CreateDocument", input);
+    const { id } = input;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.#createDocumentOnce(place, input);
+      } catch (error2) {
+        if (id === void 0 || !(error2 instanceof LinearError) || error2 instanceof LinearStoppedError || error2 instanceof LinearReadBackError) throw error2;
+        const transient = isTransientLinearError(error2);
+        if (!transient && attempt === 1) throw error2;
+        const found = await this.#findCreated(id, place, input.title, error2);
+        if (found !== void 0) {
+          this.stats.wrote("CreateDocument");
+          return found;
+        }
+        if (!transient || attempt >= CREATE_ATTEMPTS) throw error2;
+      }
+    }
+  }
+  async #createDocumentOnce(place, input) {
+    const data = await this.mutate(
+      "CreateDocument",
+      `mutation CreateDocument($input: DocumentCreateInput!, $withContent: Boolean!) {
+        documentCreate(input: $input) { success document { ${DOCUMENT_FIELDS} } }
+      }`,
+      { input: { ...input, ...place }, withContent: true }
+    );
+    const created = toDocument(succeeded("CreateDocument", data.documentCreate).document);
+    this.stats.wrote("CreateDocument");
+    return this.#storedRecord("CreateDocument", created);
+  }
+  /**
+   * Updates a document: content, rename (title), move (projectId or teamId),
+   * icon and color. Like `createDocument`, refuses a too-long title or
+   * content without a request and returns the stored content of a content
+   * change: one request as measured, two when the facts call for a read-back.
+   */
+  async updateDocument(id, patch, withContent = false) {
+    this.#refuseTooLong("UpdateDocument", patch);
+    const data = await this.mutate(
+      "UpdateDocument",
+      `mutation UpdateDocument($id: String!, $input: DocumentUpdateInput!, $withContent: Boolean!) {
+        documentUpdate(id: $id, input: $input) { success document { ${DOCUMENT_FIELDS} } }
+      }`,
+      { id, input: patch, withContent: withContent || patch.content !== void 0 }
+    );
+    const updated = toDocument(succeeded("UpdateDocument", data.documentUpdate).document);
+    this.stats.wrote("UpdateDocument");
+    return patch.content === void 0 ? updated : this.#storedRecord("UpdateDocument", updated);
+  }
+  /** Moves a document to trash; it can be restored. Never deletes for good. */
+  async trashDocument(id) {
+    const data = await this.mutate(
+      "TrashDocument",
+      `mutation TrashDocument($id: String!) { documentDelete(id: $id) { success } }`,
+      { id }
+    );
+    succeeded("TrashDocument", data.documentDelete);
+    this.stats.wrote("TrashDocument");
+  }
+  async restoreDocument(id) {
+    const data = await this.mutate(
+      "RestoreDocument",
+      `mutation RestoreDocument($id: String!) { documentUnarchive(id: $id) { success } }`,
+      { id }
+    );
+    succeeded("RestoreDocument", data.documentUnarchive);
+    this.stats.wrote("RestoreDocument");
+  }
+  /** Comments on a document; `documentContentId` comes from the document. */
+  async commentOnDocument(documentContentId, body2, id) {
+    const data = await this.mutate(
+      "CommentOnDocument",
+      `mutation CommentOnDocument($input: CommentCreateInput!) {
+        commentCreate(input: $input) { success comment { id } }
+      }`,
+      { input: { documentContentId, body: body2, ...id === void 0 ? {} : { id } } }
+    );
+    const comment = succeeded("CommentOnDocument", data.commentCreate).comment;
+    this.stats.wrote("CommentOnDocument");
+    return comment;
+  }
+  /** Update a previously posted notice without adding another comment. */
+  async updateDocumentComment(id, body2) {
+    const data = await this.mutate(
+      "UpdateDocumentComment",
+      `mutation UpdateDocumentComment($id: String!, $input: CommentUpdateInput!) {
+        commentUpdate(id: $id, input: $input) { success comment { id } }
+      }`,
+      { id, input: { body: body2 } }
+    );
+    const comment = succeeded("UpdateDocumentComment", data.commentUpdate).comment;
+    this.stats.wrote("UpdateDocumentComment");
+    return comment;
+  }
+  /** Whether an integration comment exists on this document (including archived comments). */
+  async commentExists(id, documentId) {
+    return (await this.#documentCommentIds(/* @__PURE__ */ new Map([[id, documentId]]), "FindComment")).has(id);
+  }
+  /** Authorize a batch before any notice mutation, without a read per hold. */
+  async documentCommentIds(expected) {
+    return this.#documentCommentIds(expected, "FindComments");
+  }
+  async #documentCommentIds(expected, operation) {
+    const found = /* @__PURE__ */ new Set();
+    const ids = [...expected.keys()];
+    for (let offset = 0; offset < ids.length; offset += MAX_PAGE_SIZE) {
+      const batch = ids.slice(offset, offset + MAX_PAGE_SIZE);
+      const requested = new Set(batch);
+      const data = await this.request(
+        operation,
+        "query",
+        `query ${operation}($ids: [ID!]!, $first: Int!) {
+          viewer { id }
+          comments(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
+            nodes { id user { id } documentContent { document { id } } }
+          }
+        }`,
+        { ids: batch, first: batch.length }
+      );
+      for (const comment of data.comments.nodes) {
+        if (!requested.has(comment.id) || found.has(comment.id) || comment.documentContent?.document?.id !== expected.get(comment.id) || !data.viewer?.id || comment.user?.id !== data.viewer.id) {
+          throw new LinearError(operation, message("linear.comment-mismatch"));
+        }
+        found.add(comment.id);
+      }
+    }
+    return found;
+  }
+  /**
+   * Resolves a comment, the way a person marks a thread resolved: it stays
+   * on the document, folded. Resolving one that is already resolved is not
+   * an error to the caller.
+   */
+  async resolveComment(id) {
+    const data = await this.mutate(
+      "ResolveComment",
+      `mutation ResolveComment($id: String!) { commentResolve(id: $id) { success } }`,
+      { id }
+    );
+    succeeded("ResolveComment", data.commentResolve);
+    this.stats.wrote("ResolveComment");
+  }
+  /**
+   * Ensure one notice exists, including recovery after a lost create response.
+   * With `createFirst`, a notice this caller has never seen posted is created
+   * without a lookup: an id Linear already holds refuses the create, and the
+   * lookup after that refusal finds it.
+   */
+  async ensureDocumentComment(documentContentId, body2, id, updateExisting = false, createFirst = false) {
+    const find = async () => {
+      const data = await this.request(
+        "FindDocumentComment",
+        "query",
+        `query FindDocumentComment($id: ID!) {
+          viewer { id }
+          comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id documentContentId user { id } } }
+        }`,
+        { id }
+      );
+      const comment2 = data.comments.nodes[0];
+      if (!comment2) return false;
+      if (comment2.id !== id || comment2.documentContentId !== documentContentId || !data.viewer?.id || comment2.user?.id !== data.viewer.id) {
+        throw new LinearError("FindDocumentComment", message("linear.comment-mismatch"));
+      }
+      return true;
+    };
+    const existing = async () => {
+      if (updateExisting) {
+        const comment2 = await this.updateDocumentComment(id, body2);
+        if (comment2.id !== id) throw new LinearError("UpdateDocumentComment", message("linear.updated-comment-mismatch"));
+      }
+      return { id, created: false };
+    };
+    if (!createFirst && await find()) return existing();
+    let comment;
+    try {
+      comment = await this.commentOnDocument(documentContentId, body2, id);
+    } catch (error2) {
+      if (error2 instanceof LinearError && this.stopped === void 0) {
+        let found = false;
+        try {
+          found = await find();
+        } catch {
+        }
+        if (found) {
+          const lost = error2 instanceof LinearNetworkError || (error2 instanceof LinearHttpError || error2 instanceof LinearGraphQLError) && error2.httpStatus >= 500;
+          if (lost) this.stats.wrote("CommentOnDocument");
+          return existing();
+        }
+      }
+      throw error2;
+    }
+    if (comment.id !== id) throw new LinearError("CommentOnDocument", message("linear.created-comment-mismatch"));
+    return { id, created: true };
+  }
+  /**
+   * Uploads a file: `fileUpload` returns a signed storage URL, the bytes go
+   * there with one PUT, and the returned asset URL is what documents embed.
+   * Measured: Linear issues an upload target for a declared 10 MiB and for
+   * 10 MiB + 1 byte, and refuses a declared 100 MiB (INPUT_ERROR).
+   */
+  async uploadFile(input) {
+    const data = await this.mutate(
+      "FileUpload",
+      `mutation FileUpload($contentType: String!, $filename: String!, $size: Int!) {
+        fileUpload(contentType: $contentType, filename: $filename, size: $size) {
+          success uploadFile { uploadUrl assetUrl headers { key value } }
+        }
+      }`,
+      { contentType: input.contentType, filename: input.filename, size: input.bytes.byteLength }
+    );
+    const target = succeeded("FileUpload", data.fileUpload).uploadFile;
+    if (!target) throw new LinearUploadError("FileUpload", message("linear.no-upload-target", { operation: "FileUpload" }));
+    await this.#putUpload("FileUpload.put", target, input);
+    return { assetUrl: target.assetUrl };
+  }
+  /**
+   * Uploads several files with one API request: one `fileUpload` per file,
+   * aliased in a single mutation, then one storage PUT per file. Linear's
+   * request budget is the scarce one (5,000 an hour); each `fileUpload`
+   * still counts against the complexity budget. Returns the asset URLs in
+   * the order of `inputs`; throws when any file fails, after uploading the
+   * ones before it (their URLs are lost to the caller, which uploads them
+   * again one by one).
+   */
+  async uploadFiles(inputs) {
+    if (inputs.length === 0) return [];
+    const declarations = inputs.map((_, index2) => `$contentType${index2}: String!, $filename${index2}: String!, $size${index2}: Int!`).join(", ");
+    const fields = inputs.map((_, index2) => `f${index2}: fileUpload(contentType: $contentType${index2}, filename: $filename${index2}, size: $size${index2}) {
+          success uploadFile { uploadUrl assetUrl headers { key value } }
+        }`).join("\n        ");
+    const variables = {};
+    inputs.forEach((input, index2) => {
+      variables[`contentType${index2}`] = input.contentType;
+      variables[`filename${index2}`] = input.filename;
+      variables[`size${index2}`] = input.bytes.byteLength;
+    });
+    const data = await this.mutate("FileUploads", `mutation FileUploads(${declarations}) {
+        ${fields}
+      }`, variables);
+    const targets = inputs.map((_, index2) => {
+      const payload = data[`f${index2}`];
+      const target = payload === void 0 ? null : succeeded("FileUploads", payload).uploadFile;
+      if (!target) throw new LinearUploadError("FileUploads", message("linear.no-upload-target", { operation: "FileUploads" }));
+      return target;
+    });
+    const result = [];
+    for (const [index2, input] of inputs.entries()) {
+      const target = targets[index2];
+      await this.#putUpload("FileUploads.put", target, input);
+      result.push({ assetUrl: target.assetUrl });
+    }
+    return result;
+  }
+  /** Sends a file's bytes to the storage URL Linear issued for it. */
+  async #putUpload(operation, target, input) {
+    const headers = new Headers({ "content-type": input.contentType, "cache-control": "public, max-age=31536000" });
+    for (const { key, value } of target.headers) headers.set(key, value);
+    this.stats.storagePuts += 1;
+    let response;
+    try {
+      response = await this.transport.fetch(target.uploadUrl, {
+        method: "PUT",
+        headers,
+        body: input.bytes,
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS)
+      });
+    } catch (error2) {
+      throw new LinearUploadError(operation, message("linear.storage-failed", { operation }), { cause: error2 });
+    }
+    if (!response.ok) {
+      throw new LinearUploadError(operation, message("linear.storage-answered", { operation, status: response.status }));
+    }
+    this.stats.wrote("FileUpload");
+  }
+  #refuseTooLong(operation, document3) {
+    const refusal = lengthRefusal(document3, this.facts);
+    if (refusal) throw new DocumentTooLongError(operation, refusal);
+  }
+  /**
+   * The document a lost create made, read back with its stored content, or
+   * undefined when Linear does not have the id. A document with the id in
+   * another place or under another title is not this create's: the create's
+   * own error is thrown. A read Linear fails throws that error too, so the
+   * caller reports the create; a stop and any other failure are thrown as they are.
+   */
+  async #findCreated(id, place, title, createError) {
+    let found;
+    try {
+      [found] = await this.#documentsById([id], { withContent: true }, false);
+    } catch (error2) {
+      if (error2 instanceof LinearStoppedError || !(error2 instanceof LinearError)) throw error2;
+      throw createError;
+    }
+    if (found === void 0) return void 0;
+    const samePlace = place.projectId !== void 0 ? found.projectId === place.projectId : found.teamId === place.teamId && found.projectId === null;
+    if (!samePlace || found.title !== title || found.trashed) throw createError;
+    return found;
+  }
+  /** The written document's record with its stored content: the payload, or a read-back when the payload may differ. */
+  async #storedRecord(operation, written) {
+    if (this.facts.mutationsReturnStoredContent) return written;
+    let stored;
+    try {
+      [stored] = await this.#documentsById([written.id], { withContent: true }, false);
+    } catch (error2) {
+      if (error2 instanceof LinearStoppedError || !(error2 instanceof LinearError)) throw error2;
+      throw new LinearReadBackError(operation, written, error2);
+    }
+    if (!stored) throw new LinearReadBackError(operation, written);
+    return stored;
+  }
+  /**
+   * Every document the filter matches, page by page. When Linear forgets the
+   * cursor of a later page, the listing restarts from the first page, at most
+   * `LISTING_ATTEMPTS` listings in all; the last refusal is then thrown as is,
+   * also when the client stopped meanwhile, so the run names Linear's detail.
+   */
+  async #pagedDocuments(operation, filter, options) {
+    for (let attempt = 1; ; attempt += 1) {
+      const kept = this.transport.reads?.mark();
+      try {
+        return await this.#listPages(operation, filter, options);
+      } catch (error2) {
+        if (!isCursorNotFound(error2) || attempt >= LISTING_ATTEMPTS || this.stopped) throw error2;
+        if (kept !== void 0) this.transport.reads?.dropSince(kept);
+      }
+    }
+  }
+  async #listPages(operation, filter, options) {
+    const result = [];
+    const withContent = options.withContent ?? false;
+    let first = clampPageSize(options.pageSize);
+    let after = null;
+    for (; ; ) {
+      let data;
+      try {
+        data = await this.transport.query(
+          operation,
+          `query ${operation}($filter: DocumentFilter, $first: Int!, $after: String, $includeArchived: Boolean!, $withContent: Boolean!) {
+            documents(filter: $filter, first: $first, after: $after, includeArchived: $includeArchived, orderBy: createdAt) {
+              nodes { ${DOCUMENT_FIELDS} }
+              pageInfo { hasNextPage endCursor }
+            }
+          }`,
+          { filter, first, after, includeArchived: options.includeArchived ?? false, withContent },
+          { bodies: withContent }
+        );
+      } catch (error2) {
+        if (!pageTooLarge(error2, first)) throw error2;
+        first = Math.ceil(first / 2);
+        continue;
+      }
+      result.push(...data.documents.nodes.map(toDocument));
+      const { hasNextPage, endCursor } = data.documents.pageInfo;
+      if (hasNextPage && endCursor === null) {
+        throw new LinearError(operation, message("linear.page-without-cursor", { operation }));
+      }
+      if (!hasNextPage) return result;
+      after = endCursor;
+    }
+  }
+};
+function succeeded(operation, payload) {
+  if (payload.success !== true) throw new LinearError(operation, message("linear.not-success", { operation }));
+  return payload;
+}
+function toDocument(raw) {
+  const { project, team, trashed, ...rest } = raw;
+  return { ...rest, projectId: project?.id ?? null, teamId: team?.id ?? null, trashed: trashed === true };
+}
+function isCursorNotFound(error2) {
+  return error2 instanceof LinearGraphQLError && error2.code === "INPUT_ERROR" && /cursor not found/i.test(error2.detail ?? "");
+}
+function clampPageSize(pageSize) {
+  return Math.max(1, Math.min(MAX_PAGE_SIZE, Math.floor(pageSize ?? DEFAULT_PAGE_SIZE)));
+}
+function pageTooLarge(error2, documents) {
+  return documents > 1 && error2 instanceof LinearResponseLimitError && error2.code === "linear-response-too-large";
+}
+
+// src/linear/token.ts
+async function mintAppToken(credentials, options = {}) {
+  const requestedScopes = credentials.scopes ?? ["read", "write"];
+  const body2 = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: credentials.clientId,
+    client_secret: credentials.clientSecret,
+    scope: requestedScopes.join(",")
+  });
+  const { response, json } = await oauthPost("oauth.token", "/oauth/token", body2, options, requestedScopes);
+  if (!response.ok || typeof json.access_token !== "string") {
+    const reason = oauthErrorCode(json.error) ?? `HTTP ${response.status}`;
+    throw new LinearTokenError("oauth.token", message("linear.token-refused", { reason }), { httpStatus: response.status });
+  }
+  const scope = readScopes(json.scope);
+  return {
+    accessToken: json.access_token,
+    expiresIn: typeof json.expires_in === "number" ? json.expires_in : 0,
+    scope,
+    context: { grantType: "client_credentials", requestedScopes: [...requestedScopes], returnedScopes: [...scope] }
+  };
+}
+async function revokeToken(accessToken, options = {}) {
+  const { response, json } = await oauthPost("oauth.revoke", "/oauth/revoke", new URLSearchParams({ token: accessToken }), options);
+  if (!response.ok || json.success === false) {
+    throw new LinearTokenError("oauth.revoke", message("linear.revoke-unconfirmed", { status: response.status }), {
+      httpStatus: response.status
+    });
+  }
+}
+async function withRunToken(credentials, options, work) {
+  const token = await mintAppToken(credentials, options);
+  try {
+    options.lifecycle?.minted(token.accessToken);
+    return await work(token);
+  } finally {
+    await endRunToken(token, options);
+  }
+}
+async function endRunToken(token, options) {
+  let revoked = false;
+  try {
+    await revokeToken(token.accessToken, { ...options, auth: token.context });
+    revoked = true;
+  } catch (revokeError) {
+    options.onRevokeError(revokeError);
+  }
+  if (revoked) {
+    try {
+      options.lifecycle?.revoked();
+    } catch {
+    }
+  }
+}
+async function withDeferredRunToken(credentials, known, options, work) {
+  let minting;
+  let access2;
+  const token = {
+    scope: [...known.scope],
+    context: known.context,
+    accessToken() {
+      if (access2 === void 0) {
+        const mint = mintAppToken(credentials, options);
+        minting = mint;
+        access2 = mint.then((minted) => {
+          options.lifecycle?.minted(minted.accessToken);
+          return minted.accessToken;
+        });
+      }
+      return access2;
+    }
+  };
+  try {
+    return await work(token);
+  } finally {
+    const minted = minting === void 0 ? void 0 : await minting.catch(() => void 0);
+    if (minted !== void 0) await endRunToken(minted, options);
+  }
+}
+async function oauthPost(operation, path7, body2, options, requestedScopes) {
+  const fetchImpl = options.fetch ?? defaultFetch;
+  const started = Date.now();
+  const info2 = {
+    operation,
+    kind: "oauth",
+    attempt: 1,
+    ...requestedScopes ? { grantType: "client_credentials", requestedScopes: [...requestedScopes] } : authMetadata(options.auth)
+  };
+  options.stats?.count(operation);
+  let response;
+  try {
+    response = await fetchImpl(`${trimSlash(options.baseUrl ?? DEFAULT_BASE_URL)}${path7}`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: body2,
+      signal: AbortSignal.timeout(options.timeoutMs ?? 3e4)
+    });
+  } catch (error2) {
+    emitLog(options.hooks?.log, { ...info2, ...requestTiming(started), status: "network-error", rateLimitHeaders: {} });
+    throw new LinearTokenError(operation, message("linear.token-request-failed", { operation }), { cause: error2 });
+  }
+  const json = await readJson(response);
+  emitLog(options.hooks?.log, {
+    ...info2,
+    ...requestTiming(started),
+    status: response.status,
+    ...requestedScopes ? { returnedScopes: readScopes(json.scope) } : {},
+    requestId: response.headers.get("x-request-id") ?? void 0,
+    errorCodes: json.error === void 0 ? [] : [oauthErrorCode(json.error) ?? "unknown"],
+    ...operation === "oauth.revoke" ? { revocationConfirmed: response.ok && json.success !== false } : {},
+    rateLimitHeaders: readRateLimitHeaders(response.headers).headers
+  });
+  return { response, json };
+}
+function oauthErrorCode(error2) {
+  return typeof error2 === "string" && [
+    "invalid_request",
+    "invalid_client",
+    "invalid_grant",
+    "unauthorized_client",
+    "unsupported_grant_type",
+    "invalid_scope",
+    "access_denied",
+    "server_error",
+    "temporarily_unavailable",
+    "Error"
+  ].includes(error2) ? error2 : void 0;
+}
+function readScopes(scope) {
+  return Array.isArray(scope) ? scope.filter((s) => typeof s === "string") : typeof scope === "string" ? scope.split(/[ ,]+/).filter(Boolean) : [];
+}
+async function readJson(response) {
+  try {
+    const json = await response.json();
+    return json !== null && typeof json === "object" ? json : {};
+  } catch {
+    return {};
+  }
+}
+
+// src/sync/stable-id.ts
+import { createHash as createHash4 } from "node:crypto";
+function stableId(...parts) {
+  const hex = createHash4("sha256").update(parts.join("\0")).digest("hex");
+  const variant = (parseInt(hex[16], 16) & 3 | 8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+// src/setup/linear.ts
+var REQUIRED_SCOPES = ["read", "write"];
+var TEAM_REFS_PER_REQUEST = 125;
+var PROJECT_TEAMS_PAGE_SIZE = 20;
+var TEAMS_RETRY_DELAY_MS = 3e3;
+function projectKey(team, project) {
+  return `${team}\0${project}`;
+}
+function pendingProject(targets, place) {
+  return place.kind === "project" && targets.pendingProjects?.has(projectKey(place.team, place.project)) === true;
+}
+function isCredentialError(error2) {
+  if (error2 instanceof LinearTokenError) return error2.credentialsRefused;
+  if (error2 instanceof LinearGraphQLError) {
+    return error2.httpStatus === 401 || error2.code === "AUTHENTICATION_ERROR";
+  }
+  return error2 instanceof LinearHttpError && error2.httpStatus === 401;
+}
+function checkLinearScopes(scope) {
+  if (scope === void 0) return passed("linear-credentials", "Linear token accepted");
+  const missing = REQUIRED_SCOPES.filter((wanted) => !scope.includes(wanted));
+  return missing.length === 0 ? passed("linear-credentials", `Linear token accepted with scopes ${scope.join(", ")}`) : failed("linear-credentials", "linear-credential-failed", message("setup.linear-scope", { scopes: missing.join(", ") }));
+}
+function linearCredentialFailure(detail) {
+  return failed("linear-credentials", "linear-credential-failed", detail);
+}
+async function resolveTargets(client, zones, { retryDelayMs = TEAMS_RETRY_DELAY_MS, createProjects = false, live = false } = {}) {
+  const zoneList = [...zones];
+  const teamRefs = /* @__PURE__ */ new Set();
+  const projectRefs = /* @__PURE__ */ new Map();
+  for (const zone of zoneList) {
+    teamRefs.add(zone.team);
+    if (zone.project !== void 0) projectRefs.set(projectKey(zone.team, zone.project), { team: zone.team, project: zone.project });
+  }
+  if (teamRefs.size === 0) return { result: notChecked("annotation-targets", "no annotated folders") };
+  const refs = [...teamRefs];
+  const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
+  const query = live ? client.transport.queryLive.bind(client.transport) : client.transport.query.bind(client.transport);
+  const lookUp = async () => {
+    const teamNodes2 = [];
+    let projectNodes2 = [];
+    let seesTeams;
+    for (let start3 = 0; start3 < refs.length; start3 += TEAM_REFS_PER_REQUEST) {
+      const batch = refs.slice(start3, start3 + TEAM_REFS_PER_REQUEST);
+      const first = start3 === 0;
+      const withProjects = first && names.length > 0;
+      const data = await query(
+        "SetupTargets",
+        `query SetupTargets($refs: [String!]!, $first: Int!${withProjects ? ", $names: [String!]!" : ""}) {
+          teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
+          ${withProjects ? `projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: ${PROJECT_TEAMS_PAGE_SIZE}) { nodes { id } pageInfo { hasNextPage } } } pageInfo { hasNextPage } }` : ""}
+          ${first ? "visible: teams(first: 1) { nodes { id } }" : ""}
+        }`,
+        withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 }
+      );
+      teamNodes2.push(...data.teams.nodes.filter((team) => !teamNodes2.some((known) => known.id === team.id)));
+      if (data.projects !== void 0) {
+        if (data.projects.pageInfo.hasNextPage) throw new Error(message("setup.too-many-projects"));
+        projectNodes2 = data.projects.nodes;
+      }
+      if (data.visible !== void 0) seesTeams = data.visible.nodes.length > 0;
+    }
+    return { teamNodes: teamNodes2, projectNodes: projectNodes2, seesTeams };
+  };
+  let teamNodes;
+  let projectNodes;
+  try {
+    let found = await lookUp();
+    if (found.seesTeams === false) {
+      await setTimeout3(retryDelayMs);
+      found = await lookUp();
+      if (found.seesTeams === false) {
+        return {
+          result: failed(
+            "annotation-targets",
+            "linear-teams-not-visible",
+            message("setup.no-team-visible", { teams: [...refs].sort().map((ref) => `"${ref}"`).join(", ") })
+          )
+        };
+      }
+    }
+    ({ teamNodes, projectNodes } = found);
+  } catch (error2) {
+    if (!isCredentialError(error2)) throw error2;
+    return {
+      result: notChecked("annotation-targets", "needs working Linear credentials"),
+      credentials: linearCredentialFailure(message("setup.linear-refused-teams"))
+    };
+  }
+  const targets = { teams: /* @__PURE__ */ new Map(), projects: /* @__PURE__ */ new Map() };
+  const missing = [];
+  const ambiguous = [];
+  for (const ref of [...teamRefs].sort()) {
+    const matches = teamNodes.filter((team) => team.key === ref || team.name === ref);
+    if (matches.length === 1) targets.teams.set(ref, matches[0]);
+    else (matches.length === 0 ? missing : ambiguous).push(`team "${ref}"`);
+  }
+  for (const [key, ref] of [...projectRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+    const team = targets.teams.get(ref.team);
+    if (team === void 0) continue;
+    const matches = [];
+    for (const project of projectNodes) {
+      if (project.name !== ref.project) continue;
+      if (project.teams.nodes.some((node2) => node2.id === team.id)) {
+        matches.push(project);
+      } else if (project.teams.pageInfo.hasNextPage) {
+        const membership = await query(
+          "SetupProjectTeam",
+          "query SetupProjectTeam($project: String!, $team: ID!) { project(id: $project) { teams(first: 1, filter: { id: { eq: $team } }) { nodes { id } } } }",
+          { project: project.id, team: team.id }
+        );
+        if (membership.project.teams.nodes.some((node2) => node2.id === team.id)) matches.push(project);
+      }
+    }
+    if (matches.length === 1) {
+      const { id, name } = matches[0];
+      targets.projects.set(key, { id, name });
+    } else if (matches.length === 0 && createProjects) {
+      const id = stableId("project", team.id, ref.project);
+      targets.pendingProjects ??= /* @__PURE__ */ new Map();
+      targets.pendingProjects.set(key, { id, name: ref.project, teamId: team.id, team: ref.team });
+    } else {
+      (matches.length === 0 ? missing : ambiguous).push(`project "${ref.project}" of team "${ref.team}"`);
+    }
+  }
+  if (missing.length > 0) {
+    return { result: failed("annotation-targets", "annotation-target-not-found", message("setup.target-not-found", { targets: missing.join(", ") })) };
+  }
+  if (ambiguous.length > 0) {
+    return { result: failed("annotation-targets", "annotation-target-ambiguous", message("setup.target-ambiguous", { targets: ambiguous.join(", ") })) };
+  }
+  const shared = sharedDestinations(zoneList, targets);
+  if (shared.length > 0) {
+    return { result: failed("annotation-targets", "annotation-target-shared", message("setup.target-shared", { targets: shared.join("; ") })) };
+  }
+  return {
+    result: passed("annotation-targets", `found in Linear: ${targets.teams.size} teams, ${targets.projects.size} projects` + (targets.pendingProjects === void 0 ? "" : `; ${targets.pendingProjects.size} missing projects eligible for creation`)),
+    targets
+  };
+}
+async function createPendingProjects(client, targets) {
+  const pending2 = targets.pendingProjects;
+  if (!pending2?.size) return false;
+  for (const [key, { id, name, teamId, team }] of pending2) {
+    try {
+      targets.projects.set(key, await createProject(client, id, name, teamId));
+    } catch (error2) {
+      if (error2 instanceof LinearStoppedError || !(error2 instanceof LinearError)) throw error2;
+      throw new ProjectCreationError(name, team, error2);
+    }
+    pending2.delete(key);
+  }
+  return true;
+}
+async function createProject(client, firstId, name, teamId) {
+  for (let id = firstId; ; id = stableId("project", id)) {
+    let failure;
+    try {
+      const { projectCreate } = await client.mutate(
+        "CreateProject",
+        "mutation CreateProject($input: ProjectCreateInput!) { projectCreate(input: $input) { success project { id name } } }",
+        { input: { id, name, teamIds: [teamId] } }
+      );
+      if (projectCreate.success && projectCreate.project?.id === id) {
+        client.stats.wrote("CreateProject");
+        if (projectCreate.project.name === name) return projectCreate.project;
+        throw new LinearError("CreateProject", message("setup.project-name-changed"));
+      }
+      failure = new LinearError("CreateProject", message("setup.project-create-failed"));
+    } catch (error2) {
+      if (!(error2 instanceof LinearGraphQLError) || isCredentialError(error2)) throw error2;
+      failure = error2;
+    }
+    const { projects } = await client.transport.queryLive(
+      "ProjectByCreationId",
+      "query ProjectByCreationId($id: ID!) { projects(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id name } } }",
+      { id }
+    );
+    const existing = projects.nodes.find((project) => project.id === id);
+    if (existing === void 0 || existing.name === name) throw failure;
+  }
+}
+var ProjectCreationError = class extends Error {
+  project;
+  team;
+  cause;
+  constructor(project, team, cause) {
+    super(message("setup.project-create-failed"), { cause });
+    this.project = project;
+    this.team = team;
+    this.cause = cause;
+  }
+};
+function sharedDestinations(zones, targets) {
+  const folders = /* @__PURE__ */ new Map();
+  for (const zone of zones) {
+    const team = targets.teams.get(zone.team);
+    const key = zone.project === void 0 ? void 0 : projectKey(zone.team, zone.project);
+    const [id, label, folder] = zone.project === void 0 ? [`team\0${team.id}`, `the documents of team "${team.name}"`, zone.teamFolder] : [`project\0${(targets.projects.get(key) ?? targets.pendingProjects?.get(key)).id}`, `project "${zone.project}"`, zone.projectFolder];
+    const entry = folders.get(id) ?? { label, folders: /* @__PURE__ */ new Set() };
+    entry.folders.add(folder === "" ? "the repository root" : `${folder}/`);
+    folders.set(id, entry);
+  }
+  return [...folders.values()].filter((entry) => entry.folders.size > 1).map((entry) => `${entry.label} (${[...entry.folders].sort().join(", ")})`);
+}
+
+// src/format/fix.ts
+import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
+
 // src/merge/markers.ts
 var MARKERS = {
   git: "**Sync conflict: git version**",
@@ -48415,10 +48496,10 @@ function sectionOpenersAsLinear(body2) {
   for (const opener of openers) containers.set(opener.parent, [...containers.get(opener.parent) ?? [], opener]);
   const edits = [...containers.values()].flatMap((group2) => containerEdits(body2, group2));
   const { body: written, marks } = applyTrackedEdits(body2, edits);
-  const lines2 = edits.reduce((count4, edit) => count4 + (edit.lines ?? 0), 0);
-  const plusLines = plusLineCount(body2, openers);
-  if (sectionLineCount(written) !== lines2 + plusLines) return void 0;
-  return plusLines === 0 ? written : pairSections(written, marks);
+  const lines3 = edits.reduce((count4, edit) => count4 + (edit.lines ?? 0), 0);
+  const plusLines2 = plusLineCount(body2, openers);
+  if (sectionLineCount(written) !== lines3 + plusLines2) return void 0;
+  return plusLines2 === 0 ? written : pairSections(written, marks);
 }
 function plusTextLines(body2) {
   const found = [];
@@ -48512,19 +48593,19 @@ function containerEdits(body2, openers) {
 ${blank}
 ${prefix}`;
     let written;
-    let lines2 = 1;
+    let lines3 = 1;
     if (title === "" && open4 > 0) {
       written = Array.from({ length: open4 }, () => "+++").join(between2);
-      lines2 = open4;
+      lines3 = open4;
       open4 = 0;
     } else {
       open4++;
       written = `+++ ${title}`;
     }
-    const starts = Array.from({ length: lines2 }, (_, index2) => lead.length + index2 * ("+++".length + between2.length));
+    const starts = Array.from({ length: lines3 }, (_, index2) => lead.length + index2 * ("+++".length + between2.length));
     const role = written.startsWith("+++ ") ? "open" : "close";
     edits.push({ from: line2.lineStart, to: lineEnd, text: `${lead}${written}
-${blank}`, depth: depth2, lines: lines2, marks: { at: starts, role } });
+${blank}`, depth: depth2, lines: lines3, marks: { at: starts, role } });
   }
   if (open4 > 0) {
     const parent = openers[0].parent;
@@ -48573,6 +48654,188 @@ function sectionLineCount(body2, skip = () => false) {
 function plusLineCount(body2, openers) {
   const titles = openers.map(({ node: node2 }) => [start(node2), lineEndAt(body2, start(node2))]);
   return sectionLineCount(body2, (at) => titles.some(([from, to]) => from <= at && at <= to));
+}
+
+// src/format/marker-lines.ts
+var PLUS_ONLY = /^[ \t]*(\\?\+)([ \t]*)$/;
+var PLUS_LINE = /\n[ \t]*\\?\+[ \t]*(?:\n|$)/;
+function plusLinesAsLinear(body2) {
+  if (!PLUS_LINE.test(body2)) return body2;
+  const edits = plusLineMatches(body2, parse2(body2), false);
+  if (edits.length === 0) return body2;
+  let out = "";
+  let at = 0;
+  for (const edit of edits) {
+    out += body2.slice(at, edit.from) + `${" ".repeat(itemTextColumn(body2, start(edit.item)))}+\xA0${edit.trailing}`;
+    at = edit.to;
+  }
+  out += body2.slice(at);
+  return overContentLimit(out) ? body2 : out;
+}
+function plusLines(body2, tree) {
+  return plusLineMatches(body2, tree, true).map((match) => match.line);
+}
+function plusLineMatches(body2, tree, belowMarker) {
+  if (!PLUS_LINE.test(body2)) return [];
+  const found = [];
+  visit2(tree, (node2, ancestors) => {
+    if (node2.type !== "paragraph") return;
+    const item = ancestors.at(-1);
+    if (item?.type !== "listItem" || item.children[0] !== node2 || !belowMarker && line(node2) !== line(item)) return;
+    if (ancestors.some((ancestor) => ancestor.type === "blockquote")) return;
+    const firstEnd = body2.indexOf("\n", start(node2));
+    if (firstEnd === -1 || firstEnd >= end(node2)) return;
+    const from = firstEnd + 1;
+    const newline = Math.min(...[body2.indexOf("\n", from), end(node2)].filter((at) => at !== -1));
+    const plus = PLUS_ONLY.exec(body2.slice(from, newline));
+    if (plus === null || !inText(node2, from + plus[0].indexOf(plus[1]))) return;
+    found.push({ item, from, to: newline, trailing: plus[2], line: line(node2) + 1 });
+  });
+  return found.sort((a, b) => a.from - b.from);
+}
+function itemTextColumn(body2, at) {
+  const lineStart = body2.lastIndexOf("\n", at - 1) + 1;
+  const marker = /^(?:\d{1,9}[.)]|[*+-])/.exec(body2.slice(at))[0];
+  const markerEnd = [...body2.slice(lineStart, at)].reduce(advanceColumn, 0) + marker.length;
+  const gap = /^[ \t]*/.exec(body2.slice(at + marker.length))[0];
+  const width = [...gap].reduce(advanceColumn, markerEnd) - markerEnd;
+  return markerEnd + (width >= 1 && width <= 4 ? width : 1);
+}
+function inText(paragraph2, offset) {
+  let found = false;
+  visit2(paragraph2, (node2) => {
+    if (node2.type === "text" && start(node2) <= offset && offset < end(node2)) found = true;
+  });
+  return found;
+}
+
+// src/format/tab-indentation.ts
+var CONTAINER_LIKE = /* @__PURE__ */ new Set(["root", "list", "listItem", "blockquote", "paragraph", "heading", "table", "tableRow"]);
+var BLOCK_PARENTS = /* @__PURE__ */ new Set(["root", "list", "listItem", "blockquote", "table", "tableRow"]);
+var FENCE = /^(?:`{3}|~{3})/;
+var LIST_MARKER = /^(?:\d{1,9}[.)]|[*+-])/;
+function structuralTabLines(tree, body2) {
+  if (!body2.includes("	")) return [];
+  const lineStarts = [0];
+  for (let at = body2.indexOf("\n"); at !== -1; at = body2.indexOf("\n", at + 1)) lineStarts.push(at + 1);
+  const lineText3 = (line2) => body2.slice(lineStarts[line2], line2 + 1 < lineStarts.length ? lineStarts[line2 + 1] - 1 : body2.length);
+  const tabLines = lineStarts.map((_, line2) => line2).filter((line2) => {
+    const text6 = lineText3(line2);
+    return text6.includes("	") && !/^[ \t]*$/.test(text6);
+  });
+  if (tabLines.length === 0) return [];
+  const tabLineSet = new Set(tabLines);
+  const linesIn = (first, last) => {
+    let low = 0;
+    let high = tabLines.length;
+    while (low < high) {
+      const middle = low + high >> 1;
+      if (tabLines[middle] < first) low = middle + 1;
+      else high = middle;
+    }
+    const lines3 = [];
+    for (let index2 = low; index2 < tabLines.length && tabLines[index2] <= last; index2++) lines3.push(tabLines[index2]);
+    return lines3;
+  };
+  const columnOf = (line2, offset) => [...body2.slice(lineStarts[line2], offset)].reduce(advanceColumn, 0);
+  const chains = /* @__PURE__ */ new Map();
+  const blockStarts = /* @__PURE__ */ new Set();
+  const leafStarts = /* @__PURE__ */ new Map();
+  const indentedCode = /* @__PURE__ */ new Set();
+  visit2(tree, (node2, ancestors) => {
+    if (node2.position === void 0) return;
+    const first = node2.position.start.line - 1;
+    const last = node2.position.end.line - 1;
+    if (node2.type === "listItem" || node2.type === "blockquote") {
+      const lines3 = linesIn(first + 1, last);
+      if (lines3.length > 0) {
+        const prefix = node2.type === "blockquote" ? void 0 : contentColumn(node2, body2, columnOf(first, start(node2)));
+        for (const line2 of lines3) chains.set(line2, [...chains.get(line2) ?? [], prefix]);
+      }
+    }
+    if (node2.type === "code" && isIndented(node2, body2)) for (const line2 of linesIn(first, last)) indentedCode.add(line2);
+    if (!tabLineSet.has(first)) return;
+    const parent = ancestors.at(-1);
+    if (parent === void 0 || BLOCK_PARENTS.has(parent.type)) blockStarts.add(first);
+    if (!CONTAINER_LIKE.has(node2.type)) leafStarts.set(first, Math.min(leafStarts.get(first) ?? Infinity, start(node2)));
+  });
+  const found = [];
+  for (const line2 of tabLines) {
+    const lineStart = lineStarts[line2];
+    const text6 = lineText3(line2);
+    const prefix = prefixEnd(text6, chains.get(line2) ?? []);
+    if (/^[ \t]*$/.test(text6.slice(prefix.at)) && !indentedCode.has(line2)) continue;
+    let structural = prefix.tab;
+    const leaf = leafStarts.get(line2);
+    if (!structural && blockStarts.has(line2) && leaf !== void 0) structural = body2.slice(lineStart + prefix.at, leaf).includes("	");
+    if (!structural && indentedCode.has(line2)) {
+      let column = prefix.column;
+      for (let at = prefix.at; at < text6.length && column < prefix.column + 4 && (text6[at] === " " || text6[at] === "	"); at++) {
+        if (text6[at] === "	") structural = true;
+        column = advanceColumn(column, text6[at]);
+      }
+    }
+    if (structural) found.push(line2 + 1);
+  }
+  return found;
+}
+function prefixEnd(text6, containers) {
+  let at = 0;
+  let column = 0;
+  let tab = false;
+  for (const content4 of containers) {
+    if (content4 === void 0) {
+      let marker = at;
+      let markerColumn = column;
+      let indentTab2 = false;
+      while ((text6[marker] === " " || text6[marker] === "	") && advanceColumn(markerColumn, text6[marker]) - column <= 3) {
+        indentTab2 ||= text6[marker] === "	";
+        markerColumn = advanceColumn(markerColumn, text6[marker]);
+        marker++;
+      }
+      if (text6[marker] !== ">") break;
+      tab ||= indentTab2;
+      at = marker + 1;
+      column = markerColumn + 1;
+      if (text6[at] === " " || text6[at] === "	") {
+        tab ||= text6[at] === "	";
+        column = advanceColumn(column, text6[at]);
+        at++;
+      }
+      continue;
+    }
+    let next = at;
+    let nextColumn = column;
+    let lazy = false;
+    let indentTab = false;
+    while (nextColumn < content4) {
+      if (text6[next] !== " " && text6[next] !== "	") {
+        lazy = true;
+        break;
+      }
+      indentTab ||= text6[next] === "	";
+      nextColumn = advanceColumn(nextColumn, text6[next]);
+      next++;
+    }
+    tab ||= indentTab;
+    if (lazy) break;
+    at = next;
+    column = nextColumn;
+  }
+  return { at, column, tab };
+}
+function contentColumn(item, body2, markerColumn) {
+  const marker = LIST_MARKER.exec(body2.slice(start(item), start(item) + 11))?.[0] ?? "";
+  const markerEnd = markerColumn + marker.length;
+  const lineEnd = body2.indexOf("\n", start(item));
+  const rest = body2.slice(start(item) + marker.length, lineEnd === -1 ? end(item) : Math.min(lineEnd, end(item)));
+  const gap = /^[ \t]*/.exec(rest)[0];
+  if (gap.length === rest.length) return markerEnd + 1;
+  const width = [...gap].reduce(advanceColumn, markerEnd) - markerEnd;
+  return markerEnd + (width >= 1 && width <= 4 ? width : 1);
+}
+function isIndented(node2, body2) {
+  return !FENCE.test(body2.slice(start(node2), start(node2) + 3));
 }
 
 // src/format/tab-reference.ts
@@ -48782,13 +49045,16 @@ function lintText(file, text6, options = {}) {
     return sorted();
   }
   lintTree(file, tree, content4, report, options);
+  const source = content4.replace(/^\uFEFF/, "");
+  for (const at of structuralTabLines(tree, source)) report("tab-indentation", at);
+  if (options.linearExport !== true) for (const at of plusLines(source, tree)) report("plus-line-in-item", at);
   const { unsafeLine } = tabReferences(content4);
   if (unsafeLine !== void 0) report("tab-reference-layout", unsafeLine);
   for (const at of spaceReferenceEdges(tree, content4)) report("space-reference-edge", at);
   return sorted();
 }
 function spaceReferenceEdges(tree, body2) {
-  const lines2 = [];
+  const lines3 = [];
   const blank = (node2) => node2.type === "text" && node2.position !== void 0 && /^[ \t\n]*$/.test(body2.slice(start(node2), end(node2)));
   const edgeText = (child2, side) => {
     while (child2 !== void 0 && (child2.type === "strong" || child2.type === "emphasis" || child2.type === "delete")) child2 = side === "first" ? child2.children[0] : child2.children.at(-1);
@@ -48806,9 +49072,9 @@ function spaceReferenceEdges(tree, body2) {
       while (at - slashes - 1 >= 0 && body2[at - slashes - 1] === "\\") slashes++;
       return slashes % 2 === 1;
     };
-    if (side === "first" && SPACE_REFERENCE_START.test(body2.slice(from, from + 16)) && !escaped2(from)) lines2.push(line(text6));
+    if (side === "first" && SPACE_REFERENCE_START.test(body2.slice(from, from + 16)) && !escaped2(from)) lines3.push(line(text6));
     const ending = SPACE_REFERENCE_END.exec(body2.slice(Math.max(from, to - 16), to));
-    if (side === "last" && ending !== null && !escaped2(to - ending[0].length)) lines2.push(text6.position.end.line);
+    if (side === "last" && ending !== null && !escaped2(to - ending[0].length)) lines3.push(text6.position.end.line);
   };
   visit2(tree, (node2) => {
     if (node2.type !== "paragraph" && node2.type !== "heading") return;
@@ -48823,7 +49089,7 @@ function spaceReferenceEdges(tree, body2) {
       check2(kept.at(-1), "last");
     }
   });
-  return lines2;
+  return lines3;
 }
 var SPACE_REFERENCE_START = /^&#(?:0*32|[xX]0*20);/;
 var SPACE_REFERENCE_END = /&#(?:0*32|[xX]0*20);$/;
@@ -49127,51 +49393,6 @@ function endsWithParagraph(node2) {
   return node2?.type === "paragraph";
 }
 
-// src/format/marker-lines.ts
-var PLUS_ONLY = /^[ \t]*(\\?\+)([ \t]*)$/;
-var PLUS_LINE = /\n[ \t]*\\?\+[ \t]*(?:\n|$)/;
-function plusLinesAsLinear(body2) {
-  if (!PLUS_LINE.test(body2)) return body2;
-  const edits = [];
-  visit2(parse2(body2), (node2, ancestors) => {
-    if (node2.type !== "paragraph") return;
-    const item = ancestors.at(-1);
-    if (item?.type !== "listItem" || item.children[0] !== node2 || line(node2) !== line(item)) return;
-    if (ancestors.some((ancestor) => ancestor.type === "blockquote")) return;
-    const firstEnd = body2.indexOf("\n", start(node2));
-    if (firstEnd === -1 || firstEnd >= end(node2)) return;
-    const from = firstEnd + 1;
-    const newline = Math.min(...[body2.indexOf("\n", from), end(node2)].filter((at2) => at2 !== -1));
-    const plus = PLUS_ONLY.exec(body2.slice(from, newline));
-    if (plus === null || !inText(node2, from + plus[0].indexOf(plus[1]))) return;
-    edits.push({ from, to: newline, text: `${" ".repeat(itemTextColumn(body2, start(item)))}+\xA0${plus[2]}` });
-  });
-  if (edits.length === 0) return body2;
-  let out = "";
-  let at = 0;
-  for (const edit of edits.sort((a, b) => a.from - b.from)) {
-    out += body2.slice(at, edit.from) + edit.text;
-    at = edit.to;
-  }
-  out += body2.slice(at);
-  return overContentLimit(out) ? body2 : out;
-}
-function itemTextColumn(body2, at) {
-  const lineStart = body2.lastIndexOf("\n", at - 1) + 1;
-  const marker = /^(?:\d{1,9}[.)]|[*+-])/.exec(body2.slice(at))[0];
-  const markerEnd = [...body2.slice(lineStart, at)].reduce(advanceColumn, 0) + marker.length;
-  const gap = /^[ \t]*/.exec(body2.slice(at + marker.length))[0];
-  const width = [...gap].reduce(advanceColumn, markerEnd) - markerEnd;
-  return markerEnd + (width >= 1 && width <= 4 ? width : 1);
-}
-function inText(paragraph2, offset) {
-  let found = false;
-  visit2(paragraph2, (node2) => {
-    if (node2.type === "text" && start(node2) <= offset && offset < end(node2)) found = true;
-  });
-  return found;
-}
-
 // src/format/fix.ts
 function fixText(text6, options = {}) {
   return linearForm(text6, options) ?? text6;
@@ -49252,8 +49473,8 @@ function lineEndings(body2) {
   return count4;
 }
 function backslashBreaksAsLinear(body2) {
-  const lines2 = /* @__PURE__ */ new Set();
-  if (!body2.includes("\\")) return { body: body2, lines: lines2 };
+  const lines3 = /* @__PURE__ */ new Set();
+  if (!body2.includes("\\")) return { body: body2, lines: lines3 };
   const tree = parse2(body2);
   const breaks = [];
   let unwritable = false;
@@ -49265,7 +49486,7 @@ function backslashBreaksAsLinear(body2) {
     if (leading || ancestors.some((a) => a.type === "heading")) unwritable = true;
     breaks.push(start(node2));
   });
-  if (breaks.length === 0) return { body: body2, lines: lines2 };
+  if (breaks.length === 0) return { body: body2, lines: lines3 };
   if (unwritable) return void 0;
   let written = "";
   let at = 0;
@@ -49273,11 +49494,11 @@ function backslashBreaksAsLinear(body2) {
   for (const backslash of breaks.sort((a, b) => a - b)) {
     written += body2.slice(at, backslash);
     for (let newline = body2.indexOf("\n", at); newline !== -1 && newline < backslash; newline = body2.indexOf("\n", newline + 1)) line2++;
-    lines2.add(line2 + 1);
+    lines3.add(line2 + 1);
     at = backslash + 1;
   }
   written += body2.slice(at);
-  return isDeepStrictEqual3(breakShape(parse2(written)), breakShape(tree)) ? { body: written, lines: lines2 } : void 0;
+  return isDeepStrictEqual3(breakShape(parse2(written)), breakShape(tree)) ? { body: written, lines: lines3 } : void 0;
 }
 function tablesEndAsLinear(body2) {
   if (!body2.includes("|")) return body2;
@@ -49899,15 +50120,15 @@ ${indent2}[${label}](${destination2})`;
       content4 += separator + written;
     });
     this.containers.pop();
-    const lines2 = content4.split("\n").map((text6, at) => text6 === "" && !codeLines.has(at) ? "" : indent2 + text6);
+    const lines3 = content4.split("\n").map((text6, at) => text6 === "" && !codeLines.has(at) ? "" : indent2 + text6);
     if (item.checked == null && first?.type === "paragraph" && /^\+{3} [^\n]*$/.test(this.source.slice(start(first), end(first))) && item.children.slice(1).some((child2) => child2.type === "paragraph" && this.source.slice(start(child2), end(child2)) === "+++") && !/(?:^|\n)[ \t>]*\+{4}/.test(this.source.slice(start(first), end(item)))) {
       return `${marker} 
 
-${lines2.join("\n")}`;
+${lines3.join("\n")}`;
     }
     if (first.type === "list" || nested) return `${marker} 
-${lines2.join("\n")}`;
-    return `${marker} ${lines2.join("\n").slice(indent2.length)}`;
+${lines3.join("\n")}`;
+    return `${marker} ${lines3.join("\n").slice(indent2.length)}`;
   }
   /**
    * An item's container. A continuation line belongs to the item's content
@@ -51006,62 +51227,8 @@ function spaceReferenceRuns(source, from, to, wide = false) {
   }
   return runs;
 }
-var DELIMITER = /^[*_~]$/;
-var UNICODE_WHITESPACE = /^\s$/u;
-var UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
-function sameFlanking(source, from, to, text6) {
-  const chars = [...text6];
-  const first = chars[0];
-  const last = chars.at(-1);
-  const kind = (c) => c === void 0 || UNICODE_WHITESPACE.test(c) ? "space" : UNICODE_PUNCTUATION.test(c) ? "punctuation" : "other";
-  const reads = (delimiter3, before, after) => {
-    const b = kind(before);
-    const a = kind(after);
-    const left = a !== "space" && (a !== "punctuation" || b !== "other");
-    const right = b !== "space" && (b !== "punctuation" || a !== "other");
-    if (delimiter3 !== "_") return `${left} ${right}`;
-    return `${left && (!right || b === "punctuation")} ${right && (!left || a === "punctuation")}`;
-  };
-  const delimiterBefore = source[from - 1];
-  if (delimiterBefore !== void 0 && DELIMITER.test(delimiterBefore)) {
-    let start3 = from - 1;
-    while (start3 > 0 && source[start3 - 1] === delimiterBefore) start3--;
-    if (reads(delimiterBefore, codePointBefore(source, start3), source[from]) !== reads(delimiterBefore, codePointBefore(source, start3), first)) return false;
-  }
-  const delimiterAfter = source[to];
-  if (delimiterAfter !== void 0 && DELIMITER.test(delimiterAfter)) {
-    let end2 = to + 1;
-    while (end2 < source.length && source[end2] === delimiterAfter) end2++;
-    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end2)) !== reads(delimiterAfter, last, codePointAt(source, end2))) return false;
-  }
-  return true;
-}
-function codePointBefore(source, at) {
-  if (at <= 0) return void 0;
-  const low = source.charCodeAt(at - 1);
-  if (low >= 56320 && low <= 57343 && at >= 2) {
-    const high = source.charCodeAt(at - 2);
-    if (high >= 55296 && high <= 56319) return source.slice(at - 2, at);
-  }
-  return source[at - 1];
-}
-function codePointAt(source, at) {
-  const code4 = source.codePointAt(at);
-  return code4 === void 0 ? void 0 : String.fromCodePoint(code4);
-}
 var CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
 var ASTERISK_SPELLING = new RegExp(String.raw`\\.|[*]|` + CHARACTER_REFERENCE.source, "g");
-function* emojiShortcodes(raw) {
-  for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
-    const emoji = LINEAR_EMOJI.get(match[1]);
-    if (emoji) yield { index: match.index, length: match[0].length, emoji: emoji.startsWith("*") ? `\\${emoji}` : emoji };
-  }
-}
-function escaped(text6, at) {
-  let run2 = 0;
-  while (text6[at - 1 - run2] === "\\") run2++;
-  return run2 % 2 === 1;
-}
 function paragraphPart(text6, startsLine) {
   for (let round = 0; round <= lineBreaks(text6) + 2; round++) {
     const spans = codeSpans(text6, 0, text6.length);
@@ -51158,7 +51325,7 @@ function fixLinearText(linearText, content4, inRepository, previousBody) {
   const uploaded = (url) => !notUploadedUris.has(normalizeUri(url));
   const linear = { linkedFileExists: uploaded, linearExport: true };
   const fixed = fixText(text6, linear);
-  if (fixed !== text6 && !sameMarkdown(splitFile(fixed).body, splitFile(text6).body, { linearNumberSpacing: true, linearBoldForms: true })) return text6;
+  if (fixed !== text6 && !sameMarkdown(splitFile(fixed).body, splitFile(text6).body, { linearNumberSpacing: true, linearBoldForms: true, linearShortcodes: true })) return text6;
   if (![...notUploaded].some((url) => !/\.md$/i.test(url.split(/[?#]/)[0]) && inRepository(url))) return fixed;
   const hooked = fixText(text6, { linkedFileExists: (url) => uploaded(url) || inRepository(url), linearExport: true });
   return fixText(hooked, linear) === fixed ? hooked : fixed;
@@ -51258,12 +51425,12 @@ function lineStartOf(source, at) {
 }
 function joinLines(text6) {
   if (!text6.includes("\n")) return text6;
-  const lines2 = text6.split("\n");
-  return lines2.map((line2, index2) => {
+  const lines3 = text6.split("\n");
+  return lines3.map((line2, index2) => {
     let start3 = 0;
     let end2 = line2.length;
     if (index2 > 0) while (start3 < end2 && isSpaceOrTab(line2[start3])) start3 += 1;
-    if (index2 < lines2.length - 1) while (end2 > start3 && isSpaceOrTab(line2[end2 - 1])) end2 -= 1;
+    if (index2 < lines3.length - 1) while (end2 > start3 && isSpaceOrTab(line2[end2 - 1])) end2 -= 1;
     return line2.slice(start3, end2);
   }).join(" ");
 }
@@ -51724,14 +51891,14 @@ async function readCommit(git, name) {
   const text6 = found.content.toString("utf8");
   const end2 = text6.indexOf("\n\n");
   if (end2 < 0) return void 0;
-  const lines2 = text6.slice(0, end2).split("\n");
-  const tree = /^tree ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines2[0] ?? "")?.[1];
+  const lines3 = text6.slice(0, end2).split("\n");
+  const tree = /^tree ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines3[0] ?? "")?.[1];
   let at = 1;
   const parents = [];
-  for (let parent; (parent = /^parent ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines2[at] ?? "")) !== null; at++) parents.push(parent[1]);
-  const author = lines2[at] ?? "";
-  if (tree === void 0 || !author.startsWith("author ") || !(lines2[at + 1] ?? "").startsWith("committer ")) return void 0;
-  const rest = lines2.slice(at + 2);
+  for (let parent; (parent = /^parent ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines3[at] ?? "")) !== null; at++) parents.push(parent[1]);
+  const author = lines3[at] ?? "";
+  if (tree === void 0 || !author.startsWith("author ") || !(lines3[at + 1] ?? "").startsWith("committer ")) return void 0;
+  const rest = lines3.slice(at + 2);
   if (rest.some((line2) => /^(?:tree|parent|author|committer|encoding) /.test(line2))) return void 0;
   const authorEmail = email(author);
   if (authorEmail === void 0) return void 0;
@@ -51743,9 +51910,9 @@ function email(line2) {
   return open4 < 0 || close < 0 ? void 0 : line2.slice(open4 + 1, close);
 }
 function subject(message2) {
-  const lines2 = message2.split("\n");
-  if (lines2.at(-1) === "") lines2.pop();
-  const trimmed2 = lines2.map((line2) => line2.replace(/[ \t\n\r]+$/, ""));
+  const lines3 = message2.split("\n");
+  if (lines3.at(-1) === "") lines3.pop();
+  const trimmed2 = lines3.map((line2) => line2.replace(/[ \t\n\r]+$/, ""));
   let first = 0;
   while (first < trimmed2.length && trimmed2[first] === "") first++;
   const taken = [];
@@ -51938,21 +52105,21 @@ async function pushAtomic(git, config, updates) {
   for (const update of updates) args.push(`${update.next}:${update.ref}`);
   const result = await git.run(args, { okCodes: [0, 1] });
   const stdout = result.stdout.toString("utf8");
-  const lines2 = parsePorcelain(stdout);
+  const lines3 = parsePorcelain(stdout);
   if (result.code === 0) {
     const input = changing.map((update) => `update ${localRef(config, update.ref)} ${update.next}
 `).join("");
     await git.run(["update-ref", "--stdin"], { input, okCodes: [0, 1, 128] });
-    const unchanged = new Set(lines2.filter((line2) => line2.flag === "=").map((line2) => line2.ref));
+    const unchanged = new Set(lines3.filter((line2) => line2.flag === "=").map((line2) => line2.ref));
     logMoves(git, config, changing.map((update) => update.ref).filter((ref) => !unchanged.has(ref)));
     return { ok: true, updated: changing.map((update) => update.ref) };
   }
-  const rejected = lines2.filter((line2) => line2.flag === "!");
+  const rejected = lines3.filter((line2) => line2.flag === "!");
   if (rejected.length === 0) throw new GitError(args, result.code, result.stderr);
   const remote = rejected.some((line2) => line2.summary.includes("stale info")) ? void 0 : await lsRemote(git, config.remote, updates.map((update) => update.ref));
   const stale = remote === void 0 || updates.some((update) => (remote.get(update.ref) ?? null) !== update.expected);
   if (stale) {
-    const moved = lines2.filter((line2) => line2.flag !== "!" && line2.flag !== "=").map((line2) => line2.ref);
+    const moved = lines3.filter((line2) => line2.flag !== "!" && line2.flag !== "=").map((line2) => line2.ref);
     const sent = updates.map((update) => update.ref);
     const after = moved.length === 0 ? void 0 : remote ?? await lsRemote(git, config.remote, sent).catch(() => null);
     logRefusal(git, {
@@ -51978,14 +52145,14 @@ function outputLines(stdout, stderr) {
   return [...stdout.split("\n"), ...stderr.split("\n")].map((line2) => line2.trimEnd()).filter((line2) => line2 !== "");
 }
 function parsePorcelain(output) {
-  const lines2 = [];
+  const lines3 = [];
   for (const line2 of output.split("\n")) {
     const parts = line2.split("	");
     if (parts.length < 3 || parts[0].length !== 1) continue;
     const refs = parts[1];
-    lines2.push({ flag: parts[0], ref: refs.slice(refs.lastIndexOf(":") + 1), summary: parts.slice(2).join("	") });
+    lines3.push({ flag: parts[0], ref: refs.slice(refs.lastIndexOf(":") + 1), summary: parts.slice(2).join("	") });
   }
-  return lines2;
+  return lines3;
 }
 var IDS_FILE = "ids.json";
 var UPLOADS_FILE = "uploads.json";
@@ -52561,7 +52728,7 @@ function checkSyncState(state, config, findings = {}) {
 var MARK = { passed: "passed", failed: "FAILED", warning: "warning", "not-checked": "not checked" };
 function renderSetupSummary(report) {
   const fix2 = fixUrl(report.code);
-  const lines2 = [
+  const lines3 = [
     "## Setup check",
     "",
     report.ok ? "Every required item passed." : `Stopped before any write: \`${report.code}\`.${fix2 === void 0 ? "" : ` How to fix it: ${fix2}`}`,
@@ -52574,7 +52741,7 @@ function renderSetupSummary(report) {
     }),
     ""
   ];
-  return lines2.join("\n");
+  return lines3.join("\n");
 }
 function renderStateRefusal(refusal) {
   return ["## Sync", "", `Stopped before any write: \`${refusal.code}\`.`, "", refusal.message, "", `How to fix it: ${QUICKSTART_URL}#${FIX_ANCHORS[refusal.code]}`, ""].join("\n");
@@ -53791,8 +53958,8 @@ async function securityGate(git, tracked, options = {}) {
             const escaped2 = [...files.keys()].map((path7) => path7.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
             const located = new RegExp(`(?:${escaped2.join("|")}):(\\d+)(?::|\\b)`, "g");
             const matches = [...result.output.matchAll(located)];
-            const lines2 = matches.map((match) => Number(match[1])).filter((line2) => Number.isSafeInteger(line2) && line2 > 0);
-            for (const hook of failed2.length > 0 ? failed2 : [SECURITY_ALIAS]) findings.push({ hook, line: lines2[0] ?? 1 });
+            const lines3 = matches.map((match) => Number(match[1])).filter((line2) => Number.isSafeInteger(line2) && line2 > 0);
+            for (const hook of failed2.length > 0 ? failed2 : [SECURITY_ALIAS]) findings.push({ hook, line: lines3[0] ?? 1 });
           }
         }
         if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
@@ -54183,7 +54350,7 @@ async function mergeLocally(git, linear, tracked, ids, facts = LINEAR_FACTS, opt
   const frozen = new Set([...ids].flatMap(([path7, entry]) => entry.suspended === void 0 ? [] : [path7, ...entry.suspended.paths]));
   const released = [...ids].filter(([, entry]) => entry.releaseBase !== void 0);
   if (frozen.size > 0 || released.length > 0) {
-    mergeBase ??= await git.text(["merge-base", linear, tracked]);
+    mergeBase ??= await mergeBaseOf(git, linear, tracked);
     let baseTree = mergeBase;
     const releaseGroups = /* @__PURE__ */ new Map();
     for (const [path7, entry] of released) {
@@ -54324,7 +54491,7 @@ function knownIdLookup(git, idsCommit, ids) {
   };
 }
 async function mergeWithMarkers(git, linearSide, gitSide, ids, knownId, explicitBase, echo = false) {
-  const base = explicitBase ?? await git.text(["merge-base", linearSide, gitSide]);
+  const base = explicitBase ?? await mergeBaseOf(git, linearSide, gitSide);
   const merged = await git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ...explicitBase === void 0 ? [] : [`--merge-base=${explicitBase}`], linearSide, gitSide], { okCodes: [0, 1] });
   const [gitTree, ...rest] = merged.stdout.toString("utf8").split("\0");
   if (gitTree === void 0 || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message("sync.no-merge-tree"));
@@ -54528,11 +54695,18 @@ function echoedConflicts(git, linear) {
     if (previous3 === void 0 || recordGit?.oid !== base.oid) return null;
     const previousText = await textOf(previous3);
     if (detectConflicts(previousText).length > 0) return null;
-    const merged = await git.run(["merge-base", parent, second], { okCodes: [0, 1] });
-    if (merged.code !== 0) return null;
-    const older = await entryAt(merged.stdout.toString("utf8").trim(), path7);
-    const olderText = older === void 0 ? "" : await textOf(older);
-    if ((await mergeMarkdown(olderText, baseText, previousText)).text !== linearText) return null;
+    const bases = lines2((await git.run(["merge-base", "--all", parent, second], { okCodes: [0, 1] })).stdout.toString("utf8"));
+    if (bases.length === 0) return null;
+    let olderText;
+    for (const candidate of /* @__PURE__ */ new Set([await mergedBases(git, bases), bases[0]])) {
+      const older = await entryAt(candidate, path7);
+      const text6 = older === void 0 ? "" : await textOf(older);
+      if ((await mergeMarkdown(text6, baseText, previousText)).text === linearText) {
+        olderText = text6;
+        break;
+      }
+    }
+    if (olderText === void 0) return null;
     const result = (await mergeMarkdown(olderText, trackedText, previousText)).text;
     if ((await mergeMarkdown(baseText, trackedText, result)).text !== result) return null;
     return { base: olderText, linear: previousText };
@@ -54577,8 +54751,50 @@ async function takePaths(git, into, from, paths) {
   for (const path7 of paths) checkRepoPath(path7, { removal: !entries.has(path7) });
   return placeEntries(git, into, new Map([...paths].map((path7) => [path7, entries.get(path7) ?? null])));
 }
-function treeCommit(git, tree, parent) {
-  return commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [parent], message: "Merge input", identity: NEUTRAL_IDENTITY });
+async function treeCommit(git, tree, parent) {
+  return commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [parent], message: "Merge input", identity: NEUTRAL_IDENTITY, date: await newestDate(git, [parent]) });
+}
+async function mergeBaseOf(git, a, b) {
+  return mergedBases(git, lines2(await git.text(["merge-base", "--all", a, b])));
+}
+async function mergedBases(git, bases) {
+  const [first, ...rest] = [...bases].reverse();
+  let merged = first;
+  for (const next of rest) {
+    const lower = lines2((await git.run(["merge-base", "--all", merged, next], { okCodes: [0, 1] })).stdout.toString("utf8"));
+    const inner = lower.length > 0 ? await mergedBases(git, lower) : await commitTree(git, { base: null, changes: /* @__PURE__ */ new Map(), parents: [], message: "Empty merge base", identity: NEUTRAL_IDENTITY, date: await newestDate(git, [merged, next]) });
+    const result = await git.run(["merge-tree", "--write-tree", "--no-messages", "-z", `--merge-base=${inner}`, merged, next], { okCodes: [0, 1] });
+    const [written, ...unmerged] = result.stdout.toString("utf8").split("\0");
+    if (written === void 0 || !/^[0-9a-f]{40,64}$/.test(written)) throw new Error(message("sync.no-merge-tree"));
+    const tree = result.code === 0 ? written : await keepOlderVersions(git, written, unmerged);
+    merged = await commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [merged, next], message: "Merged merge bases", identity: NEUTRAL_IDENTITY, skipIfUnchanged: false, date: await newestDate(git, [merged, next]) });
+  }
+  return merged;
+}
+async function keepOlderVersions(git, tree, stages) {
+  const byPath = /* @__PURE__ */ new Map();
+  for (const line2 of stages) {
+    const match = /^(\d+) ([0-9a-f]{40,64}) ([123])\t(.+)$/s.exec(line2);
+    if (match === null) continue;
+    const [, mode, oid, stage, path7] = match;
+    byPath.set(path7, (byPath.get(path7) ?? /* @__PURE__ */ new Map()).set(stage, { mode, oid }));
+  }
+  const older = [...byPath].filter(([, entries]) => entries.has("1") && (entries.has("2") || entries.has("3")));
+  if (older.length === 0) return tree;
+  const current = new Map((await listPaths(git, tree, older.map(([path7]) => path7))).map((entry) => [entry.path, entry.oid]));
+  const back = /* @__PURE__ */ new Map();
+  for (const [path7, entries] of older) {
+    const now = current.get(path7);
+    if (now === void 0 || now === entries.get("2")?.oid || now === entries.get("3")?.oid) back.set(path7, entries.get("1"));
+  }
+  return back.size === 0 ? tree : placeEntries(git, tree, back);
+}
+async function newestDate(git, commits) {
+  const seconds = lines2(await git.text(["show", "--no-patch", "--no-show-signature", "--format=%ct", ...commits])).map(Number);
+  return `@${Math.max(...seconds)} +0000`;
+}
+function lines2(text6) {
+  return text6.split("\n").filter(Boolean);
 }
 function isReadme(path7) {
   return path7 === "README.md" || path7.endsWith("/README.md");
@@ -56581,21 +56797,21 @@ function annotationLine(annotation, runs) {
 }
 function holdComment(checks, timedOut, annotations, text6) {
   let runs;
-  const lines2 = [];
+  const lines3 = [];
   for (const check2 of checks) {
     const name = `Check \`${checkName(check2.name)}\``;
-    lines2.push(check2.url === void 0 ? `- ${name}.` : `- ${name}: [run](${linkTarget(check2.url)})`);
+    lines3.push(check2.url === void 0 ? `- ${name}.` : `- ${name}: [run](${linkTarget(check2.url)})`);
     const own6 = annotations.get(check2.name) ?? [];
     if (own6.length > 0) runs ??= documentRuns(text6);
-    for (const annotation of own6.slice(0, ANNOTATIONS_PER_CHECK)) lines2.push(`  - ${annotationLine(annotation, runs)}`);
-    if (own6.length > ANNOTATIONS_PER_CHECK) lines2.push(`  - and ${own6.length - ANNOTATIONS_PER_CHECK} more.`);
+    for (const annotation of own6.slice(0, ANNOTATIONS_PER_CHECK)) lines3.push(`  - ${annotationLine(annotation, runs)}`);
+    if (own6.length > ANNOTATIONS_PER_CHECK) lines3.push(`  - and ${own6.length - ANNOTATIONS_PER_CHECK} more.`);
   }
-  for (const name of timedOut) lines2.push(`- Check \`${checkName(name)}\` did not finish in time.`);
-  if (lines2.length === 0) lines2.push(`- ${HOLD_UNNAMED}`);
+  for (const name of timedOut) lines3.push(`- Check \`${checkName(name)}\` did not finish in time.`);
+  if (lines3.length === 0) lines3.push(`- ${HOLD_UNNAMED}`);
   const lead = checks.length === 0 && timedOut.length > 0 ? HOLD_TIMED_OUT : HOLD_FAILED;
   return `${lead}
 
-${lines2.join("\n")}
+${lines3.join("\n")}
 
 ${HOLD_FOOTER}`;
 }
@@ -57405,30 +57621,30 @@ function commitMerge(git, tree, parents, message2, identity) {
   });
 }
 function pullRequestBody(paths, refusal, notes) {
-  const lines2 = [
+  const lines3 = [
     "Changes made in Linear, on their way to this branch.",
     "",
     "The sync merges this pull request with a merge commit once every check on its head has finished and passed, and adds later Linear changes while checks run. A head with passing checks gets a merge attempt before fresh captures join the next batch.",
     "",
     `Files changed: ${paths.length}.`
   ];
-  if (paths.length > 0) lines2.push("", ...paths.slice(0, LISTED_PATHS).map((path7) => `- ${oneLine(path7)}`));
-  else if (notes.recordMove === true) lines2.push("", "It records that the sync took in a folder moved to another Linear place, so later syncs read only the new place.");
-  if (paths.length > LISTED_PATHS) lines2.push(`- and ${paths.length - LISTED_PATHS} more`);
-  if (notes.rewriteNotes?.length) lines2.push("", "Images converted to links or removed:", ...notes.rewriteNotes);
+  if (paths.length > 0) lines3.push("", ...paths.slice(0, LISTED_PATHS).map((path7) => `- ${oneLine(path7)}`));
+  else if (notes.recordMove === true) lines3.push("", "It records that the sync took in a folder moved to another Linear place, so later syncs read only the new place.");
+  if (paths.length > LISTED_PATHS) lines3.push(`- and ${paths.length - LISTED_PATHS} more`);
+  if (notes.rewriteNotes?.length) lines3.push("", "Images converted to links or removed:", ...notes.rewriteNotes);
   if (refusal !== null) {
-    lines2.push(
+    lines3.push(
       "",
       `GitHub refused to merge head \`${refusal.head.slice(0, 12)}\` (${refusalText(refusal)}). If it refuses this head again for the same reason, the sync reports a setup error.`,
       `<!-- merge refused: head=${refusal.head} base=${refusal.base} status=${refusal.status} reason=${encodeURIComponent(refusal.reason)} -->`
     );
   }
-  if (notes.unverified !== void 0 && notes.unverified.length > 0) lines2.push("", unverifiedNote(notes.unverified));
+  if (notes.unverified !== void 0 && notes.unverified.length > 0) lines3.push("", unverifiedNote(notes.unverified));
   if (notes.held !== null) {
-    lines2.push("", `Waiting: ${codeNames(notes.held.checks)} also failed on the tracked branch's tip, so this change is not to blame. The sync merges the tracked branch in once it passes there.`, redMainNote(notes.held));
+    lines3.push("", `Waiting: ${codeNames(notes.held.checks)} also failed on the tracked branch's tip, so this change is not to blame. The sync merges the tracked branch in once it passes there.`, redMainNote(notes.held));
   }
-  lines2.push("", headNote(notes.head, notes.since, notes.checks));
-  return `${lines2.join("\n")}
+  lines3.push("", headNote(notes.head, notes.since, notes.checks));
+  return `${lines3.join("\n")}
 `;
 }
 var REFUSAL_NOTE = /^<!-- merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m;
@@ -57464,43 +57680,43 @@ function holdFailureText(code4, failure) {
   return `${span(code4)}, ${span(failure.operation)}${where}, ${span(failure.error)}${said}`;
 }
 function renderPullRequest(result) {
-  const lines2 = ["### Linear to the tracked branch", ""];
+  const lines3 = ["### Linear to the tracked branch", ""];
   if (result.suspended !== void 0) {
     const hold3 = result.suspended;
     const link3 = hold3.pullRequest === void 0 ? "" : ` [#${hold3.pullRequest.number}](${hold3.pullRequest.url})`;
-    lines2.push(hold3.released ? "Released the suspended batch." : `Suspended changes${link3}: ${hold3.paths.map((path7) => `\`${path7}\``).join(", ")}.`, "");
-    if (hold3.code === "head-unverified") lines2.push(`The suspended pull request also changes files that are not synchronized documents or their assets: ${unverifiedList(hold3.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from its branch.`, "");
-    if (hold3.code === "merge-refused" || hold3.code === "merge-blocked") lines2.push(`GitHub refused the suspended merge (${refusalText(hold3)}).`, "");
-    if (hold3.code === "merge-misplaced") lines2.push(`Setup error: ${misplacedSummary("the suspended pull request", link3, hold3.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, "");
-    if (hold3.code === "checks-missing") lines2.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold3.missing ?? [])}).`, CHECKS_MISSING_ADVICE, "");
-    if (hold3.code === "suspended-asset-discovery") lines2.push(`The batch stays suspended (${hold3.code}). ${hold3.reason ?? ""}`, "");
-    if (hold3.normalClosePending === true) lines2.push("The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.", "");
-    if (hold3.code === "github-failed" && hold3.normalClosePending !== true) lines2.push("A GitHub request for the suspended lane failed; the normal lane still runs.", "");
-    if (hold3.conflicts !== void 0) lines2.push(`Suspended files waiting for a manual merge: ${hold3.conflicts.map((path7) => `\`${path7}\``).join(", ")}.`, "");
-    if (hold3.checks.length > 0) lines2.push(`Failed checks: ${codeNames(hold3.checks)}.`, "");
-    if (hold3.timedOut !== void 0 && hold3.timedOut.length > 0) lines2.push(`Checks that did not finish in time: ${codeNames(hold3.timedOut)}.`, "");
-    if (hold3.redMain !== void 0) lines2.push(`The suspended documents' comments in Linear stay as they are: ${checkRuns(hold3.redMain)} also failed on the tracked branch's tip.`, "");
-    if (hold3.mainPending !== void 0) lines2.push(`The suspended documents' comments in Linear wait: ${codeNames(hold3.mainPending)} failed on the suspended pull request and still runs on the tracked branch's tip.`, "");
+    lines3.push(hold3.released ? "Released the suspended batch." : `Suspended changes${link3}: ${hold3.paths.map((path7) => `\`${path7}\``).join(", ")}.`, "");
+    if (hold3.code === "head-unverified") lines3.push(`The suspended pull request also changes files that are not synchronized documents or their assets: ${unverifiedList(hold3.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from its branch.`, "");
+    if (hold3.code === "merge-refused" || hold3.code === "merge-blocked") lines3.push(`GitHub refused the suspended merge (${refusalText(hold3)}).`, "");
+    if (hold3.code === "merge-misplaced") lines3.push(`Setup error: ${misplacedSummary("the suspended pull request", link3, hold3.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, "");
+    if (hold3.code === "checks-missing") lines3.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold3.missing ?? [])}).`, CHECKS_MISSING_ADVICE, "");
+    if (hold3.code === "suspended-asset-discovery") lines3.push(`The batch stays suspended (${hold3.code}). ${hold3.reason ?? ""}`, "");
+    if (hold3.normalClosePending === true) lines3.push("The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.", "");
+    if (hold3.code === "github-failed" && hold3.normalClosePending !== true) lines3.push("A GitHub request for the suspended lane failed; the normal lane still runs.", "");
+    if (hold3.conflicts !== void 0) lines3.push(`Suspended files waiting for a manual merge: ${hold3.conflicts.map((path7) => `\`${path7}\``).join(", ")}.`, "");
+    if (hold3.checks.length > 0) lines3.push(`Failed checks: ${codeNames(hold3.checks)}.`, "");
+    if (hold3.timedOut !== void 0 && hold3.timedOut.length > 0) lines3.push(`Checks that did not finish in time: ${codeNames(hold3.timedOut)}.`, "");
+    if (hold3.redMain !== void 0) lines3.push(`The suspended documents' comments in Linear stay as they are: ${checkRuns(hold3.redMain)} also failed on the tracked branch's tip.`, "");
+    if (hold3.mainPending !== void 0) lines3.push(`The suspended documents' comments in Linear wait: ${codeNames(hold3.mainPending)} failed on the suspended pull request and still runs on the tracked branch's tip.`, "");
   }
   const marks = result.holdMarks;
   if (marks !== void 0) {
     const counts2 = [[marks.set.length, "marked"], [marks.updated.length, "comments updated"], [marks.cleared.length, "cleared"]].filter(([count4]) => count4 > 0).map(([count4, what]) => `${count4} ${what}`);
-    if (counts2.length > 0) lines2.push(`Suspended documents in Linear: ${counts2.join(", ")}.`, "");
-    if (marks.deferred > 0) lines2.push(`${marks.deferred} more suspended documents get their mark or comment in a later run (at most ${HOLD_MARK_LIMIT} per run).`, "");
-    if (marks.removed.length > 0) lines2.push(`Suspended documents in Linear's trash, archived or outside the configured places, without a mark: ${marks.removed.map((path7) => `\`${path7}\``).join(", ")}.`, "");
-    if (marks.unresolved !== void 0) lines2.push(`Linear refused to resolve the suspension comment of released documents: ${marks.unresolved.map(({ path: path7, error: error2 }) => `\`${path7}\` (${error2})`).join(", ")}. The comment stays as it is, and no later run tries again.`, "");
-    if (marks.unreadAnnotations !== void 0) lines2.push(`GitHub did not give the annotations of ${marks.unreadAnnotations.map((name) => `\`${name}\``).join(", ")}; the comments name those checks without them.`, "");
-    if (marks.code !== void 0) lines2.push(`The suspended marks did not finish (${holdFailureText(marks.code, marks.failure)}); a later run goes on.`, "");
+    if (counts2.length > 0) lines3.push(`Suspended documents in Linear: ${counts2.join(", ")}.`, "");
+    if (marks.deferred > 0) lines3.push(`${marks.deferred} more suspended documents get their mark or comment in a later run (at most ${HOLD_MARK_LIMIT} per run).`, "");
+    if (marks.removed.length > 0) lines3.push(`Suspended documents in Linear's trash, archived or outside the configured places, without a mark: ${marks.removed.map((path7) => `\`${path7}\``).join(", ")}.`, "");
+    if (marks.unresolved !== void 0) lines3.push(`Linear refused to resolve the suspension comment of released documents: ${marks.unresolved.map(({ path: path7, error: error2 }) => `\`${path7}\` (${error2})`).join(", ")}. The comment stays as it is, and no later run tries again.`, "");
+    if (marks.unreadAnnotations !== void 0) lines3.push(`GitHub did not give the annotations of ${marks.unreadAnnotations.map((name) => `\`${name}\``).join(", ")}; the comments name those checks without them.`, "");
+    if (marks.code !== void 0) lines3.push(`The suspended marks did not finish (${holdFailureText(marks.code, marks.failure)}); a later run goes on.`, "");
   }
   const pr = result.pullRequest;
   const link2 = pr === null ? "" : `[#${pr.number}](${pr.url})`;
   const names = (list4) => codeNames(list4 ?? []);
   if (result.redMain !== void 0) {
-    lines2.push(`The sync pull request ${link2} is held: ${checkRuns(result.redMain)} also failed on the tracked branch's tip, so the change is not to blame. Nothing is suspended and nothing is written to Linear about it; once the check passes on the tracked branch, the sync merges it into the sync branch and the checks run again.`);
+    lines3.push(`The sync pull request ${link2} is held: ${checkRuns(result.redMain)} also failed on the tracked branch's tip, so the change is not to blame. Nothing is suspended and nothing is written to Linear about it; once the check passes on the tracked branch, the sync merges it into the sync branch and the checks run again.`);
   } else if (result.mainPending !== void 0) {
-    lines2.push(`${codeNames(result.mainPending)} failed on the sync pull request ${link2} and still runs on the tracked branch's tip; the sync waits for that result before it suspends anything.`);
+    lines3.push(`${codeNames(result.mainPending)} failed on the sync pull request ${link2} and still runs on the tracked branch's tip; the sync waits for that result before it suspends anything.`);
   } else if (result.waitsForSuspended === true) {
-    lines2.push(`Every check on the sync pull request ${link2} passed; it merges after the suspended pull request, whose checks still run.`);
+    lines3.push(`Every check on the sync pull request ${link2} passed; it merges after the suspended pull request, whose checks still run.`);
   }
   const explained = result.redMain !== void 0 || result.mainPending !== void 0 || result.waitsForSuspended === true || result.suspended?.normalClosePending === true;
   const code4 = result.code === "head-unverified" && result.unverified === void 0 ? void 0 : result.code;
@@ -57509,66 +57725,66 @@ function renderPullRequest(result) {
       break;
     // The suspended section describes the hold.
     case "conflict":
-      lines2.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
+      lines3.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
       break;
     case "merge-refused":
-      lines2.push(`GitHub did not merge the sync pull request ${link2} (${refusalText(result)}); a later run tries again.`);
+      lines3.push(`GitHub did not merge the sync pull request ${link2} (${refusalText(result)}); a later run tries again.`);
       break;
     case "merge-misplaced":
-      lines2.push(`Setup error: ${misplacedSummary("the sync pull request", ` ${link2}`, result.misplaced)}`, MISPLACED_ADVICE);
+      lines3.push(`Setup error: ${misplacedSummary("the sync pull request", ` ${link2}`, result.misplaced)}`, MISPLACED_ADVICE);
       break;
     case "merge-blocked":
-      lines2.push(
+      lines3.push(
         `Setup error: GitHub refused again to merge the sync pull request ${link2}, on the same head and for the same reason as an earlier run (${refusalText(result)}).`,
         "Nothing changes until a person does: when GitHub names a required check that is expected, make that check run on the sync pull request (check workflow filters and the required check's name); otherwise let the sync's GitHub App merge into the tracked branch (for example, adjust the branch's rules). A later run merges."
       );
       break;
     case "checks-missing":
-      lines2.push(
+      lines3.push(
         `Setup error: the sync pull request ${link2} has waited past the check deadline for checks that never started on its head (${missingText(result.checks?.missing ?? [])}).`,
         CHECKS_MISSING_ADVICE
       );
       break;
     case "initial-pull-request-pending":
-      lines2.push("The sync branch holds an initial sync from Linear that a person has not merged yet. The sync adds nothing to it and writes nothing to Linear until it is merged.");
+      lines3.push("The sync branch holds an initial sync from Linear that a person has not merged yet. The sync adds nothing to it and writes nothing to Linear until it is merged.");
       break;
     case "head-unverified":
-      lines2.push(`The sync pull request ${link2} also changes files that are not synchronized documents or their assets: ${unverifiedList(result.unverified ?? [])}. The sync does not push or merge those changes; a person reviews and merges it, or removes those changes from the sync branch.`);
+      lines3.push(`The sync pull request ${link2} also changes files that are not synchronized documents or their assets: ${unverifiedList(result.unverified ?? [])}. The sync does not push or merge those changes; a person reviews and merges it, or removes those changes from the sync branch.`);
       break;
     case "state-moved":
-      lines2.push("The sync branch moved while this run worked, or the sync pull request no longer targeted the tracked branch at the commit the sync checked right before its merge; the next run updates the sync pull request.");
+      lines3.push("The sync branch moved while this run worked, or the sync pull request no longer targeted the tracked branch at the commit the sync checked right before its merge; the next run updates the sync pull request.");
       break;
     case "github-failed":
-      lines2.push(
+      lines3.push(
         result.status === void 0 ? "A request to GitHub for the sync pull request got no answer (the connection broke or timed out); the next run tries again." : transientGitHubFailure(result) ? `GitHub ${result.rateLimited === true ? "limited the rate of" : "failed"} a request for the sync pull request (HTTP ${result.status}); the next run tries again.` : `Setup error: GitHub refused a request for the sync pull request (HTTP ${result.status}). The next run sends the same request: a person checks what GitHub refuses, for example a repository rule or the App's access.`
       );
       break;
     case "push-rejected":
-      lines2.push(`Setup error: GitHub refused the push to the sync branch (\`${(result.reason ?? "").replace(/[`\r\n]/g, " ")}\`). Nothing reaches the sync pull request until a person lets the sync's GitHub App push to that branch, for example on the bypass list of the rule that refuses it.`);
+      lines3.push(`Setup error: GitHub refused the push to the sync branch (\`${(result.reason ?? "").replace(/[`\r\n]/g, " ")}\`). Nothing reaches the sync pull request until a person lets the sync's GitHub App push to that branch, for example on the bypass list of the rule that refuses it.`);
       break;
     default:
       if (explained) break;
-      if (result.merged !== null) lines2.push("Merged the sync pull request with a merge commit: every check on its head passed.");
-      else if (pr === null) lines2.push("The tracked branch already holds every change from Linear: no pull request is needed.");
-      else if (pr.opened) lines2.push(`Opened the sync pull request ${link2}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : "A later run merges it when every check on its head has passed."}`);
-      else if (result.branchMoved) lines2.push(`Added new Linear changes to the sync pull request ${link2}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : "A later run merges it when every check on its head has passed."}`);
-      else lines2.push(`The sync pull request ${link2} waits for ${names(result.checks?.pending) || "its checks"}; a later run merges it.`);
+      if (result.merged !== null) lines3.push("Merged the sync pull request with a merge commit: every check on its head passed.");
+      else if (pr === null) lines3.push("The tracked branch already holds every change from Linear: no pull request is needed.");
+      else if (pr.opened) lines3.push(`Opened the sync pull request ${link2}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : "A later run merges it when every check on its head has passed."}`);
+      else if (result.branchMoved) lines3.push(`Added new Linear changes to the sync pull request ${link2}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : "A later run merges it when every check on its head has passed."}`);
+      else lines3.push(`The sync pull request ${link2} waits for ${names(result.checks?.pending) || "its checks"}; a later run merges it.`);
   }
-  if (result.paths.length > 0) lines2.push("", `Files it changes on the tracked branch: ${result.paths.length}.`);
+  if (result.paths.length > 0) lines3.push("", `Files it changes on the tracked branch: ${result.paths.length}.`);
   if (result.marked.length > 0) {
-    lines2.push(
+    lines3.push(
       "",
       `Pending edits on the sync branch and later edits change the same lines in ${result.marked.length === 1 ? "1 document" : `${result.marked.length} documents`}: ${names(result.marked)}. Both versions are kept between conflict markers; edit the text on either side to resolve it.`
     );
   }
   if (result.decided.length > 0) {
-    lines2.push(
+    lines3.push(
       "",
       `Pending deletes or renames on the sync branch met later edits or renames in ${result.decided.length === 1 ? "1 document" : `${result.decided.length} documents`}: ${names(result.decided)}. The sync decided them by its structural conflict rules, as for any other conflict: an edited document is kept.`
     );
   }
-  lines2.push("");
-  return lines2;
+  lines3.push("");
+  return lines3;
 }
 function checkRuns(checks) {
   return checks.map((check2) => `${codeNames([check2.name])}${check2.url === void 0 ? "" : ` ([run](${linkTarget(check2.url)}))`}`).join(", ");
@@ -57708,8 +57924,8 @@ function keptAnnotationsTrailers(kept) {
 async function readKeptAnnotations(git, ids) {
   if (ids === null) return /* @__PURE__ */ new Set();
   const log = await git.text(["log", "--format=%B", "--fixed-strings", `--grep=${FINAL_IDS_MESSAGE}`, `--grep=${KEPT_ANNOTATIONS_RECORDED}`, "-1", ids]);
-  const lines2 = log.split("\n");
-  if (lines2[0] !== FINAL_IDS_MESSAGE && !lines2.includes(KEPT_ANNOTATIONS_RECORDED)) return /* @__PURE__ */ new Set();
+  const lines3 = log.split("\n");
+  if (lines3[0] !== FINAL_IDS_MESSAGE && !lines3.includes(KEPT_ANNOTATIONS_RECORDED)) return /* @__PURE__ */ new Set();
   return new Set([...log.matchAll(KEPT_ANNOTATION)].map((match) => JSON.parse(match[1])));
 }
 var RECORD_MESSAGE = "Initial sync: Linear's state";
@@ -59099,7 +59315,7 @@ function pullRequestBody2(plan, result) {
   const out = new Set(result.leftOutAtRecord.map((entry) => entry.path));
   const overwritten = plan.overwrite.filter((entry) => !out.has(entry.path)).length;
   const created = plan.create.filter((entry) => !out.has(entry.path)).length;
-  const lines2 = [
+  const lines3 = [
     "This pull request makes the synchronized folders equal to Linear, as an initial sync from Linear asked.",
     "",
     `- ${count(overwritten, "file")} take Linear's text (front matter kept);`,
@@ -59109,11 +59325,11 @@ function pullRequestBody2(plan, result) {
     "Review it and merge it with a merge commit. The sync does not merge it, because it removes files, and it does not run until this pull request is merged. Removed files stay in the history."
   ];
   if (plan.remove.length > 0) {
-    lines2.push("", "### Removed files", "");
-    for (const path7 of plan.remove.slice(0, 100)) lines2.push(`- \`${path7.replace(/`/g, "'")}\``);
-    if (plan.remove.length > 100) lines2.push(`- and ${plan.remove.length - 100} more`);
+    lines3.push("", "### Removed files", "");
+    for (const path7 of plan.remove.slice(0, 100)) lines3.push(`- \`${path7.replace(/`/g, "'")}\``);
+    if (plan.remove.length > 100) lines3.push(`- and ${plan.remove.length - 100} more`);
   }
-  return `${lines2.join("\n")}
+  return `${lines3.join("\n")}
 `;
 }
 function entryOf(entry) {
@@ -59147,7 +59363,7 @@ function toPlanReport(plan, direction, confirm) {
   };
 }
 function renderDryRun(plan) {
-  const lines2 = [
+  const lines3 = [
     "## Initial sync from git to Linear: dry run",
     "",
     "Nothing was written. Run again with `confirm` set to `true` to make Linear equal to the tracked branch:",
@@ -59158,15 +59374,15 @@ function renderDryRun(plan) {
     `- leave out ${count2(plan.leftOut.length, "file")}, which stay in git only until they are fixed.`,
     ""
   ];
-  pushTable(lines2, "Create", ["Path", "In Linear"], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]), true);
-  pushTable(lines2, "Overwrite", ["Path", "In Linear", "Document"], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Move to trash", ["Path", "In Linear", "Document"], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
-  return lines2.join("\n") + renderCapacity(plan.capacity ?? []);
+  pushTable(lines3, "Create", ["Path", "In Linear"], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]), true);
+  pushTable(lines3, "Overwrite", ["Path", "In Linear", "Document"], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines3, "Move to trash", ["Path", "In Linear", "Document"], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines3, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
+  return lines3.join("\n") + renderCapacity(plan.capacity ?? []);
 }
 function renderConfirmed(plan, result) {
   const outcome2 = result.complete ? "Linear now equals the tracked branch, and the sync state is recorded." : result.code === "container-cap" ? "Nothing was written. Reduce planned additions or increase document-cap after checking the container limit." : result.code === "state-moved" ? "A state ref moved while this run was writing, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done." : "The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already written are skipped.";
-  const lines2 = [
+  const lines3 = [
     "## Initial sync from git to Linear",
     "",
     outcome2,
@@ -59181,24 +59397,24 @@ function renderConfirmed(plan, result) {
   ];
   if (result.stopped !== void 0) {
     const why = result.stopped.kind === "test-threshold" ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
-    lines2.push(`Stopped: ${why}. Not written yet: ${count2(result.notAttempted.length, "item")}.`, "");
+    lines3.push(`Stopped: ${why}. Not written yet: ${count2(result.notAttempted.length, "item")}.`, "");
   }
-  pushTable(lines2, "Failed", ["Path", "Operation", "Error"], result.failed.map((entry) => [entry.path, entry.operation, entry.error]), false);
-  pushTable(lines2, "Moved to trash", ["Path"], result.trashed.map((path7) => [path7]), false);
+  pushTable(lines3, "Failed", ["Path", "Operation", "Error"], result.failed.map((entry) => [entry.path, entry.operation, entry.error]), false);
+  pushTable(lines3, "Moved to trash", ["Path"], result.trashed.map((path7) => [path7]), false);
   pushTable(
-    lines2,
+    lines3,
     "Left out",
     ["Path", "Rules", "Lines", "Collides with, or the files"],
     [...leftOutRows(plan.leftOut), ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, "", (entry.files ?? []).join(", ")])],
     false
   );
   if (result.record !== null && result.record.reformatted.length > 0) {
-    lines2.push(
+    lines3.push(
       `Linear stores ${count2(result.record.reformatted.length, "file")} in a different form than the tracked branch; the next sync proposes that form in its pull request.`,
       ""
     );
   }
-  return lines2.join("\n") + renderCapacity(plan.capacity ?? []);
+  return lines3.join("\n") + renderCapacity(plan.capacity ?? []);
 }
 function toReversePlanReport(plan, confirm) {
   const paths = (entries) => entries.map((entry) => entry.path);
@@ -59220,7 +59436,7 @@ function toReversePlanReport(plan, confirm) {
   };
 }
 function renderReverseDryRun(plan) {
-  const lines2 = [
+  const lines3 = [
     "## Initial sync from Linear to the tracked branch: dry run",
     "",
     "Nothing was written. Run again with `confirm` set to `true` to open one pull request that makes the synchronized folders equal to Linear. A person merges it; the sync never does, because it removes files:",
@@ -59232,16 +59448,16 @@ function renderReverseDryRun(plan) {
     `- leave out ${count2(plan.leftOut.length, "file or document", "files or documents")}.`,
     ""
   ];
-  pushTable(lines2, "Overwrite", ["Path", "Document"], plan.overwrite.map((entry) => [entry.path, entry.documentId]), true);
-  pushTable(lines2, "Create", ["Path", "From Linear", "Document"], plan.create.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
-  pushTable(lines2, "Remove", ["Path"], plan.remove.map((path7) => [path7]), true);
-  pushTable(lines2, "Kept", ["Path", "Why"], plan.kept.map((entry) => [entry.path, "holds the annotation of its folder"]), false);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
-  return lines2.join("\n");
+  pushTable(lines3, "Overwrite", ["Path", "Document"], plan.overwrite.map((entry) => [entry.path, entry.documentId]), true);
+  pushTable(lines3, "Create", ["Path", "From Linear", "Document"], plan.create.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines3, "Remove", ["Path"], plan.remove.map((path7) => [path7]), true);
+  pushTable(lines3, "Kept", ["Path", "Why"], plan.kept.map((entry) => [entry.path, "holds the annotation of its folder"]), false);
+  pushTable(lines3, "Left out", LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
+  return lines3.join("\n");
 }
 function renderReverseConfirmed(plan, result) {
   const outcome2 = result.complete ? result.pullRequest === null ? `The tracked branch already equals Linear: no pull request is needed. The sync state is recorded.${result.closedPullRequest === void 0 ? "" : ` Pull request #${result.closedPullRequest} of an earlier run had nothing left to carry and is closed.`}` : `The sync state is recorded and pull request #${result.pullRequest.number} ${result.pullRequest.opened ? "is open" : "was already open"}. A person reviews and merges it; the sync does not run until it is merged.` : result.code === "state-moved" ? "A state ref moved while this run was working, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done." : result.code === "pull-request-failed" ? `The sync state is recorded, but the pull request could not be opened (${result.pullRequestStatus === void 0 ? "GitHub could not be reached" : `GitHub answered HTTP ${result.pullRequestStatus}`}). Run initial sync again with the same inputs to open it.` : result.code === "sync-branch-changed" ? "The sync branch holds commits this sync did not make, so nothing was recorded. Merge or close its pull request and delete the branch, then run initial sync again." : "The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already taken are skipped.";
-  const lines2 = [
+  const lines3 = [
     "## Initial sync from Linear to the tracked branch",
     "",
     outcome2,
@@ -59254,11 +59470,11 @@ function renderReverseConfirmed(plan, result) {
   ];
   if (result.stopped !== void 0) {
     const why = result.stopped.kind === "test-threshold" ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
-    lines2.push(`Stopped: ${why}. Not taken yet: ${count2(result.notAttempted.length, "document")}.`, "");
+    lines3.push(`Stopped: ${why}. Not taken yet: ${count2(result.notAttempted.length, "document")}.`, "");
   }
-  pushTable(lines2, "Remove", ["Path"], plan.remove.map((path7) => [path7]), false);
-  pushTable(lines2, "Left out", LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtRecord.map((entry) => [entry.path, entry.rule, "", ""])], false);
-  return lines2.join("\n");
+  pushTable(lines3, "Remove", ["Path"], plan.remove.map((path7) => [path7]), false);
+  pushTable(lines3, "Left out", LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtRecord.map((entry) => [entry.path, entry.rule, "", ""])], false);
+  return lines3.join("\n");
 }
 var LEFT_OUT_HEAD = ["Path", "Rules", "Lines", "Collides with, or the files"];
 function leftOutRows(entries) {
@@ -59268,16 +59484,16 @@ function leftOutRows(entries) {
     return [entry.path, entry.rules.join(", "), entry.lines.join(", "), others];
   });
 }
-function pushTable(lines2, title, head, rows, always) {
+function pushTable(lines3, title, head, rows, always) {
   if (rows.length === 0 && !always) return;
-  lines2.push(`### ${title} (${rows.length})`, "");
+  lines3.push(`### ${title} (${rows.length})`, "");
   if (rows.length === 0) {
-    lines2.push("None.", "");
+    lines3.push("None.", "");
     return;
   }
-  lines2.push(`| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
-  for (const row of rows) lines2.push(`| ${row.map(cell).join(" | ")} |`);
-  lines2.push("");
+  lines3.push(`| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
+  for (const row of rows) lines3.push(`| ${row.map(cell).join(" | ")} |`);
+  lines3.push("");
 }
 function count2(n, noun, plural = `${noun}s`) {
   return `${n} ${n === 1 ? noun : plural}`;
@@ -59358,8 +59574,8 @@ function readInputs(get, env = process.env, options = {}) {
   return inputs;
 }
 function checkList(list4) {
-  const lines2 = [...new Set(list4.split(/\r?\n/).map((line2) => line2.trim()).filter(Boolean))];
-  return lines2.map((line2) => {
+  const lines3 = [...new Set(list4.split(/\r?\n/).map((line2) => line2.trim()).filter(Boolean))];
+  return lines3.map((line2) => {
     const check2 = requiredCheck(line2);
     if (check2 === void 0) throw new InputError(message("inputs.required-checks", { line: line2 }));
     return check2;
@@ -59584,10 +59800,10 @@ function planInitialSync(input) {
   const facts = input.facts ?? LINEAR_FACTS;
   const { mapping } = input;
   const leftOut = /* @__PURE__ */ new Map();
-  const leaveOut = (path7, rules, lines2 = [], collidesWith, collidesWithMore) => {
+  const leaveOut = (path7, rules, lines3 = [], collidesWith, collidesWithMore) => {
     const entry = leftOut.get(path7) ?? { path: path7, rules: [], lines: [] };
     entry.rules = [.../* @__PURE__ */ new Set([...entry.rules, ...rules])].sort();
-    entry.lines = [.../* @__PURE__ */ new Set([...entry.lines, ...lines2])].sort((a, b) => a - b);
+    entry.lines = [.../* @__PURE__ */ new Set([...entry.lines, ...lines3])].sort((a, b) => a - b);
     if (collidesWith !== void 0) entry.collidesWith = [...collidesWith].sort(compare8);
     if (collidesWithMore !== void 0) entry.collidesWithMore = collidesWithMore;
     leftOut.set(path7, entry);
@@ -59722,14 +59938,14 @@ function compare8(a, b) {
 var PARTIAL = message("run.partial");
 function renderStop(stop) {
   const why = stop.kind === "test-threshold" ? `the test threshold of ${stop.documents} documents` : describeStop(stop);
-  const lines2 = [`Stopped: ${why}.`, ""];
+  const lines3 = [`Stopped: ${why}.`, ""];
   const limits = stop.kind === "test-threshold" ? void 0 : stop.limits;
   if (limits !== void 0) {
-    lines2.push("Linear's rate-limit headers at the stop:", "", "| Header | Value |", "| --- | --- |");
-    for (const name of Object.keys(limits).sort()) lines2.push(`| ${cell(name)} | ${cell(limits[name] ?? "")} |`);
-    lines2.push("");
+    lines3.push("Linear's rate-limit headers at the stop:", "", "| Header | Value |", "| --- | --- |");
+    for (const name of Object.keys(limits).sort()) lines3.push(`| ${cell(name)} | ${cell(limits[name] ?? "")} |`);
+    lines3.push("");
   }
-  return lines2;
+  return lines3;
 }
 function renderStoppedBeforeWriting(stop, partial) {
   const when = stop.kind !== "test-threshold" && stop.operation === "CreateProject" ? "while creating projects" : "before any write";
@@ -60753,18 +60969,18 @@ var SKIP_REASON_TEXTS = {
 };
 function renderSync(result) {
   const write = result.write;
-  const lines2 = ["## Sync", "", result.capture.summary, ""];
-  if (result.pullRequest !== void 0) lines2.push(...renderPullRequest(result.pullRequest));
+  const lines3 = ["## Sync", "", result.capture.summary, ""];
+  if (result.pullRequest !== void 0) lines3.push(...renderPullRequest(result.pullRequest));
   if (write === void 0) {
-    if (result.pullRequest === void 0) lines2.push("Capture did not finish; no tracked-branch changes were written.", "");
-    return lines2.join("\n");
+    if (result.pullRequest === void 0) lines3.push("Capture did not finish; no tracked-branch changes were written.", "");
+    return lines3.join("\n");
   }
-  lines2.push("### Tracked branch to Linear", "");
+  lines3.push("### Tracked branch to Linear", "");
   if (write.complete && write.record === null && !write.changed) {
-    lines2.push("Linear already holds the tracked branch: nothing to write.", "");
+    lines3.push("Linear already holds the tracked branch: nothing to write.", "");
   } else {
     const outcome2 = write.code === "container-cap" ? "Nothing was written. Reduce planned additions or increase document-cap after checking the container limit." : write.code === "state-moved" ? "A state ref moved while this run was writing, so it recorded nothing. Another run may be working on this repository; the next run writes again what is still missing." : write.complete ? "Linear now holds the tracked branch." : "Some documents were not written; the next run writes them.";
-    lines2.push(
+    lines3.push(
       outcome2,
       "",
       `- wrote ${count3(write.updated.length, "document")} with the file's new text;`,
@@ -60778,16 +60994,16 @@ function renderSync(result) {
       ""
     );
   }
-  if (write.code === "state-moved") lines2.push(`This run is ${PARTIAL}: the next run writes again what is still missing.`, "");
-  else if (write.code !== void 0 && write.code !== "container-cap") lines2.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, "");
+  if (write.code === "state-moved") lines3.push(`This run is ${PARTIAL}: the next run writes again what is still missing.`, "");
+  else if (write.code !== void 0 && write.code !== "container-cap") lines3.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, "");
   if (write.stopped !== void 0) {
-    lines2.push(...renderStop(write.stopped), `Not written yet: ${count3(write.notAttempted.length, "item")}.`, "");
+    lines3.push(...renderStop(write.stopped), `Not written yet: ${count3(write.notAttempted.length, "item")}.`, "");
   }
   const table = (title, head, rows) => {
     if (rows.length === 0) return;
-    lines2.push(`#### ${title} (${rows.length})`, "", `| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
-    for (const row of rows) lines2.push(`| ${row.map(cell).join(" | ")} |`);
-    lines2.push("");
+    lines3.push(`#### ${title} (${rows.length})`, "", `| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
+    for (const row of rows) lines3.push(`| ${row.map(cell).join(" | ")} |`);
+    lines3.push("");
   };
   table("Failed", ["Path", "Operation", "Error"], write.failed.map((entry) => [entry.path, entry.operation, entry.error]));
   table("Skipped", ["Path", "Why"], write.skipped.map((entry) => [entry.path, SKIP_REASON_TEXTS[entry.reason]]));
@@ -60797,7 +61013,7 @@ function renderSync(result) {
   table("Moved to trash", ["Path"], write.trashed.map((path7) => [path7]));
   table("Left out", ["Path", "Rules"], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(", ")]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);
   table("CI fixes not written", ["Path", "Hooks on the fixing commit", "Rules"], write.leftOut.filter((entry) => entry.hooks?.length).map((entry) => [entry.path, entry.hooks.join(", "), entry.rules.join(", ")]));
-  return lines2.join("\n") + renderCapacity(write.capacity ?? []);
+  return lines3.join("\n") + renderCapacity(write.capacity ?? []);
 }
 function count3(n, noun) {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -61095,10 +61311,10 @@ function stoppedBeforeWritingMessage(command, outcome2) {
   return fix2 === void 0 ? explained : message("run.how-to-fix", { message: explained.replace(/\.$/, ""), url: fix2 });
 }
 function oneLine2(text6) {
-  const lines2 = text6.split(/[\r\n]+/);
-  if (lines2.length === 1) return text6;
-  const last = lines2.length - 1;
-  return lines2.map((line2, index2) => index2 === 0 ? line2.trimEnd() : index2 === last ? line2.trimStart() : line2.trim()).filter((line2, index2) => line2 !== "" || index2 === 0 || index2 === last).join(" ");
+  const lines3 = text6.split(/[\r\n]+/);
+  if (lines3.length === 1) return text6;
+  const last = lines3.length - 1;
+  return lines3.map((line2, index2) => index2 === 0 ? line2.trimEnd() : index2 === last ? line2.trimStart() : line2.trim()).filter((line2, index2) => line2 !== "" || index2 === 0 || index2 === last).join(" ");
 }
 function containerCapMessage(command) {
   return message("run.container-cap", { command });
