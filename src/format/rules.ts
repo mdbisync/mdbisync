@@ -14,6 +14,7 @@ export const LINT_RULES = {
   'table-escaped-pipe': 'A pipe in a plain table cell, escaped or written as a character reference, comes back from Linear unescaped, which splits the row. Put the cell text in inline code, or rephrase it without the pipe.',
   'table-hash-cell': 'A table body cell starting with # becomes a heading.',
   'table-list-cell': 'A table body cell starting with -, + or * and a space, or with a number and ), becomes a list, which Linear writes with * or a number and a dot. Put a backslash before the -, + or *, or reword the cell.',
+  'table-quote-cell': 'A table body cell starting with > becomes a quote, and Linear drops the >; a cell starting with >> can take the rows and text below it into the cell. Run fix to write it as \\>, or put a backslash before the > yourself.',
   'image-in-link': 'The link around an image is dropped.',
   'content-too-long': "This document exceeds Linear's 250,000-character content limit. Linear refuses the whole document, so the sync leaves the file out until it fits. The author must decide how to shorten or split it.",
   'markdown-complexity': 'Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.',
@@ -55,8 +56,11 @@ export type LintRule = keyof typeof LINT_RULES;
  * break, which Linear keeps; where that would change the document (a break
  * in a heading, which `fix` writes on one line, or a line that reads
  * differently without its backslash), `fixText` leaves the text as it is.
+ * A `>` that starts a table body cell gets a backslash, the form Linear
+ * writes for that text; lint's FIX_ONLY_RULES lets the sync send such a
+ * file as it is, since Linear's own export can hold it.
  */
-export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash']);
+export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash', 'table-quote-cell']);
 
 /**
  * Rules about where an image's file is, not about what Linear loses. The

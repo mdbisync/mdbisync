@@ -1037,8 +1037,11 @@ class Writer {
         const escape = header ? headerCellEscape(text) : unicodeSpaceLead(inline.replace(/^[ \t]+/, '')) === 0 ? undefined : headingOrNumberEscape(text.slice(lead));
         if (escape !== undefined) text = `${text.slice(0, lead + escape)}\\${text.slice(lead + escape)}`;
         // Linear escapes a dash that starts a cell's text (`\-1.5`); a dash
-        // before a space is a list there, which lint reports.
-        else if (text.startsWith('-')) text = `\\${text}`;
+        // before a space is a list there, which lint reports. A `>` that
+        // starts a body cell is a quote there (`table-quote-cell`), and
+        // Linear writes a literal one as `\>`, the escape a header cell gets;
+        // in Linear's own export a bare one is its quote, kept as written.
+        else if (text.startsWith('-') || (text.startsWith('>') && !this.options.linearExport)) text = `\\${text}`;
         // Linear holds a body cell of only a number and a dot as an empty
         // ordered list and writes the space after its marker.
         if (!header && /^\d{1,9}\.$/.test(text)) text += ' ';

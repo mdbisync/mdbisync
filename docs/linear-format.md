@@ -268,7 +268,9 @@ Blocks:
   [`table-hash-cell`](#table-hash-cell) rule). A `-` that starts a cell's
   text gets a backslash (`| \-1.5 |`), and an escaped `+` that starts a
   cell loses it unless a space, a tab, a backslash, a character reference,
-  another `+` or the cell's end follows (`| +1 |`), as Linear writes them. In a header cell, a
+  another `+` or the cell's end follows (`| +1 |`), as Linear writes them. A
+  `>` that starts a body cell's text gets a backslash (`| \> Draft |`), the
+  [`table-quote-cell`](#table-quote-cell) rule. In a header cell, a
   starting `>` gets a backslash too, and so do a `+` that a space and text
   follow and a number's dot that whitespace and text follow
   (`| \+ Plan | 1\. Step |`). A line break tag in a cell
@@ -529,9 +531,10 @@ names a missing file, until the document or its image is fixed: see
 
 Each rule is a construct Linear would lose or alter, and its message says
 what to do. `fix` never rewrites a file with a finding, so nothing is lost
-silently; change the file yourself. The one exception is
-[`hard-break-backslash`](#hard-break-backslash), which `fix` writes in a
-form Linear keeps where it can.
+silently; change the file yourself. The exceptions are
+[`hard-break-backslash`](#hard-break-backslash) and
+[`table-quote-cell`](#table-quote-cell), which `fix` writes in a form
+Linear keeps where it can.
 
 ### `footnote`
 
@@ -603,6 +606,22 @@ the same way, and the sync keeps such a document.
 | Item | Count |
 | -- | -- |
 | + fee | 3) |
+```
+
+### `table-quote-cell`
+
+A table body cell starting with > becomes a quote, and Linear drops the >;
+a cell starting with >> can take the rows and text below it into the cell.
+Run fix to write it as \>, or put a backslash before the > yourself.
+`| > Draft |` comes back `| Draft |`. A header cell, an escaped `\>`, a
+`&gt;` and a `>` later in the cell keep their text. The sync sends such a
+file as it is: Linear's own export starts a cell with `>` for an empty
+quote inside a quote.
+
+```markdown
+| Item | Note |
+| -- | -- |
+| > Draft | Ready |
 ```
 
 ### `image-in-link`

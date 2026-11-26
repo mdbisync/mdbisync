@@ -82,6 +82,8 @@ rules:
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
   - id: table-list-cell
     title: "A table body cell starting with -, + or * and a space, or with a number and ), becomes a list, which Linear writes with * or a number and a dot. Put a backslash before the -, + or *, or reword the cell."
+  - id: table-quote-cell
+    title: "A table body cell starting with > becomes a quote, and Linear drops the >; a cell starting with >> can take the rows and text below it into the cell."
   - id: setext-heading-lines
     title: "Linear keeps only the first line of a heading underlined with = or - as the heading; the lines after it become a paragraph. Put the heading text on one line."
   - id: table-header-pipe
@@ -137,6 +139,10 @@ known_constructs:
     class: fixable
   - construct: table-cell-start-dash
     class: fixable
+  - construct: table-quote-cell
+    class: lint-error
+  - construct: table-quote-cell-escaped
+    class: unchanged
   - construct: list-kinds
     class: fixable
   - construct: list-first-in-item
@@ -3677,6 +3683,24 @@ fixtures:
     canary: kx-9bbd184a
     corpus: false
     note: "Linear escapes a dash that starts a header or body cell's text, a +, > or number dot before a space and text in a header cell, and drops the escape of a plus sign at a cell's start that opens no list"
+  - file: "tables/table-quote-cell.md"
+    group: tables
+    construct: table-quote-cell
+    class: lint-error
+    rule: table-quote-cell
+    line: 5
+    basis: known
+    canary: kx-84eba4b0
+    corpus: false
+    note: "Linear holds a body cell starting with > as a quote and writes it without the >; a cell starting with >> takes the text below it into the cell"
+  - file: "tables/table-quote-cell-escaped.md"
+    group: tables
+    construct: table-quote-cell-escaped
+    class: unchanged
+    basis: known
+    canary: kx-e549ef24
+    corpus: false
+    note: "fix's form of table-quote-cell: an escaped > at a body cell's start stays text"
   - file: "list-items/list-kinds-in-item.md"
     group: list-items
     construct: list-kinds

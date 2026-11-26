@@ -20,6 +20,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, ex
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
+import { FIXED_RULES, type LintRule } from '../../../src/format/rules.ts';
 import { LinearError, LinearStoppedError, LinearTokenError, isTransientLinearError } from '../../../src/linear/index.ts';
 import { LINEAR_FACTS, linearLength } from '../../../src/linear/facts.ts';
 import { resolveStateConfig, stateRef, suspendedBranch, Git } from '../../../src/state/index.ts';
@@ -216,9 +217,12 @@ async function offlineFormat(ctx: RunContext, command: 'lint' | 'fix', args: Rec
   const dir = join(ctx.runDir, `${command}-input`);
   writeInput(dir, input.files, input.assets);
   // Expectations of this input; the bank's recorded forms only for the files that have one.
-  const compared = args.input === 'lint-errors' ? new Set(input.files.keys()) : new Set(input.golden.keys());
+  // Of the lint errors, fix rewrites those of a rule it writes in Linear's form
+  // (the bank test checks what it writes); the others stay byte for byte.
+  const rewritten = new Set(loadBank(join(REPO_ROOT, BANK_DIR)).fixtures.filter((fixture) => FIXED_RULES.has(fixture.rule as LintRule)).map((fixture) => fixture.file));
+  const compared = args.input === 'lint-errors' ? new Set([...input.files.keys()].filter((path) => !rewritten.has(path))) : new Set(input.golden.keys());
   const only = (files: ReadonlyMap<string, string>) => new Map([...files].filter(([path]) => compared.has(path)));
-  ctx.observations.set('input.bytes', input.files);
+  ctx.observations.set('input.bytes', args.input === 'lint-errors' ? only(input.files) : input.files);
   ctx.observations.set('input.markerBytes', markerLines(input.files));
   ctx.observations.set('golden.linearForm', input.golden);
   ctx.observations.set('corpus.lintErrors', input.lintErrors);

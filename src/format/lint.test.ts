@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, describe, it } from 'node:test';
 import { markdownFiles, runFix, runLint } from './command.ts';
-import { fixText } from './fix.ts';
+import { fixLinearText, fixText } from './fix.ts';
 import { duplicateTitles, lintInTree, lintText } from './lint.ts';
 import { parse, visit } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
@@ -40,6 +40,11 @@ const cases: Array<[LintRule, string, number]> = [
   ['table-list-cell', '| A |\n| -- |\n| - |', 3],
   ['table-list-cell', '| A |\n| -- |\n| * fee |', 3],
   ['table-list-cell', '> | A | B |\n> | -- | -- |\n> | x | 3) |', 3],
+  ['table-quote-cell', '| A | B |\n| -- | -- |\n| 1 | 2 |\n| > Draft | 3 |', 4],
+  ['table-quote-cell', '| A | B |\n| -- | -- |\n| x | >> Review |', 3],
+  ['table-quote-cell', '| A |\n| -- |\n| > |', 3],
+  ['table-quote-cell', '| A |\n| -- |\n| >**Bold** |', 3],
+  ['table-quote-cell', '> | A | B |\n> | -- | -- |\n> | x | > y |', 3],
   ['table-header-pipe', 'Intro.\n\nTotal\n| --- |\n| 5 |', 3],
   ['table-header-pipe', '* Item\n\n  Total\n  |---|\n  |5|', 3],
   ['number-paragraph', 'Text.\n\n7\\.', 3],
@@ -119,6 +124,22 @@ describe('lint rules', () => {
   it('table-list-cell spares the header row, escaped markers, markers without a space and a number with a dot', () => {
     const text = '| + head | 1) |\n| -- | -- |\n| \\+ fee | \\- fee |\n| \\* fee | +fee |\n| -5 | 12. |\n| 3. x | **- x** |';
     assert.deepEqual(lintText('doc.md', text), []);
+  });
+
+  it('table-quote-cell spares the header row, an escaped or encoded >, a > after the start or inside markup, and a table Linear keeps as text', () => {
+    const text = '| > head | >> Aside |\n| -- | -- |\n| \\> Draft | \\>> Note |\n| &gt; Kept | a > b |\n| **> Bold** | `> code` |';
+    assert.deepEqual(lintText('doc.md', text), []);
+    assert.deepEqual(lintText('doc.md', 'Total\n| --- |\n| > Draft |').map((finding) => finding.rule), ['table-header-pipe']);
+  });
+
+  it("table-quote-cell is fixed by fix, and the sync sends Linear's own export, which can start a cell with >", () => {
+    const quoted = '| A |\n| -- |\n| > Draft |';
+    assert.deepEqual(lintText('doc.md', fixText(quoted)), [], 'fix writes it as Linear keeps it');
+    assert.deepEqual(lintInTree('doc.md', quoted, new Set()), []);
+    // An empty quote inside a quote, as Linear exports it: a capture keeps it.
+    const exported = '| A | B |\n| -- | -- |\n| Plan | > <br><br>Ref |\n';
+    assert.equal(fixLinearText(exported, exported, () => false), exported);
+    assert.equal(fixText('| A |\n| -- |\n| > Draft |\n', { linearExport: true }), '| A |\n| -- |\n| > Draft |\n');
   });
 
   it('table-header-pipe spares a table whose header row has a pipe', () => {

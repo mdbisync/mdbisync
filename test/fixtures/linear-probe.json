@@ -1525,6 +1525,14 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "tables/table-quote-cell-escaped.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-quote-cell.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "tables/table-quoted-end.md": {
       "yjs": "recorded",
       "fixedPoint": true

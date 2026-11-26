@@ -18,6 +18,11 @@ const read = (fixture: BankFixture): string => readFileSync(join(bank.dir, fixtu
 const golden = (fixture: BankFixture): string | undefined => readOptional(join(bank.dir, goldenMarkdownPath(fixture.file)));
 /** Lint-error fixtures `fix` rewrites into Linear's form (FIXED_RULES); the others of those rules stay as they are. */
 const FIXED_BY_FIX: ReadonlySet<string> = new Set(['construct-singles/break-backslash.md', 'construct-singles/break-backslash-indented.md']);
+/**
+ * Lint-error fixtures of a rule fix writes whose recorded form shows what
+ * Linear loses: fix's form is another fixture, recorded as a fixed point.
+ */
+const ESCAPED_BY_FIX: ReadonlyMap<string, string> = new Map([['tables/table-quote-cell.md', 'tables/table-quote-cell-escaped.md']]);
 const contentRules =(fixture: BankFixture): boolean => fixture.class === 'lint-error' && fixture.rule !== 'duplicate-title';
 
 describe('fix on the fixture bank', () => {
@@ -51,6 +56,14 @@ describe('fix on the fixture bank', () => {
         const form = golden(fixture);
         assert.ok(form !== undefined, 'a fixture of a rule fix writes has its recorded Linear form');
         assert.equal(fixed, splitFile(source).head + form, "fix reaches Linear's recorded form");
+      } else if (ESCAPED_BY_FIX.has(fixture.file)) {
+        assert.ok(fixture.class === 'lint-error' && FIXED_RULES.has(fixture.rule as LintRule), 'a fixture of a rule fix writes');
+        assert.deepEqual(lintText(fixture.file, fixed, options).map((finding) => finding.rule), [], 'lint reports nothing after fix');
+        assert.notEqual(fixed, source, 'fix rewrites it');
+        // The escaped fixture is fix's output with its own canary.
+        const escaped = read(bank.fixtures.find((other) => other.file === ESCAPED_BY_FIX.get(fixture.file))!);
+        const canary = (text: string): string => /kx-[0-9a-f]{8}/.exec(text)![0];
+        assert.equal(fixed.replace(canary(source), canary(escaped)), escaped, 'fix writes the escaped fixture');
       } else {
         assert.equal(fixed, source, 'L0-03: fix leaves it byte for byte');
         const form = golden(fixture);
