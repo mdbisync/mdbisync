@@ -7,7 +7,7 @@
 // findings. Neither stops at a rule whose construct `fix` writes in Linear's
 // form (FIXED_RULES).
 
-import type { BlockContent, Definition, DefinitionContent, Delete, Emphasis, Link, List, ListItem, Nodes, Paragraph, PhrasingContent, Root, RootContent, Strong, Table, TableRow, Text } from 'mdast';
+import type { BlockContent, Definition, DefinitionContent, Delete, Emphasis, Link, LinkReference, List, ListItem, Nodes, Paragraph, PhrasingContent, Root, RootContent, Strong, Table, TableRow, Text } from 'mdast';
 import { isDeepStrictEqual } from 'node:util';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
@@ -18,7 +18,7 @@ import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES, type Finding } from './r
 import { plusLinesAsLinear } from './marker-lines.ts';
 import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
-import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, codeSpanText, linearDropsCodeSpaces, linearMarkersAsText, linkDestination, listKind, listParts, nestedFileBlocksOnItemLine, nestsMarkerText, opensWithText, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines, endingRow } from './markdown.ts';
+import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, codeSpanText, line, lineCount, linearDropsCodeSpaces, linearMarkersAsText, linkDestination, listKind, listParts, nestedFileBlocksOnItemLine, nestsMarkerText, opensWithText, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines, endingRow } from './markdown.ts';
 
 export { imageDestination, linkDestination } from './markdown.ts';
 
@@ -102,14 +102,8 @@ function emptyLinksAsUrls(body: string): string {
   // An empty label followed by a destination or a reference label.
   if (!/\[\][([]/.test(body)) return body;
   const tree = parse(body);
-  const definitions = new Map<string, string>();
-  visit(tree, (node) => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url); });
   const edits: { at: number; text: string }[] = [];
-  visit(tree, (node) => {
-    if ((node.type !== 'link' && node.type !== 'linkReference') || node.children.length > 0) return;
-    const url = node.type === 'link' ? node.url : definitions.get(node.identifier) ?? '';
-    // An autolink always has text; a label here is `[]`, so the text goes between the brackets.
-    if (url === '' || body.slice(start(node), start(node) + 2) !== '[]') return;
+  for (const { node, url } of emptyLinksWithUrl(tree, body)) {
     node.children = [{ type: 'text', value: url }];
     // Escaped as `fix` writes the URL of an autolink as its label: nothing in it reads as syntax or a shortcode.
     let text = '';
@@ -119,7 +113,7 @@ function emptyLinksAsUrls(body: string): string {
       at = edit.to;
     }
     edits.push({ at: start(node) + 1, text: text + url.slice(at) });
-  });
+  }
   if (edits.length === 0) return body;
   let written = '';
   let from = 0;
@@ -130,6 +124,31 @@ function emptyLinksAsUrls(body: string): string {
   written += body.slice(from);
   // Each link reads its URL as its text, and nothing else changes.
   return isDeepStrictEqual(withoutPositions(parse(written)), withoutPositions(tree)) ? written : body;
+}
+
+/** The links without text that have a URL, as `emptyLinksAsUrls` fills them, in document order. */
+function emptyLinksWithUrl(tree: Root, body: string): Array<{ node: Link | LinkReference; url: string }> {
+  const definitions = new Map<string, string>();
+  visit(tree, (node) => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url); });
+  const found: Array<{ node: Link | LinkReference; url: string }> = [];
+  visit(tree, (node) => {
+    if ((node.type !== 'link' && node.type !== 'linkReference') || node.children.length > 0) return;
+    const url = node.type === 'link' ? node.url : definitions.get(node.identifier) ?? '';
+    // An autolink always has text; a label here is `[]`, so the text goes between the brackets.
+    if (url !== '' && body.slice(start(node), start(node) + 2) === '[]') found.push({ node, url });
+  });
+  return found;
+}
+
+/**
+ * The lines (1-based, front matter included) of the links without text
+ * that have a URL, one per line: the links `fix` gives their URL as text.
+ */
+export function emptyLinkLines(text: string): number[] {
+  const { head, body } = splitFile(text);
+  if (!/\[\][([]/.test(body)) return [];
+  const offset = lineCount(head);
+  return [...new Set(emptyLinksWithUrl(parse(body), body).map(({ node }) => line(node) + offset))];
 }
 
 function withoutPositions(node: Nodes): unknown {

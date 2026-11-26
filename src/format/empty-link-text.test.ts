@@ -83,6 +83,19 @@ describe('links without text', () => {
     assert.equal(readFileSync(join(dir, 'notes.md'), 'utf8'), '* one\n\n[https://example.com/a](<https://example.com/a>)\n\nEmpty [](<>) link');
   }));
 
+  it('does not warn about a link without a URL that formatting moves', () => inFolder('Intro.\n\n\nEmpty []() link\n', (dir) => {
+    const fixed = runFix(['notes.md'], dir);
+    assert.match(fixed.stdout, /^notes\.md: fixed\nnotes\.md:3: link-without-text: /);
+    assert.doesNotMatch(fixed.stdout, /link-text-from-url/);
+  }));
+
+  it('warns about a link it wrote on the line of one it left', () => inFolder('A []() and [](https://example.com/a)\n', (dir) => {
+    const fixed = runFix(['notes.md'], dir);
+    assert.ok(fixed.stdout.includes(warning(1)), fixed.stdout);
+    assert.match(fixed.stdout, /notes\.md:1: link-without-text: /);
+    assert.equal(readFileSync(join(dir, 'notes.md'), 'utf8'), 'A [](<>) and [https://example.com/a](<https://example.com/a>)');
+  }));
+
   it('repairs a link that ending a table exposes', () => {
     const fixed = fixText('| a\n| - |\nrow\n    [](https://example.com/a)');
     assert.equal(fixText(fixed), fixed);
