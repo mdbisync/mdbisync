@@ -580,6 +580,75 @@ describe('confirmed initial sync from git to Linear', () => {
     });
   }
 
+  /** A fetch wrapper: the first CreateDocument of `backend/notes` is applied, its answer is lost, and a person edits the new document before the client reads it back. */
+  const editedLostCreate = (world: FakeWorld) => {
+    const fault = { dropped: undefined as string | undefined, wrap: (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) => {
+      const request = String(input) === `${LINEAR_API}/graphql` ? JSON.parse(String(init?.body)) as { operationName?: string; variables?: { input?: { id?: string; title?: string } } } : undefined;
+      if (fault.dropped === undefined && request?.operationName === 'CreateDocument' && request.variables?.input?.title === 'backend/notes') {
+        fault.dropped = request.variables.input.id;
+        await fetch(input, init);
+        const document = world.linear.documents.find((d) => d.id === fault.dropped);
+        assert.ok(document !== undefined);
+        document.content = `${document.content ?? ''}\n\nTyped in Linear.`;
+        touch(document);
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
+      }
+      return fetch(input, init);
+    } };
+    return fault;
+  };
+
+  it('a resumed run leaves out a document the stopped run created and found edited, and does not overwrite it', async () => {
+    const world = fakeWorld();
+    const path = 'eng/backend/notes.md';
+    const fault = editedLostCreate(world);
+    // The write after the edited create is rate limited: the run stops before it records anything final.
+    world.linear.writes.rateLimitAt = 4;
+    const first = await run(world, {}, fault.wrap);
+    assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+    assert.equal(first.report.code, 'stopped');
+    assert.ok(fault.dropped !== undefined, 'the fault never fired');
+    assert.deepEqual(first.report.initialSync?.leftOutAtWrite, [{ path, rule: 'changed-during-run' }]);
+
+    delete world.linear.writes.rateLimitAt;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.equal(second.report.resumed, true);
+    assert.deepEqual(second.report.initialSync?.leftOutAtWrite, [{ path, rule: 'changed-during-run' }]);
+    assert.ok(!second.report.initialSync?.overwritten.includes(path));
+    assert.match(world.linear.documents.find((d) => d.id === fault.dropped)?.content ?? '', /Typed in Linear\./, 'the edit was overwritten');
+    assert.equal(world.linear.documents.filter((d) => d.title === 'backend/notes' && d.trashed !== true).length, 1);
+    assert.equal((await readIds())[path], undefined);
+  });
+
+  it('a create whose lost answer is read back after a person edited the document is not recorded as written', async () => {
+    const world = fakeWorld();
+    const path = 'eng/backend/notes.md';
+    const fault = editedLostCreate(world);
+    const { result, report } = await run(world, {}, fault.wrap);
+    const { dropped } = fault;
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(dropped !== undefined, 'the fault never fired');
+    assert.deepEqual(report.initialSync?.failed, []);
+    assert.deepEqual(report.initialSync?.created, SYNCED_PATHS.filter((synced) => synced !== path));
+    assert.deepEqual(report.initialSync?.leftOutAtWrite, [{ path, rule: 'changed-during-run' }]);
+    // Created once and not sent again; the person's text stays in Linear.
+    assert.equal(world.linear.documents.filter((d) => d.title === 'backend/notes').length, 1);
+    assert.match(world.linear.documents.find((d) => d.id === dropped)?.content ?? '', /Typed in Linear\./);
+    // Not recorded as this run's write: the path has no id, and the id stays reserved for it.
+    assert.equal((await readIds())[path], undefined);
+    assert.equal((JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json')) as Record<string, string>)[path], dropped);
+
+    // The first sync takes the document in as a change made in Linear, with the person's text: git's file at the
+    // path is not the document's, so it comes in at a path of its own. Linear keeps one document.
+    const sync = await runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
+    assert.equal(sync.exitCode, 0, sync.stderr);
+    const taken = Object.entries(await readIds()).find(([, entry]) => entry.id === dropped);
+    assert.ok(taken !== undefined && taken[0] !== path, JSON.stringify(taken));
+    assert.match(await show(`refs/mdbisync/linear:${taken[0]}`), /Typed in Linear\./);
+    assert.equal(world.linear.documents.filter((d) => d.title === 'backend/notes').length, 1);
+  });
+
   it('a rejected write is named; the rest are written, but nothing is trashed or recorded until it succeeds', async () => {
     const world = fakeWorld();
     world.linear.documents = [{ id: 'doc-retired', title: 'retired', projectId: 'project-api', createdAt: '2026-01-01T00:00:01Z', content: 'Retired.' }];

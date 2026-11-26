@@ -3,6 +3,7 @@
 
 import {
   DocumentTooLongError,
+  LinearCreateEditedError,
   LinearError,
   LinearGraphQLError,
   LinearHttpError,
@@ -70,6 +71,14 @@ export interface CreateDocumentInput {
   color?: string;
   /** A client-chosen id, so a retried create cannot make a duplicate. */
   id?: string;
+}
+
+export interface CreateOptions {
+  /**
+   * Whether `stored`, the content of a lost create's document read back by
+   * its id, is the content `sent`, as Linear may store it in a form of its own.
+   */
+  sameContent?: (stored: string, sent: string) => boolean;
 }
 
 /**
@@ -288,8 +297,13 @@ export class LinearClient {
    * id, and when Linear does not have it, the create is sent again with the
    * same id, at most `CREATE_ATTEMPTS` times in all. The id makes the retry
    * safe: Linear cannot hold two documents with it.
+   *
+   * A document found that way is this create's write only while it holds the
+   * content sent: `sameContent(stored, sent)`, or exact equality without it.
+   * Someone may have edited it between the lost answer and the read, so one
+   * holding other content throws `LinearCreateEditedError` with it.
    */
-  async createDocument(place: DocumentPlace, input: CreateDocumentInput): Promise<LinearDocument> {
+  async createDocument(place: DocumentPlace, input: CreateDocumentInput, { sameContent = (stored: string, sent: string) => stored === sent }: CreateOptions = {}): Promise<LinearDocument> {
     this.#refuseTooLong('CreateDocument', input);
     const { id } = input;
     for (let attempt = 1; ; attempt += 1) {
@@ -304,6 +318,7 @@ export class LinearClient {
         const found = await this.#findCreated(id, place, input.title, error);
         if (found !== undefined) {
           this.stats.wrote('CreateDocument');
+          if (!sameContent(found.content ?? '', input.content ?? '')) throw new LinearCreateEditedError('CreateDocument', found);
           return found;
         }
         if (!transient || attempt >= CREATE_ATTEMPTS) throw error;

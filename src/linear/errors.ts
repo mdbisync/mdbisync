@@ -2,6 +2,7 @@
 // statuses and Linear's error codes only, never document content or tokens.
 
 import { message } from '../messages.ts';
+import type { LinearDocument } from './client.ts';
 
 /**
  * Why the client stopped sending requests for the rest of the run. `limits`
@@ -139,6 +140,21 @@ export class LinearReadBackError extends LinearError {
 
   constructor(operation: string, document: { id: string }, cause?: unknown) {
     super(operation, message('linear.read-back-failed', { operation }), { cause });
+    this.document = document;
+  }
+}
+
+/**
+ * A create whose answer was lost was applied, but the document read back by
+ * its id holds content other than the content sent: someone edited it before
+ * the read. The create took effect, so the caller keeps `document.id`; the
+ * content is not the write's own, and the next read of Linear takes it in.
+ */
+export class LinearCreateEditedError extends LinearError {
+  readonly document: LinearDocument;
+
+  constructor(operation: string, document: LinearDocument) {
+    super(operation, message('linear.create-edited', { operation }));
     this.document = document;
   }
 }

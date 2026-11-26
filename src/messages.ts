@@ -193,6 +193,7 @@ export const MESSAGES = {
   'linear.body-budget': 'linear-body-budget: {operation}: the Linear document bodies this run reads are over the {bytes}-byte budget',
   'linear.too-long': '{operation}: {field} is {length} characters, Linear accepts at most {limit}',
   'linear.read-back-failed': '{operation}: written, but reading back the stored record failed',
+  'linear.create-edited': '{operation}: written, but the document was edited before its lost answer was recovered',
   'linear.token-refused': 'oauth.token: Linear refused the token request ({reason})',
   'linear.revoke-unconfirmed': 'oauth.revoke: Linear did not confirm the revocation (HTTP {status})',
   'linear.token-request-failed': '{operation}: request to Linear failed',

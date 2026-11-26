@@ -30,6 +30,7 @@ import { fixText, joinFile, sameAsLinear, splitFile } from '../format/index.ts';
 import {
   DocumentTooLongError,
   type LinearDocument,
+  LinearCreateEditedError,
   LinearError,
   LinearReadBackError,
   LinearStoppedError,
@@ -404,11 +405,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // That inverse comparison alone also accepts seeded relative links:
         // require stored destinations to match what was sent before using it.
         // Computed once, and only when asked: a resumed run skips most documents on the digest alone.
+        const holdsText = (content: string) => holdsBody(content, body) || (
+          sameLinkDestinations(content, body)
+          && holdsBody(fixText(restoreBody(transforms, path, content, body, sources.input.mapping.files), { linearExport: true }), source)
+        );
         let held: boolean | undefined;
-        const holds = () => (held ??= document !== undefined && (holdsBody(document.content ?? '', body) || (
-          sameLinkDestinations(document.content ?? '', body)
-          && holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body, sources.input.mapping.files), { linearExport: true }), source)
-        )));
+        const holds = () => (held ??= document !== undefined && holdsText(document.content ?? ''));
         // A resumed run skips what the stopped run wrote, as long as the text
         // to send is the same and the document still holds what was written:
         // as Linear returned it to the stopped run, or the body itself. A
@@ -433,6 +435,14 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           await reconcileMark(path, document, hash);
           continue;
         }
+        // The stopped run chose this document's id for the path and created it, but never recorded what it holds:
+        // its lost answer was read back edited, or the read-back failed. Text other than the body is someone's edit
+        // since, so it is left out as when the stopped run saw it, never overwritten.
+        if (document !== undefined && resumed && before?.id === document.id && before.observedDigest === undefined && !writtenBefore.has(path)) {
+          result.leftOutAtWrite.push({ path, rule: 'changed-during-run' });
+          skippedTitles.add(titleKey(item.entry.place, item.entry.title));
+          continue;
+        }
         if (!beforeWriteReached) {
           beforeWriteReached = true;
           await checkpoint('before-write');
@@ -441,7 +451,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           // Matching compares titles in NFC; a new title is written in that form too, so the next run matches it.
           const title = item.entry.title.normalize('NFC');
           const id = documentIds.get(path) as string;
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body });
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body }, { sameContent: holdsText });
           remember(path, created);
           sentHashes.set(path, hash);
           result.created.push(path);
@@ -485,6 +495,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           result.stopped = error.reason;
           result.notAttempted = work.slice(index).map((rest) => rest.entry.path);
           break;
+        }
+        if (error instanceof LinearCreateEditedError) {
+          // Created, but edited before its lost answer was read back: the text is not this run's write. The
+          // path keeps its reserved id, and the first sync takes the document in as Linear holds it.
+          result.leftOutAtWrite.push({ path, rule: 'changed-during-run' });
+          continue;
         }
         if (error instanceof LinearReadBackError) {
           // Written, but what Linear stored is unknown: keep the id, and let the next run read the content.

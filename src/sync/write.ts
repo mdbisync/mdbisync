@@ -25,9 +25,9 @@ import { createPendingProjects } from '../setup/linear.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { documentPath, isUntitled, keptPath } from './paths.ts';
-import { joinFile, sameAsLinear, splitFile } from '../format/index.ts';
+import { fixText, joinFile, sameAsLinear, splitFile } from '../format/index.ts';
 import { MarkdownLimitError } from '../format/markdown.ts';
-import { type DocumentPatch, type LinearClient, type LinearDocument, DocumentTooLongError, LinearError, LinearStoppedError, describeLinearError, lengthRefusal } from '../linear/index.ts';
+import { type DocumentPatch, type LinearClient, type LinearDocument, DocumentTooLongError, LinearCreateEditedError, LinearError, LinearStoppedError, describeLinearError, lengthRefusal } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
@@ -921,7 +921,18 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
       if (restoreCandidate === null) result.adopted.push(change.path);
     } else {
-      document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
+      try {
+        // A create whose answer was lost is read back by its id: its document is this write only while it holds
+        // the body, compared as an adopted one is, or exactly in the form Linear stores it (a reference link inline).
+        const sameContent = (stored: string, sent: string) => sameAsLinear(stored, sent) || stored === fixText(sent);
+        document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body }, { sameContent });
+      } catch (error) {
+        if (!(error instanceof LinearCreateEditedError)) throw error;
+        // Edited before the read: the text is a person's, not this run's. Like an adopted document that holds
+        // other text, it is left for the next capture, which finds it by its reserved id.
+        for (const { id: superseded } of supersededLinks(error.document.content ?? '')) keptSuperseded.add(superseded);
+        return skip(change.path, 'edited-in-linear');
+      }
       await checkpoint('document-created-before-ids-push');
     }
     stored.set(change.path, { content: document.content ?? '', sent: body, document });

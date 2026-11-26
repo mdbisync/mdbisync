@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { CREATE_ATTEMPTS, LinearClient, LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError } from '../../src/linear/index.ts';
+import { CREATE_ATTEMPTS, LinearClient, LinearCreateEditedError, LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError } from '../../src/linear/index.ts';
 import { FakeLinear, type FakeReply, fakeDocument, rateLimited } from './fake-linear.ts';
 
 const id = '22222222-2222-4222-8222-222222222222';
@@ -118,4 +118,39 @@ test('a read-back that fails outside Linear is thrown as it is, not as the creat
   // A payload the client cannot read is a fault of its own, not a lost create.
   fake.operations.set('GetDocuments', () => ({ body: { data: { documents: { nodes: [null] } } } }));
   await assert.rejects(linear.createDocument(place, { id, title: 'Plans', content: 'Body' }), TypeError);
+});
+
+/** A world whose create is applied and its answer lost, and in which the document holds `content` when it is read back. */
+async function readBackHolding(t: Parameters<typeof world>[0], content: string) {
+  const setup = await world(t, () => ({ apply: true, reply: { reset: true } }));
+  const read = setup.fake.operations.get('GetDocuments')!;
+  setup.fake.operations.set('GetDocuments', (request) => {
+    setup.documents.set(id, fakeDocument(id, { title: 'Plans', content, project: { id: place.projectId } }));
+    return read(request);
+  });
+  return setup;
+}
+
+test('a lost create whose document was edited before the read-back is not returned as the create', async (t) => {
+  // A person edits the new document between the lost answer and the read.
+  const { linear, sent } = await readBackHolding(t, 'Body\n\nTyped in Linear.');
+  const error = await linear.createDocument(place, { id, title: 'Plans', content: 'Body' }).then(
+    () => assert.fail('the edited document was returned as the create'),
+    (rejection: unknown) => rejection,
+  );
+  assert.ok(error instanceof LinearCreateEditedError);
+  assert.equal(error.document.id, id);
+  assert.doesNotMatch(error.message, /Typed in Linear/, 'the error names no content');
+  assert.equal(sent('CreateDocument').length, 1, 'not sent again: the id is taken');
+  // The create was applied: it counts as this run's write.
+  assert.equal(linear.stats.writes.get('CreateDocument'), 1);
+});
+
+test("a lost create's document holding the content in Linear's own form is the create", async (t) => {
+  const exact = await readBackHolding(t, 'Body\n');
+  await assert.rejects(exact.linear.createDocument(place, { id, title: 'Plans', content: 'Body' }), LinearCreateEditedError, 'exact equality without sameContent');
+  const { linear } = await readBackHolding(t, 'Body\n');
+  const sameContent = (stored: string, sent: string) => stored.trimEnd() === sent;
+  const created = await linear.createDocument(place, { id, title: 'Plans', content: 'Body' }, { sameContent });
+  assert.equal(created.content, 'Body\n');
 });

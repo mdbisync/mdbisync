@@ -17,6 +17,7 @@ import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { INPUT_NAMES, environmentName } from '../run/inputs.ts';
+import { fixText } from '../format/index.ts';
 import { CREATE_ATTEMPTS } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { Git } from '../state/index.ts';
@@ -76,6 +77,8 @@ interface Faults {
   hideFaultedCreate?: boolean;
   /** Refuse every write of this document id, as Linear does with an input it will not take. */
   rejectId?: string;
+  /** Run `change` on the fake Linear once, just before it answers the first read of exactly the id of a create that got `writeError`. */
+  beforeFaultedCreateRead?: (id: string) => void;
   /** Answer the `occurrence`-th request of `operation` with this status; with `ids`, only a request for exactly those ids. */
   onOperation?: { operation: string; occurrence: number; status: number; ids?: readonly string[]; code?: string };
   /** Run `change` on the fake Linear once, just before it answers the `occurrence`-th request of `operation` for exactly `ids`. */
@@ -126,7 +129,13 @@ function faultyFetch(world: FakeWorld) {
     const occurrence = (state.seen.get(operationName) ?? 0) + (counted ? 1 : 0);
     state.seen.set(operationName, occurrence);
 
-    if (state.faults.hideFaultedCreate === true && operationName === 'GetDocuments' && asked?.length === 1 && state.faultedCreates.has(asked[0] as string)) {
+    const readsFaultedCreate = operationName === 'GetDocuments' && asked?.length === 1 && state.faultedCreates.has(asked[0] as string);
+    const { beforeFaultedCreateRead } = state.faults;
+    if (readsFaultedCreate && beforeFaultedCreateRead !== undefined) {
+      delete state.faults.beforeFaultedCreateRead;
+      beforeFaultedCreateRead(asked?.[0] as string);
+    }
+    if (state.faults.hideFaultedCreate === true && readsFaultedCreate) {
       log(500, true);
       return new Response(JSON.stringify({ errors: [{ message: 'injected', extensions: { code: 'INTERNAL_SERVER_ERROR' } }] }), { status: 500, headers: { 'content-type': 'application/json', ...LIMIT_HEADERS } });
     }
@@ -478,6 +487,61 @@ describe('sync: rate limits and transport faults', () => {
       await assertNextRunConverges();
     });
   }
+
+  it("a lost create read back in Linear's own form is recovered in the same run, not taken as an edit", async () => {
+    const path = 'combined/new.md';
+    // Like Linear: a reference link is stored inline.
+    world.linear.store = (content) => fixText(content);
+    await commit({ [path]: `# New\n\nA new page. See [the site][s].\n\n[s]: https://example.com\n\n${CANARY}\n` });
+    transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' });
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.report.sync?.created, [path]);
+    assert.deepEqual(run.report.sync?.skipped, []);
+    const [created] = withNewPage();
+    assert.equal(withNewPage().length, 1, 'created once');
+    assert.equal(await idOf(path), created?.id);
+  });
+
+  it('a lost create whose document a person edits before it is read back is not recorded as written; the next run takes the edit in', async () => {
+    const path = 'combined/new.md';
+    await commit({ [path]: `# New\n\nA new page. ${CANARY}` });
+    transport.arm({
+      writeError: 'reset-after',
+      writeErrorOn: 'CreateDocument',
+      beforeFaultedCreateRead: (id) => {
+        const document = world.linear.documents.find((d) => d.id === id) as FakeDocument;
+        document.content = `${document.content ?? ''}\n\nTyped in Linear.`;
+        touch(document);
+      },
+    });
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.report.sync?.created, []);
+    assert.deepEqual(run.report.sync?.skipped, [{ path, reason: 'edited-in-linear' }]);
+    const [created] = withNewPage();
+    assert.ok(created !== undefined);
+    assert.equal(withNewPage().length, 1, 'created once');
+    assert.match(created.content ?? '', /Typed in Linear\./);
+    const creates = transport.exchanges.filter((exchange) => exchange.operation === 'CreateDocument');
+    assert.equal(creates.length, 1, 'a create Linear applied is read back, not sent again');
+    // Not recorded as this run's write: no id and no record of the file; the id stays reserved for the path.
+    assert.equal((await ids())[path], undefined);
+    assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/mdbisync/linear:${path}`], { okCodes: [0, 128] })).code, 128);
+    assert.equal(JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json'))[path], created.id);
+
+    transport.clear();
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.equal(await idOf(path), created.id, 'the document keeps the id of the lost create');
+    // The capture takes the edit in as a change of Linear's, merged with git's file: both versions are kept, the conflict shown.
+    assert.deepEqual(next.report.sync?.conflicts, [path]);
+    for (const text of [await recorded(path), created.content ?? '']) {
+      assert.match(text, /Typed in Linear\./);
+      assert.match(text, /Sync conflict: git version/);
+    }
+    assert.equal(withNewPage().length, 1, 'created once');
+  });
 
   it('L5-10: a document Linear rejects is named; the others are written; the run exits partial', async () => {
     await editAll(3, 'Second text.');
