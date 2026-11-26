@@ -20,6 +20,7 @@ export { type CommitIdentity, type CommitSpec, NEUTRAL_IDENTITY, type TreeEntry,
 export {
   type CommitStateOptions,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
+  INITIAL_SYNC_FROM_LINEAR_TITLE,
   INITIAL_SYNC_PROGRESS,
   initialPullRequestPending,
   pendingInitialRecord,

@@ -48,6 +48,7 @@ import {
   type StateSnapshot,
   type UploadMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
+  INITIAL_SYNC_FROM_LINEAR_TITLE,
   NEUTRAL_IDENTITY,
   branchRef,
   GitLfsMissingError,
@@ -77,7 +78,9 @@ import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync, touchedTitles } from './plan.ts';
+import { readPlainLinkProvenance } from './provenance.ts';
 import { readPlanSources } from './run.ts';
+import { destinations, resolveTarget } from './uploads.ts';
 import { createPendingProjects } from '../setup/linear.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
@@ -91,7 +94,7 @@ import { type RecordCode, type RecordLeftOutRule, type TitleLeftOutRule } from '
  */
 export const REVERSE_RECORD_MESSAGE = INITIAL_SYNC_FROM_LINEAR_RECORD;
 
-export const PULL_REQUEST_TITLE = 'Initial sync from Linear';
+export const PULL_REQUEST_TITLE = INITIAL_SYNC_FROM_LINEAR_TITLE;
 
 /** Why a confirmed run leaves out a planned file once its text is known (`ReverseResult.leftOutAtRecord`). */
 export { RECORD_LEFT_OUT_RULES, type RecordLeftOutRule } from '../codes.ts';
@@ -403,6 +406,10 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
   };
   const treePaths = new Set((await listTree(git, fetched.tracked)).map((entry) => entry.path));
   const plan = planLinearToGit({ ...input, treePaths });
+  // Which links came from Linear (a Linear member's path image, repaired into a plain link), rebuilt by document
+  // identity as the initial sync from git does, before the progress commits replace the ids. The record keeps
+  // them, so no later write uploads such a file.
+  const provenance = await readPlainLinkProvenance(git, fetched.state, fetched.tracked, { create: [], overwrite: [...plan.overwrite, ...plan.create] }, { progressKnown: false });
 
   const expected: StateSnapshot = { ...fetched.state };
   const resumed = (await readInitialSyncProgress(git, expected.ids)) !== null;
@@ -617,7 +624,11 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
         readableContents.set(entry.path, readable);
         if (linksLinearDocuments(readable)) needsLinkBase = true;
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
-        const captured = await download(entry.path, restoreBody(transforms, entry.path, readable, readable, input.mapping.files), uploads, trackedBody);
+        // An upload is never bound to a file a Linear member linked, as in the capture; with the document's
+        // provenance lost, any file a plain link of its Linear text names may be one.
+        const plain = new Set(provenance.plainFiles.get(entry.path));
+        if (provenance.unknown.has(entry.path)) for (const target of pathLinks(entry.path, readable)) plain.add(target);
+        const captured = await download(entry.path, restoreBody(transforms, entry.path, readable, readable, input.mapping.files), uploads, trackedBody, entry.path, plain);
         // Initial import records only observations and writes nothing to Linear.
         // Defer a repair to the next ordinary capture, whose PR also records its provenance.
         if (captured.observedBody !== undefined) { imageBlocked.push(entry.path); continue; }
@@ -721,6 +732,8 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     const same = (a: FileContent | null, b: FileContent | null) =>
       a === null || b === null ? a === b : contentBytes(a).equals(contentBytes(b));
     let commit: Oid;
+    /** The plain-link targets of each file the record holds, by path, as the last build recorded them. */
+    let recordedPlain = new Map<string, string[]>();
     try {
       await screen();
       // The stage step stops here: the reads it kept end, and the rest of the run reads Linear itself.
@@ -771,6 +784,33 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     }
 
     async function build(list: readonly ReverseEntry[]): Promise<Oid> {
+      // The record carries the plain links' provenance, as the capture's and the initial sync from git's do.
+      recordedPlain = new Map();
+      const held = [
+        ...list.map((entry) => ({ path: entry.path, id: entry.documentId, kept: false })),
+        ...[...keptTracked].map((path) => ({ path, id: documentOf.get(path) as string, kept: true })),
+      ];
+      for (const { path, kept } of held) {
+        const plain = new Set(provenance.plainFiles.get(path));
+        // A document whose provenance is lost may hold a Linear member's link the state no longer names: a link
+        // Linear's text holds as a repository path. A file that keeps its tracked text records only those the
+        // tracked text holds too, so nothing of a text the run did not admit reaches the record.
+        if (provenance.unknown.has(path)) {
+          try {
+            const linear = pathLinks(path, readableContents.get(path) ?? '');
+            const tracked = kept ? new Set(pathLinks(path, splitFile(input.texts.get(path) ?? '').body)) : undefined;
+            for (const target of linear) if (tracked === undefined || tracked.has(target)) plain.add(target);
+          } catch (error) {
+            // A text past the Markdown limits: no write parses it to upload a link either.
+            if (!(error instanceof MarkdownLimitError)) throw error;
+          }
+        }
+        if (plain.size > 0) recordedPlain.set(path, [...plain].sort(compare));
+      }
+      const plainTrailers = held
+        .flatMap(({ path, id }) => (recordedPlain.get(path) ?? []).map((target) => `Plain-link: ${encodeURIComponent(id)} ${encodeURIComponent(target)}`))
+        .sort(compare);
+      const recordMessage = REVERSE_RECORD_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
       const changes = new Map<string, FileContent | null>();
       for (const entry of list) {
         for (const [path, bytes] of (bodies.get(entry.path) as { files: Map<string, FileContent> }).files) changes.set(path, bytes);
@@ -790,7 +830,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
             .filter((oid): oid is string => oid !== undefined),
         ),
       ];
-      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
+      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     }
 
     const trees = (await git.text(['show', '-s', '--format=%T', commit, fetched.tracked])).split('\n');
@@ -815,6 +855,10 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     for (const {path, documentId} of entries) {
       const document = documents.get(documentId)!;
       finalIds.set(path, {...finalIds.get(path)!, observedDigest: observedDigest(document)});
+    }
+    for (const [path, entry] of finalIds) {
+      const plainFiles = recordedPlain.get(path);
+      if (plainFiles !== undefined) finalIds.set(path, { ...entry, plainFiles });
     }
     // A new document left out has no id: the capture reads every such document on every run, whatever the cursor.
     const through = captureCursor([...keptTracked].map((path) => documentOf.get(path) as string));
@@ -889,6 +933,18 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     const [subject, email, parents] = (await showCommit(git, '%s%n%ae%n%P', oid)).split('\n');
     return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? '').split(' ').filter(Boolean).length === 1;
   }
+}
+
+/**
+ * The repository paths the non-image links of a document's body name, also ones the tree does not hold now (the
+ * file may come back): the links a Linear member may have written, when the state no longer says. An upload is
+ * held in Linear's text as its URL, so it is never one.
+ */
+function pathLinks(path: string, body: string): string[] {
+  return destinations(body).flatMap(({ node }) => {
+    const target = node.type === 'image' ? null : resolveTarget(path, node.url);
+    return target === null ? [] : [target];
+  });
 }
 
 /** Paths whose file the mapping of the new tree does not give the entry's title and place. */

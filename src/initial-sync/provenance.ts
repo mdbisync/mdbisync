@@ -1,5 +1,5 @@
 // Which repository-file links of a document came from Linear, for an
-// initial sync from git that rebuilds the state (the recovery path).
+// initial sync that rebuilds the state, from git (the recovery path) or from Linear.
 //
 // Capture turns an image a Linear member wrote with a repository path into a
 // plain link and records its target as a plain file of that document: such a
@@ -9,12 +9,11 @@
 // in the ids it records.
 
 import { posix } from 'node:path';
-import { type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_PROGRESS, readIds } from '../state/index.ts';
+import { type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, INITIAL_SYNC_PROGRESS, readIds } from '../state/index.ts';
 import { readPlainFileProvenance } from '../sync/pull-repairs.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from '../sync/write.ts';
 import { SYNC_PULL_REQUEST_TITLE } from '../sync/pull-request.ts';
 import { CAPTURE_MESSAGE } from '../sync/capture.ts';
-import { type InitialSyncPlan } from './plan.ts';
 
 /**
  * The trailer of an initial sync's record that names a document it left out
@@ -23,6 +22,12 @@ import { type InitialSyncPlan } from './plan.ts';
  */
 export function provenanceUnknownTrailer(id: string): string {
   return `Provenance-unknown: ${encodeURIComponent(id)}`;
+}
+
+/** The documents a run writes: their paths, and the document each existing file is matched to. */
+export interface ProvenancePlan {
+  create: ReadonlyArray<{ path: string }>;
+  overwrite: ReadonlyArray<{ path: string; documentId: string }>;
 }
 
 export interface PlainLinkProvenance {
@@ -44,9 +49,10 @@ export interface PlainLinkProvenance {
  * unfinished initial sync's progress commits), the `Plain-link:` trailers of
  * the `linear` ref's first-parent history, and those the tracked branch took
  * in. A trailer only ever withholds an upload, so reading the tracked
- * branch's whole history cannot grant one.
+ * branch's whole history cannot grant one. Unless `progressKnown` is false,
+ * a document an unfinished initial sync's progress commits name is known.
  */
-export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapshot, 'ids' | 'linear'>, tracked: Oid, plan: InitialSyncPlan): Promise<PlainLinkProvenance> {
+export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapshot, 'ids' | 'linear'>, tracked: Oid, plan: ProvenancePlan, options: { progressKnown?: boolean } = {}): Promise<PlainLinkProvenance> {
   const entries: IdMap[] = [await readIds(git, state.ids)];
   const before = await idsBeforeProgress(git, state.ids);
   if (before !== null && before !== state.ids) entries.push(await readIds(git, before));
@@ -101,7 +107,9 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
   // With `linear` present, its trailers and the ids are the whole record. Without it, an ids entry still is for
   // its document; any other document Linear holds may carry a Linear member's link the state no longer names.
   const unknown = new Set<string>();
-  const known = new Set(entries.flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
+  // The progress commits of an initial sync from git name only documents it wrote from git text; those of one from
+  // Linear name every document before any provenance is read (`progressKnown: false`).
+  const known = new Set((options.progressKnown === false ? [started] : entries).flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
   const unproven = plan.overwrite.filter((entry) => !known.has(entry.documentId));
   if (unproven.length > 0) {
     const marked = state.linear === null ? new Set<string>() : await readProvenanceUnknown(git, state.linear);
@@ -137,12 +145,13 @@ async function readProvenanceUnknown(git: Git, linear: Oid): Promise<Set<string>
 
 /**
  * Whether the tracked branch has taken in text from Linear: a capture, a
- * sync's record, an initial sync from Linear, or the sync's pull request
- * merged by squash. A repository that never synced has none, so its first
- * initial sync uploads every repository-file link as before.
+ * sync's record, an initial sync from Linear, or the pull request of the
+ * sync or of an initial sync from Linear merged by squash. A repository that
+ * never synced has none, so its first initial sync uploads every
+ * repository-file link as before.
  */
 async function tookInLinear(git: Git, tracked: Oid): Promise<boolean> {
-  const subjects = new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, SYNC_PULL_REQUEST_TITLE]);
+  const subjects = new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE]);
   // Subjects only, so a commit that merely quotes one in its body does not count; a squash merge adds ` (#<n>)`.
   const log = await git.text(['log', '--format=%s', '--fixed-strings', ...[...subjects].map((subject) => `--grep=${subject}`), tracked]);
   return log.split('\n').some((subject) => subjects.has(subject.replace(/ \(#\d+\)$/, '')));

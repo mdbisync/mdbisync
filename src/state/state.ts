@@ -454,6 +454,8 @@ export async function readInitialSyncProgress(git: Git, commit: Oid | null): Pro
  * files; the sync does not run until it is merged.
  */
 export const INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear's state";
+/** The title of an initial sync from Linear's pull request, and the subject of its squash merge (with ` (#<n>)`). */
+export const INITIAL_SYNC_FROM_LINEAR_TITLE = 'Initial sync from Linear';
 
 /**
  * Whether `commit` is `of` or one of its ancestors, as

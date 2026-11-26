@@ -95,6 +95,16 @@ What it writes to git:
   that document again, marks it red and comments which images to fix;
 - a link to another synchronized document's Linear URL becomes a relative
   link to that document's file;
+- a plain link that came from Linear (a Linear member's image of a repository
+  path, which the sync turned into a link) stays a link that never uploads the
+  file, as in the [initial sync from git](initial-sync-git-to-linear.md).
+  When the state cannot say where a document's links came from (the `linear`
+  state ref is lost, the tracked branch took in Linear's text before and the
+  `ids` state ref does not name the document, or an earlier recovery found its
+  provenance unknown), a plain link that Linear's text holds as a repository
+  path counts as a Linear member's: its file is never uploaded from that
+  document. Links Linear holds as uploads are not affected. Write the link as
+  an image to share the file;
 - state refs (under `refs/mdbisync/` by default) that tie each file to its
   document, and
   the sync branch (`mdbisync/linear` by default) with one commit on top of the

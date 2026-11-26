@@ -1,18 +1,19 @@
-// An initial sync from git that rebuilds the state keeps the provenance of
-// plain links that came from Linear: a repository path a Linear member wrote
-// as an image, repaired into a plain link, never uploads the file.
+// An initial sync that rebuilds the state, from git or from Linear, keeps the
+// provenance of plain links that came from Linear: a repository path a Linear
+// member wrote as an image, repaired into a plain link, never uploads the file.
 
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { pullRequestHarness } from '../sync/pull-request-test-helpers.ts';
+import { mergeOnGitHub } from '../state/test-helpers.ts';
 
 const PLAN = 'eng/notes/plan.md';
 const ITEM = 'eng/notes/item-0.md';
 const SECRET = 'records.csv';
 const PUBLIC = 'public.csv';
 
-describe('initial sync from git keeps plain-link provenance', () => {
+describe('an initial sync keeps plain-link provenance', () => {
   const h = pullRequestHarness();
 
   /** A Linear member's image of a repository file, repaired into a plain link and merged; a repository-authored plain link beside it. */
@@ -47,6 +48,128 @@ describe('initial sync from git keeps plain-link provenance', () => {
     await h.settle();
     assert.ok(!h.world.linear.uploads.some((upload) => upload.filename === SECRET), 'a sync after recovery uploaded the file');
   }
+
+  /** An initial sync from Linear, its pull request merged when it opened one. */
+  async function initialSyncFromLinear() {
+    const run = await h.cli('initial-sync', { MDBISYNC_DIRECTION: 'linear-to-git', MDBISYNC_CONFIRM: 'true' });
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.linearToGit?.complete, true, JSON.stringify(run.report.linearToGit));
+    for (const pr of h.world.github.pullRequests.filter((pr) => pr.state === 'open' && pr.head === 'mdbisync/linear')) {
+      const head = await h.fixture.remote.text(['rev-parse', `refs/heads/${pr.head}`]);
+      assert.ok('sha' in await mergeOnGitHub(h.fixture, pr, head.trim()));
+      Object.assign(pr, { state: 'closed', merged: true });
+    }
+    h.start = (await h.fixture.remote.text(['rev-parse', 'refs/heads/main'])).trim();
+  }
+
+  /** A later change in git to the document and to the file it links: neither uploads the file. */
+  async function assertNoUploadAfterGitChanges() {
+    await h.settle();
+    await h.gitEdit(PLAN, `${await h.show(`refs/heads/main:${PLAN}`)}\nA repository edit.\n`);
+    await h.settle();
+    await h.gitEdit(SECRET, 'name,value\nExample,43\n');
+    await h.settle();
+    await h.gitEdit(PLAN, `${await h.show(`refs/heads/main:${PLAN}`)}\nAnother repository edit.\n`);
+    await h.settle();
+    await h.gitEdit(ITEM, `${await h.show(`refs/heads/main:${ITEM}`)}\nA repository edit.\n`);
+    await h.settle();
+    assert.ok(!h.world.linear.uploads.some((upload) => upload.filename === SECRET), 'a sync after the initial sync from Linear uploaded the file');
+    assert.doesNotMatch((await h.documentOf(PLAN)).content!, /uploads\.linear\.app/);
+  }
+
+  /** The ids and the record of the initial sync from Linear name the plain link. */
+  async function assertRecordedByLinearToGit() {
+    const ids = await h.ids() as Record<string, { id: string; plainFiles?: string[] }>;
+    assert.deepEqual(ids[PLAN]?.plainFiles, [SECRET]);
+    const record = await h.fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/linear']);
+    assert.match(record, /^Initial sync from Linear/);
+    assert.match(record, new RegExp(`^Plain-link: ${ids[PLAN]!.id} ${SECRET}$`, 'm'));
+  }
+
+  it('through an initial sync from Linear and later changes in git', async () => {
+    await repairedLink();
+    await initialSyncFromLinear();
+    await assertRecordedByLinearToGit();
+    // A repository-authored link has no provenance to keep.
+    assert.equal((await h.ids() as Record<string, { plainFiles?: string[] }>)[ITEM]?.plainFiles, undefined);
+    await assertNoUploadAfterGitChanges();
+  });
+
+  it('through an initial sync from Linear with the ids ref deleted', async () => {
+    await repairedLink();
+    await deleteRef('ids');
+    await initialSyncFromLinear();
+    await assertRecordedByLinearToGit();
+    await assertNoUploadAfterGitChanges();
+  });
+
+  /**
+   * With every state ref deleted, a Linear member's plain link to a repository file in a document's Linear text
+   * and in its tracked text that no trailer names (a capture merged by squash): the run cannot tell it from yours.
+   */
+  async function unrecordedLink() {
+    const item = await h.documentOf(ITEM);
+    for (const name of ['ids', 'uploads', 'linear']) await deleteRef(name);
+    item.content = `${item.content}\n[Records](<../../${SECRET}>)\n`;
+    await h.editRef('refs/heads/main', ITEM, `${await h.show(`refs/heads/main:${ITEM}`)}\n[Records](../../${SECRET})\n`);
+  }
+
+  /**
+   * The document of unknown provenance keeps the member's link plain and its own link as it was; later changes
+   * in git to the document and the file upload nothing. The capture holds the document until the member's link is
+   * repaired, so the runs are counted rather than settled.
+   */
+  async function assertUnknownKeptPlain(ownLink = true) {
+    const ids = await h.ids() as Record<string, { id: string; plainFiles?: string[] }>;
+    assert.deepEqual(ids[ITEM]?.plainFiles, [SECRET]);
+    // The link written in git, which Linear holds as an upload, keeps its path and stays uploadable.
+    if (ownLink) assert.match(await h.show(`refs/mdbisync/linear:${ITEM}`), /\]\(<?\.\.\/\.\.\/public\.csv>?\)/);
+    assert.match(await h.fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/linear']), new RegExp(`^Plain-link: ${ids[ITEM]!.id} ${SECRET}$`, 'm'));
+    await h.gitEdit(ITEM, `${await h.show(`refs/heads/main:${ITEM}`)}\nA repository edit.\n`);
+    await h.gitEdit(SECRET, 'name,value\nExample,43\n');
+    for (let run = 0; run < 3; run += 1) assert.equal((await h.sync()).result.exitCode, 0);
+    assert.ok(!h.world.linear.uploads.some((upload) => upload.filename === SECRET), 'a sync after the initial sync from Linear uploaded the file');
+  }
+
+  it('through an initial sync from Linear with every state ref deleted: a document of unknown provenance keeps its plain links plain', async () => {
+    await repairedLink();
+    await unrecordedLink();
+    await initialSyncFromLinear();
+    await assertRecordedByLinearToGit();
+    await assertUnknownKeptPlain();
+  });
+
+  it('through an initial sync from Linear after an earlier one merged by squash, with every state ref deleted', async () => {
+    // The squash merge kept Linear's text, with a Linear member's link, but not its record's trailers.
+    await h.editRef('refs/heads/main', SECRET, 'name,value\nExample,42\n');
+    const link = `[Records](../../${SECRET})`;
+    await h.editRef('refs/heads/main', ITEM, `${await h.show(`refs/heads/main:${ITEM}`)}\n${link}\n`, 'Initial sync from Linear (#7)');
+    const item = await h.documentOf(ITEM);
+    for (const name of ['ids', 'uploads', 'linear']) await deleteRef(name);
+    item.content = `${item.content}\n[Records](<../../${SECRET}>)\n`;
+    await initialSyncFromLinear();
+    await assertUnknownKeptPlain(false);
+  });
+
+  it('through an initial sync from Linear with every state ref deleted, stopped after the document and resumed', async () => {
+    await repairedLink();
+    await unrecordedLink();
+    // The first run stops before the last document, with the item's id in its progress commit.
+    const listed = h.world.linear.documents.filter((document) => document.trashed !== true && document.archivedAt === undefined).length;
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(h.fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: String(listed - 1) };
+    Object.assign(process.env, hooks);
+    try {
+      const stopped = await h.cli('initial-sync', { MDBISYNC_DIRECTION: 'linear-to-git', MDBISYNC_CONFIRM: 'true' });
+      assert.equal(stopped.report.linearToGit?.complete, false, JSON.stringify(stopped.report.linearToGit));
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    const progress = await h.ids() as Record<string, { id: string }>;
+    assert.ok(progress[ITEM] !== undefined, JSON.stringify(Object.keys(progress)));
+    await initialSyncFromLinear();
+    await assertRecordedByLinearToGit();
+    await assertUnknownKeptPlain();
+  });
 
   it('in a normal confirmed run', async () => {
     await repairedLink();
@@ -114,6 +237,26 @@ describe('initial sync from git keeps plain-link provenance', () => {
     assert.deepEqual(fixed.report.initialSync?.leftOutAtWrite, []);
     assert.equal(h.world.linear.uploads.length, before + 1);
     assert.match((await h.documentOf(ITEM)).content!, /uploads\.linear\.app/);
+  });
+
+  it('with every state ref deleted, stopped after creating a document from git and resumed: the created document stays known', async () => {
+    await repairedLink();
+    const NEW = 'combined/new.md';
+    await h.editRef('refs/heads/main', NEW, '# New\n\n[Shared data](../public.csv)\n');
+    for (const name of ['ids', 'uploads', 'linear']) await deleteRef(name);
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(h.fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '1' };
+    Object.assign(process.env, hooks);
+    try {
+      assert.equal((await initialSync()).report.initialSync?.complete, false);
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    assert.ok((await h.ids() as Record<string, unknown>)[NEW] !== undefined, 'the stopped run did not create the document');
+    const resumed = await initialSync();
+    assert.equal(resumed.result.exitCode, 0, resumed.result.stderr);
+    assert.equal(resumed.report.resumed, true);
+    assert.ok(!(resumed.report.initialSync?.leftOutAtWrite ?? []).some(({ path }) => path === NEW), JSON.stringify(resumed.report.initialSync?.leftOutAtWrite));
+    assert.ok((await h.ids() as Record<string, unknown>)[NEW] !== undefined);
   });
 
   it('with the ids ref deleted and the document renamed in Linear, so the run creates it anew', async () => {
