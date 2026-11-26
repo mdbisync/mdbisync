@@ -824,8 +824,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      // Only a suspended document needs the version of its reading: noting it on every entry would rewrite them all.
-      const entry = {...old?.entry, id, observedDigest: observedDigest(candidate.doc), ...(old?.entry.suspended === undefined ? {} : {capturedWith: VERSION})};
+      // Only a suspended document needs the version of its reading: noting it on every entry would rewrite them all. One
+      // that reads as the tracked file keeps the older version until the lane takes that file (`rereadAsTracked`): the
+      // lane notes the version with its push, so a run that stops before it reads the document again.
+      const entry = {...old?.entry, id, observedDigest: observedDigest(candidate.doc), ...(old?.entry.suspended === undefined || converged ? {} : {capturedWith: VERSION})};
       delete entry.pullRewrite;
       const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;

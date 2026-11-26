@@ -320,6 +320,9 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       const converged = outside === undefined ? new Set<string>()
         : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path) => !outside.has(path))), reread);
       const selected = await takePaths(git, await takePaths(git, head, tree, paths), tracked, converged);
+      // The reading is the running version's now: the version is noted with this lane's push, never before it, and only
+      // where the lane could tell whether it converged (it knows the sync's last push).
+      if (outside !== undefined) for (const path of reread) { const entry = ids.get(path); if (entry !== undefined) entry.capturedWith = VERSION; }
       if (linearChanged || selected !== await git.revParse(`${head}^{tree}`)) {
         head = await commit(context, options, selected, intake === linear ? [head] : [head, intake], LINEAR_INTAKE_MESSAGE + note(tracked, linear, intake));
         bases.linear = linear;

@@ -101,6 +101,10 @@ describe('sync: a suspended lane an older version captured', () => {
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     assert.equal(await show(`refs/mdbisync/linear:${path}`), tracked, 'the record does not change');
     assert.equal(await show(`${SUSPENDED}:${path}`), tracked, "the lane takes the tracked branch's file");
+    const ids = JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, Record<string, unknown>>;
+    assert.equal(ids[path]?.capturedWith, VERSION, "the lane's push notes the running version");
+    const quiet = await sync();
+    assert.deepEqual(quiet.report.capture?.changed, [], 'read once');
     checksOn(await rev(SUSPENDED), PASSED);
     const released = await sync();
     assert.ok(released.report.pullRequest?.suspended?.released);
