@@ -2,7 +2,7 @@
   "name": "mdbisync",
   "version": "0.0.0",
   "private": true,
-  "description": "Two-way sync of Linear documents and Markdown files in your repo. Your GitHub App, your keys.",
+  "description": "Two-way sync of Linear documents and Markdown files in your repo. Secure by design: only you hold the keys.",
   "license": "MIT",
   "type": "module",
   "engines": {
