@@ -347,6 +347,8 @@ export interface CommitSpec {
   skipIfUnchanged?: boolean;
   /** Gives the message to commit in place of `message`, from the tree and parents the commit gets: a signed one. */
   sign?: (tree: Oid, parents: readonly Oid[], message: string) => string;
+  /** Author and committer date in a form git reads (`@<seconds> <offset>`); the current time when absent. */
+  date?: string;
 }
 
 /** Builds a tree from `base` plus `changes` and commits it. Returns the commit id. */
@@ -374,6 +376,7 @@ export async function commitTree(git: Git, spec: CommitSpec): Promise<Oid> {
       GIT_AUTHOR_EMAIL: spec.identity.email,
       GIT_COMMITTER_NAME: spec.identity.name,
       GIT_COMMITTER_EMAIL: spec.identity.email,
+      ...(spec.date === undefined ? {} : { GIT_AUTHOR_DATE: spec.date, GIT_COMMITTER_DATE: spec.date }),
     },
   });
 }

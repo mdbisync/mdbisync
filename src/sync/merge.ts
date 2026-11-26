@@ -130,7 +130,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
   const frozen = new Set([...ids].flatMap(([path, entry]) => entry.suspended === undefined ? [] : [path, ...entry.suspended.paths]));
   const released = [...ids].filter(([, entry]) => entry.releaseBase !== undefined);
   if (frozen.size > 0 || released.length > 0) {
-    mergeBase ??= await git.text(['merge-base', linear, tracked]);
+    mergeBase ??= await mergeBaseOf(git, linear, tracked);
     let baseTree = mergeBase;
     const releaseGroups = new Map<Oid, Set<string>>();
     for (const [path, entry] of released) {
@@ -317,7 +317,7 @@ export interface MarkedMerge {
  * only.
  */
 export async function mergeWithMarkers(git: Git, linearSide: Oid, gitSide: Oid, ids: IdMap, knownId?: MergeOptions['knownId'], explicitBase?: Oid, echo = false): Promise<MarkedMerge> {
-  const base = explicitBase ?? await git.text(['merge-base', linearSide, gitSide]);
+  const base = explicitBase ?? await mergeBaseOf(git, linearSide, gitSide);
   const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ...(explicitBase === undefined ? [] : [`--merge-base=${explicitBase}`]), linearSide, gitSide], { okCodes: [0, 1] });
   const [gitTree, ...rest] = merged.stdout.toString('utf8').split('\0');
   if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message('sync.no-merge-tree'));
@@ -672,11 +672,19 @@ function echoedConflicts(git: Git, linear: Oid): (base: TreeEntry, tracked: Tree
     if (previous === undefined || recordGit?.oid !== base.oid) return null;
     const previousText = await textOf(previous);
     if (detectConflicts(previousText).length > 0) return null;
-    const merged = await git.run(['merge-base', parent, second], { okCodes: [0, 1] });
-    if (merged.code !== 0) return null;
-    const older = await entryAt(merged.stdout.toString('utf8').trim(), path);
-    const olderText = older === undefined ? '' : await textOf(older);
-    if ((await mergeMarkdown(olderText, baseText, previousText)).text !== linearText) return null;
+    const bases = lines((await git.run(['merge-base', '--all', parent, second], { okCodes: [0, 1] })).stdout.toString('utf8'));
+    if (bases.length === 0) return null;
+    // The record was merged from git's merged base, or, written by a version before that, from the first base alone.
+    let olderText: string | undefined;
+    for (const candidate of new Set([await mergedBases(git, bases), bases[0] as Oid])) {
+      const older = await entryAt(candidate, path);
+      const text = older === undefined ? '' : await textOf(older);
+      if ((await mergeMarkdown(text, baseText, previousText)).text === linearText) {
+        olderText = text;
+        break;
+      }
+    }
+    if (olderText === undefined) return null;
     const result = (await mergeMarkdown(olderText, trackedText, previousText)).text;
     if ((await mergeMarkdown(baseText, trackedText, result)).text !== result) return null;
     return { base: olderText, linear: previousText };
@@ -743,8 +751,83 @@ export async function takePaths(git: Git, into: Oid, from: Oid, paths: ReadonlyS
 }
 
 /** A content-only side for a merge; never pushed or used as a real lane parent. */
-export function treeCommit(git: Git, tree: Oid, parent: Oid): Promise<Oid> {
-  return commitTree(git, { base: tree, changes: new Map(), parents: [parent], message: 'Merge input', identity: NEUTRAL_IDENTITY });
+export async function treeCommit(git: Git, tree: Oid, parent: Oid): Promise<Oid> {
+  return commitTree(git, { base: tree, changes: new Map(), parents: [parent], message: 'Merge input', identity: NEUTRAL_IDENTITY, date: await newestDate(git, [parent]) });
+}
+
+/**
+ * The base git's merge of `a` and `b` starts from: their merge base, or,
+ * where the history has several (a criss-cross: the same change reached
+ * both sides by different merges), the merge of those bases, built as git
+ * builds its virtual base (each base merged into the ones before it, over
+ * their own merge base; a conflict between them stays in the text). Any
+ * one of several bases may predate a change both sides hold, and that
+ * change then reads as a conflict. The commits it writes take their
+ * parents' newest date, so the same history gives the same base.
+ */
+export async function mergeBaseOf(git: Git, a: Oid, b: Oid): Promise<Oid> {
+  // Without any base, `merge-base` exits 1 and the run stops, as before.
+  return mergedBases(git, lines(await git.text(['merge-base', '--all', a, b])));
+}
+
+/**
+ * `bases` (as `merge-base --all` lists them, at least one) merged into one
+ * commit as git merges them: in reverse order, each over its own merge
+ * base with the ones before, or over an empty tree where they share no
+ * history. Where the bases conflict, a file git could not merge to a new
+ * text (one base deleted it, or a binary) keeps the older base's version,
+ * as git's merge of bases does; a text conflict keeps its markers, of the
+ * usual length where git's are longer.
+ */
+async function mergedBases(git: Git, bases: readonly Oid[]): Promise<Oid> {
+  const [first, ...rest] = [...bases].reverse();
+  let merged = first as Oid;
+  for (const next of rest) {
+    const lower = lines((await git.run(['merge-base', '--all', merged, next], { okCodes: [0, 1] })).stdout.toString('utf8'));
+    const inner = lower.length > 0 ? await mergedBases(git, lower)
+      : await commitTree(git, { base: null, changes: new Map(), parents: [], message: 'Empty merge base', identity: NEUTRAL_IDENTITY, date: await newestDate(git, [merged, next]) });
+    const result = await git.run(['merge-tree', '--write-tree', '--no-messages', '-z', `--merge-base=${inner}`, merged, next], { okCodes: [0, 1] });
+    const [written, ...unmerged] = result.stdout.toString('utf8').split('\0');
+    if (written === undefined || !/^[0-9a-f]{40,64}$/.test(written)) throw new Error(message('sync.no-merge-tree'));
+    const tree = result.code === 0 ? written : await keepOlderVersions(git, written, unmerged);
+    merged = await commitTree(git, { base: tree, changes: new Map(), parents: [merged, next], message: 'Merged merge bases', identity: NEUTRAL_IDENTITY, skipIfUnchanged: false, date: await newestDate(git, [merged, next]) });
+  }
+  return merged;
+}
+
+/**
+ * `tree` with each conflicted path that `merge-tree` left at one side's
+ * version (a delete against an edit, a binary) set back to its base
+ * version. `stages` are merge-tree's `<mode> <oid> <stage>\t<path>` lines.
+ */
+async function keepOlderVersions(git: Git, tree: Oid, stages: readonly string[]): Promise<Oid> {
+  const byPath = new Map<string, Map<string, { mode: string; oid: Oid }>>();
+  for (const line of stages) {
+    const match = /^(\d+) ([0-9a-f]{40,64}) ([123])\t(.+)$/s.exec(line);
+    if (match === null) continue;
+    const [, mode, oid, stage, path] = match as unknown as [string, string, Oid, string, string];
+    byPath.set(path, (byPath.get(path) ?? new Map()).set(stage, { mode, oid }));
+  }
+  const older = [...byPath].filter(([, entries]) => entries.has('1'));
+  if (older.length === 0) return tree;
+  const current = new Map((await listPaths(git, tree, older.map(([path]) => path))).map((entry) => [entry.path, entry.oid]));
+  const back = new Map<string, { mode: string; oid: Oid }>();
+  for (const [path, entries] of older) {
+    const now = current.get(path);
+    // A new text holds the merged lines and markers; anything else is one side's version or nothing.
+    if (now === undefined || now === entries.get('2')?.oid || now === entries.get('3')?.oid) back.set(path, entries.get('1')!);
+  }
+  return back.size === 0 ? tree : placeEntries(git, tree, back);
+}
+
+/** The newest committer date of `commits`, in git's raw form. */
+async function newestDate(git: Git, commits: readonly Oid[]): Promise<string> {
+  const seconds = lines(await git.text(['show', '--no-patch', '--no-show-signature', '--format=%ct', ...commits])).map(Number);
+  return `@${Math.max(...seconds)} +0000`;
+}
+
+function lines(text: string): Oid[] {
+  return text.split('\n').filter(Boolean);
 }
 
 function isReadme(path: string): boolean {
