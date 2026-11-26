@@ -619,6 +619,8 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.match(world.linear.documents.find((d) => d.id === fault.dropped)?.content ?? '', /Typed in Linear\./, 'the edit was overwritten');
     assert.equal(world.linear.documents.filter((d) => d.title === 'backend/notes' && d.trashed !== true).length, 1);
     assert.equal((await readIds())[path], undefined);
+    // Its id stays reserved for the path, as when the run had not stopped: links written to it stay right.
+    assert.equal((JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json')) as Record<string, string>)[path], fault.dropped);
   });
 
   it('a create whose lost answer is read back after a person edited the document is not recorded as written', async () => {

@@ -338,6 +338,8 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
   /** Titles, by place, of an overwrite left out as changed: no document of them is trashed. */
   const skippedTitles = new Set<string>();
+  /** Paths whose document a stopped run created and this resumed run leaves out: their ids stay reserved like a new document's. */
+  const createdBefore = new Set<string>();
   const titleKey = (place: Place, title: string) => `${placeKey(place)}\0${title.normalize('NFC')}`;
   const work: Work[] = [
     ...plan.overwrite.map((entry): Work => ({ kind: 'overwrite', entry })),
@@ -441,6 +443,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         if (document !== undefined && resumed && before?.id === document.id && before.observedDigest === undefined && !writtenBefore.has(path)) {
           result.leftOutAtWrite.push({ path, rule: 'changed-during-run' });
           skippedTitles.add(titleKey(item.entry.place, item.entry.title));
+          createdBefore.add(path);
           continue;
         }
         if (!beforeWriteReached) {
@@ -613,7 +616,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;
 
     // New documents left out while writing keep their chosen ids, which other documents may link to.
-    const created = new Set(plan.create.map((entry) => entry.path));
+    const created = new Set([...plan.create.map((entry) => entry.path), ...createdBefore]);
     const stillReserved = new Map(
       result.leftOutAtWrite.filter(({ path }) => created.has(path)).map(({ path }) => [path, documentIds.get(path) as string]),
     );
