@@ -35,6 +35,8 @@ import { rebuildIds } from './rebuild.ts';
 import { pendingMove, syncedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
+import { VERSION, olderVersion } from '../version.ts';
+import { listPaths } from '../state/objects.ts';
 
 /** The subject of a capture commit on the `linear` ref: Linear members' text entering git. */
 export const CAPTURE_MESSAGE = 'Capture Linear changes';
@@ -312,10 +314,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // A stored repair the sync did not sign (one recorded before repairs were signed, or written into the ref) is
     // never applied: its document is read again, so its repair is recorded anew, signed, or dropped.
     const unsignedRepair = (old: {path: string; entry: IdEntry}) => old.entry.pullRewrite !== undefined && signedRepair(context.pushedKey, old.path, old.entry) === undefined;
+    // A suspended document whose recorded text another version read is read again, though Linear reports no change:
+    // a newer reading can show the document is what git holds, and its lane can then let it go.
+    const readByOtherVersion = (old: {path: string; entry: IdEntry}) => old.entry.suspended !== undefined && olderVersion(old.entry.capturedWith, VERSION);
     let selected = [...listed.values()].filter((doc) => {
       const old = byId.get(doc.id);
       return old === undefined || marked(doc) || (old.entry.observedDigest === undefined && live(doc) && previous.has(old.path) && !excludedPath(old.path))
         || (unsignedRepair(old) && live(doc) && previous.has(old.path))
+        || (readByOtherVersion(old) && live(doc) && previous.has(old.path))
         || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor));
     });
     const invalidZone = (doc: LinearDocument, path: string) => {
@@ -446,6 +452,27 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Links and files are found in that text: a marker escape Linear dropped (`4)     [a](b)`)
     // would otherwise read as a list item holding code, which hides the link.
     const readable = new Map<string, {text: string; previousBody: string | undefined}>();
+    // Such a document is compared with the tracked branch's text: the recorded one is the older reading itself.
+    const reread = new Set([...work.values()].filter((doc) => {
+      const old = byId.get(doc.id);
+      return old !== undefined && live(doc) && readByOtherVersion(old);
+    }).map((doc) => doc.id));
+    const rereadPaths = [...reread].map((id) => byId.get(id)!.path);
+    const trackedBodies = new Map<string, string>();
+    if (rereadPaths.length > 0) {
+      const tracked = (await listPaths(git, fetched.tracked, rereadPaths)).filter((entry) => entry.type === 'blob' && readableBlob(entry));
+      // A tracked file the record holds as it is is read already; the others have a budget of their own, so the
+      // record's own reads keep theirs.
+      const recordedOids = new Map(textEntries.map((entry) => [entry.path, entry.oid]));
+      const unread = tracked.filter((entry) => recordedOids.get(entry.path) !== entry.oid);
+      const blobs = await new MappingBlobBudget().read(git, unread);
+      for (const entry of tracked) {
+        const bytes = recordedOids.get(entry.path) === entry.oid ? previous.get(entry.path)! : blobs.get(entry.oid)!;
+        trackedBodies.set(entry.path, splitFile(bytes.toString('utf8')).body);
+      }
+    }
+    /** Whether a reading of a document read again is what the tracked branch holds there. */
+    const readsAsTracked = (path: string, text: string) => trackedBodies.has(path) && trackedBodies.get(path)!.replace(/\n+$/, '') === splitFile(text).body.replace(/\n+$/, '');
     for (const doc of work.values()) {
       if (!live(doc)) continue;
       try {
@@ -453,7 +480,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         checkImageRepairSize(doc.content ?? '');
         const old = byId.get(doc.id);
         // An over-limit legacy body is not evidence for links or equality.
-        const previousBody = old === undefined ? undefined : markdownBaseline(splitFile(previous.get(old.path)?.toString('utf8') ?? '').body);
+        // A document read again has the tracked branch's text as its baseline, or none: never its older reading.
+        const recordedBody = old === undefined ? undefined : reread.has(doc.id) ? trackedBodies.get(old.path) : splitFile(previous.get(old.path)?.toString('utf8') ?? '').body;
+        const previousBody = recordedBody === undefined ? undefined : markdownBaseline(recordedBody);
         const text = linearMarkersAsText(doc.content ?? '', previousBody);
         readable.set(doc.id, {text, previousBody});
         if (linksLinearDocuments(text)) needsLinkBase = true;
@@ -645,7 +674,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           break;
         }
         if (findings.length > 0) {
-          recordBlocked(doc, path, findings);
+          // A document read again only because another version read it, unchanged in Linear, keeps its recorded
+          // reading quietly: no one edited it, so it gets no blocked mark. The version is noted.
+          if (reread.has(id) && asRecorded(doc) && old !== undefined) ids.set(old.path, {...old.entry, capturedWith: VERSION});
+          else recordBlocked(doc, path, findings);
           candidates.delete(id);
           again = true;
           break;
@@ -773,14 +805,20 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const recordedNow = new Set<string>();
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
-      if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
+      const converged = reread.has(id) && readsAsTracked(candidate.path, String(candidate.files.get(candidate.path)));
+      if (old?.path === candidate.path && !converged && await asLastAccepted(candidate)) {
+        // The reading stays as recorded; the version that read it again is noted, so it is not read on every run.
+        if (reread.has(id)) ids.set(old.path, {...old.entry, capturedWith: VERSION});
+        continue;
+      }
       recordedNow.add(id);
       if (old !== undefined && old.path !== candidate.path) {
         removeBody(old.path);
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      const entry = {...old?.entry, id, observedDigest: observedDigest(candidate.doc)};
+      // Only a suspended document needs the version of its reading: noting it on every entry would rewrite them all.
+      const entry = {...old?.entry, id, observedDigest: observedDigest(candidate.doc), ...(old?.entry.suspended === undefined ? {} : {capturedWith: VERSION})};
       delete entry.pullRewrite;
       const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
@@ -802,7 +840,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         // Linear. Compare against the last accepted state, not an intervening
         // record that also retained the excluded bytes.
         const prior = previous.get(path);
-        if (path === candidate.path && old?.path === path && prior !== undefined && excludedPath(path)) {
+        // A newer reading that is what the tracked branch holds is recorded even where it matches the last accepted
+        // text: the recorded one is the older reading its lane holds.
+        if (path === candidate.path && old?.path === path && prior !== undefined && excludedPath(path) && !converged) {
           const baseline = baselines.get(path);
           if (baseline != null && splitFile(baseline.text).body === splitFile(String(content)).body) continue;
         }

@@ -359,6 +359,11 @@ export interface IdEntry {
    * signature of it (`PushedKey.repairMac`): a repair without a valid one, in any form, is not the sync's and is never applied.
    */
   pullRewrite?: { source?: Oid; hash: string; observedHash: string; replacement: string; images: Array<{image: number; total: number; line: number}>; mac?: string };
+  /**
+   * The mdbisync version whose pull last read a suspended document's text from Linear. It is read again when this
+   * differs, so a lane an older version captured takes a newer reading.
+   */
+  capturedWith?: string;
   /** The active hold; retained across renames and captured removals. */
   suspended?: SuspensionEpisode;
   /** First write after release must use this Linear commit as its base. */
@@ -679,6 +684,7 @@ function isIdEntry(value: unknown): value is IdEntry {
   if (entry.observedDigest !== undefined && (typeof entry.observedDigest !== 'string' || !/^[0-9a-f]{64}$/.test(entry.observedDigest))) return false;
   if (entry.plainFiles !== undefined && (!Array.isArray(entry.plainFiles) || !entry.plainFiles.every(path => typeof path === 'string'))) return false;
   if (entry.releasePaths !== undefined && (!Array.isArray(entry.releasePaths) || !entry.releasePaths.every((path) => typeof path === 'string'))) return false;
+  if (entry.capturedWith !== undefined && typeof entry.capturedWith !== 'string') return false;
   if (entry.releaseBase !== undefined && (typeof entry.releaseBase !== 'string' || !/^[0-9a-f]{40,64}$/.test(entry.releaseBase))) return false;
   if (entry.suspended !== undefined) {
     const episode = entry.suspended as SuspensionEpisode | null;

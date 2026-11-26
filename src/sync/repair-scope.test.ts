@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { VERSION } from '../version.ts';
 import { Git } from '../state/index.ts';
 import { IDENTITY, TEST_PUSHED_KEY, signTip } from '../state/test-helpers.ts';
 import { pullRequestHarness, SYNC_BRANCH } from './pull-request-test-helpers.ts';
@@ -77,8 +78,9 @@ describe('repair state scope', () => {
     const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
     const hash = createHash('sha256').update(source).digest('hex');
     // Signed as the sync's own, so the hooks are what this reaches.
+    // Read by the running version: an older reading of a suspended document is read again, which replaces its repair.
     ids[path] = {...ids[path], pullRewrite: signRepair(TEST_PUSHED_KEY, path, ids[path].id, {hash, observedHash: hash, replacement, images: []}),
-      ...(suspended ? {suspended: {noticeId: randomUUID(), paths: [path], checks: []}} : {})};
+      ...(suspended ? {suspended: {noticeId: randomUUID(), paths: [path], checks: []}, capturedWith: VERSION} : {})};
     await h.editRef('refs/mdbisync/ids', 'ids.json', JSON.stringify(ids));
     await h.editInLinear('combined/page-0.md', '# Page 0\n\nA new paragraph.\n');
     const run = await h.sync();

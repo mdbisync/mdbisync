@@ -13,6 +13,8 @@ import { PullRequestError, closePullRequestAtHead, ensurePullRequest, findOpenPu
 import { type RunContext } from '../run/preflight.ts';
 import { checkpoint } from '../test-hooks.ts';
 import { GitOutputLimitError } from '../state/git.ts';
+import { VERSION } from '../version.ts';
+import { listPaths, readBlobs } from '../state/objects.ts';
 import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, showCommit, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
@@ -110,6 +112,20 @@ async function mergeTree(git: Git, linear: Oid, other: Oid, base: Oid | undefine
   const merged = await mergeWithMarkers(git, linear, other, ids, knownIdLookup(git, idsTip, ids), base);
   if (merged.resolved.unresolved.length > 0) throw new LaneConflict('A suspended file needs a manual merge', merged.resolved.unresolved);
   return merged.resolved.tree;
+}
+
+/**
+ * The paths whose reading this intake changed (from `base`) to the tracked branch's text: the same Markdown body,
+ * whatever front matter or final newlines either side writes.
+ */
+async function convergedPaths(git: Git, intake: Oid, base: Oid, tracked: Oid, paths: ReadonlySet<string>): Promise<Set<string>> {
+  if (paths.size === 0) return new Set();
+  const list = [...paths];
+  const [read, before, held] = await Promise.all([intake, base, tracked].map(async (commit) => new Map((await listPaths(git, commit, list)).filter((entry) => entry.type === 'blob').map((entry) => [entry.path, entry.oid]))));
+  const candidates = list.filter((path) => read!.has(path) && held!.has(path) && read!.get(path) !== before!.get(path));
+  const blobs = await readBlobs(git, [...new Set(candidates.flatMap((path) => [read!.get(path)!, held!.get(path)!]))]);
+  const body = (oid: Oid) => splitFile(blobs.get(oid)!.toString('utf8')).body.replace(/\n+$/, '');
+  return new Set(candidates.filter((path) => body(read!.get(path)!) === body(held!.get(path)!)));
 }
 
 async function changedPaths(git: Git, before: Oid, after: Oid): Promise<string[]> {
@@ -217,6 +233,8 @@ async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap
   }
   for (const [path, entry] of ids) if (paths.has(path) && entry.suspended === undefined) {
     entry.suspended = { noticeId: randomUUID(), paths: [path], checks: [...checks], ...(timedOut.length > 0 ? { timedOut: [...timedOut] } : {}) };
+    // The batch was read by the running version: its next run has nothing to read again.
+    entry.capturedWith = VERSION;
     delete entry.releaseBase;
     delete entry.releasePaths;
   }
@@ -287,7 +305,14 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       const base = await treeCommit(git, await takePaths(git, head, bases.view ?? bases.linear, paths), bases.linear);
       const tree = await mergeTree(git, input, head, base, ids, options.state.ids);
       const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
-      const selected = await takePaths(git, head, tree, paths);
+      // A document this intake now reads as what the tracked branch holds is held no more: the lane takes the tracked
+      // file, conflict notices of an older reading included, so it no longer differs there. Only where the sync alone
+      // wrote the lane: a commit someone else pushed there since the sync's last push keeps its paths as merged.
+      const pushed = lastPushed(context, options, ids);
+      const outside = previous === null || pushed === undefined ? undefined : new Set(pushed === previous ? [] : await changedPaths(git, pushed, previous));
+      const converged = outside === undefined ? new Set<string>()
+        : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path) => !outside.has(path))));
+      const selected = await takePaths(git, await takePaths(git, head, tree, paths), tracked, converged);
       if (linearChanged || selected !== await git.revParse(`${head}^{tree}`)) {
         head = await commit(context, options, selected, intake === linear ? [head] : [head, intake], LINEAR_INTAKE_MESSAGE + note(tracked, linear, intake));
         bases.linear = linear;
@@ -397,6 +422,7 @@ async function release(context: RunContext, options: LaneOptions, ids: IdMap, pa
   let first = true;
   for (const [path, entry] of ids) if (entry.suspended !== undefined) {
     delete entry.suspended;
+    delete entry.capturedWith;
     entry.releaseBase = linearBase;
     entry.releasePaths = first ? [...paths].sort() : [path];
     first = false;

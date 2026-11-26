@@ -458,6 +458,16 @@ blocked or conflict mark still applies. The normal three-way merge
 resumes using the recorded base, so changes waiting on either side meet
 without dropping an edit; overlapping edits can still create a conflict.
 
+After an upgrade, the sync reads each suspended document from Linear once
+more, though Linear reports no change: an older version may have read it
+differently. It compares Linear's text with the tracked branch's file.
+When the two are the same document, the lane takes the tracked branch's
+file, any conflict notice there included, and the document no longer
+differs in the suspended pull request. The same holds when a Linear edit
+makes a suspended document read as the tracked branch's file. Its mark
+clears when the lane merges. A document whose Linear text still differs
+stays suspended.
+
 The suspended lane goes first: while its head's checks are pending before
 the deadline, the normal lane may collect changes but cannot merge. A
 failed or timed-out suspended head lets the normal lane proceed.

@@ -420,6 +420,9 @@ remain after release; its presence alone does not mean a batch is on hold.
   Once its head contains the current tracked tip and passes checks, it
   merges, the comments resolve and the marks clear. The normal three-way
   merge resumes ([suspension and release](sync-cycle.md#suspension-and-release)).
+  After an upgrade, each suspended document is read from Linear once more;
+  one that reads back as the tracked branch's file no longer differs in the
+  suspended pull request.
 - If a check also fails under the same name on the tracked branch's tip
   (`main` by default), the normal pull request stays open and held. Nothing
   is suspended or marked for that failure; no alert is written to Linear.
