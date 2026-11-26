@@ -78,6 +78,12 @@ export interface LaneOptions {
   mergeWithoutChecks?: boolean | undefined;
   /** Answers whether the hooks pass a stored repair's text. */
   security: RepairGate;
+  /**
+   * Suspended paths this run's capture read again for its version and found to be what the tracked branch holds. Such a
+   * path converges though this intake does not change it: an older version may have recorded the same reading already,
+   * while the lane still holds what it merged then.
+   */
+  rereadAsTracked?: readonly string[] | undefined;
 }
 
 const treeOf = (git: Git, commit: Oid) => git.revParse(`${commit}^{tree}`);
@@ -115,14 +121,14 @@ async function mergeTree(git: Git, linear: Oid, other: Oid, base: Oid | undefine
 }
 
 /**
- * The paths whose reading this intake changed (from `base`) to the tracked branch's text: the same Markdown body,
- * whatever front matter or final newlines either side writes.
+ * The paths whose reading this intake changed (from `base`) to the tracked branch's text, and those of `reread` whose
+ * reading is that text: the same Markdown body, whatever front matter or final newlines either side writes.
  */
-async function convergedPaths(git: Git, intake: Oid, base: Oid, tracked: Oid, paths: ReadonlySet<string>): Promise<Set<string>> {
+async function convergedPaths(git: Git, intake: Oid, base: Oid, tracked: Oid, paths: ReadonlySet<string>, reread: ReadonlySet<string>): Promise<Set<string>> {
   if (paths.size === 0) return new Set();
   const list = [...paths];
   const [read, before, held] = await Promise.all([intake, base, tracked].map(async (commit) => new Map((await listPaths(git, commit, list)).filter((entry) => entry.type === 'blob').map((entry) => [entry.path, entry.oid]))));
-  const candidates = list.filter((path) => read!.has(path) && held!.has(path) && read!.get(path) !== before!.get(path));
+  const candidates = list.filter((path) => read!.has(path) && held!.has(path) && (read!.get(path) !== before!.get(path) || reread.has(path)));
   const blobs = await readBlobs(git, [...new Set(candidates.flatMap((path) => [read!.get(path)!, held!.get(path)!]))]);
   const body = (oid: Oid) => splitFile(blobs.get(oid)!.toString('utf8')).body.replace(/\n+$/, '');
   return new Set(candidates.filter((path) => body(read!.get(path)!) === body(held!.get(path)!)));
@@ -296,7 +302,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     for (const path of await changedPaths(git, tracked, head)) paths.add(path);
     await addEpisodes(context, options, ids, paths, []);
     // A repair the hooks pass after the lane took in its observation changes the view, not the Linear ref.
-    if (bases.linear !== linear || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
+    const reread = new Set((options.rereadAsTracked ?? []).filter((path) => paths.has(path)));
+    if (bases.linear !== linear || reread.size > 0 || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
       const hold = await includeCapturedAssets(git, intake, ids, paths);
       if (hold !== undefined) return hold;
       // The intake never carries paths outside this lane. Mask them before
@@ -311,7 +318,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       const pushed = lastPushed(context, options, ids);
       const outside = previous === null || pushed === undefined ? undefined : new Set(pushed === previous ? [] : await changedPaths(git, pushed, previous));
       const converged = outside === undefined ? new Set<string>()
-        : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path) => !outside.has(path))));
+        : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path) => !outside.has(path))), reread);
       const selected = await takePaths(git, await takePaths(git, head, tree, paths), tracked, converged);
       if (linearChanged || selected !== await git.revParse(`${head}^{tree}`)) {
         head = await commit(context, options, selected, intake === linear ? [head] : [head, intake], LINEAR_INTAKE_MESSAGE + note(tracked, linear, intake));

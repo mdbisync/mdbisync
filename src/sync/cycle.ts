@@ -59,7 +59,7 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   if (!captured.ok) return {complete:false, changed, trackedTip, capture:captured};
   await checkpoint('after-capture-push-before-pr');
   // Pending checks and suspended batches still allow steps 3 to 5 for other documents.
-  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks, security: options.security });
+  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks, security: options.security, ...(captured.rereadAsTracked === undefined ? {} : { rereadAsTracked: captured.rereadAsTracked }) });
   // A pending initial pull request needs the current state intact until it merges.
   // Incomplete asset discovery also keeps state intact until the held files are known.
   if (pullRequest.code === 'initial-pull-request-pending' || pullRequest.code === 'suspended-asset-discovery') return { complete: false, changed, trackedTip, capture: captured, pullRequest };

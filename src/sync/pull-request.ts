@@ -106,6 +106,8 @@ export interface PullRequestOptions {
   mergeWithoutChecks?: boolean | undefined;
   /** Answers whether the hooks pass a stored repair's text; the tracked branch's hooks, run in this process, by default. */
   security?: RepairGate | undefined;
+  /** Suspended paths this run's capture read again and found to be what the tracked branch holds (`LaneOptions`). */
+  rereadAsTracked?: readonly string[] | undefined;
 }
 
 export interface PullRequestResult {

@@ -67,6 +67,67 @@ describe('sync: a suspended lane an older version captured', () => {
     assert.equal(await show(`refs/heads/main:${path}`), emoji);
   });
 
+  /**
+   * Suspends a document, lets the tracked branch conflict with it in the lane, and then makes the tracked branch hold
+   * the recorded reading: the record already reads as git's file, but the lane keeps the conflict it merged.
+   */
+  async function conflictThenTracked(linearText: string): Promise<string> {
+    await suspendOne(path, linearText);
+    await gitEdit(path, '# Plan\n\nA paragraph git rewrote.\n');
+    await sync();
+    checksOn(await rev(SUSPENDED), FAILED);
+    assert.match(await show(`${SUSPENDED}:${path}`), /Sync conflict: git version/);
+    const recorded = await show(`refs/mdbisync/linear:${path}`);
+    await gitEdit(path, recorded);
+    await sync();
+    checksOn(await rev(SUSPENDED), FAILED);
+    assert.match(await show(`${SUSPENDED}:${path}`), /Sync conflict: git version/, 'the lane keeps the conflict it merged');
+    assert.equal(await show(`refs/mdbisync/linear:${path}`), recorded);
+    return recorded;
+  }
+
+  /** Clears the version on the entry, as an older version left it; the record itself stays. */
+  async function olderVersionOnEntry() {
+    const ids = JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, Record<string, unknown>>;
+    delete ids[path]!.capturedWith;
+    await editRef('refs/mdbisync/ids', 'ids.json', `${JSON.stringify(ids, null, 2)}\n`, 'Sync: older ids');
+    await signTip(h.fixture.remote);
+  }
+
+  it('lets a document go whose recorded reading already is what git holds, conflict notices in the lane included', async () => {
+    const tracked = await conflictThenTracked('# Plan\n\nA paragraph Linear wrote.\n');
+    await olderVersionOnEntry();
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(await show(`refs/mdbisync/linear:${path}`), tracked, 'the record does not change');
+    assert.equal(await show(`${SUSPENDED}:${path}`), tracked, "the lane takes the tracked branch's file");
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.deepEqual(released.report.pullRequest?.holdMarks?.cleared, [path]);
+    assert.equal(await show(`refs/heads/main:${path}`), tracked);
+  });
+
+  it('lets a document go whose Linear shortcode reads as the emoji the record and git already hold', async () => {
+    const shortcode = '# Plan\n\n[:spiral_calendar_pad:](<https://example.com/img/calendar.png>) Week\n';
+    const tracked = await conflictThenTracked(shortcode);
+    assert.match(tracked, /🗓️/);
+    await olderVersionOnEntry();
+    await sync();
+    assert.equal(await show(`${SUSPENDED}:${path}`), tracked);
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.equal((await documentOf(path)).content, shortcode, 'Linear keeps its own spelling of the same document');
+  });
+
+  it('leaves a lane that conflicts with an equal record alone on a run that reads nothing again', async () => {
+    await conflictThenTracked('# Plan\n\nA paragraph Linear wrote.\n');
+    const head = await rev(SUSPENDED);
+    await sync();
+    assert.equal(await rev(SUSPENDED), head);
+  });
+
   it('keeps a document suspended when Linear holds another document than git', async () => {
     await suspendOne(path, linear);
     const other = '# Plan\n\n1. Week\n   1. A step git rewrote\n';
