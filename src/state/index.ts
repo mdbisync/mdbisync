@@ -37,6 +37,8 @@ export {
   readSupersededIds,
   WRITTEN_FILE,
   readWrittenHashes,
+  WRITTEN_MACS_FILE,
+  readWrittenMacs,
   SYNC_PUSHED_FILE,
   readSyncPushed,
   type FetchedState,

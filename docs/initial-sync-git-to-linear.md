@@ -258,6 +258,11 @@ Run it again with the same inputs, after the reset time in the summary when
 it was rate limited. It plans again, skips the documents an earlier run
 wrote, finds a document created just before a crash by its title instead
 of creating it twice, and records `linear` once everything is written.
+It trusts what an earlier run recorded about a written document only when
+the sync signed that record with its Linear client secret; otherwise,
+for example after the secret changed or someone edited the state, it skips
+the document only when the document holds the file's text, and writes it
+again when it does not.
 Until then every sync run writes nothing and stops with
 `initial-sync-required` and exit code 4.
 
