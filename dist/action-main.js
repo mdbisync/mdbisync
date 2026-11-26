@@ -29018,7 +29018,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.1-rc.5" : packageJson.version;
+var VERSION = true ? "1.0.1-rc.6" : packageJson.version;
 
 // src/linear/facts.ts
 var CONTENT_LIMIT = 25e4;
@@ -41036,7 +41036,7 @@ function linearSectionEnd(body2) {
   return lines2.flatMap((row, index2) => closing.has(index2) ? [LINE_PREFIX.exec(row)[0].trimEnd(), row] : [row]).join("\n");
 }
 var NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
-var LINEAR_BLOCK_START = /^[ \t>]*(?:(?:[*+-]|\d{1,9}[.)])[ \t]+)*(?:\+{1,3}(?:[ \t\r]|$)|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
+var LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,3}(?:[ \t\r]|$)|\+{4}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
 var LINE_END = /\r\n?|\n/;
 var LINE_PREFIX = /^[ \t>]*/;
 var CONFLICT_START = /^<{7}(?: |$)/;
@@ -41044,6 +41044,7 @@ var DIV_START = /^<div(?:[ \t][^>\n]*)?>/i;
 var DIV_END = /<\/div[ \t]*>/i;
 var DIV_END_START = /^<\/div[ \t]*>/i;
 var SECTION_TITLE = /^\+{3}[ \t]/;
+var LONG_PLUS_RUN = /^\+{4}/;
 var ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3}(?:[ \t]|$))/;
 function linearLineText(row) {
   return row.replace(LINE_PREFIX, "").trimEnd();
@@ -41185,6 +41186,7 @@ function linearMarkersAsText(content4, previous3 = "") {
         const last = (node2.position?.end.line ?? index2 + 1) - 1;
         const literal = accepted.escapes.has(blockLineKey(first, true));
         if (CONFLICT_START.test(first) || literal && first !== "+++" && !SECTION_TITLE.test(rawFirst)) escapes.add(at2);
+        if (LONG_PLUS_RUN.test(first) && last > index2) escapes.add(at2);
         if (first === "$$" && last > index2 + 1 && rowAt(last) === "$$") escapes.add(at2);
         const parent = ancestors.at(-1);
         if (SECTION_TITLE.test(rawFirst)) {
@@ -41211,7 +41213,7 @@ function linearMarkersAsText(content4, previous3 = "") {
           if (offset < at2 || offset >= end(node2)) continue;
           const raw = rowAt(row);
           if (row === line(ancestors.at(-1)) - 1) continue;
-          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false))) escapes.add(offset);
+          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false)) || LONG_PLUS_RUN.test(raw)) escapes.add(offset);
         }
       }
     });
@@ -48544,6 +48546,16 @@ function adjacentBoldAsLinear(body2, tree) {
       groups.set(block2, edits2);
       return;
     }
+    const reopened = node2.children.filter((child2) => child2.type === "strong");
+    const container = ancestors.at(-1)?.type;
+    const exposesCloser = container === "heading" && /[ \t]#+$/.test(body2.slice(start(node2), end(node2) - 2)) && body2.slice(end(node2), end(ancestors.at(-1))).trim() === "";
+    if (reopened.length > 0 && first !== void 0 && first.type !== "strong" && (container === "paragraph" || container === "heading") && !exposesCloser && reopened.every((part) => body2.slice(start(part), start(part) + 2) === "**" && body2.slice(end(part) - 2, end(part)) === "**" && !holdsStrong(part) && !(part.children.length === 1 && (part.children[0].type === "link" || part.children[0].type === "linkReference"))) && node2.children.every((child2) => child2.type === "strong" || !holdsStrong(child2))) {
+      const block2 = ancestors[1] ?? node2;
+      const edits2 = groups.get(block2) ?? [];
+      edits2.push({ from: start(reopened[0]), to: start(reopened[0]) + 2, text: "" }, { from: end(node2) - 2, to: end(node2), text: "" });
+      groups.set(block2, edits2);
+      return;
+    }
     if (first?.type !== "text" || rest.at(-1)?.type !== "text") return;
     const [inner, closing] = rest;
     if (rest.length === 2 && inner?.type === "strong" && closing?.type === "text" && SPLIT_BOLD_PUNCTUATION.has(first.value + closing.value) && body2.slice(start(inner), start(inner) + 2) === "**" && end(first) === start(inner) && end(inner) === start(closing)) {
@@ -48568,6 +48580,13 @@ function adjacentBoldAsLinear(body2, tree) {
     groups.set(block, edits);
   });
   return reSpellBold(body2, groups, true) ?? body2;
+}
+function holdsStrong(node2) {
+  let found = false;
+  visit2(node2, (child2) => {
+    found ||= child2 !== node2 && child2.type === "strong";
+  });
+  return found;
 }
 function linearBoldForms(body2, tree, splitLines = true) {
   if (!body2.includes("**") && !body2.includes("__")) return body2;
@@ -49112,8 +49131,9 @@ ${lines2.join("\n")}`;
         const inline = cell2 ? this.inline(cell2.children) : "";
         let text6 = header2 ? inline.trim() : trimKeepingWideSpace(inline);
         const lead = text6.length - text6.trimStart().length;
-        const escape2 = header2 || unicodeSpaceLead(inline.replace(/^[ \t]+/, "")) === 0 ? void 0 : headingOrNumberEscape(text6.slice(lead));
+        const escape2 = header2 ? headerCellEscape(text6) : unicodeSpaceLead(inline.replace(/^[ \t]+/, "")) === 0 ? void 0 : headingOrNumberEscape(text6.slice(lead));
         if (escape2 !== void 0) text6 = `${text6.slice(0, lead + escape2)}\\${text6.slice(lead + escape2)}`;
+        else if (text6.startsWith("-")) text6 = `\\${text6}`;
         if (!header2 && /^\d{1,9}\.$/.test(text6)) text6 += " ";
         this.inCell = false;
         this.cellStart = void 0;
@@ -49736,7 +49756,8 @@ ${lines2.join("\n")}`;
     }
   }
   redundantLineEscape(at, char) {
-    if (at === this.cellStart || !"#-=+>".includes(char)) return false;
+    if (!"#-=+>".includes(char)) return false;
+    if (at === this.cellStart) return char === "+" && /^\+[^+ \t\r\n|\\&]/.test(this.source.slice(at + 1, at + 3));
     if (char === "#" && this.source[at - 1] === "&") return false;
     if (char === "#") {
       const line3 = this.textLineAt(at);
@@ -50433,6 +50454,11 @@ function unicodeSpaceLead(line2) {
 function headingOrNumberEscape(rest) {
   if (/^#{1,6}(?:\s|$)/.test(rest)) return 0;
   const number = /^\d+(?=\.\s+\S)/.exec(rest);
+  return number === null ? void 0 : number[0].length;
+}
+function headerCellEscape(text6) {
+  if (text6.startsWith(">") || /^\+ +\S/.test(text6)) return 0;
+  const number = /^\d+(?=\.[ \t]+\S)/.exec(text6);
   return number === null ? void 0 : number[0].length;
 }
 function lineBreaks(text6) {

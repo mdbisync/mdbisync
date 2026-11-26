@@ -24273,7 +24273,7 @@ function linearSectionEnd(body2) {
   return lines2.flatMap((row, index2) => closing.has(index2) ? [LINE_PREFIX.exec(row)[0].trimEnd(), row] : [row]).join("\n");
 }
 var NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
-var LINEAR_BLOCK_START = /^[ \t>]*(?:(?:[*+-]|\d{1,9}[.)])[ \t]+)*(?:\+{1,3}(?:[ \t\r]|$)|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
+var LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,3}(?:[ \t\r]|$)|\+{4}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
 var LINE_END = /\r\n?|\n/;
 var LINE_PREFIX = /^[ \t>]*/;
 var CONFLICT_START = /^<{7}(?: |$)/;
@@ -24281,6 +24281,7 @@ var DIV_START = /^<div(?:[ \t][^>\n]*)?>/i;
 var DIV_END = /<\/div[ \t]*>/i;
 var DIV_END_START = /^<\/div[ \t]*>/i;
 var SECTION_TITLE = /^\+{3}[ \t]/;
+var LONG_PLUS_RUN = /^\+{4}/;
 var ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3}(?:[ \t]|$))/;
 function linearLineText(row) {
   return row.replace(LINE_PREFIX, "").trimEnd();
@@ -24422,6 +24423,7 @@ function linearMarkersAsText(content4, previous3 = "") {
         const last = (node2.position?.end.line ?? index2 + 1) - 1;
         const literal = accepted.escapes.has(blockLineKey(first, true));
         if (CONFLICT_START.test(first) || literal && first !== "+++" && !SECTION_TITLE.test(rawFirst)) escapes.add(at2);
+        if (LONG_PLUS_RUN.test(first) && last > index2) escapes.add(at2);
         if (first === "$$" && last > index2 + 1 && rowAt(last) === "$$") escapes.add(at2);
         const parent = ancestors.at(-1);
         if (SECTION_TITLE.test(rawFirst)) {
@@ -24448,7 +24450,7 @@ function linearMarkersAsText(content4, previous3 = "") {
           if (offset < at2 || offset >= end(node2)) continue;
           const raw = rowAt(row);
           if (row === line(ancestors.at(-1)) - 1) continue;
-          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false))) escapes.add(offset);
+          if (CONFLICT_START.test(raw) || accepted.escapes.has(blockLineKey(raw, false)) || LONG_PLUS_RUN.test(raw)) escapes.add(offset);
         }
       }
     });
@@ -27572,6 +27574,16 @@ function adjacentBoldAsLinear(body2, tree) {
       groups.set(block2, edits2);
       return;
     }
+    const reopened = node2.children.filter((child) => child.type === "strong");
+    const container = ancestors.at(-1)?.type;
+    const exposesCloser = container === "heading" && /[ \t]#+$/.test(body2.slice(start(node2), end(node2) - 2)) && body2.slice(end(node2), end(ancestors.at(-1))).trim() === "";
+    if (reopened.length > 0 && first !== void 0 && first.type !== "strong" && (container === "paragraph" || container === "heading") && !exposesCloser && reopened.every((part) => body2.slice(start(part), start(part) + 2) === "**" && body2.slice(end(part) - 2, end(part)) === "**" && !holdsStrong(part) && !(part.children.length === 1 && (part.children[0].type === "link" || part.children[0].type === "linkReference"))) && node2.children.every((child) => child.type === "strong" || !holdsStrong(child))) {
+      const block2 = ancestors[1] ?? node2;
+      const edits2 = groups.get(block2) ?? [];
+      edits2.push({ from: start(reopened[0]), to: start(reopened[0]) + 2, text: "" }, { from: end(node2) - 2, to: end(node2), text: "" });
+      groups.set(block2, edits2);
+      return;
+    }
     if (first?.type !== "text" || rest.at(-1)?.type !== "text") return;
     const [inner, closing] = rest;
     if (rest.length === 2 && inner?.type === "strong" && closing?.type === "text" && SPLIT_BOLD_PUNCTUATION.has(first.value + closing.value) && body2.slice(start(inner), start(inner) + 2) === "**" && end(first) === start(inner) && end(inner) === start(closing)) {
@@ -27596,6 +27608,13 @@ function adjacentBoldAsLinear(body2, tree) {
     groups.set(block, edits);
   });
   return reSpellBold(body2, groups, true) ?? body2;
+}
+function holdsStrong(node2) {
+  let found = false;
+  visit2(node2, (child) => {
+    found ||= child !== node2 && child.type === "strong";
+  });
+  return found;
 }
 function linearBoldForms(body2, tree, splitLines = true) {
   if (!body2.includes("**") && !body2.includes("__")) return body2;
@@ -28140,8 +28159,9 @@ ${lines2.join("\n")}`;
         const inline = cell2 ? this.inline(cell2.children) : "";
         let text6 = header2 ? inline.trim() : trimKeepingWideSpace(inline);
         const lead = text6.length - text6.trimStart().length;
-        const escape2 = header2 || unicodeSpaceLead(inline.replace(/^[ \t]+/, "")) === 0 ? void 0 : headingOrNumberEscape(text6.slice(lead));
+        const escape2 = header2 ? headerCellEscape(text6) : unicodeSpaceLead(inline.replace(/^[ \t]+/, "")) === 0 ? void 0 : headingOrNumberEscape(text6.slice(lead));
         if (escape2 !== void 0) text6 = `${text6.slice(0, lead + escape2)}\\${text6.slice(lead + escape2)}`;
+        else if (text6.startsWith("-")) text6 = `\\${text6}`;
         if (!header2 && /^\d{1,9}\.$/.test(text6)) text6 += " ";
         this.inCell = false;
         this.cellStart = void 0;
@@ -28764,7 +28784,8 @@ ${lines2.join("\n")}`;
     }
   }
   redundantLineEscape(at, char) {
-    if (at === this.cellStart || !"#-=+>".includes(char)) return false;
+    if (!"#-=+>".includes(char)) return false;
+    if (at === this.cellStart) return char === "+" && /^\+[^+ \t\r\n|\\&]/.test(this.source.slice(at + 1, at + 3));
     if (char === "#" && this.source[at - 1] === "&") return false;
     if (char === "#") {
       const line3 = this.textLineAt(at);
@@ -29463,6 +29484,11 @@ function headingOrNumberEscape(rest) {
   const number = /^\d+(?=\.\s+\S)/.exec(rest);
   return number === null ? void 0 : number[0].length;
 }
+function headerCellEscape(text6) {
+  if (text6.startsWith(">") || /^\+ +\S/.test(text6)) return 0;
+  const number = /^\d+(?=\.[ \t]+\S)/.exec(text6);
+  return number === null ? void 0 : number[0].length;
+}
 function lineBreaks(text6) {
   let count4 = 0;
   for (let at = text6.indexOf("\n"); at !== -1; at = text6.indexOf("\n", at + 1)) count4++;
@@ -29748,7 +29774,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.1-rc.5" : packageJson.version;
+var VERSION2 = true ? "1.0.1-rc.6" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -39156,7 +39182,8 @@ var workflows_default = {
 # - linear-to-git: one pull request removes the synchronized files that have
 #   no document; a person reviews and merges it.
 #
-# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.
+# Needs: variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID,
+# in the repository or in the mdbisync environment.
 # In the mdbisync environment limited to the tracked branch, set
 # MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET.
 name: mdbisync initial sync
@@ -39368,7 +39395,8 @@ jobs:
 # from your own scheduler through workflow_dispatch:
 # https://github.com/mdbisync/mdbisync/blob/main/docs/own-scheduler.md
 #
-# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.
+# Needs: variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID,
+# in the repository or in the mdbisync environment.
 # In the mdbisync environment limited to the tracked branch, set
 # MDBISYNC_APP_PRIVATE_KEY and MDBISYNC_LINEAR_CLIENT_SECRET.
 name: mdbisync
@@ -40103,8 +40131,8 @@ async function runInit(args, options = {}) {
 
 Remaining admin steps:
 1. In Settings \u2192 Environments, create mdbisync. Under Selected branches and tags, add only the tracked branch (main by default) as a Branch rule. Leave required reviewers off. If you are moving existing repository secrets, follow ${QUICKSTART_URL}#sync-environment. Until the secrets move, the jobs still read repository secrets and sync keeps working, but the branch rule does not protect those secrets. After moving the secrets and updating the workflows, delete the old repository secrets.
-2. Create a Linear OAuth app with read,write client credentials. Set repository variable MDBISYNC_LINEAR_CLIENT_ID and add environment secret MDBISYNC_LINEAR_CLIENT_SECRET. Remove any old repository secret for this client ID once the updated workflows are in place.
-3. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set repository variable MDBISYNC_APP_CLIENT_ID and add environment secret MDBISYNC_APP_PRIVATE_KEY.
+2. Create a Linear OAuth app with read,write client credentials. Set variable MDBISYNC_LINEAR_CLIENT_ID (in the repository or the mdbisync environment) and add environment secret MDBISYNC_LINEAR_CLIENT_SECRET. Remove any old repository secret for this client ID once the updated workflows are in place.
+3. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set variable MDBISYNC_APP_CLIENT_ID (in the repository or the mdbisync environment) and add environment secret MDBISYNC_APP_PRIVATE_KEY.
 4. Allow merge commits.
 5. Mark each folder to synchronize in its README.md front matter: ${TEAM_KEY} names the Linear team, and ${PROJECT_KEY} a project for that folder's documents. A folder inside a team's folder takes that team and leaves out ${TEAM_KEY}. Teams must already exist.${settings.createProjects ? " Review the projects the dry run would create." : ""}
 6. Install Node.js 24.2 or later and pre-commit. Run pre-commit install --hook-type pre-commit --hook-type pre-push, then pre-commit run --all-files. If the hook rewrites files and fails, run it again. Security scanner examples also need Docker.${settings.lfs ? " Install Git LFS and run git lfs install." : ""}
