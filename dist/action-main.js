@@ -88,10 +88,10 @@ var require_tunnel = __commonJS({
       self.on("free", function onFree(socket, host, port, localAddress) {
         var options2 = toOptions(host, port, localAddress);
         for (var i = 0, len = self.requests.length; i < len; ++i) {
-          var pending = self.requests[i];
-          if (pending.host === options2.host && pending.port === options2.port) {
+          var pending2 = self.requests[i];
+          if (pending2.host === options2.host && pending2.port === options2.port) {
             self.requests.splice(i, 1);
-            pending.request.onSocket(socket);
+            pending2.request.onSocket(socket);
             return;
           }
         }
@@ -205,10 +205,10 @@ var require_tunnel = __commonJS({
         return;
       }
       this.sockets.splice(pos, 1);
-      var pending = this.requests.shift();
-      if (pending) {
-        this.createSocket(pending, function(socket2) {
-          pending.request.onSocket(socket2);
+      var pending2 = this.requests.shift();
+      if (pending2) {
+        this.createSocket(pending2, function(socket2) {
+          pending2.request.onSocket(socket2);
         });
       }
     };
@@ -3374,13 +3374,13 @@ var require_data_url = __commonJS({
     }
     function collectASequenceOfCodePointsFast(char, input, position2) {
       const idx = input.indexOf(char, position2.position);
-      const start2 = position2.position;
+      const start3 = position2.position;
       if (idx === -1) {
         position2.position = input.length;
-        return input.slice(start2);
+        return input.slice(start3);
       }
       position2.position = idx;
-      return input.slice(start2, position2.position);
+      return input.slice(start3, position2.position);
     }
     function stringPercentDecode(input) {
       const bytes = encoder.encode(input);
@@ -5386,11 +5386,11 @@ var require_formdata_parser = __commonJS({
       return name;
     }
     function collectASequenceOfBytes(condition, input, position2) {
-      let start2 = position2.position;
-      while (start2 < input.length && condition(input[start2])) {
-        ++start2;
+      let start3 = position2.position;
+      while (start3 < input.length && condition(input[start3])) {
+        ++start3;
       }
-      return input.subarray(position2.position, position2.position = start2);
+      return input.subarray(position2.position, position2.position = start3);
     }
     function removeChars(buf, leading, trailing, predicate) {
       let lead = 0;
@@ -5403,12 +5403,12 @@ var require_formdata_parser = __commonJS({
       }
       return lead === 0 && trail2 === buf.length - 1 ? buf : buf.subarray(lead, trail2 + 1);
     }
-    function bufferStartsWith(buffer, start2, position2) {
-      if (buffer.length < start2.length) {
+    function bufferStartsWith(buffer, start3, position2) {
+      if (buffer.length < start3.length) {
         return false;
       }
-      for (let i = 0; i < start2.length; i++) {
-        if (start2[i] !== buffer[position2.position + i]) {
+      for (let i = 0; i < start3.length; i++) {
+        if (start3[i] !== buffer[position2.position + i]) {
           return false;
         }
       }
@@ -5814,8 +5814,8 @@ var require_client_h1 = __commonJS({
           },
           wasm_on_status: (p, at, len) => {
             assert(currentParser.ptr === p);
-            const start2 = at - currentBufferPtr + currentBufferRef.byteOffset;
-            return currentParser.onStatus(new FastBuffer(currentBufferRef.buffer, start2, len)) || 0;
+            const start3 = at - currentBufferPtr + currentBufferRef.byteOffset;
+            return currentParser.onStatus(new FastBuffer(currentBufferRef.buffer, start3, len)) || 0;
           },
           wasm_on_message_begin: (p) => {
             assert(currentParser.ptr === p);
@@ -5823,13 +5823,13 @@ var require_client_h1 = __commonJS({
           },
           wasm_on_header_field: (p, at, len) => {
             assert(currentParser.ptr === p);
-            const start2 = at - currentBufferPtr + currentBufferRef.byteOffset;
-            return currentParser.onHeaderField(new FastBuffer(currentBufferRef.buffer, start2, len)) || 0;
+            const start3 = at - currentBufferPtr + currentBufferRef.byteOffset;
+            return currentParser.onHeaderField(new FastBuffer(currentBufferRef.buffer, start3, len)) || 0;
           },
           wasm_on_header_value: (p, at, len) => {
             assert(currentParser.ptr === p);
-            const start2 = at - currentBufferPtr + currentBufferRef.byteOffset;
-            return currentParser.onHeaderValue(new FastBuffer(currentBufferRef.buffer, start2, len)) || 0;
+            const start3 = at - currentBufferPtr + currentBufferRef.byteOffset;
+            return currentParser.onHeaderValue(new FastBuffer(currentBufferRef.buffer, start3, len)) || 0;
           },
           wasm_on_headers_complete: (p, statusCode, upgrade, shouldKeepAlive) => {
             assert(currentParser.ptr === p);
@@ -5837,8 +5837,8 @@ var require_client_h1 = __commonJS({
           },
           wasm_on_body: (p, at, len) => {
             assert(currentParser.ptr === p);
-            const start2 = at - currentBufferPtr + currentBufferRef.byteOffset;
-            return currentParser.onBody(new FastBuffer(currentBufferRef.buffer, start2, len)) || 0;
+            const start3 = at - currentBufferPtr + currentBufferRef.byteOffset;
+            return currentParser.onBody(new FastBuffer(currentBufferRef.buffer, start3, len)) || 0;
           },
           wasm_on_message_complete: (p) => {
             assert(currentParser.ptr === p);
@@ -6871,7 +6871,7 @@ var require_client_h2 = __commonJS({
     "use strict";
     var assert = __require("node:assert");
     var { errorMonitor } = __require("node:events");
-    var { pipeline: pipeline2 } = __require("node:stream");
+    var { pipeline } = __require("node:stream");
     var util = require_util();
     var {
       RequestContentLengthMismatchError,
@@ -7350,7 +7350,7 @@ var require_client_h2 = __commonJS({
     }
     function writeStream(abort, socket, expectsPayload, h2stream, body2, client, request2, contentLength) {
       assert(contentLength !== 0 || client[kRunning] === 0, "stream body cannot be pipelined");
-      const pipe = pipeline2(
+      const pipe = pipeline(
         body2,
         h2stream,
         (err) => {
@@ -8280,8 +8280,8 @@ var require_pool_base = __commonJS({
       }
       get [kPending]() {
         let ret = this[kQueued];
-        for (const { [kPending]: pending } of this[kClients]) {
-          ret += pending;
+        for (const { [kPending]: pending2 } of this[kClients]) {
+          ret += pending2;
         }
         return ret;
       }
@@ -9286,8 +9286,8 @@ var require_retry_handler = __commonJS({
             this.abort(contentLengthError);
             return false;
           }
-          const { start: start2, size, end: end2 = size - 1 } = contentRange;
-          if (this.start !== start2 || this.end != null && this.end !== end2) {
+          const { start: start3, size, end: end2 = size - 1 } = contentRange;
+          if (this.start !== start3 || this.end != null && this.end !== end2) {
             this.abort(
               new RequestRetryError("Content-Range mismatch", statusCode, {
                 headers,
@@ -9316,13 +9316,13 @@ var require_retry_handler = __commonJS({
               this.abort(contentLengthError);
               return false;
             }
-            const { start: start2, size, end: end2 = size - 1 } = range;
+            const { start: start3, size, end: end2 = size - 1 } = range;
             assert(
-              start2 != null && Number.isFinite(start2),
+              start3 != null && Number.isFinite(start3),
               "content-range mismatch"
             );
             assert(end2 != null && Number.isFinite(end2), "invalid content-length");
-            this.start = start2;
+            this.start = start3;
             this.end = end2;
           }
           if (this.end == null) {
@@ -9648,9 +9648,9 @@ var require_readable = __commonJS({
       }
       const { _readableState: state } = consume3.stream;
       if (state.bufferIndex) {
-        const start2 = state.bufferIndex;
+        const start3 = state.bufferIndex;
         const end2 = state.buffer.length;
-        for (let n = start2; n < end2; n++) {
+        for (let n = start3; n < end2; n++) {
           consumePush(consume3, state.buffer[n]);
         }
       } else {
@@ -9675,8 +9675,8 @@ var require_readable = __commonJS({
       }
       const buffer = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, length);
       const bufferLength = buffer.length;
-      const start2 = bufferLength > 2 && buffer[0] === 239 && buffer[1] === 187 && buffer[2] === 191 ? 3 : 0;
-      return buffer.utf8Slice(start2, bufferLength);
+      const start3 = bufferLength > 2 && buffer[0] === 239 && buffer[1] === 187 && buffer[2] === 191 ? 3 : 0;
+      return buffer.utf8Slice(start3, bufferLength);
     }
     function chunksConcat(chunks, length) {
       if (chunks.length === 0 || length === 0) {
@@ -10395,7 +10395,7 @@ var require_api_pipeline = __commonJS({
         util.destroy(ret, err);
       }
     };
-    function pipeline2(opts, handler) {
+    function pipeline(opts, handler) {
       try {
         const pipelineHandler = new PipelineHandler(opts, handler);
         this.dispatch({ ...opts, body: pipelineHandler.req }, pipelineHandler);
@@ -10404,7 +10404,7 @@ var require_api_pipeline = __commonJS({
         return new PassThrough().destroy(err);
       }
     }
-    module.exports = pipeline2;
+    module.exports = pipeline;
   }
 });
 
@@ -11402,18 +11402,18 @@ var require_mock_agent = __commonJS({
       }
       pendingInterceptors() {
         const mockAgentClients = this[kClients];
-        return Array.from(mockAgentClients.entries()).flatMap(([origin, scope]) => scope[kDispatches].map((dispatch) => ({ ...dispatch, origin }))).filter(({ pending }) => pending);
+        return Array.from(mockAgentClients.entries()).flatMap(([origin, scope]) => scope[kDispatches].map((dispatch) => ({ ...dispatch, origin }))).filter(({ pending: pending2 }) => pending2);
       }
       assertNoPendingInterceptors({ pendingInterceptorsFormatter = new PendingInterceptorsFormatter() } = {}) {
-        const pending = this.pendingInterceptors();
-        if (pending.length === 0) {
+        const pending2 = this.pendingInterceptors();
+        if (pending2.length === 0) {
           return;
         }
-        const pluralizer = new Pluralizer("interceptor", "interceptors").pluralize(pending.length);
+        const pluralizer = new Pluralizer("interceptor", "interceptors").pluralize(pending2.length);
         throw new UndiciError(`
 ${pluralizer.count} ${pluralizer.noun} ${pluralizer.is} pending:
 
-${pendingInterceptorsFormatter.format(pending)}
+${pendingInterceptorsFormatter.format(pending2)}
 `.trim());
       }
     };
@@ -13569,7 +13569,7 @@ var require_fetch = __commonJS({
       subresourceSet
     } = require_constants3();
     var EE = __require("node:events");
-    var { Readable, pipeline: pipeline2, finished } = __require("node:stream");
+    var { Readable, pipeline, finished } = __require("node:stream");
     var { addAbortListener, isErrored, isReadable, bufferToLowerCasedHeaderName } = require_util();
     var { dataURLProcessor, serializeAMimeType, minimizeSupportedMimeType } = require_data_url();
     var { getGlobalDispatcher } = require_global2();
@@ -14514,7 +14514,7 @@ var require_fetch = __commonJS({
                 status,
                 statusText,
                 headersList,
-                body: decoders.length ? pipeline2(this.body, ...decoders, (err) => {
+                body: decoders.length ? pipeline(this.body, ...decoders, (err) => {
                   if (err) {
                     this.onError(err);
                   }
@@ -18326,19 +18326,19 @@ var require_eventsource_stream = __commonJS({
     var minParserItems = 1024;
     var maxParserItems = 131072;
     var bytesPerParserItem = 128;
-    function isASCIINumberBytes(buffer2, start2) {
-      if (start2 >= buffer2.length) {
+    function isASCIINumberBytes(buffer2, start3) {
+      if (start3 >= buffer2.length) {
         return false;
       }
-      for (let i = start2; i < buffer2.length; i++) {
+      for (let i = start3; i < buffer2.length; i++) {
         if (buffer2[i] < 48 || buffer2[i] > 57) {
           return false;
         }
       }
       return true;
     }
-    function isValidLastEventIdBytes(buffer2, start2) {
-      for (let i = start2; i < buffer2.length; i++) {
+    function isValidLastEventIdBytes(buffer2, start3) {
+      for (let i = start3; i < buffer2.length; i++) {
         if (buffer2[i] === 0) {
           return false;
         }
@@ -18641,9 +18641,9 @@ ${value}`;
         let length = 0;
         for (let i = this.lineChunkIndex; i <= this.chunkIndex; i++) {
           const chunk = this.chunks[i];
-          const start2 = i === this.lineChunkIndex ? this.linePos : 0;
+          const start3 = i === this.lineChunkIndex ? this.linePos : 0;
           const end2 = i === this.chunkIndex ? this.pos : chunk.length;
-          const slice = chunk.subarray(start2, end2);
+          const slice = chunk.subarray(start3, end2);
           length += slice.length;
           chunks.push(slice);
         }
@@ -18715,7 +18715,7 @@ ${value}`;
 var require_eventsource = __commonJS({
   "node_modules/undici/lib/web/eventsource/eventsource.js"(exports, module) {
     "use strict";
-    var { pipeline: pipeline2 } = __require("node:stream");
+    var { pipeline } = __require("node:stream");
     var { fetching } = require_fetch();
     var { makeRequest } = require_request2();
     var { webidl } = require_webidl();
@@ -18875,7 +18875,7 @@ var require_eventsource = __commonJS({
               ));
             }
           });
-          pipeline2(
+          pipeline(
             response.body.stream,
             eventSourceStream,
             (error2) => {
@@ -20226,18 +20226,18 @@ ${indent2}${text6.slice(fold + 1, end3)}`;
     }
     function consumeMoreIndentedLines(text6, i, indent2) {
       let end2 = i;
-      let start2 = i + 1;
-      let ch = text6[start2];
+      let start3 = i + 1;
+      let ch = text6[start3];
       while (ch === " " || ch === "	") {
-        if (i < start2 + indent2) {
+        if (i < start3 + indent2) {
           ch = text6[++i];
         } else {
           do {
             ch = text6[++i];
           } while (ch && ch !== "\n");
           end2 = i;
-          start2 = i + 1;
-          ch = text6[start2];
+          start3 = i + 1;
+          ch = text6[start3];
         }
       }
       return end2;
@@ -20268,12 +20268,12 @@ var require_stringifyString = __commonJS({
       const strLen = str.length;
       if (strLen <= limit)
         return false;
-      for (let i = 0, start2 = 0; i < strLen; ++i) {
+      for (let i = 0, start3 = 0; i < strLen; ++i) {
         if (str[i] === "\n") {
-          if (i - start2 > limit)
+          if (i - start3 > limit)
             return true;
-          start2 = i + 1;
-          if (strLen - start2 <= limit)
+          start3 = i + 1;
+          if (strLen - start3 <= limit)
             return false;
         }
       }
@@ -20287,19 +20287,19 @@ var require_stringifyString = __commonJS({
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent2 = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
       let str = "";
-      let start2 = 0;
+      let start3 = 0;
       for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
         if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
-          str += json.slice(start2, i) + "\\ ";
+          str += json.slice(start3, i) + "\\ ";
           i += 1;
-          start2 = i;
+          start3 = i;
           ch = "\\";
         }
         if (ch === "\\")
           switch (json[i + 1]) {
             case "u":
               {
-                str += json.slice(start2, i);
+                str += json.slice(start3, i);
                 const code4 = json.substr(i + 2, 4);
                 switch (code4) {
                   case "0000":
@@ -20333,14 +20333,14 @@ var require_stringifyString = __commonJS({
                       str += json.substr(i, 6);
                 }
                 i += 5;
-                start2 = i + 1;
+                start3 = i + 1;
               }
               break;
             case "n":
               if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str += json.slice(start2, i) + "\n\n";
+                str += json.slice(start3, i) + "\n\n";
                 while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
                   str += "\n";
                   i += 2;
@@ -20349,14 +20349,14 @@ var require_stringifyString = __commonJS({
                 if (json[i + 2] === " ")
                   str += "\\";
                 i += 1;
-                start2 = i + 1;
+                start3 = i + 1;
               }
               break;
             default:
               i += 1;
           }
       }
-      str = start2 ? str + json.slice(start2) : json;
+      str = start3 ? str + json.slice(start3) : json;
       return implicitKey ? str : foldFlowLines.foldFlowLines(str, indent2, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
@@ -20435,10 +20435,10 @@ ${indent2}`) + "'";
         else
           break;
       }
-      let start2 = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
-      if (start2) {
-        value = value.substring(start2.length);
-        start2 = start2.replace(/\n+/g, `$&${indent2}`);
+      let start3 = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
+      if (start3) {
+        value = value.substring(start3.length);
+        start3 = start3.replace(/\n+/g, `$&${indent2}`);
       }
       const indentSize = indent2 ? "2" : "1";
       let header = (startWithSpace ? indentSize : "") + chomp;
@@ -20456,14 +20456,14 @@ ${indent2}`) + "'";
             literalFallback = true;
           };
         }
-        const body2 = foldFlowLines.foldFlowLines(`${start2}${foldedValue}${end2}`, indent2, foldFlowLines.FOLD_BLOCK, foldOptions);
+        const body2 = foldFlowLines.foldFlowLines(`${start3}${foldedValue}${end2}`, indent2, foldFlowLines.FOLD_BLOCK, foldOptions);
         if (!literalFallback)
           return `>${header}
 ${indent2}${body2}`;
       }
       value = value.replace(/\n+/g, `$&${indent2}`);
       return `|${header}
-${indent2}${start2}${value}${end2}`;
+${indent2}${start3}${value}${end2}`;
     }
     function plainString(item, ctx, onComment, onChompKeep) {
       const { type, value } = item;
@@ -21094,23 +21094,23 @@ ${indent2}${line2}` : "\n";
         lines2.push(str);
         linesAtValue = lines2.length;
       }
-      const { start: start2, end: end2 } = flowChars;
+      const { start: start3, end: end2 } = flowChars;
       if (lines2.length === 0) {
-        return start2 + end2;
+        return start3 + end2;
       } else {
         if (!reqNewline) {
           const len = lines2.reduce((sum, line2) => sum + line2.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
-          let str = start2;
+          let str = start3;
           for (const line2 of lines2)
             str += line2 ? `
 ${indentStep}${indent2}${line2}` : "\n";
           return `${str}
 ${indent2}${end2}`;
         } else {
-          return `${start2}${fcPadding}${lines2.join(" ")}${fcPadding}${end2}`;
+          return `${start3}${fcPadding}${lines2.join(" ")}${fcPadding}${end2}`;
         }
       }
     }
@@ -22905,7 +22905,7 @@ var require_resolve_props = __commonJS({
       let newlineAfterProp = null;
       let comma = null;
       let found = null;
-      let start2 = null;
+      let start3 = null;
       for (const token of tokens) {
         if (reqSpace) {
           if (token.type !== "space" && token.type !== "newline" && token.type !== "comma")
@@ -22957,7 +22957,7 @@ var require_resolve_props = __commonJS({
             if (token.source.endsWith(":"))
               onError(token.offset + token.source.length - 1, "BAD_ALIAS", "Anchor ending in : is ambiguous", true);
             anchor = token;
-            start2 ?? (start2 = token.offset);
+            start3 ?? (start3 = token.offset);
             atNewline = false;
             hasSpace = false;
             reqSpace = true;
@@ -22966,7 +22966,7 @@ var require_resolve_props = __commonJS({
             if (tag)
               onError(token, "MULTIPLE_TAGS", "A node can have at most one tag");
             tag = token;
-            start2 ?? (start2 = token.offset);
+            start3 ?? (start3 = token.offset);
             atNewline = false;
             hasSpace = false;
             reqSpace = true;
@@ -23014,7 +23014,7 @@ var require_resolve_props = __commonJS({
         tag,
         newlineAfterProp,
         end: end2,
-        start: start2 ?? end2
+        start: start3 ?? end2
       };
     }
     exports.resolveProps = resolveProps;
@@ -23116,8 +23116,8 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start: start2, key, sep: sep6, value } = collItem;
-        const keyProps = resolveProps.resolveProps(start2, {
+        const { start: start3, key, sep: sep6, value } = collItem;
+        const keyProps = resolveProps.resolveProps(start3, {
           indicator: "explicit-key-ind",
           next: key ?? sep6?.[0],
           offset,
@@ -23144,14 +23144,14 @@ var require_resolve_block_map = __commonJS({
             continue;
           }
           if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key)) {
-            onError(key ?? start2[start2.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
+            onError(key ?? start3[start3.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
           }
         } else if (keyProps.found?.indent !== bm.indent) {
           onError(offset, "BAD_INDENT", startColMsg);
         }
         ctx.atKey = true;
         const keyStart = keyProps.end;
-        const keyNode = key ? composeNode(ctx, key, keyProps, onError) : composeEmptyNode(ctx, keyStart, start2, null, keyProps, onError);
+        const keyNode = key ? composeNode(ctx, key, keyProps, onError) : composeEmptyNode(ctx, keyStart, start3, null, keyProps, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bm.indent, key, onError);
         ctx.atKey = false;
@@ -23221,8 +23221,8 @@ var require_resolve_block_seq = __commonJS({
         ctx.atKey = false;
       let offset = bs.offset;
       let commentEnd = null;
-      for (const { start: start2, value } of bs.items) {
-        const props = resolveProps.resolveProps(start2, {
+      for (const { start: start3, value } of bs.items) {
+        const props = resolveProps.resolveProps(start3, {
           indicator: "seq-item-ind",
           next: value,
           offset,
@@ -23243,7 +23243,7 @@ var require_resolve_block_seq = __commonJS({
             continue;
           }
         }
-        const node2 = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start2, null, props, onError);
+        const node2 = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start3, null, props, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bs.indent, value, onError);
         offset = node2.range[2];
@@ -23327,8 +23327,8 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start: start2, key, sep: sep6, value } = collItem;
-        const props = resolveProps.resolveProps(start2, {
+        const { start: start3, key, sep: sep6, value } = collItem;
+        const props = resolveProps.resolveProps(start3, {
           flow: fcName,
           indicator: "explicit-key-ind",
           next: key ?? sep6?.[0],
@@ -23368,7 +23368,7 @@ var require_resolve_flow_collection = __commonJS({
             onError(props.start, "MISSING_CHAR", `Missing , between ${fcName} items`);
           if (props.comment) {
             let prevItemComment = "";
-            loop: for (const st of start2) {
+            loop: for (const st of start3) {
               switch (st.type) {
                 case "comma":
                 case "space":
@@ -23401,7 +23401,7 @@ var require_resolve_flow_collection = __commonJS({
         } else {
           ctx.atKey = true;
           const keyStart = props.end;
-          const keyNode = key ? composeNode(ctx, key, props, onError) : composeEmptyNode(ctx, keyStart, start2, null, props, onError);
+          const keyNode = key ? composeNode(ctx, key, props, onError) : composeEmptyNode(ctx, keyStart, start3, null, props, onError);
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
@@ -23564,10 +23564,10 @@ var require_resolve_block_scalar = __commonJS({
     "use strict";
     var Scalar = require_Scalar();
     function resolveBlockScalar(ctx, scalar, onError) {
-      const start2 = scalar.offset;
+      const start3 = scalar.offset;
       const header = parseBlockScalarHeader(scalar, ctx.options.strict, onError);
       if (!header)
-        return { value: "", type: null, comment: "", range: [start2, start2, start2] };
+        return { value: "", type: null, comment: "", range: [start3, start3, start3] };
       const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
       const lines2 = scalar.source ? splitLines(scalar.source) : [];
       let chompStart = lines2.length;
@@ -23580,10 +23580,10 @@ var require_resolve_block_scalar = __commonJS({
       }
       if (chompStart === 0) {
         const value2 = header.chomp === "+" && lines2.length > 0 ? "\n".repeat(Math.max(1, lines2.length - 1)) : "";
-        let end3 = start2 + header.length;
+        let end3 = start3 + header.length;
         if (scalar.source)
           end3 += scalar.source.length;
-        return { value: value2, type, comment: header.comment, range: [start2, end3, end3] };
+        return { value: value2, type, comment: header.comment, range: [start3, end3, end3] };
       }
       let trimIndent = scalar.indent + header.indent;
       let offset = scalar.offset + header.length;
@@ -23664,8 +23664,8 @@ var require_resolve_block_scalar = __commonJS({
         default:
           value += "\n";
       }
-      const end2 = start2 + header.length + scalar.source.length;
-      return { value, type, comment: header.comment, range: [start2, end2, end2] };
+      const end2 = start3 + header.length + scalar.source.length;
+      return { value, type, comment: header.comment, range: [start3, end2, end2] };
     }
     function parseBlockScalarHeader({ offset, props }, strict, onError) {
       if (props[0].type !== "block-scalar-header") {
@@ -24187,7 +24187,7 @@ var require_compose_doc = __commonJS({
     var composeNode = require_compose_node();
     var resolveEnd = require_resolve_end();
     var resolveProps = require_resolve_props();
-    function composeDoc(options, directives, { offset, start: start2, value, end: end2 }, onError) {
+    function composeDoc(options, directives, { offset, start: start3, value, end: end2 }, onError) {
       const opts = Object.assign({ _directives: directives }, options);
       const doc = new Document.Document(void 0, opts);
       const ctx = {
@@ -24197,7 +24197,7 @@ var require_compose_doc = __commonJS({
         options: doc.options,
         schema: doc.schema
       };
-      const props = resolveProps.resolveProps(start2, {
+      const props = resolveProps.resolveProps(start3, {
         indicator: "doc-start",
         next: value ?? end2?.[0],
         offset,
@@ -24210,7 +24210,7 @@ var require_compose_doc = __commonJS({
         if (value && (value.type === "block-map" || value.type === "block-seq") && !props.hasNewline)
           onError(props.end, "MISSING_CHAR", "Block collection cannot start on same line with directives-end marker");
       }
-      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start2, null, props, onError);
+      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start3, null, props, onError);
       const contentEnd = doc.contents.range[2];
       const re = resolveEnd.resolveEnd(end2, contentEnd, false, onError);
       if (re.comment)
@@ -24659,9 +24659,9 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start: start2, key, sep: sep6, value }) {
+    function stringifyItem({ start: start3, key, sep: sep6, value }) {
       let res = "";
-      for (const st of start2)
+      for (const st of start3)
         res += st.source;
       if (key)
         res += stringifyToken(key);
@@ -25451,8 +25451,8 @@ var require_line_counter = __commonJS({
             return { line: low + 1, col: 1 };
           if (low === 0)
             return { line: 0, col: offset };
-          const start2 = this.lineStarts[low - 1];
-          return { line: low, col: offset - start2 + 1 };
+          const start3 = this.lineStarts[low - 1];
+          return { line: low, col: offset - start3 + 1 };
         };
       }
     };
@@ -25832,7 +25832,7 @@ var require_parser = __commonJS({
       *scalar(scalar) {
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
-          const start2 = getFirstKeyStartProps(prev);
+          const start3 = getFirstKeyStartProps(prev);
           let sep6;
           if (scalar.end) {
             sep6 = scalar.end;
@@ -25844,7 +25844,7 @@ var require_parser = __commonJS({
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start: start2, key: scalar, sep: sep6 }]
+            items: [{ start: start3, key: scalar, sep: sep6 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map4;
@@ -25919,7 +25919,7 @@ var require_parser = __commonJS({
         if (this.indent >= map4.indent) {
           const atMapIndent = !this.onKeyLine && this.indent === map4.indent;
           const atNextItem = atMapIndent && (it.sep || it.explicitKey) && this.type !== "seq-item-ind";
-          let start2 = [];
+          let start3 = [];
           if (atNextItem && it.sep && !it.value) {
             const nl = [];
             for (let i = 0; i < it.sep.length; ++i) {
@@ -25939,14 +25939,14 @@ var require_parser = __commonJS({
               }
             }
             if (nl.length >= 2)
-              start2 = it.sep.splice(nl[1]);
+              start3 = it.sep.splice(nl[1]);
           }
           switch (this.type) {
             case "anchor":
             case "tag":
               if (atNextItem || it.value) {
-                start2.push(this.sourceToken);
-                map4.items.push({ start: start2 });
+                start3.push(this.sourceToken);
+                map4.items.push({ start: start3 });
                 this.onKeyLine = true;
               } else if (it.sep) {
                 it.sep.push(this.sourceToken);
@@ -25959,8 +25959,8 @@ var require_parser = __commonJS({
                 it.start.push(this.sourceToken);
                 it.explicitKey = true;
               } else if (atNextItem || it.value) {
-                start2.push(this.sourceToken);
-                map4.items.push({ start: start2, explicitKey: true });
+                start3.push(this.sourceToken);
+                map4.items.push({ start: start3, explicitKey: true });
               } else {
                 this.stack.push({
                   type: "block-map",
@@ -25977,12 +25977,12 @@ var require_parser = __commonJS({
                   if (includesToken(it.start, "newline")) {
                     Object.assign(it, { key: null, sep: [this.sourceToken] });
                   } else {
-                    const start3 = getFirstKeyStartProps(it.start);
+                    const start4 = getFirstKeyStartProps(it.start);
                     this.stack.push({
                       type: "block-map",
                       offset: this.offset,
                       indent: this.indent,
-                      items: [{ start: start3, key: null, sep: [this.sourceToken] }]
+                      items: [{ start: start4, key: null, sep: [this.sourceToken] }]
                     });
                   }
                 } else if (it.value) {
@@ -25992,10 +25992,10 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key: null, sep: [this.sourceToken] }]
+                    items: [{ start: start3, key: null, sep: [this.sourceToken] }]
                   });
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
-                  const start3 = getFirstKeyStartProps(it.start);
+                  const start4 = getFirstKeyStartProps(it.start);
                   const key = it.key;
                   const sep6 = it.sep;
                   sep6.push(this.sourceToken);
@@ -26005,10 +26005,10 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start3, key, sep: sep6 }]
+                    items: [{ start: start4, key, sep: sep6 }]
                   });
-                } else if (start2.length > 0) {
-                  it.sep = it.sep.concat(start2, this.sourceToken);
+                } else if (start3.length > 0) {
+                  it.sep = it.sep.concat(start3, this.sourceToken);
                 } else {
                   it.sep.push(this.sourceToken);
                 }
@@ -26016,7 +26016,7 @@ var require_parser = __commonJS({
                 if (!it.sep) {
                   Object.assign(it, { key: null, sep: [this.sourceToken] });
                 } else if (it.value || atNextItem) {
-                  map4.items.push({ start: start2, key: null, sep: [this.sourceToken] });
+                  map4.items.push({ start: start3, key: null, sep: [this.sourceToken] });
                 } else if (includesToken(it.sep, "map-value-ind")) {
                   this.stack.push({
                     type: "block-map",
@@ -26036,7 +26036,7 @@ var require_parser = __commonJS({
             case "double-quoted-scalar": {
               const fs3 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map4.items.push({ start: start2, key: fs3, sep: [] });
+                map4.items.push({ start: start3, key: fs3, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
                 this.stack.push(fs3);
@@ -26060,7 +26060,7 @@ var require_parser = __commonJS({
                     return;
                   }
                 } else if (atMapIndent) {
-                  map4.items.push({ start: start2 });
+                  map4.items.push({ start: start3 });
                 }
                 this.stack.push(bv);
                 return;
@@ -26197,7 +26197,7 @@ var require_parser = __commonJS({
             yield* this.step();
           } else if (this.type === "map-value-ind" && parent.type !== "flow-collection") {
             const prev = getPrevProps(parent);
-            const start2 = getFirstKeyStartProps(prev);
+            const start3 = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
             const sep6 = fc.end.splice(1, fc.end.length);
             sep6.push(this.sourceToken);
@@ -26205,7 +26205,7 @@ var require_parser = __commonJS({
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start: start2, key: fc, sep: sep6 }]
+              items: [{ start: start3, key: fc, sep: sep6 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map4;
@@ -26264,35 +26264,35 @@ var require_parser = __commonJS({
           case "explicit-key-ind": {
             this.onKeyLine = true;
             const prev = getPrevProps(parent);
-            const start2 = getFirstKeyStartProps(prev);
-            start2.push(this.sourceToken);
+            const start3 = getFirstKeyStartProps(prev);
+            start3.push(this.sourceToken);
             return {
               type: "block-map",
               offset: this.offset,
               indent: this.indent,
-              items: [{ start: start2, explicitKey: true }]
+              items: [{ start: start3, explicitKey: true }]
             };
           }
           case "map-value-ind": {
             this.onKeyLine = true;
             const prev = getPrevProps(parent);
-            const start2 = getFirstKeyStartProps(prev);
+            const start3 = getFirstKeyStartProps(prev);
             return {
               type: "block-map",
               offset: this.offset,
               indent: this.indent,
-              items: [{ start: start2, key: null, sep: [this.sourceToken] }]
+              items: [{ start: start3, key: null, sep: [this.sourceToken] }]
             };
           }
         }
         return null;
       }
-      atIndentedComment(start2, indent2) {
+      atIndentedComment(start3, indent2) {
         if (this.type !== "comment")
           return false;
         if (this.indent <= indent2)
           return false;
-        return start2.every((st) => st.type === "newline" || st.type === "space");
+        return start3.every((st) => st.type === "newline" || st.type === "space");
       }
       *documentEnd(docEnd) {
         if (this.type !== "doc-mode") {
@@ -26383,7 +26383,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse5(src, reviver, options) {
+    function parse6(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -26424,7 +26424,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse5;
+    exports.parse = parse6;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument2;
     exports.stringify = stringify2;
@@ -28902,6 +28902,11 @@ var MESSAGES = {
   "git.output-limit": "git-output-limit: command output exceeded {bytes} bytes",
   "lfs.needs-git-lfs": "files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync",
   "objects.missing": "git object {oid} is missing",
+  "objects.bad-tree": "a git tree object could not be read",
+  "objects.batch-name": "git object name {name} cannot be asked in a batch",
+  "objects.invalid-entry-name": "invalid tree entry name {name}",
+  "git.unreadable-answer": "git {command} gave an answer that could not be read",
+  "git.starter-ended": "the process that starts git commands ended ({reason})",
   "objects.not-blob": "git object {oid} is a {type}, not a blob",
   "objects.invalid-path": "invalid repository path {path}",
   "state.tracked-missing": 'the tracked branch "{branch}" does not exist on remote "{remote}"',
@@ -29018,7 +29023,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.1-rc.6" : packageJson.version;
+var VERSION = true ? "1.0.1-rc.7" : packageJson.version;
 
 // src/linear/facts.ts
 var CONTENT_LIMIT = 25e4;
@@ -29053,6 +29058,7 @@ var LINT_RULES = {
   "table-escaped-pipe": "A pipe in a plain table cell, escaped or written as a character reference, comes back from Linear unescaped, which splits the row. Put the cell text in inline code, or rephrase it without the pipe.",
   "table-hash-cell": "A table body cell starting with # becomes a heading.",
   "table-list-cell": "A table body cell starting with -, + or * and a space, or with a number and ), becomes a list, which Linear writes with * or a number and a dot. Put a backslash before the -, + or *, or reword the cell.",
+  "table-quote-cell": "A table body cell starting with > becomes a quote, and Linear drops the >; a cell starting with >> can take the rows and text below it into the cell. Run fix to write it as \\>, or put a backslash before the > yourself.",
   "image-in-link": "The link around an image is dropped.",
   "content-too-long": "This document exceeds Linear's 250,000-character content limit. Linear refuses the whole document, so the sync leaves the file out until it fits. The author must decide how to shorten or split it.",
   "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.",
@@ -29083,7 +29089,7 @@ var LINT_RULES = {
   "upload-file-refused": "A file named as the sync names a captured upload fails the upload check: documents that link it are blocked when they change in Linear.",
   "document-in-assets-folder": "A Markdown document cannot be inside a folder named assets, which holds the files documents embed."
 };
-var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash"]);
+var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash", "table-quote-cell"]);
 var IMAGE_PLACE_RULES = /* @__PURE__ */ new Set(["image-not-in-repository", "image-file-missing"]);
 
 // src/setup/report.ts
@@ -29168,9 +29174,9 @@ var ContentSpool = class {
 // src/sync/capture.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { createHash as createHash16 } from "node:crypto";
-import { mkdtemp as mkdtemp6, rm as rm7 } from "node:fs/promises";
+import { mkdtemp as mkdtemp5, rm as rm6 } from "node:fs/promises";
 import { tmpdir as tmpdir7 } from "node:os";
-import { join as join13, posix as posix9 } from "node:path";
+import { join as join14, posix as posix9 } from "node:path";
 
 // src/mapping/front-matter.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -31351,28 +31357,28 @@ function decodeNamedCharacterReference(value) {
 }
 
 // node_modules/micromark-util-chunked/index.js
-function splice(list4, start2, remove, items) {
+function splice(list4, start3, remove, items) {
   const end2 = list4.length;
   let chunkStart = 0;
   let parameters;
-  if (start2 < 0) {
-    start2 = -start2 > end2 ? 0 : end2 + start2;
+  if (start3 < 0) {
+    start3 = -start3 > end2 ? 0 : end2 + start3;
   } else {
-    start2 = start2 > end2 ? end2 : start2;
+    start3 = start3 > end2 ? end2 : start3;
   }
   remove = remove > 0 ? remove : 0;
   if (items.length < 1e4) {
     parameters = Array.from(items);
-    parameters.unshift(start2, remove);
+    parameters.unshift(start3, remove);
     list4.splice(...parameters);
   } else {
-    if (remove) list4.splice(start2, remove);
+    if (remove) list4.splice(start3, remove);
     while (chunkStart < items.length) {
       parameters = items.slice(chunkStart, chunkStart + 1e4);
-      parameters.unshift(start2, 0);
+      parameters.unshift(start3, 0);
       list4.splice(...parameters);
       chunkStart += 1e4;
-      start2 += 1e4;
+      start3 += 1e4;
     }
   }
 }
@@ -31483,7 +31489,7 @@ function regexCheck(regex) {
 function normalizeUri(value) {
   const result = [];
   let index2 = -1;
-  let start2 = 0;
+  let start3 = 0;
   let skip = 0;
   while (++index2 < value.length) {
     const code4 = value.charCodeAt(index2);
@@ -31506,8 +31512,8 @@ function normalizeUri(value) {
       replace2 = String.fromCharCode(code4);
     }
     if (replace2) {
-      result.push(value.slice(start2, index2), encodeURIComponent(replace2));
-      start2 = index2 + skip + 1;
+      result.push(value.slice(start3, index2), encodeURIComponent(replace2));
+      start3 = index2 + skip + 1;
       replace2 = "";
     }
     if (skip) {
@@ -31515,15 +31521,15 @@ function normalizeUri(value) {
       skip = 0;
     }
   }
-  return result.join("") + value.slice(start2);
+  return result.join("") + value.slice(start3);
 }
 
 // node_modules/micromark-factory-space/index.js
 function factorySpace(effects, ok3, type, max) {
   const limit = max ? max - 1 : Infinity;
   let size = 0;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (markdownSpace(code4)) {
       effects.enter(type);
       return prefix(code4);
@@ -31541,8 +31547,8 @@ function factorySpace(effects, ok3, type, max) {
 }
 function factorySpaceMinMax(effects, ok3, nok, type, min, max) {
   let size = 0;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (max > 0 && markdownSpace(code4)) {
       effects.enter(type);
       return prefix(code4);
@@ -31725,8 +31731,8 @@ function initializeDocument(effects) {
   let childFlow;
   let childToken;
   let lineStartOffset;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (continued < stack.length) {
       const item = stack[continued];
       self.containerState = item[1];
@@ -31764,7 +31770,7 @@ function initializeDocument(effects) {
       editMap.consume(self.events);
       return checkNewContainers(code4);
     }
-    return start2(code4);
+    return start3(code4);
   }
   function checkNewContainers(code4) {
     if (continued === stack.length) {
@@ -31829,7 +31835,7 @@ function initializeDocument(effects) {
       writeToChild(effects.exit("chunkFlow"));
       continued = 0;
       self.interrupt = void 0;
-      return start2;
+      return start3;
     }
     effects.consume(code4);
     return flowContinue;
@@ -31948,17 +31954,17 @@ function resolveAllAttention(events2, context) {
             continue;
           }
           const use = events2[open4][1].end.offset - events2[open4][1].start.offset > 1 && events2[index2][1].end.offset - events2[index2][1].start.offset > 1 ? 2 : 1;
-          const start2 = {
+          const start3 = {
             ...events2[open4][1].end
           };
           const end2 = {
             ...events2[index2][1].start
           };
-          movePoint(start2, -use);
+          movePoint(start3, -use);
           movePoint(end2, use);
           const openingSequence = {
             type: use > 1 ? "strongSequence" : "emphasisSequence",
-            start: start2,
+            start: start3,
             end: {
               ...events2[open4][1].end
             }
@@ -32026,8 +32032,8 @@ function tokenizeAttention(effects, ok3) {
   const previous3 = this.previous;
   const before = classifyCharacter(previous3);
   let marker;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     marker = code4;
     effects.enter("attentionSequence");
     return inside2(code4);
@@ -32059,8 +32065,8 @@ var autolink = {
 };
 function tokenizeAutolink(effects, ok3, nok) {
   let size = 0;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("autolink");
     effects.enter("autolinkMarker");
     effects.consume(code4);
@@ -32159,8 +32165,8 @@ var blankLine = {
   tokenize: tokenizeBlankLine
 };
 function tokenizeBlankLine(effects, ok3, nok) {
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     return markdownSpace(code4) ? factorySpace(effects, after, "linePrefix")(code4) : after(code4);
   }
   function after(code4) {
@@ -32179,8 +32185,8 @@ var blockQuote = {
 };
 function tokenizeBlockQuoteStart(effects, ok3, nok) {
   const self = this;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (code4 === 62) {
       const state = self.containerState;
       if (!state.open) {
@@ -32232,8 +32238,8 @@ var characterEscape = {
   tokenize: tokenizeCharacterEscape
 };
 function tokenizeCharacterEscape(effects, ok3, nok) {
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("characterEscape");
     effects.enter("escapeMarker");
     effects.consume(code4);
@@ -32262,8 +32268,8 @@ function tokenizeCharacterReference(effects, ok3, nok) {
   let size = 0;
   let max;
   let test;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("characterReference");
     effects.enter("characterReferenceMarker");
     effects.consume(code4);
@@ -32324,8 +32330,8 @@ var nonLazyContinuation = {
 };
 function tokenizeNonLazyContinuation(effects, ok3, nok) {
   const self = this;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (code4 === null) {
       return nok(code4);
     }
@@ -32354,8 +32360,8 @@ function tokenizeCodeFenced(effects, ok3, nok) {
   let initialPrefix = 0;
   let sizeOpen = 0;
   let marker;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     return beforeSequenceOpen(code4);
   }
   function beforeSequenceOpen(code4) {
@@ -32467,9 +32473,9 @@ function tokenizeCodeFenced(effects, ok3, nok) {
       effects2.enter("lineEnding");
       effects2.consume(code4);
       effects2.exit("lineEnding");
-      return start3;
+      return start4;
     }
-    function start3(code4) {
+    function start4(code4) {
       effects2.enter("codeFencedFence");
       return markdownSpace(code4) ? factorySpace(effects2, beforeSequenceClose, "linePrefix", self.parser.constructs.disable.null.includes("codeIndented") ? void 0 : 4)(code4) : beforeSequenceClose(code4);
     }
@@ -32512,8 +32518,8 @@ var furtherStart = {
   tokenize: tokenizeFurtherStart
 };
 function tokenizeCodeIndented(effects, ok3, nok) {
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("codeIndented");
     return factorySpaceMinMax(effects, atBreak, nok, "linePrefix", 4, 4)(code4);
   }
@@ -32612,8 +32618,8 @@ function tokenizeCodeText(effects, ok3, nok) {
   let sizeOpen = 0;
   let size;
   let token;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("codeText");
     effects.enter("codeTextSequence");
     return sequenceOpen(code4);
@@ -32732,15 +32738,15 @@ var SpliceBuffer = class {
    * @returns {Array<T>}
    *   Array of items.
    */
-  slice(start2, end2) {
+  slice(start3, end2) {
     const stop = end2 === null || end2 === void 0 ? Number.POSITIVE_INFINITY : end2;
     if (stop < this.left.length) {
-      return this.left.slice(start2, stop);
+      return this.left.slice(start3, stop);
     }
-    if (start2 > this.left.length) {
-      return this.right.slice(this.right.length - stop + this.left.length, this.right.length - start2 + this.left.length).reverse();
+    if (start3 > this.left.length) {
+      return this.right.slice(this.right.length - stop + this.left.length, this.right.length - start3 + this.left.length).reverse();
     }
-    return this.left.slice(start2).concat(this.right.slice(this.right.length - stop + this.left.length).reverse());
+    return this.left.slice(start3).concat(this.right.slice(this.right.length - stop + this.left.length).reverse());
   }
   /**
    * Mimics the behavior of Array.prototype.splice() except for the change of
@@ -32762,9 +32768,9 @@ var SpliceBuffer = class {
    * @return {Array<T>}
    *   Any removed items.
    */
-  splice(start2, deleteCount, items) {
+  splice(start3, deleteCount, items) {
     const count4 = deleteCount || 0;
-    this.setCursor(Math.trunc(start2));
+    this.setCursor(Math.trunc(start3));
     const removed = this.right.splice(this.right.length - count4, Number.POSITIVE_INFINITY);
     if (items) chunkedPush(this.left, items);
     return removed.reverse();
@@ -32960,8 +32966,8 @@ function subcontent(events2, eventIndex) {
   let index2 = -1;
   let current = token;
   let adjust = 0;
-  let start2 = 0;
-  const breaks = [start2];
+  let start3 = 0;
+  const breaks = [start3];
   while (current) {
     while (events2.get(++startPosition)[1] !== current) {
     }
@@ -32991,8 +32997,8 @@ function subcontent(events2, eventIndex) {
       // Find a void token that includes a break.
       childEvents[index2][0] === "exit" && childEvents[index2 - 1][0] === "enter" && childEvents[index2][1].type === childEvents[index2 - 1][1].type && childEvents[index2][1].start.line !== childEvents[index2][1].end.line
     ) {
-      start2 = index2 + 1;
-      breaks.push(start2);
+      start3 = index2 + 1;
+      breaks.push(start3);
       current._tokenizer = void 0;
       current.previous = void 0;
       current = current.next;
@@ -33008,9 +33014,9 @@ function subcontent(events2, eventIndex) {
   index2 = breaks.length;
   while (index2--) {
     const slice = childEvents.slice(breaks[index2], breaks[index2 + 1]);
-    const start3 = startPositions.pop();
-    jumps.push([start3, start3 + slice.length - 1]);
-    events2.splice(start3, 2, slice);
+    const start4 = startPositions.pop();
+    jumps.push([start4, start4 + slice.length - 1]);
+    events2.splice(start4, 2, slice);
   }
   jumps.reverse();
   index2 = -1;
@@ -33096,8 +33102,8 @@ function tokenizeContinuation(effects, ok3, nok) {
 function factoryDestination(effects, ok3, nok, type, literalType, literalMarkerType, rawType, stringType, max) {
   const limit = max || Number.POSITIVE_INFINITY;
   let balance = 0;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (code4 === 60) {
       effects.enter(type);
       effects.enter(literalType);
@@ -33189,8 +33195,8 @@ function factoryLabel(effects, ok3, nok, type, markerType, stringType) {
   const self = this;
   let size = 0;
   let seen;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter(type);
     effects.enter(markerType);
     effects.consume(code4);
@@ -33248,8 +33254,8 @@ function factoryLabel(effects, ok3, nok, type, markerType, stringType) {
 // node_modules/micromark-factory-title/index.js
 function factoryTitle(effects, ok3, nok, type, markerType, stringType) {
   let marker;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (code4 === 34 || code4 === 39 || code4 === 40) {
       effects.enter(type);
       effects.enter(markerType);
@@ -33310,17 +33316,17 @@ function factoryTitle(effects, ok3, nok, type, markerType, stringType) {
 // node_modules/micromark-factory-whitespace/index.js
 function factoryWhitespace(effects, ok3) {
   let seen;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (markdownLineEnding(code4)) {
       effects.enter("lineEnding");
       effects.consume(code4);
       effects.exit("lineEnding");
       seen = true;
-      return start2;
+      return start3;
     }
     if (markdownSpace(code4)) {
-      return factorySpace(effects, start2, seen ? "linePrefix" : "lineSuffix")(code4);
+      return factorySpace(effects, start3, seen ? "linePrefix" : "lineSuffix")(code4);
     }
     return ok3(code4);
   }
@@ -33338,8 +33344,8 @@ var titleBefore = {
 function tokenizeDefinition(effects, ok3, nok) {
   const self = this;
   let identifier;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("definition");
     return before(code4);
   }
@@ -33418,8 +33424,8 @@ var hardBreakEscape = {
   tokenize: tokenizeHardBreakEscape
 };
 function tokenizeHardBreakEscape(effects, ok3, nok) {
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("hardBreakEscape");
     effects.consume(code4);
     return after;
@@ -33469,8 +33475,8 @@ function resolveHeadingAtx(events2, context) {
 }
 function tokenizeHeadingAtx(effects, ok3, nok) {
   let size = 0;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("atxHeading");
     return before(code4);
   }
@@ -33621,8 +33627,8 @@ function tokenizeHtmlFlow(effects, ok3, nok) {
   let buffer;
   let index2;
   let markerB;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     return before(code4);
   }
   function before(code4) {
@@ -33939,8 +33945,8 @@ function tokenizeHtmlFlow(effects, ok3, nok) {
   }
 }
 function tokenizeBlankLineBefore(effects, ok3, nok) {
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("lineEnding");
     effects.consume(code4);
     effects.exit("lineEnding");
@@ -33958,8 +33964,8 @@ function tokenizeHtmlText(effects, ok3, nok) {
   let marker;
   let index2;
   let returnState;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("htmlText");
     effects.enter("htmlTextData");
     effects.consume(code4);
@@ -34362,8 +34368,8 @@ function tokenizeLabelEnd(effects, ok3, nok) {
     }
     labelStart = labelStarts[labelStarts.length - 1];
   }
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (!labelStart) {
       return nok(code4);
     }
@@ -34489,8 +34495,8 @@ var labelStartImage = {
 function tokenizeLabelStartImage(effects, ok3, nok) {
   const self = this;
   let labelImage;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("labelImage");
     effects.enter("labelImageMarker");
     effects.consume(code4);
@@ -34526,8 +34532,8 @@ var labelStartLink = {
 function tokenizeLabelStartLink(effects, ok3, nok) {
   const self = this;
   let labelLink;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("labelLink");
     effects.enter("labelMarker");
     effects.consume(code4);
@@ -34551,8 +34557,8 @@ var lineEnding = {
   tokenize: tokenizeLineEnding
 };
 function tokenizeLineEnding(effects, ok3) {
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("lineEnding");
     effects.consume(code4);
     effects.exit("lineEnding");
@@ -34568,8 +34574,8 @@ var thematicBreak = {
 function tokenizeThematicBreak(effects, ok3, nok) {
   let size = 0;
   let marker;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("thematicBreak");
     return before(code4);
   }
@@ -34621,8 +34627,8 @@ function tokenizeListStart(effects, ok3, nok) {
   const tail = self.events[self.events.length - 1];
   let initialSize = tail && tail[1].type === "linePrefix" ? tail[2].sliceSerialize(tail[1], true).length : 0;
   let size = 0;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     const kind = self.containerState.type || (code4 === 42 || code4 === 43 || code4 === 45 ? "listUnordered" : "listOrdered");
     if (kind === "listUnordered" ? !self.containerState.marker || code4 === self.containerState.marker : asciiDigit(code4)) {
       if (!self.containerState.type) {
@@ -34785,8 +34791,8 @@ function resolveToSetextUnderline(events2, context) {
 function tokenizeSetextUnderline(effects, ok3, nok) {
   const self = this;
   let marker;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     let index2 = self.events.length;
     let paragraph2;
     while (index2--) {
@@ -34875,9 +34881,9 @@ function initializeFactory(field) {
   function initializeText(effects) {
     const self = this;
     const constructs2 = this.parser.constructs[field];
-    const text6 = effects.attempt(constructs2, start2, notText);
-    return start2;
-    function start2(code4) {
+    const text6 = effects.attempt(constructs2, start3, notText);
+    return start3;
+    function start3(code4) {
       return atBreak(code4) ? text6(code4) : notText(code4);
     }
     function notText(code4) {
@@ -35240,8 +35246,8 @@ function createTokenizer(parser, initialize, from) {
         ])
       ) : handleMapOfConstructs(constructs2);
       function handleMapOfConstructs(map4) {
-        return start2;
-        function start2(code4) {
+        return start3;
+        function start3(code4) {
           const left = code4 !== null && map4[code4];
           const all2 = code4 !== null && map4.null;
           const list4 = [
@@ -35262,8 +35268,8 @@ function createTokenizer(parser, initialize, from) {
         return handleConstruct(list4[constructIndex]);
       }
       function handleConstruct(construct) {
-        return start2;
-        function start2(code4) {
+        return start3;
+        function start3(code4) {
           info2 = store();
           currentConstruct = construct;
           if (!construct.partial) {
@@ -35442,7 +35448,7 @@ var search = /[\0\t\n\r]/g;
 function preprocess() {
   let column = 1;
   let buffer = "";
-  let start2 = true;
+  let start3 = true;
   let atCarriageReturn;
   return preprocessor;
   function preprocessor(value, encoding, end2) {
@@ -35450,11 +35456,11 @@ function preprocess() {
     const chunks = [];
     let startPosition = 0;
     buffer = "";
-    if (start2) {
+    if (start3) {
       if (value.charCodeAt(0) === 65279) {
         startPosition++;
       }
-      start2 = void 0;
+      start3 = void 0;
     }
     while (startPosition < value.length) {
       search.lastIndex = startPosition;
@@ -35756,9 +35762,9 @@ function compiler(options) {
       listeners[index2].call(context, token);
     }
   }
-  function prepareList(events2, start2) {
+  function prepareList(events2, start3) {
     const end2 = events2.length - 1;
-    let index2 = start2 - 1;
+    let index2 = start3 - 1;
     let containerBalance = -1;
     let listSpread = false;
     let listItem3;
@@ -35846,16 +35852,16 @@ function compiler(options) {
         }
       }
     }
-    const listEvents = events2.splice(start2);
+    const listEvents = events2.splice(start3);
     let insertion = 0;
     index2 = -1;
     while (++index2 < listEvents.length) {
-      while (insertion < insertions.length && insertions[insertion].at === start2 + index2) {
+      while (insertion < insertions.length && insertions[insertion].at === start3 + index2) {
         events2.push(insertions[insertion++].event);
       }
       events2.push(listEvents[index2]);
     }
-    events2[start2][1]._spread = listSpread;
+    events2[start3][1]._spread = listSpread;
   }
   function opener(create, and) {
     return open4;
@@ -36601,7 +36607,7 @@ function findAndReplace(tree, list4, options) {
     const parent = parents[parents.length - 1];
     const find = pairs[pairIndex][0];
     const replace2 = pairs[pairIndex][1];
-    let start2 = 0;
+    let start3 = 0;
     let change = false;
     let nodes = [];
     find.lastIndex = 0;
@@ -36620,15 +36626,15 @@ function findAndReplace(tree, list4, options) {
       if (value === false) {
         find.lastIndex = position2 + 1;
       } else {
-        if (start2 !== position2) {
-          add({ type: "text", value: node2.value.slice(start2, position2) });
+        if (start3 !== position2) {
+          add({ type: "text", value: node2.value.slice(start3, position2) });
         }
         if (Array.isArray(value)) {
           for (const child2 of value) add(child2);
         } else if (value) {
           add(value);
         }
-        start2 = position2 + match[0].length;
+        start3 = position2 + match[0].length;
         change = true;
       }
       if (!find.global) {
@@ -36637,8 +36643,8 @@ function findAndReplace(tree, list4, options) {
       match = find.exec(node2.value);
     }
     if (change) {
-      if (start2 < node2.value.length) {
-        add({ type: "text", value: node2.value.slice(start2) });
+      if (start3 < node2.value.length) {
+        add({ type: "text", value: node2.value.slice(start3) });
       }
       parent.children.splice(index2, 1, ...nodes);
     } else {
@@ -36798,10 +36804,10 @@ function splitUrl(url) {
   }
   return [url, trail2];
 }
-function previous2(match, email) {
+function previous2(match, email2) {
   const code4 = match.input.charCodeAt(match.index - 1);
   return (match.index === 0 || unicodeWhitespace(code4) || unicodePunctuation(code4)) && // If it’s an email, the previous character should not be a slash.
-  (!email || code4 !== 47);
+  (!email2 || code4 !== 47);
 }
 
 // node_modules/mdast-util-gfm-footnote/lib/index.js
@@ -37306,14 +37312,14 @@ function htmlKind(value) {
   }
   if (next === 63) return 3;
   const closing = next === 47;
-  const start2 = closing ? 2 : 1;
-  let end2 = start2;
+  const start3 = closing ? 2 : 1;
+  let end2 = start3;
   let code4 = value.charCodeAt(end2);
   if (!asciiAlpha(code4)) return;
   while (code4 === 45 || asciiAlphanumeric(code4)) {
     code4 = value.charCodeAt(++end2);
   }
-  const name = value.slice(start2, end2).toLowerCase();
+  const name = value.slice(start3, end2).toLowerCase();
   if (!closing && code4 !== 47 && htmlRawNames.includes(name)) {
     return 1;
   }
@@ -37398,15 +37404,15 @@ function check(tokens, before, after) {
 function containerPhrasing(parent, state, info2) {
   return serialize(phrasing2(parent, state, info2), info2.before, info2.after);
 }
-function encode(tokens, start2) {
-  const token = tokens[start2 ? 0 : tokens.length - 1];
+function encode(tokens, start3) {
+  const token = tokens[start3 ? 0 : tokens.length - 1];
   if (!token || token.attention) return;
-  const character = start2 ? firstCharacter(token.value) : lastCharacter(token.value);
+  const character = start3 ? firstCharacter(token.value) : lastCharacter(token.value);
   const reference = encodeCharacterReference(
     /** @type {number} */
     character.codePointAt(0)
   );
-  if (start2) {
+  if (start3) {
     token.value = reference + token.value.slice(character.length);
   } else {
     let value = token.value.slice(0, token.value.length - character.length);
@@ -38602,16 +38608,16 @@ function between(left, right, parent, state) {
 var eol = /\r?\n|\r/g;
 function indentLines(value, map4) {
   const result = [];
-  let start2 = 0;
+  let start3 = 0;
   let line2 = 0;
   let match;
   while (match = eol.exec(value)) {
-    one2(value.slice(start2, match.index));
+    one2(value.slice(start3, match.index));
     result.push(match[0]);
-    start2 = match.index + match[0].length;
+    start3 = match.index + match[0].length;
     line2++;
   }
-  one2(value.slice(start2));
+  one2(value.slice(start3));
   return result.join("");
   function one2(value2) {
     result.push(map4(value2, line2, !value2));
@@ -38636,9 +38642,9 @@ function safe(state, input, config) {
     }
     const expression = state.compilePattern(pattern);
     const from = pattern.beforeNode ? offset : 0;
-    const subject = value.slice(from, pattern.afterNode ? end2 : void 0);
+    const subject2 = value.slice(from, pattern.afterNode ? end2 : void 0);
     let match;
-    while (match = expression.exec(subject)) {
+    while (match = expression.exec(subject2)) {
       const before = Boolean(pattern.before || pattern.atBreak);
       const after = Boolean(pattern.after);
       const position2 = from + match.index + (before ? match[1].length : 0);
@@ -38656,11 +38662,11 @@ function safe(state, input, config) {
     }
   }
   positions.sort(numerical);
-  let start2 = offset;
+  let start3 = offset;
   index2 = -1;
   while (++index2 < positions.length) {
     const position2 = positions[index2];
-    if (position2 < start2 || position2 >= end2) {
+    if (position2 < start3 || position2 >= end2) {
       continue;
     }
     if (value.charAt(position2) === "_" && // Preceded by an unescaped character that is not punctuation or whitespace:
@@ -38685,11 +38691,11 @@ function safe(state, input, config) {
     if (position2 + 1 < end2 && positions[index2 + 1] === position2 + 1 && infos[position2].after && !infos[position2 + 1].before && !infos[position2 + 1].after || position2 - 1 >= offset && positions[index2 - 1] === position2 - 1 && infos[position2].before && !infos[position2 - 1].before && !infos[position2 - 1].after) {
       continue;
     }
-    if (start2 !== position2) {
-      const slice = value.slice(start2, position2);
+    if (start3 !== position2) {
+      const slice = value.slice(start3, position2);
       result.push(percentEncode ? slice : escapeBackslashes(slice, "\\"));
     }
-    start2 = position2 + 1;
+    start3 = position2 + 1;
     if (percentEncode) {
       result.push(
         "%" + value.charCodeAt(position2).toString(16).toUpperCase().padStart(2, "0")
@@ -38700,7 +38706,7 @@ function safe(state, input, config) {
       result.push(encodeCharacterReference(value.charCodeAt(position2)));
     }
   }
-  const rest = value.slice(start2, end2);
+  const rest = value.slice(start3, end2);
   result.push(percentEncode ? rest : escapeBackslashes(rest, config.after));
   return result.join("");
 }
@@ -38718,19 +38724,19 @@ function escapeBackslashes(value, after) {
   const results = [];
   const whole = value + after;
   let index2 = -1;
-  let start2 = 0;
+  let start3 = 0;
   let match;
   while (match = expression.exec(whole)) {
     positions.push(match.index);
   }
   while (++index2 < positions.length) {
-    if (start2 !== positions[index2]) {
-      results.push(value.slice(start2, positions[index2]));
+    if (start3 !== positions[index2]) {
+      results.push(value.slice(start3, positions[index2]));
     }
     results.push("\\");
-    start2 = positions[index2];
+    start3 = positions[index2];
   }
-  results.push(value.slice(start2));
+  results.push(value.slice(start3));
   return results.join("");
 }
 
@@ -39014,8 +39020,8 @@ function tokenizeEmailAutolink(effects, ok3, nok) {
   const self = this;
   let dot;
   let data;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (!gfmAtext(code4) || !previousEmail.call(self, self.previous) || previousUnbalanced(self.events)) {
       return nok(code4);
     }
@@ -39254,8 +39260,8 @@ function tokenizeTrail(effects, ok3, nok) {
   }
 }
 function tokenizeEmailDomainDotTrail(effects, ok3, nok) {
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.consume(code4);
     return after;
   }
@@ -39341,8 +39347,8 @@ function tokenizePotentialGfmFootnoteCall(effects, ok3, nok) {
       break;
     }
   }
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     if (!labelStart || !labelStart._balanced) {
       return nok(code4);
     }
@@ -39423,8 +39429,8 @@ function tokenizeGfmFootnoteCall(effects, ok3, nok) {
   const defined = self.parser.gfmFootnotes || (self.parser.gfmFootnotes = []);
   let size = 0;
   let data;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("gfmFootnoteCall");
     effects.enter("gfmFootnoteCallLabelMarker");
     effects.consume(code4);
@@ -39484,8 +39490,8 @@ function tokenizeDefinitionStart(effects, ok3, nok) {
   let identifier;
   let size = 0;
   let data;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     effects.enter("gfmFootnoteDefinition")._container = true;
     effects.enter("gfmFootnoteDefinitionLabel");
     effects.enter("gfmFootnoteDefinitionLabelMarker");
@@ -39638,8 +39644,8 @@ function gfmStrikethrough(options) {
     const previous3 = this.previous;
     const events2 = this.events;
     let size = 0;
-    return start2;
-    function start2(code4) {
+    return start3;
+    function start3(code4) {
       if (previous3 === 126 && events2[events2.length - 1][1].type !== "characterEscape") {
         return nok(code4);
       }
@@ -39794,8 +39800,8 @@ function tokenizeTable(effects, ok3, nok) {
   let size = 0;
   let sizeB = 0;
   let seen;
-  return start2;
-  function start2(code4) {
+  return start3;
+  function start3(code4) {
     let index2 = self.events.length - 1;
     while (index2 > -1) {
       const {
@@ -40131,11 +40137,11 @@ function flushCell(map4, context, range, rowKind, rowEnd, previousCell) {
     };
     map4.add(range[2], 0, [["enter", valueToken, context]]);
     if (rowKind !== 2) {
-      const start2 = context.events[range[2]];
+      const start3 = context.events[range[2]];
       const end2 = context.events[range[3]];
-      start2[1].end = Object.assign({}, end2[1].end);
-      start2[1].type = "chunkText";
-      start2[1].contentType = "text";
+      start3[1].end = Object.assign({}, end2[1].end);
+      start3[1].type = "chunkText";
+      start3[1].contentType = "text";
       if (range[3] > range[2] + 1) {
         const a = range[2] + 1;
         const b = range[3] - range[2] - 1;
@@ -40593,7 +40599,7 @@ function placeLinkedBoldItalicSuffixes(tree, source) {
       const decoded = decodeTextLiteral(match[0]);
       if (!text6.value.startsWith(decoded)) return [text6];
       const to = from + match[0].length;
-      const position2 = (start2, end2) => ({ start: points.at(start2), end: points.at(end2) });
+      const position2 = (start3, end2) => ({ start: points.at(start3), end: points.at(end2) });
       const marked = {
         type: "emphasis",
         position: position2(from, to),
@@ -41658,10 +41664,10 @@ var HTML_UNTIL = [
 function inlineHtmlEnds(source, from, to) {
   let text6;
   const next = /* @__PURE__ */ new Map();
-  const closer = (marker, start2) => {
+  const closer = (marker, start3) => {
     let found = next.get(marker);
-    if (found === void 0 || found !== -1 && found < start2) {
-      found = text6.indexOf(marker, start2);
+    if (found === void 0 || found !== -1 && found < start3) {
+      found = text6.indexOf(marker, start3);
       next.set(marker, found);
     }
     return found;
@@ -41822,13 +41828,13 @@ var ZoneTree = class {
     let node2 = this.root;
     let found = node2.zone === void 0 ? void 0 : node2;
     if (folder === "") return found;
-    for (let start2 = 0; ; ) {
-      const slash = folder.indexOf("/", start2);
-      node2 = node2.children.get(slash === -1 ? folder.slice(start2) : folder.slice(start2, slash));
+    for (let start3 = 0; ; ) {
+      const slash = folder.indexOf("/", start3);
+      node2 = node2.children.get(slash === -1 ? folder.slice(start3) : folder.slice(start3, slash));
       if (node2 === void 0) return found;
       if (node2.zone !== void 0) found = node2;
       if (slash === -1) return found;
-      start2 = slash + 1;
+      start3 = slash + 1;
     }
   }
 };
@@ -41862,9 +41868,783 @@ function display(folder) {
 }
 
 // src/state/git.ts
+import { existsSync as existsSync2 } from "node:fs";
+import { join as join7 } from "node:path";
+
+// src/state/batch.ts
 import { spawn as spawn2 } from "node:child_process";
-import { createWriteStream } from "node:fs";
-import { pipeline } from "node:stream/promises";
+import { statSync } from "node:fs";
+var IDLE_MS = 1e3;
+var Queue = class {
+  items = [];
+  head = 0;
+  get size() {
+    return this.items.length - this.head;
+  }
+  push(item) {
+    this.items.push(item);
+  }
+  first() {
+    return this.items[this.head];
+  }
+  shift() {
+    this.head++;
+    if (this.head > 1024 && this.head * 2 > this.items.length) {
+      this.items = this.items.slice(this.head);
+      this.head = 0;
+    }
+  }
+  drain() {
+    const rest = this.items.slice(this.head);
+    this.items = [];
+    this.head = 0;
+    return rest;
+  }
+};
+var BatchProcess = class {
+  options;
+  running;
+  starting;
+  directory;
+  constructor(options) {
+    this.options = options;
+  }
+  /** Writes `input` and waits for its answer. */
+  async request(input, request2) {
+    let running = this.running;
+    if (running === void 0 || this.directory === void 0 || identityOf(this.directory) !== running.identity) running = await this.start();
+    const current = running;
+    return new Promise((resolve3, reject) => {
+      if (current.idle !== void 0) clearTimeout(current.idle);
+      current.idle = void 0;
+      if (current.pending.size === 0) hold(current.child, true);
+      current.pending.push({ request: request2, resolve: resolve3, reject });
+      current.child.stdin.write(input);
+    });
+  }
+  /** Ends the process; the next request starts a new one. */
+  close() {
+    const running = this.running;
+    this.running = void 0;
+    if (running === void 0) return;
+    if (running.idle !== void 0) clearTimeout(running.idle);
+    running.child.stdin.end();
+  }
+  start() {
+    if (this.starting === void 0) {
+      const starting = (async () => {
+        this.close();
+        this.directory ??= await this.options.objectDirectory();
+        const running = this.spawn(this.directory);
+        this.running = running;
+        return running;
+      })();
+      this.starting = starting;
+      const clear = () => {
+        if (this.starting === starting) this.starting = void 0;
+      };
+      starting.then(clear, clear);
+    }
+    return this.starting;
+  }
+  spawn(directory) {
+    const { dir, args, env } = this.options;
+    const child2 = spawn2("git", args, { cwd: dir, env: { ...env(), GIT_FLUSH: "1" }, stdio: ["pipe", "pipe", "pipe"] });
+    const running = { child: child2, identity: identityOf(directory), pending: new Queue(), chunks: [], length: 0, need: 0, stderr: "", idle: void 0 };
+    child2.stdout.on("data", (chunk) => this.receive(running, chunk));
+    child2.stderr.on("data", (chunk) => {
+      if (running.stderr.length < 64 * 1024) running.stderr += chunk.toString("utf8");
+    });
+    child2.stdin.on("error", () => {
+    });
+    let ended = false;
+    const end2 = (code4) => {
+      if (ended) return;
+      ended = true;
+      if (running.idle !== void 0) clearTimeout(running.idle);
+      if (this.running === running) this.running = void 0;
+      const error2 = new GitError(args, code4, running.stderr);
+      const waiting = running.pending.drain();
+      for (const request2 of waiting) request2.reject(error2);
+      if (waiting.length > 0) this.options.onIdle?.();
+    };
+    child2.on("error", () => end2(-1));
+    child2.on("close", (code4) => end2(code4 ?? -1));
+    hold(child2, false);
+    return running;
+  }
+  receive(running, chunk) {
+    running.chunks.push(chunk);
+    running.length += chunk.length;
+    if (running.length < running.need) return;
+    let buffered = running.chunks.length === 1 ? running.chunks[0] : Buffer.concat(running.chunks);
+    running.chunks = [buffered];
+    while (running.pending.size > 0) {
+      const waiting = running.pending.first();
+      let parsed;
+      try {
+        parsed = this.options.parse(buffered, waiting.request);
+      } catch (error2) {
+        this.broken(running, error2);
+        return;
+      }
+      if (parsed === void 0 || "need" in parsed) {
+        running.need = parsed === void 0 ? buffered.length + 1 : parsed.need;
+        break;
+      }
+      buffered = buffered.subarray(parsed.bytes);
+      running.chunks = buffered.length === 0 ? [] : [buffered];
+      running.length = buffered.length;
+      running.need = 0;
+      running.pending.shift();
+      if (running.pending.size === 0) this.rest(running);
+      waiting.resolve(parsed.answer);
+    }
+  }
+  /** Nothing waits: the process must not keep the program running, and it ends unless a request comes soon. */
+  rest(running) {
+    hold(running.child, false);
+    running.idle = setTimeout(() => {
+      if (this.running === running) this.close();
+    }, IDLE_MS);
+    running.idle.unref();
+    this.options.onIdle?.();
+  }
+  broken(running, cause) {
+    if (this.running === running) this.running = void 0;
+    const error2 = new GitError(this.options.args, -1, cause.message);
+    for (const waiting of running.pending.drain()) waiting.reject(error2);
+    running.child.kill("SIGKILL");
+    this.options.onIdle?.();
+  }
+};
+function parseLine(buffer) {
+  const newline = buffer.indexOf(10);
+  return newline < 0 ? void 0 : { answer: buffer.subarray(0, newline).toString("utf8"), bytes: newline + 1 };
+}
+function hold(child2, waiting) {
+  for (const handle2 of [child2, child2.stdin, child2.stdout, child2.stderr]) {
+    if (waiting) handle2.ref();
+    else handle2.unref();
+  }
+}
+function identityOf(directory) {
+  try {
+    const stat2 = statSync(directory);
+    return `${stat2.dev}:${stat2.ino}`;
+  } catch {
+    return "missing";
+  }
+}
+
+// src/state/object-reader.ts
+var HEADER = /^([0-9a-f]{40}|[0-9a-f]{64}) ([a-z]+) ([0-9]+)$/;
+function batchName(name) {
+  return name !== "" && !/[\n\r\0]/.test(name) && name.trim() === name;
+}
+var ObjectReader = class {
+  process;
+  /**
+   * @param dir the directory the process runs in
+   * @param env the environment of the process
+   * @param objectDirectory gives the absolute path of the repository's object directory
+   */
+  constructor(dir, env, objectDirectory) {
+    this.process = new BatchProcess({ dir, args: ["cat-file", "--batch-command"], env, objectDirectory, parse: parse4 });
+  }
+  /** The object a name resolves to, with its content; null when the name resolves to no object. */
+  contents(name) {
+    return this.ask(name, true);
+  }
+  /** The id, type and size of the object a name resolves to; null when it resolves to no object. */
+  info(name) {
+    return this.ask(name, false);
+  }
+  async ask(name, contents) {
+    if (!batchName(name)) throw new Error(message("objects.batch-name", { name: JSON.stringify(name) }));
+    return this.process.request(`${contents ? "contents" : "info"} ${name}
+`, { name, contents });
+  }
+};
+function parse4(buffer, request2) {
+  const newline = buffer.indexOf(10);
+  if (newline < 0) return void 0;
+  const header = buffer.subarray(0, newline).toString("utf8");
+  const match = HEADER.exec(header);
+  if (match === null) {
+    if (header === `${request2.name} missing` || header === `${request2.name} ambiguous`) return { answer: null, bytes: newline + 1 };
+    throw new Error(message("git.unreadable-answer", { command: "cat-file" }));
+  }
+  const info2 = { oid: match[1], type: match[2], size: Number(match[3]) };
+  if (!request2.contents) return { answer: info2, bytes: newline + 1 };
+  const end2 = newline + 1 + info2.size;
+  if (buffer.length < end2 + 1) return { need: end2 + 1 };
+  return { answer: { ...info2, content: Buffer.from(buffer.subarray(newline + 1, end2)) }, bytes: end2 + 1 };
+}
+
+// src/state/object-writer.ts
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import { join as join5 } from "node:path";
+var ObjectWriter = class {
+  blobs;
+  trees;
+  /** Blob content waits in a file here while git reads it; the folder is there only while blobs are being written. */
+  folder;
+  files = 0;
+  writing = 0;
+  /** Writes waiting for one of the `BLOBS_AT_ONCE` places, so the folder holds a bounded number of blobs. */
+  waiting = [];
+  /**
+   * @param dir the directory the processes run in
+   * @param env the environment of the processes
+   * @param objectDirectory gives the absolute path of the repository's object directory
+   */
+  constructor(dir, env, objectDirectory) {
+    const oid = (buffer) => parseLine(buffer);
+    this.blobs = new BatchProcess({
+      dir,
+      env,
+      objectDirectory,
+      parse: oid,
+      args: ["-c", "core.fsyncMethod=fsync", "-c", `core.bigFileThreshold=${Number.MAX_SAFE_INTEGER}`, "hash-object", "-w", "--no-filters", "--stdin-paths"]
+    });
+    this.trees = new BatchProcess({ dir, env, objectDirectory, parse: oid, args: ["mktree", "-z", "--batch"] });
+  }
+  /**
+   * Stores content as a blob, exactly as given (no clean filters, no LFS).
+   * Content given as a function is read only when the blob's turn comes.
+   */
+  async blob(content4) {
+    if (this.writing >= BLOBS_AT_ONCE) await new Promise((resolve3) => this.waiting.push(resolve3));
+    else this.writing++;
+    let path7;
+    try {
+      this.folder ??= mkdtempSync2(join5(tmpdir2(), "blob-"));
+      path7 = join5(this.folder, String(this.files++));
+      writeFileSync2(path7, typeof content4 === "function" ? content4() : content4, { mode: 384 });
+      return checkOid(await this.blobs.request(`${path7}
+`, path7), "hash-object");
+    } finally {
+      if (path7 !== void 0) rmSync2(path7, { force: true });
+      const next = this.waiting.shift();
+      if (next !== void 0) next();
+      else if (--this.writing === 0) this.clearFolder();
+    }
+  }
+  /** Stores a tree of these entries; git sorts them. */
+  async tree(entries) {
+    const records = entries.map((entry) => {
+      if (entry.name.length === 0 || entry.name.includes(0) || entry.name.includes(47)) throw new Error(message("objects.invalid-entry-name", { name: JSON.stringify(entry.name.toString("utf8")) }));
+      return Buffer.concat([Buffer.from(`${entry.mode} ${entry.type} ${entry.oid}	`), entry.name, NUL]);
+    });
+    const input = Buffer.concat([...records, NUL]);
+    try {
+      return checkOid(await this.trees.request(input, null), "mktree");
+    } catch (error2) {
+      if (!(error2 instanceof GitError && error2.stderr.includes("is unavailable"))) throw error2;
+      return checkOid(await this.trees.request(input, null), "mktree");
+    }
+  }
+  clearFolder() {
+    const folder = this.folder;
+    this.folder = void 0;
+    if (folder !== void 0) rmSync2(folder, { recursive: true, force: true });
+  }
+};
+var NUL = Buffer.from([0]);
+var BLOBS_AT_ONCE = 8;
+function checkOid(line2, command) {
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(line2)) throw new Error(message("git.unreadable-answer", { command }));
+  return line2;
+}
+
+// src/state/spawner.ts
+import { spawn as spawn3 } from "node:child_process";
+var HELPER = String.raw`
+'use strict';
+const { spawn } = require('node:child_process');
+const { createWriteStream } = require('node:fs');
+const { pipeline } = require('node:stream/promises');
+const failure = (error) => ({ message: String(error && error.message), code: error && error.code, errno: error && error.errno, syscall: error && error.syscall, path: error && error.path });
+const reply = (message) => { if (process.connected) process.send(message); };
+function run(id, request) {
+  const child = spawn('git', request.args, { cwd: request.cwd, env: request.env, stdio: [request.file ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+  const out = [];
+  const err = [];
+  let exceeded;
+  const collector = (chunks, limit) => {
+    let bytes = 0;
+    return (chunk) => {
+      if (exceeded !== undefined) return;
+      bytes += chunk.length;
+      if (limit !== undefined && bytes > limit) {
+        exceeded = limit;
+        child.kill('SIGKILL');
+        return;
+      }
+      chunks.push(chunk);
+    };
+  };
+  // A bounded call stops the command when its standard error passes 64 KiB as well; a call that streams to a file
+  // keeps the first 64 KiB of it and lets the command finish.
+  let kept = 0;
+  const firstPart = (chunk) => { if (kept < 64 * 1024) { kept += chunk.length; err.push(chunk); } };
+  if (!request.file) child.stdout.on('data', collector(out, request.maxOutputBytes));
+  child.stderr.on('data', request.file ? firstPart : collector(err, request.maxOutputBytes !== undefined ? 64 * 1024 : undefined));
+  let failed;
+  const exited = new Promise((resolve) => {
+    child.on('error', (error) => { failed = error; resolve(-1); });
+    child.on('close', (code) => resolve(code === null ? -1 : code));
+  });
+  if (!request.file) {
+    child.stdin.on('error', () => {});
+    child.stdin.end(request.input === undefined ? '' : request.input);
+  }
+  const copied = request.file
+    ? pipeline(child.stdout, createWriteStream(request.file.path, { flags: 'wx', mode: request.file.mode })).catch((error) => { child.kill('SIGKILL'); throw error; })
+    : Promise.resolve();
+  copied.then(() => exited).then((code) => {
+    if (failed !== undefined) return reply({ id, failure: failure(failed) });
+    reply({ id, result: { code, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8'), exceeded } });
+  }, (error) => exited.then(() => reply({ id, failure: failure(failed === undefined ? error : failed) })));
+}
+process.on('message', ({ id, request }) => {
+  // A command that cannot even start (an argument with a NUL in it) fails alone.
+  try { run(id, request); } catch (error) { reply({ id, failure: failure(error) }); }
+});
+process.on('disconnect', () => process.exit(0));
+`;
+var helper;
+var pending = /* @__PURE__ */ new Map();
+var nextId = 0;
+function start2() {
+  const { NODE_OPTIONS: _options, ...env } = process.env;
+  const child2 = spawn3(process.execPath, ["-e", HELPER], { stdio: ["ignore", "ignore", "inherit", "ipc"], serialization: "advanced", env });
+  child2.on("message", (message2) => {
+    const waiting = pending.get(message2.id);
+    if (waiting === void 0) return;
+    pending.delete(message2.id);
+    if (pending.size === 0) hold2(child2, false);
+    if ("result" in message2) waiting.resolve({ ...message2.result, stdout: Buffer.from(message2.result.stdout) });
+    else waiting.reject(Object.assign(new Error(message2.failure.message), withoutUndefined(message2.failure)));
+  });
+  const end2 = (error2) => {
+    if (helper === child2) helper = void 0;
+    for (const [id, waiting] of pending) {
+      pending.delete(id);
+      waiting.reject(error2);
+    }
+  };
+  child2.on("error", end2);
+  child2.on("exit", (code4, signal) => end2(new Error(message("git.starter-ended", { reason: String(signal ?? code4) }))));
+  hold2(child2, false);
+  return child2;
+}
+function hold2(child2, waiting) {
+  const channel = child2.channel;
+  if (waiting) {
+    child2.ref();
+    channel?.ref();
+  } else {
+    child2.unref();
+    channel?.unref();
+  }
+}
+function withoutUndefined(failure) {
+  return Object.fromEntries(Object.entries(failure).filter(([key, value]) => key !== "message" && value !== void 0 && value !== null));
+}
+function spawnGit(request2) {
+  helper ??= start2();
+  const child2 = helper;
+  const id = nextId++;
+  return new Promise((resolve3, reject) => {
+    if (pending.size === 0) hold2(child2, true);
+    pending.set(id, { resolve: resolve3, reject });
+    child2.send({ id, request: request2 });
+  });
+}
+
+// src/state/objects.ts
+import { mkdtemp, rm as rm2 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join6 } from "node:path";
+var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
+function listTree(git, treeish, maxOutputBytes) {
+  return git.listTree(treeish, maxOutputBytes);
+}
+async function readTreeListing(git, treeish, maxOutputBytes) {
+  let files;
+  try {
+    files = await walkTree(git, treeish, maxOutputBytes === void 0 ? void 0 : { maxOutputBytes, sized: true });
+  } catch (error2) {
+    if (!(error2 instanceof TreeOverLimit)) throw error2;
+    const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
+  const sizes = await Promise.all(files.map((file) => file.type === "blob" ? git.objectInfo(file.oid) : null));
+  let bytes = 0;
+  return files.map((file, index2) => {
+    const size = file.type === "blob" ? sizes[index2]?.size ?? Number.NaN : null;
+    if (maxOutputBytes !== void 0) {
+      bytes += file.bytes + Math.max(7, size === null ? 1 : Number.isNaN(size) ? 3 : String(size).length);
+      if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
+    }
+    return { path: file.path, mode: file.mode, type: file.type, oid: file.oid, size };
+  });
+}
+async function listPaths(git, treeish, paths, maxOutputBytes) {
+  const unique = [...new Set(paths)];
+  const inside2 = (path7) => unique.some((other) => other.startsWith(`${path7}/`));
+  if (unique.some((path7) => inside2(path7) || path7.split("/").some((part) => part === "" || part === "." || part === ".."))) {
+    const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", treeish, "--", ...paths], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
+  try {
+    return await listPathsInTrees(git, treeish, unique, maxOutputBytes);
+  } catch (error2) {
+    if (!(error2 instanceof TreeOverLimit)) throw error2;
+    const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", treeish, "--", ...paths], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
+}
+async function listPathsInTrees(git, treeish, unique, maxOutputBytes) {
+  const root2 = await readTree(git, `${treeish}^{tree}`, maxOutputBytes);
+  if (root2 === null || root2.type !== "tree") throw new GitError(["ls-tree", "--full-tree", treeish], 128, `fatal: not a tree object: ${treeish}`);
+  const rawLength = root2.oid.length / 2;
+  const folders = /* @__PURE__ */ new Map([["", Promise.resolve(parseTree(root2.content, rawLength))]]);
+  const folder = (path7) => {
+    let found2 = folders.get(path7);
+    if (found2 === void 0) {
+      const slash = path7.lastIndexOf("/");
+      found2 = (async () => {
+        const entry = await entryIn(folder(slash < 0 ? "" : path7.slice(0, slash)), path7.slice(slash + 1));
+        if (entry?.mode !== "040000") return null;
+        const tree = await readTree(git, entry.oid, maxOutputBytes);
+        return tree?.type === "tree" ? parseTree(tree.content, rawLength) : null;
+      })();
+      folders.set(path7, found2);
+    }
+    return found2;
+  };
+  const entryIn = async (entries, name) => {
+    const bytes = Buffer.from(name, "utf8");
+    return (await entries)?.find((entry) => entry.name.equals(bytes));
+  };
+  const found = await Promise.all(unique.map(async (path7) => {
+    const slash = path7.lastIndexOf("/");
+    const entry = await entryIn(folder(slash < 0 ? "" : path7.slice(0, slash)), path7.slice(slash + 1));
+    if (entry === void 0) return void 0;
+    const type = entry.mode === "040000" ? "tree" : entry.mode === "160000" ? "commit" : "blob";
+    const size = type === "blob" ? (await git.objectInfo(entry.oid))?.size ?? Number.NaN : null;
+    return { path: path7, bytes: Buffer.from(path7, "utf8"), mode: entry.mode, type, oid: entry.oid, size };
+  }));
+  const listed = found.filter((entry) => entry !== void 0).sort((a, b) => a.bytes.compare(b.bytes));
+  if (maxOutputBytes !== void 0) {
+    let bytes = 0;
+    for (const entry of listed) {
+      bytes += entry.mode.length + entry.type.length + entry.oid.length + entry.bytes.length + 5 + Math.max(7, entry.size === null ? 1 : Number.isNaN(entry.size) ? 3 : String(entry.size).length);
+    }
+    if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
+  }
+  return listed.flatMap(({ path: path7, mode, type, oid, size }) => type === "tree" ? [] : [{ path: path7, mode, type, oid, size }]);
+}
+async function walkTree(git, treeish, limit) {
+  const root2 = await readTree(git, `${treeish}^{tree}`, limit?.maxOutputBytes);
+  if (root2 === null || root2.type !== "tree") throw new GitError(["ls-tree", "-r", "--full-tree", treeish], 128, `fatal: not a tree object: ${treeish}`);
+  const rawLength = root2.oid.length / 2;
+  const files = [];
+  let bytes = 0;
+  const walk = async (content4, prefix) => {
+    const entries = parseTree(content4, rawLength);
+    const subtrees = entries.map((entry) => limit === void 0 && entry.mode === "040000" ? git.readObject(entry.oid) : void 0);
+    for (const read of subtrees) read?.catch(() => {
+    });
+    for (const [index2, entry] of entries.entries()) {
+      const path7 = prefix.length === 0 ? entry.name : Buffer.concat([prefix, SLASH, entry.name]);
+      if (entry.mode === "040000") {
+        const tree = await (subtrees[index2] ?? readTree(git, entry.oid, limit === void 0 ? void 0 : limit.maxOutputBytes - bytes));
+        if (tree === null || tree === void 0 || tree.type !== "tree") throw new GitError(["ls-tree", "-r", "--full-tree", treeish], 128, `fatal: not a tree object: ${entry.oid}`);
+        await walk(tree.content, path7);
+        continue;
+      }
+      const type = entry.mode === "160000" ? "commit" : "blob";
+      const record = entry.mode.length + type.length + entry.oid.length + path7.length + 5;
+      if (limit !== void 0) {
+        bytes += record + (limit.sized ? 7 : -1);
+        if (bytes > limit.maxOutputBytes) throw new GitOutputLimitError(limit.maxOutputBytes);
+      }
+      files.push({ path: path7.toString("utf8"), mode: entry.mode, type, oid: entry.oid, bytes: record });
+    }
+  };
+  await walk(root2.content, Buffer.alloc(0));
+  return files;
+}
+var SLASH = Buffer.from("/");
+var TreeOverLimit = class extends Error {
+};
+async function readTree(git, name, budget) {
+  if (budget === void 0) return git.readObject(name);
+  const info2 = await git.objectInfo(name);
+  if (info2 === null) return null;
+  if (info2.type === "tree" && info2.size > budget) throw new TreeOverLimit();
+  return git.readObject(info2.oid);
+}
+function parseTree(content4, rawLength) {
+  const entries = [];
+  let offset = 0;
+  while (offset < content4.length) {
+    const space = content4.indexOf(32, offset);
+    const nul = content4.indexOf(0, space + 1);
+    if (space < 0 || nul < 0 || nul + 1 + rawLength > content4.length) throw new Error(message("objects.bad-tree"));
+    const mode = canonicalMode(Number.parseInt(content4.subarray(offset, space).toString("latin1"), 8));
+    entries.push({ mode, name: content4.subarray(space + 1, nul), oid: content4.subarray(nul + 1, nul + 1 + rawLength).toString("hex") });
+    offset = nul + 1 + rawLength;
+  }
+  return entries;
+}
+function canonicalMode(mode) {
+  const kind = mode & 61440;
+  const canonical = kind === 32768 ? 32768 | (mode & 64 ? 493 : 420) : kind === 40960 ? 40960 : kind === 16384 ? 16384 : 57344;
+  return canonical.toString(8).padStart(6, "0");
+}
+function parseTreeListing(stdout) {
+  const entries = [];
+  for (const record of stdout.toString("utf8").split("\0")) {
+    if (record === "") continue;
+    const tab = record.indexOf("	");
+    const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
+    if (type !== "blob" && type !== "commit") continue;
+    entries.push({
+      path: record.slice(tab + 1),
+      mode,
+      type,
+      oid,
+      size: size === "-" || size === void 0 ? null : Number(size)
+    });
+  }
+  return entries;
+}
+function readBlobs(git, oids, maxOutputBytes) {
+  return git.readBlobs(oids, maxOutputBytes);
+}
+async function readBlobBatch(git, oids, maxOutputBytes) {
+  const unique = [...new Set(oids)];
+  const result = /* @__PURE__ */ new Map();
+  if (unique.length === 0) return result;
+  if (maxOutputBytes !== void 0) {
+    const infos = await Promise.all(unique.map((oid) => git.objectInfo(oid)));
+    let bytes = 0;
+    infos.forEach((info2, index2) => {
+      bytes += info2 === null ? `${unique[index2]} missing
+`.length : `${info2.oid} ${info2.type} ${info2.size}
+`.length + info2.size + 1;
+    });
+    if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
+  }
+  const objects = await Promise.all(unique.map((oid) => git.readObject(oid)));
+  unique.forEach((oid, index2) => {
+    const found = objects[index2];
+    if (found === null || found === void 0) throw new Error(message("objects.missing", { oid }));
+    if (found.type !== "blob") throw new Error(message("objects.not-blob", { oid, type: found.type }));
+    result.set(oid, found.content);
+  });
+  return result;
+}
+function isGitDirectoryName(part) {
+  return /^(?:\.git|git~[0-9]+)[. ]*(?::|$)/i.test(part.replace(HFS_IGNORED, ""));
+}
+var HFS_IGNORED = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
+function checkRepoPath(path7, { removal = false } = {}) {
+  const parts = path7.split("/");
+  if (path7 === "" || path7.includes("\0") || path7.includes("\\")) throw new Error(message("objects.invalid-path", { path: JSON.stringify(path7) }));
+  for (const part of parts) {
+    if (part === "" || part === "." || part === ".." || !removal && isGitDirectoryName(part)) {
+      throw new Error(message("objects.invalid-path", { path: JSON.stringify(path7) }));
+    }
+  }
+}
+async function commitTree(git, spec) {
+  for (const [path7, content4] of spec.changes) checkRepoPath(path7, { removal: content4 === null });
+  const tree = await buildTree(git, spec.base, spec.changes);
+  if ((spec.skipIfUnchanged ?? true) && spec.parents.length === 1) {
+    const parentTree = await git.revParse(`${spec.parents[0]}^{tree}`);
+    if (parentTree === tree) return spec.parents[0];
+  }
+  const args = ["-c", "i18n.commitEncoding=UTF-8", "commit-tree", "--no-gpg-sign", tree];
+  const parents = [...new Set(spec.parents)];
+  for (const parent of parents) args.push("-p", parent);
+  args.push("-F", "-");
+  const text6 = spec.sign === void 0 ? spec.message : spec.sign(tree, parents, spec.message);
+  return git.text(args, {
+    input: text6.endsWith("\n") ? text6 : `${text6}
+`,
+    env: {
+      GIT_AUTHOR_NAME: spec.identity.name,
+      GIT_AUTHOR_EMAIL: spec.identity.email,
+      GIT_COMMITTER_NAME: spec.identity.name,
+      GIT_COMMITTER_EMAIL: spec.identity.email
+    }
+  });
+}
+async function buildTree(git, base, changes) {
+  const writer = git.objectWriter();
+  const placed = /* @__PURE__ */ new Map();
+  for (const [path7, content4] of changes) {
+    const oid = content4 === null ? void 0 : writer.blob(() => contentBytes(content4));
+    oid?.catch(() => {
+    });
+    placed.set(path7, oid === void 0 ? null : { oid });
+  }
+  try {
+    return await placeInTrees(git, base, placed) ?? await buildTreeInIndex(git, base, placed);
+  } finally {
+    await Promise.all([...placed.values()].map((placement) => placement?.oid));
+  }
+}
+async function placeEntries(git, base, entries) {
+  const placed = new Map([...entries].map(([path7, entry]) => [path7, entry === null ? null : { oid: Promise.resolve(entry.oid), mode: entry.mode }]));
+  const built = await placeInTrees(git, base, placed);
+  if (built !== void 0) return built;
+  const dir = await mkdtemp(join6(tmpdir3(), "lane-index-"));
+  const env = { GIT_INDEX_FILE: join6(dir, "index") };
+  try {
+    await git.run(["read-tree", `${base}^{tree}`], { env });
+    const zero = "0".repeat(await git.objectFormat() === "sha256" ? 64 : 40);
+    const input = [...entries].map(([path7, entry]) => entry === null ? `0 ${zero}	${path7}\0` : `${entry.mode} ${entry.oid}	${path7}\0`).join("");
+    if (input) await git.run(["update-index", "-z", "--index-info"], { env, input });
+    return await git.text(["write-tree"], { env });
+  } finally {
+    await rm2(dir, { recursive: true, force: true });
+  }
+}
+async function buildTreeInIndex(git, base, changes) {
+  const dir = await mkdtemp(join6(tmpdir3(), "state-index-"));
+  const env = { GIT_INDEX_FILE: join6(dir, "index") };
+  try {
+    if (base === null) await git.run(["read-tree", "--empty"], { env });
+    else await git.run(["read-tree", `${base}^{tree}`], { env });
+    const modes = base !== null && changes.size > 0 ? await listModes(git, base) : /* @__PURE__ */ new Map();
+    const nullOid = "0".repeat(await git.objectFormat() === "sha256" ? 64 : 40);
+    const lines2 = await mapLimit([...changes.entries()], 8, async ([path7, placement]) => {
+      if (placement === null) return `0 ${nullOid}	${path7}\0`;
+      const oid = await placement.oid;
+      const mode = modes.get(path7) === "100755" ? "100755" : "100644";
+      return `${mode} ${oid}	${path7}\0`;
+    });
+    if (lines2.length > 0) await git.run(["update-index", "-z", "--index-info"], { input: lines2.join(""), env });
+    return await git.text(["write-tree"], { env });
+  } finally {
+    await rm2(dir, { recursive: true, force: true });
+  }
+}
+var NeedsIndex = class extends Error {
+};
+async function placeInTrees(git, base, changes) {
+  const root2 = { below: /* @__PURE__ */ new Map() };
+  for (const [path7, change] of changes) {
+    const parts = path7.split("/");
+    if (parts.some((part) => part === "" || part === "." || part === ".." || isGitDirectoryName(part))) return void 0;
+    let node2 = root2;
+    for (const part of parts) {
+      let next = node2.below.get(part);
+      if (next === void 0) node2.below.set(part, next = { below: /* @__PURE__ */ new Map() });
+      node2 = next;
+    }
+    node2.change = change;
+  }
+  let tree = null;
+  if (base !== null) {
+    const found = await git.readObject(`${base}^{tree}`);
+    if (found === null || found.type !== "tree") return void 0;
+    if (changes.size === 0) return found.oid;
+    tree = found.content;
+  }
+  const context = { rawLength: await git.objectFormat() === "sha256" ? 32 : 20, holdsFiles: /* @__PURE__ */ new Map() };
+  try {
+    return await rebuild(git, tree, root2, context) ?? await git.objectWriter().tree([]);
+  } catch (error2) {
+    if (error2 instanceof NeedsIndex) return void 0;
+    throw error2;
+  }
+}
+async function rebuild(git, content4, node2, context) {
+  const entries = /* @__PURE__ */ new Map();
+  if (content4 !== null) {
+    let previous3;
+    for (const entry of parseTree(content4, context.rawLength)) {
+      if (previous3 !== void 0 && compareEntries(previous3, entry) >= 0) throw new NeedsIndex();
+      const name = entry.name.toString("latin1");
+      if (name === "." || name === ".." || isGitDirectoryName(entry.name.toString("utf8"))) throw new NeedsIndex();
+      previous3 = entry;
+      entries.set(name, { mode: entry.mode, type: entryType(entry.mode), oid: entry.oid, name: entry.name });
+    }
+  }
+  const changedKeys = new Set([...node2.below.keys()].map((name) => Buffer.from(name, "utf8").toString("latin1")));
+  const changed2 = await Promise.all([...node2.below.entries()].map(async ([name, below]) => {
+    const bytes = Buffer.from(name, "utf8");
+    const existing = entries.get(bytes.toString("latin1"));
+    if (below.change !== void 0) {
+      if (below.below.size > 0 || existing?.type === "tree") throw new NeedsIndex();
+      if (below.change === null) return null;
+      const mode = below.change.mode ?? (existing?.mode === "100755" ? "100755" : "100644");
+      return { mode, type: entryType(mode), oid: await below.change.oid, name: bytes };
+    }
+    if (existing !== void 0 && existing.type !== "tree") {
+      if (adds(below)) throw new NeedsIndex();
+      return existing;
+    }
+    if (existing === void 0 && !adds(below)) return null;
+    let subtree = null;
+    if (existing !== void 0) {
+      const found = await git.readObject(existing.oid);
+      if (found === null || found.type !== "tree") throw new NeedsIndex();
+      subtree = found.content;
+    }
+    const oid = await rebuild(git, subtree, below, context);
+    return oid === null ? null : { mode: "040000", type: "tree", oid, name: bytes };
+  }));
+  const kept = [...entries.entries()].filter(([key]) => !changedKeys.has(key)).map(([, entry]) => entry);
+  const holds = await Promise.all(kept.map((entry) => entry.type === "tree" ? holdsFile(git, entry.oid, context) : true));
+  const result = [...kept.filter((_, index2) => holds[index2]), ...changed2.filter((entry) => entry !== null)];
+  if (result.length === 0) return null;
+  return git.objectWriter().tree(result);
+}
+function adds(node2) {
+  if (node2.change !== void 0 && node2.change !== null) return true;
+  for (const next of node2.below.values()) if (adds(next)) return true;
+  return false;
+}
+function holdsFile(git, oid, context) {
+  let known = context.holdsFiles.get(oid);
+  if (known === void 0) {
+    known = (async () => {
+      const found = await git.readObject(oid);
+      if (found === null || found.type !== "tree") throw new NeedsIndex();
+      const entries = parseTree(found.content, context.rawLength);
+      if (entries.some((entry) => entry.mode !== "040000")) return true;
+      for (const entry of entries) if (await holdsFile(git, entry.oid, context)) return true;
+      return false;
+    })();
+    context.holdsFiles.set(oid, known);
+  }
+  return known;
+}
+function entryType(mode) {
+  return mode === "040000" ? "tree" : mode === "160000" ? "commit" : "blob";
+}
+function compareEntries(a, b) {
+  const length = Math.min(a.name.length, b.name.length);
+  const common = a.name.subarray(0, length).compare(b.name.subarray(0, length));
+  if (common !== 0) return common;
+  const next = (entry) => entry.name.length > length ? entry.name[length] : entry.mode === "040000" ? 47 : 0;
+  return next(a) - next(b);
+}
+async function listModes(git, treeish) {
+  return new Map((await walkTree(git, treeish)).map((file) => [file.path, file.mode]));
+}
+
+// src/state/git.ts
 var GitError = class extends Error {
   args;
   code;
@@ -41908,47 +42688,140 @@ var Git = class {
     }
     return env;
   }
-  run(args, options = {}) {
-    const env = this.environment(options);
+  reader;
+  writer;
+  /** The absolute path of the repository's object directory, for the long-lived processes to notice a repository made again. */
+  objectDirectory = () => {
+    return this.layout().then(({ objects }) => objects);
+  };
+  layoutRead;
+  /** The repository's object format and folders, from one `rev-parse`; they do not change while the repository exists. */
+  layout() {
+    this.layoutRead ??= this.text(["rev-parse", "--show-object-format", "--path-format=absolute", "--git-path", "objects", "--git-common-dir"]).then(
+      async (text6) => {
+        const lines2 = text6.split("\n");
+        if (lines2.length === 3) return { format: lines2[0], objects: lines2[1], common: lines2[2] };
+        const [format, objects, common] = await Promise.all([
+          this.text(["rev-parse", "--show-object-format"]),
+          this.text(["rev-parse", "--path-format=absolute", "--git-path", "objects"]),
+          this.text(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        ]);
+        return { format, objects, common };
+      },
+      (error2) => {
+        this.layoutRead = void 0;
+        throw error2;
+      }
+    );
+    return this.layoutRead;
+  }
+  /**
+   * Reads objects through one long-lived git process instead of a process
+   * per read. Names are revisions as `git cat-file` takes them (`<oid>`,
+   * `<commit>:<path>`, `<ref>^{commit}`).
+   */
+  objects() {
+    this.reader ??= new ObjectReader(this.dir, () => this.environment({}), this.objectDirectory);
+    return this.reader;
+  }
+  /** Writes blobs and trees through long-lived git processes instead of a process per object. */
+  objectWriter() {
+    this.writer ??= new ObjectWriter(this.dir, () => this.environment({}), this.objectDirectory);
+    return this.writer;
+  }
+  /** The object a name resolves to, with its content; null when it resolves to none. */
+  async readObject(name) {
+    if (batchName(name)) return this.objects().contents(name);
+    const found = await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", name], { okCodes: [0, 1, 128] });
+    if (found.code !== 0) return null;
+    const oid = found.stdout.toString("utf8").trim();
+    return this.objects().contents(oid);
+  }
+  /**
+   * Every file of a commit or tree, recursively, as `git ls-tree -r -l`
+   * lists them (see `listTree` in objects.ts).
+   */
+  listTree(treeish, maxOutputBytes) {
+    return readTreeListing(this, treeish, maxOutputBytes);
+  }
+  /** Blobs by id, one batch (see `readBlobs` in objects.ts). */
+  readBlobs(oids, maxOutputBytes) {
+    return readBlobBatch(this, oids, maxOutputBytes);
+  }
+  /** The content of the blob a name resolves to, as `git cat-file blob` gives it; null when it resolves to no blob. */
+  async readBlob(name, maxBytes) {
+    if (maxBytes === void 0) {
+      const found = await this.readObject(name);
+      return found?.type === "blob" ? found.content : null;
+    }
+    const info2 = await this.objectInfo(name);
+    if (info2?.type !== "blob") return null;
+    if (info2.size > maxBytes) throw new GitOutputLimitError(maxBytes);
+    return (await this.objects().contents(info2.oid))?.content ?? null;
+  }
+  /**
+   * The id a name resolves to, as `git rev-parse <name>` gives it: read
+   * through the object reader, and from `rev-parse` itself (with its error)
+   * when the reader finds no object.
+   */
+  async revParse(name) {
+    return (await this.objectInfo(name))?.oid ?? this.text(["rev-parse", name]);
+  }
+  /**
+   * What `git show <name>` gives: for a blob its content, read through the
+   * object reader; anything else, and a name that resolves to nothing, is
+   * left to `git show` itself.
+   */
+  async showBlob(name, options = {}) {
+    const found = await this.readObject(name);
+    if (found?.type === "blob") return { code: 0, stdout: found.content, stderr: "" };
+    return this.run(["show", name], options);
+  }
+  /** The id, type and size of the object a name resolves to; null when it resolves to none. */
+  async objectInfo(name) {
+    if (batchName(name)) return this.objects().info(name);
+    const found = await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", name], { okCodes: [0, 1, 128] });
+    if (found.code !== 0) return null;
+    return this.objects().info(found.stdout.toString("utf8").trim());
+  }
+  plain;
+  /**
+   * True when git prints commit messages as stored, without re-encoding:
+   * the repository sets no message encoding other than UTF-8
+   * (`i18n.commitEncoding`, `i18n.logOutputEncoding`).
+   */
+  plainMessages() {
+    this.plain ??= this.run(["config", "--get-regexp", "^i18n\\.(commitencoding|logoutputencoding)$"], { okCodes: [0, 1] }).then(
+      ({ stdout }) => stdout.toString("utf8").split("\n").filter(Boolean).every((line2) => /^\S+ utf-?8$/i.test(line2)),
+      (error2) => {
+        this.plain = void 0;
+        throw error2;
+      }
+    );
+    return this.plain;
+  }
+  /**
+   * True when git reads some commits' parents other than as stored: a
+   * shallow repository cuts history at its boundary, and grafts replace
+   * parents. Checked on every call, as a fetch can make a repository shallow.
+   */
+  async rewritesHistory() {
+    const env = this.environment({});
+    if (env.GIT_SHALLOW_FILE !== void 0 || env.GIT_GRAFT_FILE !== void 0) return true;
+    const { common } = await this.layout();
+    return existsSync2(join7(common, "shallow")) || existsSync2(join7(common, "info", "grafts"));
+  }
+  /** The repository's object format, `sha1` or `sha256`; it does not change while the repository exists. */
+  objectFormat() {
+    return this.layout().then(({ format }) => format);
+  }
+  async run(args, options = {}) {
     const okCodes = options.okCodes ?? [0];
-    return new Promise((resolve3, reject) => {
-      const child2 = spawn2("git", args, { cwd: this.dir, env, stdio: ["pipe", "pipe", "pipe"] });
-      const out = [];
-      const err = [];
-      let exceededLimit;
-      const collector = (chunks, limit) => {
-        let bytes = 0;
-        return (chunk) => {
-          if (exceededLimit !== void 0) return;
-          bytes += chunk.length;
-          if (limit !== void 0 && bytes > limit) {
-            exceededLimit = limit;
-            child2.kill("SIGKILL");
-            return;
-          }
-          chunks.push(chunk);
-        };
-      };
-      child2.stdout.on("data", collector(out, options.maxOutputBytes));
-      child2.stderr.on("data", collector(err, options.maxOutputBytes === void 0 ? void 0 : 64 * 1024));
-      child2.on("error", reject);
-      child2.stdin.on("error", () => {
-      });
-      child2.on("close", (code4) => {
-        if (exceededLimit !== void 0) {
-          reject(new GitOutputLimitError(exceededLimit));
-          return;
-        }
-        const result = {
-          code: code4 ?? -1,
-          stdout: Buffer.concat(out),
-          stderr: Buffer.concat(err).toString("utf8")
-        };
-        if (okCodes.includes(result.code)) resolve3(result);
-        else reject(new GitError(args, result.code, result.stderr));
-      });
-      child2.stdin.end(options.input ?? "");
-    });
+    const result = await spawnGit({ args, cwd: this.dir, env: this.environment(options), input: options.input ?? "", ...options.maxOutputBytes === void 0 ? {} : { maxOutputBytes: options.maxOutputBytes } });
+    if (result.exceeded !== void 0) throw new GitOutputLimitError(result.exceeded);
+    const { code: code4, stdout, stderr } = result;
+    if (!okCodes.includes(code4)) throw new GitError(args, code4, stderr);
+    return { code: code4, stdout, stderr };
   }
   /**
    * Runs git and writes its standard output to a new file at `path` as it
@@ -41956,26 +42829,7 @@ var Git = class {
    * is capped at 64 KiB. A failing exit is a `GitError`.
    */
   async runToFile(args, path7, fileMode) {
-    const child2 = spawn2("git", args, { cwd: this.dir, env: this.environment({}), stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-    child2.stderr.on("data", (chunk) => {
-      if (stderr.length < 64 * 1024) stderr += chunk.toString("utf8");
-    });
-    const exited = new Promise((resolve3, reject) => {
-      child2.on("error", reject);
-      child2.on("close", (code5) => resolve3(code5 ?? -1));
-    });
-    exited.catch(() => {
-    });
-    try {
-      await pipeline(child2.stdout, createWriteStream(path7, { flags: "wx", mode: fileMode }));
-    } catch (error2) {
-      child2.kill("SIGKILL");
-      await exited.catch(() => {
-      });
-      throw error2;
-    }
-    const code4 = await exited;
+    const { code: code4, stderr } = await spawnGit({ args, cwd: this.dir, env: this.environment({}), file: { path: path7, mode: fileMode } });
     if (code4 !== 0) throw new GitError(args, code4, stderr);
   }
   /** Runs git and returns standard output as text without the final newline. */
@@ -41999,9 +42853,9 @@ async function mapLimit(items, limit, fn) {
 
 // src/state/lfs.ts
 import { createHash as createHash2 } from "node:crypto";
-import { mkdtemp, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
-import { tmpdir as tmpdir2 } from "node:os";
-import { join as join5 } from "node:path";
+import { mkdtemp as mkdtemp2, rm as rm3, writeFile as writeFile2 } from "node:fs/promises";
+import { tmpdir as tmpdir4 } from "node:os";
+import { join as join8 } from "node:path";
 
 // src/state/config.ts
 var STORES = ["linear", "ids", "uploads"];
@@ -42134,16 +42988,16 @@ async function lfsPush(git, to, oids) {
 }
 var LFSCONFIG_LIMIT = 64 * 1024;
 async function lfsSetting(git, from) {
-  const found = await git.run(["cat-file", "blob", `${from.tracked}:.lfsconfig`], { okCodes: [0, 128], maxOutputBytes: LFSCONFIG_LIMIT });
-  return { gitDir: await git.text(["rev-parse", "--absolute-git-dir"]), lfsconfig: found.code === 0 ? found.stdout : Buffer.alloc(0) };
+  const found = await git.readBlob(`${from.tracked}:.lfsconfig`, LFSCONFIG_LIMIT);
+  return { gitDir: await git.text(["rev-parse", "--absolute-git-dir"]), lfsconfig: found ?? Buffer.alloc(0) };
 }
 async function withLfsconfig(setting, work) {
-  const tree = await mkdtemp(join5(tmpdir2(), "mdbisync-lfs-"));
+  const tree = await mkdtemp2(join8(tmpdir4(), "mdbisync-lfs-"));
   try {
-    await writeFile2(join5(tree, ".lfsconfig"), setting.lfsconfig);
+    await writeFile2(join8(tree, ".lfsconfig"), setting.lfsconfig);
     return await work({ GIT_DIR: setting.gitDir, GIT_WORK_TREE: tree });
   } finally {
-    await rm2(tree, { recursive: true, force: true });
+    await rm3(tree, { recursive: true, force: true });
   }
 }
 var GitLfsMissingError = class extends Error {
@@ -42212,122 +43066,6 @@ size ${pointer.size}
     return { ok: false, reason: `LFS object ${pointer.oid} is missing or does not match its pointer` };
   }
   return { ok: true, content: content4 };
-}
-
-// src/state/objects.ts
-import { mkdtemp as mkdtemp2, rm as rm3 } from "node:fs/promises";
-import { tmpdir as tmpdir3 } from "node:os";
-import { join as join6 } from "node:path";
-var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
-async function listTree(git, treeish, maxOutputBytes) {
-  const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
-  return parseTreeListing(stdout);
-}
-function parseTreeListing(stdout) {
-  const entries = [];
-  for (const record of stdout.toString("utf8").split("\0")) {
-    if (record === "") continue;
-    const tab = record.indexOf("	");
-    const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
-    if (type !== "blob" && type !== "commit") continue;
-    entries.push({
-      path: record.slice(tab + 1),
-      mode,
-      type,
-      oid,
-      size: size === "-" || size === void 0 ? null : Number(size)
-    });
-  }
-  return entries;
-}
-async function readBlobs(git, oids, maxOutputBytes) {
-  const unique = [...new Set(oids)];
-  const result = /* @__PURE__ */ new Map();
-  if (unique.length === 0) return result;
-  const { stdout } = await git.run(["cat-file", "--batch"], { input: unique.join("\n") + "\n", maxOutputBytes });
-  let offset = 0;
-  for (const oid of unique) {
-    const end2 = stdout.indexOf(10, offset);
-    const header = stdout.subarray(offset, end2).toString("utf8");
-    const [, type, size] = header.split(" ");
-    if (type === "missing" || type === void 0 || size === void 0) {
-      throw new Error(message("objects.missing", { oid }));
-    }
-    if (type !== "blob") throw new Error(message("objects.not-blob", { oid, type: String(type) }));
-    const start2 = end2 + 1;
-    const length = Number(size);
-    result.set(oid, stdout.subarray(start2, start2 + length));
-    offset = start2 + length + 1;
-  }
-  return result;
-}
-async function writeBlob(git, content4) {
-  return git.text(["hash-object", "-w", "--no-filters", "--stdin"], { input: contentBytes(content4) });
-}
-function isGitDirectoryName(part) {
-  return /^(?:\.git|git~[0-9]+)[. ]*(?::|$)/i.test(part.replace(HFS_IGNORED, ""));
-}
-var HFS_IGNORED = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
-function checkRepoPath(path7, { removal = false } = {}) {
-  const parts = path7.split("/");
-  if (path7 === "" || path7.includes("\0") || path7.includes("\\")) throw new Error(message("objects.invalid-path", { path: JSON.stringify(path7) }));
-  for (const part of parts) {
-    if (part === "" || part === "." || part === ".." || !removal && isGitDirectoryName(part)) {
-      throw new Error(message("objects.invalid-path", { path: JSON.stringify(path7) }));
-    }
-  }
-}
-async function commitTree(git, spec) {
-  for (const [path7, content4] of spec.changes) checkRepoPath(path7, { removal: content4 === null });
-  const tree = await buildTree(git, spec.base, spec.changes);
-  if ((spec.skipIfUnchanged ?? true) && spec.parents.length === 1) {
-    const parentTree = await git.text(["rev-parse", `${spec.parents[0]}^{tree}`]);
-    if (parentTree === tree) return spec.parents[0];
-  }
-  const args = ["-c", "i18n.commitEncoding=UTF-8", "commit-tree", "--no-gpg-sign", tree];
-  const parents = [...new Set(spec.parents)];
-  for (const parent of parents) args.push("-p", parent);
-  args.push("-F", "-");
-  const text6 = spec.sign === void 0 ? spec.message : spec.sign(tree, parents, spec.message);
-  return git.text(args, {
-    input: text6.endsWith("\n") ? text6 : `${text6}
-`,
-    env: {
-      GIT_AUTHOR_NAME: spec.identity.name,
-      GIT_AUTHOR_EMAIL: spec.identity.email,
-      GIT_COMMITTER_NAME: spec.identity.name,
-      GIT_COMMITTER_EMAIL: spec.identity.email
-    }
-  });
-}
-async function buildTree(git, base, changes) {
-  const dir = await mkdtemp2(join6(tmpdir3(), "state-index-"));
-  const env = { GIT_INDEX_FILE: join6(dir, "index") };
-  try {
-    if (base === null) await git.run(["read-tree", "--empty"], { env });
-    else await git.run(["read-tree", `${base}^{tree}`], { env });
-    const modes = base !== null && changes.size > 0 ? await listModes(git, base) : /* @__PURE__ */ new Map();
-    const nullOid = "0".repeat(await git.text(["rev-parse", "--show-object-format"]) === "sha256" ? 64 : 40);
-    const lines2 = await mapLimit([...changes.entries()], 8, async ([path7, content4]) => {
-      if (content4 === null) return `0 ${nullOid}	${path7}\0`;
-      const oid = await writeBlob(git, content4);
-      const mode = modes.get(path7) === "100755" ? "100755" : "100644";
-      return `${mode} ${oid}	${path7}\0`;
-    });
-    if (lines2.length > 0) await git.run(["update-index", "-z", "--index-info"], { input: lines2.join(""), env });
-    return await git.text(["write-tree"], { env });
-  } finally {
-    await rm3(dir, { recursive: true, force: true });
-  }
-}
-async function listModes(git, treeish) {
-  const { stdout } = await git.run(["ls-tree", "-r", "-z", "--full-tree", treeish]);
-  const modes = /* @__PURE__ */ new Map();
-  for (const record of stdout.toString("utf8").split("\0")) {
-    const tab = record.indexOf("	");
-    if (tab > 0) modes.set(record.slice(tab + 1), record.slice(0, record.indexOf(" ")));
-  }
-  return modes;
 }
 
 // src/mapping/blobs.ts
@@ -42789,7 +43527,7 @@ var RequestStats = class {
 // src/linear/reads.ts
 import { createHash as createHash3 } from "node:crypto";
 import { mkdir as mkdir2, open as open2, readFile, writeFile as writeFile3 } from "node:fs/promises";
-import { join as join7 } from "node:path";
+import { join as join9 } from "node:path";
 var VERSION2 = 2;
 var INDEX = "index.json";
 var BODIES = "bodies";
@@ -42820,7 +43558,7 @@ var LinearReads = class _LinearReads {
    */
   static async replaying(folder) {
     try {
-      const index2 = JSON.parse(await readFile(join7(folder, INDEX), "utf8"));
+      const index2 = JSON.parse(await readFile(join9(folder, INDEX), "utf8"));
       if (index2.version !== VERSION2 || index2.token === null || !Array.isArray(index2.answers)) return null;
       const reads = new _LinearReads("replay");
       reads.#token = index2.token;
@@ -42828,7 +43566,7 @@ var LinearReads = class _LinearReads {
       let total = 0;
       for (const { key, status, type, body: body2 } of index2.answers) {
         if (!/^[0-9a-f]{64}$/.test(body2)) return null;
-        const file = join7(folder, BODIES, body2);
+        const file = join9(folder, BODIES, body2);
         const handle2 = await open2(file, "r");
         try {
           const info2 = await handle2.stat();
@@ -42891,17 +43629,17 @@ var LinearReads = class _LinearReads {
   }
   /** Writes the record into `folder`, which only the job's own steps share. */
   async save(folder) {
-    await mkdir2(join7(folder, BODIES), { recursive: true, mode: 448 });
+    await mkdir2(join9(folder, BODIES), { recursive: true, mode: 448 });
     const index2 = { version: VERSION2, token: this.#token, answers: [] };
     const queues = new Map([...this.#answers].map(([key, answers]) => [key, [...answers]]));
     for (const key of this.#order) {
       const answer = queues.get(key)?.shift();
       if (answer === void 0) continue;
       const body2 = answer.body.hash;
-      await writeFile3(join7(folder, BODIES, body2), contentBytes(answer.body), { mode: 384 });
+      await writeFile3(join9(folder, BODIES, body2), contentBytes(answer.body), { mode: 384 });
       index2.answers.push({ key, status: answer.status, type: answer.type, body: body2 });
     }
-    await writeFile3(join7(folder, INDEX), JSON.stringify(index2), { mode: 384 });
+    await writeFile3(join9(folder, INDEX), JSON.stringify(index2), { mode: 384 });
   }
   close() {
     this.#spool.close();
@@ -43230,7 +43968,7 @@ var LinearClient = class {
     const pageSize = clampPageSize(options.pageSize);
     const result = [];
     const pages = [];
-    for (let start2 = 0; start2 < ids.length; start2 += pageSize) pages.push(ids.slice(start2, start2 + pageSize));
+    for (let start3 = 0; start3 < ids.length; start3 += pageSize) pages.push(ids.slice(start3, start3 + pageSize));
     for (let chunk = pages.shift(); chunk !== void 0; chunk = pages.shift()) {
       let data;
       try {
@@ -43862,9 +44600,9 @@ async function resolveTargets(client, zones, { retryDelayMs = TEAMS_RETRY_DELAY_
     const teamNodes2 = [];
     let projectNodes2 = [];
     let seesTeams;
-    for (let start2 = 0; start2 < refs.length; start2 += TEAM_REFS_PER_REQUEST) {
-      const batch = refs.slice(start2, start2 + TEAM_REFS_PER_REQUEST);
-      const first = start2 === 0;
+    for (let start3 = 0; start3 < refs.length; start3 += TEAM_REFS_PER_REQUEST) {
+      const batch = refs.slice(start3, start3 + TEAM_REFS_PER_REQUEST);
+      const first = start3 === 0;
       const withProjects = first && names.length > 0;
       const data = await query(
         "SetupTargets",
@@ -43961,16 +44699,16 @@ async function resolveTargets(client, zones, { retryDelayMs = TEAMS_RETRY_DELAY_
   };
 }
 async function createPendingProjects(client, targets) {
-  const pending = targets.pendingProjects;
-  if (!pending?.size) return false;
-  for (const [key, { id, name, teamId, team }] of pending) {
+  const pending2 = targets.pendingProjects;
+  if (!pending2?.size) return false;
+  for (const [key, { id, name, teamId, team }] of pending2) {
     try {
       targets.projects.set(key, await createProject(client, id, name, teamId));
     } catch (error2) {
       if (error2 instanceof LinearStoppedError || !(error2 instanceof LinearError)) throw error2;
       throw new ProjectCreationError(name, team, error2);
     }
-    pending.delete(key);
+    pending2.delete(key);
   }
   return true;
 }
@@ -46020,24 +46758,24 @@ function arm(source, after, before) {
 function detectConflicts(text6) {
   const source = lines(text6);
   const found = [];
-  let start2;
+  let start3;
   let middle;
   for (const marker of findMarkerLines(text6).values()) {
     if (marker.value === MARKERS.git) {
-      if (start2 !== void 0) found.push({ startLine: start2.startLine, endLine: marker.startLine - 1 });
-      start2 = marker;
+      if (start3 !== void 0) found.push({ startLine: start3.startLine, endLine: marker.startLine - 1 });
+      start3 = marker;
       middle = void 0;
-    } else if (marker.value === MARKERS.linear && start2 !== void 0 && middle === void 0) {
+    } else if (marker.value === MARKERS.linear && start3 !== void 0 && middle === void 0) {
       middle = marker;
-    } else if (marker.value === MARKERS.end && start2 !== void 0) {
-      found.push(middle === void 0 ? { startLine: start2.startLine, endLine: marker.endLine } : { startLine: start2.startLine, endLine: marker.endLine, git: arm(source, start2.endLine, middle.startLine), linear: arm(source, middle.endLine, marker.startLine) });
-      start2 = void 0;
+    } else if (marker.value === MARKERS.end && start3 !== void 0) {
+      found.push(middle === void 0 ? { startLine: start3.startLine, endLine: marker.endLine } : { startLine: start3.startLine, endLine: marker.endLine, git: arm(source, start3.endLine, middle.startLine), linear: arm(source, middle.endLine, marker.startLine) });
+      start3 = void 0;
       middle = void 0;
-    } else if (start2 === void 0) {
+    } else if (start3 === void 0) {
       found.push({ startLine: marker.startLine, endLine: marker.endLine });
     }
   }
-  if (start2 !== void 0) found.push({ startLine: start2.startLine, endLine: source.length });
+  if (start3 !== void 0) found.push({ startLine: start3.startLine, endLine: source.length });
   return found.sort((a, b) => a.startLine - b.startLine);
 }
 
@@ -47933,7 +48671,7 @@ function extractTabs(children, leading) {
 var GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 var QUOTE_PREFIX = /^ {0,3}> ?/;
 var ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-var FIX_ONLY_RULES = /* @__PURE__ */ new Set(["code-span-padding", "hard-break-in-heading", "list-after-item-text", "list-number-too-long", "setext-heading-lines", "table-header-pipe", "table-list-cell", "tab-reference-layout", "space-reference-edge", "unplaced-link", "number-paragraph"]);
+var FIX_ONLY_RULES = /* @__PURE__ */ new Set(["code-span-padding", "hard-break-in-heading", "list-after-item-text", "list-number-too-long", "setext-heading-lines", "table-header-pipe", "table-list-cell", "table-quote-cell", "tab-reference-layout", "space-reference-edge", "unplaced-link", "number-paragraph"]);
 var NUMBER_ONLY = /^\d{1,9}\\[.)]$/;
 var LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 var LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
@@ -48104,6 +48842,10 @@ function childrenLength(reference, length) {
   const last = reference.children.at(-1);
   return first === void 0 || last === void 0 ? 0 : length(start(first), end(last));
 }
+function headerHasPipe(body2, table) {
+  const lineEnd = body2.indexOf("\n", start(table));
+  return body2.slice(start(table), lineEnd === -1 ? void 0 : lineEnd).includes("|");
+}
 function endedBefore(body2, table, row) {
   let ended = endedRows.get(table);
   if (ended === void 0) {
@@ -48209,8 +48951,7 @@ function lintTree(file, tree, body2, report, options) {
       }
       case "table": {
         if (node2.align?.some((align) => align !== null)) report("table-alignment", line(node2));
-        const lineEnd = body2.indexOf("\n", start(node2));
-        if (!body2.slice(start(node2), lineEnd === -1 ? void 0 : lineEnd).includes("|")) report("table-header-pipe", line(node2));
+        if (!headerHasPipe(body2, node2)) report("table-header-pipe", line(node2));
         break;
       }
       case "tableCell": {
@@ -48224,6 +48965,7 @@ function lintTree(file, tree, body2, report, options) {
         }
         const list4 = first?.type === "text" && last !== void 0 && LIST_CELL.test(body2.slice(start(first), end(last)));
         if (list4 && table?.type === "table" && table.children[0] !== row) report("table-list-cell", line(node2));
+        if (first?.type === "text" && body2[start(first)] === ">" && table?.type === "table" && table.children[0] !== row && headerHasPipe(body2, table)) report("table-quote-cell", line(node2));
         break;
       }
       case "text": {
@@ -49133,7 +49875,7 @@ ${lines2.join("\n")}`;
         const lead = text6.length - text6.trimStart().length;
         const escape2 = header2 ? headerCellEscape(text6) : unicodeSpaceLead(inline.replace(/^[ \t]+/, "")) === 0 ? void 0 : headingOrNumberEscape(text6.slice(lead));
         if (escape2 !== void 0) text6 = `${text6.slice(0, lead + escape2)}\\${text6.slice(lead + escape2)}`;
-        else if (text6.startsWith("-")) text6 = `\\${text6}`;
+        else if (text6.startsWith("-") || text6.startsWith(">") && !this.options.linearExport) text6 = `\\${text6}`;
         if (!header2 && /^\d{1,9}\.$/.test(text6)) text6 += " ";
         this.inCell = false;
         this.cellStart = void 0;
@@ -49410,13 +50152,13 @@ ${lines2.join("\n")}`;
     let digits;
     for (let newline = lineEnd; newline !== -1 && newline < to; newline = this.source.indexOf("\n", newline + 1)) {
       if (!texts.some(([a, b]) => a <= newline && newline < b)) return void 0;
-      const start2 = newline + 1;
-      const nextNewline = this.source.indexOf("\n", start2);
+      const start3 = newline + 1;
+      const nextNewline = this.source.indexOf("\n", start3);
       const end2 = nextNewline === -1 || nextNewline > to ? to : nextNewline;
-      const numbered = /^([ \t]*)(\d{1,9})\.(?:([ \t]*)|( (?![ \t]).*[^ \t]))$/.exec(this.source.slice(start2, end2));
-      if (numbered === null || this.prefixEnd(start2, this.source.slice(start2, end2)).lazy) return void 0;
+      const numbered = /^([ \t]*)(\d{1,9})\.(?:([ \t]*)|( (?![ \t]).*[^ \t]))$/.exec(this.source.slice(start3, end2));
+      if (numbered === null || this.prefixEnd(start3, this.source.slice(start3, end2)).lazy) return void 0;
       if (numbered[4] !== void 0 && !itemTextAsLinear(numbered[4].slice(1))) return void 0;
-      const numberColumn = column(start2 + numbered[1].length);
+      const numberColumn = column(start3 + numbered[1].length);
       const inside2 = numberColumn >= emptyContent;
       if (nested !== void 0 && inside2 !== nested || bare === "*" && !inside2) return void 0;
       if (numberColumn - (inside2 ? emptyContent : itemContent) >= 4 || numbered[2].startsWith("0")) return void 0;
@@ -49425,7 +50167,7 @@ ${lines2.join("\n")}`;
       digits ??= nested ? numbered[2].length : bare.length - 1;
       if (Number(numbered[2]) !== expected || expected < 2 || numbered[2].length !== digits) return void 0;
       expected++;
-      edits.push({ from: start2, to: start2 + numbered[1].length, text: nested ? " ".repeat(bare.length + 1) : "" });
+      edits.push({ from: start3, to: start3 + numbered[1].length, text: nested ? " ".repeat(bare.length + 1) : "" });
       if (numbered[3] !== void 0 && numbered[3] !== " ") edits.push({ from: end2 - numbered[3].length, to: end2, text: " " });
     }
     return edits;
@@ -50183,9 +50925,9 @@ function sameFlanking(source, from, to, char) {
   };
   const delimiterBefore = source[from - 1];
   if (delimiterBefore !== void 0 && DELIMITER.test(delimiterBefore)) {
-    let start2 = from - 1;
-    while (start2 > 0 && source[start2 - 1] === delimiterBefore) start2--;
-    if (reads(delimiterBefore, codePointBefore(source, start2), source[from]) !== reads(delimiterBefore, codePointBefore(source, start2), char)) return false;
+    let start3 = from - 1;
+    while (start3 > 0 && source[start3 - 1] === delimiterBefore) start3--;
+    if (reads(delimiterBefore, codePointBefore(source, start3), source[from]) !== reads(delimiterBefore, codePointBefore(source, start3), char)) return false;
   }
   const delimiterAfter = source[to];
   if (delimiterAfter !== void 0 && DELIMITER.test(delimiterAfter)) {
@@ -50419,17 +51161,17 @@ function joinLines(text6) {
   if (!text6.includes("\n")) return text6;
   const lines2 = text6.split("\n");
   return lines2.map((line2, index2) => {
-    let start2 = 0;
+    let start3 = 0;
     let end2 = line2.length;
-    if (index2 > 0) while (start2 < end2 && isSpaceOrTab(line2[start2])) start2 += 1;
-    if (index2 < lines2.length - 1) while (end2 > start2 && isSpaceOrTab(line2[end2 - 1])) end2 -= 1;
-    return line2.slice(start2, end2);
+    if (index2 > 0) while (start3 < end2 && isSpaceOrTab(line2[start3])) start3 += 1;
+    if (index2 < lines2.length - 1) while (end2 > start3 && isSpaceOrTab(line2[end2 - 1])) end2 -= 1;
+    return line2.slice(start3, end2);
   }).join(" ");
 }
 function trimKeepingWideSpace(text6) {
-  let start2 = 0;
-  while (start2 < text6.length && trimmed(text6[start2])) start2 += 1;
-  return trimEndKeepingWideSpace(text6.slice(start2));
+  let start3 = 0;
+  while (start3 < text6.length && trimmed(text6[start3])) start3 += 1;
+  return trimEndKeepingWideSpace(text6.slice(start3));
 }
 function trimEndKeepingWideSpace(text6) {
   let end2 = text6.length;
@@ -50474,7 +51216,7 @@ function isSpaceOrTab(char) {
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { constants as constants3 } from "node:fs";
 import { lstat as lstat2, mkdir as mkdir3, open as open3, readlink as readlink2, realpath, rename as rename2, unlink as unlink2 } from "node:fs/promises";
-import { dirname as dirname3, isAbsolute, join as join8, parse as parse4, relative as relative2, resolve as resolve2, sep as sep3 } from "node:path";
+import { dirname as dirname3, isAbsolute, join as join10, parse as parse5, relative as relative2, resolve as resolve2, sep as sep3 } from "node:path";
 function outputText(value, limit = 16 * 1024 * 1024) {
   if (typeof value !== "string" || value.length > limit || !/^[\t\n\r\x20-\x7e -\u{10ffff}]*$/u.test(value)) {
     throw new Error(message("output.invalid-text", { limit }));
@@ -50495,11 +51237,11 @@ async function writeReportFile(path7, text6, checkout) {
   const [root2, names] = rootAndNames(isAbsolute(path7) ? path7 : `${process.cwd()}${sep3}${path7}`);
   const name = names.pop();
   if (name === void 0 || name === "." || name === "..") throw new Error(message("output.not-a-file", { path: path7 }));
-  const file = join8(await reportDirectory(root2, names, await realpath(checkout), path7), name);
+  const file = join10(await reportDirectory(root2, names, await realpath(checkout), path7), name);
   const existing = await lstat2(file).catch(ifMissing);
   if (existing !== void 0 && !existing.isFile() && !existing.isSymbolicLink()) throw new Error(message("output.not-a-file", { path: path7 }));
   const kept = existing?.isFile() === true ? existing.mode & 4095 : void 0;
-  const temporary = join8(dirname3(file), `.mdbisync-${randomUUID2()}.tmp`);
+  const temporary = join10(dirname3(file), `.mdbisync-${randomUUID2()}.tmp`);
   const handle2 = await open3(temporary, constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | constants3.O_NOFOLLOW, kept === void 0 ? 438 : 384);
   try {
     await handle2.writeFile(text6);
@@ -50516,21 +51258,21 @@ async function writeReportFile(path7, text6, checkout) {
 }
 var SEPARATORS = sep3 === "\\" ? /[\\/]/ : /\//;
 function rootAndNames(path7) {
-  const { root: root2 } = parse4(path7);
+  const { root: root2 } = parse5(path7);
   return [root2, path7.slice(root2.length).split(SEPARATORS).filter((name) => name !== "")];
 }
 async function reportDirectory(root2, names, checkout, path7) {
-  const pending = [...names];
+  const pending2 = [...names];
   let current = root2;
   let links = 0;
-  while (pending.length > 0) {
-    const name = pending.shift();
+  while (pending2.length > 0) {
+    const name = pending2.shift();
     if (name === ".") continue;
     if (name === "..") {
       current = dirname3(current);
       continue;
     }
-    const next = join8(current, name);
+    const next = join10(current, name);
     let entry = await lstat2(next).catch(ifMissing);
     if (entry === void 0) {
       await mkdir3(next).catch((error2) => {
@@ -50548,9 +51290,9 @@ async function reportDirectory(root2, names, checkout, path7) {
     if (isAbsolute(target)) {
       const [targetRoot, targetNames] = rootAndNames(target);
       current = targetRoot;
-      pending.unshift(...targetNames);
+      pending2.unshift(...targetNames);
     } else {
-      pending.unshift(...rootAndNames(target)[1]);
+      pending2.unshift(...rootAndNames(target)[1]);
     }
   }
   return current;
@@ -50615,6 +51357,93 @@ function trailingEntity(url, end2) {
 
 // src/setup/github.ts
 import { setTimeout as setTimeout4 } from "node:timers/promises";
+
+// src/state/commit-format.ts
+var PLACEHOLDERS = /%(?:[TPBsn%]|ae)/g;
+var SUPPORTED = /^(?:[^%]|%(?:[TPBsn%]|ae))*$/;
+async function showCommit(git, format, commit2) {
+  const plain = SUPPORTED.test(format) && await git.plainMessages() && !await git.rewritesHistory();
+  const fields = plain ? await readCommit(git, commit2) : void 0;
+  if (fields === void 0) return git.text(["show", "-s", `--format=${format}`, commit2]);
+  const shown = format.replace(PLACEHOLDERS, (placeholder) => {
+    switch (placeholder) {
+      case "%T":
+        return fields.tree;
+      case "%P":
+        return fields.parents.join(" ");
+      case "%B":
+        return fields.message;
+      case "%s":
+        return subject(fields.message);
+      case "%ae":
+        return fields.authorEmail;
+      case "%n":
+        return "\n";
+      default:
+        return "%";
+    }
+  });
+  return shown;
+}
+var ANCESTRY_COMMITS = 32;
+async function ancestorWithin(git, ancestor, descendant) {
+  if (await git.rewritesHistory()) return void 0;
+  const [target, start3] = await Promise.all([git.objectInfo(`${ancestor}^{commit}`), git.objectInfo(`${descendant}^{commit}`)]);
+  if (target === null || start3 === null) return void 0;
+  const seen = /* @__PURE__ */ new Set([start3.oid]);
+  let frontier = [start3.oid];
+  let read = 0;
+  while (frontier.length > 0) {
+    if (seen.has(target.oid)) return true;
+    read += frontier.length;
+    if (read > ANCESTRY_COMMITS) return void 0;
+    const commits = await Promise.all(frontier.map((oid) => readCommit(git, oid)));
+    frontier = [];
+    for (const commit2 of commits) {
+      if (commit2 === void 0) return void 0;
+      for (const parent of commit2.parents) {
+        if (seen.has(parent)) continue;
+        seen.add(parent);
+        frontier.push(parent);
+      }
+    }
+  }
+  return seen.has(target.oid);
+}
+async function readCommit(git, name) {
+  const found = await git.readObject(name);
+  if (found === null || found.type !== "commit") return void 0;
+  const text6 = found.content.toString("utf8");
+  const end2 = text6.indexOf("\n\n");
+  if (end2 < 0) return void 0;
+  const lines2 = text6.slice(0, end2).split("\n");
+  const tree = /^tree ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines2[0] ?? "")?.[1];
+  let at = 1;
+  const parents = [];
+  for (let parent; (parent = /^parent ([0-9a-f]{40}|[0-9a-f]{64})$/.exec(lines2[at] ?? "")) !== null; at++) parents.push(parent[1]);
+  const author = lines2[at] ?? "";
+  if (tree === void 0 || !author.startsWith("author ") || !(lines2[at + 1] ?? "").startsWith("committer ")) return void 0;
+  const rest = lines2.slice(at + 2);
+  if (rest.some((line2) => /^(?:tree|parent|author|committer|encoding) /.test(line2))) return void 0;
+  const authorEmail = email(author);
+  if (authorEmail === void 0) return void 0;
+  return { tree, parents, authorEmail, message: text6.slice(end2 + 2) };
+}
+function email(line2) {
+  const open4 = line2.indexOf("<");
+  const close = line2.indexOf(">", open4 + 1);
+  return open4 < 0 || close < 0 ? void 0 : line2.slice(open4 + 1, close);
+}
+function subject(message2) {
+  const lines2 = message2.split("\n");
+  if (lines2.at(-1) === "") lines2.pop();
+  const trimmed2 = lines2.map((line2) => line2.replace(/[ \t\n\r]+$/, ""));
+  let first = 0;
+  while (first < trimmed2.length && trimmed2[first] === "") first++;
+  const taken = [];
+  for (let index2 = first; index2 < trimmed2.length && trimmed2[index2] !== ""; index2++) taken.push(trimmed2[index2]);
+  return taken.join(" ");
+}
 
 // src/state/pushed.ts
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -50689,8 +51518,9 @@ ${SIGNATURE}: ${key.observationMac(tree, parents, text6)}
   };
 }
 async function signedObservation(git, commit2, key) {
-  const [tree = "", parents = ""] = (await git.text(["show", "-s", "--format=%T%n%P", commit2])).split("\n");
-  const raw = (await git.run(["cat-file", "commit", commit2])).stdout.toString("utf8");
+  const [tree = "", parents = ""] = (await showCommit(git, "%T%n%P", commit2)).split("\n");
+  const found = await git.readObject(commit2);
+  const raw = (found?.type === "commit" ? found.content : (await git.run(["cat-file", "commit", commit2])).stdout).toString("utf8");
   const split = raw.indexOf("\n\n");
   if (split < 0) return false;
   if (raw.slice(0, split).split("\n").some((line2) => line2.startsWith("encoding "))) return false;
@@ -50700,7 +51530,7 @@ async function signedObservation(git, commit2, key) {
 }
 async function trustedObservation(git, linear, tracked, key) {
   if (await signedObservation(git, linear, key)) return true;
-  const tree = await git.text(["rev-parse", `${linear}^{tree}`]);
+  const tree = await git.revParse(`${linear}^{tree}`);
   const trees = (await git.text(["log", "--first-parent", "--format=%T", tracked])).split("\n");
   return trees.includes(tree);
 }
@@ -50719,13 +51549,17 @@ async function fetchState(git, config) {
   await git.run(["fetch", "--no-tags", "--no-write-fetch-head", "--quiet", config.remote, ...refspecs]);
   const read = async (ref) => {
     const local = localRef(config, ref);
-    if (advertised.has(ref)) return git.text(["rev-parse", "--verify", `${local}^{commit}`]);
-    await git.run(["update-ref", "-d", local]);
+    if (advertised.has(ref)) return (await git.objectInfo(`${local}^{commit}`))?.oid ?? git.text(["rev-parse", "--verify", `${local}^{commit}`]);
+    gone.push(local);
     return null;
   };
+  const gone = [];
   const state = {};
   for (const store of STORES) state[store] = await read(stateRef(config, store));
-  return { tracked: await read(tracked), sync: await read(sync), suspended: await read(suspended), state };
+  const fetched = { tracked: await read(tracked), sync: await read(sync), suspended: await read(suspended), state };
+  if (gone.length > 0) await git.run(["update-ref", "--stdin"], { input: gone.map((ref) => `delete ${ref}
+`).join("") });
+  return fetched;
 }
 async function lsRemote(git, remote, refs) {
   const output = await git.text(["ls-remote", "--refs", remote, ...refs]);
@@ -50782,8 +51616,7 @@ async function pushAtomic(git, config, updates) {
   if (changing.length === 0) return { ok: true, updated: [] };
   for (const update of changing) {
     if (update.expected !== null && update.replace !== true) {
-      const ancestor = await git.run(["merge-base", "--is-ancestor", update.expected, update.next], { okCodes: [0, 1] });
-      if (ancestor.code !== 0) throw new NotFastForwardError(update.ref);
+      if (!await isAncestor(git, update.expected, update.next)) throw new NotFastForwardError(update.ref);
     }
   }
   const before = await lsRemote(git, config.remote, updates.map((update) => update.ref));
@@ -50889,14 +51722,15 @@ Tracked: ${tracked}
 }
 async function readInitialSyncProgress(git, commit2) {
   if (commit2 === null) return null;
-  const message2 = (await git.run(["show", "-s", "--format=%B", commit2])).stdout.toString("utf8");
-  const [subject] = message2.split("\n");
-  if (subject !== INITIAL_SYNC_PROGRESS) return null;
+  const message2 = `${await showCommit(git, "%B", commit2)}
+`;
+  const [subject2] = message2.split("\n");
+  if (subject2 !== INITIAL_SYNC_PROGRESS) return null;
   return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message2)?.[1] ?? null };
 }
 var INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear's state";
 async function isAncestor(git, commit2, of) {
-  return (await git.run(["merge-base", "--is-ancestor", commit2, of], { okCodes: [0, 1] })).code === 0;
+  return await ancestorWithin(git, commit2, of) ?? (await git.run(["merge-base", "--is-ancestor", commit2, of], { okCodes: [0, 1] })).code === 0;
 }
 async function initialPullRequestPending(git, state) {
   return await pendingInitialRecord(git, state) !== null;
@@ -50937,8 +51771,7 @@ function readSupersededIds(git, commit2) {
 }
 async function readStringMap(git, commit2, file) {
   if (commit2 === null) return /* @__PURE__ */ new Map();
-  const read = await git.run(["cat-file", "blob", `${commit2}:${file}`], { okCodes: [0, 128] });
-  if (read.code !== 0) return /* @__PURE__ */ new Map();
+  if (await git.readBlob(`${commit2}:${file}`) === null) return /* @__PURE__ */ new Map();
   const data = await readJsonFile(git, commit2, file);
   const map4 = /* @__PURE__ */ new Map();
   for (const [key, value] of Object.entries(data)) {
@@ -50950,8 +51783,7 @@ async function readStringMap(git, commit2, file) {
 var WRITTEN_FILE = "written.json";
 async function readWrittenHashes(git, commit2) {
   if (commit2 === null) return /* @__PURE__ */ new Map();
-  const read = await git.run(["cat-file", "blob", `${commit2}:${WRITTEN_FILE}`], { okCodes: [0, 128] });
-  if (read.code !== 0) return /* @__PURE__ */ new Map();
+  if (await git.readBlob(`${commit2}:${WRITTEN_FILE}`) === null) return /* @__PURE__ */ new Map();
   const data = await readJsonFile(git, commit2, WRITTEN_FILE);
   const map4 = /* @__PURE__ */ new Map();
   for (const [path7, hash] of Object.entries(data)) {
@@ -50963,11 +51795,11 @@ async function readWrittenHashes(git, commit2) {
 var SYNC_PUSHED_FILE = "sync-pushed.json";
 async function readSyncPushed(git, commit2) {
   if (commit2 === null) return void 0;
-  const read = await git.run(["cat-file", "blob", `${commit2}:${SYNC_PUSHED_FILE}`], { okCodes: [0, 128] });
-  if (read.code !== 0) return void 0;
+  const read = await git.readBlob(`${commit2}:${SYNC_PUSHED_FILE}`);
+  if (read === null) return void 0;
   let data;
   try {
-    data = JSON.parse(read.stdout.toString("utf8"));
+    data = JSON.parse(read.toString("utf8"));
   } catch {
     throw new Error(message("state.invalid-json", { file: SYNC_PUSHED_FILE, commit: commit2 }));
   }
@@ -50993,8 +51825,8 @@ var UPLOADS_REBUILDING = "Upload cache lost: uploading again";
 var UPLOADS_REBUILT = "Upload cache uploaded again";
 async function uploadsRebuilding(git, commit2) {
   if (commit2 === null) return true;
-  const subject = await git.text(["log", "-1", "--format=%s", "--fixed-strings", `--grep=${UPLOADS_REBUILDING}`, `--grep=${UPLOADS_REBUILT}`, commit2]);
-  return subject.trim() === UPLOADS_REBUILDING;
+  const subject2 = await git.text(["log", "-1", "--format=%s", "--fixed-strings", `--grep=${UPLOADS_REBUILDING}`, `--grep=${UPLOADS_REBUILT}`, commit2]);
+  return subject2.trim() === UPLOADS_REBUILDING;
 }
 function commitUploads(git, parent, uploads, identity, key, options = {}) {
   const entries = [...uploads.entries()].sort(([a], [b]) => compareStrings(a, b));
@@ -51039,12 +51871,11 @@ function isMarkNotice(value) {
 }
 async function readJsonFile(git, commit2, file, options = {}) {
   if (commit2 === null) return {};
-  const read = await git.run(["cat-file", "blob", `${commit2}:${file}`], { okCodes: [0, 128] });
-  if (read.code !== 0) {
+  const blob = await git.readBlob(`${commit2}:${file}`);
+  if (blob === null) {
     if (options.optional) return {};
     throw new Error(message("state.file-missing", { file, commit: commit2 }));
   }
-  const blob = read.stdout;
   let data;
   try {
     data = JSON.parse(blob.toString("utf8"));
@@ -51670,11 +52501,11 @@ function publishedBy(check2, expected) {
   return expected.publisher.id > 0 && check2.publisher.kind === expected.publisher.kind && check2.publisher.id === expected.publisher.id;
 }
 function checkState(commit2, expect = {}) {
-  const pending = new Set(commit2.unlisted);
+  const pending2 = new Set(commit2.unlisted);
   const succeeded2 = /* @__PURE__ */ new Set();
   const failures = /* @__PURE__ */ new Map();
   for (const check2 of commit2.checks) {
-    if (check2.outcome === "pending") pending.add(check2.name);
+    if (check2.outcome === "pending") pending2.add(check2.name);
     else if (check2.outcome === "passed") succeeded2.add(check2.name);
     else if (!failures.has(check2.name)) {
       const failure = { name: check2.name };
@@ -51685,8 +52516,8 @@ function checkState(commit2, expect = {}) {
   }
   const failed2 = [...failures.keys()].sort();
   const missing = [...new Set((expect.checks ?? []).filter((expected) => !commit2.checks.some((check2) => check2.name === expected.name && publishedBy(check2, expected))).map(({ name }) => name))].sort();
-  const waiting = pending.size > 0 || missing.length > 0 || !commit2.hasChecks && expect.allowNone === false;
-  const state = { hasChecks: commit2.hasChecks, state: failed2.length > 0 ? "failed" : waiting ? "pending" : "passed", failed: failed2, pending: [...pending].sort() };
+  const waiting = pending2.size > 0 || missing.length > 0 || !commit2.hasChecks && expect.allowNone === false;
+  const state = { hasChecks: commit2.hasChecks, state: failed2.length > 0 ? "failed" : waiting ? "pending" : "passed", failed: failed2, pending: [...pending2].sort() };
   if (failed2.length > 0) state.failures = failed2.map((name) => failures.get(name));
   if (succeeded2.size > 0) state.succeeded = [...succeeded2].sort();
   if (missing.length > 0) state.missing = missing;
@@ -51794,8 +52625,8 @@ function refusalReason(message2) {
 import { createHash as createHash14, randomUUID as randomUUID6 } from "node:crypto";
 
 // src/test-hooks.ts
-import { existsSync as existsSync2, mkdirSync, renameSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { isAbsolute as isAbsolute2, join as join9 } from "node:path";
+import { existsSync as existsSync3, mkdirSync, renameSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { isAbsolute as isAbsolute2, join as join11 } from "node:path";
 import { setTimeout as sleep2 } from "node:timers/promises";
 var HOOKS_ENV = "MDBISYNC_TEST_HOOKS";
 var HOOKS_DIR_ENV = "MDBISYNC_TEST_HOOKS_DIR";
@@ -51831,14 +52662,14 @@ async function checkpoint(name, env = process.env) {
   const count4 = (counts.get(name) ?? 0) + 1;
   counts.set(name, count4);
   mark(dir, "reached", name, count4);
-  while (existsSync2(join9(dir, "pause", name))) await sleep2(POLL_MS);
+  while (existsSync3(join11(dir, "pause", name))) await sleep2(POLL_MS);
   mark(dir, "passed", name, count4);
 }
 function mark(dir, kind, name, count4) {
-  mkdirSync(join9(dir, kind), { recursive: true });
-  const file = join9(dir, kind, name);
+  mkdirSync(join11(dir, kind), { recursive: true });
+  const file = join11(dir, kind, name);
   const partial = `${file}.${process.pid}.tmp`;
-  writeFileSync2(partial, `${JSON.stringify({ pid: process.pid, count: count4, at: (/* @__PURE__ */ new Date()).toISOString() })}
+  writeFileSync3(partial, `${JSON.stringify({ pid: process.pid, count: count4, at: (/* @__PURE__ */ new Date()).toISOString() })}
 `);
   renameSync(partial, file);
 }
@@ -51955,7 +52786,7 @@ async function predictPlanned(git, files, planned, uploads, options) {
       if (index2 === batches.length - 1) {
         const later = order.slice(position2 + 1).map((next) => planned.get(next));
         await fillBatch(taken, later, linked, limit, uploaded, async () => {
-        }, async (pending) => ![...pending.values()].some(unreadable));
+        }, async (pending2) => ![...pending2.values()].some(unreadable));
       }
       for (const hash of taken.hashes) uploaded.add(hash);
     }
@@ -51976,12 +52807,12 @@ async function fillBatch(batch, later, linked, limit, uploaded, prepare, read) {
     if (batch.hashes.size >= UPLOAD_BATCH_FILES) break;
     await prepare(targets);
     if (targets.some((target) => file(target).size > limit)) continue;
-    const pending = new Map([...filesToRead(targets, linked, uploaded)].filter(([hash]) => !batch.hashes.has(hash)));
-    if (pending.size === 0) continue;
-    const pendingBytes = [...pending.values()].reduce((sum, target) => sum + uploadBytes(file(target)), 0);
-    if (batch.hashes.size + pending.size > UPLOAD_BATCH_FILES || batch.bytes + pendingBytes > UPLOAD_BATCH_BYTES) break;
-    if (!await read(pending)) continue;
-    for (const hash of pending.keys()) batch.hashes.add(hash);
+    const pending2 = new Map([...filesToRead(targets, linked, uploaded)].filter(([hash]) => !batch.hashes.has(hash)));
+    if (pending2.size === 0) continue;
+    const pendingBytes = [...pending2.values()].reduce((sum, target) => sum + uploadBytes(file(target)), 0);
+    if (batch.hashes.size + pending2.size > UPLOAD_BATCH_FILES || batch.bytes + pendingBytes > UPLOAD_BATCH_BYTES) break;
+    if (!await read(pending2)) continue;
+    for (const hash of pending2.keys()) batch.hashes.add(hash);
     batch.bytes += pendingBytes;
   }
 }
@@ -52151,8 +52982,8 @@ function uploadsTransform(options) {
     const position2 = order.indexOf(path7);
     const later = (position2 === -1 ? [] : order.slice(position2 + 1)).map((next) => planned.get(next));
     const taken = { hashes: new Set(own6.map((item) => item.hash)), bytes };
-    await fillBatch(taken, later, linked, limit, uploads, (next) => hashFiles(git, next), async (pending) => {
-      const files2 = await readFiles2(pending);
+    await fillBatch(taken, later, linked, limit, uploads, (next) => hashFiles(git, next), async (pending2) => {
+      const files2 = await readFiles2(pending2);
       if (!Array.isArray(files2)) return false;
       batch.push(...files2);
       return true;
@@ -52434,14 +53265,14 @@ async function checkPushScope(git, tracked, next, zones) {
 }
 
 // src/sync/security.ts
-import { spawn as spawn3 } from "node:child_process";
+import { spawn as spawn4 } from "node:child_process";
 import { lstat as lstat3, mkdtemp as mkdtemp3, mkdir as mkdir4, writeFile as writeFile4, readFile as readFile2, realpath as realpath2, rm as rm4, symlink as symlink2 } from "node:fs/promises";
-import { tmpdir as tmpdir4 } from "node:os";
-import { dirname as dirname4, join as join10, sep as sep4 } from "node:path";
+import { tmpdir as tmpdir5 } from "node:os";
+import { dirname as dirname4, join as join12, sep as sep4 } from "node:path";
 import { createHash as createHash6 } from "node:crypto";
 function runHooks(dir, args, env) {
   return new Promise((resolve3) => {
-    const child2 = spawn3("pre-commit", args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: "never", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child2 = spawn4("pre-commit", args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: "never", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const collect = (chunk) => {
       if (output.length < 2e6) output += chunk.toString("utf8");
@@ -52514,8 +53345,7 @@ async function readInBatches(git, entries, use, alone) {
   await flush();
 }
 async function trackedHookConfig(git, tracked) {
-  const read = await git.run(["cat-file", "blob", `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
-  const config = readHookConfig(read.code === 0 ? read.stdout.toString("utf8") : null);
+  const config = readHookConfig((await git.readBlob(`${tracked}:${PRE_COMMIT_CONFIG}`))?.toString("utf8") ?? null);
   if (config.invalid !== void 0) throw new Error(message("sync.invalid-security-config"));
   return config;
 }
@@ -52537,14 +53367,14 @@ async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
     if (pointer === null || content4 === void 0) return false;
     const bytes = contentBytes(content4);
     if (pointer.size !== bytes.length || pointer.oid !== createHash6("sha256").update(bytes).digest("hex")) return false;
-    if (!(await readFile2(join10(dir, path7))).equals(bytes)) return false;
+    if (!(await readFile2(join12(dir, path7))).equals(bytes)) return false;
   }
   return true;
 }
 async function throughLink(dir, path7) {
   const parts = path7.split("/");
   for (let at = 1; at <= parts.length; at++) {
-    const found = await lstat3(join10(dir, ...parts.slice(0, at))).catch(() => null);
+    const found = await lstat3(join12(dir, ...parts.slice(0, at))).catch(() => null);
     if (found === null) return false;
     if (found.isSymbolicLink()) return true;
   }
@@ -52558,18 +53388,18 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
   const fileMode = (entry) => entry.mode === "100755" ? 493 : 420;
   await readInBatches(git, files, async (batch, blobs) => {
     for (const entry of batch) {
-      await mkdir4(dirname4(join10(dir, entry.path)), { recursive: true });
-      await writeFile4(join10(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
+      await mkdir4(dirname4(join12(dir, entry.path)), { recursive: true });
+      await writeFile4(join12(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
     }
   }, async (entry) => {
-    await mkdir4(dirname4(join10(dir, entry.path)), { recursive: true });
-    await git.runToFile(["cat-file", "blob", entry.oid], join10(dir, entry.path), fileMode(entry));
+    await mkdir4(dirname4(join12(dir, entry.path)), { recursive: true });
+    await git.runToFile(["cat-file", "blob", entry.oid], join12(dir, entry.path), fileMode(entry));
   });
-  for (const entry of gitlinks) await mkdir4(join10(dir, entry.path), { recursive: true });
+  for (const entry of gitlinks) await mkdir4(join12(dir, entry.path), { recursive: true });
   await readInBatches(git, links, async (batch, targets) => {
     for (const entry of batch) {
-      await mkdir4(dirname4(join10(dir, entry.path)), { recursive: true });
-      await symlink2(targets.get(entry.oid), join10(dir, entry.path));
+      await mkdir4(dirname4(join12(dir, entry.path)), { recursive: true });
+      await symlink2(targets.get(entry.oid), join12(dir, entry.path));
     }
   }, async () => {
     throw new Error(message("sync.security-link-outside"));
@@ -52577,19 +53407,19 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
   const root2 = await realpath2(dir);
   const linkedSupport = [];
   for (const entry of links) {
-    const target = await realpath2(join10(dir, entry.path));
+    const target = await realpath2(join12(dir, entry.path));
     const inside2 = target.slice(root2.length + 1).split(sep4);
     if (!target.startsWith(root2 + sep4) || isGitDirectoryName(inside2[0])) throw new Error(message("sync.security-link-outside"));
     if (!isMarkdownPath(entry.path)) linkedSupport.push(inside2.join("/"));
   }
-  await mkdir4(join10(dir, ".git", "info"), { recursive: true });
-  await writeFile4(join10(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
+  await mkdir4(join12(dir, ".git", "info"), { recursive: true });
+  await writeFile4(join12(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
   await scratch.run(["add", "--all", "--force"]);
   if (gitlinks.length > 0) {
     await scratch.run(["update-index", "-z", "--index-info"], { input: gitlinks.map((entry) => `160000 ${entry.oid}	${entry.path}\0`).join("") });
   }
   const tree = await scratch.text(["write-tree"]);
-  if (tree !== await git.text(["rev-parse", `${tracked}^{tree}`])) throw new SecurityScratchTreeError();
+  if (tree !== await git.revParse(`${tracked}^{tree}`)) throw new SecurityScratchTreeError();
   return { tree, linkedSupport };
 }
 async function securityGate(git, tracked, options = {}) {
@@ -52615,7 +53445,7 @@ async function securityGate(git, tracked, options = {}) {
         if (dir === void 0) {
           const entries = await listTree(git, tracked);
           checkScratchBudget(entries, budget);
-          dir = await mkdtemp3(join10(tmpdir4(), "capture-security-"));
+          dir = await mkdtemp3(join12(tmpdir5(), "capture-security-"));
           scratch = new Git(dir);
           await scratch.run(["init", "--quiet", `--object-format=${await git.text(["rev-parse", "--show-object-format"])}`]);
           ({ tree: baseline, linkedSupport } = await reproduceTree(git, tracked, entries, scratch, dir));
@@ -52628,10 +53458,10 @@ async function securityGate(git, tracked, options = {}) {
           if (batch && (path7.startsWith(":") || /[*?\[]/.test(path7))) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (path7 === PRE_COMMIT_CONFIG || path7.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (await throughLink(dir, path7)) return [{ hook: SECURITY_ALIAS, line: 1 }];
-          await mkdir4(dirname4(join10(dir, path7)), { recursive: true });
-          await writeFile4(join10(dir, path7), contentBytes(content4));
+          await mkdir4(dirname4(join12(dir, path7)), { recursive: true });
+          await writeFile4(join12(dir, path7), contentBytes(content4));
           if (batch) {
-            const { dev, ino } = await lstat3(join10(dir, path7), { bigint: true });
+            const { dev, ino } = await lstat3(join12(dir, path7), { bigint: true });
             const identity = `${dev}:${ino}`;
             if (written.has(identity)) return [{ hook: SECURITY_ALIAS, line: 1 }];
             written.add(identity);
@@ -52658,7 +53488,7 @@ async function securityGate(git, tracked, options = {}) {
         }
         if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         for (const [path7, content4] of files) {
-          const after = await readFile2(join10(dir, path7)).catch(() => null);
+          const after = await readFile2(join12(dir, path7)).catch(() => null);
           if (after === null || !after.equals(contentBytes(content4))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         }
         return findings;
@@ -52688,14 +53518,11 @@ async function checkTitle(gate, path7, title) {
 
 // src/sync/merge.ts
 import { createHash as createHash7 } from "node:crypto";
-import { mkdtemp as mkdtemp5, rm as rm6 } from "node:fs/promises";
-import { tmpdir as tmpdir6 } from "node:os";
-import { join as join12 } from "node:path";
 
 // src/merge/merge.ts
 import { mkdtemp as mkdtemp4, writeFile as writeFile5, rm as rm5 } from "node:fs/promises";
-import { tmpdir as tmpdir5 } from "node:os";
-import { join as join11 } from "node:path";
+import { tmpdir as tmpdir6 } from "node:os";
+import { join as join13 } from "node:path";
 
 // src/merge/conflict-ranges.ts
 var CONFLICT_WIDENING_WORK_LIMIT = 4e6;
@@ -52731,12 +53558,12 @@ var MERGE_OK_CODES = Array.from({ length: 128 }, (_, i) => i);
 function tokenize(text6, size) {
   const source = lines(text6);
   const tokens = [];
-  const start2 = `${"<".repeat(size)} git`;
+  const start3 = `${"<".repeat(size)} git`;
   const middle = "=".repeat(size);
   const end2 = `${">".repeat(size)} linear`;
   for (let i = 0; i < source.length; i++) {
     const text7 = source[i];
-    if (lineText(text7) !== start2) {
+    if (lineText(text7) !== start3) {
       tokens.push({ kind: "line", text: text7 });
       continue;
     }
@@ -52767,9 +53594,9 @@ function blockRanges(tokens, side) {
   const text6 = source.join("");
   const ranges = [];
   const add = (startLine, endLine) => {
-    const start2 = tokenAtLine[startLine - 1];
+    const start3 = tokenAtLine[startLine - 1];
     const end2 = tokenAtLine[Math.min(endLine, source.length) - 1];
-    if (start2 !== void 0 && end2 !== void 0) ranges.push({ start: start2, end: end2 + 1 });
+    if (start3 !== void 0 && end2 !== void 0) ranges.push({ start: start3, end: end2 + 1 });
   };
   const tree = parse2(text6);
   visit2(tree, (node2) => {
@@ -52808,8 +53635,8 @@ function completeBlocks(text6) {
   const insertions = [];
   visit2(parse2(text6), (node2) => {
     if (node2.type !== "code" && node2.type !== "html" || !node2.position) return;
-    const { start: start2, end: end2 } = node2.position;
-    const raw = text6.slice(start2.offset, end2.offset);
+    const { start: start3, end: end2 } = node2.position;
+    const raw = text6.slice(start3.offset, end2.offset);
     let close;
     if (node2.type === "code") {
       const opener = /^(?: {0,3})(`{3,}|~{3,})/.exec(raw)?.[1];
@@ -52827,8 +53654,8 @@ function completeBlocks(text6) {
       if (!terminator || closedHtmlBlock(node2.value)) return;
       close = terminator;
     }
-    const lineStart = text6.lastIndexOf("\n", start2.offset - 1) + 1;
-    const prefix = text6.slice(lineStart, start2.offset).replace(/[^ >\t]/g, " ");
+    const lineStart = text6.lastIndexOf("\n", start3.offset - 1) + 1;
+    const prefix = text6.slice(lineStart, start3.offset).replace(/[^ >\t]/g, " ");
     insertions.push({ offset: end2.offset, text: `${raw.endsWith("\n") ? "" : "\n"}${prefix}${close}
 ` });
   });
@@ -52899,7 +53726,7 @@ async function mergeHeads(dir, withBom) {
   const heads = Object.fromEntries(Object.entries(withBom).map(([name, text6]) => [name, text6.replace(/^﻿/, "")]));
   if (heads.theirs === heads.base || heads.ours === heads.theirs) return bom + heads.ours;
   if (heads.ours === heads.base) return bom + heads.theirs;
-  await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile5(join11(dir, `head-${name}`), text6, { mode: 384 })));
+  await Promise.all(Object.entries(heads).map(([name, text6]) => writeFile5(join13(dir, `head-${name}`), text6, { mode: 384 })));
   const merged = await runMergeFile(dir, Object.values(heads), DEFAULT_MARKER_SIZE, ["head-ours", "head-base", "head-theirs"]);
   return bom + (merged.code === 0 ? merged.stdout.toString("utf8") : heads.ours);
 }
@@ -52917,10 +53744,10 @@ async function mergeMarkdown(base, ours, theirs) {
       size = Math.max(size, run2.length + 1);
     }
   }
-  const dir = await mkdtemp4(join11(tmpdir5(), "markdown-merge-"));
+  const dir = await mkdtemp4(join13(tmpdir6(), "markdown-merge-"));
   try {
     const head = await mergeHeads(dir, heads);
-    await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile5(join11(dir, name), text7, { mode: 384 })));
+    await Promise.all([["base", base], ["ours", ours], ["theirs", theirs]].map(([name, text7]) => writeFile5(join13(dir, name), text7, { mode: 384 })));
     const result = await runMergeFile(dir, [base, ours, theirs], size, [
       "-L",
       "git",
@@ -53255,13 +54082,12 @@ async function linkedFiles(git, commits, path7) {
   const linked = /* @__PURE__ */ new Set();
   for (const commit2 of commits) {
     const object = `${commit2}:${path7}`;
-    const result = await git.run(["cat-file", "-s", object], { okCodes: [0, 128], maxOutputBytes: 64 });
-    const size = Number(result.stdout.toString("utf8"));
-    if (result.code !== 0 || !Number.isSafeInteger(size) || size < 0 || size > MAPPING_FILE_BYTES) continue;
-    const blob = await git.run(["cat-file", "blob", object], { okCodes: [0, 128], maxOutputBytes: MAPPING_FILE_BYTES });
-    if (blob.code !== 0) continue;
+    const found = await git.objectInfo(object);
+    if (found === null || found.type !== "blob" || found.size > MAPPING_FILE_BYTES) continue;
+    const blob = await git.readBlob(found.oid);
+    if (blob === null) continue;
     try {
-      for (const link2 of findFileLinks(path7, splitFile(blob.stdout.toString("utf8")).body, () => true)) {
+      for (const link2 of findFileLinks(path7, splitFile(blob.toString("utf8")).body, () => true)) {
         if (!link2.target.endsWith(MARKDOWN_EXTENSION)) linked.add(link2.target);
       }
     } catch (error2) {
@@ -53380,8 +54206,7 @@ async function resolveConflicts(git, input) {
 function echoedConflicts(git, linear) {
   const budget = new MappingBlobBudget();
   const entryAt = async (commit2, path7) => {
-    const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", commit2, "--", path7]);
-    return parseTreeListing(stdout).find((entry) => entry.path === path7 && entry.type === "blob" && readableBlob(entry));
+    return (await listPaths(git, commit2, [path7])).find((entry) => entry.path === path7 && entry.type === "blob" && readableBlob(entry));
   };
   const textOf = async (entry) => (await budget.read(git, [entry])).get(entry.oid).toString("utf8");
   const versions = async (base, tracked, linearEntry) => {
@@ -53423,13 +54248,13 @@ async function renamesBetween(git, from, to) {
   return renames;
 }
 async function alreadyMerged(git, linear, tracked) {
-  return (await git.run(["merge-base", "--is-ancestor", tracked, linear], { okCodes: [0, 1] })).code === 0;
+  return isAncestor(git, tracked, linear);
 }
 async function mergedInitialRecord(git, linear, tracked) {
-  const [subject] = (await git.text(["show", "-s", "--format=%s", linear])).split("\n");
-  if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
+  const [subject2] = (await showCommit(git, "%s", linear)).split("\n");
+  if (subject2 !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
   if (!await isAncestor(git, linear, tracked)) return false;
-  const [linearTree, trackedTree] = (await git.text(["rev-parse", `${linear}^{tree}`, `${tracked}^{tree}`])).split("\n");
+  const [linearTree, trackedTree] = await Promise.all([git.revParse(`${linear}^{tree}`), git.revParse(`${tracked}^{tree}`)]);
   return linearTree === trackedTree;
 }
 async function filesOf(git, treeish) {
@@ -53441,20 +54266,7 @@ function compare3(a, b) {
 async function takePaths(git, into, from, paths) {
   const entries = new Map((await listTree(git, from)).map((entry) => [entry.path, entry]));
   for (const path7 of paths) checkRepoPath(path7, { removal: !entries.has(path7) });
-  const dir = await mkdtemp5(join12(tmpdir6(), "lane-index-"));
-  const env = { GIT_INDEX_FILE: join12(dir, "index") };
-  try {
-    await git.run(["read-tree", `${into}^{tree}`], { env });
-    const zero = "0".repeat(await git.text(["rev-parse", "--show-object-format"]) === "sha256" ? 64 : 40);
-    const input = [...paths].map((path7) => {
-      const entry = entries.get(path7);
-      return entry === void 0 ? `0 ${zero}	${path7}\0` : `${entry.mode} ${entry.oid}	${path7}\0`;
-    }).join("");
-    if (input) await git.run(["update-index", "-z", "--index-info"], { env, input });
-    return await git.text(["write-tree"], { env });
-  } finally {
-    await rm6(dir, { recursive: true, force: true });
-  }
+  return placeEntries(git, into, new Map([...paths].map((path7) => [path7, entries.get(path7) ?? null])));
 }
 function treeCommit(git, tree, parent) {
   return commitTree(git, { base: tree, changes: /* @__PURE__ */ new Map(), parents: [parent], message: "Merge input", identity: NEUTRAL_IDENTITY });
@@ -53482,15 +54294,15 @@ function signedRepairs(ids, key) {
 async function pendingRepairs(git, linear, ids, zones, key, paths) {
   const counts2 = /* @__PURE__ */ new Map();
   for (const entry of ids.values()) counts2.set(entry.id, (counts2.get(entry.id) ?? 0) + 1);
-  const pending = [...ids].filter(([path7, entry]) => entry.pullRewrite !== void 0 && counts2.get(entry.id) === 1 && (paths === void 0 || paths.has(path7)));
+  const pending2 = [...ids].filter(([path7, entry]) => entry.pullRewrite !== void 0 && counts2.get(entry.id) === 1 && (paths === void 0 || paths.has(path7)));
   const repairs = /* @__PURE__ */ new Map();
   const unsigned = /* @__PURE__ */ new Set();
-  if (pending.length === 0) return { repairs, unsigned };
+  if (pending2.length === 0) return { repairs, unsigned };
   const entries = new Map((await listTree(git, linear, MAPPING_TREE_BYTES)).map((entry) => [entry.path, entry]));
   const files = candidateFiles([...entries.values()], zones);
   const blobs = await new MappingBlobBudget().read(git, files);
   const documents = new Set(mapFiles([...entries.values()], zones, blobs).documents.map((document3) => document3.path));
-  for (const [path7, entry] of pending) {
+  for (const [path7, entry] of pending2) {
     const file = entries.get(path7);
     if (!documents.has(path7) || file === void 0 || !isSyncedChange(path7, file.mode, zones)) continue;
     const source = blobs.get(file.oid);
@@ -53502,7 +54314,7 @@ async function pendingRepairs(git, linear, ids, zones, key, paths) {
   }
   return { repairs, unsigned };
 }
-async function checkedPullView(git, linear, ids, zones, identity, gate, key, hold, paths) {
+async function checkedPullView(git, linear, ids, zones, identity, gate, key, hold3, paths) {
   const changes = /* @__PURE__ */ new Map();
   const held = /* @__PURE__ */ new Set();
   const notes = [];
@@ -53518,9 +54330,9 @@ async function checkedPullView(git, linear, ids, zones, identity, gate, key, hol
     for (const image2 of repair.images) notes.push(`- ${oneLine(path7)}: image ${image2.image} of ${image2.total} (line ${image2.line}).`);
   }
   if (changes.size === 0 && held.size === 0) return { commit: linear, notes };
-  let tree = changes.size === 0 ? await git.text(["rev-parse", `${linear}^{tree}`]) : await buildTree(git, linear, changes);
-  if (held.size > 0) tree = await takePaths(git, tree, hold, held);
-  if (tree === await git.text(["rev-parse", `${linear}^{tree}`])) return { commit: linear, notes };
+  let tree = changes.size === 0 ? await git.revParse(`${linear}^{tree}`) : await buildTree(git, linear, changes);
+  if (held.size > 0) tree = await takePaths(git, tree, hold3, held);
+  if (tree === await git.revParse(`${linear}^{tree}`)) return { commit: linear, notes };
   const date = await git.text(["show", "-s", "--format=%cI", linear]);
   const commit2 = await git.text(["commit-tree", "--no-gpg-sign", tree, "-p", linear, "-m", "Apply checked image and link repairs"], { env: {
     GIT_AUTHOR_NAME: identity.name,
@@ -53750,19 +54562,19 @@ function linksFromLinear(content4, fromPath, map4, seen) {
   });
 }
 function destinationSpan(body2, node2) {
-  const start2 = node2.position?.start.offset;
+  const start3 = node2.position?.start.offset;
   const end2 = node2.position?.end.offset;
-  if (start2 === void 0 || end2 === void 0) return void 0;
+  if (start3 === void 0 || end2 === void 0) return void 0;
   let at;
   if (node2.type === "link") {
     if (body2[end2 - 1] !== ")") return void 0;
     const last = node2.children.at(-1);
-    const textEnd = last?.position?.end.offset ?? start2 + 1;
+    const textEnd = last?.position?.end.offset ?? start3 + 1;
     const open4 = body2.indexOf("](", textEnd);
     if (open4 === -1 || open4 >= end2) return void 0;
     at = open4 + 2;
   } else {
-    let close = start2 + 1;
+    let close = start3 + 1;
     while (close < end2 && body2[close] !== "]") close += body2[close] === "\\" ? 2 : 1;
     if (body2[close + 1] !== ":") return void 0;
     at = close + 2;
@@ -53844,7 +54656,7 @@ function documentLinks() {
 // src/sync/fix-hooks.ts
 async function nameFixingHooks(git, tracked, files) {
   if (files.length === 0) return;
-  const config = readHookConfig(await git.text(["show", `${tracked}:${PRE_COMMIT_CONFIG}`]));
+  const config = readHookConfig((await git.showBlob(`${tracked}:${PRE_COMMIT_CONFIG}`)).stdout.toString("utf8").replace(/\n$/, ""));
   const configured = new Set(config.hooks.map((hook) => hook.id));
   await mapLimit(files, 4, async (file) => {
     const trailers = await git.text(["--literal-pathspecs", "log", "-1", "--format=%(trailers:key=Pre-commit-fix,valueonly)", tracked, "--", file.path]);
@@ -53862,8 +54674,8 @@ var MARKS = {
 };
 var CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and delete every "Sync conflict" marker throughout the document. The alert clears after the next sync.';
 var BLOCKED_COMMENT = "Security checks rejected this document. Fix the listed findings and sync again.";
-async function resolveHold(linear, hold, documentId) {
-  if (await linear.commentExists(hold.id, documentId)) await linear.resolveComment(hold.id);
+async function resolveHold(linear, hold3, documentId) {
+  if (await linear.commentExists(hold3.id, documentId)) await linear.resolveComment(hold3.id);
 }
 function releasedHold(entry) {
   return entry.suspended === void 0 && entry.saved?.hold !== void 0;
@@ -54016,7 +54828,7 @@ async function onTracked(git, config, tracked, merged) {
   if (tip === null) return "absent";
   await git.run(["fetch", "--no-tags", "--no-write-fetch-head", config.remote, branchRef(config.trackedBranch)]);
   if ((await git.run(["merge-base", "--is-ancestor", merged, tip], { okCodes: [0, 1, 128] })).code !== 0) return "absent";
-  return await git.text(["rev-parse", `${merged}^1`]) === tracked ? "checked" : "unchecked";
+  return await git.revParse(`${merged}^1`) === tracked ? "checked" : "unchecked";
 }
 async function mergedHead(git, merged, head) {
   const parent = await git.run(["rev-parse", "--verify", "--quiet", `${merged}^2`], { okCodes: [0, 1] });
@@ -54085,7 +54897,7 @@ async function earlierHeadChecks(git, github, head, { base, pushed }) {
   if (pushed === void 0) return null;
   const commits = (await git.text(["rev-list", "--first-parent", "-n", String(EARLIER_HEAD_DEPTH + 2), head, "--not", base])).split("\n").filter(Boolean);
   const own6 = commits[0] === pushed;
-  const until = own6 ? checksAgainFrom(await git.text(["show", "-s", "--format=%B", pushed])) : pushed;
+  const until = own6 ? checksAgainFrom(await showCommit(git, "%B", pushed)) : pushed;
   const checks = [];
   for (const [index2, commit2] of commits.slice(1).entries()) {
     if (index2 === EARLIER_HEAD_DEPTH) return null;
@@ -54133,7 +54945,7 @@ async function checksAgain(github, head, required, earlier, options) {
   if (earlier.pushed === head) return null;
   const now = /* @__PURE__ */ new Date();
   if (!pastDeadline(headSince(earlier.body, head, now), CHECKS_AGAIN_AFTER_MINUTES, now)) return null;
-  if ((await earlier.git.text(["show", "-s", "--format=%s", earlier.pushed])).startsWith(options.againMessage)) return null;
+  if ((await showCommit(earlier.git, "%s", earlier.pushed)).startsWith(options.againMessage)) return null;
   if (!await options.verified()) return null;
   const expectation = checkExpectation(options, expected.checks);
   const checks = await readChecks(github, head, expectation);
@@ -54146,8 +54958,8 @@ var CHECKS_MISSING_ADVICE = "Nothing merges until a person acts: make every expe
 function pastDeadline(since, minutes, now) {
   return now.getTime() - since.getTime() >= minutes * 6e4;
 }
-function redMainNote(hold) {
-  return `<!-- red main: head=${hold.head} main=${hold.main} checks=${hold.checks.map(encodeURIComponent).join(",")} -->`;
+function redMainNote(hold3) {
+  return `<!-- red main: head=${hold3.head} main=${hold3.main} checks=${hold3.checks.map(encodeURIComponent).join(",")} -->`;
 }
 function readRedMainNote(body2) {
   const note2 = RED_MAIN_NOTE.exec(body2 ?? "");
@@ -54179,8 +54991,8 @@ function mainVerdict(checks, names) {
   const wanted = new Set(names);
   const red = (checks.failures ?? checks.failed.map((name) => ({ name }))).filter((failure) => wanted.has(failure.name));
   if (red.length > 0) return { state: "red", checks: red };
-  const pending = checks.pending.filter((name) => wanted.has(name));
-  if (pending.length > 0) return { state: "pending", checks: pending };
+  const pending2 = checks.pending.filter((name) => wanted.has(name));
+  if (pending2.length > 0) return { state: "pending", checks: pending2 };
   const succeeded2 = new Set(checks.succeeded ?? []);
   return { state: "clear", passed: names.length > 0 && names.every((name) => succeeded2.has(name)) };
 }
@@ -54193,7 +55005,7 @@ var SUSPENDED_TITLE = "Suspended changes from Linear";
 var SET_ASIDE_MESSAGE = "Set aside suspended changes";
 var LINEAR_INTAKE_MESSAGE = "Take Linear's changes to suspended documents";
 var SUSPENDED_CHECKS_AGAIN_MESSAGE = "Run the checks again on suspended changes";
-var treeOf = (git, commit2) => git.text(["rev-parse", `${commit2}^{tree}`]);
+var treeOf = (git, commit2) => git.revParse(`${commit2}^{tree}`);
 var LaneMoved = class extends Error {
 };
 var LaneConflict = class extends Error {
@@ -54237,12 +55049,12 @@ async function changedPaths(git, before, after) {
   return (await git.text(["diff", "--name-only", "--no-renames", "-z", before, after])).split("\0").filter(Boolean);
 }
 async function includeCapturedAssets(git, linear, ids, paths) {
-  const hold = (reason) => ({ paths: [...paths].sort(), checks: [], code: "suspended-asset-discovery", reason });
+  const hold3 = (reason) => ({ paths: [...paths].sort(), checks: [], code: "suspended-asset-discovery", reason });
   try {
     const entries = new Map((await listTree(git, linear, MAPPING_TREE_BYTES)).map((entry) => [entry.path, entry]));
     const documents = [...ids].filter(([, entry]) => entry.suspended !== void 0).map(([path7]) => entries.get(path7)).filter((entry) => entry !== void 0).filter(isRegularFile);
     if (documents.some((entry) => !readableBlob(entry))) {
-      return hold(`A suspended document has no usable blob size or exceeds the ${MAPPING_FILE_BYTES}-byte file limit.`);
+      return hold3(`A suspended document has no usable blob size or exceeds the ${MAPPING_FILE_BYTES}-byte file limit.`);
     }
     const texts = await new MappingBlobBudget().read(git, documents);
     const assets = /* @__PURE__ */ new Set();
@@ -54255,10 +55067,10 @@ async function includeCapturedAssets(git, linear, ids, paths) {
     }
     for (const asset of assets) paths.add(asset);
   } catch (error2) {
-    if (error2 instanceof MappingBlobBudgetError) return hold(`The suspended documents exceed the ${MAPPING_BUDGET_BYTES}-byte Markdown budget.`);
-    if (error2 instanceof GitOutputLimitError) return hold(`A Git read during asset discovery exceeded its ${error2.bytes}-byte output limit.`);
-    if (error2 instanceof MarkdownLimitError) return hold(`A suspended document exceeds the Markdown ${error2.limit} limit.`);
-    return hold("The recorded tree or its document links could not be read safely.");
+    if (error2 instanceof MappingBlobBudgetError) return hold3(`The suspended documents exceed the ${MAPPING_BUDGET_BYTES}-byte Markdown budget.`);
+    if (error2 instanceof GitOutputLimitError) return hold3(`A Git read during asset discovery exceeded its ${error2.bytes}-byte output limit.`);
+    if (error2 instanceof MarkdownLimitError) return hold3(`A suspended document exceeds the Markdown ${error2.limit} limit.`);
+    return hold3("The recorded tree or its document links could not be read safely.");
   }
 }
 async function persistIds(context, options, ids, syncPushed) {
@@ -54324,18 +55136,18 @@ async function maintainSuspended(context, options) {
   if (linear === null) return void 0;
   const ids = await readIds(git, options.state.ids);
   const paths = suspendedPaths(ids);
-  if (context.fetched.sync !== null && await git.text(["show", "-s", "--format=%s", context.fetched.sync]) === SET_ASIDE_MESSAGE) {
-    const pending = { paths: [...paths].sort(), checks: [], normalClosePending: true };
+  if (context.fetched.sync !== null && await showCommit(git, "%s", context.fetched.sync) === SET_ASIDE_MESSAGE) {
+    const pending2 = { paths: [...paths].sort(), checks: [], normalClosePending: true };
     try {
       const normal = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
       if (normal !== null && !await closePullRequestAtHead(options.github, normal.number, context.fetched.sync)) {
         const held2 = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
-        if (held2 !== null) pending.pullRequest = { number: held2.number, url: held2.url };
-        return pending;
+        if (held2 !== null) pending2.pullRequest = { number: held2.number, url: held2.url };
+        return pending2;
       }
     } catch (error2) {
       if (!(error2 instanceof PullRequestError)) throw error2;
-      return { ...pending, code: "github-failed", ...error2.status === void 0 ? {} : { status: error2.status }, ...error2.rateLimited ? { rateLimited: true } : {} };
+      return { ...pending2, code: "github-failed", ...error2.status === void 0 ? {} : { status: error2.status }, ...error2.rateLimited ? { rateLimited: true } : {} };
     }
   }
   const tracked = context.fetched.tracked;
@@ -54354,8 +55166,8 @@ async function maintainSuspended(context, options) {
       const previousBases = await recordedBases(git, releasedHead);
       return release(context, options, ids, paths, releasedHead, previousBases.linear, tracked);
     }
-    const hold = await includeCapturedAssets(git, intake, ids, paths);
-    if (hold !== void 0) return hold;
+    const hold3 = await includeCapturedAssets(git, intake, ids, paths);
+    if (hold3 !== void 0) return hold3;
     head = await commit(context, options, await takePaths(git, tracked, intake, paths), intake === linear ? [tracked] : [tracked, intake], "Restore suspended changes" + note(tracked, linear, intake));
     bases = { tracked, linear, view: intake };
   } else {
@@ -54368,14 +55180,14 @@ async function maintainSuspended(context, options) {
     for (const path7 of await changedPaths(git, tracked, head)) paths.add(path7);
     await addEpisodes(context, options, ids, paths, []);
     if (bases.linear !== linear || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
-      const hold = await includeCapturedAssets(git, intake, ids, paths);
-      if (hold !== void 0) return hold;
+      const hold3 = await includeCapturedAssets(git, intake, ids, paths);
+      if (hold3 !== void 0) return hold3;
       const input = await treeCommit(git, await takePaths(git, head, intake, paths), linear);
       const base = await treeCommit(git, await takePaths(git, head, bases.view ?? bases.linear, paths), bases.linear);
       const tree = await mergeTree(git, input, head, base, ids, options.state.ids);
       const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
       const selected = await takePaths(git, head, tree, paths);
-      if (linearChanged || selected !== await git.text(["rev-parse", `${head}^{tree}`])) {
+      if (linearChanged || selected !== await git.revParse(`${head}^{tree}`)) {
         head = await commit(context, options, selected, intake === linear ? [head] : [head, intake], LINEAR_INTAKE_MESSAGE + note(tracked, linear, intake));
         bases.linear = linear;
         bases.view = intake;
@@ -54396,7 +55208,7 @@ async function maintainSuspended(context, options) {
     if (again !== null) {
       carried = again.carried;
       const trailer = again.from === void 0 ? "" : checksAgainTrailer(again.from);
-      head = await commit(context, options, await git.text(["rev-parse", `${unchanged}^{tree}`]), [unchanged], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view) + trailer);
+      head = await commit(context, options, await git.revParse(`${unchanged}^{tree}`), [unchanged], SUSPENDED_CHECKS_AGAIN_MESSAGE + note(bases.tracked, bases.linear, bases.view) + trailer);
     }
   }
   const anchor = [...ids.values()].find((entry) => entry.suspended !== void 0);
@@ -54536,7 +55348,7 @@ async function suspendBatch(context, options, failed2, normalNumber, failures, t
   await addEpisodes(context, options, ids, paths, checks, timedOut);
   const anchor = [...ids.values()].find((entry) => entry.suspended !== void 0);
   if (anchor?.suspended !== void 0) anchor.suspended.paths = [...paths].sort();
-  const normal = await commit(context, options, await git.text(["rev-parse", `${tracked}^{tree}`]), [failed2, tracked], SET_ASIDE_MESSAGE);
+  const normal = await commit(context, options, await git.revParse(`${tracked}^{tree}`), [failed2, tracked], SET_ASIDE_MESSAGE);
   await checkpoint("before-suspension-push");
   await push2(context, options, ids, head, previous3, { expected: failed2, next: normal });
   const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
@@ -55205,7 +56017,7 @@ async function writeTrackedToLinear(context, options) {
   async function writesNothing() {
     if (merge.changes.length > 0 || cacheLost || releasing || supersededBefore.size > 0) return false;
     if ([...reserved].some(([path7, id]) => ids.has(path7) && ids.get(path7)?.id !== id)) return false;
-    return merge.tree === await git.text(["rev-parse", `${linearTip}^{tree}`]);
+    return merge.tree === await git.revParse(`${linearTip}^{tree}`);
   }
   async function findGoneRestores() {
     const restoring = merge.changes.filter((change) => change.kind === "create" && change.restore !== void 0);
@@ -55389,8 +56201,7 @@ async function repairMerged(git, source, tracked, path7, replacement) {
   const blob = await git.text(["hash-object", "--stdin"], { input: replacement });
   const commits = (await git.text(["log", "--format=%H", `--find-object=${blob}`, `${source}..${tracked}`])).split("\n").filter((line2) => line2 !== "");
   for (const commit2 of commits) {
-    const found = await git.run(["rev-parse", "--verify", "--quiet", `${commit2}:${path7}`], { okCodes: [0, 1, 128] });
-    if (found.code === 0 && found.stdout.toString("utf8").trim() === blob) return true;
+    if ((await git.objectInfo(`${commit2}:${path7}`))?.oid === blob) return true;
   }
   return false;
 }
@@ -55427,15 +56238,15 @@ function checkName(name) {
 var collapse = (text6) => text6.replace(/\s+/g, " ");
 function quotesDocument(text6, runs) {
   const points = [...collapse(text6)];
-  for (let start2 = 0; start2 + QUOTE_RUN <= points.length; start2 += 1) {
-    if (runs.has(points.slice(start2, start2 + QUOTE_RUN).join(""))) return true;
+  for (let start3 = 0; start3 + QUOTE_RUN <= points.length; start3 += 1) {
+    if (runs.has(points.slice(start3, start3 + QUOTE_RUN).join(""))) return true;
   }
   return false;
 }
 function documentRuns(text6) {
   const points = [...collapse(text6)];
   const runs = /* @__PURE__ */ new Set();
-  for (let start2 = 0; start2 + QUOTE_RUN <= points.length; start2 += 1) runs.add(points.slice(start2, start2 + QUOTE_RUN).join(""));
+  for (let start3 = 0; start3 + QUOTE_RUN <= points.length; start3 += 1) runs.add(points.slice(start3, start3 + QUOTE_RUN).join(""));
   return runs;
 }
 function annotationLine(annotation, runs) {
@@ -55500,7 +56311,7 @@ async function reconcileHoldMarks(context, options) {
     const all2 = await readAll(failure2);
     const own6 = new Map([...all2].map(([name, list4]) => [name, list4.filter((annotation) => annotation.path === path7)]));
     const needsText = [...own6.values()].some((list4) => list4.length > 0);
-    const shown = needsText ? await git.run(["show", `${failure2.head}:${path7}`], { okCodes: [0, 128] }) : void 0;
+    const shown = needsText ? await git.showBlob(`${failure2.head}:${path7}`, { okCodes: [0, 128] }) : void 0;
     const text6 = shown?.code === 0 ? shown.stdout.toString("utf8") : "";
     if (needsText && shown?.code !== 0) for (const [name, list4] of own6) own6.set(name, list4.map(({ message: _message, ...rest }) => ({ ...rest, message: "" })));
     return { body: holdComment(failure2.checks, failure2.timedOut ?? [], own6, text6), failure: failureKey(failure2) };
@@ -55508,9 +56319,9 @@ async function reconcileHoldMarks(context, options) {
   const work = [];
   const quiet = [];
   for (const [path7, entry] of ids) {
-    const hold = entry.saved?.hold;
+    const hold3 = entry.saved?.hold;
     const episode = entry.suspended;
-    if (hold === void 0 && episode === void 0) continue;
+    if (hold3 === void 0 && episode === void 0) continue;
     const document3 = options.documents.get(entry.id);
     if (document3 === void 0 || document3.trashed || document3.archivedAt !== null) {
       if (episode !== void 0) result.removed.push(path7);
@@ -55521,18 +56332,18 @@ async function reconcileHoldMarks(context, options) {
       work.push({ kind: "clear", path: path7, entry, document: document3 });
       continue;
     }
-    if (hold?.id !== episode.noticeId || !hold.posted) {
-      const previous3 = hold !== void 0 && hold.id !== episode.noticeId && hold.posted ? { previous: hold } : {};
+    if (hold3?.id !== episode.noticeId || !hold3.posted) {
+      const previous3 = hold3 !== void 0 && hold3.id !== episode.noticeId && hold3.posted ? { previous: hold3 } : {};
       work.push({ kind: "set", path: path7, entry, document: document3, ...previous3 });
       continue;
     }
     const repaint = document3.icon !== MARKS.suspended.icon || document3.color !== MARKS.suspended.color;
-    if (failure === void 0 || hold.failure === failureKey(failure)) {
+    if (failure === void 0 || hold3.failure === failureKey(failure)) {
       if (repaint) work.push({ kind: "repaint", path: path7, entry, document: document3 });
       continue;
     }
     const next = await bodyOf(path7, entry, failure);
-    if (sha2563(next.body) === hold.bodyHash) quiet.push({ path: path7, entry: withHold(entry, { ...hold, ...next.failure === void 0 ? {} : { failure: next.failure } }) });
+    if (sha2563(next.body) === hold3.bodyHash) quiet.push({ path: path7, entry: withHold(entry, { ...hold3, ...next.failure === void 0 ? {} : { failure: next.failure } }) });
     else work.push({ kind: "update", path: path7, entry, document: document3, ...next });
   }
   const order = { clear: 0, set: 1, update: 2, repaint: 3 };
@@ -55598,7 +56409,7 @@ async function reconcileHoldMarks(context, options) {
         continue;
       }
       if (document3 === void 0) continue;
-      const hold = item.entry.saved?.hold;
+      const hold3 = item.entry.saved?.hold;
       if (item.kind === "repaint") {
         await linear.updateDocument(document3.id, MARKS.suspended);
         result.updated.push(path7);
@@ -55610,15 +56421,15 @@ async function reconcileHoldMarks(context, options) {
       }
       if (!document3.documentContentId) continue;
       if (item.kind === "set") {
-        await linear.ensureDocumentComment(document3.documentContentId, item.body, hold.id, true, true);
+        await linear.ensureDocumentComment(document3.documentContentId, item.body, hold3.id, true, true);
         const mark2 = MARKS.suspended;
         if (document3.icon !== mark2.icon || document3.color !== mark2.color) await linear.updateDocument(document3.id, mark2);
-        ids.set(path7, withHold(item.entry, { ...hold, posted: true }));
+        ids.set(path7, withHold(item.entry, { ...hold3, posted: true }));
         result.set.push(path7);
       } else {
         if (document3.icon !== MARKS.suspended.icon || document3.color !== MARKS.suspended.color) await linear.updateDocument(document3.id, MARKS.suspended);
-        await linear.updateDocumentComment(hold.id, item.body);
-        ids.set(path7, withHold(item.entry, { ...hold, bodyHash: sha2563(item.body), ...item.failure === void 0 ? {} : { failure: item.failure } }));
+        await linear.updateDocumentComment(hold3.id, item.body);
+        ids.set(path7, withHold(item.entry, { ...hold3, bodyHash: sha2563(item.body), ...item.failure === void 0 ? {} : { failure: item.failure } }));
         result.updated.push(path7);
       }
     }
@@ -55630,9 +56441,9 @@ async function reconcileHoldMarks(context, options) {
   if (!await persist()) result.code = "state-moved";
   return result;
 }
-async function resolveCleared(linear, hold, documentId) {
+async function resolveCleared(linear, hold3, documentId) {
   try {
-    await resolveHold(linear, hold, documentId);
+    await resolveHold(linear, hold3, documentId);
     return true;
   } catch (error2) {
     if (!refusesComment(error2)) throw error2;
@@ -55665,9 +56476,9 @@ function writeFailure(error2, path7, sent) {
 function newHold(item) {
   return { id: item.entry.suspended.noticeId, bodyHash: sha2563(item.body), posted: false, ...item.failure === void 0 ? {} : { failure: item.failure } };
 }
-function withHold(entry, hold, document3) {
+function withHold(entry, hold3, document3) {
   const saved = entry.saved ?? { icon: document3?.icon ?? null, color: document3?.color ?? null };
-  return { ...entry, saved: { ...saved, hold } };
+  return { ...entry, saved: { ...saved, hold: hold3 } };
 }
 function holdChanges(result) {
   return result === void 0 ? 0 : result.set.length + result.updated.length + result.cleared.length + (result.unresolved?.length ?? 0);
@@ -55739,13 +56550,13 @@ var TrackedHistory = class {
   async addPlaces(path7, commits, index2, file, places) {
     places.add(placeKey2(file.place));
     const line2 = await this.linePositions();
-    const start2 = line2.get(commits[index2]);
+    const start3 = line2.get(commits[index2]);
     const end2 = index2 === 0 ? -1 : line2.get(commits[index2 - 1]);
-    if (start2 === void 0 || end2 === void 0) return;
+    if (start3 === void 0 || end2 === void 0) return;
     const folder = folderOf(path7);
     for (const { commit: commit2, zone } of await this.folderMoves(folder)) {
       const position2 = line2.get(commit2);
-      if (zone !== void 0 && position2 !== void 0 && position2 < start2 && position2 > end2) places.add(placeKey2(placeOf(zone)));
+      if (zone !== void 0 && position2 !== void 0 && position2 < start3 && position2 > end2) places.add(placeKey2(placeOf(zone)));
     }
   }
   folderMoves(folder) {
@@ -55805,7 +56616,7 @@ async function recordsUnmergedMove(git, tracked, linear, current) {
 }
 async function moveRecorded(git, tracked, change, readmes, folder, target) {
   const subjects = /* @__PURE__ */ new Set([MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, ...INITIAL_RECORD_SUBJECTS]);
-  const records = await git.text(["log", "--ancestry-path", "--format=%H %s", "--fixed-strings", ...[...subjects].map((subject) => `--grep=${subject}`), tracked, "--not", change]);
+  const records = await git.text(["log", "--ancestry-path", "--format=%H %s", "--fixed-strings", ...[...subjects].map((subject2) => `--grep=${subject2}`), tracked, "--not", change]);
   for (const line2 of records.split("\n")) {
     const space = line2.indexOf(" ");
     if (space < 0 || !subjects.has(line2.slice(space + 1))) continue;
@@ -55825,7 +56636,7 @@ async function* readmeHistory(git, tracked, readmes) {
   const earlier = [...new Set(commits.flatMap((entry) => entry.changes.flatMap((change) => change.before === void 0 ? [] : [change.before])))];
   for (const [oid, size] of await blobSizes(git, earlier.filter((oid2) => !sizes.has(oid2)))) sizes.set(oid, size);
   const texts = /* @__PURE__ */ new Map();
-  for (let start2 = 0; start2 < commits.length; ) {
+  for (let start3 = 0; start3 < commits.length; ) {
     const needed = /* @__PURE__ */ new Map();
     let bytes = 0;
     const take = (oid, path7) => {
@@ -55835,17 +56646,17 @@ async function* readmeHistory(git, tracked, readmes) {
       if (readableBlob(entry)) bytes += entry.size;
     };
     for (const [path7, oid] of state) take(oid, path7);
-    let end2 = start2;
+    let end2 = start3;
     while (end2 < commits.length) {
       const fresh = commits[end2].changes.flatMap((change) => change.before === void 0 || texts.has(change.before) || needed.has(change.before) ? [] : [change.before]);
       const extra = [...new Set(fresh)].reduce((sum, oid) => sum + Math.min(sizes.get(oid) ?? 0, MAPPING_FILE_BYTES + 1), 0);
-      if (end2 > start2 && bytes + extra > HISTORY_BATCH_BYTES) break;
+      if (end2 > start3 && bytes + extra > HISTORY_BATCH_BYTES) break;
       for (const change of commits[end2].changes) if (change.before !== void 0) take(change.before, change.path);
       end2++;
     }
     const entries = [...needed].map(([oid, path7]) => ({ path: path7, mode: "100644", type: "blob", oid, size: sizes.get(oid) ?? null }));
     for (const [oid, blob] of await new MappingBlobBudget().read(git, entries)) texts.set(oid, blob.toString("utf8"));
-    for (const { commit: commit2, changes } of commits.slice(start2, end2)) {
+    for (const { commit: commit2, changes } of commits.slice(start3, end2)) {
       const unreadable = new Set([...state].flatMap(([path7, oid]) => texts.has(oid) ? [] : [path7]));
       yield { commit: commit2, texts: new Map([...state].flatMap(([path7, oid]) => texts.has(oid) ? [[path7, texts.get(oid)]] : [])), unreadable };
       for (const change of changes) {
@@ -55853,7 +56664,7 @@ async function* readmeHistory(git, tracked, readmes) {
         else state.set(change.path, change.before);
       }
     }
-    start2 = end2;
+    start3 = end2;
     const current = new Set(state.values());
     for (const oid of texts.keys()) if (!current.has(oid)) texts.delete(oid);
   }
@@ -55861,12 +56672,11 @@ async function* readmeHistory(git, tracked, readmes) {
 async function blobSizes(git, oids) {
   const sizes = /* @__PURE__ */ new Map();
   if (oids.length === 0) return sizes;
-  const lines2 = await git.text(["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], { input: `${oids.join("\n")}
-` });
-  for (const line2 of lines2.split("\n")) {
-    const [oid, type, size] = line2.split(" ");
-    if (oid !== void 0) sizes.set(oid, type === "blob" && size !== void 0 ? Number(size) : null);
-  }
+  const found = await Promise.all(oids.map((oid) => git.objectInfo(oid)));
+  oids.forEach((oid, index2) => {
+    const info2 = found[index2];
+    sizes.set(oid, info2?.type === "blob" ? info2.size : null);
+  });
   return sizes;
 }
 var HISTORY_BATCH_BYTES = MAPPING_BUDGET_BYTES / 4;
@@ -55906,8 +56716,7 @@ async function zonesAt(git, commit2, readmes) {
   return resolveZones(collectAnnotations(texts).annotations).zones;
 }
 async function blobEntries(git, commit2, readmes) {
-  const { stdout } = await git.run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", commit2, "--", ...readmes], { maxOutputBytes: MAPPING_TREE_BYTES });
-  return parseTreeListing(stdout).filter((entry) => entry.type === "blob");
+  return (await listPaths(git, commit2, readmes, MAPPING_TREE_BYTES)).filter((entry) => entry.type === "blob");
 }
 
 // src/sync/pull-request.ts
@@ -55985,15 +56794,15 @@ async function pullRequestStep(context, options) {
   const rewriteNotes = view.notes;
   linear = view.commit;
   const laneLinear = frozen.size === 0 ? linear : await treeCommit(git, await takePaths(git, linear, sync ?? tracked, frozen), linear);
-  const trackedTree = await git.text(["rev-parse", `${tracked}^{tree}`]);
+  const trackedTree = await git.revParse(`${tracked}^{tree}`);
   const wanted = await mergedTree(git, tracked, laneLinear);
   if (wanted === null) return { ...result, needed: true, code: "conflict" };
   result.needed = wanted !== trackedTree;
-  const pending = sync !== null && !await isAncestor2(git, sync, tracked);
-  const linearMerged = await isAncestor2(git, linear, tracked);
+  const pending2 = sync !== null && !await isAncestor(git, sync, tracked);
+  const linearMerged = await isAncestor(git, linear, tracked);
   const setAside = fetched.suspended ?? null;
-  const recordMove = !result.needed && !linearMerged && await recordsUnmergedMove(git, tracked, linear, context.mapping.zones) && (setAside === null || await isAncestor2(git, setAside, tracked));
-  if (!result.needed && !pending && !recordMove) {
+  const recordMove = !result.needed && !linearMerged && await recordsUnmergedMove(git, tracked, linear, context.mapping.zones) && (setAside === null || await isAncestor(git, setAside, tracked));
+  if (!result.needed && !pending2 && !recordMove) {
     if (sync !== null || linearMerged || await isInitialRecord(git, linear)) return result;
     const needsTrackedTree = frozen.size > 0 || (await unverifiedPaths(git, tracked, linear, context.mapping.zones)).length > 0;
     const next = needsTrackedTree ? await commitTree(git, { base: wanted, changes: /* @__PURE__ */ new Map(), parents: [linear, tracked], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity }) : linear;
@@ -56005,7 +56814,7 @@ async function pullRequestStep(context, options) {
   }
   try {
     const open4 = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
-    if (open4 !== null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options))) return { ...result, code: "initial-pull-request-pending" };
+    if (open4 !== null && pending2 && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options))) return { ...result, code: "initial-pull-request-pending" };
     const identity = options.identity ?? context.identity;
     const noted = open4 === null ? null : readRefusal(open4.body);
     const held = open4 === null ? null : readRedMainNote(open4.body);
@@ -56015,10 +56824,10 @@ async function pullRequestStep(context, options) {
       const known = await expectedChecks(github, sync, options.requiredChecks ?? [], { body: open4?.body, git, base: tracked, pushed: await ownPushed(context, options) });
       return known.complete ? checkExpectation(options, known.checks) : null;
     };
-    const keepCheckedHead = open4 !== null && pending && suspended?.waiting !== true && noted === null && await mergedTree(git, tracked, sync) !== null && !await needsTrackedMerge(git, tracked, sync, noted) && await checkedHeadReady(github, sync, await checkedExpectation());
+    const keepCheckedHead = open4 !== null && pending2 && suspended?.waiting !== true && noted === null && await mergedTree(git, tracked, sync) !== null && !await needsTrackedMerge(git, tracked, sync, noted) && await checkedHeadReady(github, sync, await checkedExpectation());
     let head = sync;
-    const heldSnapshot = open4 === null && pending && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options));
-    if (open4 === null && (!pending || heldSnapshot)) {
+    const heldSnapshot = open4 === null && pending2 && await holdsInitialRecord(git, sync, tracked, await ownPushed(context, options));
+    if (open4 === null && (!pending2 || heldSnapshot)) {
       if (!result.needed && (heldSnapshot || !recordMove)) return result;
       head = await restart(git, sync, linear, wanted, identity, frozen.size > 0);
     } else if (!keepCheckedHead) {
@@ -56034,29 +56843,29 @@ async function pullRequestStep(context, options) {
       }
     }
     if (head === null) return { ...result, code: "conflict" };
-    let hold = held !== null && held.head === sync ? held : null;
+    let hold3 = held !== null && held.head === sync ? held : null;
     let headTree = await mergedTree(git, tracked, head);
-    if (headTree === null || hold === null && await needsTrackedMerge(git, tracked, head, noted)) {
+    if (headTree === null || hold3 === null && await needsTrackedMerge(git, tracked, head, noted)) {
       const merged = await merger(head, tracked, [head, tracked], TRACKED_MERGE_MESSAGE);
       if (merged === null) return { ...result, code: "conflict" };
       head = merged.head;
       addResolution(resolved, merged);
-      headTree = await git.text(["rev-parse", `${head}^{tree}`]);
+      headTree = await git.revParse(`${head}^{tree}`);
     }
-    if (hold !== null && !await isAncestor2(git, tracked, head)) {
-      const verdict = await readMainVerdict(github, tracked, hold.checks);
+    if (hold3 !== null && !await isAncestor(git, tracked, head)) {
+      const verdict = await readMainVerdict(github, tracked, hold3.checks);
       if (verdict.state === "clear" && verdict.passed) {
         const merged = await merger(head, tracked, [head, tracked], TRACKED_MERGE_MESSAGE);
         if (merged === null) return { ...result, code: "conflict" };
         head = merged.head;
         addResolution(resolved, merged);
-        headTree = await git.text(["rev-parse", `${head}^{tree}`]);
-        hold = null;
+        headTree = await git.revParse(`${head}^{tree}`);
+        hold3 = null;
       }
     }
     if (open4 === null && !result.needed && !recordMove && headTree === trackedTree) return result;
     let carried = [];
-    if (head === sync && sync !== null && pending && options.state.ids !== null) {
+    if (head === sync && sync !== null && pending2 && options.state.ids !== null) {
       const again = await checksAgain(
         github,
         sync,
@@ -56069,11 +56878,11 @@ async function pullRequestStep(context, options) {
         const message2 = again.from === void 0 ? CHECKS_AGAIN_MESSAGE : `${CHECKS_AGAIN_MESSAGE}
 
 ${checksAgainTrailer(again.from)}`;
-        head = await commitTree(git, { base: await git.text(["rev-parse", `${sync}^{tree}`]), changes: /* @__PURE__ */ new Map(), parents: [sync], message: message2, identity, skipIfUnchanged: false });
+        head = await commitTree(git, { base: await git.revParse(`${sync}^{tree}`), changes: /* @__PURE__ */ new Map(), parents: [sync], message: message2, identity, skipIfUnchanged: false });
       }
     }
     let pushUnverified = await unverifiedPaths(git, tracked, head, context.mapping.zones);
-    if (head !== sync && hold === null && pushUnverified.length > 0 && headTree !== null && (await unverifiedPaths(git, tracked, headTree, context.mapping.zones)).length === 0) {
+    if (head !== sync && hold3 === null && pushUnverified.length > 0 && headTree !== null && (await unverifiedPaths(git, tracked, headTree, context.mapping.zones)).length === 0) {
       head = await commitTree(git, { base: headTree, changes: /* @__PURE__ */ new Map(), parents: [head, tracked], message: TRACKED_MERGE_MESSAGE, identity });
       pushUnverified = [];
     }
@@ -56095,7 +56904,7 @@ ${checksAgainTrailer(again.from)}`;
     const earlier = noted !== null && noted.head === head && noted.base === tracked ? noted : null;
     const since = headSince(open4?.body, head, /* @__PURE__ */ new Date());
     const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync], carried } : { body: open4?.body, git, base: tracked, pushed: await ownPushed(context, options) });
-    const stillHeld = hold === null ? null : { ...hold, head };
+    const stillHeld = hold3 === null ? null : { ...hold3, head };
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);
     const { pullRequest, opened } = await ensurePullRequest(github, {
       head: config.syncBranch,
@@ -56117,8 +56926,8 @@ ${checksAgainTrailer(again.from)}`;
       const verdict = await readMainVerdict(github, tracked, [...failures.map(({ name }) => name), ...timedOut]);
       if (verdict.state === "red") {
         result.redMain = verdict.checks;
-        const hold2 = { head, main: tracked, checks: verdict.checks.map(({ name }) => name) };
-        const body2 = pullRequestBody(result.paths, earlier, { head, since, held: hold2, checks: expected.observed, rewriteNotes, recordMove });
+        const hold4 = { head, main: tracked, checks: verdict.checks.map(({ name }) => name) };
+        const body2 = pullRequestBody(result.paths, earlier, { head, since, held: hold4, checks: expected.observed, rewriteNotes, recordMove });
         try {
           if (body2 !== pullRequest.body) await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: body2 });
         } catch (error2) {
@@ -56192,12 +57001,12 @@ async function checkedHeadReady(github, head, expectation) {
   return checks.hasChecks && checks.state === "passed";
 }
 async function isInitialRecord(git, commit2) {
-  const [subject] = (await git.text(["show", "-s", "--format=%s", commit2])).split("\n");
-  return INITIAL_RECORD_SUBJECTS.has(subject ?? "");
+  const [subject2] = (await showCommit(git, "%s", commit2)).split("\n");
+  return INITIAL_RECORD_SUBJECTS.has(subject2 ?? "");
 }
 async function holdsInitialRecord(git, sync, tracked, own6) {
   let chosen;
-  if (own6 !== void 0 && (await git.run(["cat-file", "-e", `${own6}^{commit}`], { okCodes: [0, 1, 128] })).code === 0) {
+  if (own6 !== void 0 && await git.objectInfo(`${own6}^{commit}`) !== null) {
     const made = new Set((await git.text(["rev-list", own6, "--not", tracked])).split("\n"));
     const commits = (await git.text(["log", "--first-parent", "--format=%H %s", `${tracked}..${sync}`])).split("\n");
     for (const line2 of commits) {
@@ -56220,13 +57029,10 @@ async function mergedTree(git, into, from) {
   return merged.stdout.toString("utf8").split("\n")[0];
 }
 async function needsTrackedMerge(git, tracked, head, noted) {
-  if (await isAncestor2(git, tracked, head)) return false;
+  if (await isAncestor(git, tracked, head)) return false;
   if (noted !== null && noted.head === head && CONFLICT_REFUSAL.test(noted.reason)) return true;
   const plain = await git.run(["-c", "merge.renames=false", "merge-tree", "--write-tree", "--no-messages", tracked, head], { okCodes: [0, 1] });
   return plain.code !== 0;
-}
-async function isAncestor2(git, ancestor, descendant) {
-  return (await git.run(["merge-base", "--is-ancestor", ancestor, descendant], { okCodes: [0, 1] })).code === 0;
 }
 async function ownPushed(context, options) {
   return context.pushedKey.verified(branchRef(options.config.syncBranch), await readSyncPushed(context.git, options.state.ids));
@@ -56244,7 +57050,7 @@ async function pushSyncBranch(context, options, expected, next) {
 }
 async function restart(git, sync, linear, wanted, identity, masked = false) {
   if (masked) return commitTree(git, { base: wanted, changes: /* @__PURE__ */ new Map(), parents: sync === null ? [linear] : [sync, linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity });
-  if (sync === null || await isAncestor2(git, sync, linear)) return linear;
+  if (sync === null || await isAncestor(git, sync, linear)) return linear;
   return commitMerge(git, wanted, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE, identity);
 }
 function addResolution(into, from) {
@@ -56266,8 +57072,8 @@ function markedMerger(git, idsCommit, identity, frozen) {
 }
 async function advance(git, merge, sync, linear, masked = false) {
   if (masked) return merge(linear, sync, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE);
-  if (await isAncestor2(git, sync, linear)) return { head: linear, marked: [], decided: [] };
-  if (await isAncestor2(git, linear, sync)) return { head: sync, marked: [], decided: [] };
+  if (await isAncestor(git, sync, linear)) return { head: linear, marked: [], decided: [] };
+  if (await isAncestor(git, linear, sync)) return { head: sync, marked: [], decided: [] };
   return merge(linear, sync, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE);
 }
 function commitMerge(git, tree, parents, message2, identity) {
@@ -56337,21 +57143,21 @@ function holdFailureText(code4, failure) {
 function renderPullRequest(result) {
   const lines2 = ["### Linear to the tracked branch", ""];
   if (result.suspended !== void 0) {
-    const hold = result.suspended;
-    const link3 = hold.pullRequest === void 0 ? "" : ` [#${hold.pullRequest.number}](${hold.pullRequest.url})`;
-    lines2.push(hold.released ? "Released the suspended batch." : `Suspended changes${link3}: ${hold.paths.map((path7) => `\`${path7}\``).join(", ")}.`, "");
-    if (hold.code === "head-unverified") lines2.push(`The suspended pull request also changes files that are not synchronized documents or their assets: ${unverifiedList(hold.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from its branch.`, "");
-    if (hold.code === "merge-refused" || hold.code === "merge-blocked") lines2.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, "");
-    if (hold.code === "merge-misplaced") lines2.push(`Setup error: ${misplacedSummary("the suspended pull request", link3, hold.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, "");
-    if (hold.code === "checks-missing") lines2.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold.missing ?? [])}).`, CHECKS_MISSING_ADVICE, "");
-    if (hold.code === "suspended-asset-discovery") lines2.push(`The batch stays suspended (${hold.code}). ${hold.reason ?? ""}`, "");
-    if (hold.normalClosePending === true) lines2.push("The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.", "");
-    if (hold.code === "github-failed" && hold.normalClosePending !== true) lines2.push("A GitHub request for the suspended lane failed; the normal lane still runs.", "");
-    if (hold.conflicts !== void 0) lines2.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path7) => `\`${path7}\``).join(", ")}.`, "");
-    if (hold.checks.length > 0) lines2.push(`Failed checks: ${codeNames(hold.checks)}.`, "");
-    if (hold.timedOut !== void 0 && hold.timedOut.length > 0) lines2.push(`Checks that did not finish in time: ${codeNames(hold.timedOut)}.`, "");
-    if (hold.redMain !== void 0) lines2.push(`The suspended documents' comments in Linear stay as they are: ${checkRuns(hold.redMain)} also failed on the tracked branch's tip.`, "");
-    if (hold.mainPending !== void 0) lines2.push(`The suspended documents' comments in Linear wait: ${codeNames(hold.mainPending)} failed on the suspended pull request and still runs on the tracked branch's tip.`, "");
+    const hold3 = result.suspended;
+    const link3 = hold3.pullRequest === void 0 ? "" : ` [#${hold3.pullRequest.number}](${hold3.pullRequest.url})`;
+    lines2.push(hold3.released ? "Released the suspended batch." : `Suspended changes${link3}: ${hold3.paths.map((path7) => `\`${path7}\``).join(", ")}.`, "");
+    if (hold3.code === "head-unverified") lines2.push(`The suspended pull request also changes files that are not synchronized documents or their assets: ${unverifiedList(hold3.unverified ?? [])}. The sync does not merge it; a person reviews and merges it, or removes those changes from its branch.`, "");
+    if (hold3.code === "merge-refused" || hold3.code === "merge-blocked") lines2.push(`GitHub refused the suspended merge (${refusalText(hold3)}).`, "");
+    if (hold3.code === "merge-misplaced") lines2.push(`Setup error: ${misplacedSummary("the suspended pull request", link3, hold3.misplaced)} Its documents stay suspended.`, MISPLACED_ADVICE, "");
+    if (hold3.code === "checks-missing") lines2.push(`Setup error: the suspended pull request has waited past the check deadline for checks that never started on its head (${missingText(hold3.missing ?? [])}).`, CHECKS_MISSING_ADVICE, "");
+    if (hold3.code === "suspended-asset-discovery") lines2.push(`The batch stays suspended (${hold3.code}). ${hold3.reason ?? ""}`, "");
+    if (hold3.normalClosePending === true) lines2.push("The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.", "");
+    if (hold3.code === "github-failed" && hold3.normalClosePending !== true) lines2.push("A GitHub request for the suspended lane failed; the normal lane still runs.", "");
+    if (hold3.conflicts !== void 0) lines2.push(`Suspended files waiting for a manual merge: ${hold3.conflicts.map((path7) => `\`${path7}\``).join(", ")}.`, "");
+    if (hold3.checks.length > 0) lines2.push(`Failed checks: ${codeNames(hold3.checks)}.`, "");
+    if (hold3.timedOut !== void 0 && hold3.timedOut.length > 0) lines2.push(`Checks that did not finish in time: ${codeNames(hold3.timedOut)}.`, "");
+    if (hold3.redMain !== void 0) lines2.push(`The suspended documents' comments in Linear stay as they are: ${checkRuns(hold3.redMain)} also failed on the tracked branch's tip.`, "");
+    if (hold3.mainPending !== void 0) lines2.push(`The suspended documents' comments in Linear wait: ${codeNames(hold3.mainPending)} failed on the suspended pull request and still runs on the tracked branch's tip.`, "");
   }
   const marks = result.holdMarks;
   if (marks !== void 0) {
@@ -56524,8 +57330,8 @@ async function readProvenanceUnknown(git, linear) {
 }
 async function tookInLinear(git, tracked) {
   const subjects = /* @__PURE__ */ new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, SYNC_PULL_REQUEST_TITLE]);
-  const log = await git.text(["log", "--format=%s", "--fixed-strings", ...[...subjects].map((subject) => `--grep=${subject}`), tracked]);
-  return log.split("\n").some((subject) => subjects.has(subject.replace(/ \(#\d+\)$/, "")));
+  const log = await git.text(["log", "--format=%s", "--fixed-strings", ...[...subjects].map((subject2) => `--grep=${subject2}`), tracked]);
+  return log.split("\n").some((subject2) => subjects.has(subject2.replace(/ \(#\d+\)$/, "")));
 }
 
 // src/initial-sync/run.ts
@@ -56927,12 +57733,12 @@ ${plainTrailers.join("\n")}`);
     ];
     const pushed = await pushAtomic(git, options.config, updates);
     if (!pushed.ok) return null;
-    const parents = (await git.text(["show", "-s", "--format=%P", linearCommit])).split(" ").filter(Boolean);
+    const parents = (await showCommit(git, "%P", linearCommit)).split(" ").filter(Boolean);
     const hasTrackedParent = parents.length === 1 && parents[0] === tracked;
     return { linear: linearCommit, moved: linearCommit !== expected.linear, reformatted, parents, hasTrackedParent };
   }
   async function sameRecord(a, b) {
-    const describe = (oid) => git.text(["show", "-s", "--format=%T %P%n%B", oid]);
+    const describe = (oid) => showCommit(git, "%T %P%n%B", oid);
     return await describe(a) === await describe(b);
   }
 }
@@ -58128,7 +58934,7 @@ ${trailers.join("\n")}`,
     if (moveSync) updates.push({ ref: branchRef(options.config.syncBranch), expected: fetched.sync, next: commit2, replace: true });
     const pushed = await pushAtomic(git, options.config, updates);
     if (!pushed.ok) return null;
-    const parents = (await git.text(["show", "-s", "--format=%P", commit2])).split(" ").filter(Boolean);
+    const parents = (await showCommit(git, "%P", commit2)).split(" ").filter(Boolean);
     return {
       linear: commit2,
       moved: pushed.updated.length > 0,
@@ -58145,12 +58951,12 @@ ${trailers.join("\n")}`,
     return [...listed.values()].reduce((a, b) => a === null || b > a ? b : a, null);
   }
   async function sameRecord(a, b) {
-    const describe = (oid) => git.text(["show", "-s", "--format=%T %P%n%B", oid]);
+    const describe = (oid) => showCommit(git, "%T %P%n%B", oid);
     return await describe(a) === await describe(b);
   }
   async function isOwnRecord(oid) {
-    const [subject, email, parents] = (await git.text(["show", "-s", "--format=%s%n%ae%n%P", oid])).split("\n");
-    return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? "").split(" ").filter(Boolean).length === 1;
+    const [subject2, email2, parents] = (await showCommit(git, "%s%n%ae%n%P", oid)).split("\n");
+    return subject2 === REVERSE_RECORD_MESSAGE && (email2 === identity.email || email2 === NEUTRAL_IDENTITY.email) && (parents ?? "").split(" ").filter(Boolean).length === 1;
   }
 }
 function mismatches(mapping, entries) {
@@ -58456,19 +59262,19 @@ async function runPreflight(operation, inputs, options, work) {
   const fetched = await fetchState(git, inputs.state);
   if (operation === "sync") {
     const unfinished = await readInitialSyncProgress(git, fetched.state.ids) !== null;
-    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, tracked: fetched.tracked });
+    const pending2 = await initialPullRequestPending(git, { linear: fetched.state.linear, tracked: fetched.tracked });
     const linear = fetched.state.linear;
     const untrusted = linear !== null && !await trustedObservation(git, linear, fetched.tracked, pushedKey(inputs));
-    const refusal = checkSyncState(fetched.state, inputs.state, { initialSyncUnfinished: unfinished, linearUntrusted: untrusted, initialPullRequestPending: pending });
+    const refusal = checkSyncState(fetched.state, inputs.state, { initialSyncUnfinished: unfinished, linearUntrusted: untrusted, initialPullRequestPending: pending2 });
     if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   } else if (options.refusePendingInitialPullRequest === true) {
-    let pending = false;
+    let pending2 = false;
     if (fetched.sync !== null) {
       for (const record of await pendingInitialRecords(git, { linear: fetched.state.linear, tracked: fetched.tracked })) {
-        if (await isAncestor(git, record, fetched.sync)) pending = true;
+        if (await isAncestor(git, record, fetched.sync)) pending2 = true;
       }
     }
-    const refusal = checkSyncState(fetched.state, inputs.state, { initialPullRequestPending: pending });
+    const refusal = checkSyncState(fetched.state, inputs.state, { initialPullRequestPending: pending2 });
     if (refusal?.code === "initial-pull-request-pending") return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   }
   const mapping = await loadMapping(git, fetched.tracked);
@@ -58547,8 +59353,7 @@ function outcome(operation, report) {
   return result;
 }
 async function readTrackedFile(git, commit2, path7) {
-  const result = await git.run(["cat-file", "blob", `${commit2}:${path7}`], { okCodes: [0, 128] });
-  return result.code === 0 ? result.stdout.toString("utf8") : null;
+  return (await git.readBlob(`${commit2}:${path7}`))?.toString("utf8") ?? null;
 }
 
 // src/run/capacity.ts
@@ -58870,7 +59675,7 @@ async function rebuildIds({ git, record, linear, facts, targets, allowedPlace, d
   return ids;
 }
 async function latestInitialRecord(git, record) {
-  const log = await git.text(["log", "--first-parent", "--format=%H %s", "--fixed-strings", ...[...INITIAL_RECORD_SUBJECTS].map((subject) => `--grep=${subject}`), record]);
+  const log = await git.text(["log", "--first-parent", "--format=%H %s", "--fixed-strings", ...[...INITIAL_RECORD_SUBJECTS].map((subject2) => `--grep=${subject2}`), record]);
   for (const line2 of log.split("\n")) {
     const space = line2.indexOf(" ");
     if (space > 0 && INITIAL_RECORD_SUBJECTS.has(line2.slice(space + 1))) return line2.slice(0, space);
@@ -59734,16 +60539,18 @@ ${warning3.code}: ${JSON.stringify(warning3.path)} (${warning3.length} character
   return summary3;
 }
 async function prepareLfs(git, tracked, changes) {
-  const dir = await mkdtemp6(join13(tmpdir7(), "capture-attributes-"));
-  const env = { GIT_INDEX_FILE: join13(dir, "index") };
+  const dir = await mkdtemp5(join14(tmpdir7(), "capture-attributes-"));
+  const env = { GIT_INDEX_FILE: join14(dir, "index") };
   const result = new Map(changes);
   const oids = [];
   try {
+    const written = [...changes].filter(([, content4]) => content4 !== null);
+    if (written.length === 0) return { changes: result, oids: [] };
     await git.run(["read-tree", tracked], { env });
-    for (const [path7, content4] of changes) {
+    const attributes = (await git.run(["check-attr", "--cached", "-z", "--stdin", "filter"], { input: written.map(([path7]) => `${path7}\0`).join(""), env })).stdout.toString("utf8").split("\0");
+    for (const [index2, [path7, content4]] of written.entries()) {
       if (content4 === null) continue;
-      const attributes = await git.run(["check-attr", "--cached", "-z", "--stdin", "filter"], { input: `${path7}\0`, env });
-      if (attributes.stdout.toString("utf8").split("\0")[2] !== "lfs") continue;
+      if (attributes[index2 * 3 + 2] !== "lfs") continue;
       const bytes = contentBytes(content4);
       const cleaned = await git.run(["lfs", "clean"], { input: bytes });
       const pointer = parseLfsPointer(cleaned.stdout);
@@ -59756,7 +60563,7 @@ async function prepareLfs(git, tracked, changes) {
     }
     return { changes: result, oids: [...new Set(oids)] };
   } finally {
-    await rm7(dir, { recursive: true, force: true });
+    await rm6(dir, { recursive: true, force: true });
   }
 }
 
@@ -59844,12 +60651,12 @@ function count3(n, noun) {
 }
 
 // src/run/operation.ts
-import { rm as rm9 } from "node:fs/promises";
+import { rm as rm8 } from "node:fs/promises";
 
 // src/sync/staged.ts
 import { createHash as createHash17 } from "node:crypto";
-import { mkdir as mkdir5, readFile as readFile3, rm as rm8, writeFile as writeFile6 } from "node:fs/promises";
-import { join as join14 } from "node:path";
+import { mkdir as mkdir5, readFile as readFile3, rm as rm7, writeFile as writeFile6 } from "node:fs/promises";
+import { join as join15 } from "node:path";
 var SECURITY_STEPS = ["stage", "apply"];
 var STAGE_FOLDER = "mdbisync-candidates";
 var MANIFEST = "manifest.json";
@@ -59861,9 +60668,9 @@ var BATCH_PATH_BYTES = 24 * 1024;
 function stageFolder(env = process.env) {
   const base = env["RUNNER_TEMP"];
   if (base === void 0 || base === "") throw new Error(message("sync.no-runner-temp"));
-  return join14(base, STAGE_FOLDER);
+  return join15(base, STAGE_FOLDER);
 }
-var readsFolder = (folder) => join14(folder, READS);
+var readsFolder = (folder) => join15(folder, READS);
 var sha2565 = (content4) => createHash17("sha256").update(contentBytes(content4)).digest("hex");
 function candidateKey(files) {
   const pairs = [...files].map(([path7, content4]) => [path7, sha2565(content4)]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
@@ -59871,8 +60678,8 @@ function candidateKey(files) {
 }
 async function stagingGate(git, tracked, folder) {
   const configured = (await securityHookIds(git, tracked)).length > 0;
-  await rm8(folder, { recursive: true, force: true });
-  await mkdir5(join14(folder, "files"), { recursive: true, mode: 448 });
+  await rm7(folder, { recursive: true, force: true });
+  await mkdir5(join15(folder, "files"), { recursive: true, mode: 448 });
   const sets = /* @__PURE__ */ new Map();
   return {
     configured,
@@ -59884,7 +60691,7 @@ async function stagingGate(git, tracked, folder) {
         for (const [path7, content4] of files) {
           checkRepoPath(path7);
           const hash = sha2565(content4);
-          await writeFile6(join14(folder, "files", hash), contentBytes(content4), { mode: 384 });
+          await writeFile6(join15(folder, "files", hash), contentBytes(content4), { mode: 384 });
           entries.push({ path: path7, sha256: hash });
         }
         sets.set(key, { key, files: entries });
@@ -59893,22 +60700,22 @@ async function stagingGate(git, tracked, folder) {
     },
     async finish() {
       const manifest = { version: VERSION3, tracked, sets: [...sets.values()] };
-      await writeFile6(join14(folder, MANIFEST), JSON.stringify(manifest), { mode: 384 });
+      await writeFile6(join15(folder, MANIFEST), JSON.stringify(manifest), { mode: 384 });
       return sets.size;
     }
   };
 }
 async function stageNothing(folder, tracked) {
-  await rm8(folder, { recursive: true, force: true });
+  await rm7(folder, { recursive: true, force: true });
   await mkdir5(folder, { recursive: true, mode: 448 });
-  await writeFile6(join14(folder, MANIFEST), JSON.stringify({ version: VERSION3, tracked: tracked ?? "", sets: [] }), { mode: 384 });
+  await writeFile6(join15(folder, MANIFEST), JSON.stringify({ version: VERSION3, tracked: tracked ?? "", sets: [] }), { mode: 384 });
 }
 async function answeringGate(git, tracked, folder) {
   const hooks = new Set(await securityHookIds(git, tracked));
   const configured = hooks.size > 0;
   let answers = {};
   if (configured) {
-    const text6 = await readFile3(join14(folder, ANSWERS), "utf8").catch(() => null);
+    const text6 = await readFile3(join15(folder, ANSWERS), "utf8").catch(() => null);
     const read = text6 === null ? null : JSON.parse(text6);
     if (read !== null && read.version === VERSION3 && read.tracked === tracked) answers = read.answers;
   }
@@ -59955,7 +60762,7 @@ ${renderStaged(0)}` } : outcome2;
     return staged;
   } finally {
     reads?.close();
-    if (security?.step === "apply") await rm9(security.folder, { recursive: true, force: true });
+    if (security?.step === "apply") await rm8(security.folder, { recursive: true, force: true });
   }
 }
 async function runWithSecurity(operation, inputs, initialSync, options, security) {

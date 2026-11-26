@@ -1108,18 +1108,18 @@ ${indent}${text.slice(fold + 1, end2)}`;
     }
     function consumeMoreIndentedLines(text, i, indent) {
       let end = i;
-      let start = i + 1;
-      let ch = text[start];
+      let start2 = i + 1;
+      let ch = text[start2];
       while (ch === " " || ch === "	") {
-        if (i < start + indent) {
+        if (i < start2 + indent) {
           ch = text[++i];
         } else {
           do {
             ch = text[++i];
           } while (ch && ch !== "\n");
           end = i;
-          start = i + 1;
-          ch = text[start];
+          start2 = i + 1;
+          ch = text[start2];
         }
       }
       return end;
@@ -1150,12 +1150,12 @@ var require_stringifyString = __commonJS({
       const strLen = str.length;
       if (strLen <= limit)
         return false;
-      for (let i = 0, start = 0; i < strLen; ++i) {
+      for (let i = 0, start2 = 0; i < strLen; ++i) {
         if (str[i] === "\n") {
-          if (i - start > limit)
+          if (i - start2 > limit)
             return true;
-          start = i + 1;
-          if (strLen - start <= limit)
+          start2 = i + 1;
+          if (strLen - start2 <= limit)
             return false;
         }
       }
@@ -1169,19 +1169,19 @@ var require_stringifyString = __commonJS({
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
       let str = "";
-      let start = 0;
+      let start2 = 0;
       for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
         if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
-          str += json.slice(start, i) + "\\ ";
+          str += json.slice(start2, i) + "\\ ";
           i += 1;
-          start = i;
+          start2 = i;
           ch = "\\";
         }
         if (ch === "\\")
           switch (json[i + 1]) {
             case "u":
               {
-                str += json.slice(start, i);
+                str += json.slice(start2, i);
                 const code = json.substr(i + 2, 4);
                 switch (code) {
                   case "0000":
@@ -1215,14 +1215,14 @@ var require_stringifyString = __commonJS({
                       str += json.substr(i, 6);
                 }
                 i += 5;
-                start = i + 1;
+                start2 = i + 1;
               }
               break;
             case "n":
               if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str += json.slice(start, i) + "\n\n";
+                str += json.slice(start2, i) + "\n\n";
                 while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
                   str += "\n";
                   i += 2;
@@ -1231,14 +1231,14 @@ var require_stringifyString = __commonJS({
                 if (json[i + 2] === " ")
                   str += "\\";
                 i += 1;
-                start = i + 1;
+                start2 = i + 1;
               }
               break;
             default:
               i += 1;
           }
       }
-      str = start ? str + json.slice(start) : json;
+      str = start2 ? str + json.slice(start2) : json;
       return implicitKey ? str : foldFlowLines.foldFlowLines(str, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
@@ -1317,10 +1317,10 @@ ${indent}`) + "'";
         else
           break;
       }
-      let start = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
-      if (start) {
-        value = value.substring(start.length);
-        start = start.replace(/\n+/g, `$&${indent}`);
+      let start2 = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
+      if (start2) {
+        value = value.substring(start2.length);
+        start2 = start2.replace(/\n+/g, `$&${indent}`);
       }
       const indentSize = indent ? "2" : "1";
       let header = (startWithSpace ? indentSize : "") + chomp;
@@ -1338,14 +1338,14 @@ ${indent}`) + "'";
             literalFallback = true;
           };
         }
-        const body = foldFlowLines.foldFlowLines(`${start}${foldedValue}${end}`, indent, foldFlowLines.FOLD_BLOCK, foldOptions);
+        const body = foldFlowLines.foldFlowLines(`${start2}${foldedValue}${end}`, indent, foldFlowLines.FOLD_BLOCK, foldOptions);
         if (!literalFallback)
           return `>${header}
 ${indent}${body}`;
       }
       value = value.replace(/\n+/g, `$&${indent}`);
       return `|${header}
-${indent}${start}${value}${end}`;
+${indent}${start2}${value}${end}`;
     }
     function plainString(item, ctx, onComment, onChompKeep) {
       const { type, value } = item;
@@ -1976,23 +1976,23 @@ ${indent}${line}` : "\n";
         lines.push(str);
         linesAtValue = lines.length;
       }
-      const { start, end } = flowChars;
+      const { start: start2, end } = flowChars;
       if (lines.length === 0) {
-        return start + end;
+        return start2 + end;
       } else {
         if (!reqNewline) {
           const len = lines.reduce((sum, line) => sum + line.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
-          let str = start;
+          let str = start2;
           for (const line of lines)
             str += line ? `
 ${indentStep}${indent}${line}` : "\n";
           return `${str}
 ${indent}${end}`;
         } else {
-          return `${start}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
+          return `${start2}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
         }
       }
     }
@@ -3787,7 +3787,7 @@ var require_resolve_props = __commonJS({
       let newlineAfterProp = null;
       let comma = null;
       let found = null;
-      let start = null;
+      let start2 = null;
       for (const token of tokens) {
         if (reqSpace) {
           if (token.type !== "space" && token.type !== "newline" && token.type !== "comma")
@@ -3839,7 +3839,7 @@ var require_resolve_props = __commonJS({
             if (token.source.endsWith(":"))
               onError(token.offset + token.source.length - 1, "BAD_ALIAS", "Anchor ending in : is ambiguous", true);
             anchor = token;
-            start ?? (start = token.offset);
+            start2 ?? (start2 = token.offset);
             atNewline = false;
             hasSpace = false;
             reqSpace = true;
@@ -3848,7 +3848,7 @@ var require_resolve_props = __commonJS({
             if (tag)
               onError(token, "MULTIPLE_TAGS", "A node can have at most one tag");
             tag = token;
-            start ?? (start = token.offset);
+            start2 ?? (start2 = token.offset);
             atNewline = false;
             hasSpace = false;
             reqSpace = true;
@@ -3896,7 +3896,7 @@ var require_resolve_props = __commonJS({
         tag,
         newlineAfterProp,
         end,
-        start: start ?? end
+        start: start2 ?? end
       };
     }
     exports.resolveProps = resolveProps;
@@ -3998,8 +3998,8 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep2, value } = collItem;
-        const keyProps = resolveProps.resolveProps(start, {
+        const { start: start2, key, sep: sep2, value } = collItem;
+        const keyProps = resolveProps.resolveProps(start2, {
           indicator: "explicit-key-ind",
           next: key ?? sep2?.[0],
           offset,
@@ -4026,14 +4026,14 @@ var require_resolve_block_map = __commonJS({
             continue;
           }
           if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key)) {
-            onError(key ?? start[start.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
+            onError(key ?? start2[start2.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
           }
         } else if (keyProps.found?.indent !== bm.indent) {
           onError(offset, "BAD_INDENT", startColMsg);
         }
         ctx.atKey = true;
         const keyStart = keyProps.end;
-        const keyNode = key ? composeNode(ctx, key, keyProps, onError) : composeEmptyNode(ctx, keyStart, start, null, keyProps, onError);
+        const keyNode = key ? composeNode(ctx, key, keyProps, onError) : composeEmptyNode(ctx, keyStart, start2, null, keyProps, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bm.indent, key, onError);
         ctx.atKey = false;
@@ -4103,8 +4103,8 @@ var require_resolve_block_seq = __commonJS({
         ctx.atKey = false;
       let offset = bs.offset;
       let commentEnd = null;
-      for (const { start, value } of bs.items) {
-        const props = resolveProps.resolveProps(start, {
+      for (const { start: start2, value } of bs.items) {
+        const props = resolveProps.resolveProps(start2, {
           indicator: "seq-item-ind",
           next: value,
           offset,
@@ -4125,7 +4125,7 @@ var require_resolve_block_seq = __commonJS({
             continue;
           }
         }
-        const node = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start, null, props, onError);
+        const node = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start2, null, props, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bs.indent, value, onError);
         offset = node.range[2];
@@ -4209,8 +4209,8 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep2, value } = collItem;
-        const props = resolveProps.resolveProps(start, {
+        const { start: start2, key, sep: sep2, value } = collItem;
+        const props = resolveProps.resolveProps(start2, {
           flow: fcName,
           indicator: "explicit-key-ind",
           next: key ?? sep2?.[0],
@@ -4250,7 +4250,7 @@ var require_resolve_flow_collection = __commonJS({
             onError(props.start, "MISSING_CHAR", `Missing , between ${fcName} items`);
           if (props.comment) {
             let prevItemComment = "";
-            loop: for (const st of start) {
+            loop: for (const st of start2) {
               switch (st.type) {
                 case "comma":
                 case "space":
@@ -4283,7 +4283,7 @@ var require_resolve_flow_collection = __commonJS({
         } else {
           ctx.atKey = true;
           const keyStart = props.end;
-          const keyNode = key ? composeNode(ctx, key, props, onError) : composeEmptyNode(ctx, keyStart, start, null, props, onError);
+          const keyNode = key ? composeNode(ctx, key, props, onError) : composeEmptyNode(ctx, keyStart, start2, null, props, onError);
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
@@ -4446,10 +4446,10 @@ var require_resolve_block_scalar = __commonJS({
     "use strict";
     var Scalar = require_Scalar();
     function resolveBlockScalar(ctx, scalar, onError) {
-      const start = scalar.offset;
+      const start2 = scalar.offset;
       const header = parseBlockScalarHeader(scalar, ctx.options.strict, onError);
       if (!header)
-        return { value: "", type: null, comment: "", range: [start, start, start] };
+        return { value: "", type: null, comment: "", range: [start2, start2, start2] };
       const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
       const lines = scalar.source ? splitLines(scalar.source) : [];
       let chompStart = lines.length;
@@ -4462,10 +4462,10 @@ var require_resolve_block_scalar = __commonJS({
       }
       if (chompStart === 0) {
         const value2 = header.chomp === "+" && lines.length > 0 ? "\n".repeat(Math.max(1, lines.length - 1)) : "";
-        let end2 = start + header.length;
+        let end2 = start2 + header.length;
         if (scalar.source)
           end2 += scalar.source.length;
-        return { value: value2, type, comment: header.comment, range: [start, end2, end2] };
+        return { value: value2, type, comment: header.comment, range: [start2, end2, end2] };
       }
       let trimIndent = scalar.indent + header.indent;
       let offset = scalar.offset + header.length;
@@ -4546,8 +4546,8 @@ var require_resolve_block_scalar = __commonJS({
         default:
           value += "\n";
       }
-      const end = start + header.length + scalar.source.length;
-      return { value, type, comment: header.comment, range: [start, end, end] };
+      const end = start2 + header.length + scalar.source.length;
+      return { value, type, comment: header.comment, range: [start2, end, end] };
     }
     function parseBlockScalarHeader({ offset, props }, strict, onError) {
       if (props[0].type !== "block-scalar-header") {
@@ -5069,7 +5069,7 @@ var require_compose_doc = __commonJS({
     var composeNode = require_compose_node();
     var resolveEnd = require_resolve_end();
     var resolveProps = require_resolve_props();
-    function composeDoc(options, directives, { offset, start, value, end }, onError) {
+    function composeDoc(options, directives, { offset, start: start2, value, end }, onError) {
       const opts = Object.assign({ _directives: directives }, options);
       const doc = new Document.Document(void 0, opts);
       const ctx = {
@@ -5079,7 +5079,7 @@ var require_compose_doc = __commonJS({
         options: doc.options,
         schema: doc.schema
       };
-      const props = resolveProps.resolveProps(start, {
+      const props = resolveProps.resolveProps(start2, {
         indicator: "doc-start",
         next: value ?? end?.[0],
         offset,
@@ -5092,7 +5092,7 @@ var require_compose_doc = __commonJS({
         if (value && (value.type === "block-map" || value.type === "block-seq") && !props.hasNewline)
           onError(props.end, "MISSING_CHAR", "Block collection cannot start on same line with directives-end marker");
       }
-      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start, null, props, onError);
+      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start2, null, props, onError);
       const contentEnd = doc.contents.range[2];
       const re = resolveEnd.resolveEnd(end, contentEnd, false, onError);
       if (re.comment)
@@ -5541,9 +5541,9 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep2, value }) {
+    function stringifyItem({ start: start2, key, sep: sep2, value }) {
       let res = "";
-      for (const st of start)
+      for (const st of start2)
         res += st.source;
       if (key)
         res += stringifyToken(key);
@@ -6333,8 +6333,8 @@ var require_line_counter = __commonJS({
             return { line: low + 1, col: 1 };
           if (low === 0)
             return { line: 0, col: offset };
-          const start = this.lineStarts[low - 1];
-          return { line: low, col: offset - start + 1 };
+          const start2 = this.lineStarts[low - 1];
+          return { line: low, col: offset - start2 + 1 };
         };
       }
     };
@@ -6714,7 +6714,7 @@ var require_parser = __commonJS({
       *scalar(scalar) {
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
-          const start = getFirstKeyStartProps(prev);
+          const start2 = getFirstKeyStartProps(prev);
           let sep2;
           if (scalar.end) {
             sep2 = scalar.end;
@@ -6726,7 +6726,7 @@ var require_parser = __commonJS({
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep2 }]
+            items: [{ start: start2, key: scalar, sep: sep2 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6801,7 +6801,7 @@ var require_parser = __commonJS({
         if (this.indent >= map.indent) {
           const atMapIndent = !this.onKeyLine && this.indent === map.indent;
           const atNextItem = atMapIndent && (it.sep || it.explicitKey) && this.type !== "seq-item-ind";
-          let start = [];
+          let start2 = [];
           if (atNextItem && it.sep && !it.value) {
             const nl = [];
             for (let i = 0; i < it.sep.length; ++i) {
@@ -6821,14 +6821,14 @@ var require_parser = __commonJS({
               }
             }
             if (nl.length >= 2)
-              start = it.sep.splice(nl[1]);
+              start2 = it.sep.splice(nl[1]);
           }
           switch (this.type) {
             case "anchor":
             case "tag":
               if (atNextItem || it.value) {
-                start.push(this.sourceToken);
-                map.items.push({ start });
+                start2.push(this.sourceToken);
+                map.items.push({ start: start2 });
                 this.onKeyLine = true;
               } else if (it.sep) {
                 it.sep.push(this.sourceToken);
@@ -6841,8 +6841,8 @@ var require_parser = __commonJS({
                 it.start.push(this.sourceToken);
                 it.explicitKey = true;
               } else if (atNextItem || it.value) {
-                start.push(this.sourceToken);
-                map.items.push({ start, explicitKey: true });
+                start2.push(this.sourceToken);
+                map.items.push({ start: start2, explicitKey: true });
               } else {
                 this.stack.push({
                   type: "block-map",
@@ -6859,12 +6859,12 @@ var require_parser = __commonJS({
                   if (includesToken(it.start, "newline")) {
                     Object.assign(it, { key: null, sep: [this.sourceToken] });
                   } else {
-                    const start2 = getFirstKeyStartProps(it.start);
+                    const start3 = getFirstKeyStartProps(it.start);
                     this.stack.push({
                       type: "block-map",
                       offset: this.offset,
                       indent: this.indent,
-                      items: [{ start: start2, key: null, sep: [this.sourceToken] }]
+                      items: [{ start: start3, key: null, sep: [this.sourceToken] }]
                     });
                   }
                 } else if (it.value) {
@@ -6874,10 +6874,10 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start, key: null, sep: [this.sourceToken] }]
+                    items: [{ start: start2, key: null, sep: [this.sourceToken] }]
                   });
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
-                  const start2 = getFirstKeyStartProps(it.start);
+                  const start3 = getFirstKeyStartProps(it.start);
                   const key = it.key;
                   const sep2 = it.sep;
                   sep2.push(this.sourceToken);
@@ -6887,10 +6887,10 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep2 }]
+                    items: [{ start: start3, key, sep: sep2 }]
                   });
-                } else if (start.length > 0) {
-                  it.sep = it.sep.concat(start, this.sourceToken);
+                } else if (start2.length > 0) {
+                  it.sep = it.sep.concat(start2, this.sourceToken);
                 } else {
                   it.sep.push(this.sourceToken);
                 }
@@ -6898,7 +6898,7 @@ var require_parser = __commonJS({
                 if (!it.sep) {
                   Object.assign(it, { key: null, sep: [this.sourceToken] });
                 } else if (it.value || atNextItem) {
-                  map.items.push({ start, key: null, sep: [this.sourceToken] });
+                  map.items.push({ start: start2, key: null, sep: [this.sourceToken] });
                 } else if (includesToken(it.sep, "map-value-ind")) {
                   this.stack.push({
                     type: "block-map",
@@ -6918,7 +6918,7 @@ var require_parser = __commonJS({
             case "double-quoted-scalar": {
               const fs = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs, sep: [] });
+                map.items.push({ start: start2, key: fs, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
                 this.stack.push(fs);
@@ -6942,7 +6942,7 @@ var require_parser = __commonJS({
                     return;
                   }
                 } else if (atMapIndent) {
-                  map.items.push({ start });
+                  map.items.push({ start: start2 });
                 }
                 this.stack.push(bv);
                 return;
@@ -7079,7 +7079,7 @@ var require_parser = __commonJS({
             yield* this.step();
           } else if (this.type === "map-value-ind" && parent.type !== "flow-collection") {
             const prev = getPrevProps(parent);
-            const start = getFirstKeyStartProps(prev);
+            const start2 = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
             const sep2 = fc.end.splice(1, fc.end.length);
             sep2.push(this.sourceToken);
@@ -7087,7 +7087,7 @@ var require_parser = __commonJS({
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep2 }]
+              items: [{ start: start2, key: fc, sep: sep2 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -7146,35 +7146,35 @@ var require_parser = __commonJS({
           case "explicit-key-ind": {
             this.onKeyLine = true;
             const prev = getPrevProps(parent);
-            const start = getFirstKeyStartProps(prev);
-            start.push(this.sourceToken);
+            const start2 = getFirstKeyStartProps(prev);
+            start2.push(this.sourceToken);
             return {
               type: "block-map",
               offset: this.offset,
               indent: this.indent,
-              items: [{ start, explicitKey: true }]
+              items: [{ start: start2, explicitKey: true }]
             };
           }
           case "map-value-ind": {
             this.onKeyLine = true;
             const prev = getPrevProps(parent);
-            const start = getFirstKeyStartProps(prev);
+            const start2 = getFirstKeyStartProps(prev);
             return {
               type: "block-map",
               offset: this.offset,
               indent: this.indent,
-              items: [{ start, key: null, sep: [this.sourceToken] }]
+              items: [{ start: start2, key: null, sep: [this.sourceToken] }]
             };
           }
         }
         return null;
       }
-      atIndentedComment(start, indent) {
+      atIndentedComment(start2, indent) {
         if (this.type !== "comment")
           return false;
         if (this.indent <= indent)
           return false;
-        return start.every((st) => st.type === "newline" || st.type === "space");
+        return start2.every((st) => st.type === "newline" || st.type === "space");
       }
       *documentEnd(docEnd) {
         if (this.type !== "doc-mode") {
@@ -7265,7 +7265,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse2(src, reviver, options) {
+    function parse3(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -7306,7 +7306,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse2;
+    exports.parse = parse3;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument;
     exports.stringify = stringify;
@@ -7507,6 +7507,11 @@ var MESSAGES = {
   "git.output-limit": "git-output-limit: command output exceeded {bytes} bytes",
   "lfs.needs-git-lfs": "files stored in Git LFS need a working git-lfs on PATH; install git-lfs before the sync",
   "objects.missing": "git object {oid} is missing",
+  "objects.bad-tree": "a git tree object could not be read",
+  "objects.batch-name": "git object name {name} cannot be asked in a batch",
+  "objects.invalid-entry-name": "invalid tree entry name {name}",
+  "git.unreadable-answer": "git {command} gave an answer that could not be read",
+  "git.starter-ended": "the process that starts git commands ended ({reason})",
   "objects.not-blob": "git object {oid} is a {type}, not a blob",
   "objects.invalid-path": "invalid repository path {path}",
   "state.tracked-missing": 'the tracked branch "{branch}" does not exist on remote "{remote}"',
@@ -7614,9 +7619,556 @@ var DEFAULT_STATE_CONFIG = Object.freeze({
 });
 
 // src/state/git.ts
+import { existsSync } from "node:fs";
+import { join as join2 } from "node:path";
+
+// src/state/batch.ts
 import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
-import { pipeline } from "node:stream/promises";
+import { statSync } from "node:fs";
+var IDLE_MS = 1e3;
+var Queue = class {
+  items = [];
+  head = 0;
+  get size() {
+    return this.items.length - this.head;
+  }
+  push(item) {
+    this.items.push(item);
+  }
+  first() {
+    return this.items[this.head];
+  }
+  shift() {
+    this.head++;
+    if (this.head > 1024 && this.head * 2 > this.items.length) {
+      this.items = this.items.slice(this.head);
+      this.head = 0;
+    }
+  }
+  drain() {
+    const rest = this.items.slice(this.head);
+    this.items = [];
+    this.head = 0;
+    return rest;
+  }
+};
+var BatchProcess = class {
+  options;
+  running;
+  starting;
+  directory;
+  constructor(options) {
+    this.options = options;
+  }
+  /** Writes `input` and waits for its answer. */
+  async request(input, request) {
+    let running = this.running;
+    if (running === void 0 || this.directory === void 0 || identityOf(this.directory) !== running.identity) running = await this.start();
+    const current = running;
+    return new Promise((resolve, reject) => {
+      if (current.idle !== void 0) clearTimeout(current.idle);
+      current.idle = void 0;
+      if (current.pending.size === 0) hold(current.child, true);
+      current.pending.push({ request, resolve, reject });
+      current.child.stdin.write(input);
+    });
+  }
+  /** Ends the process; the next request starts a new one. */
+  close() {
+    const running = this.running;
+    this.running = void 0;
+    if (running === void 0) return;
+    if (running.idle !== void 0) clearTimeout(running.idle);
+    running.child.stdin.end();
+  }
+  start() {
+    if (this.starting === void 0) {
+      const starting = (async () => {
+        this.close();
+        this.directory ??= await this.options.objectDirectory();
+        const running = this.spawn(this.directory);
+        this.running = running;
+        return running;
+      })();
+      this.starting = starting;
+      const clear = () => {
+        if (this.starting === starting) this.starting = void 0;
+      };
+      starting.then(clear, clear);
+    }
+    return this.starting;
+  }
+  spawn(directory) {
+    const { dir, args, env } = this.options;
+    const child = spawn("git", args, { cwd: dir, env: { ...env(), GIT_FLUSH: "1" }, stdio: ["pipe", "pipe", "pipe"] });
+    const running = { child, identity: identityOf(directory), pending: new Queue(), chunks: [], length: 0, need: 0, stderr: "", idle: void 0 };
+    child.stdout.on("data", (chunk) => this.receive(running, chunk));
+    child.stderr.on("data", (chunk) => {
+      if (running.stderr.length < 64 * 1024) running.stderr += chunk.toString("utf8");
+    });
+    child.stdin.on("error", () => {
+    });
+    let ended = false;
+    const end = (code) => {
+      if (ended) return;
+      ended = true;
+      if (running.idle !== void 0) clearTimeout(running.idle);
+      if (this.running === running) this.running = void 0;
+      const error = new GitError(args, code, running.stderr);
+      const waiting = running.pending.drain();
+      for (const request of waiting) request.reject(error);
+      if (waiting.length > 0) this.options.onIdle?.();
+    };
+    child.on("error", () => end(-1));
+    child.on("close", (code) => end(code ?? -1));
+    hold(child, false);
+    return running;
+  }
+  receive(running, chunk) {
+    running.chunks.push(chunk);
+    running.length += chunk.length;
+    if (running.length < running.need) return;
+    let buffered = running.chunks.length === 1 ? running.chunks[0] : Buffer.concat(running.chunks);
+    running.chunks = [buffered];
+    while (running.pending.size > 0) {
+      const waiting = running.pending.first();
+      let parsed;
+      try {
+        parsed = this.options.parse(buffered, waiting.request);
+      } catch (error) {
+        this.broken(running, error);
+        return;
+      }
+      if (parsed === void 0 || "need" in parsed) {
+        running.need = parsed === void 0 ? buffered.length + 1 : parsed.need;
+        break;
+      }
+      buffered = buffered.subarray(parsed.bytes);
+      running.chunks = buffered.length === 0 ? [] : [buffered];
+      running.length = buffered.length;
+      running.need = 0;
+      running.pending.shift();
+      if (running.pending.size === 0) this.rest(running);
+      waiting.resolve(parsed.answer);
+    }
+  }
+  /** Nothing waits: the process must not keep the program running, and it ends unless a request comes soon. */
+  rest(running) {
+    hold(running.child, false);
+    running.idle = setTimeout(() => {
+      if (this.running === running) this.close();
+    }, IDLE_MS);
+    running.idle.unref();
+    this.options.onIdle?.();
+  }
+  broken(running, cause) {
+    if (this.running === running) this.running = void 0;
+    const error = new GitError(this.options.args, -1, cause.message);
+    for (const waiting of running.pending.drain()) waiting.reject(error);
+    running.child.kill("SIGKILL");
+    this.options.onIdle?.();
+  }
+};
+function parseLine(buffer) {
+  const newline = buffer.indexOf(10);
+  return newline < 0 ? void 0 : { answer: buffer.subarray(0, newline).toString("utf8"), bytes: newline + 1 };
+}
+function hold(child, waiting) {
+  for (const handle of [child, child.stdin, child.stdout, child.stderr]) {
+    if (waiting) handle.ref();
+    else handle.unref();
+  }
+}
+function identityOf(directory) {
+  try {
+    const stat = statSync(directory);
+    return `${stat.dev}:${stat.ino}`;
+  } catch {
+    return "missing";
+  }
+}
+
+// src/state/object-reader.ts
+var HEADER = /^([0-9a-f]{40}|[0-9a-f]{64}) ([a-z]+) ([0-9]+)$/;
+function batchName(name) {
+  return name !== "" && !/[\n\r\0]/.test(name) && name.trim() === name;
+}
+var ObjectReader = class {
+  process;
+  /**
+   * @param dir the directory the process runs in
+   * @param env the environment of the process
+   * @param objectDirectory gives the absolute path of the repository's object directory
+   */
+  constructor(dir, env, objectDirectory) {
+    this.process = new BatchProcess({ dir, args: ["cat-file", "--batch-command"], env, objectDirectory, parse });
+  }
+  /** The object a name resolves to, with its content; null when the name resolves to no object. */
+  contents(name) {
+    return this.ask(name, true);
+  }
+  /** The id, type and size of the object a name resolves to; null when it resolves to no object. */
+  info(name) {
+    return this.ask(name, false);
+  }
+  async ask(name, contents) {
+    if (!batchName(name)) throw new Error(message("objects.batch-name", { name: JSON.stringify(name) }));
+    return this.process.request(`${contents ? "contents" : "info"} ${name}
+`, { name, contents });
+  }
+};
+function parse(buffer, request) {
+  const newline = buffer.indexOf(10);
+  if (newline < 0) return void 0;
+  const header = buffer.subarray(0, newline).toString("utf8");
+  const match = HEADER.exec(header);
+  if (match === null) {
+    if (header === `${request.name} missing` || header === `${request.name} ambiguous`) return { answer: null, bytes: newline + 1 };
+    throw new Error(message("git.unreadable-answer", { command: "cat-file" }));
+  }
+  const info = { oid: match[1], type: match[2], size: Number(match[3]) };
+  if (!request.contents) return { answer: info, bytes: newline + 1 };
+  const end = newline + 1 + info.size;
+  if (buffer.length < end + 1) return { need: end + 1 };
+  return { answer: { ...info, content: Buffer.from(buffer.subarray(newline + 1, end)) }, bytes: end + 1 };
+}
+
+// src/state/object-writer.ts
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+var ObjectWriter = class {
+  blobs;
+  trees;
+  /** Blob content waits in a file here while git reads it; the folder is there only while blobs are being written. */
+  folder;
+  files = 0;
+  writing = 0;
+  /** Writes waiting for one of the `BLOBS_AT_ONCE` places, so the folder holds a bounded number of blobs. */
+  waiting = [];
+  /**
+   * @param dir the directory the processes run in
+   * @param env the environment of the processes
+   * @param objectDirectory gives the absolute path of the repository's object directory
+   */
+  constructor(dir, env, objectDirectory) {
+    const oid = (buffer) => parseLine(buffer);
+    this.blobs = new BatchProcess({
+      dir,
+      env,
+      objectDirectory,
+      parse: oid,
+      args: ["-c", "core.fsyncMethod=fsync", "-c", `core.bigFileThreshold=${Number.MAX_SAFE_INTEGER}`, "hash-object", "-w", "--no-filters", "--stdin-paths"]
+    });
+    this.trees = new BatchProcess({ dir, env, objectDirectory, parse: oid, args: ["mktree", "-z", "--batch"] });
+  }
+  /**
+   * Stores content as a blob, exactly as given (no clean filters, no LFS).
+   * Content given as a function is read only when the blob's turn comes.
+   */
+  async blob(content) {
+    if (this.writing >= BLOBS_AT_ONCE) await new Promise((resolve) => this.waiting.push(resolve));
+    else this.writing++;
+    let path;
+    try {
+      this.folder ??= mkdtempSync(join(tmpdir(), "blob-"));
+      path = join(this.folder, String(this.files++));
+      writeFileSync(path, typeof content === "function" ? content() : content, { mode: 384 });
+      return checkOid(await this.blobs.request(`${path}
+`, path), "hash-object");
+    } finally {
+      if (path !== void 0) rmSync(path, { force: true });
+      const next = this.waiting.shift();
+      if (next !== void 0) next();
+      else if (--this.writing === 0) this.clearFolder();
+    }
+  }
+  /** Stores a tree of these entries; git sorts them. */
+  async tree(entries) {
+    const records = entries.map((entry) => {
+      if (entry.name.length === 0 || entry.name.includes(0) || entry.name.includes(47)) throw new Error(message("objects.invalid-entry-name", { name: JSON.stringify(entry.name.toString("utf8")) }));
+      return Buffer.concat([Buffer.from(`${entry.mode} ${entry.type} ${entry.oid}	`), entry.name, NUL]);
+    });
+    const input = Buffer.concat([...records, NUL]);
+    try {
+      return checkOid(await this.trees.request(input, null), "mktree");
+    } catch (error) {
+      if (!(error instanceof GitError && error.stderr.includes("is unavailable"))) throw error;
+      return checkOid(await this.trees.request(input, null), "mktree");
+    }
+  }
+  clearFolder() {
+    const folder = this.folder;
+    this.folder = void 0;
+    if (folder !== void 0) rmSync(folder, { recursive: true, force: true });
+  }
+};
+var NUL = Buffer.from([0]);
+var BLOBS_AT_ONCE = 8;
+function checkOid(line, command) {
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(line)) throw new Error(message("git.unreadable-answer", { command }));
+  return line;
+}
+
+// src/state/spawner.ts
+import { spawn as spawn2 } from "node:child_process";
+var HELPER = String.raw`
+'use strict';
+const { spawn } = require('node:child_process');
+const { createWriteStream } = require('node:fs');
+const { pipeline } = require('node:stream/promises');
+const failure = (error) => ({ message: String(error && error.message), code: error && error.code, errno: error && error.errno, syscall: error && error.syscall, path: error && error.path });
+const reply = (message) => { if (process.connected) process.send(message); };
+function run(id, request) {
+  const child = spawn('git', request.args, { cwd: request.cwd, env: request.env, stdio: [request.file ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+  const out = [];
+  const err = [];
+  let exceeded;
+  const collector = (chunks, limit) => {
+    let bytes = 0;
+    return (chunk) => {
+      if (exceeded !== undefined) return;
+      bytes += chunk.length;
+      if (limit !== undefined && bytes > limit) {
+        exceeded = limit;
+        child.kill('SIGKILL');
+        return;
+      }
+      chunks.push(chunk);
+    };
+  };
+  // A bounded call stops the command when its standard error passes 64 KiB as well; a call that streams to a file
+  // keeps the first 64 KiB of it and lets the command finish.
+  let kept = 0;
+  const firstPart = (chunk) => { if (kept < 64 * 1024) { kept += chunk.length; err.push(chunk); } };
+  if (!request.file) child.stdout.on('data', collector(out, request.maxOutputBytes));
+  child.stderr.on('data', request.file ? firstPart : collector(err, request.maxOutputBytes !== undefined ? 64 * 1024 : undefined));
+  let failed;
+  const exited = new Promise((resolve) => {
+    child.on('error', (error) => { failed = error; resolve(-1); });
+    child.on('close', (code) => resolve(code === null ? -1 : code));
+  });
+  if (!request.file) {
+    child.stdin.on('error', () => {});
+    child.stdin.end(request.input === undefined ? '' : request.input);
+  }
+  const copied = request.file
+    ? pipeline(child.stdout, createWriteStream(request.file.path, { flags: 'wx', mode: request.file.mode })).catch((error) => { child.kill('SIGKILL'); throw error; })
+    : Promise.resolve();
+  copied.then(() => exited).then((code) => {
+    if (failed !== undefined) return reply({ id, failure: failure(failed) });
+    reply({ id, result: { code, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8'), exceeded } });
+  }, (error) => exited.then(() => reply({ id, failure: failure(failed === undefined ? error : failed) })));
+}
+process.on('message', ({ id, request }) => {
+  // A command that cannot even start (an argument with a NUL in it) fails alone.
+  try { run(id, request); } catch (error) { reply({ id, failure: failure(error) }); }
+});
+process.on('disconnect', () => process.exit(0));
+`;
+var helper;
+var pending = /* @__PURE__ */ new Map();
+var nextId = 0;
+function start() {
+  const { NODE_OPTIONS: _options, ...env } = process.env;
+  const child = spawn2(process.execPath, ["-e", HELPER], { stdio: ["ignore", "ignore", "inherit", "ipc"], serialization: "advanced", env });
+  child.on("message", (message2) => {
+    const waiting = pending.get(message2.id);
+    if (waiting === void 0) return;
+    pending.delete(message2.id);
+    if (pending.size === 0) hold2(child, false);
+    if ("result" in message2) waiting.resolve({ ...message2.result, stdout: Buffer.from(message2.result.stdout) });
+    else waiting.reject(Object.assign(new Error(message2.failure.message), withoutUndefined(message2.failure)));
+  });
+  const end = (error) => {
+    if (helper === child) helper = void 0;
+    for (const [id, waiting] of pending) {
+      pending.delete(id);
+      waiting.reject(error);
+    }
+  };
+  child.on("error", end);
+  child.on("exit", (code, signal) => end(new Error(message("git.starter-ended", { reason: String(signal ?? code) }))));
+  hold2(child, false);
+  return child;
+}
+function hold2(child, waiting) {
+  const channel = child.channel;
+  if (waiting) {
+    child.ref();
+    channel?.ref();
+  } else {
+    child.unref();
+    channel?.unref();
+  }
+}
+function withoutUndefined(failure) {
+  return Object.fromEntries(Object.entries(failure).filter(([key, value]) => key !== "message" && value !== void 0 && value !== null));
+}
+function spawnGit(request) {
+  helper ??= start();
+  const child = helper;
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    if (pending.size === 0) hold2(child, true);
+    pending.set(id, { resolve, reject });
+    child.send({ id, request });
+  });
+}
+
+// src/state/content.ts
+import { createHash } from "node:crypto";
+import { mkdtempSync as mkdtempSync2, writeFileSync as writeFileSync2, readFileSync, rmSync as rmSync2 } from "node:fs";
+var isSpooled = (content) => typeof content === "object" && !Buffer.isBuffer(content);
+function contentBytes(content) {
+  if (!isSpooled(content)) return Buffer.from(content);
+  const bytes = readFileSync(content.file);
+  if (bytes.length !== content.size || createHash("sha256").update(bytes).digest("hex") !== content.hash) throw new Error(message("assets.spool-changed"));
+  return bytes;
+}
+
+// src/state/objects.ts
+var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
+function listTree(git, treeish, maxOutputBytes) {
+  return git.listTree(treeish, maxOutputBytes);
+}
+async function readTreeListing(git, treeish, maxOutputBytes) {
+  let files;
+  try {
+    files = await walkTree(git, treeish, maxOutputBytes === void 0 ? void 0 : { maxOutputBytes, sized: true });
+  } catch (error) {
+    if (!(error instanceof TreeOverLimit)) throw error;
+    const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
+  const sizes = await Promise.all(files.map((file) => file.type === "blob" ? git.objectInfo(file.oid) : null));
+  let bytes = 0;
+  return files.map((file, index) => {
+    const size = file.type === "blob" ? sizes[index]?.size ?? Number.NaN : null;
+    if (maxOutputBytes !== void 0) {
+      bytes += file.bytes + Math.max(7, size === null ? 1 : Number.isNaN(size) ? 3 : String(size).length);
+      if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
+    }
+    return { path: file.path, mode: file.mode, type: file.type, oid: file.oid, size };
+  });
+}
+async function walkTree(git, treeish, limit) {
+  const root = await readTree(git, `${treeish}^{tree}`, limit?.maxOutputBytes);
+  if (root === null || root.type !== "tree") throw new GitError(["ls-tree", "-r", "--full-tree", treeish], 128, `fatal: not a tree object: ${treeish}`);
+  const rawLength = root.oid.length / 2;
+  const files = [];
+  let bytes = 0;
+  const walk = async (content, prefix) => {
+    const entries = parseTree(content, rawLength);
+    const subtrees = entries.map((entry) => limit === void 0 && entry.mode === "040000" ? git.readObject(entry.oid) : void 0);
+    for (const read of subtrees) read?.catch(() => {
+    });
+    for (const [index, entry] of entries.entries()) {
+      const path = prefix.length === 0 ? entry.name : Buffer.concat([prefix, SLASH, entry.name]);
+      if (entry.mode === "040000") {
+        const tree = await (subtrees[index] ?? readTree(git, entry.oid, limit === void 0 ? void 0 : limit.maxOutputBytes - bytes));
+        if (tree === null || tree === void 0 || tree.type !== "tree") throw new GitError(["ls-tree", "-r", "--full-tree", treeish], 128, `fatal: not a tree object: ${entry.oid}`);
+        await walk(tree.content, path);
+        continue;
+      }
+      const type = entry.mode === "160000" ? "commit" : "blob";
+      const record = entry.mode.length + type.length + entry.oid.length + path.length + 5;
+      if (limit !== void 0) {
+        bytes += record + (limit.sized ? 7 : -1);
+        if (bytes > limit.maxOutputBytes) throw new GitOutputLimitError(limit.maxOutputBytes);
+      }
+      files.push({ path: path.toString("utf8"), mode: entry.mode, type, oid: entry.oid, bytes: record });
+    }
+  };
+  await walk(root.content, Buffer.alloc(0));
+  return files;
+}
+var SLASH = Buffer.from("/");
+var TreeOverLimit = class extends Error {
+};
+async function readTree(git, name, budget) {
+  if (budget === void 0) return git.readObject(name);
+  const info = await git.objectInfo(name);
+  if (info === null) return null;
+  if (info.type === "tree" && info.size > budget) throw new TreeOverLimit();
+  return git.readObject(info.oid);
+}
+function parseTree(content, rawLength) {
+  const entries = [];
+  let offset = 0;
+  while (offset < content.length) {
+    const space = content.indexOf(32, offset);
+    const nul = content.indexOf(0, space + 1);
+    if (space < 0 || nul < 0 || nul + 1 + rawLength > content.length) throw new Error(message("objects.bad-tree"));
+    const mode = canonicalMode(Number.parseInt(content.subarray(offset, space).toString("latin1"), 8));
+    entries.push({ mode, name: content.subarray(space + 1, nul), oid: content.subarray(nul + 1, nul + 1 + rawLength).toString("hex") });
+    offset = nul + 1 + rawLength;
+  }
+  return entries;
+}
+function canonicalMode(mode) {
+  const kind = mode & 61440;
+  const canonical = kind === 32768 ? 32768 | (mode & 64 ? 493 : 420) : kind === 40960 ? 40960 : kind === 16384 ? 16384 : 57344;
+  return canonical.toString(8).padStart(6, "0");
+}
+function parseTreeListing(stdout) {
+  const entries = [];
+  for (const record of stdout.toString("utf8").split("\0")) {
+    if (record === "") continue;
+    const tab = record.indexOf("	");
+    const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
+    if (type !== "blob" && type !== "commit") continue;
+    entries.push({
+      path: record.slice(tab + 1),
+      mode,
+      type,
+      oid,
+      size: size === "-" || size === void 0 ? null : Number(size)
+    });
+  }
+  return entries;
+}
+function readBlobs(git, oids, maxOutputBytes) {
+  return git.readBlobs(oids, maxOutputBytes);
+}
+async function readBlobBatch(git, oids, maxOutputBytes) {
+  const unique = [...new Set(oids)];
+  const result = /* @__PURE__ */ new Map();
+  if (unique.length === 0) return result;
+  if (maxOutputBytes !== void 0) {
+    const infos = await Promise.all(unique.map((oid) => git.objectInfo(oid)));
+    let bytes = 0;
+    infos.forEach((info, index) => {
+      bytes += info === null ? `${unique[index]} missing
+`.length : `${info.oid} ${info.type} ${info.size}
+`.length + info.size + 1;
+    });
+    if (bytes > maxOutputBytes) throw new GitOutputLimitError(maxOutputBytes);
+  }
+  const objects = await Promise.all(unique.map((oid) => git.readObject(oid)));
+  unique.forEach((oid, index) => {
+    const found = objects[index];
+    if (found === null || found === void 0) throw new Error(message("objects.missing", { oid }));
+    if (found.type !== "blob") throw new Error(message("objects.not-blob", { oid, type: found.type }));
+    result.set(oid, found.content);
+  });
+  return result;
+}
+function isGitDirectoryName(part) {
+  return /^(?:\.git|git~[0-9]+)[. ]*(?::|$)/i.test(part.replace(HFS_IGNORED, ""));
+}
+var HFS_IGNORED = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
+function checkRepoPath(path, { removal = false } = {}) {
+  const parts = path.split("/");
+  if (path === "" || path.includes("\0") || path.includes("\\")) throw new Error(message("objects.invalid-path", { path: JSON.stringify(path) }));
+  for (const part of parts) {
+    if (part === "" || part === "." || part === ".." || !removal && isGitDirectoryName(part)) {
+      throw new Error(message("objects.invalid-path", { path: JSON.stringify(path) }));
+    }
+  }
+}
+
+// src/state/git.ts
 var GitError = class extends Error {
   args;
   code;
@@ -7660,47 +8212,140 @@ var Git = class {
     }
     return env;
   }
-  run(args, options = {}) {
-    const env = this.environment(options);
+  reader;
+  writer;
+  /** The absolute path of the repository's object directory, for the long-lived processes to notice a repository made again. */
+  objectDirectory = () => {
+    return this.layout().then(({ objects }) => objects);
+  };
+  layoutRead;
+  /** The repository's object format and folders, from one `rev-parse`; they do not change while the repository exists. */
+  layout() {
+    this.layoutRead ??= this.text(["rev-parse", "--show-object-format", "--path-format=absolute", "--git-path", "objects", "--git-common-dir"]).then(
+      async (text) => {
+        const lines = text.split("\n");
+        if (lines.length === 3) return { format: lines[0], objects: lines[1], common: lines[2] };
+        const [format, objects, common] = await Promise.all([
+          this.text(["rev-parse", "--show-object-format"]),
+          this.text(["rev-parse", "--path-format=absolute", "--git-path", "objects"]),
+          this.text(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        ]);
+        return { format, objects, common };
+      },
+      (error) => {
+        this.layoutRead = void 0;
+        throw error;
+      }
+    );
+    return this.layoutRead;
+  }
+  /**
+   * Reads objects through one long-lived git process instead of a process
+   * per read. Names are revisions as `git cat-file` takes them (`<oid>`,
+   * `<commit>:<path>`, `<ref>^{commit}`).
+   */
+  objects() {
+    this.reader ??= new ObjectReader(this.dir, () => this.environment({}), this.objectDirectory);
+    return this.reader;
+  }
+  /** Writes blobs and trees through long-lived git processes instead of a process per object. */
+  objectWriter() {
+    this.writer ??= new ObjectWriter(this.dir, () => this.environment({}), this.objectDirectory);
+    return this.writer;
+  }
+  /** The object a name resolves to, with its content; null when it resolves to none. */
+  async readObject(name) {
+    if (batchName(name)) return this.objects().contents(name);
+    const found = await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", name], { okCodes: [0, 1, 128] });
+    if (found.code !== 0) return null;
+    const oid = found.stdout.toString("utf8").trim();
+    return this.objects().contents(oid);
+  }
+  /**
+   * Every file of a commit or tree, recursively, as `git ls-tree -r -l`
+   * lists them (see `listTree` in objects.ts).
+   */
+  listTree(treeish, maxOutputBytes) {
+    return readTreeListing(this, treeish, maxOutputBytes);
+  }
+  /** Blobs by id, one batch (see `readBlobs` in objects.ts). */
+  readBlobs(oids, maxOutputBytes) {
+    return readBlobBatch(this, oids, maxOutputBytes);
+  }
+  /** The content of the blob a name resolves to, as `git cat-file blob` gives it; null when it resolves to no blob. */
+  async readBlob(name, maxBytes) {
+    if (maxBytes === void 0) {
+      const found = await this.readObject(name);
+      return found?.type === "blob" ? found.content : null;
+    }
+    const info = await this.objectInfo(name);
+    if (info?.type !== "blob") return null;
+    if (info.size > maxBytes) throw new GitOutputLimitError(maxBytes);
+    return (await this.objects().contents(info.oid))?.content ?? null;
+  }
+  /**
+   * The id a name resolves to, as `git rev-parse <name>` gives it: read
+   * through the object reader, and from `rev-parse` itself (with its error)
+   * when the reader finds no object.
+   */
+  async revParse(name) {
+    return (await this.objectInfo(name))?.oid ?? this.text(["rev-parse", name]);
+  }
+  /**
+   * What `git show <name>` gives: for a blob its content, read through the
+   * object reader; anything else, and a name that resolves to nothing, is
+   * left to `git show` itself.
+   */
+  async showBlob(name, options = {}) {
+    const found = await this.readObject(name);
+    if (found?.type === "blob") return { code: 0, stdout: found.content, stderr: "" };
+    return this.run(["show", name], options);
+  }
+  /** The id, type and size of the object a name resolves to; null when it resolves to none. */
+  async objectInfo(name) {
+    if (batchName(name)) return this.objects().info(name);
+    const found = await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", name], { okCodes: [0, 1, 128] });
+    if (found.code !== 0) return null;
+    return this.objects().info(found.stdout.toString("utf8").trim());
+  }
+  plain;
+  /**
+   * True when git prints commit messages as stored, without re-encoding:
+   * the repository sets no message encoding other than UTF-8
+   * (`i18n.commitEncoding`, `i18n.logOutputEncoding`).
+   */
+  plainMessages() {
+    this.plain ??= this.run(["config", "--get-regexp", "^i18n\\.(commitencoding|logoutputencoding)$"], { okCodes: [0, 1] }).then(
+      ({ stdout }) => stdout.toString("utf8").split("\n").filter(Boolean).every((line) => /^\S+ utf-?8$/i.test(line)),
+      (error) => {
+        this.plain = void 0;
+        throw error;
+      }
+    );
+    return this.plain;
+  }
+  /**
+   * True when git reads some commits' parents other than as stored: a
+   * shallow repository cuts history at its boundary, and grafts replace
+   * parents. Checked on every call, as a fetch can make a repository shallow.
+   */
+  async rewritesHistory() {
+    const env = this.environment({});
+    if (env.GIT_SHALLOW_FILE !== void 0 || env.GIT_GRAFT_FILE !== void 0) return true;
+    const { common } = await this.layout();
+    return existsSync(join2(common, "shallow")) || existsSync(join2(common, "info", "grafts"));
+  }
+  /** The repository's object format, `sha1` or `sha256`; it does not change while the repository exists. */
+  objectFormat() {
+    return this.layout().then(({ format }) => format);
+  }
+  async run(args, options = {}) {
     const okCodes = options.okCodes ?? [0];
-    return new Promise((resolve, reject) => {
-      const child = spawn("git", args, { cwd: this.dir, env, stdio: ["pipe", "pipe", "pipe"] });
-      const out = [];
-      const err = [];
-      let exceededLimit;
-      const collector = (chunks, limit) => {
-        let bytes = 0;
-        return (chunk) => {
-          if (exceededLimit !== void 0) return;
-          bytes += chunk.length;
-          if (limit !== void 0 && bytes > limit) {
-            exceededLimit = limit;
-            child.kill("SIGKILL");
-            return;
-          }
-          chunks.push(chunk);
-        };
-      };
-      child.stdout.on("data", collector(out, options.maxOutputBytes));
-      child.stderr.on("data", collector(err, options.maxOutputBytes === void 0 ? void 0 : 64 * 1024));
-      child.on("error", reject);
-      child.stdin.on("error", () => {
-      });
-      child.on("close", (code) => {
-        if (exceededLimit !== void 0) {
-          reject(new GitOutputLimitError(exceededLimit));
-          return;
-        }
-        const result = {
-          code: code ?? -1,
-          stdout: Buffer.concat(out),
-          stderr: Buffer.concat(err).toString("utf8")
-        };
-        if (okCodes.includes(result.code)) resolve(result);
-        else reject(new GitError(args, result.code, result.stderr));
-      });
-      child.stdin.end(options.input ?? "");
-    });
+    const result = await spawnGit({ args, cwd: this.dir, env: this.environment(options), input: options.input ?? "", ...options.maxOutputBytes === void 0 ? {} : { maxOutputBytes: options.maxOutputBytes } });
+    if (result.exceeded !== void 0) throw new GitOutputLimitError(result.exceeded);
+    const { code, stdout, stderr } = result;
+    if (!okCodes.includes(code)) throw new GitError(args, code, stderr);
+    return { code, stdout, stderr };
   }
   /**
    * Runs git and writes its standard output to a new file at `path` as it
@@ -7708,26 +8353,7 @@ var Git = class {
    * is capped at 64 KiB. A failing exit is a `GitError`.
    */
   async runToFile(args, path, fileMode) {
-    const child = spawn("git", args, { cwd: this.dir, env: this.environment({}), stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-    child.stderr.on("data", (chunk) => {
-      if (stderr.length < 64 * 1024) stderr += chunk.toString("utf8");
-    });
-    const exited = new Promise((resolve, reject) => {
-      child.on("error", reject);
-      child.on("close", (code2) => resolve(code2 ?? -1));
-    });
-    exited.catch(() => {
-    });
-    try {
-      await pipeline(child.stdout, createWriteStream(path, { flags: "wx", mode: fileMode }));
-    } catch (error) {
-      child.kill("SIGKILL");
-      await exited.catch(() => {
-      });
-      throw error;
-    }
-    const code = await exited;
+    const { code, stderr } = await spawnGit({ args, cwd: this.dir, env: this.environment({}), file: { path, mode: fileMode } });
     if (code !== 0) throw new GitError(args, code, stderr);
   }
   /** Runs git and returns standard output as text without the final newline. */
@@ -7777,79 +8403,10 @@ function parseLfsPointer(blob) {
 }
 var LFSCONFIG_LIMIT = 64 * 1024;
 
-// src/state/content.ts
-import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-var isSpooled = (content) => typeof content === "object" && !Buffer.isBuffer(content);
-function contentBytes(content) {
-  if (!isSpooled(content)) return Buffer.from(content);
-  const bytes = readFileSync(content.file);
-  if (bytes.length !== content.size || createHash("sha256").update(bytes).digest("hex") !== content.hash) throw new Error(message("assets.spool-changed"));
-  return bytes;
-}
-
-// src/state/objects.ts
-var NEUTRAL_IDENTITY = Object.freeze({ name: "mdbisync", email: "mdbisync@sync.invalid" });
-async function listTree(git, treeish, maxOutputBytes) {
-  const { stdout } = await git.run(["ls-tree", "-r", "-z", "-l", "--full-tree", treeish], { maxOutputBytes });
-  return parseTreeListing(stdout);
-}
-function parseTreeListing(stdout) {
-  const entries = [];
-  for (const record of stdout.toString("utf8").split("\0")) {
-    if (record === "") continue;
-    const tab = record.indexOf("	");
-    const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
-    if (type !== "blob" && type !== "commit") continue;
-    entries.push({
-      path: record.slice(tab + 1),
-      mode,
-      type,
-      oid,
-      size: size === "-" || size === void 0 ? null : Number(size)
-    });
-  }
-  return entries;
-}
-async function readBlobs(git, oids, maxOutputBytes) {
-  const unique = [...new Set(oids)];
-  const result = /* @__PURE__ */ new Map();
-  if (unique.length === 0) return result;
-  const { stdout } = await git.run(["cat-file", "--batch"], { input: unique.join("\n") + "\n", maxOutputBytes });
-  let offset = 0;
-  for (const oid of unique) {
-    const end = stdout.indexOf(10, offset);
-    const header = stdout.subarray(offset, end).toString("utf8");
-    const [, type, size] = header.split(" ");
-    if (type === "missing" || type === void 0 || size === void 0) {
-      throw new Error(message("objects.missing", { oid }));
-    }
-    if (type !== "blob") throw new Error(message("objects.not-blob", { oid, type: String(type) }));
-    const start = end + 1;
-    const length = Number(size);
-    result.set(oid, stdout.subarray(start, start + length));
-    offset = start + length + 1;
-  }
-  return result;
-}
-function isGitDirectoryName(part) {
-  return /^(?:\.git|git~[0-9]+)[. ]*(?::|$)/i.test(part.replace(HFS_IGNORED, ""));
-}
-var HFS_IGNORED = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
-function checkRepoPath(path, { removal = false } = {}) {
-  const parts = path.split("/");
-  if (path === "" || path.includes("\0") || path.includes("\\")) throw new Error(message("objects.invalid-path", { path: JSON.stringify(path) }));
-  for (const part of parts) {
-    if (part === "" || part === "." || part === ".." || !removal && isGitDirectoryName(part)) {
-      throw new Error(message("objects.invalid-path", { path: JSON.stringify(path) }));
-    }
-  }
-}
-
 // src/sync/staged.ts
 import { createHash as createHash3 } from "node:crypto";
 import { mkdir as mkdir2, readFile as readFile2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
-import { join as join2 } from "node:path";
+import { join as join4 } from "node:path";
 
 // src/mapping/front-matter.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -8153,10 +8710,10 @@ function isRecord(value) {
 }
 
 // src/sync/security.ts
-import { spawn as spawn2 } from "node:child_process";
+import { spawn as spawn3 } from "node:child_process";
 import { lstat, mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { tmpdir as tmpdir2 } from "node:os";
+import { dirname, join as join3, sep } from "node:path";
 import { createHash as createHash2 } from "node:crypto";
 
 // src/mapping/annotations.ts
@@ -8180,7 +8737,7 @@ function isMarkdownPath(path) {
 // src/sync/security.ts
 function runHooks(dir, args, env) {
   return new Promise((resolve) => {
-    const child = spawn2("pre-commit", args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: "never", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn3("pre-commit", args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: "never", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const collect = (chunk) => {
       if (output.length < 2e6) output += chunk.toString("utf8");
@@ -8253,8 +8810,7 @@ async function readInBatches(git, entries, use, alone) {
   await flush();
 }
 async function trackedHookConfig(git, tracked) {
-  const read = await git.run(["cat-file", "blob", `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
-  const config = readHookConfig(read.code === 0 ? read.stdout.toString("utf8") : null);
+  const config = readHookConfig((await git.readBlob(`${tracked}:${PRE_COMMIT_CONFIG}`))?.toString("utf8") ?? null);
   if (config.invalid !== void 0) throw new Error(message("sync.invalid-security-config"));
   return config;
 }
@@ -8273,14 +8829,14 @@ async function onlyDocumentsChanged(scratch, dir, files, linkedSupport) {
     if (pointer === null || content === void 0) return false;
     const bytes = contentBytes(content);
     if (pointer.size !== bytes.length || pointer.oid !== createHash2("sha256").update(bytes).digest("hex")) return false;
-    if (!(await readFile(join(dir, path))).equals(bytes)) return false;
+    if (!(await readFile(join3(dir, path))).equals(bytes)) return false;
   }
   return true;
 }
 async function throughLink(dir, path) {
   const parts = path.split("/");
   for (let at = 1; at <= parts.length; at++) {
-    const found = await lstat(join(dir, ...parts.slice(0, at))).catch(() => null);
+    const found = await lstat(join3(dir, ...parts.slice(0, at))).catch(() => null);
     if (found === null) return false;
     if (found.isSymbolicLink()) return true;
   }
@@ -8294,18 +8850,18 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
   const fileMode = (entry) => entry.mode === "100755" ? 493 : 420;
   await readInBatches(git, files, async (batch, blobs) => {
     for (const entry of batch) {
-      await mkdir(dirname(join(dir, entry.path)), { recursive: true });
-      await writeFile(join(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
+      await mkdir(dirname(join3(dir, entry.path)), { recursive: true });
+      await writeFile(join3(dir, entry.path), blobs.get(entry.oid), { mode: fileMode(entry) });
     }
   }, async (entry) => {
-    await mkdir(dirname(join(dir, entry.path)), { recursive: true });
-    await git.runToFile(["cat-file", "blob", entry.oid], join(dir, entry.path), fileMode(entry));
+    await mkdir(dirname(join3(dir, entry.path)), { recursive: true });
+    await git.runToFile(["cat-file", "blob", entry.oid], join3(dir, entry.path), fileMode(entry));
   });
-  for (const entry of gitlinks) await mkdir(join(dir, entry.path), { recursive: true });
+  for (const entry of gitlinks) await mkdir(join3(dir, entry.path), { recursive: true });
   await readInBatches(git, links, async (batch, targets) => {
     for (const entry of batch) {
-      await mkdir(dirname(join(dir, entry.path)), { recursive: true });
-      await symlink(targets.get(entry.oid), join(dir, entry.path));
+      await mkdir(dirname(join3(dir, entry.path)), { recursive: true });
+      await symlink(targets.get(entry.oid), join3(dir, entry.path));
     }
   }, async () => {
     throw new Error(message("sync.security-link-outside"));
@@ -8313,19 +8869,19 @@ async function reproduceTree(git, tracked, entries, scratch, dir) {
   const root = await realpath(dir);
   const linkedSupport = [];
   for (const entry of links) {
-    const target = await realpath(join(dir, entry.path));
+    const target = await realpath(join3(dir, entry.path));
     const inside = target.slice(root.length + 1).split(sep);
     if (!target.startsWith(root + sep) || isGitDirectoryName(inside[0])) throw new Error(message("sync.security-link-outside"));
     if (!isMarkdownPath(entry.path)) linkedSupport.push(inside.join("/"));
   }
-  await mkdir(join(dir, ".git", "info"), { recursive: true });
-  await writeFile(join(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
+  await mkdir(join3(dir, ".git", "info"), { recursive: true });
+  await writeFile(join3(dir, ".git", "info", "attributes"), "* -text -filter -ident -working-tree-encoding\n");
   await scratch.run(["add", "--all", "--force"]);
   if (gitlinks.length > 0) {
     await scratch.run(["update-index", "-z", "--index-info"], { input: gitlinks.map((entry) => `160000 ${entry.oid}	${entry.path}\0`).join("") });
   }
   const tree = await scratch.text(["write-tree"]);
-  if (tree !== await git.text(["rev-parse", `${tracked}^{tree}`])) throw new SecurityScratchTreeError();
+  if (tree !== await git.revParse(`${tracked}^{tree}`)) throw new SecurityScratchTreeError();
   return { tree, linkedSupport };
 }
 async function securityGate(git, tracked, options = {}) {
@@ -8351,7 +8907,7 @@ async function securityGate(git, tracked, options = {}) {
         if (dir === void 0) {
           const entries = await listTree(git, tracked);
           checkScratchBudget(entries, budget);
-          dir = await mkdtemp(join(tmpdir(), "capture-security-"));
+          dir = await mkdtemp(join3(tmpdir2(), "capture-security-"));
           scratch = new Git(dir);
           await scratch.run(["init", "--quiet", `--object-format=${await git.text(["rev-parse", "--show-object-format"])}`]);
           ({ tree: baseline, linkedSupport } = await reproduceTree(git, tracked, entries, scratch, dir));
@@ -8364,10 +8920,10 @@ async function securityGate(git, tracked, options = {}) {
           if (batch && (path.startsWith(":") || /[*?\[]/.test(path))) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (path === PRE_COMMIT_CONFIG || path.startsWith("-")) return [{ hook: SECURITY_ALIAS, line: 1 }];
           if (await throughLink(dir, path)) return [{ hook: SECURITY_ALIAS, line: 1 }];
-          await mkdir(dirname(join(dir, path)), { recursive: true });
-          await writeFile(join(dir, path), contentBytes(content));
+          await mkdir(dirname(join3(dir, path)), { recursive: true });
+          await writeFile(join3(dir, path), contentBytes(content));
           if (batch) {
-            const { dev, ino } = await lstat(join(dir, path), { bigint: true });
+            const { dev, ino } = await lstat(join3(dir, path), { bigint: true });
             const identity = `${dev}:${ino}`;
             if (written.has(identity)) return [{ hook: SECURITY_ALIAS, line: 1 }];
             written.add(identity);
@@ -8394,7 +8950,7 @@ async function securityGate(git, tracked, options = {}) {
         }
         if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         for (const [path, content] of files) {
-          const after = await readFile(join(dir, path)).catch(() => null);
+          const after = await readFile(join3(dir, path)).catch(() => null);
           if (after === null || !after.equals(contentBytes(content))) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         }
         return findings;
@@ -8423,7 +8979,7 @@ var BATCH_PATH_BYTES = 24 * 1024;
 function stageFolder(env = process.env) {
   const base = env["RUNNER_TEMP"];
   if (base === void 0 || base === "") throw new Error(message("sync.no-runner-temp"));
-  return join2(base, STAGE_FOLDER);
+  return join4(base, STAGE_FOLDER);
 }
 var sha256 = (content) => createHash3("sha256").update(contentBytes(content)).digest("hex");
 function candidateKey(files) {
@@ -8436,7 +8992,7 @@ function union(sets) {
   return files;
 }
 async function checkStaged(git, folder, env) {
-  const manifest = JSON.parse(await readFile2(join2(folder, MANIFEST), "utf8"));
+  const manifest = JSON.parse(await readFile2(join4(folder, MANIFEST), "utf8"));
   if (manifest.version !== VERSION) throw new Error(message("sync.staged-version"));
   const result = { sets: manifest.sets.length, rejected: 0, unanswered: 0 };
   const answers = { version: VERSION, tracked: manifest.tracked, answers: {} };
@@ -8479,7 +9035,7 @@ async function checkStaged(git, folder, env) {
         for (const { path, sha256: hash } of set.files) {
           checkRepoPath(path);
           if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(message("sync.staged-hash"));
-          const content = await readFile2(join2(folder, "files", hash));
+          const content = await readFile2(join4(folder, "files", hash));
           files.set(path, content);
           bytes += content.length;
           pathBytes += Buffer.byteLength(path) + 1;
@@ -8511,7 +9067,7 @@ async function checkStaged(git, folder, env) {
       await gate.close?.();
     }
   }
-  await writeFile2(join2(folder, ANSWERS), JSON.stringify(answers), { mode: 384 });
+  await writeFile2(join4(folder, ANSWERS), JSON.stringify(answers), { mode: 384 });
   return result;
 }
 
