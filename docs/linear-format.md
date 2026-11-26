@@ -429,9 +429,13 @@ Inline text:
   text. At the inner edge of an emphasis mark it moves outside the mark.
   Where the tab would change how Markdown reads the text, `fix` leaves
   the file as written and reports [`tab-reference-layout`](#tab-reference-layout).
-- Emoji shortcodes Linear knows become emoji: `Done :tada:` becomes
-  `Done 🎉`. An escaped reference or shortcode (`\&amp;`, `\:tada:`) stays
-  as written.
+- Emoji shortcodes Linear knows become emoji, also in link text: `Done
+  :tada:` becomes `Done 🎉`, and `:spiral_calendar_pad:` becomes `🗓️`.
+  Linear knows Slack's names for emoji up to Unicode 14, one name per
+  emoji. Other shortcodes stay text, in Linear and in the file: GitHub-only
+  names such as `:albania:`, second names such as `:thumbsup:` (use
+  `:+1:`), and newer emoji such as `:shaking_face:`. An escaped reference
+  or shortcode (`\&amp;`, `\:tada:`) stays as written.
 - A backslash before anything but ASCII punctuation (a letter, a digit, a
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`. So is a

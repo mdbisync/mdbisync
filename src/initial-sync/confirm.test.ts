@@ -16,7 +16,7 @@ import { Git, type IdEntry } from '../state/index.ts';
 import { LinearClient, LinearResponseLimitError } from '../linear/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch, virtualCheckClock } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
-import { type ConfirmedResult, FINAL_IDS_MESSAGE, PROGRESS_MESSAGE, confirmInitialSync } from './confirm.ts';
+import { type ConfirmedResult, FINAL_IDS_MESSAGE, PROGRESS_MESSAGE, confirmInitialSync, holdsBody } from './confirm.ts';
 import { type BodyTransform, LeaveOutError } from './transform.ts';
 
 const CANARY = 'kx-3c9e51d7';
@@ -764,5 +764,15 @@ describe('confirmed initial sync from git to Linear', () => {
       assert.match((await document('eng/notes/readings.md')).content ?? '', /\| Tuesday \| \+4 \|/);
       await assertQuiet();
     });
+  });
+});
+
+describe('holdsBody', () => {
+  it('matches a shortcode in the file with its emoji in Linear only where Linear converts it', () => {
+    assert.ok(holdsBody('Due \u{1F5D3}\u{FE0F} soon', 'Due :spiral_calendar_pad: soon\n'));
+    assert.ok(holdsBody('[\u{1F5D3}\u{FE0F} plan](<https://example.com/a>)', '[:spiral_calendar_pad: plan](<https://example.com/a>)\n'));
+    assert.ok(holdsBody('Flag \u{1F1E6}\u{1F1F1}', 'Flag :flag-al:\n'));
+    // Linear keeps a GitHub-only name as text, so its emoji is another document.
+    assert.ok(!holdsBody('Trip \u{1F1E6}\u{1F1F1}', 'Trip :albania:\n'));
   });
 });

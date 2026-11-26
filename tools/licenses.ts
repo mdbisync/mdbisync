@@ -36,13 +36,20 @@ export function bundledPackagePaths(metafile: Metafile): string[] {
   const paths = new Set<string>();
   for (const output of Object.values(metafile.outputs)) {
     for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
-      const path = packagePathOf(input);
+      const path = packagePathOf(input) ?? vendoredPathOf(input);
       if (path !== undefined && bytesInOutput > 0) {
         paths.add(path);
       }
     }
   }
   return [...paths].sort();
+}
+
+// Third-party material kept in the repository (src/vendor/<folder>/) counts
+// as a package: its folder holds a package.json with name, version and
+// license, and the license file, like an installed package.
+export function vendoredPathOf(file: string): string | undefined {
+  return /^(.*\/)?vendor\/[^/]+(?=\/)/.exec(file)?.[0];
 }
 
 // Only a single allowed SPDX identifier passes. A compound expression

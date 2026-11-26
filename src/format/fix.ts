@@ -10,7 +10,7 @@
 import type { BlockContent, Definition, DefinitionContent, Delete, Emphasis, Link, LinkReference, List, ListItem, Nodes, Paragraph, PhrasingContent, Root, RootContent, Strong, Table, TableRow, Text } from 'mdast';
 import { isDeepStrictEqual } from 'node:util';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
-import { nameToEmoji } from 'gemoji';
+import { LINEAR_EMOJI } from './linear-emoji.ts';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
@@ -2115,14 +2115,19 @@ function textEdits(source: string, from: number, to: number, redundantEscape: (a
     if (!sameFlanking(source, at, at + match[0].length, char)) continue;
     edits.push({ from: at, to: at + match[0].length, text: char });
   }
-  // `:name:` shortcodes Linear knows become the emoji, unless the first colon is escaped.
+  // `:name:` shortcodes Linear knows become the emoji, unless the first colon
+  // is escaped or the emoji would change how an emphasis run next to it reads.
   for (const { index, length, emoji } of emojiShortcodes(raw)) {
-    if (!escaped(raw, index)) edits.push({ from: from + index, to: from + index + length, text: emoji });
+    const at = from + index;
+    if (!escaped(raw, index) && sameFlanking(source, at, at + length, emoji)) edits.push({ from: at, to: at + length, text: emoji });
   }
   // Keep escapes that would expose a shortcode on the next formatting pass.
   const shortcodeEscapes = new Set<number>();
-  for (const match of raw.matchAll(/:(?=([a-z0-9_+-]*)\\([+-][a-z0-9_+-]*):)/g)) {
-    if (Object.hasOwn(nameToEmoji, match[1]! + match[2]!)) shortcodeEscapes.add(match.index + 1 + match[1]!.length);
+  // A name can hold several escaped `+` or `-` (`:man\-raising\-hand:`); all of them stay.
+  for (const match of raw.matchAll(/:(?=((?:[a-z0-9_+-]|\\[+-])*\\[+-](?:[a-z0-9_+-]|\\[+-])*):)/g)) {
+    const name = match[1]!;
+    if (!LINEAR_EMOJI.has(name.replace(/\\([+-])/g, '$1'))) continue;
+    for (const escape of name.matchAll(/\\/g)) shortcodeEscapes.add(match.index + 1 + escape.index);
   }
   // A backslash before a letter is a literal backslash; Linear doubles it,
   // as it does one that ends its line (where it breaks no line: a block's
@@ -2169,7 +2174,7 @@ function tildeUnderscoreEdits(raw: string, from: number): Edit[] {
   const text = chars.map(({ char }) => char).join('');
   const shortcode = new Set<number>();
   for (const match of text.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
-    if (Object.hasOwn(nameToEmoji, match[1]!)) for (let index = match.index; index < match.index + match[1]!.length + 2; index++) shortcode.add(index);
+    if (LINEAR_EMOJI.has(match[1]!)) for (let index = match.index; index < match.index + match[1]!.length + 2; index++) shortcode.add(index);
   }
   const edits: Edit[] = [];
   chars.forEach(({ char, at, backslash }, index) => {
@@ -2263,7 +2268,7 @@ function plainUrlUnderscores(label: string): string {
 /** Label shortcodes can share a colon, as in `:fire:tada:`. */
 function* emojiShortcodeStarts(label: string): Generator<number> {
   for (const match of label.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
-    if (Object.hasOwn(nameToEmoji, match[1]!)) yield match.index;
+    if (LINEAR_EMOJI.has(match[1]!)) yield match.index;
   }
 }
 
@@ -2394,9 +2399,14 @@ const UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
 
 /**
  * Whether the delimiter runs right before `from` and right after `to` (a
- * reference) can open and close the same way when the reference is `char`.
+ * reference or a shortcode) can open and close the same way when it is
+ * replaced by `text`: its first character faces the run before, its last
+ * character the run after.
  */
-function sameFlanking(source: string, from: number, to: number, char: string): boolean {
+function sameFlanking(source: string, from: number, to: number, text: string): boolean {
+  const chars = [...text];
+  const first = chars[0];
+  const last = chars.at(-1);
   const kind = (c: string | undefined) => (c === undefined || UNICODE_WHITESPACE.test(c) ? 'space' : UNICODE_PUNCTUATION.test(c) ? 'punctuation' : 'other');
   // Whether a run of `delimiter` between `before` and `after` can open and close.
   const reads = (delimiter: string, before: string | undefined, after: string | undefined): string => {
@@ -2411,13 +2421,13 @@ function sameFlanking(source: string, from: number, to: number, char: string): b
   if (delimiterBefore !== undefined && DELIMITER.test(delimiterBefore)) {
     let start = from - 1;
     while (start > 0 && source[start - 1] === delimiterBefore) start--;
-    if (reads(delimiterBefore, codePointBefore(source, start), source[from]) !== reads(delimiterBefore, codePointBefore(source, start), char)) return false;
+    if (reads(delimiterBefore, codePointBefore(source, start), source[from]) !== reads(delimiterBefore, codePointBefore(source, start), first)) return false;
   }
   const delimiterAfter = source[to];
   if (delimiterAfter !== undefined && DELIMITER.test(delimiterAfter)) {
     let end = to + 1;
     while (end < source.length && source[end] === delimiterAfter) end++;
-    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end)) !== reads(delimiterAfter, char, codePointAt(source, end))) return false;
+    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end)) !== reads(delimiterAfter, last, codePointAt(source, end))) return false;
   }
   return true;
 }
@@ -2446,8 +2456,9 @@ const ASTERISK_SPELLING = new RegExp(String.raw`\\.|[*]|` + CHARACTER_REFERENCE.
 /** The `:name:` shortcodes in `raw` that name an emoji Linear knows, with their offsets. */
 function* emojiShortcodes(raw: string): Generator<{ index: number; length: number; emoji: string }> {
   for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
-    const emoji = Object.hasOwn(nameToEmoji, match[1]!) ? nameToEmoji[match[1]!] : undefined;
-    if (emoji) yield { index: match.index, length: match[0].length, emoji };
+    const emoji = LINEAR_EMOJI.get(match[1]!);
+    // Linear escapes the `*` of the keycap asterisk, so it cannot open emphasis.
+    if (emoji) yield { index: match.index, length: match[0].length, emoji: emoji.startsWith('*') ? `\\${emoji}` : emoji };
   }
 }
 
