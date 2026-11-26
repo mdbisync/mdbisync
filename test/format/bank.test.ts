@@ -22,7 +22,11 @@ const FIXED_BY_FIX: ReadonlySet<string> = new Set(['construct-singles/break-back
  * Lint-error fixtures of a rule fix writes whose recorded form shows what
  * Linear loses: fix's form is another fixture, recorded as a fixed point.
  */
-const ESCAPED_BY_FIX: ReadonlyMap<string, string> = new Map([['tables/table-quote-cell.md', 'tables/table-quote-cell-escaped.md']]);
+const ESCAPED_BY_FIX: ReadonlyMap<string, string> = new Map([
+  ['tables/table-quote-cell.md', 'tables/table-quote-cell-escaped.md'],
+  ['construct-singles/item-section-run.md', 'construct-singles/item-section-run-escaped.md'],
+  ['construct-singles/item-section-run-outside.md', 'construct-singles/item-section-run-outside-escaped.md'],
+]);
 const contentRules =(fixture: BankFixture): boolean => fixture.class === 'lint-error' && fixture.rule !== 'duplicate-title';
 
 describe('fix on the fixture bank', () => {

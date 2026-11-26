@@ -485,6 +485,110 @@ describe('linearMarkersAsText', () => {
     }
   });
 
+  // Linear keeps `\+++Plan` as text and writes it back as `+++Plan`. With a
+  // nested list or another block after it in its container, Linear and
+  // `lint` read that as a section holding them. `fix` writes the escape back
+  // (section-marker-text); the reading of Linear's export adds none.
+  it('pulls three plus signs before text back in fix\'s escaped form when blocks follow', () => {
+    const cases: Array<[string, string]> = [
+      ['1. Week\n   1. +++Plan\n      1. First step\n      2. Second step\n   2. Review', '1. Week\n   1. \\+++Plan\n      1. First step\n      2. Second step\n   2. Review'],
+      ['* +++Budget\n  * Rent', '* \\+++Budget\n  * Rent'],
+      ['1. +++Plan\n   more words', '1. \\+++Plan\n   more words'],
+      ['+++Plan\n\nNext paragraph', '\\+++Plan\n\nNext paragraph'],
+      ['Week\n+++Plan\nmore words', 'Week\n\\+++Plan\nmore words'],
+    ];
+    for (const [linear, file] of cases) {
+      assert.equal(linearMarkersAsText(linear), linear, JSON.stringify(linear));
+      assert.equal(fixLinearText(linear, linear, () => false), file, JSON.stringify(linear));
+      assert.ok(sameAsLinear(linear, file), JSON.stringify(linear));
+      assert.deepEqual(lintText('a.md', file), [], JSON.stringify(file));
+      assert.equal(fixText(file), file, `fix keeps ${JSON.stringify(file)}`);
+    }
+    // Last in its container, the text stays text in Linear without the escape.
+    for (const alone of ['1. +++Plan', '1. +++Plan\n2. Next step', '* Week\n  * +++Plan']) {
+      assert.equal(fixLinearText(alone, alone, () => false), alone);
+    }
+    // An accepted body that wrote such a line escaped supplies the escape.
+    assert.equal(linearMarkersAsText('1. +++Plan', '1. \\+++Plan'), '1. \\+++Plan');
+    assert.ok(sameAsLinear('1. +++Plan', '1. \\+++Plan'));
+    // A section Linear writes keeps its title line.
+    const section = '1. \n\n   +++ Plan\n   1. First step\n\n   +++';
+    assert.equal(linearMarkersAsText(section), section);
+  });
+
+  // Linear writes a bare `+++` after escaped text as a paragraph of its own.
+  it('pulls escaped text before a bare closing line back unchanged', () => {
+    const file = '\\+++Tip\nSeeds\n\n+++';
+    const linear = '+++Tip\nSeeds\n\n+++';
+    assert.equal(fixText('+++Tip\nSeeds\n+++'), file);
+    assert.ok(sameAsLinear(linear, file));
+    assert.equal(fixLinearText(linear, linear, () => false), file);
+  });
+
+  // Inline text after a mark is no line start: it is no evidence for a line's spelling.
+  it('takes only line starts as evidence for an escape', () => {
+    const file = 'Note **bold**+++Tip\n\n1. \\+++Tip\n   1. step';
+    const linear = file.replace('\\+++', '+++');
+    assert.equal(linearMarkersAsText(linear, file), file);
+    assert.ok(sameAsLinear(linear, file));
+  });
+
+  it('compares a long run of escaped signs in about the time of its length', () => {
+    const body = '\\+'.repeat(32_000);
+    const started = Date.now();
+    sameAsLinear(body, `${body}\n`);
+    assert.ok(Date.now() - started < 3_000);
+  });
+
+  // A body can write the same line escaped where blocks follow it and plain
+  // where it ends its container. That line is no evidence for either.
+  it('takes a line the accepted body writes both ways as no evidence', () => {
+    const file = '1. Week\n   1. \\+++Plan 12\n      1. First step\n   2. +++Plan 12\n\nText\n\n* +++ Tip 3\n* \\+++ Tip 3\n\nMore';
+    const linear = file.replaceAll('\\+++', '+++');
+    assert.ok(sameAsLinear(linear, file));
+    // Fix escapes the line where blocks follow; a title line that is an item's only text stays plain, as Linear writes it.
+    assert.equal(fixLinearText(linear, linear, () => false, file), '1. Week\n   1. \\+++Plan 12\n      1. First step\n   2. +++Plan 12\n\nText\n\n* +++ Tip 3\n* +++ Tip 3\n\nMore');
+    // Without that evidence, an unclosed title line outside an item is text: the pull escapes it.
+    assert.equal(fixLinearText('+++ Tip 3\n\nMore', '+++ Tip 3\n\nMore', () => false), '\\+++ Tip 3\n\nMore');
+  });
+
+  // Escapes that change nothing in Linear's grammar are a spelling.
+  it('compares escapes of plus signs that open no section as the same text', () => {
+    // A section line that is a list item's only text stays text: Linear writes it escaped.
+    assert.ok(sameAsLinear('1. Week\n2. \\+++ Tip words\n3. Next', '1. Week\n2. +++ Tip words\n3. Next'));
+    // Two signs are no section marker.
+    assert.ok(sameAsLinear('1. Week\n   1\\. ++Plan 12', '1. Week\n   1\\. \\++Plan 12'));
+    // Also with marks in the item's text.
+    assert.ok(sameAsLinear('1. Week\n2. \\+++ **Tip** words', '1. Week\n2. +++ **Tip** words'));
+    // Signs with text right after them are text, also a longer run and a backslash after it.
+    assert.ok(sameAsLinear('Week\n\\+++Plan\nmore', 'Week\n+++Plan\nmore'));
+    assert.ok(sameAsLinear(`Week\n\\${'+'.repeat(80)}Plan\nmore`, `Week\n${'+'.repeat(80)}Plan\nmore`));
+    assert.ok(sameAsLinear('Week\n\\+++\\Plan\nmore', 'Week\n+++\\Plan\nmore'));
+    // A section title line with a body is not text: its escape matters.
+    assert.ok(!sameAsLinear('\\+++ Tip\n\nBody\n\n+++', '+++ Tip\n\nBody\n\n+++'));
+  });
+
+  // Linear writes every heading with `#`. It keeps the escape of a line of
+  // `-` or `=` at its text's column, and drops it from such a line indented
+  // past that column.
+  it('reads a heading underlined past its text\'s column in Linear\'s export as text', () => {
+    const cases: Array<[string, string]> = [
+      ['1. Week\n   1. Total 12\n       -------\n       Rest of the week', '1. Week\n   1. Total 12\n       \\-------\n       Rest of the week'],
+      ['* Year\n   =====\n  Summary line', '* Year\n   \\=====\n  Summary line'],
+      ['Total 12\n -------\nRest', 'Total 12\n \\-------\nRest'],
+      ['> Total 12\n>  -------', '> Total 12\n>  \\-------'],
+    ];
+    for (const [linear, file] of cases) {
+      assert.equal(linearMarkersAsText(linear), file, JSON.stringify(linear));
+      assert.ok(sameAsLinear(linear, file), JSON.stringify(linear));
+      assert.deepEqual(lintText('a.md', fixLinearText(linear, linear, () => false)), [], JSON.stringify(linear));
+    }
+    // At the text's column the underline is the author's heading: Linear keeps the escape of a line it holds as text there.
+    for (const kept of ['# Total', 'Total\n\n---\n\nRest', '1. Total\n\n   ---', 'Total 12\n-------\nRest', '* Year\n  =====', '1. Total 9\n   \\-------\n   Rest']) {
+      assert.equal(linearMarkersAsText(kept), kept);
+    }
+  });
+
   it('uses the accepted spelling for an ambiguous export', () => {
     const rows = '| Color | Size |\n| -- | -- |\n| Blue | Large |';
     const section = '+++ Supplies\n\nPaper\n\n+++';

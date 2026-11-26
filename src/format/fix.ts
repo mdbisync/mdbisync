@@ -16,7 +16,7 @@ import { findMarkerLines } from '../merge/markers.ts';
 import { lintText, overContentLimit, paddingOverLimit, referencesOverLimit } from './lint.ts';
 import { CONTENT_LIMIT, FIXED_RULES, IMAGE_PLACE_RULES, type Finding } from './rules.ts';
 import { plusLinesAsLinear } from './marker-lines.ts';
-import { plusSectionsAsLinear, sectionOpenersAsLinear } from './sections.ts';
+import { plusSectionsAsLinear, plusTextAsText, sectionOpenersAsLinear } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 import { ALERT, LINKED_BOLD_ITALIC_SUFFIX, MarkdownLimitError, advanceColumn, bracketedLabel, codeSpans, decodedDestinationPath, end, hasOuterStars, imageDestination, isCallout, isCalloutComment, joinFile, codeSpanText, line, lineCount, linearDropsCodeSpaces, linearMarkersAsText, linkDestination, listKind, listParts, nestedFileBlocksOnItemLine, nestsMarkerText, opensWithText, parse, quoteLines, sameMarkdown, splitFile, start, visit, withoutTrailingNewlines, endingRow } from './markdown.ts';
 
@@ -66,8 +66,12 @@ export function linearForm(text: string, options: FixOptions = {}): string | und
   // The lines a table gives up can form blocks lint has not seen (a table
   // whose header has no pipe): lint them as written.
   if (ended !== normalized && lintText('', ended, { linearExport: options.linearExport === true }).some(stopsFix)) return undefined;
-  const sections = sectionOpenersAsLinear(ended);
-  const lf = sections === ended ? plusSectionsAsLinear(sections) : sections;
+  // Plus signs with text right after them are text: escaped, they can join
+  // the lines after them into one paragraph, which can read another way.
+  const plain = plusTextAsText(ended);
+  if (plain !== ended && lintText('', plain, { linearExport: options.linearExport === true }).some(stopsFix)) return undefined;
+  const sections = sectionOpenersAsLinear(plain);
+  const lf = sections === plain ? plusSectionsAsLinear(sections) : sections;
   if (lf === undefined) return undefined;
   const broken = backslashBreaksAsLinear(lf);
   if (broken === undefined) return undefined;
@@ -84,7 +88,7 @@ export function linearForm(text: string, options: FixOptions = {}): string | und
   // A section that ends an empty item's text, as Linear writes it, can close
   // right above a list numbered other than 1, which Linear writes on the next
   // line, where Markdown reads it as text (`list-after-item-text`).
-  if (lf !== ended && lintText('', fixed, { linearExport: options.linearExport === true }).some((finding) => finding.rule === 'list-after-item-text')) return undefined;
+  if (lf !== plain && lintText('', fixed, { linearExport: options.linearExport === true }).some((finding) => finding.rule === 'list-after-item-text')) return undefined;
   // After the rest: a lone plus sign can also reach an item's second line
   // when the item's text moves onto its marker line or a code span is joined.
   // Linear's own export is captured as it is: the no-break space is a character.
@@ -281,7 +285,11 @@ function fixBody(body: string, bodyOptions: WriterOptions): string | undefined {
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    const source = pass === 0 ? current : plusSectionsAsLinear(current);
+    // A rewrite can expose plus signs with text right after them: their
+    // escape can join the lines below, so lint that before going on.
+    const plain = pass === 0 ? current : plusTextAsText(current);
+    if (plain !== current && lintText('', plain, { linearExport: bodyOptions.linearExport === true }).some(stopsFix)) return undefined;
+    const source = pass === 0 ? current : plusSectionsAsLinear(plain);
     // A later pass writes the text the first one wrote: its break lines are written.
     const { breakLines: _written, ...rest } = bodyOptions;
     const options: WriterOptions = pass === 0 ? bodyOptions : rest;

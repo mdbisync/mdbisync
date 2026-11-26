@@ -796,7 +796,7 @@ function linearSectionEnd(body: string): string {
 
 // A bullet or number marker Linear never writes for a list of its own.
 const NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
-const LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,3}(?:[ \t\r]|$)|\+{4}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
+const LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,2}(?:[ \t\r]|$)|\+{3}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\||(?:-+|=+)[ \t]*\r?$)/m;
 const LINE_END = /\r\n?|\n/;
 const LINE_PREFIX = /^[ \t>]*/;
 const CONFLICT_START = /^<{7}(?: |$)/;
@@ -805,7 +805,9 @@ const DIV_END = /<\/div[ \t]*>/i;
 const DIV_END_START = /^<\/div[ \t]*>/i;
 const SECTION_TITLE = /^\+{3}[ \t]/;
 const LONG_PLUS_RUN = /^\+{4}/;
-const ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3}(?:[ \t]|$))/;
+const ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3})/;
+// Plus signs with text right after them at a line's start: no section title.
+const PLAIN_PLUS_TEXT = /^\+{3,}[^+\s]/;
 
 function linearLineText(row: string): string {
   return row.replace(LINE_PREFIX, '').trimEnd();
@@ -838,6 +840,7 @@ function acceptedBlockStarts(previous: string) {
   const html = new Set<string>();
   if (!/\\[<|$+]|<div\b|^[ \t>]*\|/im.test(previous)) return { escapes, tables, tableHeaders, html };
   const lines = previous.split(LINE_END);
+  const plain = new Set<string>();
   visit(parse(previous), (node, ancestors) => {
     const first = line(node) - 1;
     if (node.type === 'table') {
@@ -855,9 +858,12 @@ function acceptedBlockStarts(previous: string) {
     for (let index = first; index < (node.position?.end.line ?? 0); index++) {
       const row = lines[index]!;
       const raw = linearLineText(index === first ? row.slice(column) : row);
+      const paragraph = ancestors.at(-1)!;
+      // Only where the line starts in this text, not after an inline mark.
+      const lineStart = index > first || (paragraph as Paragraph).children[0] === node;
+      if (lineStart && PLAIN_PLUS_TEXT.test(raw)) plain.add(blockLineKey(raw, index === line(paragraph) - 1));
       if (!ESCAPED_BLOCK_START.test(raw)) continue;
       const literal = raw.slice(1);
-      const paragraph = ancestors.at(-1)!;
       if (literal.startsWith('|')) {
         const key = tableKey(lines[index - 1] ?? '', literal);
         escapes.add(key);
@@ -870,6 +876,9 @@ function acceptedBlockStarts(previous: string) {
       }
     }
   });
+  // A line of plus signs and text that the body writes both with and
+  // without its escape is no evidence for either spelling.
+  for (const key of plain) escapes.delete(key);
   return { escapes, tables, tableHeaders, html };
 }
 
@@ -914,7 +923,7 @@ export function linearMarkersAsText(content: string, previous = ''): string {
     for (const match of text.matchAll(/\r\n?|\n/g)) offsets.push(match.index + match[0].length);
     const lineEnd = (index: number) => offsets[index]! + lines[index]!.length;
     const rowAt = (index: number) => linearLineText(lines[index] ?? '');
-    const sections = new Map<Nodes, Array<{ at: number; literal: boolean }>>();
+    const sections = new Map<Nodes, Array<{ at: number; literal: boolean; itemText: boolean }>>();
     const rowStart = (index: number) => offsets[index]! + LINE_PREFIX.exec(lines[index]!)![0].length;
     const tree = parse(text);
     const pairedDivs = divsClosedInAnotherBlock(tree, text);
@@ -965,6 +974,13 @@ export function linearMarkersAsText(content: string, previous = ''): string {
             if (accepted.escapes.has(blockLineKey(rowText, false)) || incompleteDiv && DIV_START.test(rowText)) escapes.add(offset);
           }
         }
+      } else if (node.type === 'heading' && (node.position?.end.line ?? index + 1) - 1 > index) {
+        // Linear writes every heading with `#`, and keeps the escape of a
+        // line of `-` or `=` at its text's column. Indented past that
+        // column, the line is text it holds, written without its escape.
+        // An underline at the text's column stays the author's heading.
+        const underline = (node.position?.end.line ?? index + 1) - 1;
+        if (rowStart(underline) - offsets[underline]! > at - offsets[index]!) escapes.add(rowStart(underline));
       } else if (node.type === 'paragraph') {
         const rawFirst = text.slice(at, lineEnd(index));
         const first = rawFirst.trimEnd();
@@ -973,7 +989,8 @@ export function linearMarkersAsText(content: string, previous = ''): string {
         if (CONFLICT_START.test(first) || literal && first !== '+++' && !SECTION_TITLE.test(rawFirst)) escapes.add(at);
         // Linear writes a section's title line with three signs. A longer
         // run is text it holds, with the paragraph's next lines after a
-        // break; without its escape, it would open a section.
+        // break; without its escape, it would open a section. Signs with
+        // text right after them (`+++Tip`) are text too: `fix` escapes them.
         if (LONG_PLUS_RUN.test(first) && last > index) escapes.add(at);
         if (first === '$$' && last > index + 1 && rowAt(last) === '$$') escapes.add(at);
         // Linear writes a blank line after a real section's title. Pair
@@ -985,7 +1002,10 @@ export function linearMarkersAsText(content: string, previous = ''): string {
             if (rowAt(last) === '+++') escapes.add(rowStart(last));
           } else {
             const open = sections.get(parent) ?? [];
-            open.push({ at, literal: accepted.escapes.has('section:' + first) && accepted.escapes.has(blockLineKey('+++', true)) });
+            // A title line that is a list item's only text is text, and
+            // Linear writes it so, without an escape.
+            const itemText = parent.type === 'listItem' && (parent as Parent).children.length === 1;
+            open.push({ at, literal: accepted.escapes.has('section:' + first) && accepted.escapes.has(blockLineKey('+++', true)), itemText });
             sections.set(parent, open);
           }
         } else if (first === '+++' && (last === index || closesAboveList(lines, index, last))) {
@@ -1007,7 +1027,7 @@ export function linearMarkersAsText(content: string, previous = ''): string {
         }
       }
     });
-    for (const open of sections.values()) for (const section of open) escapes.add(section.at);
+    for (const open of sections.values()) for (const section of open) if (!section.itemText || section.literal) escapes.add(section.at);
     if (escapes.size === 0) return text;
     const parts: string[] = [];
     let at = 0;
@@ -1025,10 +1045,33 @@ export function linearMarkersAsText(content: string, previous = ''): string {
 // as text either way: `$$` math and `+++` collapsible sections.
 const LINEAR_SYNTAX_ESCAPES: Readonly<Record<string, string>> = { '\\$': '', '\\+': '' };
 
-/** Whether the `\+` at `at` is separate from a run of plus signs. */
-function isLonePlus(text: string, at: number): boolean {
-  const after = text[at + 2];
-  return text[at - 1] !== '+' && after !== '+' && (after !== '\\' || text[at + 3] !== '+');
+/**
+ * For each `\+` of the body, whether Markdown reads it as a plain escape
+ * in Linear's grammar too: outside a run of three or more plus signs
+ * (escaped or not; sections need three), or in a run that text follows
+ * right away (`\+++Tip`; Linear writes a section's title after a space).
+ * Each run is read once, for its first `\+`.
+ */
+function plainPlusEscapes(text: string): (at: number) => boolean {
+  let runEnd = -1;
+  let plain = false;
+  return (at) => {
+    if (at < runEnd) return plain;
+    let from = at;
+    while (from > 0 && text[from - 1] === '+') from--;
+    let signs = 0;
+    let end = from;
+    for (;;) {
+      if (text[end] === '+') end++;
+      else if (text[end] === '\\' && text[end + 1] === '+') end += 2;
+      else break;
+      signs++;
+    }
+    runEnd = end;
+    const after = text[end];
+    plain = signs < 3 || (after !== undefined && !/\s/.test(after));
+    return plain;
+  };
 }
 
 /** Mark file block openings without treating a lone plus in paragraph text as an item. */
@@ -1201,17 +1244,31 @@ export function linearDropsCodeSpaces(code: string): boolean {
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
 function comparable(body: string, { linearNumberSpacing, linearBoldForms, ignoreBold }: NonNullable<Parameters<typeof sameMarkdown>[2]>): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
-  // A lone `\+`, as `fix` writes for item text that is a bare `+`, cannot
-  // be part of `+++`. Markdown reads it as a regular escape.
+  // A `\+` outside a run of three signs (a bare `+` item text that `fix`
+  // escapes, `\++`) cannot be part of `+++`. Markdown reads it as a regular escape.
   // A list marker (with a task checkbox, if any) alone on its line opens a file block
   // in Linear (`* \n  [a](a.pdf)`), which Markdown reads as `* [a](a.pdf)`: keep that line apart too.
-  const marked = markFileBlockStarts(nestedFileBlocksOnItemLine(body)
-    .replace(/\\[$+]/g, (escape, at: number, text: string) => (escape === '\\+' && isLonePlus(text, at) ? escape : LINEAR_SYNTAX_ESCAPES[escape]!)));
+  const nested = nestedFileBlocksOnItemLine(body);
+  const plainPlus = plainPlusEscapes(nested);
+  const marked = markFileBlockStarts(nested
+    .replace(/\\[$+]/g, (escape, at: number) => (escape === '\\+' && plainPlus(at) ? escape : LINEAR_SYNTAX_ESCAPES[escape]!)));
   const tree = parse(marked, [], true);
   // Linear returns a top-level code block with one blank line fewer before
   // its closing fence each time it is written, and `fix` writes none: those
   // blank lines are a spelling, not content the sync compares.
   for (const child of tree.children) if (child.type === 'code') child.value = withoutTrailingNewlines(child.value);
+  // A section line that is a list item's only text stays text, so its
+  // escape is a spelling: Linear writes it escaped (`* \+++ Tip`).
+  const escapedPlus = LINEAR_SYNTAX_ESCAPES['\\+']!;
+  visit(tree, (node) => {
+    if (node.type !== 'listItem' || node.children.length !== 1) return;
+    const [paragraph] = node.children;
+    if (paragraph?.type !== 'paragraph' || paragraph.position?.start.line !== paragraph.position?.end.line) return;
+    const [text] = paragraph.children;
+    if (text?.type === 'text' && text.value.startsWith(escapedPlus) && SECTION_TITLE.test('+' + text.value.slice(1))) {
+      text.value = '+' + text.value.slice(1);
+    }
+  });
   const strip = (node: Nodes, paragraphLine?: boolean): ComparableNode => {
     const { position: _position, ...rest } = node;
     if ('url' in rest) rest.url = normalizeUri(rest.url);

@@ -155,9 +155,7 @@ describe('triple-plus section markers', () => {
     ['bare opener and closer', '+++\n\nSeeds\n\n+++', '+++ \n\nSeeds\n\n+++'],
     // Linear reads a longer run of signs as a marker and writes three (MDS-029-88).
     ['longer markers pair by their width', '++++ Tip\n\nSeeds\n\n++++', '+++ Tip\n\nSeeds\n\n+++'],
-    ['a longer titled marker interrupts a paragraph', 'Intro\n++++Tip\n\nSeeds', 'Intro\n\n+++ Tip\n\nSeeds\n\n+++'],
     ['a longer bare marker opens an untitled section', 'Intro\n\n++++++++++\n\nSeeds', 'Intro\n\n+++ \n\nSeeds\n\n+++'],
-    ['a longer marker starting a quote', '> ++++Tip\n>\n> Seeds', '> +++ Tip\n>\n> Seeds\n>\n> +++'],
     ['a longer marker that is the item\'s only text stays text', '1. ++++Tip\n2. Next', '1. ++++Tip\n2. Next'],
     // Markers of other widths do not pair in Linear: the container stays as written.
     ['titled opener', '+++ Garden\n\nSeeds\n\n+++', '+++ Garden\n\nSeeds\n\n+++'],
@@ -186,7 +184,6 @@ describe('triple-plus section markers', () => {
     ['marker over a lazy item line', '* +++\nSeeds', '* \\+++\n  Seeds'],
     ['titled marker over a lazy item line', '* +++Plan\nlazy words', '* \\+++Plan\n  lazy words'],
     ['marker over a sibling item stays text', '* +++\n* b', '* +++\n* b'],
-    ['titled marker first in a quote, the next line right below it', '> +++Plan\n> first step', '> +++ Plan\n>\n> first step\n>\n> +++'],
     ['titled marker alone in an item stays text', '1. +++Plan\n2. Next', '1. +++Plan\n2. Next'],
     ['indent at the document root does not move the closer into a list', '  +++\n\n* Seeds', '+++ \n\n* Seeds\n\n+++'],
     ['indent in a quote does not move the closer into a list', '>   +++\n>\n> * Seeds',
@@ -215,6 +212,63 @@ describe('triple-plus section markers', () => {
   }
 });
 
+// Linear writes a section's title line as its signs and a space. Signs
+// with text right after them are text; Linear's import would still open a
+// section there when more of the container follows, so fix escapes them.
+describe('plus signs with text right after them', () => {
+  const escaped = [
+    ['a longer run interrupting a paragraph', 'Intro\n++++Tip\n\nSeeds', 'Intro\n\\++++Tip\n\nSeeds', 2],
+    ['a longer run starting a quote', '> ++++Tip\n>\n> Seeds', '> \\++++Tip\n>\n> Seeds', 1],
+    ['first in a quote, the next line right below it', '> +++Plan\n> first step', '> \\+++Plan\n> first step', 1],
+    ['first in an item, the next line right below it', '1. +++Plan\n   first step', '1. \\+++Plan\n   first step', 1],
+    ['a longer run with more of the item', '1. ++++Tip\n   Seeds', '1. \\++++Tip\n   Seeds', 1],
+    ['a longer run in a nested item', '* a\n  * ++++Tip\n\n    Seeds', '* a\n  * \\++++Tip\n\n    Seeds', 2],
+    ['over a nested item, tab-indented', '1. Spring\n\t1. +++Seed notes\n\t\t1. **Water**\n\t2. Plant',
+      '1. Spring\n   1. \\+++Seed notes\n      1. **Water**\n   2. Plant', 2],
+    ['with a closing line of another width', '1. ++++Tip\n\n   Seeds\n\n   +++', '1. \\++++Tip\n\n   Seeds\n\n   +++', 1],
+    ['a paragraph continuation line', 'Week\n+++Plan\nmore words', 'Week\n\\+++Plan\nmore words', 2],
+    ['before a closing line', '+++Tip\nSeeds\n+++', '\\+++Tip\nSeeds\n\n+++', 1],
+    // As a paragraph's last line Linear splits it off as a paragraph of its own.
+    ['a document\'s last line, continuing a paragraph', 'Intro words\n+++Tip', 'Intro words\n\\+++Tip', 2],
+    ['an item\'s last line, continuing its text', '1. Week\n   +++Plan\n2. Next', '1. Week\n   \\+++Plan\n2. Next', 2],
+  ] as const;
+  for (const [label, input, expected, line] of escaped) {
+    it(`is escaped and reported: ${label}`, () => {
+      assert.equal(fixText(input), expected);
+      assert.equal(fixText(expected), expected);
+      assert.deepEqual(lintText('doc.md', input).map((finding) => `${finding.rule}@${finding.line}`), [`section-marker-text@${line}`]);
+      assert.deepEqual(lintText('doc.md', expected), []);
+    });
+  }
+
+  // As the last line of its container, Linear keeps it as text.
+  for (const alone of ['1. +++Plan', '1. +++Plan\n2. Next step', '* Week\n  * +++Plan', '+++Plan', '> +++Tip']) {
+    it(`stays as written alone in its container: ${JSON.stringify(alone)}`, () => {
+      assert.equal(fixText(alone), alone);
+      assert.deepEqual(lintText('doc.md', alone), []);
+    });
+  }
+
+  it('reports a block that starts an item once the escape joins the lines above, on its own line', () => {
+    const input = '* +++A\n  a\n* +++B\n  b\n* +++C\n  c\n* +++D\n  d\n* +++\n\n  Seeds\n\n  +++';
+    assert.deepEqual(lintText('doc.md', input).map((finding) => `${finding.rule}@${finding.line}`),
+      ['section-marker-text@1', 'section-marker-text@3', 'section-marker-text@5', 'section-marker-text@7', 'block-first-in-list-item@9']);
+    assert.equal(fixText(input), input, 'left to the author');
+  });
+
+  it('reads a long run of signs in about the time of its length', () => {
+    const run = '+'.repeat(64_000);
+    const started = Date.now();
+    lintText('doc.md', `${run}\n\nText`);
+    fixText(`${run}\n\nText`);
+    assert.ok(Date.now() - started < 3_000, 'lint and fix stay fast');
+  });
+
+  it('leaves a section title after a space to the section rules', () => {
+    assert.equal(fixText('> +++ Plan\n> first step'), '> +++ Plan\n>\n> first step\n>\n> +++');
+  });
+});
+
 // Linear writes a section that starts a list item as the item's marker, a
 // blank line and the section at the item's text column, and reads that form
 // back as an empty item with the section after it, outside the item (MDS-029-88).
@@ -222,15 +276,10 @@ describe('a section that starts a list item', () => {
   const left: Array<[string, string, number]> = [
     ['an untitled section', '* +++\n\n  Seeds\n\n  +++\n* Tools', 1],
     ['a titled section', '* +++ Tray\n\n  Seeds\n\n  +++\n* Tools', 1],
-    ['a titled marker with the next line right below it', '1. +++Plan\n   first step', 1],
-    ['a longer marker with more of the item', '1. ++++Tip\n   Seeds', 1],
-    ['a longer marker in a nested item', '* a\n  * ++++Tip\n\n    Seeds', 2],
-    ['a marker over a nested item, tab-indented', '1. Spring\n\t1. +++Seed notes\n\t\t1. **Water**\n\t2. Plant', 2],
     ['a nested item after a list of another kind', '* Plan\n  1. one\n\n  * +++ \n\n    words\n\n    +++', 4],
     ['an item in a quote', '> 1. +++ Plan\n>    first step\n>\n>    +++', 1],
     ['a >>> line', '* >>> Tray\n\n  Seeds\n* Tools', 1],
     ['a >>> line in a nested item', '1. Spring\n   1. >>> Seed notes\n      Keep moist.\n   2. Plant', 2],
-    ['an item with mixed widths', '1. ++++Tip\n\n   Seeds\n\n   +++', 1],
     ['a section with a closer of another width', '* +++ Tip\n\n  Seeds\n\n  ++++\n* Tools', 1],
     ['a section before one with a closer of another width', '* +++ Tray\n\n  Seeds\n\n  +++\n\n  ++++ Tip\n\n  Soil\n\n  +++\n* Tools', 1],
   ];

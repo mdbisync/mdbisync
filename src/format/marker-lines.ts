@@ -1,5 +1,5 @@
-// A line of only a plus sign right below a list item's first line, with more
-// text after it. Markdown reads it as the item's text, as an empty item
+// A line of only a plus sign right below a list item's first line, also as
+// the paragraph's last line. Markdown reads it as the item's text, as an empty item
 // cannot interrupt a paragraph; Linear reads `+` there as an empty list item
 // (a code block four or more columns past the item's text) and drops the
 // backslash of `\+`. Linear keeps `+` followed by a no-break space at the
@@ -11,13 +11,13 @@ import { advanceColumn, end, line, parse, start, visit } from './markdown.ts';
 
 const PLUS_ONLY = /^[ \t]*(\\?\+)([ \t]*)$/;
 /** A line that can be such a plus line: only then does `plusLinesAsLinear` parse the body. */
-const PLUS_LINE = /\n[ \t]*\\?\+[ \t]*\n/;
+const PLUS_LINE = /\n[ \t]*\\?\+[ \t]*(?:\n|$)/;
 
 /**
  * The body with each lone `+` or `\+` written as `+` and a no-break space
  * at the item's text column, where it is the second line of the first
- * paragraph of a list item (starting on the item's line), more lines of
- * the paragraph follow, and no quote holds it. Spaces after the sign stay
+ * paragraph of a list item (starting on the item's line) and no quote
+ * holds it. Spaces after the sign stay
  * (two make a hard break). The body is `fix`'s output, whose item
  * prefixes are spaces; it stays as it is when the added characters would
  * take it over Linear's content limit.
@@ -33,9 +33,7 @@ export function plusLinesAsLinear(body: string): string {
     const firstEnd = body.indexOf('\n', start(node));
     if (firstEnd === -1 || firstEnd >= end(node)) return;
     const from = firstEnd + 1;
-    const newline = body.indexOf('\n', from);
-    // As the paragraph's last line, Linear reads the plus sign as text.
-    if (newline === -1 || newline >= end(node)) return;
+    const newline = Math.min(...[body.indexOf('\n', from), end(node)].filter((at) => at !== -1));
     const plus = PLUS_ONLY.exec(body.slice(from, newline));
     if (plus === null || !inText(node, from + plus[0].indexOf(plus[1]!))) return;
     edits.push({ from, to: newline, text: `${' '.repeat(itemTextColumn(body, start(item)))}+\u00a0${plus[2]}` });

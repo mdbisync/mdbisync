@@ -72,6 +72,8 @@ rules:
     title: "A URL inside raw HTML is turned into a Markdown link."
   - id: block-first-in-list-item
     title: "A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item."
+  - id: section-marker-text
+    title: "A line that starts with +++ and text right after it is text, but Linear opens a collapsible section from it when more of its list item, quote or document follows."
   - id: ordered-task-list
     title: "An ordered task list becomes a bullet task list."
   - id: table-hash-cell
@@ -3577,12 +3579,12 @@ fixtures:
     group: construct-singles
     construct: item-section-run
     class: lint-error
-    rule: block-first-in-list-item
+    rule: section-marker-text
     line: 11
     basis: known
     canary: kx-84ea78d6
     corpus: false
-    note: "+++ starting a list item: text when it is the item's only line, a section when a closing marker follows in the item"
+    note: "+++ starting a list item: text when it is the item's only line; +++Plan with more of the item below it is text Linear would read as a section, which fix escapes (section-marker-text)"
   - file: "construct-singles/item-section-run-more.md"
     group: construct-singles
     construct: item-section-run
@@ -3598,7 +3600,7 @@ fixtures:
     construct: item-section-run
     class: lint-error
     rule: block-first-in-list-item
-    line: 4
+    line: 9
     basis: known
     canary: kx-c0acae56
     corpus: false
@@ -3615,18 +3617,38 @@ fixtures:
     group: construct-singles
     construct: item-section-run
     class: lint-error
-    rule: block-first-in-list-item
+    rule: section-marker-text
     line: 10
     basis: known
     canary: kx-28e5300f
     corpus: false
-    note: "a +++ item followed by a +++ line after the list stays text; a titled marker with an indented line below it opens a section"
+    note: "a +++ item followed by a +++ line after the list stays text; +++Topic with an indented line below it is text Linear would read as a section, which fix escapes (section-marker-text)"
+  - file: "construct-singles/item-section-run-escaped.md"
+    group: construct-singles
+    construct: item-section-run-escaped
+    class: fixable
+    basis: assumed
+    canary: kx-f6eb1150
+    git_form: captured
+    corpus: false
+    probe_pending: true
+    note: "fix's form of item-section-run: an escaped +++Plan with more of the item below it stays text; Linear writes it back without the backslash, and the sync captures fix's form"
+  - file: "construct-singles/item-section-run-outside-escaped.md"
+    group: construct-singles
+    construct: item-section-run-escaped
+    class: fixable
+    basis: assumed
+    canary: kx-f6e0b909
+    git_form: captured
+    corpus: false
+    probe_pending: true
+    note: "fix's form of item-section-run-outside: an escaped +++Topic with an indented line below it stays text; Linear writes it back without the backslash, and the sync captures fix's form"
   - file: "construct-singles/item-section-run-tight.md"
     group: construct-singles
     construct: item-section-run
     class: lint-error
     rule: block-first-in-list-item
-    line: 3
+    line: 6
     basis: known
     canary: kx-65eb6a08
     corpus: false
@@ -3799,7 +3821,7 @@ fixtures:
     construct: item-section-long-run
     class: lint-error
     rule: block-first-in-list-item
-    line: 1
+    line: 19
     basis: known
     canary: kx-750c916e
     corpus: false

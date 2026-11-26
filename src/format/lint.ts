@@ -7,7 +7,7 @@ import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent,
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, bracketedLabel, codeSpanText, linearDropsCodeSpaces, listKind, listParts, MAX_LIST_NUMBER, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
-import { sectionsFirstInItem, unwritableSectionLine } from './sections.ts';
+import { plusTextAsText, plusTextLines, sectionsFirstInItem, unwritableSectionLine } from './sections.ts';
 import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
@@ -543,13 +543,21 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
     // The section parse splits lines the ordinary parse reads as one
     // paragraph, so it can pass the parser's limits where that one did not.
     let firstInItem: number[] = [];
+    let plusText: number[] = [];
+    // Escaped, such a line can join the lines after it, so a section
+    // further down can start its item: read the sections as fix leaves them.
+    // The escapes add no lines: offsets in it give the same line numbers.
+    let escaped = body;
     try {
-      firstInItem = sectionsFirstInItem(body);
+      plusText = plusTextLines(body);
+      escaped = plusTextAsText(body);
+      firstInItem = sectionsFirstInItem(escaped);
     } catch (error) {
       if (!(error instanceof MarkdownLimitError)) throw error;
       report('markdown-complexity', 1);
     }
-    for (const at of firstInItem) report('block-first-in-list-item', body.slice(0, at).split('\n').length);
+    for (const at of firstInItem) report('block-first-in-list-item', escaped.slice(0, at).split('\n').length);
+    for (const at of plusText) report('section-marker-text', body.slice(0, at).split('\n').length);
   }
 }
 
