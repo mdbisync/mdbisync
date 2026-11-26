@@ -54,7 +54,7 @@ export type LintRule = keyof typeof LINT_RULES;
  * never fail a command, a hook or CI, and never leave a file out.
  */
 export const LINT_WARNINGS = {
-  'image-made-link': 'fix wrote an image from a URL as a link to it: Linear shows the link, not the image. To show the image, add the file to the repository and link it by its relative path.',
+  'image-made-link': 'fix wrote an image from a URL as a link to it, or as the text of the link around it: Linear shows no image. To show the image, add the file to the repository and link it by its relative path.',
   'list-number-as-text': "A line in a list item starts with a number that Markdown reads as text of the item, though it looks like a nested numbered list: a nested list numbered other than 1 cannot follow the item's text, and a list indented four or more columns past the item's text is part of it. To make it a list, renumber its first item to 1., move it one level up, or remove a doubled number such as 14. 13. in the line above, and remove the backslash fix writes after each of its numbers (2\\.).",
 } as const;
 

@@ -85,6 +85,11 @@ try {
   await writeFile(join(scratch, '.pre-commit-config.yaml'), config('linear-format-check'));
   assert.match(hooks(0), /page with spaces\.md:2: warning: list-number-as-text: /);
   await writeFile(join(scratch, '.pre-commit-config.yaml'), config('linear-format'));
+  // An HTTP(S) image becomes a link with a warning; the next run passes.
+  await writeFile(page, 'Intro.\n\n![Chart](https://example.com/chart.png)\n');
+  assert.match(hooks(1), /page with spaces\.md:3: warning: image-made-link: /);
+  assert.equal(await readFile(page, 'utf8'), 'Intro.\n\n[Chart](<https://example.com/chart.png>)');
+  hooks(0);
 
   const url = 'https://example.com/garden';
   const prefix = 'x'.repeat(CONTENT_LIMIT - url.length - 3) + '\n\n';

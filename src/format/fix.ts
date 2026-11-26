@@ -52,33 +52,38 @@ interface WriterOptions extends FixOptions {
  * the source.
  */
 export function fixText(text: string, options: FixOptions = {}): string {
-  if (lintText('', text, { linearExport: options.linearExport === true }).some(stopsFix)) return text;
+  return linearForm(text, options) ?? text;
+}
+
+/** The text in Linear's form, or undefined when `fixText` leaves it to its author. */
+export function linearForm(text: string, options: FixOptions = {}): string | undefined {
+  if (lintText('', text, { linearExport: options.linearExport === true }).some(stopsFix)) return undefined;
   const { head, body } = splitFile(text);
   const normalized = tabReferences(body.replace(/\r\n?/g, '\n')).text;
   // Tables end first: a section marker on a line they give up is a marker.
   const ended = tablesEndAsLinear(normalized);
   // The lines a table gives up can form blocks lint has not seen (a table
   // whose header has no pipe): lint them as written.
-  if (ended !== normalized && lintText('', ended, { linearExport: options.linearExport === true }).some(stopsFix)) return text;
+  if (ended !== normalized && lintText('', ended, { linearExport: options.linearExport === true }).some(stopsFix)) return undefined;
   const sections = sectionOpenersAsLinear(ended);
   const lf = sections === ended ? plusSectionsAsLinear(sections) : sections;
-  if (lf === undefined) return text;
+  if (lf === undefined) return undefined;
   const broken = backslashBreaksAsLinear(lf);
-  if (broken === undefined) return text;
+  if (broken === undefined) return undefined;
   const { body: unbroken, lines: breakLines } = broken;
   const fixed = fixBody(unbroken, { ...options, breakLines });
-  if (fixed === undefined) return text;
+  if (fixed === undefined) return undefined;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
   // block): such a file stays with its author.
-  if (unbroken !== lf && lineEndings(fixed) < lineEndings(unbroken)) return text;
+  if (unbroken !== lf && lineEndings(fixed) < lineEndings(unbroken)) return undefined;
   // Text split off at an image can be a paragraph of only a number (`3\.`),
   // which Linear writes back as an empty item (`number-paragraph`).
-  if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText('', fixed).some((finding) => finding.rule === 'number-paragraph')) return text;
+  if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText('', fixed).some((finding) => finding.rule === 'number-paragraph')) return undefined;
   // A section that ends an empty item's text, as Linear writes it, can close
   // right above a list numbered other than 1, which Linear writes on the next
   // line, where Markdown reads it as text (`list-after-item-text`).
-  if (lf !== ended && lintText('', fixed, { linearExport: options.linearExport === true }).some((finding) => finding.rule === 'list-after-item-text')) return text;
+  if (lf !== ended && lintText('', fixed, { linearExport: options.linearExport === true }).some((finding) => finding.rule === 'list-after-item-text')) return undefined;
   // After the rest: a lone plus sign can also reach an item's second line
   // when the item's text moves onto its marker line or a code span is joined.
   // Linear's own export is captured as it is: the no-break space is a character.

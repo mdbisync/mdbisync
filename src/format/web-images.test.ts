@@ -66,7 +66,28 @@ describe('fix and web images', () => {
 
   it('leaves a table cell image whose alt text holds a pipe: its link label would not survive Linear', () => inFolder('| A |\n| -- |\n| ![x\\|y](https://example.com/x.png) |\n', (dir) => {
     const fixed = runFix(['notes.md'], dir);
-    assert.match(fixed.stdout, /^notes\.md:3: image-not-in-repository: /);
+    assert.match(fixed.stdout, /^notes\.md:3: image-not-in-repository: .*\nnotes\.md:3: table-escaped-pipe: /);
     assert.doesNotMatch(fixed.stdout, /fixed|image-made-link/);
+  }));
+
+  it('leaves a file whose rest fix cannot write in Linear\'s form, images and all', () => inFolder('Title\\\nmore\n===\n\n![A](https://example.com/a.png)\n', (dir) => {
+    const fixed = runFix(['notes.md'], dir);
+    assert.doesNotMatch(fixed.stdout, /fixed|image-made-link/);
+    assert.match(fixed.stdout, /notes\.md:5: image-not-in-repository: /);
+    assert.equal(readFileSync(join(dir, 'notes.md'), 'utf8'), 'Title\\\nmore\n===\n\n![A](https://example.com/a.png)\n');
+  }));
+
+  it('leaves a titled web image to image-title', () => inFolder('![Build](https://example.com/badge.svg "Release status")\n', (dir) => {
+    const fixed = runFix(['notes.md'], dir);
+    assert.match(fixed.stdout, /^notes\.md:1: image-title: /m);
+    assert.match(fixed.stdout, /^notes\.md:1: image-not-in-repository: /m);
+    assert.doesNotMatch(fixed.stdout, /fixed|image-made-link/);
+  }));
+
+  it('writes a linked web image as the text of its link, and a file without web images as before', () => inFolder('[![Build](https://example.com/badge.svg)](https://example.com/build)\n', (dir) => {
+    writeFileSync(join(dir, 'other.md'), '*one*\n');
+    const fixed = runFix(['.'], dir);
+    assert.match(fixed.stdout, /^notes\.md: fixed\nother\.md: fixed\nnotes\.md:1: warning: image-made-link: .*or as the text of the link around it/);
+    assert.equal(readFileSync(join(dir, 'other.md'), 'utf8'), '*one*');
   }));
 });

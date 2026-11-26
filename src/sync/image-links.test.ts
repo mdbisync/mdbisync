@@ -178,6 +178,8 @@ for (const [source, expected, lines] of [
   ['![Upload](https://uploads.linear.app/a/b.png)', '[Upload](<https://uploads.linear.app/a/b.png>)', [1]],
   ['![Web](https://example.com/w.png) and [Bad](javascript:alert%281%29)', '[Web](<https://example.com/w.png>) and [Bad](javascript:alert%281%29)', [1]],
   ['![Dot](data:image/png;base64,AAAA) ![Web](https://example.com/w.png)', '![Dot](data:image/png;base64,AAAA) [Web](<https://example.com/w.png>)', [1]],
+  ['[![a\\]b](https://example.com/i.png)](https://example.com/p)', '[a\\]b](https://example.com/p)', [1]],
+  ['[![a\\]b](https://example.com/i.png)][r]\n\n[r]: https://example.com/p', '[a\\]b][r]\n\n[r]: https://example.com/p', [1]],
 ] as const) it(`fix writes a web image as a link: ${JSON.stringify(source)}`, () => {
   assert.deepEqual(webImageLinks(source), {body: expected, lines});
 });
@@ -191,6 +193,8 @@ for (const source of [
   '![Undefined][none]',
   '`![Chart](https://example.com/chart.png)`',
   '[Web](https://example.com/page)',
+  '![Build](https://example.com/badge.svg "Release status")',
+  '![Build][b]\n\n[b]: https://example.com/badge.svg "Release status"',
 ]) it(`fix keeps an image that is not on the web: ${JSON.stringify(source)}`, () => {
   assert.equal(webImageLinks(source), undefined);
 });

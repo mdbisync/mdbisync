@@ -26,6 +26,11 @@ function text(value: string): string {
   return toMarkdown({type: 'root', children: [{type: 'paragraph', children: [{type: 'text', value}]}]}).trimEnd();
 }
 
+/** Text inside the label of the link around an image: a `]` the serializer leaves bare would end that label. */
+function linkLabelText(value: string): string {
+  return text(value).replace(/(\\*)\]/g, (bracket, backslashes: string) => backslashes.length % 2 === 0 ? `${backslashes}\\]` : bracket);
+}
+
 /**
  * A link as Linear stores it: the destination in angle brackets, as `fix` writes it, so the repaired file
  * equals the document Linear holds after the write-back byte for byte. The serializer escapes the label.
@@ -54,15 +59,16 @@ const WEB_IMAGE = /^https?:/i;
 export function webImageLinks(body: string): { body: string; lines: number[] } | undefined {
   checkImageRepairSize(body);
   const tree = parse(body);
-  const definitions = new Map<string, string>();
-  visit(tree, node => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url); });
+  const definitions = new Map<string, {url: string; title?: string | null | undefined}>();
+  visit(tree, node => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node); });
   const selected = new Set<number>();
   let index = 0;
   visit(tree, node => {
     if (node.type !== 'image' && node.type !== 'imageReference') return;
     index++;
-    const url = node.type === 'image' ? node.url : definitions.get(node.identifier);
-    if (url !== undefined && WEB_IMAGE.test(url)) selected.add(index);
+    const definition = node.type === 'image' ? node : definitions.get(node.identifier);
+    // A title would be lost: `image-title` leaves it to the author.
+    if (definition !== undefined && WEB_IMAGE.test(definition.url) && !definition.title) selected.add(index);
   });
   if (selected.size === 0) return undefined;
   const repair = imageLinks(body, new Set(), selected, 'fix');
@@ -132,7 +138,7 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
       const cached = replacements.get(key);
       if (cached !== undefined) replacement = cached;
       else {
-        const rendered = inLink ? text(label) : linearLink(label, url);
+        const rendered = inLink ? linkLabelText(label) : linearLink(label, url);
         const value = inTable ? rendered.replace(/\|/g, '&#124;') : rendered;
         replacement = {text: value, ...(value.startsWith('[') ? {url: destinationOf(value)} : {})};
         replacements.set(key, replacement);

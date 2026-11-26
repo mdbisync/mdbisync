@@ -1068,8 +1068,9 @@ like any other.
 repairs it, and prints the [`image-made-link`](#image-made-link) warning:
 `[Revenue chart](<https://example.com/charts/revenue.png>)`. An empty alt
 text uses the URL as the label, and an image inside a link keeps the outer
-link. `data:` images, absolute paths and paths outside the repository stay
-findings for you to fix.
+link. An image with a title ([`image-title`](#image-title)), `data:`
+images, absolute paths and paths outside the repository stay findings for
+you to fix.
 
 ### `image-file-missing`
 
@@ -1134,10 +1135,11 @@ leaves a file out of the sync.
 
 ### `image-made-link`
 
-fix wrote an image from a URL as a link to it: Linear shows the link, not
-the image. To show the image, add the file to the repository and link it by
-its relative path. `fix` prints it with the file and line of each image it
-wrote as a link ([`image-not-in-repository`](#image-not-in-repository)).
+fix wrote an image from a URL as a link to it, or as the text of the link
+around it: Linear shows no image. To show the image, add the file to the
+repository and link it by its relative path. `fix` prints it for each image
+it rewrote, with the image's line in the file before the fix
+([`image-not-in-repository`](#image-not-in-repository)).
 
 ```markdown
 Intro.
