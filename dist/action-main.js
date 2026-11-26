@@ -29023,7 +29023,29 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.1-rc.8" : packageJson.version;
+var VERSION = true ? "1.0.1-rc.9" : packageJson.version;
+function olderVersion(version, than) {
+  if (version === void 0) return true;
+  const a = parseVersion(version);
+  const b = parseVersion(than);
+  if (a === void 0 || b === void 0) return false;
+  for (let index2 = 0; index2 < 3; index2++) if (a.core[index2] !== b.core[index2]) return a.core[index2] < b.core[index2];
+  if (a.pre.length === 0 || b.pre.length === 0) return a.pre.length > 0 && b.pre.length === 0;
+  for (let index2 = 0; index2 < Math.min(a.pre.length, b.pre.length); index2++) {
+    const [x, y] = [a.pre[index2], b.pre[index2]];
+    if (x === y) continue;
+    const [nx, ny] = [/^\d+$/.test(x), /^\d+$/.test(y)];
+    if (nx && ny) return Number(x) < Number(y);
+    if (nx !== ny) return nx;
+    return x < y;
+  }
+  return a.pre.length < b.pre.length;
+}
+function parseVersion(version) {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
+  if (match === null) return void 0;
+  return { core: [Number(match[1]), Number(match[2]), Number(match[3])], pre: match[4] === void 0 ? [] : match[4].split(".") };
+}
 
 // src/linear/facts.ts
 var CONTENT_LIMIT = 25e4;
@@ -52132,6 +52154,7 @@ function isIdEntry(value) {
   if (entry.observedDigest !== void 0 && (typeof entry.observedDigest !== "string" || !/^[0-9a-f]{64}$/.test(entry.observedDigest))) return false;
   if (entry.plainFiles !== void 0 && (!Array.isArray(entry.plainFiles) || !entry.plainFiles.every((path7) => typeof path7 === "string"))) return false;
   if (entry.releasePaths !== void 0 && (!Array.isArray(entry.releasePaths) || !entry.releasePaths.every((path7) => typeof path7 === "string"))) return false;
+  if (entry.capturedWith !== void 0 && typeof entry.capturedWith !== "string") return false;
   if (entry.releaseBase !== void 0 && (typeof entry.releaseBase !== "string" || !/^[0-9a-f]{40,64}$/.test(entry.releaseBase))) return false;
   if (entry.suspended !== void 0) {
     const episode = entry.suspended;
@@ -55331,6 +55354,15 @@ async function mergeTree(git, linear, other, base, ids, idsTip) {
   if (merged.resolved.unresolved.length > 0) throw new LaneConflict("A suspended file needs a manual merge", merged.resolved.unresolved);
   return merged.resolved.tree;
 }
+async function convergedPaths(git, intake, base, tracked, paths) {
+  if (paths.size === 0) return /* @__PURE__ */ new Set();
+  const list4 = [...paths];
+  const [read, before, held] = await Promise.all([intake, base, tracked].map(async (commit2) => new Map((await listPaths(git, commit2, list4)).filter((entry) => entry.type === "blob").map((entry) => [entry.path, entry.oid]))));
+  const candidates2 = list4.filter((path7) => read.has(path7) && held.has(path7) && read.get(path7) !== before.get(path7));
+  const blobs = await readBlobs(git, [...new Set(candidates2.flatMap((path7) => [read.get(path7), held.get(path7)]))]);
+  const body2 = (oid) => splitFile(blobs.get(oid).toString("utf8")).body.replace(/\n+$/, "");
+  return new Set(candidates2.filter((path7) => body2(read.get(path7)) === body2(held.get(path7))));
+}
 async function changedPaths(git, before, after) {
   return (await git.text(["diff", "--name-only", "--no-renames", "-z", before, after])).split("\0").filter(Boolean);
 }
@@ -55412,6 +55444,7 @@ async function addEpisodes(context, options, ids, paths, checks, timedOut = []) 
   }
   for (const [path7, entry] of ids) if (paths.has(path7) && entry.suspended === void 0) {
     entry.suspended = { noticeId: randomUUID4(), paths: [path7], checks: [...checks], ...timedOut.length > 0 ? { timedOut: [...timedOut] } : {} };
+    entry.capturedWith = VERSION;
     delete entry.releaseBase;
     delete entry.releasePaths;
   }
@@ -55472,7 +55505,10 @@ async function maintainSuspended(context, options) {
       const base = await treeCommit(git, await takePaths(git, head, bases.view ?? bases.linear, paths), bases.linear);
       const tree = await mergeTree(git, input, head, base, ids, options.state.ids);
       const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
-      const selected = await takePaths(git, head, tree, paths);
+      const pushed = lastPushed(context, options, ids);
+      const outside = previous3 === null || pushed === void 0 ? void 0 : new Set(pushed === previous3 ? [] : await changedPaths(git, pushed, previous3));
+      const converged = outside === void 0 ? /* @__PURE__ */ new Set() : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path7) => !outside.has(path7))));
+      const selected = await takePaths(git, await takePaths(git, head, tree, paths), tracked, converged);
       if (linearChanged || selected !== await git.revParse(`${head}^{tree}`)) {
         head = await commit(context, options, selected, intake === linear ? [head] : [head, intake], LINEAR_INTAKE_MESSAGE + note(tracked, linear, intake));
         bases.linear = linear;
@@ -55581,6 +55617,7 @@ async function release(context, options, ids, paths, head, linearBase, tracked) 
   let first = true;
   for (const [path7, entry] of ids) if (entry.suspended !== void 0) {
     delete entry.suspended;
+    delete entry.capturedWith;
     entry.releaseBase = linearBase;
     entry.releasePaths = first ? [...paths].sort() : [path7];
     first = false;
@@ -59960,9 +59997,10 @@ async function capture(context, options) {
       return entry?.saved !== void 0 && (entry.suspended === void 0 || entry.saved.notice?.kind === "blocked");
     };
     const unsignedRepair = (old) => old.entry.pullRewrite !== void 0 && signedRepair(context.pushedKey, old.path, old.entry) === void 0;
+    const readByOtherVersion = (old) => old.entry.suspended !== void 0 && olderVersion(old.entry.capturedWith, VERSION);
     let selected = [...listed.values()].filter((doc) => {
       const old = byId.get(doc.id);
-      return old === void 0 || marked(doc) || old.entry.observedDigest === void 0 && live(doc) && previous3.has(old.path) && !excludedPath(old.path) || unsignedRepair(old) && live(doc) && previous3.has(old.path) || !asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor);
+      return old === void 0 || marked(doc) || old.entry.observedDigest === void 0 && live(doc) && previous3.has(old.path) && !excludedPath(old.path) || unsignedRepair(old) && live(doc) && previous3.has(old.path) || readByOtherVersion(old) && live(doc) && previous3.has(old.path) || !asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor);
     });
     const invalidZone = (doc, path7) => {
       const zone = nearestZone(mapping.zones, folderOf(path7));
@@ -60071,12 +60109,30 @@ async function capture(context, options) {
     const limited = /* @__PURE__ */ new Set();
     let needsLinkBase = false;
     const readable = /* @__PURE__ */ new Map();
+    const reread = new Set([...work.values()].filter((doc) => {
+      const old = byId.get(doc.id);
+      return old !== void 0 && live(doc) && readByOtherVersion(old);
+    }).map((doc) => doc.id));
+    const rereadPaths = [...reread].map((id) => byId.get(id).path);
+    const trackedBodies = /* @__PURE__ */ new Map();
+    if (rereadPaths.length > 0) {
+      const tracked = (await listPaths(git, fetched.tracked, rereadPaths)).filter((entry) => entry.type === "blob" && readableBlob(entry));
+      const recordedOids = new Map(textEntries.map((entry) => [entry.path, entry.oid]));
+      const unread = tracked.filter((entry) => recordedOids.get(entry.path) !== entry.oid);
+      const blobs2 = await new MappingBlobBudget().read(git, unread);
+      for (const entry of tracked) {
+        const bytes = recordedOids.get(entry.path) === entry.oid ? previous3.get(entry.path) : blobs2.get(entry.oid);
+        trackedBodies.set(entry.path, splitFile(bytes.toString("utf8")).body);
+      }
+    }
+    const readsAsTracked = (path7, text6) => trackedBodies.has(path7) && trackedBodies.get(path7).replace(/\n+$/, "") === splitFile(text6).body.replace(/\n+$/, "");
     for (const doc of work.values()) {
       if (!live(doc)) continue;
       try {
         checkImageRepairSize(doc.content ?? "");
         const old = byId.get(doc.id);
-        const previousBody = old === void 0 ? void 0 : markdownBaseline(splitFile(previous3.get(old.path)?.toString("utf8") ?? "").body);
+        const recordedBody = old === void 0 ? void 0 : reread.has(doc.id) ? trackedBodies.get(old.path) : splitFile(previous3.get(old.path)?.toString("utf8") ?? "").body;
+        const previousBody = recordedBody === void 0 ? void 0 : markdownBaseline(recordedBody);
         const text6 = linearMarkersAsText(doc.content ?? "", previousBody);
         readable.set(doc.id, { text: text6, previousBody });
         if (linksLinearDocuments(text6)) needsLinkBase = true;
@@ -60244,7 +60300,8 @@ ${assets.plainFiles.join("\n")}
           break;
         }
         if (findings.length > 0) {
-          recordBlocked(doc, path7, findings);
+          if (reread.has(id) && asRecorded(doc) && old !== void 0) ids.set(old.path, { ...old.entry, capturedWith: VERSION });
+          else recordBlocked(doc, path7, findings);
           candidates2.delete(id);
           again = true;
           break;
@@ -60341,14 +60398,18 @@ ${assets.plainFiles.join("\n")}
     const recordedNow = /* @__PURE__ */ new Set();
     for (const [id, candidate] of candidates2) {
       const old = byId.get(id);
-      if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
+      const converged = reread.has(id) && readsAsTracked(candidate.path, String(candidate.files.get(candidate.path)));
+      if (old?.path === candidate.path && !converged && await asLastAccepted(candidate)) {
+        if (reread.has(id)) ids.set(old.path, { ...old.entry, capturedWith: VERSION });
+        continue;
+      }
       recordedNow.add(id);
       if (old !== void 0 && old.path !== candidate.path) {
         removeBody(old.path);
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      const entry = { ...old?.entry, id, observedDigest: observedDigest(candidate.doc) };
+      const entry = { ...old?.entry, id, observedDigest: observedDigest(candidate.doc), ...old?.entry.suspended === void 0 ? {} : { capturedWith: VERSION } };
       delete entry.pullRewrite;
       const plainFiles = [.../* @__PURE__ */ new Set([...old?.entry.plainFiles ?? [], ...candidate.assets.plainFiles ?? []])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
@@ -60371,7 +60432,7 @@ ${assets.plainFiles.join("\n")}
       ids.set(candidate.path, entry);
       for (const [path7, content4] of candidate.files) {
         const prior = previous3.get(path7);
-        if (path7 === candidate.path && old?.path === path7 && prior !== void 0 && excludedPath(path7)) {
+        if (path7 === candidate.path && old?.path === path7 && prior !== void 0 && excludedPath(path7) && !converged) {
           const baseline = baselines.get(path7);
           if (baseline != null && splitFile(baseline.text).body === splitFile(String(content4)).body) continue;
         }
