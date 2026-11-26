@@ -85,3 +85,33 @@ so the check and mutation cannot be atomic.
 
 **What you can do.** For a critical edit, stop ongoing sync, wait for the
 active run to finish, save the edit, then enable sync again.
+
+## AR-006: A document edit pushed to the sync branch merges without review
+
+**Accepted.** 2026-11-26.
+
+**The risk.** When the sync's GitHub App may bypass required reviews on the
+tracked branch and other people with write access may push to the sync
+branch or its suspended branch, someone can push a commit there that changes
+only synchronized documents or their assets. The sync's scope check accepts
+it, and the sync merges the pull request once its checks pass, without the
+review the tracked branch otherwise requires. Code, workflows and
+configuration cannot enter this way: a change to any other file, to a file's
+mode, to anything under a `.github` folder or to a folder's Linear
+annotation leaves the pull request to a person. Updates to the sync branches
+stay open on purpose, so that the `pre-commit` workflow can push its
+formatter fixes.
+
+**Why it is accepted.** It needs write access to the repository and a bypass
+for the App on the tracked branch. It can bring in only document content,
+about what any member of the Linear team can already change through Linear,
+and CI still runs on it. A fix changes the supported formatter setup and is
+planned for a later release.
+
+**What you can do.** Restrict who may push to the sync branches: in the
+ruleset from
+[who may push to the sync branches](https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#who-may-push-to-the-sync-branches),
+also turn on **Restrict updates** when you do not use the `pre-commit`
+workflow, and keep only the sync's App and, if it pushes as its own GitHub
+App, your formatter's App on its bypass list. Limit write access to people
+you trust, and review the sync's merged pull requests.
