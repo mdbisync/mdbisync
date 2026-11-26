@@ -1,4 +1,5 @@
 // Pull repairs are separate from the record of what Linear actually holds.
+import type { Nodes } from 'mdast';
 import { toMarkdown } from 'mdast-util-to-markdown';
 import { parse, visit, start, end, line, allowedLink, linkDestination } from '../format/markdown.ts';
 import { CONTENT_LIMIT } from '../format/rules.ts';
@@ -142,6 +143,22 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
         const value = inTable ? rendered.replace(/\|/g, '&#124;') : rendered;
         replacement = {text: value, ...(value.startsWith('[') ? {url: destinationOf(value)} : {})};
         replacements.set(key, replacement);
+      }
+    } else {
+      // Linear drops a link left without text, and its URL with it: the first removed image's
+      // alt text, or else the link's URL, becomes its text, as `fix` writes a link without text.
+      const link = ancestors.at(-1);
+      const linkUrl = link?.type === 'link' ? link.url : link?.type === 'linkReference' ? definitions.get(link.identifier) : undefined;
+      const removed = (child: Nodes) => {
+        if (child.type !== 'image' && child.type !== 'imageReference') return false;
+        const source = child.type === 'image' ? child.url : definitions.get(child.identifier);
+        return source !== undefined && (source === '' || !permitted(source));
+      };
+      const children: Nodes[] = link !== undefined && 'children' in link ? link.children : [];
+      if (linkUrl && children.every(child => removed(child) || (child.type === 'text' && child.value.trim() === '')) && children.find(removed) === node) {
+        const label = linkLabelText(node.alt || linkUrl);
+        // A table row is one line.
+        replacement = {text: ancestors.some(parent => parent.type === 'tableCell') ? label.replace(/\|/g, '&#124;').replace(/\n/g, ' ') : label};
       }
     }
     // A long definition can be expanded by many references to it.

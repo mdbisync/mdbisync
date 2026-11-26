@@ -90,6 +90,14 @@ try {
   assert.match(hooks(1), /page with spaces\.md:3: warning: image-made-link: /);
   assert.equal(await readFile(page, 'utf8'), 'Intro.\n\n[Chart](<https://example.com/chart.png>)');
   hooks(0);
+  // A link without text gets its URL as the text, with a warning; the check hook fails on it.
+  await writeFile(join(scratch, '.pre-commit-config.yaml'), config('linear-format-check'));
+  await writeFile(page, 'Intro.\n\nSee [](https://example.com/guide).\n');
+  assert.match(hooks(1), /page with spaces\.md:3: link-without-text: /);
+  await writeFile(join(scratch, '.pre-commit-config.yaml'), config('linear-format'));
+  assert.match(hooks(1), /page with spaces\.md:3: warning: link-text-from-url: /);
+  assert.equal(await readFile(page, 'utf8'), 'Intro.\n\nSee [https://example.com/guide](<https://example.com/guide>).');
+  hooks(0);
 
   const url = 'https://example.com/garden';
   const prefix = 'x'.repeat(CONTENT_LIMIT - url.length - 3) + '\n\n';

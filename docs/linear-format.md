@@ -754,6 +754,22 @@ links are removed together with their text.
 [Unsupported](javascript:alert%281%29)
 ```
 
+### `link-without-text`
+
+Linear drops a link without text, and its URL with it. Run fix to write the
+URL as the link text, or write the text yourself; a link with neither text
+nor URL needs text or removal. This holds for an inline link and a
+reference link.
+
+```markdown
+See [](https://example.com/guide).
+```
+
+`fix` writes this as `See [https://example.com/guide](<https://example.com/guide>).`
+and prints the [`link-text-from-url`](#link-text-from-url) warning. An
+image without alt text (`![](images/logo.png)`) is not a link and is not
+reported.
+
 ### `link-title`
 
 A link title is dropped. Remove the title, or move its text into the link
@@ -1151,6 +1167,25 @@ Line 3 is reported. An image of a repository file is not:
 
 ```markdown
 ![Revenue chart](images/revenue.png)
+```
+
+### `link-text-from-url`
+
+fix wrote the URL of a link without text as its text: Linear drops a link
+without text. To show other words, replace the text. `fix` prints it for
+each line with such a link, with the line in the file before the fix
+([`link-without-text`](#link-without-text)).
+
+```markdown
+Intro.
+
+See [](https://example.com/guide).
+```
+
+Line 3 is reported. A link with text is not:
+
+```markdown
+See [the guide](https://example.com/guide).
 ```
 
 ### `list-number-as-text`

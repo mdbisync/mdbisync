@@ -32,6 +32,16 @@ for (const [source, expected] of [
   ['![Chart][image]\n\n[image]: https://example.com/a.png', '[Chart](<https://example.com/a.png>)\n\n[image]: https://example.com/a.png'],
   ['`![Chart](../chart.png)`', '`![Chart](../chart.png)`'],
   ['![Chart](https://uploads.linear.app/chart.png)', '![Chart](https://uploads.linear.app/chart.png)'],
+  // A link left without text would be dropped by Linear: its alt text or URL becomes its text.
+  ['[![](data:image/png;base64,AAAA)](https://example.com/p)', '[https://example.com/p](https://example.com/p)'],
+  ['[![Dot](data:image/png;base64,AAAA)](https://example.com/p)', '[Dot](https://example.com/p)'],
+  ['[![]()][p]\n\n[p]: https://example.com/p', '[https://example.com/p][p]\n\n[p]: https://example.com/p'],
+  ['[Before ![]()](https://example.com/p)', '[Before ](https://example.com/p)'],
+  ['[*![]() more*](https://example.com/p)', '[* more*](https://example.com/p)'],
+  ['[![]()![b]()](https://example.com/p)', '[https://example.com/p](https://example.com/p)'],
+  ['[![]() ![b](https://example.com/b.png)](https://example.com/p)', '[ b](https://example.com/p)'],
+  ['| A |\n| -- |\n| [![x][i]](https://example.com/p) |\n\n[i]: <> "t"', '| A |\n| -- |\n| [x](https://example.com/p) |\n\n[i]: <> "t"'],
+  ['| A |\n| -- |\n| [![a\\|b]()](https://example.com/p) |', '| A |\n| -- |\n| [a&#124;b](https://example.com/p) |'],
 ]) it(`repairs pull Markdown: ${source}`, () => assert.equal(imageLinks(source!).body, expected));
 
 it('reports original image places and lines, including removed images', () => {

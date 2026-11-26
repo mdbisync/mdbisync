@@ -370,14 +370,16 @@ the reason is fixed. The summaries list each with its rules:
 
 The `linear-format` hook's rules leave a file out too until it is fixed:
 `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
-`image-in-link`, `table-alignment`, `link-title`, `image-title`, `code-in-emphasis`, `hard-break-backslash`,
+`image-in-link`, `table-alignment`, `link-without-text`, `link-title`, `image-title`, `code-in-emphasis`, `hard-break-backslash`,
 `git-conflict-marker`,
 `section-opener`, `url-in-html`, `block-first-in-list-item`, `ordered-task-list`,
 `image-not-in-repository`, `image-file-missing` and
 `document-in-assets-folder`. Each is described, with its fix, in
 [linear-format.md](linear-format.md#lint-rules). `fix` writes an HTTP(S)
 image as a link and prints the
-[`image-made-link`](linear-format.md#image-made-link) warning. A list item that opens
+[`image-made-link`](linear-format.md#image-made-link) warning; it writes the
+URL of a link without text as its text and prints the
+[`link-text-from-url`](linear-format.md#link-text-from-url) warning. A list item that opens
 with a collapsible section (`1. +++ Notes` with more of the item below
 it) is `block-first-in-list-item`: put a line of text first in the item.
 

@@ -68,7 +68,9 @@ describe('format docs', () => {
       const named = /\bLines? ([\d, and]+) (?:is|are) reported\./.exec(text);
       assert.ok(named !== null, `${rule}: the docs do not say which lines are reported`);
       const documented = named[1]!.split(/,? and |, /).map(Number);
-      const lines = (body: string): number[] => rule === 'image-made-link' ? webImageLinks(body)?.lines ?? [] : listTextWarnings('example.md', body).map((warning) => warning.line);
+      const lines = (body: string): number[] => rule === 'image-made-link' ? webImageLinks(body)?.lines ?? []
+        : rule === 'link-text-from-url' ? lintText('example.md', body).filter((finding) => finding.rule === 'link-without-text').map((finding) => finding.line)
+        : listTextWarnings('example.md', body).map((warning) => warning.line);
       assert.deepEqual(lines(example.body), documented);
       assert.deepEqual(lines(listed!.body), []);
     }

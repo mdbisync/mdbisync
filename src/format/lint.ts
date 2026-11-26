@@ -476,6 +476,8 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         break;
       }
       case 'link':
+        // Linear drops a link without text on write: `fix` writes its URL as the text.
+        if (node.children.length === 0) report('link-without-text', line(node));
         if (!allowedLink(node.url)) report('link-scheme', line(node));
         if (node.title) report('link-title', line(node));
         if (node.children.some((child) => child.type === 'image' || child.type === 'imageReference')) report('image-in-link', line(node));
@@ -484,6 +486,7 @@ function lintTree(file: string, tree: Root, body: string, report: (rule: LintRul
         const definition = definitions.get(node.identifier);
         if (definition !== undefined && !allowedLink(definition.url)) report('link-scheme', line(node));
         if (definition?.title) report('link-title', line(node));
+        if (node.children.length === 0) report('link-without-text', line(node));
         if (node.children.some((child) => child.type === 'image' || child.type === 'imageReference')) report('image-in-link', line(node));
         break;
       }

@@ -21,6 +21,7 @@ export const LINT_RULES = {
   'duplicate-title': 'Two or more files map to one document title.',
   'table-alignment': 'Table column alignment is dropped. Remove the colons from the separator row to accept that.',
   'link-scheme': 'Links must use http, https, mailto, a path or a fragment. Change the destination, or write the address as inline code.',
+  'link-without-text': 'Linear drops a link without text, and its URL with it. Run fix to write the URL as the link text, or write the text yourself; a link with neither text nor URL needs text or removal.',
   'link-title': 'A link title is dropped. Remove the title, or move its text into the link text.',
   'image-title': 'An image title is dropped from the Markdown. Remove the title, or move its text into the alt text.',
   'code-in-emphasis': 'Bold or italic around inline code is dropped from the code. Write the code without emphasis, or emphasize the words around it.',
@@ -55,6 +56,7 @@ export type LintRule = keyof typeof LINT_RULES;
  */
 export const LINT_WARNINGS = {
   'image-made-link': 'fix wrote an image from a URL as a link to it, or as the text of the link around it: Linear shows no image. To show the image, add the file to the repository and link it by its relative path.',
+  'link-text-from-url': 'fix wrote the URL of a link without text as its text: Linear drops a link without text. To show other words, replace the text.',
   'list-number-as-text': "A line in a list item starts with a number that Markdown reads as text of the item, though it looks like a nested numbered list: a nested list numbered other than 1 cannot follow the item's text, and a list indented four or more columns past the item's text is part of it. To make it a list, renumber its first item to 1., move it one level up, or remove a doubled number such as 14. 13. in the line above, and remove the backslash fix writes after each of its numbers (2\\.).",
 } as const;
 
@@ -78,9 +80,10 @@ export interface Warning {
  * differently without its backslash), `fixText` leaves the text as it is.
  * A `>` that starts a table body cell gets a backslash, the form Linear
  * writes for that text; lint's FIX_ONLY_RULES lets the sync send such a
- * file as it is, since Linear's own export can hold it.
+ * file as it is, since Linear's own export can hold it. A link without
+ * text gets its URL as the text; one without a URL stays with its author.
  */
-export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash', 'table-quote-cell']);
+export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash', 'link-without-text', 'table-quote-cell']);
 
 /**
  * Rules about where an image's file is, not about what Linear loses. The

@@ -213,7 +213,8 @@ function lint(paths: readonly string[], cwd: string): CommandResult {
 /**
  * `fix`: rewrites files into Linear's form; exit 1 when a file changed or lint
  * found a problem `fix` leaves to the author. An image from an HTTP(S) URL
- * becomes a link, with a warning. The warnings of the files, as written, are
+ * becomes a link, and a link without text gets its URL as the text, each
+ * with a warning. The warnings of the files, as written, are
  * printed too, but alone they exit 0.
  */
 export function runFix(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
@@ -248,7 +249,8 @@ function fix(paths: readonly string[], cwd: string): CommandResult {
   }
   const changed: string[] = [];
   const moved: string[] = [];
-  const imageLinks: Warning[] = [];
+  const madeLinks: Warning[] = [];
+  const imageLines = new Map<string, number[]>();
   for (const file of files) {
     if (failing.has(file)) continue;
     const outcome = fixFile(file, cwd);
@@ -256,18 +258,29 @@ function fix(paths: readonly string[], cwd: string): CommandResult {
     else if (outcome === 'moved') moved.push(file);
     else if (outcome !== 'unchanged') {
       changed.push(file);
-      for (const line of outcome.imageLines) imageLinks.push({ file, line, rule: 'image-made-link', message: LINT_WARNINGS['image-made-link'] });
+      imageLines.set(file, outcome.imageLines);
     }
   }
   // The rewritten files are linted again: their earlier findings were only
   // ones `fix` writes in Linear's form, and what is left of them is reported.
   const rewritten = new Set(changed);
-  const findings = [...before.filter((finding) => !rewritten.has(finding.file)), ...lintAll(changed, cwd)];
+  const after = lintAll(changed, cwd);
+  const findings = [...before.filter((finding) => !rewritten.has(finding.file)), ...after];
+  for (const file of changed) {
+    // A link without text that is still one (no URL) was not rewritten.
+    const kept = new Set(after.filter((finding) => finding.file === file && finding.rule === 'link-without-text').map((finding) => finding.line));
+    const textLines = before.filter((finding) => finding.file === file && finding.rule === 'link-without-text' && !kept.has(finding.line)).map((finding) => finding.line);
+    const made: Warning[] = [
+      ...(imageLines.get(file) ?? []).map((line) => ({ file, line, rule: 'image-made-link' as const, message: LINT_WARNINGS['image-made-link'] })),
+      ...textLines.map((line) => ({ file, line, rule: 'link-text-from-url' as const, message: LINT_WARNINGS['link-text-from-url'] })),
+    ];
+    madeLinks.push(...made.sort((a, b) => a.line - b.line));
+  }
   const stdout = changed.map((file) => `${lineText(file)}: fixed\n`).join('')
     + moved.map((file) => `${lineText(file)}: moved while fix ran; left unchanged\n`).join('')
     + describe(findings);
   const kept = new Set(moved);
-  return { exitCode: stdout === '' ? 0 : 1, stdout: stdout + describeWarnings(imageLinks) + warnings(files.filter((file) => !kept.has(file)), cwd), stderr: '' };
+  return { exitCode: stdout === '' ? 0 : 1, stdout: stdout + describeWarnings(madeLinks) + warnings(files.filter((file) => !kept.has(file)), cwd), stderr: '' };
 }
 
 /**
