@@ -24,9 +24,18 @@ type OpenerLine = { role: 'open' | 'close' | 'end'; run: number };
 
 /** Rounds of splitting: each makes the section lines that nest in quotes the round before split off visible. */
 const SPLIT_ROUNDS = 8;
-// Linear reads a longer run of signs as the same marker (`++++Tip` opens a
-// section titled `Tip`) and writes it with three.
+// Linear reads a longer run of signs as the same marker and writes it with
+// three (`++++ Tip` as `+++ Tip`).
 const PLUS_MARKER = /^(\+{3,})(.*)$/;
+// Linear writes a section's title line as its signs and a space, so signs
+// followed right away by text (`+++Tip`, `++++Tip`) are text. Linear's
+// import would still open a section there: `fix` escapes such a line.
+const PLUS_TEXT = /^\+{3,}[^+\s]/;
+/** Whether a body can hold such a line: each sign is looked at once. */
+const PLUS_TEXT_ANYWHERE = /\+{3}[^+\s]/;
+// An escaped section title (`\+++ Tip`) the image writer split off; not
+// escaped text (`\+++Tip`), whose closing line Linear reads on its own.
+const ESCAPED_TITLE = /^\\\+{3}(?:[ \t\n]|$)/;
 
 // For this scan only, give a +++ line a block node so it can interrupt a
 // paragraph or end a lazy list/quote continuation. Fences and HTML blocks
@@ -86,8 +95,8 @@ function parseForSections(body: string): Root {
  * `firstInItem` hears the offset of each marker that opens a section as
  * the first block of a list item.
  */
-export function plusSectionsAsLinear(body: string, firstInItem?: (at: number) => void): string {
-  return pairSections(body, new Map(), firstInItem)!;
+export function plusSectionsAsLinear(body: string, firstInItem?: (at: number) => void, plusText?: (at: number, opensSection: boolean) => void): string {
+  return pairSections(body, new Map(), firstInItem, plusText)!;
 }
 
 /**
@@ -103,7 +112,7 @@ export function plusSectionsAsLinear(body: string, firstInItem?: (at: number) =>
  * closing line), or a title-less `>>>` line after a `+++` line closed its
  * sections (Linear opens a section there).
  */
-function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>, firstInItem?: (at: number) => void): string | undefined {
+function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>, firstInItem?: (at: number) => void, plusText?: (at: number, opensSection: boolean) => void): string | undefined {
   if (!body.includes('+++')) return body;
   const tree = parseForSections(body);
   let unwritable = false;
@@ -111,19 +120,41 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
   // Where each paragraph of the ordinary parse ends, by its start: a marker
   // whose paragraph runs past its line has a lazy line after it.
   let paragraphEnds: Map<number, number> | undefined;
-  const lazyAfter = (marker: Nodes): boolean => {
+  const paragraphStartEnds = (): Map<number, number> => {
     if (paragraphEnds === undefined) {
       const ends = new Map<number, number>();
       visit(parse(body), (node) => { if (node.type === 'paragraph') ends.set(start(node), end(node)); });
       paragraphEnds = ends;
     }
-    const paragraphEnd = paragraphEnds.get(start(marker));
+    return paragraphEnds;
+  };
+  const lazyAfter = (marker: Nodes): boolean => {
+    const paragraphEnd = paragraphStartEnds().get(start(marker));
     return paragraphEnd !== undefined && paragraphEnd > lineEndAt(body, start(marker));
   };
   visit(tree, (parent, ancestors) => {
     if (parent.type !== 'root' && parent.type !== 'blockquote' && parent.type !== 'listItem') return;
     const blocks = parent.children;
-    const markers = blocks.map((node) => node.type === 'thematicBreak' ? PLUS_MARKER.exec(body.slice(start(node), end(node))) : null);
+    const signs = blocks.map((node) => node.type === 'thematicBreak' ? PLUS_MARKER.exec(body.slice(start(node), end(node))) : null);
+    // Text after the signs: Linear's import reads it as a section's title
+    // when more of its container follows, also on the next line, and
+    // keeps the last line of its container as text.
+    for (const [index, marker] of signs.entries()) {
+      if (marker === null || !PLUS_TEXT.test(marker[0])) continue;
+      const node = blocks[index]!;
+      const paragraphEnd = paragraphStartEnds().get(start(node));
+      const last = index === blocks.length - 1;
+      const alone = last && paragraphEnd !== undefined && paragraphEnd <= lineEndAt(body, start(node));
+      if (!alone) {
+        edits.push({ from: start(node), to: start(node), text: '\\', depth: ancestors.length });
+        // Over a lazy line only (the container ends there), Linear keeps it
+        // as text: the escape keeps it so once the writer indents that line.
+        // A paragraph's last line Linear splits off as a paragraph of its own.
+        plusText?.(start(node), !(last && paragraphEnd !== undefined));
+      }
+      signs[index] = null;
+    }
+    const markers = signs;
     if (markers.every((marker) => marker === null)) return;
     const opener = (index: number) => fromOpeners.get(start(blocks[index]!));
     const mixed = markers.some((marker, index) => marker !== null && opener(index) !== undefined);
@@ -256,7 +287,7 @@ function pairSections(body: string, fromOpeners: ReadonlyMap<number, OpenerLine>
       // its final marker. Keep those lines together for that rewrite.
       if (!roles.has(index) && previous?.type === 'paragraph'
         && previous.position!.end.line + 1 === node.position!.start.line
-        && (body.startsWith('\\+++', start(previous))
+        && (ESCAPED_TITLE.test(body.slice(start(previous), start(previous) + 5))
           || previous.children.some((child) => child.type === 'image' || child.type === 'imageReference'))) continue;
       const line = prefixes(body, at);
       const blank = line.prefix.trimEnd();
@@ -355,6 +386,36 @@ export function sectionOpenersAsLinear(body: string): string | undefined {
   const plusLines = plusLineCount(body, openers);
   if (sectionLineCount(written) !== lines + plusLines) return undefined;
   return plusLines === 0 ? written : pairSections(written, marks);
+}
+
+/**
+ * The offsets of lines of plus signs with text right after them (`+++Plan`)
+ * that Linear would read as a section's title: more of their container
+ * follows, also on the next line. `fix` escapes them (`\+++Plan`).
+ */
+export function plusTextLines(body: string): number[] {
+  const found: number[] = [];
+  if (PLUS_TEXT_ANYWHERE.test(body)) plusSectionsAsLinear(body, undefined, (at, opensSection) => { if (opensSection) found.push(at); });
+  return found.sort((a, b) => a - b);
+}
+
+/**
+ * The body with each line of plus signs and text right after them escaped
+ * where Linear would read it as a section's title, or over a lazy line
+ * (`\+++Plan`). Escaping such a line can change how the lines after it
+ * read, so `fix` writes this first and lints the result.
+ */
+export function plusTextAsText(body: string): string {
+  if (!PLUS_TEXT_ANYWHERE.test(body)) return body;
+  const found = new Set<number>();
+  plusSectionsAsLinear(body, undefined, (at) => found.add(at));
+  let out = '';
+  let from = 0;
+  for (const at of [...found].sort((a, b) => a - b)) {
+    out += body.slice(from, at) + '\\';
+    from = at;
+  }
+  return out + body.slice(from);
 }
 
 /**

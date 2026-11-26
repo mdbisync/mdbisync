@@ -192,9 +192,9 @@ Blocks:
   Linear keeps such text but can return `4\) pear` and a lone `\+` without
   their escapes. The sync restores an escape where the text would read as
   a block. A lone `+` on a paragraph continuation line stays plain.
-  As the second line of a list item's text, with more of that paragraph
-  after it, Linear reads a lone `+` as an empty item (four or more columns
-  past the item's text, as code) and drops the backslash of `\+`: there
+  As the second line of a list item's text, also as its last line, Linear
+  reads a lone `+` as an empty item (four or more columns past the item's
+  text, as code) and drops the backslash of `\+`: there
   `fix` writes `+` and a no-break space at the column of the item's text,
   which Linear keeps as text. Under a quote, and on later lines, the `+`
   stays as it is.
@@ -216,15 +216,22 @@ Blocks:
   line without a title that would open a section inside another one, or a
   `>>>` line without a title after a `+++` line closed its sections, is
   left to you (`section-opener`).
-- A run of more than three `+` signs is a section marker too, and `fix`
+- A section marker is a run of `+` signs followed by a space, a tab or
+  the line's end; Linear writes a section's title line as `+++ Title`.
+  A run of more than three signs is a section marker too, and `fix`
   writes it with three: `++++ Tip` and a closing `++++` become `+++ Tip`
   and `+++`. A closing marker pairs only with an opener of its own width,
   so a list item, quote or document that mixes widths is left to you.
-  Where such a run starts a list item or quote whose text goes on in a
-  line below without its indentation (`* ++++Tip` / `lazy words`), Linear
-  keeps it as text; `fix` escapes it (`* \++++Tip` / `  lazy words`).
-  Linear writes that text back without the backslash, and the sync puts
-  the backslash back, since a new document would read it as a section.
+- Signs with text right after them (`+++Plan`, `++++Tip`) are text.
+  Linear writes such text back without a backslash, but reads it as a
+  section's title when more of its list item, quote or document follows,
+  also on the next line. There `fix` escapes it (`1. \+++Plan` with a
+  nested list below it), the
+  [`section-marker-text`](#section-marker-text) rule. As the last line of
+  a paragraph above it, Linear splits it off as a paragraph of its own, so
+  `fix` escapes it there too. As the only line of the last paragraph of its
+  container (`1. +++Plan` followed by the next item) it stays as you wrote
+  it: Linear keeps it as text.
 - A bare `+++` opens an untitled section when it has a body or a closing
   marker and there is no section open in the same document, list item or
   quote. `fix` writes that opener with one trailing space, as Linear does.
@@ -233,7 +240,7 @@ Blocks:
   stays plain text.
 - A section marker that starts a list item or quote opens a section when
   more of the item or quote follows it, also on the next line: Linear reads
-  `1. +++Plan` followed by `   first step` as a section titled `Plan`. In a
+  `1. +++ Plan` followed by `   first step` as a section titled `Plan`. In a
   quote `fix` writes it as Linear does. In a list item it is
   [`block-first-in-list-item`](#block-first-in-list-item). A marker that is
   the item's only text stays text.
@@ -539,7 +546,8 @@ names a missing file, until the document or its image is fixed: see
 Each rule is a construct Linear would lose or alter, and its message says
 what to do. `fix` never rewrites a file with a finding, so nothing is lost
 silently; change the file yourself. The exceptions are
-[`hard-break-backslash`](#hard-break-backslash) and
+[`hard-break-backslash`](#hard-break-backslash),
+[`section-marker-text`](#section-marker-text) and
 [`table-quote-cell`](#table-quote-cell), which `fix` writes in a form
 Linear keeps where it can, and HTTP(S) images, which `fix` writes as links
 ([`image-not-in-repository`](#image-not-in-repository)).
@@ -1048,6 +1056,20 @@ file to you. A list that starts an item (`* * a`, `1. 2.`) is no finding:
 1. +++ Notes
    Water daily.
    +++
+```
+
+### `section-marker-text`
+
+A line that starts with +++ and text right after it (+++Plan) is text, but
+Linear opens a collapsible section from it when more of its list item,
+quote or document follows. Run fix to write it as \+++Plan, or put a space
+after +++ to make it a section. Linear writes the text back without the
+backslash; the sync reads it as text and writes it as `fix` does.
+
+```markdown
+1. Week
+   1. +++Plan
+      1. First step
 ```
 
 ### `ordered-task-list`

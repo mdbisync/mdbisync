@@ -1254,7 +1254,7 @@ describe('what fix leaves alone', () => {
       ['1. Plan\n\n   Note\n   2.', '1. Plan\n\n   Note\n   2.'],
       ['* Plan\n  Note\n  *', '* Plan\n  Note\n  \\*'],
       ['1. Trip\n   1. Plan\n      3)', '1. Trip\n   1. Plan\n      3)'],
-      ['1. Plan\n   +', '1. Plan\n   +'],
+      // A lone `+` there: fix writes it with a no-break space (see the plus line test).
       // Numbered lines after it: Linear reads the items of a list, nested in
       // the empty item where they reach its content, else after it. Their
       // numbers are not 1 and an empty item cannot interrupt the paragraph:
@@ -1783,7 +1783,7 @@ describe('what fix leaves alone', () => {
     }
   });
 
-  it('writes a lone + or \\+ right below an item\'s first line, before more text, with a no-break space, as Linear keeps it', () => {
+  it('writes a lone + or \\+ right below an item\'s first line with a no-break space, as Linear keeps it', () => {
     // Linear reads a lone `+` there as an empty item (code four or more
     // columns past the item's text) and drops the escape of `\+`; a no-break
     // space after it keeps it text.
@@ -1803,8 +1803,10 @@ describe('what fix leaves alone', () => {
       ['* `A\n  B`\n  +\n  More', `* \`A B\`\n  +${nbsp}\n  More`],
       // A hard break after the sign stays.
       ['* Plan\n  +  \n  More', `* Plan\n  +${nbsp}  \n  More`],
-      // Kept: the paragraph's last line, a later line, a quote, the top level and a plus before text.
-      ['1. Plan\n   +', '1. Plan\n   +'],
+      // As the paragraph's last line too, also before an empty item of the list around it.
+      ['1. Plan\n   +', `1. Plan\n   +${nbsp}`],
+      ['* Week\n  * Fruit\n    * 3 apples\n        +\n  * \n* Done', `* Week\n  * Fruit\n    * 3 apples\n      +${nbsp}\n  * \n* Done`],
+      // Kept: a later line, a quote, the top level and a plus before text.
       ['1. Plan\n   Note\n   +\n   More', '1. Plan\n   Note\n   +\n   More'],
       ['> 1. Plan\n>    +\n>    More', '> 1. Plan\n>    +\n>    More'],
       ['Plan\n+\nMore', 'Plan\n+\nMore'],
@@ -1822,7 +1824,7 @@ describe('what fix leaves alone', () => {
   });
 
   it('writes a bare plus on a paragraph continuation without creating an item', () => {
-    for (const output of ['Plan\n+', '* Plan\n  +', '> Plan\n> +']) {
+    for (const output of ['Plan\n+', '* Plan\n  Note\n  +', '> Plan\n> +']) {
       const input = output.slice(0, -1) + '\\+';
       assert.equal(fixText(input), output);
       assert.equal(fixText(output), output);
@@ -2482,4 +2484,35 @@ describe('Linear\'s content limit', () => {
       assert.equal(fixText(fixed), fixed, `a file over the limit is left as it is: ${tail}`);
     }
   });
+});
+
+// A file in fix's form that no one edits in Linear comes back unchanged:
+// Linear's export of it (as Linear writes it back) is no change from the
+// file, and its pull reads it back in fix's form.
+describe('a file in fix\'s form pulls back unchanged from Linear\'s export', () => {
+  const nbsp = '\u00a0';
+  const cases: Array<[string, string, string]> = [
+    // Linear writes text it holds without the escape of `+++` before text.
+    ['plus signs before text with a nested list', '1. Week\n   1. \\+++Plan\n      1. First step\n   2. Review', '1. Week\n   1. +++Plan\n      1. First step\n   2. Review'],
+    ['plus signs before text on a continuation line', 'Week\n\\+++Plan\nmore words', 'Week\n+++Plan\nmore words'],
+    // The same line escaped where blocks follow and plain where it ends its item.
+    ['a line written both ways', '1. Week\n   1. \\+++Plan 12\n      1. First step\n   2. +++Plan 12', '1. Week\n   1. +++Plan 12\n      1. First step\n   2. +++Plan 12'],
+    // Linear can write a section line that is an item's only text with an escape.
+    ['a section line as an item\'s only text', '1. Week\n2. +++ Tip words', '1. Week\n2. \\+++ Tip words'],
+    // Two signs are no section marker; Linear drops their escape.
+    ['two plus signs', '1. Week\n   1\\. \\++Plan 12', '1. Week\n   1\\. ++Plan 12'],
+    ['a number in bold and an entity', '1. Week\n   1. **12\\. Rent**\n   2. a -&gt; b', '1. Week\n   1. **12. Rent**\n   2. a -> b'],
+    // Linear drops the escape of a dash line indented past its item's text.
+    ['a dash line past the item\'s text', '1. Week\n   1. Total 12\n       \\-------\n       Rest', '1. Week\n   1. Total 12\n       -------\n       Rest'],
+    // Linear keeps a plus sign and a no-break space as text.
+    ['a plus line in an item', `* Week\n  * 3 apples\n    +${nbsp}\n  * \n* Done`, `* Week\n  * 3 apples\n    +${nbsp}\n  * \n* Done`],
+  ];
+  for (const [label, file, linear] of cases) {
+    it(label, () => {
+      assert.equal(fixText(file), file, 'fix leaves the file');
+      assert.deepEqual(lintText('a.md', file), [], 'lint finds nothing');
+      assert.ok(sameAsLinear(linear, file), 'the sync takes Linear\'s export as no change');
+      assert.deepEqual(lintText('a.md', fixLinearText(linear, linear, () => false, file)), [], 'a pull of it is lint clean');
+    });
+  }
 });

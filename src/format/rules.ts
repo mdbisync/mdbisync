@@ -40,6 +40,7 @@ export const LINT_RULES = {
   'list-after-item-text': 'In a list item, Linear writes a list on the line right below the text or the list of another kind before it. When its first item is empty, starts with a list, or is numbered other than 1, Markdown reads that marker as part of the text above. Start the list with an item of text, numbered 1 in a numbered list.',
   'list-number-too-long': 'An ordered list numbered past 999999999: Linear numbers its items on from the first number, and Markdown reads a number of more than nine digits as text of the item above it. Start the list at a smaller number.',
   'block-first-in-list-item': 'A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.',
+  'section-marker-text': 'A line that starts with +++ and text right after it (+++Plan) is text, but Linear opens a collapsible section from it when more of its list item, quote or document follows. Run fix to write it as \\+++Plan, or put a space after +++ to make it a section.',
   'ordered-task-list': 'An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.',
   'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path, or run fix to write an HTTP(S) image as a link.',
   'image-file-missing': 'An image must name a file that exists in the repository, not a folder or a Markdown document.',
@@ -82,8 +83,11 @@ export interface Warning {
  * writes for that text; lint's FIX_ONLY_RULES lets the sync send such a
  * file as it is, since Linear's own export can hold it. A link without
  * text gets its URL as the text; one without a URL stays with its author.
+ * A line of plus signs with text right after them that Linear would read
+ * as a section's title gets a backslash (`\+++Plan`); the sync leaves it
+ * out until then.
  */
-export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash', 'link-without-text', 'table-quote-cell']);
+export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash', 'link-without-text', 'section-marker-text', 'table-quote-cell']);
 
 /**
  * Rules about where an image's file is, not about what Linear loses. The
