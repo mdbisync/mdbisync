@@ -167,6 +167,12 @@ refuses an earlier release, given by its SHA or its `--release-version`,
 and names it; it writes any other SHA as given, since it works offline and
 cannot check one it does not know.
 
+When rerun with the same release flags, `init` also accepts an exact
+match for a workflow it generated with the earlier comment
+`# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.`
+and keeps that wording. An edited workflow still causes an
+`existing workflow differs` error.
+
 ## Tokens left by interrupted jobs
 
 The action revokes each run's Linear token when it ends and retries in its

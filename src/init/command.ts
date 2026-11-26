@@ -39,6 +39,15 @@ export const LFS_ATTRIBUTES: readonly string[] = [
   `**/${ASSETS_FOLDER}/** ${LFS}`,
 ];
 
+// Both sync workflows previously used this comment. Match the full rendered
+// workflow so a custom comment or a change to a workflow setting still conflicts.
+const EARLIER_VARIABLE_COMMENT = '# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.\n';
+const VARIABLE_COMMENT = '# Needs: variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID,\n# in the repository or in the mdbisync environment.\n';
+
+function enableProjectCreation(workflow: string): string {
+  return workflow.replace(/^( +)security-step: (?:stage|apply)$/gm, '$&\n$1create-projects: true');
+}
+
 interface Settings { sha?: string; version?: string; security?: boolean; lfs?: boolean; createProjects?: boolean }
 export interface InitOptions { cwd?: string; prompt?: (question: string) => Promise<string> }
 class InitError extends Error {}
@@ -211,10 +220,15 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
     };
     for (const [name, template] of Object.entries(templates)) {
       const pinned = template.replace(new RegExp(RELEASE_PIN, 'g'), `mdbisync/mdbisync@${settings.sha}${settings.version ? ` # ${settings.version}` : ''}`);
-      const optedIn = pinned.replace(/^( +)security-step: (?:stage|apply)$/gm, '$&\n$1create-projects: true');
       await queue(`.github/workflows/${name}`, (before) => {
-        if (before !== undefined && before !== pinned && before !== optedIn) throw new InitError(message('init.workflow-differs', { name }));
-        return settings.createProjects || before === optedIn ? optedIn : pinned;
+        if (before === undefined) return settings.createProjects ? enableProjectCreation(pinned) : pinned;
+        const earlier = pinned.replace(VARIABLE_COMMENT, EARLIER_VARIABLE_COMMENT);
+        for (const generated of [pinned, earlier]) {
+          const optedIn = enableProjectCreation(generated);
+          if (before === optedIn) return before;
+          if (before === generated) return settings.createProjects ? optedIn : before;
+        }
+        throw new InitError(message('init.workflow-differs', { name }));
       });
     }
     await queue(PRE_COMMIT_CONFIG, (before) => hookConfig(before, settings));

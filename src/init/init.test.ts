@@ -77,6 +77,60 @@ test('init opts in to project creation on both stages of both sync workflows', a
   assert.match((await runCli(flags, { cwd })).stdout, /already initialized/);
 });
 
+const currentVariablesComment = '# Needs: variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID,\n# in the repository or in the mdbisync environment.\n';
+const earlierVariablesComment = '# Needs: repository variables MDBISYNC_APP_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_ID.\n';
+
+test('init accepts both untouched earlier sync workflows with the same pin', async (t) => {
+  const cwd = await fixture(t);
+  const initialized = await runCli(flags, { cwd });
+  assert.equal(initialized.exitCode, 0, initialized.stderr);
+  const earlierWorkflows = new Map<string, string>();
+  for (const name of ['mdbisync.yml', 'mdbisync-initial-sync.yml']) {
+    const path = join(cwd, '.github/workflows', name);
+    const current = await readFile(path, 'utf8');
+    assert.equal(current.split(currentVariablesComment).length - 1, 1, name);
+    const earlier = current.replace(currentVariablesComment, earlierVariablesComment);
+    await writeFile(path, earlier);
+    earlierWorkflows.set(path, earlier);
+  }
+
+  const again = await runCli(flags, { cwd });
+  assert.equal(again.exitCode, 0, again.stderr);
+  assert.match(again.stdout, /already initialized/);
+  for (const [path, earlier] of earlierWorkflows) assert.equal(await readFile(path, 'utf8'), earlier);
+
+  const optedIn = await runCli([...flags, '--create-projects'], { cwd });
+  assert.equal(optedIn.exitCode, 0, optedIn.stderr);
+  for (const path of earlierWorkflows.keys()) {
+    const text = await readFile(path, 'utf8');
+    assert.ok(text.includes(earlierVariablesComment));
+    assert.equal(text.match(/^ +create-projects: true$/gm)?.length, 2);
+  }
+  assert.match((await runCli(flags, { cwd })).stdout, /already initialized/);
+});
+
+test('init reports edits to an earlier workflow and preserves it', async (t) => {
+  const cwd = await fixture(t);
+  const initialized = await runCli(flags, { cwd });
+  assert.equal(initialized.exitCode, 0, initialized.stderr);
+  const path = join(cwd, '.github/workflows/mdbisync.yml');
+  const current = await readFile(path, 'utf8');
+  assert.ok(current.includes(currentVariablesComment));
+  const earlier = current.replace(currentVariablesComment, earlierVariablesComment);
+  for (const edited of [
+    `# Run after the example checks.\n${earlier}`,
+    earlier.replace('name: mdbisync\n', 'name: example sync\n'),
+    earlier.replaceAll(sha, 'abcdef0123456789abcdef0123456789abcdef01'),
+  ]) {
+    assert.notEqual(edited, earlier);
+    await writeFile(path, edited);
+    const result = await runCli(flags, { cwd });
+    assert.equal(result.exitCode, 2, result.stderr);
+    assert.match(result.stderr, /^init: existing workflow differs: mdbisync\.yml\n/);
+    assert.equal(await readFile(path, 'utf8'), edited);
+  }
+});
+
 test('init refuses to enable project creation on a known release that lacks the action input', async (t) => {
   const cwd = await fixture(t);
   const result = await runCli(['init', '--release-sha', '7931bd5f1d8b457fe1d51ddff8991e2c59f24503', '--create-projects'], { cwd });
@@ -226,6 +280,16 @@ test('the bundled CLI initializes a repository with no dependency installation',
   assert.match(result.stdout, /jobs still read repository secrets.*branch rule does not protect those secrets/);
   assert.match(result.stdout, /Set variable MDBISYNC_LINEAR_CLIENT_ID \(in the repository or the mdbisync environment\) and add environment secret MDBISYNC_LINEAR_CLIENT_SECRET/);
   assert.match(result.stdout, /Set variable MDBISYNC_APP_CLIENT_ID \(in the repository or the mdbisync environment\) and add environment secret MDBISYNC_APP_PRIVATE_KEY/);
+
+  const path = join(cwd, '.github/workflows/mdbisync.yml');
+  const current = await readFile(path, 'utf8');
+  assert.ok(current.includes(currentVariablesComment));
+  const earlier = current.replace(currentVariablesComment, earlierVariablesComment);
+  await writeFile(path, earlier);
+  const again = spawnSync(process.execPath, [entry.pathname, ...flags], { cwd, encoding: 'utf8', input: '' });
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /already initialized/);
+  assert.equal(await readFile(path, 'utf8'), earlier);
 });
 
 test('complete flags do not prompt even when a terminal prompt is available', async (t) => {
