@@ -78,7 +78,7 @@ export function renderReport(run: ProbeRun, options: ReportOptions): string {
           ? `refused: ${cell(result.secondRefused)}`
           : 'n/a'
         : `${result.fixedPoint ? 'yes' : '**no**'}${result.yjsStable === false ? ' (Yjs differs)' : ''}`;
-    const nodes = result.yjs ? cell(describeSummary(result.yjs).join(', ')) : result.yjsError ? cell(result.yjsError) : 'n/a';
+    const nodes = result.yjs ? cell(describeSummary(result.yjs).join(', ')) : cell(result.yjsBlocked ?? result.yjsError ?? 'n/a');
     out.push(`| \`${result.file}\` | ${result.construct} | ${klass} | ${changedCell} | ${fixed} | ${nodes} | ${cell(keptOnlyInYjs(result).join(', ') || '')} |`);
   }
   out.push('');

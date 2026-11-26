@@ -100,6 +100,14 @@ class FakeWorkspace {
       }));
       return data({ documents: { nodes } });
     });
+    const directRead = (r: ReceivedRequest) => {
+      const id = r.variables!.id as string;
+      const document = this.documents.get(id);
+      const state = r.operation === 'ReadBackDocument' ? document?.state : undefined;
+      return data({ document: document ? { id, content: document.content, contentState: state, team: null } : null });
+    };
+    fake.operations.set('ReadBackDocument', directRead);
+    fake.operations.set('ReadBackDocumentMarkdown', directRead);
   }
 
   store(id: string, content: string): void {
@@ -243,6 +251,94 @@ describe('format probe against a fake Linear', () => {
     assert.deepEqual(files(), [file]);
     assert.equal(await main(args, env), 0);
     assert.deepEqual(files(), [file]);
+  });
+
+  it('reads omitted documents directly after create and update, including their Yjs state', async (t) => {
+    const original = fake.operations.get('ReadBack')!;
+    fake.operations.set('ReadBack', (request) => original({
+      ...request,
+      variables: { ids: (request.variables!.ids as string[]).filter((_, index) => index !== 1) },
+    }));
+    t.after(() => { fake.operations.set('ReadBack', original); });
+
+    const start = fake.received.length;
+    const run = await probe();
+    const fixture = run.fixtures[1]!;
+    assert.equal(fixture.first, '- One\n- Two\n\nRef kx-00000002');
+    assert.equal(fixture.fixedPoint, true);
+    assert.equal(fixture.yjsStable, true);
+    const direct = fake.received.slice(start).filter((request) => request.operation === 'ReadBackDocument');
+    assert.equal(direct.length, 2, 'one direct read per omitted document');
+    assert.deepEqual(direct[0]?.variables, direct[1]?.variables);
+  });
+
+  it('leaves recorded forms and manifest intact when an update run misses a readback', async (t) => {
+    const log = t.mock.method(console, 'error', () => {});
+    const dir = makeBank();
+    const env = { LINEAR_TEST_APP_CLIENT_ID: 'probe-client', LINEAR_TEST_APP_CLIENT_SECRET: 'probe-secret', LINEAR_BASE_URL: fake.url };
+    const args = ['--bank-dir', dir, '--only', 'lists/star.md', '--no-facts', '--update'];
+    assert.equal(await main(args, env), 0);
+    const files = ['linear-probe.json', goldenMarkdownPath('lists/star.md'), goldenYjsPath('lists/star.md')].map(file => join(dir, file));
+    const recorded = files.map(file => readFileSync(file, 'utf8'));
+    t.after(() => { fake.fault = undefined; });
+
+    for (const missingRead of [1, 2]) {
+      let reads = 0;
+      fake.fault = (request) => {
+        if (request.operation === 'ReadBack' && ++reads === missingRead) {
+          return { body: { data: { documents: { nodes: [] } } } };
+        }
+        if (request.operation === 'ReadBackDocument') {
+          return missingRead === 1
+            ? { body: { data: { document: null } } }
+            : { body: { data: null, errors: [{ message: 'Entity not found: Document' }] } };
+        }
+        return undefined;
+      };
+      const start = log.mock.callCount();
+      assert.equal(await main(args, env), 2, `readback ${missingRead} failed`);
+      assert.ok(log.mock.calls.slice(start).some(({ arguments: [line] }) => line.includes('Linear readback could not find a document')));
+      assert.deepEqual(files.map(file => readFileSync(file, 'utf8')), recorded);
+      assert.equal(fake.received.at(-2)?.operation, 'DeleteProject');
+      assert.equal(fake.received.at(-1)?.path, '/oauth/revoke');
+    }
+  });
+
+  it('keeps a direct Yjs read error local to that fixture and preserves its recorded state', async (t) => {
+    const bank = loadBank(makeBank());
+    const runBank = () => runProbe({
+      client: new LinearClient({ token: 'fake', baseUrl: fake.url }, PROBE_FACTS),
+      bank,
+      runId: 'test-run',
+      facts: false,
+    });
+    writeRecord(bank, await runBank());
+    const yjsPath = join(bank.dir, goldenYjsPath('lists/star.md'));
+    const recorded = readFileSync(yjsPath, 'utf8');
+    const list = fake.operations.get('ReadBack')!;
+    t.after(() => { fake.fault = undefined; });
+
+    for (const missingRead of [1, 2]) {
+      let reads = 0;
+      fake.fault = (request) => {
+        if (request.operation === 'ReadBack' && ++reads === missingRead) {
+          return list({ ...request, variables: { ids: (request.variables!.ids as string[]).slice(1) } });
+        }
+        if (request.operation === 'ReadBackDocument') {
+          return { body: { errors: [{ message: 'Could not resolve contentState for document' }] } };
+        }
+        return undefined;
+      };
+      const run = await runBank();
+      assert.equal(run.yjsBlocked, undefined);
+      assert.equal(run.fixtures[0]?.fixedPoint, true);
+      assert.equal(run.fixtures[0]?.yjsStable, undefined);
+      assert.equal(run.fixtures[1]?.yjsStable, true);
+      assert.deepEqual(findDrift(bank, run), []);
+      writeRecord(bank, run);
+      assert.equal(readFileSync(yjsPath, 'utf8'), recorded);
+      assert.equal(JSON.parse(readFileSync(join(bank.dir, 'linear-probe.json'), 'utf8')).fixtures['lists/star.md'].yjs, 'recorded');
+    }
   });
 
   it('records the client\'s own refusal of an over-limit content as that fixture\'s refusal, matching Linear\'s recorded one', async () => {

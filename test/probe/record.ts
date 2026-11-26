@@ -128,7 +128,7 @@ export function findDrift(bank: Bank, run: ProbeRun): Drift[] {
     if (recorded.fixedPoint !== observed.fixedPoint) {
       drifts.push({ file: result.file, kind: 'fixed-point', detail: `recorded ${recorded.fixedPoint}, now ${observed.fixedPoint}` });
     }
-    if (!run.yjsBlocked) {
+    if (!run.yjsBlocked && !result.yjsBlocked) {
       const now = yjsText(result);
       if (recorded.yjs !== observed.yjs) {
         drifts.push({
@@ -154,12 +154,12 @@ export function writeRecord(bank: Bank, run: ProbeRun): void {
     if (result.first === undefined) rmSync(markdownPath, { force: true });
     else writeFileSync(markdownPath, result.first);
     const yjs = yjsText(result);
+    const keepPreviousYjs = run.yjsBlocked || result.yjsBlocked;
     if (yjs !== undefined) writeFileSync(yjsPath, yjs);
-    else if (!run.yjsBlocked) rmSync(yjsPath, { force: true });
+    else if (!keepPreviousYjs) rmSync(yjsPath, { force: true });
     const previous = manifest.fixtures[result.file];
     const entry = entryOf(result);
-    // A run without Yjs keeps the earlier Yjs record.
-    if (run.yjsBlocked && previous) entry.yjs = previous.yjs;
+    if (keepPreviousYjs && previous) entry.yjs = previous.yjs;
     manifest.fixtures[result.file] = entry;
   }
   // Entries of fixtures that left the bank go with them.

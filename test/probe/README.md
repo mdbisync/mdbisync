@@ -82,6 +82,9 @@ entry exists. Use `--only` to probe them directly or `--update` to record them.
 
 If Linear stops serving `contentState` (an internal field), the probe
 reports the Yjs part as blocked and still checks the Markdown forms.
+If the document list omits a document the probe just wrote, the probe looks
+it up directly with the same token. If that read also misses, the run exits
+2 before `--update` writes any records.
 
 Each OAuth and GraphQL attempt emits a JSON diagnostic line on stderr with
 the run id, UTC start/end, operation, status, request id and budget headers.

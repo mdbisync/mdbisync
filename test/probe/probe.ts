@@ -80,6 +80,8 @@ export interface FixtureResult {
   /** Linear refused writing the first readback back. */
   secondRefused?: string;
   yjs?: YjsSummary;
+  /** The first direct lookup could only read Markdown for this fixture. */
+  yjsBlocked?: string;
   /** Why the Yjs state could not be read or decoded. */
   yjsError?: string;
   /** The decoded state is the same after the second write. */
@@ -142,6 +144,7 @@ interface ReadDocument {
   id: string;
   content: string | null;
   contentState?: string | null;
+  yjsBlocked?: string;
   trashed: boolean | null;
   archivedAt: string | null;
   team: { id: string } | null;
@@ -301,11 +304,7 @@ async function probeFixtures(
   const rawFirst = new Map<string, string>();
   const updated: Array<{ result: FixtureResult; id: string; returned: string | null | undefined }> = [];
   for (const entry of created) {
-    const document = firstRead.get(entry.id);
-    if (!document) {
-      entry.result.refused = 'created, but the document was not found on reading it back';
-      continue;
-    }
+    const document = firstRead.get(entry.id)!;
     const content = document.content ?? '';
     rawFirst.set(entry.id, content);
     const copies: Copies = new Map();
@@ -324,17 +323,13 @@ async function probeFixtures(
 
   const secondRead = await readBack(client, updated.map((u) => u.id), run);
   for (const entry of updated) {
-    const document = secondRead.get(entry.id);
-    if (!document) {
-      entry.result.secondRefused = 'written back, but the document was not found on reading it again';
-      continue;
-    }
+    const document = secondRead.get(entry.id)!;
     const content = document.content ?? '';
     const copies: Copies = new Map();
     entry.result.second = fromLinear(content, assets, copies);
     entry.result.fixedPoint = content === rawFirst.get(entry.id);
     entry.result.updateReturnedStored = entry.returned === document.content;
-    if (entry.result.yjs) {
+    if (entry.result.yjs && !run.yjsBlocked && !document.yjsBlocked) {
       const again: FixtureResult = { ...entry.result };
       delete again.yjs;
       decodeInto(again, document, assets, run, copies);
@@ -345,6 +340,10 @@ async function probeFixtures(
 
 function decodeInto(result: FixtureResult, document: ReadDocument, assets: AssetMap, run: ProbeRun, copies: Copies): void {
   if (run.yjsBlocked) return;
+  if (document.yjsBlocked) {
+    result.yjsBlocked = document.yjsBlocked;
+    return;
+  }
   if (typeof document.contentState !== 'string' || document.contentState === '') {
     result.yjsError = 'no content state returned';
     return;
@@ -359,38 +358,70 @@ function decodeInto(result: FixtureResult, document: ReadDocument, assets: Asset
 const READ_FIELDS = 'id content trashed archivedAt team { id }';
 
 /**
- * Reads documents by id with their content and content state. When Linear no
- * longer serves `contentState` (an internal field), reads without it and
- * marks Yjs as blocked for the run.
+ * Reads every requested document or stops the run. Try the direct lookup for
+ * any freshly written document that Linear omits from the collection.
  */
 async function readBack(client: LinearClient, ids: readonly string[], run: ProbeRun): Promise<Map<string, ReadDocument>> {
   const result = new Map<string, ReadDocument>();
+  // When Linear no longer serves its internal contentState field, keep
+  // reading Markdown. A direct lookup can fail for just one document.
+  const read = async <T>(
+    query: (withState: boolean) => Promise<T>,
+    markBlocked: (reason: string, data: T) => void,
+  ): Promise<T> => {
+    if (run.yjsBlocked) return query(false);
+    try {
+      return await query(true);
+    } catch (error) {
+      if (!(error instanceof LinearGraphQLError) || !/contentState/i.test(error.message)) throw error;
+      const data = await query(false);
+      markBlocked(describe(error), data);
+      return data;
+    }
+  };
   for (let start = 0; start < ids.length; start += READ_PAGE_SIZE) {
     const chunk = ids.slice(start, start + READ_PAGE_SIZE);
-    const read = (withState: boolean) =>
-      client.request<{ documents: { nodes: ReadDocument[] } }>(
-        withState ? 'ReadBack' : 'ReadBackMarkdown',
+    const data = await read((withState) => {
+      const operation = withState ? 'ReadBack' : 'ReadBackMarkdown';
+      return client.request<{ documents: { nodes: ReadDocument[] } }>(
+        operation,
         'query',
-        `query ${withState ? 'ReadBack' : 'ReadBackMarkdown'}($ids: [ID!]!, $first: Int!) {
+        `query ${operation}($ids: [ID!]!, $first: Int!) {
           documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
             nodes { ${READ_FIELDS}${withState ? ' contentState' : ''} }
           }
         }`,
         { ids: chunk, first: chunk.length },
       );
-    let data: { documents: { nodes: ReadDocument[] } };
-    if (run.yjsBlocked) {
-      data = await read(false);
-    } else {
-      try {
-        data = await read(true);
-      } catch (error) {
-        if (!(error instanceof LinearGraphQLError) || !/contentState/i.test(error.message)) throw error;
-        run.yjsBlocked = describe(error);
-        data = await read(false);
-      }
-    }
+    }, (reason) => { run.yjsBlocked = reason; });
     for (const document of data.documents.nodes) result.set(document.id, document);
+
+    for (const id of chunk) {
+      if (result.has(id)) continue;
+      let document: ReadDocument | null = null;
+      try {
+        const direct = await read((withState) => {
+          const operation = withState ? 'ReadBackDocument' : 'ReadBackDocumentMarkdown';
+          return client.request<{ document: ReadDocument | null }>(
+            operation,
+            'query',
+            `query ${operation}($id: String!) {
+              document(id: $id) { ${READ_FIELDS}${withState ? ' contentState' : ''} }
+            }`,
+            { id },
+          );
+        }, (reason, data) => {
+          if (data.document) data.document.yjsBlocked = reason;
+        });
+        document = direct.document;
+      } catch (error) {
+        if (!(error instanceof LinearGraphQLError) || !error.notFound) throw error;
+      }
+      if (document?.id !== id) {
+        throw new Error('Linear readback could not find a document written by the probe by either list or direct lookup');
+      }
+      result.set(id, document);
+    }
   }
   return result;
 }
@@ -481,8 +512,8 @@ async function measureFacts(
     { teamId, id: scratch.id },
   );
   facts.teamFilterIncludesProjectDocuments = teamData.documents.nodes.some((d) => d.id === scratch.id);
-  const [scratchRead] = (await readBack(client, [scratch.id], run)).values();
-  facts.projectDocumentHasTeam = scratchRead?.team !== null && scratchRead?.team !== undefined;
+  const scratchRead = (await readBack(client, [scratch.id], run)).get(scratch.id)!;
+  facts.projectDocumentHasTeam = scratchRead.team !== null;
 
   facts.complexity = [];
   for (const first of [50, 100, 250]) {
