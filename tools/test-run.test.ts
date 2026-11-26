@@ -24,6 +24,8 @@ test('takes the options it supports in --name=value form, and leaves the rest to
     ['--test-reporter=./my-reporter.mjs', 'x.test.ts'], ['--test-concurrency=2'],
   ]) assert.equal(plan(args, ''), undefined, args.join(' '));
   assert.equal(plan(['x.test.ts'], '--test-shard=2/2'), undefined);
+  assert.equal(plan(['x.test.ts'], '--experimental-test-isolation=none'), undefined);
+  assert.equal(plan(['x.test.ts'], '--max-old-space-size=4096 --experimental-test-module-mocks'), undefined);
   assert.notEqual(plan(['x.test.ts'], '--max-old-space-size=4096'), undefined);
 });
 

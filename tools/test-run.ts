@@ -37,7 +37,8 @@ export interface Plan {
  * in, or test runner options in `NODE_OPTIONS`.
  */
 export function plan(args: readonly string[], nodeOptions = process.env.NODE_OPTIONS ?? ''): Plan | undefined {
-  if (/(^|\s)--test/.test(nodeOptions)) return undefined;
+  // Test options there, experimental ones included (`--experimental-test-isolation`), change how `node --test` runs.
+  if (/(^|\s)--(experimental-)?test/.test(nodeOptions)) return undefined;
   // A file per CPU: `node --test` leaves one CPU to its own process, and this one only passes events on.
   const result: Plan = { patterns: [], concurrency: availableParallelism(), namePatterns: [], skipPatterns: [], reporters: [], timeout: undefined };
   const names: string[] = [];
