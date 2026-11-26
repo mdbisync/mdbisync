@@ -40,7 +40,7 @@ export const LINT_RULES = {
   'list-number-too-long': 'An ordered list numbered past 999999999: Linear numbers its items on from the first number, and Markdown reads a number of more than nine digits as text of the item above it. Start the list at a smaller number.',
   'block-first-in-list-item': 'A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.',
   'ordered-task-list': 'An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.',
-  'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path.',
+  'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path, or run fix to write an HTTP(S) image as a link.',
   'image-file-missing': 'An image must name a file that exists in the repository, not a folder or a Markdown document.',
   'upload-file-refused': 'A file named as the sync names a captured upload fails the upload check: documents that link it are blocked when they change in Linear.',
   'document-in-assets-folder': 'A Markdown document cannot be inside a folder named assets, which holds the files documents embed.',
@@ -54,6 +54,7 @@ export type LintRule = keyof typeof LINT_RULES;
  * never fail a command, a hook or CI, and never leave a file out.
  */
 export const LINT_WARNINGS = {
+  'image-made-link': 'fix wrote an image from a URL as a link to it: Linear shows the link, not the image. To show the image, add the file to the repository and link it by its relative path.',
   'list-number-as-text': "A line in a list item starts with a number that Markdown reads as text of the item, though it looks like a nested numbered list: a nested list numbered other than 1 cannot follow the item's text, and a list indented four or more columns past the item's text is part of it. To make it a list, renumber its first item to 1., move it one level up, or remove a doubled number such as 14. 13. in the line above, and remove the backslash fix writes after each of its numbers (2\\.).",
 } as const;
 

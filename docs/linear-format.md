@@ -537,7 +537,8 @@ what to do. `fix` never rewrites a file with a finding, so nothing is lost
 silently; change the file yourself. The exceptions are
 [`hard-break-backslash`](#hard-break-backslash) and
 [`table-quote-cell`](#table-quote-cell), which `fix` writes in a form
-Linear keeps where it can.
+Linear keeps where it can, and HTTP(S) images, which `fix` writes as links
+([`image-not-in-repository`](#image-not-in-repository)).
 
 ### `footnote`
 
@@ -637,9 +638,9 @@ its link.
 ```
 
 Instead, put the image and the link side by side or on separate lines.
-A badge served from another site is an image outside the repository, which
-[`image-not-in-repository`](#image-not-in-repository) reports as well: link
-to the page instead.
+A badge served from another site is an image outside the repository:
+`fix` writes it as text of the outer link
+([`image-not-in-repository`](#image-not-in-repository)).
 
 ### `content-too-long`
 
@@ -1045,7 +1046,8 @@ counts.
 
 An image must be a relative path to a file of the repository, not a URL,
 an absolute path or a path outside it. Add the file to the repository and
-link it by its relative path. The sync uploads the files a
+link it by its relative path, or run fix to write an HTTP(S) image as a
+link. The sync uploads the files a
 document's images name; an image anywhere else would depend on the reader's
 network and on what Linear does with it. Linear has kept such an image,
 copied it to an upload of its own, and, most recently, kept only its alt
@@ -1061,6 +1063,13 @@ repository. Plain links to URLs are not affected.
 Add the file in the same pull request, for example as
 `![Revenue chart](images/revenue.png)`. A file stored with Git LFS counts
 like any other.
+
+`fix` writes an `http:` or `https:` image as a link to its URL, as a pull
+repairs it, and prints the [`image-made-link`](#image-made-link) warning:
+`[Revenue chart](<https://example.com/charts/revenue.png>)`. An empty alt
+text uses the URL as the label, and an image inside a link keeps the outer
+link. `data:` images, absolute paths and paths outside the repository stay
+findings for you to fix.
 
 ### `image-file-missing`
 
@@ -1120,8 +1129,27 @@ Instead, move the document out of the `assets` folder.
 ## Lint warnings
 
 A warning marks text that may not read as its author meant. `lint` and
-`fix` print it and keep the text as it is; a warning never fails a
-command, a hook or CI, and never leaves a file out of the sync.
+`fix` print it; a warning never fails a command, a hook or CI, and never
+leaves a file out of the sync.
+
+### `image-made-link`
+
+fix wrote an image from a URL as a link to it: Linear shows the link, not
+the image. To show the image, add the file to the repository and link it by
+its relative path. `fix` prints it with the file and line of each image it
+wrote as a link ([`image-not-in-repository`](#image-not-in-repository)).
+
+```markdown
+Intro.
+
+![Revenue chart](https://example.com/charts/revenue.png)
+```
+
+Line 3 is reported. An image of a repository file is not:
+
+```markdown
+![Revenue chart](images/revenue.png)
+```
 
 ### `list-number-as-text`
 

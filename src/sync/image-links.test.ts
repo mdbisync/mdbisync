@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { it, test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { imageLinks, ImageRepairBudgetError } from './image-links.ts';
+import { imageLinks, ImageRepairBudgetError, webImageLinks } from './image-links.ts';
 import { parse, visit } from '../format/markdown.ts';
 import { fixText } from '../format/index.ts';
 
@@ -166,4 +166,31 @@ for (const [source, repaired] of [
   let links = 0;
   visit(parse(body), node => { if (node.type === 'link') links++; });
   assert.equal(links, 1, 'the repair is a link, not text');
+});
+
+// `fix` writes HTTP(S) images as links with the same rules, and changes nothing else.
+for (const [source, expected, lines] of [
+  ['![Chart](https://example.com/chart.png)', '[Chart](<https://example.com/chart.png>)', [1]],
+  ['Intro.\n\n![](HTTP://example.com/a.png)', 'Intro.\n\n[HTTP://example.com/a.png](<HTTP://example.com/a.png>)', [3]],
+  ['See ![Chart][c].\n\n[c]: https://example.com/c.png', 'See [Chart](<https://example.com/c.png>).\n\n[c]: https://example.com/c.png', [1]],
+  ['[![Build](https://example.com/badge.svg)](https://example.com/build)', '[Build](https://example.com/build)', [1]],
+  ['| A |\n| -- |\n| ![Cell](https://example.com/x.png) |', '| A |\n| -- |\n| [Cell](<https://example.com/x.png>) |', [3]],
+  ['![Upload](https://uploads.linear.app/a/b.png)', '[Upload](<https://uploads.linear.app/a/b.png>)', [1]],
+  ['![Web](https://example.com/w.png) and [Bad](javascript:alert%281%29)', '[Web](<https://example.com/w.png>) and [Bad](javascript:alert%281%29)', [1]],
+  ['![Dot](data:image/png;base64,AAAA) ![Web](https://example.com/w.png)', '![Dot](data:image/png;base64,AAAA) [Web](<https://example.com/w.png>)', [1]],
+] as const) it(`fix writes a web image as a link: ${JSON.stringify(source)}`, () => {
+  assert.deepEqual(webImageLinks(source), {body: expected, lines});
+});
+
+for (const source of [
+  '![Dot](data:image/png;base64,AAAA)',
+  '![Logo](/images/logo.png)',
+  '![Logo](//example.com/logo.png)',
+  '![Outside](../logo.png)',
+  '![Chart](chart.png)',
+  '![Undefined][none]',
+  '`![Chart](https://example.com/chart.png)`',
+  '[Web](https://example.com/page)',
+]) it(`fix keeps an image that is not on the web: ${JSON.stringify(source)}`, () => {
+  assert.equal(webImageLinks(source), undefined);
 });

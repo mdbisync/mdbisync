@@ -17,7 +17,8 @@ git.
 
 Files a document links are uploaded to Linear once. An image must be a
 relative path to a file of the repository; the `linear-format` hook reports
-other images ([image-not-in-repository](linear-format.md#image-not-in-repository)).
+other images ([image-not-in-repository](linear-format.md#image-not-in-repository)),
+and its `fix` writes an HTTP(S) image as a link, with a warning.
 External images are never downloaded, and repaired paths stay plain links
 and do not upload repository files.
 
@@ -36,7 +37,8 @@ the upload URL or declared content type.
 
 - External HTTP(S) images, path images and uploads returning 404 or 410
   become ordinary links. An empty alt text uses the URL as its label, and
-  an image inside a link keeps the outer link.
+  an image inside a link keeps the outer link. `fix` applies the same
+  rewrite to HTTP(S) images in git.
 - Empty images and `data:` images are removed.
 - Links with schemes other than HTTP, HTTPS or `mailto` are removed with
   their text on pull and refused by lint on push. Paths and fragments are

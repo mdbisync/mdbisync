@@ -375,7 +375,9 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `section-opener`, `url-in-html`, `block-first-in-list-item`, `ordered-task-list`,
 `image-not-in-repository`, `image-file-missing` and
 `document-in-assets-folder`. Each is described, with its fix, in
-[linear-format.md](linear-format.md#lint-rules). A list item that opens
+[linear-format.md](linear-format.md#lint-rules). `fix` writes an HTTP(S)
+image as a link and prints the
+[`image-made-link`](linear-format.md#image-made-link) warning. A list item that opens
 with a collapsible section (`1. +++ Notes` with more of the item below
 it) is `block-first-in-list-item`: put a line of text first in the item.
 

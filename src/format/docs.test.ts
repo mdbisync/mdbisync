@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import { fixText } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
 import { listTextWarnings } from './list-text.ts';
+import { webImageLinks } from '../sync/image-links.ts';
 import { LINT_RULES, LINT_WARNINGS, type LintRule, type LintWarningRule } from './rules.ts';
 
 const docs = readFileSync(new URL('../../docs/linear-format.md', import.meta.url), 'utf8');
@@ -55,7 +56,7 @@ describe('format docs', () => {
     }
   });
 
-  it('list each warning with its message, a Markdown example it reports and the list form it does not', () => {
+  it('list each warning with its message, a Markdown example it reports and a form it does not', () => {
     const parts = section('Lint warnings').split(/\n### `([^`]+)`\n/);
     const sections = new Map<string, string>();
     for (let index = 1; index < parts.length; index += 2) sections.set(parts[index]!, parts[index + 1]!);
@@ -67,8 +68,9 @@ describe('format docs', () => {
       const named = /\bLines? ([\d, and]+) (?:is|are) reported\./.exec(text);
       assert.ok(named !== null, `${rule}: the docs do not say which lines are reported`);
       const documented = named[1]!.split(/,? and |, /).map(Number);
-      assert.deepEqual(listTextWarnings('example.md', example.body).map((warning) => warning.line), documented);
-      assert.deepEqual(listTextWarnings('example.md', listed!.body), []);
+      const lines = (body: string): number[] => rule === 'image-made-link' ? webImageLinks(body)?.lines ?? [] : listTextWarnings('example.md', body).map((warning) => warning.line);
+      assert.deepEqual(lines(example.body), documented);
+      assert.deepEqual(lines(listed!.body), []);
     }
   });
 
