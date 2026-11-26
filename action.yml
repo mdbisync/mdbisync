@@ -1,5 +1,5 @@
 name: mdbisync
-description: "Two-way sync of Linear documents and Markdown files in your repo. Your GitHub App, your keys."
+description: "Two-way sync of Linear documents and Markdown files in your repo. Secure by design: only you hold the keys."
 branding:
   icon: refresh-cw
   color: green

@@ -10768,6 +10768,7 @@ var LINT_RULES = {
   "duplicate-title": "Two or more files map to one document title.",
   "table-alignment": "Table column alignment is dropped. Remove the colons from the separator row to accept that.",
   "link-scheme": "Links must use http, https, mailto, a path or a fragment. Change the destination, or write the address as inline code.",
+  "link-without-text": "Linear drops a link without text, and its URL with it. Run fix to write the URL as the link text, or write the text yourself; a link with neither text nor URL needs text or removal.",
   "link-title": "A link title is dropped. Remove the title, or move its text into the link text.",
   "image-title": "An image title is dropped from the Markdown. Remove the title, or move its text into the alt text.",
   "code-in-emphasis": "Bold or italic around inline code is dropped from the code. Write the code without emphasis, or emphasize the words around it.",
@@ -10786,13 +10787,19 @@ var LINT_RULES = {
   "list-after-item-text": "In a list item, Linear writes a list on the line right below the text or the list of another kind before it. When its first item is empty, starts with a list, or is numbered other than 1, Markdown reads that marker as part of the text above. Start the list with an item of text, numbered 1 in a numbered list.",
   "list-number-too-long": "An ordered list numbered past 999999999: Linear numbers its items on from the first number, and Markdown reads a number of more than nine digits as text of the item above it. Start the list at a smaller number.",
   "block-first-in-list-item": "A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.",
+  "section-marker-text": "A line that starts with +++ and text right after it (+++Plan) is text, but Linear opens a collapsible section from it when more of its list item, quote or document follows. Run fix to write it as \\+++Plan, or put a space after +++ to make it a section.",
   "ordered-task-list": "An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.",
-  "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path.",
+  "image-not-in-repository": "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path, or run fix to write an HTTP(S) image as a link.",
   "image-file-missing": "An image must name a file that exists in the repository, not a folder or a Markdown document.",
   "upload-file-refused": "A file named as the sync names a captured upload fails the upload check: documents that link it are blocked when they change in Linear.",
   "document-in-assets-folder": "A Markdown document cannot be inside a folder named assets, which holds the files documents embed."
 };
-var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash", "table-quote-cell"]);
+var LINT_WARNINGS = {
+  "image-made-link": "fix wrote an image from a URL as a link to it, or as the text of the link around it: Linear shows no image. To show the image, add the file to the repository and link it by its relative path.",
+  "link-text-from-url": "fix wrote the URL of a link without text as its text: Linear drops a link without text. To show other words, replace the text.",
+  "list-number-as-text": "A line in a list item starts with a number that Markdown reads as text of the item, though it looks like a nested numbered list: a nested list numbered other than 1 cannot follow the item's text, and a list indented four or more columns past the item's text is part of it. To make it a list, renumber its first item to 1., move it one level up, or remove a doubled number such as 14. 13. in the line above, and remove the backslash fix writes after each of its numbers (2\\.)."
+};
+var FIXED_RULES = /* @__PURE__ */ new Set(["hard-break-backslash", "link-without-text", "section-marker-text", "table-quote-cell"]);
 var IMAGE_PLACE_RULES = /* @__PURE__ */ new Set(["image-not-in-repository", "image-file-missing"]);
 
 // src/setup/report.ts
@@ -13457,18 +13464,17 @@ function decodeNamedCharacterReference(value) {
   return own.call(characterEntities, value) ? characterEntities[value] : false;
 }
 
-// node_modules/gemoji/index.js
-var nameToEmoji = {
-  100: "\u{1F4AF}",
-  1234: "\u{1F522}",
+// src/vendor/emoji-mart-data/linear-emoji.json
+var linear_emoji_default = {
+  "100": "\u{1F4AF}",
+  "1234": "\u{1F522}",
   grinning: "\u{1F600}",
   smiley: "\u{1F603}",
   smile: "\u{1F604}",
   grin: "\u{1F601}",
   laughing: "\u{1F606}",
-  satisfied: "\u{1F606}",
   sweat_smile: "\u{1F605}",
-  rofl: "\u{1F923}",
+  rolling_on_the_floor_laughing: "\u{1F923}",
   joy: "\u{1F602}",
   slightly_smiling_face: "\u{1F642}",
   upside_down_face: "\u{1F643}",
@@ -13476,9 +13482,9 @@ var nameToEmoji = {
   wink: "\u{1F609}",
   blush: "\u{1F60A}",
   innocent: "\u{1F607}",
-  smiling_face_with_three_hearts: "\u{1F970}",
+  smiling_face_with_3_hearts: "\u{1F970}",
   heart_eyes: "\u{1F60D}",
-  star_struck: "\u{1F929}",
+  "star-struck": "\u{1F929}",
   kissing_heart: "\u{1F618}",
   kissing: "\u{1F617}",
   relaxed: "\u263A\uFE0F",
@@ -13491,15 +13497,15 @@ var nameToEmoji = {
   zany_face: "\u{1F92A}",
   stuck_out_tongue_closed_eyes: "\u{1F61D}",
   money_mouth_face: "\u{1F911}",
-  hugs: "\u{1F917}",
-  hand_over_mouth: "\u{1F92D}",
+  hugging_face: "\u{1F917}",
+  face_with_hand_over_mouth: "\u{1F92D}",
   face_with_open_eyes_and_hand_over_mouth: "\u{1FAE2}",
   face_with_peeking_eye: "\u{1FAE3}",
   shushing_face: "\u{1F92B}",
-  thinking: "\u{1F914}",
+  thinking_face: "\u{1F914}",
   saluting_face: "\u{1FAE1}",
   zipper_mouth_face: "\u{1F910}",
-  raised_eyebrow: "\u{1F928}",
+  face_with_raised_eyebrow: "\u{1F928}",
   neutral_face: "\u{1F610}",
   expressionless: "\u{1F611}",
   no_mouth: "\u{1F636}",
@@ -13507,11 +13513,10 @@ var nameToEmoji = {
   face_in_clouds: "\u{1F636}\u200D\u{1F32B}\uFE0F",
   smirk: "\u{1F60F}",
   unamused: "\u{1F612}",
-  roll_eyes: "\u{1F644}",
+  face_with_rolling_eyes: "\u{1F644}",
   grimacing: "\u{1F62C}",
   face_exhaling: "\u{1F62E}\u200D\u{1F4A8}",
   lying_face: "\u{1F925}",
-  shaking_face: "\u{1FAE8}",
   relieved: "\u{1F60C}",
   pensive: "\u{1F614}",
   sleepy: "\u{1F62A}",
@@ -13521,7 +13526,7 @@ var nameToEmoji = {
   face_with_thermometer: "\u{1F912}",
   face_with_head_bandage: "\u{1F915}",
   nauseated_face: "\u{1F922}",
-  vomiting_face: "\u{1F92E}",
+  face_vomiting: "\u{1F92E}",
   sneezing_face: "\u{1F927}",
   hot_face: "\u{1F975}",
   cold_face: "\u{1F976}",
@@ -13529,17 +13534,17 @@ var nameToEmoji = {
   dizzy_face: "\u{1F635}",
   face_with_spiral_eyes: "\u{1F635}\u200D\u{1F4AB}",
   exploding_head: "\u{1F92F}",
-  cowboy_hat_face: "\u{1F920}",
+  face_with_cowboy_hat: "\u{1F920}",
   partying_face: "\u{1F973}",
   disguised_face: "\u{1F978}",
   sunglasses: "\u{1F60E}",
   nerd_face: "\u{1F913}",
-  monocle_face: "\u{1F9D0}",
+  face_with_monocle: "\u{1F9D0}",
   confused: "\u{1F615}",
   face_with_diagonal_mouth: "\u{1FAE4}",
   worried: "\u{1F61F}",
   slightly_frowning_face: "\u{1F641}",
-  frowning_face: "\u2639\uFE0F",
+  white_frowning_face: "\u2639\uFE0F",
   open_mouth: "\u{1F62E}",
   hushed: "\u{1F62F}",
   astonished: "\u{1F632}",
@@ -13563,23 +13568,20 @@ var nameToEmoji = {
   yawning_face: "\u{1F971}",
   triumph: "\u{1F624}",
   rage: "\u{1F621}",
-  pout: "\u{1F621}",
   angry: "\u{1F620}",
-  cursing_face: "\u{1F92C}",
+  face_with_symbols_on_mouth: "\u{1F92C}",
   smiling_imp: "\u{1F608}",
   imp: "\u{1F47F}",
   skull: "\u{1F480}",
   skull_and_crossbones: "\u2620\uFE0F",
   hankey: "\u{1F4A9}",
-  poop: "\u{1F4A9}",
-  shit: "\u{1F4A9}",
   clown_face: "\u{1F921}",
   japanese_ogre: "\u{1F479}",
   japanese_goblin: "\u{1F47A}",
   ghost: "\u{1F47B}",
   alien: "\u{1F47D}",
   space_invader: "\u{1F47E}",
-  robot: "\u{1F916}",
+  robot_face: "\u{1F916}",
   smiley_cat: "\u{1F63A}",
   smile_cat: "\u{1F638}",
   joy_cat: "\u{1F639}",
@@ -13601,32 +13603,28 @@ var nameToEmoji = {
   revolving_hearts: "\u{1F49E}",
   two_hearts: "\u{1F495}",
   heart_decoration: "\u{1F49F}",
-  heavy_heart_exclamation: "\u2763\uFE0F",
+  heavy_heart_exclamation_mark_ornament: "\u2763\uFE0F",
   broken_heart: "\u{1F494}",
   heart_on_fire: "\u2764\uFE0F\u200D\u{1F525}",
   mending_heart: "\u2764\uFE0F\u200D\u{1FA79}",
   heart: "\u2764\uFE0F",
-  pink_heart: "\u{1FA77}",
   orange_heart: "\u{1F9E1}",
   yellow_heart: "\u{1F49B}",
   green_heart: "\u{1F49A}",
   blue_heart: "\u{1F499}",
-  light_blue_heart: "\u{1FA75}",
   purple_heart: "\u{1F49C}",
   brown_heart: "\u{1F90E}",
   black_heart: "\u{1F5A4}",
-  grey_heart: "\u{1FA76}",
   white_heart: "\u{1F90D}",
   kiss: "\u{1F48B}",
   anger: "\u{1F4A2}",
   boom: "\u{1F4A5}",
-  collision: "\u{1F4A5}",
   dizzy: "\u{1F4AB}",
   sweat_drops: "\u{1F4A6}",
   dash: "\u{1F4A8}",
   hole: "\u{1F573}\uFE0F",
   speech_balloon: "\u{1F4AC}",
-  eye_speech_bubble: "\u{1F441}\uFE0F\u200D\u{1F5E8}\uFE0F",
+  "eye-in-speech-bubble": "\u{1F441}\uFE0F\u200D\u{1F5E8}\uFE0F",
   left_speech_bubble: "\u{1F5E8}\uFE0F",
   right_anger_bubble: "\u{1F5EF}\uFE0F",
   thought_balloon: "\u{1F4AD}",
@@ -13635,42 +13633,33 @@ var nameToEmoji = {
   raised_back_of_hand: "\u{1F91A}",
   raised_hand_with_fingers_splayed: "\u{1F590}\uFE0F",
   hand: "\u270B",
-  raised_hand: "\u270B",
-  vulcan_salute: "\u{1F596}",
+  "spock-hand": "\u{1F596}",
   rightwards_hand: "\u{1FAF1}",
   leftwards_hand: "\u{1FAF2}",
   palm_down_hand: "\u{1FAF3}",
   palm_up_hand: "\u{1FAF4}",
-  leftwards_pushing_hand: "\u{1FAF7}",
-  rightwards_pushing_hand: "\u{1FAF8}",
   ok_hand: "\u{1F44C}",
   pinched_fingers: "\u{1F90C}",
   pinching_hand: "\u{1F90F}",
   v: "\u270C\uFE0F",
   crossed_fingers: "\u{1F91E}",
   hand_with_index_finger_and_thumb_crossed: "\u{1FAF0}",
-  love_you_gesture: "\u{1F91F}",
-  metal: "\u{1F918}",
+  i_love_you_hand_sign: "\u{1F91F}",
+  the_horns: "\u{1F918}",
   call_me_hand: "\u{1F919}",
   point_left: "\u{1F448}",
   point_right: "\u{1F449}",
   point_up_2: "\u{1F446}",
   middle_finger: "\u{1F595}",
-  fu: "\u{1F595}",
   point_down: "\u{1F447}",
   point_up: "\u261D\uFE0F",
   index_pointing_at_the_viewer: "\u{1FAF5}",
   "+1": "\u{1F44D}",
-  thumbsup: "\u{1F44D}",
   "-1": "\u{1F44E}",
-  thumbsdown: "\u{1F44E}",
-  fist_raised: "\u270A",
   fist: "\u270A",
-  fist_oncoming: "\u{1F44A}",
   facepunch: "\u{1F44A}",
-  punch: "\u{1F44A}",
-  fist_left: "\u{1F91B}",
-  fist_right: "\u{1F91C}",
+  "left-facing_fist": "\u{1F91B}",
+  "right-facing_fist": "\u{1F91C}",
   clap: "\u{1F44F}",
   raised_hands: "\u{1F64C}",
   heart_hands: "\u{1FAF6}",
@@ -13704,146 +13693,138 @@ var nameToEmoji = {
   boy: "\u{1F466}",
   girl: "\u{1F467}",
   adult: "\u{1F9D1}",
-  blond_haired_person: "\u{1F471}",
+  person_with_blond_hair: "\u{1F471}",
   man: "\u{1F468}",
   bearded_person: "\u{1F9D4}",
-  man_beard: "\u{1F9D4}\u200D\u2642\uFE0F",
-  woman_beard: "\u{1F9D4}\u200D\u2640\uFE0F",
+  man_with_beard: "\u{1F9D4}\u200D\u2642\uFE0F",
+  woman_with_beard: "\u{1F9D4}\u200D\u2640\uFE0F",
   red_haired_man: "\u{1F468}\u200D\u{1F9B0}",
   curly_haired_man: "\u{1F468}\u200D\u{1F9B1}",
   white_haired_man: "\u{1F468}\u200D\u{1F9B3}",
   bald_man: "\u{1F468}\u200D\u{1F9B2}",
   woman: "\u{1F469}",
   red_haired_woman: "\u{1F469}\u200D\u{1F9B0}",
-  person_red_hair: "\u{1F9D1}\u200D\u{1F9B0}",
+  red_haired_person: "\u{1F9D1}\u200D\u{1F9B0}",
   curly_haired_woman: "\u{1F469}\u200D\u{1F9B1}",
-  person_curly_hair: "\u{1F9D1}\u200D\u{1F9B1}",
+  curly_haired_person: "\u{1F9D1}\u200D\u{1F9B1}",
   white_haired_woman: "\u{1F469}\u200D\u{1F9B3}",
-  person_white_hair: "\u{1F9D1}\u200D\u{1F9B3}",
+  white_haired_person: "\u{1F9D1}\u200D\u{1F9B3}",
   bald_woman: "\u{1F469}\u200D\u{1F9B2}",
-  person_bald: "\u{1F9D1}\u200D\u{1F9B2}",
-  blond_haired_woman: "\u{1F471}\u200D\u2640\uFE0F",
-  blonde_woman: "\u{1F471}\u200D\u2640\uFE0F",
-  blond_haired_man: "\u{1F471}\u200D\u2642\uFE0F",
+  bald_person: "\u{1F9D1}\u200D\u{1F9B2}",
+  "blond-haired-woman": "\u{1F471}\u200D\u2640\uFE0F",
+  "blond-haired-man": "\u{1F471}\u200D\u2642\uFE0F",
   older_adult: "\u{1F9D3}",
   older_man: "\u{1F474}",
   older_woman: "\u{1F475}",
-  frowning_person: "\u{1F64D}",
-  frowning_man: "\u{1F64D}\u200D\u2642\uFE0F",
-  frowning_woman: "\u{1F64D}\u200D\u2640\uFE0F",
-  pouting_face: "\u{1F64E}",
-  pouting_man: "\u{1F64E}\u200D\u2642\uFE0F",
-  pouting_woman: "\u{1F64E}\u200D\u2640\uFE0F",
+  person_frowning: "\u{1F64D}",
+  "man-frowning": "\u{1F64D}\u200D\u2642\uFE0F",
+  "woman-frowning": "\u{1F64D}\u200D\u2640\uFE0F",
+  person_with_pouting_face: "\u{1F64E}",
+  "man-pouting": "\u{1F64E}\u200D\u2642\uFE0F",
+  "woman-pouting": "\u{1F64E}\u200D\u2640\uFE0F",
   no_good: "\u{1F645}",
-  no_good_man: "\u{1F645}\u200D\u2642\uFE0F",
-  ng_man: "\u{1F645}\u200D\u2642\uFE0F",
-  no_good_woman: "\u{1F645}\u200D\u2640\uFE0F",
-  ng_woman: "\u{1F645}\u200D\u2640\uFE0F",
-  ok_person: "\u{1F646}",
-  ok_man: "\u{1F646}\u200D\u2642\uFE0F",
-  ok_woman: "\u{1F646}\u200D\u2640\uFE0F",
-  tipping_hand_person: "\u{1F481}",
+  "man-gesturing-no": "\u{1F645}\u200D\u2642\uFE0F",
+  "woman-gesturing-no": "\u{1F645}\u200D\u2640\uFE0F",
+  ok_woman: "\u{1F646}",
+  "man-gesturing-ok": "\u{1F646}\u200D\u2642\uFE0F",
+  "woman-gesturing-ok": "\u{1F646}\u200D\u2640\uFE0F",
   information_desk_person: "\u{1F481}",
-  tipping_hand_man: "\u{1F481}\u200D\u2642\uFE0F",
-  sassy_man: "\u{1F481}\u200D\u2642\uFE0F",
-  tipping_hand_woman: "\u{1F481}\u200D\u2640\uFE0F",
-  sassy_woman: "\u{1F481}\u200D\u2640\uFE0F",
+  "man-tipping-hand": "\u{1F481}\u200D\u2642\uFE0F",
+  "woman-tipping-hand": "\u{1F481}\u200D\u2640\uFE0F",
   raising_hand: "\u{1F64B}",
-  raising_hand_man: "\u{1F64B}\u200D\u2642\uFE0F",
-  raising_hand_woman: "\u{1F64B}\u200D\u2640\uFE0F",
+  "man-raising-hand": "\u{1F64B}\u200D\u2642\uFE0F",
+  "woman-raising-hand": "\u{1F64B}\u200D\u2640\uFE0F",
   deaf_person: "\u{1F9CF}",
   deaf_man: "\u{1F9CF}\u200D\u2642\uFE0F",
   deaf_woman: "\u{1F9CF}\u200D\u2640\uFE0F",
   bow: "\u{1F647}",
-  bowing_man: "\u{1F647}\u200D\u2642\uFE0F",
-  bowing_woman: "\u{1F647}\u200D\u2640\uFE0F",
-  facepalm: "\u{1F926}",
-  man_facepalming: "\u{1F926}\u200D\u2642\uFE0F",
-  woman_facepalming: "\u{1F926}\u200D\u2640\uFE0F",
+  "man-bowing": "\u{1F647}\u200D\u2642\uFE0F",
+  "woman-bowing": "\u{1F647}\u200D\u2640\uFE0F",
+  face_palm: "\u{1F926}",
+  "man-facepalming": "\u{1F926}\u200D\u2642\uFE0F",
+  "woman-facepalming": "\u{1F926}\u200D\u2640\uFE0F",
   shrug: "\u{1F937}",
-  man_shrugging: "\u{1F937}\u200D\u2642\uFE0F",
-  woman_shrugging: "\u{1F937}\u200D\u2640\uFE0F",
+  "man-shrugging": "\u{1F937}\u200D\u2642\uFE0F",
+  "woman-shrugging": "\u{1F937}\u200D\u2640\uFE0F",
   health_worker: "\u{1F9D1}\u200D\u2695\uFE0F",
-  man_health_worker: "\u{1F468}\u200D\u2695\uFE0F",
-  woman_health_worker: "\u{1F469}\u200D\u2695\uFE0F",
+  "male-doctor": "\u{1F468}\u200D\u2695\uFE0F",
+  "female-doctor": "\u{1F469}\u200D\u2695\uFE0F",
   student: "\u{1F9D1}\u200D\u{1F393}",
-  man_student: "\u{1F468}\u200D\u{1F393}",
-  woman_student: "\u{1F469}\u200D\u{1F393}",
+  "male-student": "\u{1F468}\u200D\u{1F393}",
+  "female-student": "\u{1F469}\u200D\u{1F393}",
   teacher: "\u{1F9D1}\u200D\u{1F3EB}",
-  man_teacher: "\u{1F468}\u200D\u{1F3EB}",
-  woman_teacher: "\u{1F469}\u200D\u{1F3EB}",
+  "male-teacher": "\u{1F468}\u200D\u{1F3EB}",
+  "female-teacher": "\u{1F469}\u200D\u{1F3EB}",
   judge: "\u{1F9D1}\u200D\u2696\uFE0F",
-  man_judge: "\u{1F468}\u200D\u2696\uFE0F",
-  woman_judge: "\u{1F469}\u200D\u2696\uFE0F",
+  "male-judge": "\u{1F468}\u200D\u2696\uFE0F",
+  "female-judge": "\u{1F469}\u200D\u2696\uFE0F",
   farmer: "\u{1F9D1}\u200D\u{1F33E}",
-  man_farmer: "\u{1F468}\u200D\u{1F33E}",
-  woman_farmer: "\u{1F469}\u200D\u{1F33E}",
+  "male-farmer": "\u{1F468}\u200D\u{1F33E}",
+  "female-farmer": "\u{1F469}\u200D\u{1F33E}",
   cook: "\u{1F9D1}\u200D\u{1F373}",
-  man_cook: "\u{1F468}\u200D\u{1F373}",
-  woman_cook: "\u{1F469}\u200D\u{1F373}",
+  "male-cook": "\u{1F468}\u200D\u{1F373}",
+  "female-cook": "\u{1F469}\u200D\u{1F373}",
   mechanic: "\u{1F9D1}\u200D\u{1F527}",
-  man_mechanic: "\u{1F468}\u200D\u{1F527}",
-  woman_mechanic: "\u{1F469}\u200D\u{1F527}",
+  "male-mechanic": "\u{1F468}\u200D\u{1F527}",
+  "female-mechanic": "\u{1F469}\u200D\u{1F527}",
   factory_worker: "\u{1F9D1}\u200D\u{1F3ED}",
-  man_factory_worker: "\u{1F468}\u200D\u{1F3ED}",
-  woman_factory_worker: "\u{1F469}\u200D\u{1F3ED}",
+  "male-factory-worker": "\u{1F468}\u200D\u{1F3ED}",
+  "female-factory-worker": "\u{1F469}\u200D\u{1F3ED}",
   office_worker: "\u{1F9D1}\u200D\u{1F4BC}",
-  man_office_worker: "\u{1F468}\u200D\u{1F4BC}",
-  woman_office_worker: "\u{1F469}\u200D\u{1F4BC}",
+  "male-office-worker": "\u{1F468}\u200D\u{1F4BC}",
+  "female-office-worker": "\u{1F469}\u200D\u{1F4BC}",
   scientist: "\u{1F9D1}\u200D\u{1F52C}",
-  man_scientist: "\u{1F468}\u200D\u{1F52C}",
-  woman_scientist: "\u{1F469}\u200D\u{1F52C}",
+  "male-scientist": "\u{1F468}\u200D\u{1F52C}",
+  "female-scientist": "\u{1F469}\u200D\u{1F52C}",
   technologist: "\u{1F9D1}\u200D\u{1F4BB}",
-  man_technologist: "\u{1F468}\u200D\u{1F4BB}",
-  woman_technologist: "\u{1F469}\u200D\u{1F4BB}",
+  "male-technologist": "\u{1F468}\u200D\u{1F4BB}",
+  "female-technologist": "\u{1F469}\u200D\u{1F4BB}",
   singer: "\u{1F9D1}\u200D\u{1F3A4}",
-  man_singer: "\u{1F468}\u200D\u{1F3A4}",
-  woman_singer: "\u{1F469}\u200D\u{1F3A4}",
+  "male-singer": "\u{1F468}\u200D\u{1F3A4}",
+  "female-singer": "\u{1F469}\u200D\u{1F3A4}",
   artist: "\u{1F9D1}\u200D\u{1F3A8}",
-  man_artist: "\u{1F468}\u200D\u{1F3A8}",
-  woman_artist: "\u{1F469}\u200D\u{1F3A8}",
+  "male-artist": "\u{1F468}\u200D\u{1F3A8}",
+  "female-artist": "\u{1F469}\u200D\u{1F3A8}",
   pilot: "\u{1F9D1}\u200D\u2708\uFE0F",
-  man_pilot: "\u{1F468}\u200D\u2708\uFE0F",
-  woman_pilot: "\u{1F469}\u200D\u2708\uFE0F",
+  "male-pilot": "\u{1F468}\u200D\u2708\uFE0F",
+  "female-pilot": "\u{1F469}\u200D\u2708\uFE0F",
   astronaut: "\u{1F9D1}\u200D\u{1F680}",
-  man_astronaut: "\u{1F468}\u200D\u{1F680}",
-  woman_astronaut: "\u{1F469}\u200D\u{1F680}",
+  "male-astronaut": "\u{1F468}\u200D\u{1F680}",
+  "female-astronaut": "\u{1F469}\u200D\u{1F680}",
   firefighter: "\u{1F9D1}\u200D\u{1F692}",
-  man_firefighter: "\u{1F468}\u200D\u{1F692}",
-  woman_firefighter: "\u{1F469}\u200D\u{1F692}",
-  police_officer: "\u{1F46E}",
+  "male-firefighter": "\u{1F468}\u200D\u{1F692}",
+  "female-firefighter": "\u{1F469}\u200D\u{1F692}",
   cop: "\u{1F46E}",
-  policeman: "\u{1F46E}\u200D\u2642\uFE0F",
-  policewoman: "\u{1F46E}\u200D\u2640\uFE0F",
-  detective: "\u{1F575}\uFE0F",
-  male_detective: "\u{1F575}\uFE0F\u200D\u2642\uFE0F",
-  female_detective: "\u{1F575}\uFE0F\u200D\u2640\uFE0F",
-  guard: "\u{1F482}",
-  guardsman: "\u{1F482}\u200D\u2642\uFE0F",
-  guardswoman: "\u{1F482}\u200D\u2640\uFE0F",
+  "male-police-officer": "\u{1F46E}\u200D\u2642\uFE0F",
+  "female-police-officer": "\u{1F46E}\u200D\u2640\uFE0F",
+  sleuth_or_spy: "\u{1F575}\uFE0F",
+  "male-detective": "\u{1F575}\uFE0F\u200D\u2642\uFE0F",
+  "female-detective": "\u{1F575}\uFE0F\u200D\u2640\uFE0F",
+  guardsman: "\u{1F482}",
+  "male-guard": "\u{1F482}\u200D\u2642\uFE0F",
+  "female-guard": "\u{1F482}\u200D\u2640\uFE0F",
   ninja: "\u{1F977}",
   construction_worker: "\u{1F477}",
-  construction_worker_man: "\u{1F477}\u200D\u2642\uFE0F",
-  construction_worker_woman: "\u{1F477}\u200D\u2640\uFE0F",
+  "male-construction-worker": "\u{1F477}\u200D\u2642\uFE0F",
+  "female-construction-worker": "\u{1F477}\u200D\u2640\uFE0F",
   person_with_crown: "\u{1FAC5}",
   prince: "\u{1F934}",
   princess: "\u{1F478}",
-  person_with_turban: "\u{1F473}",
-  man_with_turban: "\u{1F473}\u200D\u2642\uFE0F",
-  woman_with_turban: "\u{1F473}\u200D\u2640\uFE0F",
+  man_with_turban: "\u{1F473}",
+  "man-wearing-turban": "\u{1F473}\u200D\u2642\uFE0F",
+  "woman-wearing-turban": "\u{1F473}\u200D\u2640\uFE0F",
   man_with_gua_pi_mao: "\u{1F472}",
-  woman_with_headscarf: "\u{1F9D5}",
+  person_with_headscarf: "\u{1F9D5}",
   person_in_tuxedo: "\u{1F935}",
   man_in_tuxedo: "\u{1F935}\u200D\u2642\uFE0F",
   woman_in_tuxedo: "\u{1F935}\u200D\u2640\uFE0F",
-  person_with_veil: "\u{1F470}",
+  bride_with_veil: "\u{1F470}",
   man_with_veil: "\u{1F470}\u200D\u2642\uFE0F",
   woman_with_veil: "\u{1F470}\u200D\u2640\uFE0F",
-  bride_with_veil: "\u{1F470}\u200D\u2640\uFE0F",
   pregnant_woman: "\u{1F930}",
   pregnant_man: "\u{1FAC3}",
   pregnant_person: "\u{1FAC4}",
-  breast_feeding: "\u{1F931}",
+  "breast-feeding": "\u{1F931}",
   woman_feeding_baby: "\u{1F469}\u200D\u{1F37C}",
   man_feeding_baby: "\u{1F468}\u200D\u{1F37C}",
   person_feeding_baby: "\u{1F9D1}\u200D\u{1F37C}",
@@ -13852,48 +13833,48 @@ var nameToEmoji = {
   mrs_claus: "\u{1F936}",
   mx_claus: "\u{1F9D1}\u200D\u{1F384}",
   superhero: "\u{1F9B8}",
-  superhero_man: "\u{1F9B8}\u200D\u2642\uFE0F",
-  superhero_woman: "\u{1F9B8}\u200D\u2640\uFE0F",
+  male_superhero: "\u{1F9B8}\u200D\u2642\uFE0F",
+  female_superhero: "\u{1F9B8}\u200D\u2640\uFE0F",
   supervillain: "\u{1F9B9}",
-  supervillain_man: "\u{1F9B9}\u200D\u2642\uFE0F",
-  supervillain_woman: "\u{1F9B9}\u200D\u2640\uFE0F",
+  male_supervillain: "\u{1F9B9}\u200D\u2642\uFE0F",
+  female_supervillain: "\u{1F9B9}\u200D\u2640\uFE0F",
   mage: "\u{1F9D9}",
-  mage_man: "\u{1F9D9}\u200D\u2642\uFE0F",
-  mage_woman: "\u{1F9D9}\u200D\u2640\uFE0F",
+  male_mage: "\u{1F9D9}\u200D\u2642\uFE0F",
+  female_mage: "\u{1F9D9}\u200D\u2640\uFE0F",
   fairy: "\u{1F9DA}",
-  fairy_man: "\u{1F9DA}\u200D\u2642\uFE0F",
-  fairy_woman: "\u{1F9DA}\u200D\u2640\uFE0F",
+  male_fairy: "\u{1F9DA}\u200D\u2642\uFE0F",
+  female_fairy: "\u{1F9DA}\u200D\u2640\uFE0F",
   vampire: "\u{1F9DB}",
-  vampire_man: "\u{1F9DB}\u200D\u2642\uFE0F",
-  vampire_woman: "\u{1F9DB}\u200D\u2640\uFE0F",
+  male_vampire: "\u{1F9DB}\u200D\u2642\uFE0F",
+  female_vampire: "\u{1F9DB}\u200D\u2640\uFE0F",
   merperson: "\u{1F9DC}",
   merman: "\u{1F9DC}\u200D\u2642\uFE0F",
   mermaid: "\u{1F9DC}\u200D\u2640\uFE0F",
   elf: "\u{1F9DD}",
-  elf_man: "\u{1F9DD}\u200D\u2642\uFE0F",
-  elf_woman: "\u{1F9DD}\u200D\u2640\uFE0F",
+  male_elf: "\u{1F9DD}\u200D\u2642\uFE0F",
+  female_elf: "\u{1F9DD}\u200D\u2640\uFE0F",
   genie: "\u{1F9DE}",
-  genie_man: "\u{1F9DE}\u200D\u2642\uFE0F",
-  genie_woman: "\u{1F9DE}\u200D\u2640\uFE0F",
+  male_genie: "\u{1F9DE}\u200D\u2642\uFE0F",
+  female_genie: "\u{1F9DE}\u200D\u2640\uFE0F",
   zombie: "\u{1F9DF}",
-  zombie_man: "\u{1F9DF}\u200D\u2642\uFE0F",
-  zombie_woman: "\u{1F9DF}\u200D\u2640\uFE0F",
+  male_zombie: "\u{1F9DF}\u200D\u2642\uFE0F",
+  female_zombie: "\u{1F9DF}\u200D\u2640\uFE0F",
   troll: "\u{1F9CC}",
   massage: "\u{1F486}",
-  massage_man: "\u{1F486}\u200D\u2642\uFE0F",
-  massage_woman: "\u{1F486}\u200D\u2640\uFE0F",
+  "man-getting-massage": "\u{1F486}\u200D\u2642\uFE0F",
+  "woman-getting-massage": "\u{1F486}\u200D\u2640\uFE0F",
   haircut: "\u{1F487}",
-  haircut_man: "\u{1F487}\u200D\u2642\uFE0F",
-  haircut_woman: "\u{1F487}\u200D\u2640\uFE0F",
+  "man-getting-haircut": "\u{1F487}\u200D\u2642\uFE0F",
+  "woman-getting-haircut": "\u{1F487}\u200D\u2640\uFE0F",
   walking: "\u{1F6B6}",
-  walking_man: "\u{1F6B6}\u200D\u2642\uFE0F",
-  walking_woman: "\u{1F6B6}\u200D\u2640\uFE0F",
+  "man-walking": "\u{1F6B6}\u200D\u2642\uFE0F",
+  "woman-walking": "\u{1F6B6}\u200D\u2640\uFE0F",
   standing_person: "\u{1F9CD}",
-  standing_man: "\u{1F9CD}\u200D\u2642\uFE0F",
-  standing_woman: "\u{1F9CD}\u200D\u2640\uFE0F",
+  man_standing: "\u{1F9CD}\u200D\u2642\uFE0F",
+  woman_standing: "\u{1F9CD}\u200D\u2640\uFE0F",
   kneeling_person: "\u{1F9CE}",
-  kneeling_man: "\u{1F9CE}\u200D\u2642\uFE0F",
-  kneeling_woman: "\u{1F9CE}\u200D\u2640\uFE0F",
+  man_kneeling: "\u{1F9CE}\u200D\u2642\uFE0F",
+  woman_kneeling: "\u{1F9CE}\u200D\u2640\uFE0F",
   person_with_probing_cane: "\u{1F9D1}\u200D\u{1F9AF}",
   man_with_probing_cane: "\u{1F468}\u200D\u{1F9AF}",
   woman_with_probing_cane: "\u{1F469}\u200D\u{1F9AF}",
@@ -13904,111 +13885,107 @@ var nameToEmoji = {
   man_in_manual_wheelchair: "\u{1F468}\u200D\u{1F9BD}",
   woman_in_manual_wheelchair: "\u{1F469}\u200D\u{1F9BD}",
   runner: "\u{1F3C3}",
-  running: "\u{1F3C3}",
-  running_man: "\u{1F3C3}\u200D\u2642\uFE0F",
-  running_woman: "\u{1F3C3}\u200D\u2640\uFE0F",
-  woman_dancing: "\u{1F483}",
+  "man-running": "\u{1F3C3}\u200D\u2642\uFE0F",
+  "woman-running": "\u{1F3C3}\u200D\u2640\uFE0F",
   dancer: "\u{1F483}",
   man_dancing: "\u{1F57A}",
-  business_suit_levitating: "\u{1F574}\uFE0F",
+  man_in_business_suit_levitating: "\u{1F574}\uFE0F",
   dancers: "\u{1F46F}",
-  dancing_men: "\u{1F46F}\u200D\u2642\uFE0F",
-  dancing_women: "\u{1F46F}\u200D\u2640\uFE0F",
-  sauna_person: "\u{1F9D6}",
-  sauna_man: "\u{1F9D6}\u200D\u2642\uFE0F",
-  sauna_woman: "\u{1F9D6}\u200D\u2640\uFE0F",
-  climbing: "\u{1F9D7}",
-  climbing_man: "\u{1F9D7}\u200D\u2642\uFE0F",
-  climbing_woman: "\u{1F9D7}\u200D\u2640\uFE0F",
-  person_fencing: "\u{1F93A}",
+  "men-with-bunny-ears-partying": "\u{1F46F}\u200D\u2642\uFE0F",
+  "women-with-bunny-ears-partying": "\u{1F46F}\u200D\u2640\uFE0F",
+  person_in_steamy_room: "\u{1F9D6}",
+  man_in_steamy_room: "\u{1F9D6}\u200D\u2642\uFE0F",
+  woman_in_steamy_room: "\u{1F9D6}\u200D\u2640\uFE0F",
+  person_climbing: "\u{1F9D7}",
+  man_climbing: "\u{1F9D7}\u200D\u2642\uFE0F",
+  woman_climbing: "\u{1F9D7}\u200D\u2640\uFE0F",
+  fencer: "\u{1F93A}",
   horse_racing: "\u{1F3C7}",
   skier: "\u26F7\uFE0F",
   snowboarder: "\u{1F3C2}",
-  golfing: "\u{1F3CC}\uFE0F",
-  golfing_man: "\u{1F3CC}\uFE0F\u200D\u2642\uFE0F",
-  golfing_woman: "\u{1F3CC}\uFE0F\u200D\u2640\uFE0F",
+  golfer: "\u{1F3CC}\uFE0F",
+  "man-golfing": "\u{1F3CC}\uFE0F\u200D\u2642\uFE0F",
+  "woman-golfing": "\u{1F3CC}\uFE0F\u200D\u2640\uFE0F",
   surfer: "\u{1F3C4}",
-  surfing_man: "\u{1F3C4}\u200D\u2642\uFE0F",
-  surfing_woman: "\u{1F3C4}\u200D\u2640\uFE0F",
+  "man-surfing": "\u{1F3C4}\u200D\u2642\uFE0F",
+  "woman-surfing": "\u{1F3C4}\u200D\u2640\uFE0F",
   rowboat: "\u{1F6A3}",
-  rowing_man: "\u{1F6A3}\u200D\u2642\uFE0F",
-  rowing_woman: "\u{1F6A3}\u200D\u2640\uFE0F",
+  "man-rowing-boat": "\u{1F6A3}\u200D\u2642\uFE0F",
+  "woman-rowing-boat": "\u{1F6A3}\u200D\u2640\uFE0F",
   swimmer: "\u{1F3CA}",
-  swimming_man: "\u{1F3CA}\u200D\u2642\uFE0F",
-  swimming_woman: "\u{1F3CA}\u200D\u2640\uFE0F",
-  bouncing_ball_person: "\u26F9\uFE0F",
-  bouncing_ball_man: "\u26F9\uFE0F\u200D\u2642\uFE0F",
-  basketball_man: "\u26F9\uFE0F\u200D\u2642\uFE0F",
-  bouncing_ball_woman: "\u26F9\uFE0F\u200D\u2640\uFE0F",
-  basketball_woman: "\u26F9\uFE0F\u200D\u2640\uFE0F",
-  weight_lifting: "\u{1F3CB}\uFE0F",
-  weight_lifting_man: "\u{1F3CB}\uFE0F\u200D\u2642\uFE0F",
-  weight_lifting_woman: "\u{1F3CB}\uFE0F\u200D\u2640\uFE0F",
+  "man-swimming": "\u{1F3CA}\u200D\u2642\uFE0F",
+  "woman-swimming": "\u{1F3CA}\u200D\u2640\uFE0F",
+  person_with_ball: "\u26F9\uFE0F",
+  "man-bouncing-ball": "\u26F9\uFE0F\u200D\u2642\uFE0F",
+  "woman-bouncing-ball": "\u26F9\uFE0F\u200D\u2640\uFE0F",
+  weight_lifter: "\u{1F3CB}\uFE0F",
+  "man-lifting-weights": "\u{1F3CB}\uFE0F\u200D\u2642\uFE0F",
+  "woman-lifting-weights": "\u{1F3CB}\uFE0F\u200D\u2640\uFE0F",
   bicyclist: "\u{1F6B4}",
-  biking_man: "\u{1F6B4}\u200D\u2642\uFE0F",
-  biking_woman: "\u{1F6B4}\u200D\u2640\uFE0F",
+  "man-biking": "\u{1F6B4}\u200D\u2642\uFE0F",
+  "woman-biking": "\u{1F6B4}\u200D\u2640\uFE0F",
   mountain_bicyclist: "\u{1F6B5}",
-  mountain_biking_man: "\u{1F6B5}\u200D\u2642\uFE0F",
-  mountain_biking_woman: "\u{1F6B5}\u200D\u2640\uFE0F",
-  cartwheeling: "\u{1F938}",
-  man_cartwheeling: "\u{1F938}\u200D\u2642\uFE0F",
-  woman_cartwheeling: "\u{1F938}\u200D\u2640\uFE0F",
-  wrestling: "\u{1F93C}",
-  men_wrestling: "\u{1F93C}\u200D\u2642\uFE0F",
-  women_wrestling: "\u{1F93C}\u200D\u2640\uFE0F",
+  "man-mountain-biking": "\u{1F6B5}\u200D\u2642\uFE0F",
+  "woman-mountain-biking": "\u{1F6B5}\u200D\u2640\uFE0F",
+  person_doing_cartwheel: "\u{1F938}",
+  "man-cartwheeling": "\u{1F938}\u200D\u2642\uFE0F",
+  "woman-cartwheeling": "\u{1F938}\u200D\u2640\uFE0F",
+  wrestlers: "\u{1F93C}",
+  "man-wrestling": "\u{1F93C}\u200D\u2642\uFE0F",
+  "woman-wrestling": "\u{1F93C}\u200D\u2640\uFE0F",
   water_polo: "\u{1F93D}",
-  man_playing_water_polo: "\u{1F93D}\u200D\u2642\uFE0F",
-  woman_playing_water_polo: "\u{1F93D}\u200D\u2640\uFE0F",
-  handball_person: "\u{1F93E}",
-  man_playing_handball: "\u{1F93E}\u200D\u2642\uFE0F",
-  woman_playing_handball: "\u{1F93E}\u200D\u2640\uFE0F",
-  juggling_person: "\u{1F939}",
-  man_juggling: "\u{1F939}\u200D\u2642\uFE0F",
-  woman_juggling: "\u{1F939}\u200D\u2640\uFE0F",
-  lotus_position: "\u{1F9D8}",
-  lotus_position_man: "\u{1F9D8}\u200D\u2642\uFE0F",
-  lotus_position_woman: "\u{1F9D8}\u200D\u2640\uFE0F",
+  "man-playing-water-polo": "\u{1F93D}\u200D\u2642\uFE0F",
+  "woman-playing-water-polo": "\u{1F93D}\u200D\u2640\uFE0F",
+  handball: "\u{1F93E}",
+  "man-playing-handball": "\u{1F93E}\u200D\u2642\uFE0F",
+  "woman-playing-handball": "\u{1F93E}\u200D\u2640\uFE0F",
+  juggling: "\u{1F939}",
+  "man-juggling": "\u{1F939}\u200D\u2642\uFE0F",
+  "woman-juggling": "\u{1F939}\u200D\u2640\uFE0F",
+  person_in_lotus_position: "\u{1F9D8}",
+  man_in_lotus_position: "\u{1F9D8}\u200D\u2642\uFE0F",
+  woman_in_lotus_position: "\u{1F9D8}\u200D\u2640\uFE0F",
   bath: "\u{1F6C0}",
-  sleeping_bed: "\u{1F6CC}",
+  sleeping_accommodation: "\u{1F6CC}",
   people_holding_hands: "\u{1F9D1}\u200D\u{1F91D}\u200D\u{1F9D1}",
   two_women_holding_hands: "\u{1F46D}",
-  couple: "\u{1F46B}",
+  man_and_woman_holding_hands: "\u{1F46B}",
   two_men_holding_hands: "\u{1F46C}",
   couplekiss: "\u{1F48F}",
-  couplekiss_man_woman: "\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F468}",
-  couplekiss_man_man: "\u{1F468}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F468}",
-  couplekiss_woman_woman: "\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F469}",
+  "woman-kiss-man": "\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F468}",
+  "man-kiss-man": "\u{1F468}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F468}",
+  "woman-kiss-woman": "\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F469}",
   couple_with_heart: "\u{1F491}",
-  couple_with_heart_woman_man: "\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F468}",
-  couple_with_heart_man_man: "\u{1F468}\u200D\u2764\uFE0F\u200D\u{1F468}",
-  couple_with_heart_woman_woman: "\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F469}",
+  "woman-heart-man": "\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F468}",
+  "man-heart-man": "\u{1F468}\u200D\u2764\uFE0F\u200D\u{1F468}",
+  "woman-heart-woman": "\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F469}",
   family: "\u{1F46A}",
-  family_man_woman_boy: "\u{1F468}\u200D\u{1F469}\u200D\u{1F466}",
-  family_man_woman_girl: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}",
-  family_man_woman_girl_boy: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}",
-  family_man_woman_boy_boy: "\u{1F468}\u200D\u{1F469}\u200D\u{1F466}\u200D\u{1F466}",
-  family_man_woman_girl_girl: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F467}",
-  family_man_man_boy: "\u{1F468}\u200D\u{1F468}\u200D\u{1F466}",
-  family_man_man_girl: "\u{1F468}\u200D\u{1F468}\u200D\u{1F467}",
-  family_man_man_girl_boy: "\u{1F468}\u200D\u{1F468}\u200D\u{1F467}\u200D\u{1F466}",
-  family_man_man_boy_boy: "\u{1F468}\u200D\u{1F468}\u200D\u{1F466}\u200D\u{1F466}",
-  family_man_man_girl_girl: "\u{1F468}\u200D\u{1F468}\u200D\u{1F467}\u200D\u{1F467}",
-  family_woman_woman_boy: "\u{1F469}\u200D\u{1F469}\u200D\u{1F466}",
-  family_woman_woman_girl: "\u{1F469}\u200D\u{1F469}\u200D\u{1F467}",
-  family_woman_woman_girl_boy: "\u{1F469}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}",
-  family_woman_woman_boy_boy: "\u{1F469}\u200D\u{1F469}\u200D\u{1F466}\u200D\u{1F466}",
-  family_woman_woman_girl_girl: "\u{1F469}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F467}",
-  family_man_boy: "\u{1F468}\u200D\u{1F466}",
-  family_man_boy_boy: "\u{1F468}\u200D\u{1F466}\u200D\u{1F466}",
-  family_man_girl: "\u{1F468}\u200D\u{1F467}",
-  family_man_girl_boy: "\u{1F468}\u200D\u{1F467}\u200D\u{1F466}",
-  family_man_girl_girl: "\u{1F468}\u200D\u{1F467}\u200D\u{1F467}",
-  family_woman_boy: "\u{1F469}\u200D\u{1F466}",
-  family_woman_boy_boy: "\u{1F469}\u200D\u{1F466}\u200D\u{1F466}",
-  family_woman_girl: "\u{1F469}\u200D\u{1F467}",
-  family_woman_girl_boy: "\u{1F469}\u200D\u{1F467}\u200D\u{1F466}",
-  family_woman_girl_girl: "\u{1F469}\u200D\u{1F467}\u200D\u{1F467}",
-  speaking_head: "\u{1F5E3}\uFE0F",
+  "man-woman-boy": "\u{1F468}\u200D\u{1F469}\u200D\u{1F466}",
+  "man-woman-girl": "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}",
+  "man-woman-girl-boy": "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}",
+  "man-woman-boy-boy": "\u{1F468}\u200D\u{1F469}\u200D\u{1F466}\u200D\u{1F466}",
+  "man-woman-girl-girl": "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F467}",
+  "man-man-boy": "\u{1F468}\u200D\u{1F468}\u200D\u{1F466}",
+  "man-man-girl": "\u{1F468}\u200D\u{1F468}\u200D\u{1F467}",
+  "man-man-girl-boy": "\u{1F468}\u200D\u{1F468}\u200D\u{1F467}\u200D\u{1F466}",
+  "man-man-boy-boy": "\u{1F468}\u200D\u{1F468}\u200D\u{1F466}\u200D\u{1F466}",
+  "man-man-girl-girl": "\u{1F468}\u200D\u{1F468}\u200D\u{1F467}\u200D\u{1F467}",
+  "woman-woman-boy": "\u{1F469}\u200D\u{1F469}\u200D\u{1F466}",
+  "woman-woman-girl": "\u{1F469}\u200D\u{1F469}\u200D\u{1F467}",
+  "woman-woman-girl-boy": "\u{1F469}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}",
+  "woman-woman-boy-boy": "\u{1F469}\u200D\u{1F469}\u200D\u{1F466}\u200D\u{1F466}",
+  "woman-woman-girl-girl": "\u{1F469}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F467}",
+  "man-boy": "\u{1F468}\u200D\u{1F466}",
+  "man-boy-boy": "\u{1F468}\u200D\u{1F466}\u200D\u{1F466}",
+  "man-girl": "\u{1F468}\u200D\u{1F467}",
+  "man-girl-boy": "\u{1F468}\u200D\u{1F467}\u200D\u{1F466}",
+  "man-girl-girl": "\u{1F468}\u200D\u{1F467}\u200D\u{1F467}",
+  "woman-boy": "\u{1F469}\u200D\u{1F466}",
+  "woman-boy-boy": "\u{1F469}\u200D\u{1F466}\u200D\u{1F466}",
+  "woman-girl": "\u{1F469}\u200D\u{1F467}",
+  "woman-girl-boy": "\u{1F469}\u200D\u{1F467}\u200D\u{1F466}",
+  "woman-girl-girl": "\u{1F469}\u200D\u{1F467}\u200D\u{1F467}",
+  speaking_head_in_silhouette: "\u{1F5E3}\uFE0F",
   bust_in_silhouette: "\u{1F464}",
   busts_in_silhouette: "\u{1F465}",
   people_hugging: "\u{1FAC2}",
@@ -14028,16 +14005,14 @@ var nameToEmoji = {
   cat: "\u{1F431}",
   cat2: "\u{1F408}",
   black_cat: "\u{1F408}\u200D\u2B1B",
-  lion: "\u{1F981}",
+  lion_face: "\u{1F981}",
   tiger: "\u{1F42F}",
   tiger2: "\u{1F405}",
   leopard: "\u{1F406}",
   horse: "\u{1F434}",
-  moose: "\u{1FACE}",
-  donkey: "\u{1FACF}",
   racehorse: "\u{1F40E}",
-  unicorn: "\u{1F984}",
-  zebra: "\u{1F993}",
+  unicorn_face: "\u{1F984}",
+  zebra_face: "\u{1F993}",
   deer: "\u{1F98C}",
   bison: "\u{1F9AC}",
   cow: "\u{1F42E}",
@@ -14054,7 +14029,7 @@ var nameToEmoji = {
   dromedary_camel: "\u{1F42A}",
   camel: "\u{1F42B}",
   llama: "\u{1F999}",
-  giraffe: "\u{1F992}",
+  giraffe_face: "\u{1F992}",
   elephant: "\u{1F418}",
   mammoth: "\u{1F9A3}",
   rhinoceros: "\u{1F98F}",
@@ -14079,7 +14054,6 @@ var nameToEmoji = {
   kangaroo: "\u{1F998}",
   badger: "\u{1F9A1}",
   feet: "\u{1F43E}",
-  paw_prints: "\u{1F43E}",
   turkey: "\u{1F983}",
   chicken: "\u{1F414}",
   rooster: "\u{1F413}",
@@ -14088,7 +14062,7 @@ var nameToEmoji = {
   hatched_chick: "\u{1F425}",
   bird: "\u{1F426}",
   penguin: "\u{1F427}",
-  dove: "\u{1F54A}\uFE0F",
+  dove_of_peace: "\u{1F54A}\uFE0F",
   eagle: "\u{1F985}",
   duck: "\u{1F986}",
   swan: "\u{1F9A2}",
@@ -14098,9 +14072,6 @@ var nameToEmoji = {
   flamingo: "\u{1F9A9}",
   peacock: "\u{1F99A}",
   parrot: "\u{1F99C}",
-  wing: "\u{1FABD}",
-  black_bird: "\u{1F426}\u200D\u2B1B",
-  goose: "\u{1FABF}",
   frog: "\u{1F438}",
   crocodile: "\u{1F40A}",
   turtle: "\u{1F422}",
@@ -14113,7 +14084,6 @@ var nameToEmoji = {
   whale: "\u{1F433}",
   whale2: "\u{1F40B}",
   dolphin: "\u{1F42C}",
-  flipper: "\u{1F42C}",
   seal: "\u{1F9AD}",
   fish: "\u{1F41F}",
   tropical_fish: "\u{1F420}",
@@ -14122,15 +14092,13 @@ var nameToEmoji = {
   octopus: "\u{1F419}",
   shell: "\u{1F41A}",
   coral: "\u{1FAB8}",
-  jellyfish: "\u{1FABC}",
   snail: "\u{1F40C}",
   butterfly: "\u{1F98B}",
   bug: "\u{1F41B}",
   ant: "\u{1F41C}",
   bee: "\u{1F41D}",
-  honeybee: "\u{1F41D}",
   beetle: "\u{1FAB2}",
-  lady_beetle: "\u{1F41E}",
+  ladybug: "\u{1F41E}",
   cricket: "\u{1F997}",
   cockroach: "\u{1FAB3}",
   spider: "\u{1F577}\uFE0F",
@@ -14151,7 +14119,6 @@ var nameToEmoji = {
   sunflower: "\u{1F33B}",
   blossom: "\u{1F33C}",
   tulip: "\u{1F337}",
-  hyacinth: "\u{1FABB}",
   seedling: "\u{1F331}",
   potted_plant: "\u{1FAB4}",
   evergreen_tree: "\u{1F332}",
@@ -14172,8 +14139,6 @@ var nameToEmoji = {
   melon: "\u{1F348}",
   watermelon: "\u{1F349}",
   tangerine: "\u{1F34A}",
-  orange: "\u{1F34A}",
-  mandarin: "\u{1F34A}",
   lemon: "\u{1F34B}",
   banana: "\u{1F34C}",
   pineapple: "\u{1F34D}",
@@ -14185,7 +14150,7 @@ var nameToEmoji = {
   cherries: "\u{1F352}",
   strawberry: "\u{1F353}",
   blueberries: "\u{1FAD0}",
-  kiwi_fruit: "\u{1F95D}",
+  kiwifruit: "\u{1F95D}",
   tomato: "\u{1F345}",
   olive: "\u{1FAD2}",
   coconut: "\u{1F965}",
@@ -14204,8 +14169,6 @@ var nameToEmoji = {
   peanuts: "\u{1F95C}",
   beans: "\u{1FAD8}",
   chestnut: "\u{1F330}",
-  ginger_root: "\u{1FADA}",
-  pea_pod: "\u{1FADB}",
   bread: "\u{1F35E}",
   croissant: "\u{1F950}",
   baguette_bread: "\u{1F956}",
@@ -14214,7 +14177,7 @@ var nameToEmoji = {
   bagel: "\u{1F96F}",
   pancakes: "\u{1F95E}",
   waffle: "\u{1F9C7}",
-  cheese: "\u{1F9C0}",
+  cheese_wedge: "\u{1F9C0}",
   meat_on_bone: "\u{1F356}",
   poultry_leg: "\u{1F357}",
   cut_of_meat: "\u{1F969}",
@@ -14277,7 +14240,7 @@ var nameToEmoji = {
   custard: "\u{1F36E}",
   honey_pot: "\u{1F36F}",
   baby_bottle: "\u{1F37C}",
-  milk_glass: "\u{1F95B}",
+  glass_of_milk: "\u{1F95B}",
   coffee: "\u2615",
   teapot: "\u{1FAD6}",
   tea: "\u{1F375}",
@@ -14294,14 +14257,13 @@ var nameToEmoji = {
   cup_with_straw: "\u{1F964}",
   bubble_tea: "\u{1F9CB}",
   beverage_box: "\u{1F9C3}",
-  mate: "\u{1F9C9}",
+  mate_drink: "\u{1F9C9}",
   ice_cube: "\u{1F9CA}",
   chopsticks: "\u{1F962}",
-  plate_with_cutlery: "\u{1F37D}\uFE0F",
+  knife_fork_plate: "\u{1F37D}\uFE0F",
   fork_and_knife: "\u{1F374}",
   spoon: "\u{1F944}",
   hocho: "\u{1F52A}",
-  knife: "\u{1F52A}",
   jar: "\u{1FAD9}",
   amphora: "\u{1F3FA}",
   earth_africa: "\u{1F30D}",
@@ -14311,12 +14273,12 @@ var nameToEmoji = {
   world_map: "\u{1F5FA}\uFE0F",
   japan: "\u{1F5FE}",
   compass: "\u{1F9ED}",
-  mountain_snow: "\u{1F3D4}\uFE0F",
+  snow_capped_mountain: "\u{1F3D4}\uFE0F",
   mountain: "\u26F0\uFE0F",
   volcano: "\u{1F30B}",
   mount_fuji: "\u{1F5FB}",
   camping: "\u{1F3D5}\uFE0F",
-  beach_umbrella: "\u{1F3D6}\uFE0F",
+  beach_with_umbrella: "\u{1F3D6}\uFE0F",
   desert: "\u{1F3DC}\uFE0F",
   desert_island: "\u{1F3DD}\uFE0F",
   national_park: "\u{1F3DE}\uFE0F",
@@ -14327,8 +14289,8 @@ var nameToEmoji = {
   rock: "\u{1FAA8}",
   wood: "\u{1FAB5}",
   hut: "\u{1F6D6}",
-  houses: "\u{1F3D8}\uFE0F",
-  derelict_house: "\u{1F3DA}\uFE0F",
+  house_buildings: "\u{1F3D8}\uFE0F",
+  derelict_house_building: "\u{1F3DA}\uFE0F",
   house: "\u{1F3E0}",
   house_with_garden: "\u{1F3E1}",
   office: "\u{1F3E2}",
@@ -14393,7 +14355,6 @@ var nameToEmoji = {
   taxi: "\u{1F695}",
   oncoming_taxi: "\u{1F696}",
   car: "\u{1F697}",
-  red_car: "\u{1F697}",
   oncoming_automobile: "\u{1F698}",
   blue_car: "\u{1F699}",
   pickup_truck: "\u{1F6FB}",
@@ -14401,13 +14362,13 @@ var nameToEmoji = {
   articulated_lorry: "\u{1F69B}",
   tractor: "\u{1F69C}",
   racing_car: "\u{1F3CE}\uFE0F",
-  motorcycle: "\u{1F3CD}\uFE0F",
+  racing_motorcycle: "\u{1F3CD}\uFE0F",
   motor_scooter: "\u{1F6F5}",
   manual_wheelchair: "\u{1F9BD}",
   motorized_wheelchair: "\u{1F9BC}",
   auto_rickshaw: "\u{1F6FA}",
   bike: "\u{1F6B2}",
-  kick_scooter: "\u{1F6F4}",
+  scooter: "\u{1F6F4}",
   skateboard: "\u{1F6F9}",
   roller_skate: "\u{1F6FC}",
   busstop: "\u{1F68F}",
@@ -14419,12 +14380,11 @@ var nameToEmoji = {
   rotating_light: "\u{1F6A8}",
   traffic_light: "\u{1F6A5}",
   vertical_traffic_light: "\u{1F6A6}",
-  stop_sign: "\u{1F6D1}",
+  octagonal_sign: "\u{1F6D1}",
   construction: "\u{1F6A7}",
   anchor: "\u2693",
   ring_buoy: "\u{1F6DF}",
   boat: "\u26F5",
-  sailboat: "\u26F5",
   canoe: "\u{1F6F6}",
   speedboat: "\u{1F6A4}",
   passenger_ship: "\u{1F6F3}\uFE0F",
@@ -14433,15 +14393,15 @@ var nameToEmoji = {
   ship: "\u{1F6A2}",
   airplane: "\u2708\uFE0F",
   small_airplane: "\u{1F6E9}\uFE0F",
-  flight_departure: "\u{1F6EB}",
-  flight_arrival: "\u{1F6EC}",
+  airplane_departure: "\u{1F6EB}",
+  airplane_arriving: "\u{1F6EC}",
   parachute: "\u{1FA82}",
   seat: "\u{1F4BA}",
   helicopter: "\u{1F681}",
   suspension_railway: "\u{1F69F}",
   mountain_cableway: "\u{1F6A0}",
   aerial_tramway: "\u{1F6A1}",
-  artificial_satellite: "\u{1F6F0}\uFE0F",
+  satellite: "\u{1F6F0}\uFE0F",
   rocket: "\u{1F680}",
   flying_saucer: "\u{1F6F8}",
   bellhop_bell: "\u{1F6CE}\uFE0F",
@@ -14481,7 +14441,6 @@ var nameToEmoji = {
   waxing_crescent_moon: "\u{1F312}",
   first_quarter_moon: "\u{1F313}",
   moon: "\u{1F314}",
-  waxing_gibbous_moon: "\u{1F314}",
   full_moon: "\u{1F315}",
   waning_gibbous_moon: "\u{1F316}",
   last_quarter_moon: "\u{1F317}",
@@ -14501,26 +14460,26 @@ var nameToEmoji = {
   milky_way: "\u{1F30C}",
   cloud: "\u2601\uFE0F",
   partly_sunny: "\u26C5",
-  cloud_with_lightning_and_rain: "\u26C8\uFE0F",
-  sun_behind_small_cloud: "\u{1F324}\uFE0F",
-  sun_behind_large_cloud: "\u{1F325}\uFE0F",
-  sun_behind_rain_cloud: "\u{1F326}\uFE0F",
-  cloud_with_rain: "\u{1F327}\uFE0F",
-  cloud_with_snow: "\u{1F328}\uFE0F",
-  cloud_with_lightning: "\u{1F329}\uFE0F",
+  thunder_cloud_and_rain: "\u26C8\uFE0F",
+  mostly_sunny: "\u{1F324}\uFE0F",
+  barely_sunny: "\u{1F325}\uFE0F",
+  partly_sunny_rain: "\u{1F326}\uFE0F",
+  rain_cloud: "\u{1F327}\uFE0F",
+  snow_cloud: "\u{1F328}\uFE0F",
+  lightning: "\u{1F329}\uFE0F",
   tornado: "\u{1F32A}\uFE0F",
   fog: "\u{1F32B}\uFE0F",
-  wind_face: "\u{1F32C}\uFE0F",
+  wind_blowing_face: "\u{1F32C}\uFE0F",
   cyclone: "\u{1F300}",
   rainbow: "\u{1F308}",
   closed_umbrella: "\u{1F302}",
-  open_umbrella: "\u2602\uFE0F",
-  umbrella: "\u2614",
-  parasol_on_ground: "\u26F1\uFE0F",
+  umbrella: "\u2602\uFE0F",
+  umbrella_with_rain_drops: "\u2614",
+  umbrella_on_ground: "\u26F1\uFE0F",
   zap: "\u26A1",
   snowflake: "\u2744\uFE0F",
-  snowman_with_snow: "\u2603\uFE0F",
-  snowman: "\u26C4",
+  snowman: "\u2603\uFE0F",
+  snowman_without_snow: "\u26C4",
   comet: "\u2604\uFE0F",
   fire: "\u{1F525}",
   droplet: "\u{1F4A7}",
@@ -14544,14 +14503,14 @@ var nameToEmoji = {
   ribbon: "\u{1F380}",
   gift: "\u{1F381}",
   reminder_ribbon: "\u{1F397}\uFE0F",
-  tickets: "\u{1F39F}\uFE0F",
+  admission_tickets: "\u{1F39F}\uFE0F",
   ticket: "\u{1F3AB}",
-  medal_military: "\u{1F396}\uFE0F",
+  medal: "\u{1F396}\uFE0F",
   trophy: "\u{1F3C6}",
-  medal_sports: "\u{1F3C5}",
-  "1st_place_medal": "\u{1F947}",
-  "2nd_place_medal": "\u{1F948}",
-  "3rd_place_medal": "\u{1F949}",
+  sports_medal: "\u{1F3C5}",
+  first_place_medal: "\u{1F947}",
+  second_place_medal: "\u{1F948}",
+  third_place_medal: "\u{1F949}",
   soccer: "\u26BD",
   baseball: "\u26BE",
   softball: "\u{1F94E}",
@@ -14562,12 +14521,12 @@ var nameToEmoji = {
   tennis: "\u{1F3BE}",
   flying_disc: "\u{1F94F}",
   bowling: "\u{1F3B3}",
-  cricket_game: "\u{1F3CF}",
-  field_hockey: "\u{1F3D1}",
-  ice_hockey: "\u{1F3D2}",
+  cricket_bat_and_ball: "\u{1F3CF}",
+  field_hockey_stick_and_ball: "\u{1F3D1}",
+  ice_hockey_stick_and_puck: "\u{1F3D2}",
   lacrosse: "\u{1F94D}",
-  ping_pong: "\u{1F3D3}",
-  badminton: "\u{1F3F8}",
+  table_tennis_paddle_and_ball: "\u{1F3D3}",
+  badminton_racquet_and_shuttlecock: "\u{1F3F8}",
   boxing_glove: "\u{1F94A}",
   martial_arts_uniform: "\u{1F94B}",
   goal_net: "\u{1F945}",
@@ -14580,7 +14539,7 @@ var nameToEmoji = {
   sled: "\u{1F6F7}",
   curling_stone: "\u{1F94C}",
   dart: "\u{1F3AF}",
-  yo_yo: "\u{1FA80}",
+  "yo-yo": "\u{1FA80}",
   kite: "\u{1FA81}",
   gun: "\u{1F52B}",
   "8ball": "\u{1F3B1}",
@@ -14604,7 +14563,7 @@ var nameToEmoji = {
   mahjong: "\u{1F004}",
   flower_playing_cards: "\u{1F3B4}",
   performing_arts: "\u{1F3AD}",
-  framed_picture: "\u{1F5BC}\uFE0F",
+  frame_with_picture: "\u{1F5BC}\uFE0F",
   art: "\u{1F3A8}",
   thread: "\u{1F9F5}",
   sewing_needle: "\u{1FAA1}",
@@ -14617,7 +14576,6 @@ var nameToEmoji = {
   safety_vest: "\u{1F9BA}",
   necktie: "\u{1F454}",
   shirt: "\u{1F455}",
-  tshirt: "\u{1F455}",
   jeans: "\u{1F456}",
   scarf: "\u{1F9E3}",
   gloves: "\u{1F9E4}",
@@ -14626,35 +14584,32 @@ var nameToEmoji = {
   dress: "\u{1F457}",
   kimono: "\u{1F458}",
   sari: "\u{1F97B}",
-  one_piece_swimsuit: "\u{1FA71}",
-  swim_brief: "\u{1FA72}",
+  "one-piece_swimsuit": "\u{1FA71}",
+  briefs: "\u{1FA72}",
   shorts: "\u{1FA73}",
   bikini: "\u{1F459}",
   womans_clothes: "\u{1F45A}",
-  folding_hand_fan: "\u{1FAAD}",
   purse: "\u{1F45B}",
   handbag: "\u{1F45C}",
   pouch: "\u{1F45D}",
-  shopping: "\u{1F6CD}\uFE0F",
+  shopping_bags: "\u{1F6CD}\uFE0F",
   school_satchel: "\u{1F392}",
   thong_sandal: "\u{1FA74}",
   mans_shoe: "\u{1F45E}",
-  shoe: "\u{1F45E}",
   athletic_shoe: "\u{1F45F}",
   hiking_boot: "\u{1F97E}",
-  flat_shoe: "\u{1F97F}",
+  womans_flat_shoe: "\u{1F97F}",
   high_heel: "\u{1F460}",
   sandal: "\u{1F461}",
   ballet_shoes: "\u{1FA70}",
   boot: "\u{1F462}",
-  hair_pick: "\u{1FAAE}",
   crown: "\u{1F451}",
   womans_hat: "\u{1F452}",
   tophat: "\u{1F3A9}",
   mortar_board: "\u{1F393}",
   billed_cap: "\u{1F9E2}",
   military_helmet: "\u{1FA96}",
-  rescue_worker_helmet: "\u26D1\uFE0F",
+  helmet_with_white_cross: "\u26D1\uFE0F",
   prayer_beads: "\u{1F4FF}",
   lipstick: "\u{1F484}",
   ring: "\u{1F48D}",
@@ -14684,14 +14639,11 @@ var nameToEmoji = {
   trumpet: "\u{1F3BA}",
   violin: "\u{1F3BB}",
   banjo: "\u{1FA95}",
-  drum: "\u{1F941}",
+  drum_with_drumsticks: "\u{1F941}",
   long_drum: "\u{1FA98}",
-  maracas: "\u{1FA87}",
-  flute: "\u{1FA88}",
   iphone: "\u{1F4F1}",
   calling: "\u{1F4F2}",
   phone: "\u260E\uFE0F",
-  telephone: "\u260E\uFE0F",
   telephone_receiver: "\u{1F4DE}",
   pager: "\u{1F4DF}",
   fax: "\u{1F4E0}",
@@ -14702,7 +14654,7 @@ var nameToEmoji = {
   desktop_computer: "\u{1F5A5}\uFE0F",
   printer: "\u{1F5A8}\uFE0F",
   keyboard: "\u2328\uFE0F",
-  computer_mouse: "\u{1F5B1}\uFE0F",
+  three_button_mouse: "\u{1F5B1}\uFE0F",
   trackball: "\u{1F5B2}\uFE0F",
   minidisc: "\u{1F4BD}",
   floppy_disk: "\u{1F4BE}",
@@ -14710,12 +14662,12 @@ var nameToEmoji = {
   dvd: "\u{1F4C0}",
   abacus: "\u{1F9EE}",
   movie_camera: "\u{1F3A5}",
-  film_strip: "\u{1F39E}\uFE0F",
+  film_frames: "\u{1F39E}\uFE0F",
   film_projector: "\u{1F4FD}\uFE0F",
   clapper: "\u{1F3AC}",
   tv: "\u{1F4FA}",
   camera: "\u{1F4F7}",
-  camera_flash: "\u{1F4F8}",
+  camera_with_flash: "\u{1F4F8}",
   video_camera: "\u{1F4F9}",
   vhs: "\u{1F4FC}",
   mag: "\u{1F50D}",
@@ -14724,12 +14676,10 @@ var nameToEmoji = {
   bulb: "\u{1F4A1}",
   flashlight: "\u{1F526}",
   izakaya_lantern: "\u{1F3EE}",
-  lantern: "\u{1F3EE}",
   diya_lamp: "\u{1FA94}",
   notebook_with_decorative_cover: "\u{1F4D4}",
   closed_book: "\u{1F4D5}",
   book: "\u{1F4D6}",
-  open_book: "\u{1F4D6}",
   green_book: "\u{1F4D7}",
   blue_book: "\u{1F4D8}",
   orange_book: "\u{1F4D9}",
@@ -14740,7 +14690,7 @@ var nameToEmoji = {
   scroll: "\u{1F4DC}",
   page_facing_up: "\u{1F4C4}",
   newspaper: "\u{1F4F0}",
-  newspaper_roll: "\u{1F5DE}\uFE0F",
+  rolled_up_newspaper: "\u{1F5DE}\uFE0F",
   bookmark_tabs: "\u{1F4D1}",
   bookmark: "\u{1F516}",
   label: "\u{1F3F7}\uFE0F",
@@ -14754,8 +14704,7 @@ var nameToEmoji = {
   credit_card: "\u{1F4B3}",
   receipt: "\u{1F9FE}",
   chart: "\u{1F4B9}",
-  envelope: "\u2709\uFE0F",
-  email: "\u{1F4E7}",
+  email: "\u2709\uFE0F",
   "e-mail": "\u{1F4E7}",
   incoming_envelope: "\u{1F4E8}",
   envelope_with_arrow: "\u{1F4E9}",
@@ -14767,23 +14716,22 @@ var nameToEmoji = {
   mailbox_with_mail: "\u{1F4EC}",
   mailbox_with_no_mail: "\u{1F4ED}",
   postbox: "\u{1F4EE}",
-  ballot_box: "\u{1F5F3}\uFE0F",
+  ballot_box_with_ballot: "\u{1F5F3}\uFE0F",
   pencil2: "\u270F\uFE0F",
   black_nib: "\u2712\uFE0F",
-  fountain_pen: "\u{1F58B}\uFE0F",
-  pen: "\u{1F58A}\uFE0F",
-  paintbrush: "\u{1F58C}\uFE0F",
-  crayon: "\u{1F58D}\uFE0F",
+  lower_left_fountain_pen: "\u{1F58B}\uFE0F",
+  lower_left_ballpoint_pen: "\u{1F58A}\uFE0F",
+  lower_left_paintbrush: "\u{1F58C}\uFE0F",
+  lower_left_crayon: "\u{1F58D}\uFE0F",
   memo: "\u{1F4DD}",
-  pencil: "\u{1F4DD}",
   briefcase: "\u{1F4BC}",
   file_folder: "\u{1F4C1}",
   open_file_folder: "\u{1F4C2}",
   card_index_dividers: "\u{1F5C2}\uFE0F",
   date: "\u{1F4C5}",
   calendar: "\u{1F4C6}",
-  spiral_notepad: "\u{1F5D2}\uFE0F",
-  spiral_calendar: "\u{1F5D3}\uFE0F",
+  spiral_note_pad: "\u{1F5D2}\uFE0F",
+  spiral_calendar_pad: "\u{1F5D3}\uFE0F",
   card_index: "\u{1F4C7}",
   chart_with_upwards_trend: "\u{1F4C8}",
   chart_with_downwards_trend: "\u{1F4C9}",
@@ -14792,7 +14740,7 @@ var nameToEmoji = {
   pushpin: "\u{1F4CC}",
   round_pushpin: "\u{1F4CD}",
   paperclip: "\u{1F4CE}",
-  paperclips: "\u{1F587}\uFE0F",
+  linked_paperclips: "\u{1F587}\uFE0F",
   straight_ruler: "\u{1F4CF}",
   triangular_ruler: "\u{1F4D0}",
   scissors: "\u2702\uFE0F",
@@ -14810,7 +14758,7 @@ var nameToEmoji = {
   pick: "\u26CF\uFE0F",
   hammer_and_pick: "\u2692\uFE0F",
   hammer_and_wrench: "\u{1F6E0}\uFE0F",
-  dagger: "\u{1F5E1}\uFE0F",
+  dagger_knife: "\u{1F5E1}\uFE0F",
   crossed_swords: "\u2694\uFE0F",
   bomb: "\u{1F4A3}",
   boomerang: "\u{1FA83}",
@@ -14821,8 +14769,8 @@ var nameToEmoji = {
   screwdriver: "\u{1FA9B}",
   nut_and_bolt: "\u{1F529}",
   gear: "\u2699\uFE0F",
-  clamp: "\u{1F5DC}\uFE0F",
-  balance_scale: "\u2696\uFE0F",
+  compression: "\u{1F5DC}\uFE0F",
+  scales: "\u2696\uFE0F",
   probing_cane: "\u{1F9AF}",
   link: "\u{1F517}",
   chains: "\u26D3\uFE0F",
@@ -14836,14 +14784,14 @@ var nameToEmoji = {
   dna: "\u{1F9EC}",
   microscope: "\u{1F52C}",
   telescope: "\u{1F52D}",
-  satellite: "\u{1F4E1}",
+  satellite_antenna: "\u{1F4E1}",
   syringe: "\u{1F489}",
   drop_of_blood: "\u{1FA78}",
   pill: "\u{1F48A}",
   adhesive_bandage: "\u{1FA79}",
   crutch: "\u{1FA7C}",
   stethoscope: "\u{1FA7A}",
-  x_ray: "\u{1FA7B}",
+  "x-ray": "\u{1FA7B}",
   door: "\u{1F6AA}",
   elevator: "\u{1F6D7}",
   mirror: "\u{1FA9E}",
@@ -14868,7 +14816,7 @@ var nameToEmoji = {
   toothbrush: "\u{1FAA5}",
   sponge: "\u{1F9FD}",
   fire_extinguisher: "\u{1F9EF}",
-  shopping_cart: "\u{1F6D2}",
+  shopping_trolley: "\u{1F6D2}",
   smoking: "\u{1F6AC}",
   coffin: "\u26B0\uFE0F",
   headstone: "\u{1FAA6}",
@@ -14902,8 +14850,8 @@ var nameToEmoji = {
   no_pedestrians: "\u{1F6B7}",
   no_mobile_phones: "\u{1F4F5}",
   underage: "\u{1F51E}",
-  radioactive: "\u2622\uFE0F",
-  biohazard: "\u2623\uFE0F",
+  radioactive_sign: "\u2622\uFE0F",
+  biohazard_sign: "\u2623\uFE0F",
   arrow_up: "\u2B06\uFE0F",
   arrow_upper_right: "\u2197\uFE0F",
   arrow_right: "\u27A1\uFE0F",
@@ -14927,7 +14875,7 @@ var nameToEmoji = {
   top: "\u{1F51D}",
   place_of_worship: "\u{1F6D0}",
   atom_symbol: "\u269B\uFE0F",
-  om: "\u{1F549}\uFE0F",
+  om_symbol: "\u{1F549}\uFE0F",
   star_of_david: "\u2721\uFE0F",
   wheel_of_dharma: "\u2638\uFE0F",
   yin_yang: "\u262F\uFE0F",
@@ -14935,9 +14883,8 @@ var nameToEmoji = {
   orthodox_cross: "\u2626\uFE0F",
   star_and_crescent: "\u262A\uFE0F",
   peace_symbol: "\u262E\uFE0F",
-  menorah: "\u{1F54E}",
+  menorah_with_nine_branches: "\u{1F54E}",
   six_pointed_star: "\u{1F52F}",
-  khanda: "\u{1FAAF}",
   aries: "\u2648",
   taurus: "\u2649",
   gemini: "\u264A",
@@ -14956,24 +14903,23 @@ var nameToEmoji = {
   repeat_one: "\u{1F502}",
   arrow_forward: "\u25B6\uFE0F",
   fast_forward: "\u23E9",
-  next_track_button: "\u23ED\uFE0F",
-  play_or_pause_button: "\u23EF\uFE0F",
+  black_right_pointing_double_triangle_with_vertical_bar: "\u23ED\uFE0F",
+  black_right_pointing_triangle_with_double_vertical_bar: "\u23EF\uFE0F",
   arrow_backward: "\u25C0\uFE0F",
   rewind: "\u23EA",
-  previous_track_button: "\u23EE\uFE0F",
+  black_left_pointing_double_triangle_with_vertical_bar: "\u23EE\uFE0F",
   arrow_up_small: "\u{1F53C}",
   arrow_double_up: "\u23EB",
   arrow_down_small: "\u{1F53D}",
   arrow_double_down: "\u23EC",
-  pause_button: "\u23F8\uFE0F",
-  stop_button: "\u23F9\uFE0F",
-  record_button: "\u23FA\uFE0F",
-  eject_button: "\u23CF\uFE0F",
+  double_vertical_bar: "\u23F8\uFE0F",
+  black_square_for_stop: "\u23F9\uFE0F",
+  black_circle_for_record: "\u23FA\uFE0F",
+  eject: "\u23CF\uFE0F",
   cinema: "\u{1F3A6}",
   low_brightness: "\u{1F505}",
   high_brightness: "\u{1F506}",
   signal_strength: "\u{1F4F6}",
-  wireless: "\u{1F6DC}",
   vibration_mode: "\u{1F4F3}",
   mobile_phone_off: "\u{1F4F4}",
   female_sign: "\u2640\uFE0F",
@@ -14991,7 +14937,6 @@ var nameToEmoji = {
   grey_question: "\u2754",
   grey_exclamation: "\u2755",
   exclamation: "\u2757",
-  heavy_exclamation_mark: "\u2757",
   wavy_dash: "\u3030\uFE0F",
   currency_exchange: "\u{1F4B1}",
   heavy_dollar_sign: "\u{1F4B2}",
@@ -15017,7 +14962,7 @@ var nameToEmoji = {
   registered: "\xAE\uFE0F",
   tm: "\u2122\uFE0F",
   hash: "#\uFE0F\u20E3",
-  asterisk: "*\uFE0F\u20E3",
+  keycap_star: "*\uFE0F\u20E3",
   zero: "0\uFE0F\u20E3",
   one: "1\uFE0F\u20E3",
   two: "2\uFE0F\u20E3",
@@ -15068,21 +15013,21 @@ var nameToEmoji = {
   u55b6: "\u{1F23A}",
   u6e80: "\u{1F235}",
   red_circle: "\u{1F534}",
-  orange_circle: "\u{1F7E0}",
-  yellow_circle: "\u{1F7E1}",
-  green_circle: "\u{1F7E2}",
+  large_orange_circle: "\u{1F7E0}",
+  large_yellow_circle: "\u{1F7E1}",
+  large_green_circle: "\u{1F7E2}",
   large_blue_circle: "\u{1F535}",
-  purple_circle: "\u{1F7E3}",
-  brown_circle: "\u{1F7E4}",
+  large_purple_circle: "\u{1F7E3}",
+  large_brown_circle: "\u{1F7E4}",
   black_circle: "\u26AB",
   white_circle: "\u26AA",
-  red_square: "\u{1F7E5}",
-  orange_square: "\u{1F7E7}",
-  yellow_square: "\u{1F7E8}",
-  green_square: "\u{1F7E9}",
-  blue_square: "\u{1F7E6}",
-  purple_square: "\u{1F7EA}",
-  brown_square: "\u{1F7EB}",
+  large_red_square: "\u{1F7E5}",
+  large_orange_square: "\u{1F7E7}",
+  large_yellow_square: "\u{1F7E8}",
+  large_green_square: "\u{1F7E9}",
+  large_blue_square: "\u{1F7E6}",
+  large_purple_square: "\u{1F7EA}",
+  large_brown_square: "\u{1F7EB}",
   black_large_square: "\u2B1B",
   white_large_square: "\u2B1C",
   black_medium_square: "\u25FC\uFE0F",
@@ -15104,275 +15049,276 @@ var nameToEmoji = {
   checkered_flag: "\u{1F3C1}",
   triangular_flag_on_post: "\u{1F6A9}",
   crossed_flags: "\u{1F38C}",
-  black_flag: "\u{1F3F4}",
-  white_flag: "\u{1F3F3}\uFE0F",
-  rainbow_flag: "\u{1F3F3}\uFE0F\u200D\u{1F308}",
+  waving_black_flag: "\u{1F3F4}",
+  waving_white_flag: "\u{1F3F3}\uFE0F",
+  "rainbow-flag": "\u{1F3F3}\uFE0F\u200D\u{1F308}",
   transgender_flag: "\u{1F3F3}\uFE0F\u200D\u26A7\uFE0F",
   pirate_flag: "\u{1F3F4}\u200D\u2620\uFE0F",
-  ascension_island: "\u{1F1E6}\u{1F1E8}",
-  andorra: "\u{1F1E6}\u{1F1E9}",
-  united_arab_emirates: "\u{1F1E6}\u{1F1EA}",
-  afghanistan: "\u{1F1E6}\u{1F1EB}",
-  antigua_barbuda: "\u{1F1E6}\u{1F1EC}",
-  anguilla: "\u{1F1E6}\u{1F1EE}",
-  albania: "\u{1F1E6}\u{1F1F1}",
-  armenia: "\u{1F1E6}\u{1F1F2}",
-  angola: "\u{1F1E6}\u{1F1F4}",
-  antarctica: "\u{1F1E6}\u{1F1F6}",
-  argentina: "\u{1F1E6}\u{1F1F7}",
-  american_samoa: "\u{1F1E6}\u{1F1F8}",
-  austria: "\u{1F1E6}\u{1F1F9}",
-  australia: "\u{1F1E6}\u{1F1FA}",
-  aruba: "\u{1F1E6}\u{1F1FC}",
-  aland_islands: "\u{1F1E6}\u{1F1FD}",
-  azerbaijan: "\u{1F1E6}\u{1F1FF}",
-  bosnia_herzegovina: "\u{1F1E7}\u{1F1E6}",
-  barbados: "\u{1F1E7}\u{1F1E7}",
-  bangladesh: "\u{1F1E7}\u{1F1E9}",
-  belgium: "\u{1F1E7}\u{1F1EA}",
-  burkina_faso: "\u{1F1E7}\u{1F1EB}",
-  bulgaria: "\u{1F1E7}\u{1F1EC}",
-  bahrain: "\u{1F1E7}\u{1F1ED}",
-  burundi: "\u{1F1E7}\u{1F1EE}",
-  benin: "\u{1F1E7}\u{1F1EF}",
-  st_barthelemy: "\u{1F1E7}\u{1F1F1}",
-  bermuda: "\u{1F1E7}\u{1F1F2}",
-  brunei: "\u{1F1E7}\u{1F1F3}",
-  bolivia: "\u{1F1E7}\u{1F1F4}",
-  caribbean_netherlands: "\u{1F1E7}\u{1F1F6}",
-  brazil: "\u{1F1E7}\u{1F1F7}",
-  bahamas: "\u{1F1E7}\u{1F1F8}",
-  bhutan: "\u{1F1E7}\u{1F1F9}",
-  bouvet_island: "\u{1F1E7}\u{1F1FB}",
-  botswana: "\u{1F1E7}\u{1F1FC}",
-  belarus: "\u{1F1E7}\u{1F1FE}",
-  belize: "\u{1F1E7}\u{1F1FF}",
-  canada: "\u{1F1E8}\u{1F1E6}",
-  cocos_islands: "\u{1F1E8}\u{1F1E8}",
-  congo_kinshasa: "\u{1F1E8}\u{1F1E9}",
-  central_african_republic: "\u{1F1E8}\u{1F1EB}",
-  congo_brazzaville: "\u{1F1E8}\u{1F1EC}",
-  switzerland: "\u{1F1E8}\u{1F1ED}",
-  cote_divoire: "\u{1F1E8}\u{1F1EE}",
-  cook_islands: "\u{1F1E8}\u{1F1F0}",
-  chile: "\u{1F1E8}\u{1F1F1}",
-  cameroon: "\u{1F1E8}\u{1F1F2}",
+  "flag-ac": "\u{1F1E6}\u{1F1E8}",
+  "flag-ad": "\u{1F1E6}\u{1F1E9}",
+  "flag-ae": "\u{1F1E6}\u{1F1EA}",
+  "flag-af": "\u{1F1E6}\u{1F1EB}",
+  "flag-ag": "\u{1F1E6}\u{1F1EC}",
+  "flag-ai": "\u{1F1E6}\u{1F1EE}",
+  "flag-al": "\u{1F1E6}\u{1F1F1}",
+  "flag-am": "\u{1F1E6}\u{1F1F2}",
+  "flag-ao": "\u{1F1E6}\u{1F1F4}",
+  "flag-aq": "\u{1F1E6}\u{1F1F6}",
+  "flag-ar": "\u{1F1E6}\u{1F1F7}",
+  "flag-as": "\u{1F1E6}\u{1F1F8}",
+  "flag-at": "\u{1F1E6}\u{1F1F9}",
+  "flag-au": "\u{1F1E6}\u{1F1FA}",
+  "flag-aw": "\u{1F1E6}\u{1F1FC}",
+  "flag-ax": "\u{1F1E6}\u{1F1FD}",
+  "flag-az": "\u{1F1E6}\u{1F1FF}",
+  "flag-ba": "\u{1F1E7}\u{1F1E6}",
+  "flag-bb": "\u{1F1E7}\u{1F1E7}",
+  "flag-bd": "\u{1F1E7}\u{1F1E9}",
+  "flag-be": "\u{1F1E7}\u{1F1EA}",
+  "flag-bf": "\u{1F1E7}\u{1F1EB}",
+  "flag-bg": "\u{1F1E7}\u{1F1EC}",
+  "flag-bh": "\u{1F1E7}\u{1F1ED}",
+  "flag-bi": "\u{1F1E7}\u{1F1EE}",
+  "flag-bj": "\u{1F1E7}\u{1F1EF}",
+  "flag-bl": "\u{1F1E7}\u{1F1F1}",
+  "flag-bm": "\u{1F1E7}\u{1F1F2}",
+  "flag-bn": "\u{1F1E7}\u{1F1F3}",
+  "flag-bo": "\u{1F1E7}\u{1F1F4}",
+  "flag-bq": "\u{1F1E7}\u{1F1F6}",
+  "flag-br": "\u{1F1E7}\u{1F1F7}",
+  "flag-bs": "\u{1F1E7}\u{1F1F8}",
+  "flag-bt": "\u{1F1E7}\u{1F1F9}",
+  "flag-bv": "\u{1F1E7}\u{1F1FB}",
+  "flag-bw": "\u{1F1E7}\u{1F1FC}",
+  "flag-by": "\u{1F1E7}\u{1F1FE}",
+  "flag-bz": "\u{1F1E7}\u{1F1FF}",
+  "flag-ca": "\u{1F1E8}\u{1F1E6}",
+  "flag-cc": "\u{1F1E8}\u{1F1E8}",
+  "flag-cd": "\u{1F1E8}\u{1F1E9}",
+  "flag-cf": "\u{1F1E8}\u{1F1EB}",
+  "flag-cg": "\u{1F1E8}\u{1F1EC}",
+  "flag-ch": "\u{1F1E8}\u{1F1ED}",
+  "flag-ci": "\u{1F1E8}\u{1F1EE}",
+  "flag-ck": "\u{1F1E8}\u{1F1F0}",
+  "flag-cl": "\u{1F1E8}\u{1F1F1}",
+  "flag-cm": "\u{1F1E8}\u{1F1F2}",
   cn: "\u{1F1E8}\u{1F1F3}",
-  colombia: "\u{1F1E8}\u{1F1F4}",
-  clipperton_island: "\u{1F1E8}\u{1F1F5}",
-  costa_rica: "\u{1F1E8}\u{1F1F7}",
-  cuba: "\u{1F1E8}\u{1F1FA}",
-  cape_verde: "\u{1F1E8}\u{1F1FB}",
-  curacao: "\u{1F1E8}\u{1F1FC}",
-  christmas_island: "\u{1F1E8}\u{1F1FD}",
-  cyprus: "\u{1F1E8}\u{1F1FE}",
-  czech_republic: "\u{1F1E8}\u{1F1FF}",
+  "flag-co": "\u{1F1E8}\u{1F1F4}",
+  "flag-cp": "\u{1F1E8}\u{1F1F5}",
+  "flag-cr": "\u{1F1E8}\u{1F1F7}",
+  "flag-cu": "\u{1F1E8}\u{1F1FA}",
+  "flag-cv": "\u{1F1E8}\u{1F1FB}",
+  "flag-cw": "\u{1F1E8}\u{1F1FC}",
+  "flag-cx": "\u{1F1E8}\u{1F1FD}",
+  "flag-cy": "\u{1F1E8}\u{1F1FE}",
+  "flag-cz": "\u{1F1E8}\u{1F1FF}",
   de: "\u{1F1E9}\u{1F1EA}",
-  diego_garcia: "\u{1F1E9}\u{1F1EC}",
-  djibouti: "\u{1F1E9}\u{1F1EF}",
-  denmark: "\u{1F1E9}\u{1F1F0}",
-  dominica: "\u{1F1E9}\u{1F1F2}",
-  dominican_republic: "\u{1F1E9}\u{1F1F4}",
-  algeria: "\u{1F1E9}\u{1F1FF}",
-  ceuta_melilla: "\u{1F1EA}\u{1F1E6}",
-  ecuador: "\u{1F1EA}\u{1F1E8}",
-  estonia: "\u{1F1EA}\u{1F1EA}",
-  egypt: "\u{1F1EA}\u{1F1EC}",
-  western_sahara: "\u{1F1EA}\u{1F1ED}",
-  eritrea: "\u{1F1EA}\u{1F1F7}",
+  "flag-dg": "\u{1F1E9}\u{1F1EC}",
+  "flag-dj": "\u{1F1E9}\u{1F1EF}",
+  "flag-dk": "\u{1F1E9}\u{1F1F0}",
+  "flag-dm": "\u{1F1E9}\u{1F1F2}",
+  "flag-do": "\u{1F1E9}\u{1F1F4}",
+  "flag-dz": "\u{1F1E9}\u{1F1FF}",
+  "flag-ea": "\u{1F1EA}\u{1F1E6}",
+  "flag-ec": "\u{1F1EA}\u{1F1E8}",
+  "flag-ee": "\u{1F1EA}\u{1F1EA}",
+  "flag-eg": "\u{1F1EA}\u{1F1EC}",
+  "flag-eh": "\u{1F1EA}\u{1F1ED}",
+  "flag-er": "\u{1F1EA}\u{1F1F7}",
   es: "\u{1F1EA}\u{1F1F8}",
-  ethiopia: "\u{1F1EA}\u{1F1F9}",
-  eu: "\u{1F1EA}\u{1F1FA}",
-  european_union: "\u{1F1EA}\u{1F1FA}",
-  finland: "\u{1F1EB}\u{1F1EE}",
-  fiji: "\u{1F1EB}\u{1F1EF}",
-  falkland_islands: "\u{1F1EB}\u{1F1F0}",
-  micronesia: "\u{1F1EB}\u{1F1F2}",
-  faroe_islands: "\u{1F1EB}\u{1F1F4}",
+  "flag-et": "\u{1F1EA}\u{1F1F9}",
+  "flag-eu": "\u{1F1EA}\u{1F1FA}",
+  "flag-fi": "\u{1F1EB}\u{1F1EE}",
+  "flag-fj": "\u{1F1EB}\u{1F1EF}",
+  "flag-fk": "\u{1F1EB}\u{1F1F0}",
+  "flag-fm": "\u{1F1EB}\u{1F1F2}",
+  "flag-fo": "\u{1F1EB}\u{1F1F4}",
   fr: "\u{1F1EB}\u{1F1F7}",
-  gabon: "\u{1F1EC}\u{1F1E6}",
+  "flag-ga": "\u{1F1EC}\u{1F1E6}",
   gb: "\u{1F1EC}\u{1F1E7}",
-  uk: "\u{1F1EC}\u{1F1E7}",
-  grenada: "\u{1F1EC}\u{1F1E9}",
-  georgia: "\u{1F1EC}\u{1F1EA}",
-  french_guiana: "\u{1F1EC}\u{1F1EB}",
-  guernsey: "\u{1F1EC}\u{1F1EC}",
-  ghana: "\u{1F1EC}\u{1F1ED}",
-  gibraltar: "\u{1F1EC}\u{1F1EE}",
-  greenland: "\u{1F1EC}\u{1F1F1}",
-  gambia: "\u{1F1EC}\u{1F1F2}",
-  guinea: "\u{1F1EC}\u{1F1F3}",
-  guadeloupe: "\u{1F1EC}\u{1F1F5}",
-  equatorial_guinea: "\u{1F1EC}\u{1F1F6}",
-  greece: "\u{1F1EC}\u{1F1F7}",
-  south_georgia_south_sandwich_islands: "\u{1F1EC}\u{1F1F8}",
-  guatemala: "\u{1F1EC}\u{1F1F9}",
-  guam: "\u{1F1EC}\u{1F1FA}",
-  guinea_bissau: "\u{1F1EC}\u{1F1FC}",
-  guyana: "\u{1F1EC}\u{1F1FE}",
-  hong_kong: "\u{1F1ED}\u{1F1F0}",
-  heard_mcdonald_islands: "\u{1F1ED}\u{1F1F2}",
-  honduras: "\u{1F1ED}\u{1F1F3}",
-  croatia: "\u{1F1ED}\u{1F1F7}",
-  haiti: "\u{1F1ED}\u{1F1F9}",
-  hungary: "\u{1F1ED}\u{1F1FA}",
-  canary_islands: "\u{1F1EE}\u{1F1E8}",
-  indonesia: "\u{1F1EE}\u{1F1E9}",
-  ireland: "\u{1F1EE}\u{1F1EA}",
-  israel: "\u{1F1EE}\u{1F1F1}",
-  isle_of_man: "\u{1F1EE}\u{1F1F2}",
-  india: "\u{1F1EE}\u{1F1F3}",
-  british_indian_ocean_territory: "\u{1F1EE}\u{1F1F4}",
-  iraq: "\u{1F1EE}\u{1F1F6}",
-  iran: "\u{1F1EE}\u{1F1F7}",
-  iceland: "\u{1F1EE}\u{1F1F8}",
+  "flag-gd": "\u{1F1EC}\u{1F1E9}",
+  "flag-ge": "\u{1F1EC}\u{1F1EA}",
+  "flag-gf": "\u{1F1EC}\u{1F1EB}",
+  "flag-gg": "\u{1F1EC}\u{1F1EC}",
+  "flag-gh": "\u{1F1EC}\u{1F1ED}",
+  "flag-gi": "\u{1F1EC}\u{1F1EE}",
+  "flag-gl": "\u{1F1EC}\u{1F1F1}",
+  "flag-gm": "\u{1F1EC}\u{1F1F2}",
+  "flag-gn": "\u{1F1EC}\u{1F1F3}",
+  "flag-gp": "\u{1F1EC}\u{1F1F5}",
+  "flag-gq": "\u{1F1EC}\u{1F1F6}",
+  "flag-gr": "\u{1F1EC}\u{1F1F7}",
+  "flag-gs": "\u{1F1EC}\u{1F1F8}",
+  "flag-gt": "\u{1F1EC}\u{1F1F9}",
+  "flag-gu": "\u{1F1EC}\u{1F1FA}",
+  "flag-gw": "\u{1F1EC}\u{1F1FC}",
+  "flag-gy": "\u{1F1EC}\u{1F1FE}",
+  "flag-hk": "\u{1F1ED}\u{1F1F0}",
+  "flag-hm": "\u{1F1ED}\u{1F1F2}",
+  "flag-hn": "\u{1F1ED}\u{1F1F3}",
+  "flag-hr": "\u{1F1ED}\u{1F1F7}",
+  "flag-ht": "\u{1F1ED}\u{1F1F9}",
+  "flag-hu": "\u{1F1ED}\u{1F1FA}",
+  "flag-ic": "\u{1F1EE}\u{1F1E8}",
+  "flag-id": "\u{1F1EE}\u{1F1E9}",
+  "flag-ie": "\u{1F1EE}\u{1F1EA}",
+  "flag-il": "\u{1F1EE}\u{1F1F1}",
+  "flag-im": "\u{1F1EE}\u{1F1F2}",
+  "flag-in": "\u{1F1EE}\u{1F1F3}",
+  "flag-io": "\u{1F1EE}\u{1F1F4}",
+  "flag-iq": "\u{1F1EE}\u{1F1F6}",
+  "flag-ir": "\u{1F1EE}\u{1F1F7}",
+  "flag-is": "\u{1F1EE}\u{1F1F8}",
   it: "\u{1F1EE}\u{1F1F9}",
-  jersey: "\u{1F1EF}\u{1F1EA}",
-  jamaica: "\u{1F1EF}\u{1F1F2}",
-  jordan: "\u{1F1EF}\u{1F1F4}",
+  "flag-je": "\u{1F1EF}\u{1F1EA}",
+  "flag-jm": "\u{1F1EF}\u{1F1F2}",
+  "flag-jo": "\u{1F1EF}\u{1F1F4}",
   jp: "\u{1F1EF}\u{1F1F5}",
-  kenya: "\u{1F1F0}\u{1F1EA}",
-  kyrgyzstan: "\u{1F1F0}\u{1F1EC}",
-  cambodia: "\u{1F1F0}\u{1F1ED}",
-  kiribati: "\u{1F1F0}\u{1F1EE}",
-  comoros: "\u{1F1F0}\u{1F1F2}",
-  st_kitts_nevis: "\u{1F1F0}\u{1F1F3}",
-  north_korea: "\u{1F1F0}\u{1F1F5}",
+  "flag-ke": "\u{1F1F0}\u{1F1EA}",
+  "flag-kg": "\u{1F1F0}\u{1F1EC}",
+  "flag-kh": "\u{1F1F0}\u{1F1ED}",
+  "flag-ki": "\u{1F1F0}\u{1F1EE}",
+  "flag-km": "\u{1F1F0}\u{1F1F2}",
+  "flag-kn": "\u{1F1F0}\u{1F1F3}",
+  "flag-kp": "\u{1F1F0}\u{1F1F5}",
   kr: "\u{1F1F0}\u{1F1F7}",
-  kuwait: "\u{1F1F0}\u{1F1FC}",
-  cayman_islands: "\u{1F1F0}\u{1F1FE}",
-  kazakhstan: "\u{1F1F0}\u{1F1FF}",
-  laos: "\u{1F1F1}\u{1F1E6}",
-  lebanon: "\u{1F1F1}\u{1F1E7}",
-  st_lucia: "\u{1F1F1}\u{1F1E8}",
-  liechtenstein: "\u{1F1F1}\u{1F1EE}",
-  sri_lanka: "\u{1F1F1}\u{1F1F0}",
-  liberia: "\u{1F1F1}\u{1F1F7}",
-  lesotho: "\u{1F1F1}\u{1F1F8}",
-  lithuania: "\u{1F1F1}\u{1F1F9}",
-  luxembourg: "\u{1F1F1}\u{1F1FA}",
-  latvia: "\u{1F1F1}\u{1F1FB}",
-  libya: "\u{1F1F1}\u{1F1FE}",
-  morocco: "\u{1F1F2}\u{1F1E6}",
-  monaco: "\u{1F1F2}\u{1F1E8}",
-  moldova: "\u{1F1F2}\u{1F1E9}",
-  montenegro: "\u{1F1F2}\u{1F1EA}",
-  st_martin: "\u{1F1F2}\u{1F1EB}",
-  madagascar: "\u{1F1F2}\u{1F1EC}",
-  marshall_islands: "\u{1F1F2}\u{1F1ED}",
-  macedonia: "\u{1F1F2}\u{1F1F0}",
-  mali: "\u{1F1F2}\u{1F1F1}",
-  myanmar: "\u{1F1F2}\u{1F1F2}",
-  mongolia: "\u{1F1F2}\u{1F1F3}",
-  macau: "\u{1F1F2}\u{1F1F4}",
-  northern_mariana_islands: "\u{1F1F2}\u{1F1F5}",
-  martinique: "\u{1F1F2}\u{1F1F6}",
-  mauritania: "\u{1F1F2}\u{1F1F7}",
-  montserrat: "\u{1F1F2}\u{1F1F8}",
-  malta: "\u{1F1F2}\u{1F1F9}",
-  mauritius: "\u{1F1F2}\u{1F1FA}",
-  maldives: "\u{1F1F2}\u{1F1FB}",
-  malawi: "\u{1F1F2}\u{1F1FC}",
-  mexico: "\u{1F1F2}\u{1F1FD}",
-  malaysia: "\u{1F1F2}\u{1F1FE}",
-  mozambique: "\u{1F1F2}\u{1F1FF}",
-  namibia: "\u{1F1F3}\u{1F1E6}",
-  new_caledonia: "\u{1F1F3}\u{1F1E8}",
-  niger: "\u{1F1F3}\u{1F1EA}",
-  norfolk_island: "\u{1F1F3}\u{1F1EB}",
-  nigeria: "\u{1F1F3}\u{1F1EC}",
-  nicaragua: "\u{1F1F3}\u{1F1EE}",
-  netherlands: "\u{1F1F3}\u{1F1F1}",
-  norway: "\u{1F1F3}\u{1F1F4}",
-  nepal: "\u{1F1F3}\u{1F1F5}",
-  nauru: "\u{1F1F3}\u{1F1F7}",
-  niue: "\u{1F1F3}\u{1F1FA}",
-  new_zealand: "\u{1F1F3}\u{1F1FF}",
-  oman: "\u{1F1F4}\u{1F1F2}",
-  panama: "\u{1F1F5}\u{1F1E6}",
-  peru: "\u{1F1F5}\u{1F1EA}",
-  french_polynesia: "\u{1F1F5}\u{1F1EB}",
-  papua_new_guinea: "\u{1F1F5}\u{1F1EC}",
-  philippines: "\u{1F1F5}\u{1F1ED}",
-  pakistan: "\u{1F1F5}\u{1F1F0}",
-  poland: "\u{1F1F5}\u{1F1F1}",
-  st_pierre_miquelon: "\u{1F1F5}\u{1F1F2}",
-  pitcairn_islands: "\u{1F1F5}\u{1F1F3}",
-  puerto_rico: "\u{1F1F5}\u{1F1F7}",
-  palestinian_territories: "\u{1F1F5}\u{1F1F8}",
-  portugal: "\u{1F1F5}\u{1F1F9}",
-  palau: "\u{1F1F5}\u{1F1FC}",
-  paraguay: "\u{1F1F5}\u{1F1FE}",
-  qatar: "\u{1F1F6}\u{1F1E6}",
-  reunion: "\u{1F1F7}\u{1F1EA}",
-  romania: "\u{1F1F7}\u{1F1F4}",
-  serbia: "\u{1F1F7}\u{1F1F8}",
+  "flag-kw": "\u{1F1F0}\u{1F1FC}",
+  "flag-ky": "\u{1F1F0}\u{1F1FE}",
+  "flag-kz": "\u{1F1F0}\u{1F1FF}",
+  "flag-la": "\u{1F1F1}\u{1F1E6}",
+  "flag-lb": "\u{1F1F1}\u{1F1E7}",
+  "flag-lc": "\u{1F1F1}\u{1F1E8}",
+  "flag-li": "\u{1F1F1}\u{1F1EE}",
+  "flag-lk": "\u{1F1F1}\u{1F1F0}",
+  "flag-lr": "\u{1F1F1}\u{1F1F7}",
+  "flag-ls": "\u{1F1F1}\u{1F1F8}",
+  "flag-lt": "\u{1F1F1}\u{1F1F9}",
+  "flag-lu": "\u{1F1F1}\u{1F1FA}",
+  "flag-lv": "\u{1F1F1}\u{1F1FB}",
+  "flag-ly": "\u{1F1F1}\u{1F1FE}",
+  "flag-ma": "\u{1F1F2}\u{1F1E6}",
+  "flag-mc": "\u{1F1F2}\u{1F1E8}",
+  "flag-md": "\u{1F1F2}\u{1F1E9}",
+  "flag-me": "\u{1F1F2}\u{1F1EA}",
+  "flag-mf": "\u{1F1F2}\u{1F1EB}",
+  "flag-mg": "\u{1F1F2}\u{1F1EC}",
+  "flag-mh": "\u{1F1F2}\u{1F1ED}",
+  "flag-mk": "\u{1F1F2}\u{1F1F0}",
+  "flag-ml": "\u{1F1F2}\u{1F1F1}",
+  "flag-mm": "\u{1F1F2}\u{1F1F2}",
+  "flag-mn": "\u{1F1F2}\u{1F1F3}",
+  "flag-mo": "\u{1F1F2}\u{1F1F4}",
+  "flag-mp": "\u{1F1F2}\u{1F1F5}",
+  "flag-mq": "\u{1F1F2}\u{1F1F6}",
+  "flag-mr": "\u{1F1F2}\u{1F1F7}",
+  "flag-ms": "\u{1F1F2}\u{1F1F8}",
+  "flag-mt": "\u{1F1F2}\u{1F1F9}",
+  "flag-mu": "\u{1F1F2}\u{1F1FA}",
+  "flag-mv": "\u{1F1F2}\u{1F1FB}",
+  "flag-mw": "\u{1F1F2}\u{1F1FC}",
+  "flag-mx": "\u{1F1F2}\u{1F1FD}",
+  "flag-my": "\u{1F1F2}\u{1F1FE}",
+  "flag-mz": "\u{1F1F2}\u{1F1FF}",
+  "flag-na": "\u{1F1F3}\u{1F1E6}",
+  "flag-nc": "\u{1F1F3}\u{1F1E8}",
+  "flag-ne": "\u{1F1F3}\u{1F1EA}",
+  "flag-nf": "\u{1F1F3}\u{1F1EB}",
+  "flag-ng": "\u{1F1F3}\u{1F1EC}",
+  "flag-ni": "\u{1F1F3}\u{1F1EE}",
+  "flag-nl": "\u{1F1F3}\u{1F1F1}",
+  "flag-no": "\u{1F1F3}\u{1F1F4}",
+  "flag-np": "\u{1F1F3}\u{1F1F5}",
+  "flag-nr": "\u{1F1F3}\u{1F1F7}",
+  "flag-nu": "\u{1F1F3}\u{1F1FA}",
+  "flag-nz": "\u{1F1F3}\u{1F1FF}",
+  "flag-om": "\u{1F1F4}\u{1F1F2}",
+  "flag-pa": "\u{1F1F5}\u{1F1E6}",
+  "flag-pe": "\u{1F1F5}\u{1F1EA}",
+  "flag-pf": "\u{1F1F5}\u{1F1EB}",
+  "flag-pg": "\u{1F1F5}\u{1F1EC}",
+  "flag-ph": "\u{1F1F5}\u{1F1ED}",
+  "flag-pk": "\u{1F1F5}\u{1F1F0}",
+  "flag-pl": "\u{1F1F5}\u{1F1F1}",
+  "flag-pm": "\u{1F1F5}\u{1F1F2}",
+  "flag-pn": "\u{1F1F5}\u{1F1F3}",
+  "flag-pr": "\u{1F1F5}\u{1F1F7}",
+  "flag-ps": "\u{1F1F5}\u{1F1F8}",
+  "flag-pt": "\u{1F1F5}\u{1F1F9}",
+  "flag-pw": "\u{1F1F5}\u{1F1FC}",
+  "flag-py": "\u{1F1F5}\u{1F1FE}",
+  "flag-qa": "\u{1F1F6}\u{1F1E6}",
+  "flag-re": "\u{1F1F7}\u{1F1EA}",
+  "flag-ro": "\u{1F1F7}\u{1F1F4}",
+  "flag-rs": "\u{1F1F7}\u{1F1F8}",
   ru: "\u{1F1F7}\u{1F1FA}",
-  rwanda: "\u{1F1F7}\u{1F1FC}",
-  saudi_arabia: "\u{1F1F8}\u{1F1E6}",
-  solomon_islands: "\u{1F1F8}\u{1F1E7}",
-  seychelles: "\u{1F1F8}\u{1F1E8}",
-  sudan: "\u{1F1F8}\u{1F1E9}",
-  sweden: "\u{1F1F8}\u{1F1EA}",
-  singapore: "\u{1F1F8}\u{1F1EC}",
-  st_helena: "\u{1F1F8}\u{1F1ED}",
-  slovenia: "\u{1F1F8}\u{1F1EE}",
-  svalbard_jan_mayen: "\u{1F1F8}\u{1F1EF}",
-  slovakia: "\u{1F1F8}\u{1F1F0}",
-  sierra_leone: "\u{1F1F8}\u{1F1F1}",
-  san_marino: "\u{1F1F8}\u{1F1F2}",
-  senegal: "\u{1F1F8}\u{1F1F3}",
-  somalia: "\u{1F1F8}\u{1F1F4}",
-  suriname: "\u{1F1F8}\u{1F1F7}",
-  south_sudan: "\u{1F1F8}\u{1F1F8}",
-  sao_tome_principe: "\u{1F1F8}\u{1F1F9}",
-  el_salvador: "\u{1F1F8}\u{1F1FB}",
-  sint_maarten: "\u{1F1F8}\u{1F1FD}",
-  syria: "\u{1F1F8}\u{1F1FE}",
-  swaziland: "\u{1F1F8}\u{1F1FF}",
-  tristan_da_cunha: "\u{1F1F9}\u{1F1E6}",
-  turks_caicos_islands: "\u{1F1F9}\u{1F1E8}",
-  chad: "\u{1F1F9}\u{1F1E9}",
-  french_southern_territories: "\u{1F1F9}\u{1F1EB}",
-  togo: "\u{1F1F9}\u{1F1EC}",
-  thailand: "\u{1F1F9}\u{1F1ED}",
-  tajikistan: "\u{1F1F9}\u{1F1EF}",
-  tokelau: "\u{1F1F9}\u{1F1F0}",
-  timor_leste: "\u{1F1F9}\u{1F1F1}",
-  turkmenistan: "\u{1F1F9}\u{1F1F2}",
-  tunisia: "\u{1F1F9}\u{1F1F3}",
-  tonga: "\u{1F1F9}\u{1F1F4}",
-  tr: "\u{1F1F9}\u{1F1F7}",
-  trinidad_tobago: "\u{1F1F9}\u{1F1F9}",
-  tuvalu: "\u{1F1F9}\u{1F1FB}",
-  taiwan: "\u{1F1F9}\u{1F1FC}",
-  tanzania: "\u{1F1F9}\u{1F1FF}",
-  ukraine: "\u{1F1FA}\u{1F1E6}",
-  uganda: "\u{1F1FA}\u{1F1EC}",
-  us_outlying_islands: "\u{1F1FA}\u{1F1F2}",
-  united_nations: "\u{1F1FA}\u{1F1F3}",
+  "flag-rw": "\u{1F1F7}\u{1F1FC}",
+  "flag-sa": "\u{1F1F8}\u{1F1E6}",
+  "flag-sb": "\u{1F1F8}\u{1F1E7}",
+  "flag-sc": "\u{1F1F8}\u{1F1E8}",
+  "flag-sd": "\u{1F1F8}\u{1F1E9}",
+  "flag-se": "\u{1F1F8}\u{1F1EA}",
+  "flag-sg": "\u{1F1F8}\u{1F1EC}",
+  "flag-sh": "\u{1F1F8}\u{1F1ED}",
+  "flag-si": "\u{1F1F8}\u{1F1EE}",
+  "flag-sj": "\u{1F1F8}\u{1F1EF}",
+  "flag-sk": "\u{1F1F8}\u{1F1F0}",
+  "flag-sl": "\u{1F1F8}\u{1F1F1}",
+  "flag-sm": "\u{1F1F8}\u{1F1F2}",
+  "flag-sn": "\u{1F1F8}\u{1F1F3}",
+  "flag-so": "\u{1F1F8}\u{1F1F4}",
+  "flag-sr": "\u{1F1F8}\u{1F1F7}",
+  "flag-ss": "\u{1F1F8}\u{1F1F8}",
+  "flag-st": "\u{1F1F8}\u{1F1F9}",
+  "flag-sv": "\u{1F1F8}\u{1F1FB}",
+  "flag-sx": "\u{1F1F8}\u{1F1FD}",
+  "flag-sy": "\u{1F1F8}\u{1F1FE}",
+  "flag-sz": "\u{1F1F8}\u{1F1FF}",
+  "flag-ta": "\u{1F1F9}\u{1F1E6}",
+  "flag-tc": "\u{1F1F9}\u{1F1E8}",
+  "flag-td": "\u{1F1F9}\u{1F1E9}",
+  "flag-tf": "\u{1F1F9}\u{1F1EB}",
+  "flag-tg": "\u{1F1F9}\u{1F1EC}",
+  "flag-th": "\u{1F1F9}\u{1F1ED}",
+  "flag-tj": "\u{1F1F9}\u{1F1EF}",
+  "flag-tk": "\u{1F1F9}\u{1F1F0}",
+  "flag-tl": "\u{1F1F9}\u{1F1F1}",
+  "flag-tm": "\u{1F1F9}\u{1F1F2}",
+  "flag-tn": "\u{1F1F9}\u{1F1F3}",
+  "flag-to": "\u{1F1F9}\u{1F1F4}",
+  "flag-tr": "\u{1F1F9}\u{1F1F7}",
+  "flag-tt": "\u{1F1F9}\u{1F1F9}",
+  "flag-tv": "\u{1F1F9}\u{1F1FB}",
+  "flag-tw": "\u{1F1F9}\u{1F1FC}",
+  "flag-tz": "\u{1F1F9}\u{1F1FF}",
+  "flag-ua": "\u{1F1FA}\u{1F1E6}",
+  "flag-ug": "\u{1F1FA}\u{1F1EC}",
+  "flag-um": "\u{1F1FA}\u{1F1F2}",
+  "flag-un": "\u{1F1FA}\u{1F1F3}",
   us: "\u{1F1FA}\u{1F1F8}",
-  uruguay: "\u{1F1FA}\u{1F1FE}",
-  uzbekistan: "\u{1F1FA}\u{1F1FF}",
-  vatican_city: "\u{1F1FB}\u{1F1E6}",
-  st_vincent_grenadines: "\u{1F1FB}\u{1F1E8}",
-  venezuela: "\u{1F1FB}\u{1F1EA}",
-  british_virgin_islands: "\u{1F1FB}\u{1F1EC}",
-  us_virgin_islands: "\u{1F1FB}\u{1F1EE}",
-  vietnam: "\u{1F1FB}\u{1F1F3}",
-  vanuatu: "\u{1F1FB}\u{1F1FA}",
-  wallis_futuna: "\u{1F1FC}\u{1F1EB}",
-  samoa: "\u{1F1FC}\u{1F1F8}",
-  kosovo: "\u{1F1FD}\u{1F1F0}",
-  yemen: "\u{1F1FE}\u{1F1EA}",
-  mayotte: "\u{1F1FE}\u{1F1F9}",
-  south_africa: "\u{1F1FF}\u{1F1E6}",
-  zambia: "\u{1F1FF}\u{1F1F2}",
-  zimbabwe: "\u{1F1FF}\u{1F1FC}",
-  england: "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}",
-  scotland: "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
-  wales: "\u{1F3F4}\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}"
+  "flag-uy": "\u{1F1FA}\u{1F1FE}",
+  "flag-uz": "\u{1F1FA}\u{1F1FF}",
+  "flag-va": "\u{1F1FB}\u{1F1E6}",
+  "flag-vc": "\u{1F1FB}\u{1F1E8}",
+  "flag-ve": "\u{1F1FB}\u{1F1EA}",
+  "flag-vg": "\u{1F1FB}\u{1F1EC}",
+  "flag-vi": "\u{1F1FB}\u{1F1EE}",
+  "flag-vn": "\u{1F1FB}\u{1F1F3}",
+  "flag-vu": "\u{1F1FB}\u{1F1FA}",
+  "flag-wf": "\u{1F1FC}\u{1F1EB}",
+  "flag-ws": "\u{1F1FC}\u{1F1F8}",
+  "flag-xk": "\u{1F1FD}\u{1F1F0}",
+  "flag-ye": "\u{1F1FE}\u{1F1EA}",
+  "flag-yt": "\u{1F1FE}\u{1F1F9}",
+  "flag-za": "\u{1F1FF}\u{1F1E6}",
+  "flag-zm": "\u{1F1FF}\u{1F1F2}",
+  "flag-zw": "\u{1F1FF}\u{1F1FC}",
+  "flag-england": "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}",
+  "flag-scotland": "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
+  "flag-wales": "\u{1F3F4}\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}"
 };
+
+// src/format/linear-emoji.ts
+var LINEAR_EMOJI = new Map(Object.entries(linear_emoji_default));
 
 // node_modules/micromark-util-character/index.js
 var asciiAlpha = regexCheck(/[A-Za-z]/);
@@ -25100,7 +25046,7 @@ function linearSectionEnd(body2) {
   return lines2.flatMap((row, index2) => closing.has(index2) ? [LINE_PREFIX.exec(row)[0].trimEnd(), row] : [row]).join("\n");
 }
 var NOT_LINEAR_MARKER = /^(?:\+|\d{1,9}\))/;
-var LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,3}(?:[ \t\r]|$)|\+{4}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\|)/m;
+var LINEAR_BLOCK_START = /^(?:[ \t>]|(?:[*+-]|\d{1,9}[.)])(?=[ \t]))*(?:\+{1,2}(?:[ \t\r]|$)|\+{3}|\d{1,9}\)(?:[ \t\r]|$)|\$\$|<|\||(?:-+|=+)[ \t]*\r?$)/m;
 var LINE_END = /\r\n?|\n/;
 var LINE_PREFIX = /^[ \t>]*/;
 var CONFLICT_START = /^<{7}(?: |$)/;
@@ -25109,7 +25055,8 @@ var DIV_END = /<\/div[ \t]*>/i;
 var DIV_END_START = /^<\/div[ \t]*>/i;
 var SECTION_TITLE = /^\+{3}[ \t]/;
 var LONG_PLUS_RUN = /^\+{4}/;
-var ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3}(?:[ \t]|$))/;
+var ESCAPED_BLOCK_START = /^\\(?=<|\|[- \t:]|\$\$|\+{3})/;
+var PLAIN_PLUS_TEXT = /^\+{3,}[^+\s]/;
 function linearLineText(row) {
   return row.replace(LINE_PREFIX, "").trimEnd();
 }
@@ -25136,6 +25083,7 @@ function acceptedBlockStarts(previous3) {
   const html2 = /* @__PURE__ */ new Set();
   if (!/\\[<|$+]|<div\b|^[ \t>]*\|/im.test(previous3)) return { escapes, tables, tableHeaders, html: html2 };
   const lines2 = previous3.split(LINE_END);
+  const plain = /* @__PURE__ */ new Set();
   visit2(parse3(previous3), (node2, ancestors) => {
     const first = line(node2) - 1;
     if (node2.type === "table") {
@@ -25153,9 +25101,11 @@ function acceptedBlockStarts(previous3) {
     for (let index2 = first; index2 < (node2.position?.end.line ?? 0); index2++) {
       const row = lines2[index2];
       const raw = linearLineText(index2 === first ? row.slice(column) : row);
+      const paragraph2 = ancestors.at(-1);
+      const lineStart = index2 > first || paragraph2.children[0] === node2;
+      if (lineStart && PLAIN_PLUS_TEXT.test(raw)) plain.add(blockLineKey(raw, index2 === line(paragraph2) - 1));
       if (!ESCAPED_BLOCK_START.test(raw)) continue;
       const literal = raw.slice(1);
-      const paragraph2 = ancestors.at(-1);
       if (literal.startsWith("|")) {
         const key = tableKey(lines2[index2 - 1] ?? "", literal);
         escapes.add(key);
@@ -25168,6 +25118,7 @@ function acceptedBlockStarts(previous3) {
       }
     }
   });
+  for (const key of plain) escapes.delete(key);
   return { escapes, tables, tableHeaders, html: html2 };
 }
 function divsClosedInAnotherBlock(tree, source) {
@@ -25244,6 +25195,9 @@ function linearMarkersAsText(content4, previous3 = "") {
             if (accepted.escapes.has(blockLineKey(rowText, false)) || incompleteDiv && DIV_START.test(rowText)) escapes.add(offset);
           }
         }
+      } else if (node2.type === "heading" && (node2.position?.end.line ?? index2 + 1) - 1 > index2) {
+        const underline = (node2.position?.end.line ?? index2 + 1) - 1;
+        if (rowStart(underline) - offsets[underline] > at2 - offsets[index2]) escapes.add(rowStart(underline));
       } else if (node2.type === "paragraph") {
         const rawFirst = text6.slice(at2, lineEnd(index2));
         const first = rawFirst.trimEnd();
@@ -25259,7 +25213,8 @@ function linearMarkersAsText(content4, previous3 = "") {
             if (rowAt(last) === "+++") escapes.add(rowStart(last));
           } else {
             const open3 = sections.get(parent) ?? [];
-            open3.push({ at: at2, literal: accepted.escapes.has("section:" + first) && accepted.escapes.has(blockLineKey("+++", true)) });
+            const itemText = parent.type === "listItem" && parent.children.length === 1;
+            open3.push({ at: at2, literal: accepted.escapes.has("section:" + first) && accepted.escapes.has(blockLineKey("+++", true)), itemText });
             sections.set(parent, open3);
           }
         } else if (first === "+++" && (last === index2 || closesAboveList(lines2, index2, last))) {
@@ -25281,7 +25236,7 @@ function linearMarkersAsText(content4, previous3 = "") {
         }
       }
     });
-    for (const open3 of sections.values()) for (const section of open3) escapes.add(section.at);
+    for (const open3 of sections.values()) for (const section of open3) if (!section.itemText || section.literal) escapes.add(section.at);
     if (escapes.size === 0) return text6;
     const parts = [];
     let at = 0;
@@ -25295,9 +25250,26 @@ function linearMarkersAsText(content4, previous3 = "") {
   throw new MarkdownLimitError("depth");
 }
 var LINEAR_SYNTAX_ESCAPES = { "\\$": "\uE000", "\\+": "\uE001" };
-function isLonePlus(text6, at) {
-  const after = text6[at + 2];
-  return text6[at - 1] !== "+" && after !== "+" && (after !== "\\" || text6[at + 3] !== "+");
+function plainPlusEscapes(text6) {
+  let runEnd = -1;
+  let plain = false;
+  return (at) => {
+    if (at < runEnd) return plain;
+    let from = at;
+    while (from > 0 && text6[from - 1] === "+") from--;
+    let signs = 0;
+    let end2 = from;
+    for (; ; ) {
+      if (text6[end2] === "+") end2++;
+      else if (text6[end2] === "\\" && text6[end2 + 1] === "+") end2 += 2;
+      else break;
+      signs++;
+    }
+    runEnd = end2;
+    const after = text6[end2];
+    plain = signs < 3 || after !== void 0 && !/\s/.test(after);
+    return plain;
+  };
 }
 function markFileBlockStarts(body2) {
   let plusItems;
@@ -25431,9 +25403,21 @@ function linearDropsCodeSpaces(code4) {
   return /^ {3,}$/.test(code4) || code4.length > 2 && code4.startsWith(" ") && code4.endsWith(" ");
 }
 function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldForms2, ignoreBold }) {
-  const marked = markFileBlockStarts(nestedFileBlocksOnItemLine(body2).replace(/\\[$+]/g, (escape2, at, text6) => escape2 === "\\+" && isLonePlus(text6, at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]));
+  const nested = nestedFileBlocksOnItemLine(body2);
+  const plainPlus = plainPlusEscapes(nested);
+  const marked = markFileBlockStarts(nested.replace(/\\[$+]/g, (escape2, at) => escape2 === "\\+" && plainPlus(at) ? escape2 : LINEAR_SYNTAX_ESCAPES[escape2]));
   const tree = parse3(marked, [], true);
   for (const child of tree.children) if (child.type === "code") child.value = withoutTrailingNewlines(child.value);
+  const escapedPlus = LINEAR_SYNTAX_ESCAPES["\\+"];
+  visit2(tree, (node2) => {
+    if (node2.type !== "listItem" || node2.children.length !== 1) return;
+    const [paragraph2] = node2.children;
+    if (paragraph2?.type !== "paragraph" || paragraph2.position?.start.line !== paragraph2.position?.end.line) return;
+    const [text6] = paragraph2.children;
+    if (text6?.type === "text" && text6.value.startsWith(escapedPlus) && SECTION_TITLE.test("+" + text6.value.slice(1))) {
+      text6.value = "+" + text6.value.slice(1);
+    }
+  });
   const strip = (node2, paragraphLine) => {
     const { position: _position, ...rest } = node2;
     if ("url" in rest) rest.url = normalizeUri(rest.url);
@@ -25448,7 +25432,7 @@ function comparable(body2, { linearNumberSpacing, linearBoldForms: linearBoldFor
         const startsLine = node2.type === "paragraph" ? index2 === 0 || node2.children[index2 - 1]?.type === "break" : void 0;
         const part = strip(child, startsLine);
         if ((ignoreBold || node2.type === "strong") && part.type === "strong" || linearBoldForms2 && hasOuterStars(marked, child)) {
-          for (const nested of part.children) appendComparable(children, nested);
+          for (const nested2 of part.children) appendComparable(children, nested2);
         } else {
           appendComparable(children, part);
         }
@@ -27247,6 +27231,9 @@ function safeSvg(bytes) {
 // src/format/sections.ts
 var SPLIT_ROUNDS = 8;
 var PLUS_MARKER = /^(\+{3,})(.*)$/;
+var PLUS_TEXT = /^\+{3,}[^+\s]/;
+var PLUS_TEXT_ANYWHERE = /\+{3}[^+\s]/;
+var ESCAPED_TITLE = /^\\\+{3}(?:[ \t\n]|$)/;
 function plusSectionSyntax(ignored) {
   return { flow: {
     43: {
@@ -27288,16 +27275,16 @@ function parseForSections(body2) {
   }
   return parse3(body2, [], false, [plusSectionSyntax(ignored)]);
 }
-function plusSectionsAsLinear(body2, firstInItem) {
-  return pairSections(body2, /* @__PURE__ */ new Map(), firstInItem);
+function plusSectionsAsLinear(body2, firstInItem, plusText) {
+  return pairSections(body2, /* @__PURE__ */ new Map(), firstInItem, plusText);
 }
-function pairSections(body2, fromOpeners, firstInItem) {
+function pairSections(body2, fromOpeners, firstInItem, plusText) {
   if (!body2.includes("+++")) return body2;
   const tree = parseForSections(body2);
   let unwritable = false;
   const edits = [];
   let paragraphEnds;
-  const lazyAfter = (marker) => {
+  const paragraphStartEnds = () => {
     if (paragraphEnds === void 0) {
       const ends = /* @__PURE__ */ new Map();
       visit2(parse3(body2), (node2) => {
@@ -27305,13 +27292,29 @@ function pairSections(body2, fromOpeners, firstInItem) {
       });
       paragraphEnds = ends;
     }
-    const paragraphEnd = paragraphEnds.get(start2(marker));
+    return paragraphEnds;
+  };
+  const lazyAfter = (marker) => {
+    const paragraphEnd = paragraphStartEnds().get(start2(marker));
     return paragraphEnd !== void 0 && paragraphEnd > lineEndAt(body2, start2(marker));
   };
   visit2(tree, (parent, ancestors) => {
     if (parent.type !== "root" && parent.type !== "blockquote" && parent.type !== "listItem") return;
     const blocks = parent.children;
-    const markers = blocks.map((node2) => node2.type === "thematicBreak" ? PLUS_MARKER.exec(body2.slice(start2(node2), end(node2))) : null);
+    const signs = blocks.map((node2) => node2.type === "thematicBreak" ? PLUS_MARKER.exec(body2.slice(start2(node2), end(node2))) : null);
+    for (const [index2, marker] of signs.entries()) {
+      if (marker === null || !PLUS_TEXT.test(marker[0])) continue;
+      const node2 = blocks[index2];
+      const paragraphEnd = paragraphStartEnds().get(start2(node2));
+      const last2 = index2 === blocks.length - 1;
+      const alone = last2 && paragraphEnd !== void 0 && paragraphEnd <= lineEndAt(body2, start2(node2));
+      if (!alone) {
+        edits.push({ from: start2(node2), to: start2(node2), text: "\\", depth: ancestors.length });
+        plusText?.(start2(node2), !(last2 && paragraphEnd !== void 0));
+      }
+      signs[index2] = null;
+    }
+    const markers = signs;
     if (markers.every((marker) => marker === null)) return;
     const opener = (index2) => fromOpeners.get(start2(blocks[index2]));
     const mixed = markers.some((marker, index2) => marker !== null && opener(index2) !== void 0);
@@ -27415,7 +27418,7 @@ function pairSections(body2, fromOpeners, firstInItem) {
       }
       if (!roles.has(index2) && parent.type !== "root" && index2 === 0 && index2 === blocks.length - 1) continue;
       const previous3 = blocks[index2 - 1];
-      if (!roles.has(index2) && previous3?.type === "paragraph" && previous3.position.end.line + 1 === node2.position.start.line && (body2.startsWith("\\+++", start2(previous3)) || previous3.children.some((child) => child.type === "image" || child.type === "imageReference"))) continue;
+      if (!roles.has(index2) && previous3?.type === "paragraph" && previous3.position.end.line + 1 === node2.position.start.line && (ESCAPED_TITLE.test(body2.slice(start2(previous3), start2(previous3) + 5)) || previous3.children.some((child) => child.type === "image" || child.type === "imageReference"))) continue;
       const line2 = prefixes(body2, at);
       const blank = line2.prefix.trimEnd();
       const before = index2 > 0 || line2.linePrefix === line2.prefix && parent.type === "root" && line2.lineStart > 0;
@@ -27497,6 +27500,25 @@ function sectionOpenersAsLinear(body2) {
   const plusLines = plusLineCount(body2, openers);
   if (sectionLineCount(written) !== lines2 + plusLines) return void 0;
   return plusLines === 0 ? written : pairSections(written, marks);
+}
+function plusTextLines(body2) {
+  const found = [];
+  if (PLUS_TEXT_ANYWHERE.test(body2)) plusSectionsAsLinear(body2, void 0, (at, opensSection) => {
+    if (opensSection) found.push(at);
+  });
+  return found.sort((a, b) => a - b);
+}
+function plusTextAsText(body2) {
+  if (!PLUS_TEXT_ANYWHERE.test(body2)) return body2;
+  const found = /* @__PURE__ */ new Set();
+  plusSectionsAsLinear(body2, void 0, (at) => found.add(at));
+  let out = "";
+  let from = 0;
+  for (const at of [...found].sort((a, b) => a - b)) {
+    out += body2.slice(from, at) + "\\";
+    from = at;
+  }
+  return out + body2.slice(from);
 }
 function sectionsFirstInItem(body2) {
   const found = [];
@@ -28077,6 +28099,7 @@ function lintTree(file, tree, body2, report, options) {
         break;
       }
       case "link":
+        if (node2.children.length === 0) report("link-without-text", line(node2));
         if (!allowedLink(node2.url)) report("link-scheme", line(node2));
         if (node2.title) report("link-title", line(node2));
         if (node2.children.some((child) => child.type === "image" || child.type === "imageReference")) report("image-in-link", line(node2));
@@ -28085,6 +28108,7 @@ function lintTree(file, tree, body2, report, options) {
         const definition3 = definitions.get(node2.identifier);
         if (definition3 !== void 0 && !allowedLink(definition3.url)) report("link-scheme", line(node2));
         if (definition3?.title) report("link-title", line(node2));
+        if (node2.children.length === 0) report("link-without-text", line(node2));
         if (node2.children.some((child) => child.type === "image" || child.type === "imageReference")) report("image-in-link", line(node2));
         break;
       }
@@ -28128,13 +28152,18 @@ function lintTree(file, tree, body2, report, options) {
   if (section !== void 0) report("section-opener", section);
   if (body2.includes("+++") || body2.includes(">>>")) {
     let firstInItem = [];
+    let plusText = [];
+    let escaped2 = body2;
     try {
-      firstInItem = sectionsFirstInItem(body2);
+      plusText = plusTextLines(body2);
+      escaped2 = plusTextAsText(body2);
+      firstInItem = sectionsFirstInItem(escaped2);
     } catch (error) {
       if (!(error instanceof MarkdownLimitError)) throw error;
       report("markdown-complexity", 1);
     }
-    for (const at of firstInItem) report("block-first-in-list-item", body2.slice(0, at).split("\n").length);
+    for (const at of firstInItem) report("block-first-in-list-item", escaped2.slice(0, at).split("\n").length);
+    for (const at of plusText) report("section-marker-text", body2.slice(0, at).split("\n").length);
   }
 }
 function unplacedLine(node2, ancestors) {
@@ -28200,7 +28229,7 @@ function endsWithParagraph(node2) {
 
 // src/format/marker-lines.ts
 var PLUS_ONLY = /^[ \t]*(\\?\+)([ \t]*)$/;
-var PLUS_LINE = /\n[ \t]*\\?\+[ \t]*\n/;
+var PLUS_LINE = /\n[ \t]*\\?\+[ \t]*(?:\n|$)/;
 function plusLinesAsLinear(body2) {
   if (!PLUS_LINE.test(body2)) return body2;
   const edits = [];
@@ -28212,8 +28241,7 @@ function plusLinesAsLinear(body2) {
     const firstEnd = body2.indexOf("\n", start2(node2));
     if (firstEnd === -1 || firstEnd >= end(node2)) return;
     const from = firstEnd + 1;
-    const newline = body2.indexOf("\n", from);
-    if (newline === -1 || newline >= end(node2)) return;
+    const newline = Math.min(...[body2.indexOf("\n", from), end(node2)].filter((at2) => at2 !== -1));
     const plus = PLUS_ONLY.exec(body2.slice(from, newline));
     if (plus === null || !inText(node2, from + plus[0].indexOf(plus[1]))) return;
     edits.push({ from, to: newline, text: `${" ".repeat(itemTextColumn(body2, start2(item)))}+\xA0${plus[2]}` });
@@ -28246,23 +28274,75 @@ function inText(paragraph2, offset) {
 
 // src/format/fix.ts
 function fixText(text6, options = {}) {
-  if (lintText("", text6, { linearExport: options.linearExport === true }).some(stopsFix)) return text6;
+  return linearForm(text6, options) ?? text6;
+}
+function linearForm(text6, options = {}) {
+  if (lintText("", text6, { linearExport: options.linearExport === true }).some(stopsFix)) return void 0;
   const { head, body: body2 } = splitFile(text6);
   const normalized = tabReferences(body2.replace(/\r\n?/g, "\n")).text;
-  const ended = tablesEndAsLinear(normalized);
-  if (ended !== normalized && lintText("", ended, { linearExport: options.linearExport === true }).some(stopsFix)) return text6;
-  const sections = sectionOpenersAsLinear(ended);
-  const lf2 = sections === ended ? plusSectionsAsLinear(sections) : sections;
-  if (lf2 === void 0) return text6;
+  const ended = emptyLinksAsUrls(tablesEndAsLinear(normalized));
+  if (ended !== normalized && lintText("", ended, { linearExport: options.linearExport === true }).some(stopsFix)) return void 0;
+  const plain = plusTextAsText(ended);
+  if (plain !== ended && lintText("", plain, { linearExport: options.linearExport === true }).some(stopsFix)) return void 0;
+  const sections = sectionOpenersAsLinear(plain);
+  const lf2 = sections === plain ? plusSectionsAsLinear(sections) : sections;
+  if (lf2 === void 0) return void 0;
   const broken = backslashBreaksAsLinear(lf2);
-  if (broken === void 0) return text6;
+  if (broken === void 0) return void 0;
   const { body: unbroken, lines: breakLines } = broken;
   const fixed = fixBody(unbroken, { ...options, breakLines });
-  if (fixed === void 0) return text6;
-  if (unbroken !== lf2 && lineEndings(fixed) < lineEndings(unbroken)) return text6;
-  if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText("", fixed).some((finding) => finding.rule === "number-paragraph")) return text6;
-  if (lf2 !== ended && lintText("", fixed, { linearExport: options.linearExport === true }).some((finding) => finding.rule === "list-after-item-text")) return text6;
+  if (fixed === void 0) return void 0;
+  if (unbroken !== lf2 && lineEndings(fixed) < lineEndings(unbroken)) return void 0;
+  if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText("", fixed).some((finding) => finding.rule === "number-paragraph")) return void 0;
+  if (lf2 !== plain && lintText("", fixed, { linearExport: options.linearExport === true }).some((finding) => finding.rule === "list-after-item-text")) return void 0;
   return joinFile(head, options.linearExport === true ? fixed : plusLinesAsLinear(fixed));
+}
+function emptyLinksAsUrls(body2) {
+  if (!/\[\][([]/.test(body2)) return body2;
+  const tree = parse3(body2);
+  const edits = [];
+  for (const { node: node2, url } of emptyLinksWithUrl(tree, body2)) {
+    node2.children = [{ type: "text", value: url }];
+    let text6 = "";
+    let at = 0;
+    for (const edit of literalEdits(url, 0, url.length)) {
+      text6 += url.slice(at, edit.from) + edit.text;
+      at = edit.to;
+    }
+    edits.push({ at: start2(node2) + 1, text: text6 + url.slice(at) });
+  }
+  if (edits.length === 0) return body2;
+  let written = "";
+  let from = 0;
+  for (const { at, text: text6 } of edits.sort((a, b) => a.at - b.at)) {
+    written += body2.slice(from, at) + text6;
+    from = at;
+  }
+  written += body2.slice(from);
+  return isDeepStrictEqual3(withoutPositions(parse3(written)), withoutPositions(tree)) ? written : body2;
+}
+function emptyLinksWithUrl(tree, body2) {
+  const definitions = /* @__PURE__ */ new Map();
+  visit2(tree, (node2) => {
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+  });
+  const found = [];
+  visit2(tree, (node2) => {
+    if (node2.type !== "link" && node2.type !== "linkReference" || node2.children.length > 0) return;
+    const url = node2.type === "link" ? node2.url : definitions.get(node2.identifier) ?? "";
+    if (url !== "" && body2.slice(start2(node2), start2(node2) + 2) === "[]") found.push({ node: node2, url });
+  });
+  return found;
+}
+function emptyLinkLines(text6) {
+  const { head, body: body2 } = splitFile(text6);
+  if (!/\[\][([]/.test(body2)) return [];
+  const offset = lineCount(head);
+  return [...new Set(emptyLinksWithUrl(parse3(body2), body2).map(({ node: node2 }) => line(node2) + offset))];
+}
+function withoutPositions(node2) {
+  const { position: _position, ...rest } = node2;
+  return "children" in node2 ? { ...rest, children: node2.children.map(withoutPositions) } : rest;
 }
 function stopsFix(finding) {
   return !IMAGE_PLACE_RULES.has(finding.rule) && !FIXED_RULES.has(finding.rule);
@@ -28350,7 +28430,9 @@ function fixBody(body2, bodyOptions) {
   let current = body2;
   let rewroteSections = false;
   for (let pass = 0; pass < 5; pass++) {
-    const source = pass === 0 ? current : plusSectionsAsLinear(current);
+    const plain = pass === 0 ? current : plusTextAsText(current);
+    if (plain !== current && lintText("", plain, { linearExport: bodyOptions.linearExport === true }).some(stopsFix)) return void 0;
+    const source = pass === 0 ? current : plusSectionsAsLinear(plain);
     const { breakLines: _written, ...rest } = bodyOptions;
     const options = pass === 0 ? bodyOptions : rest;
     rewroteSections ||= source !== current;
@@ -29828,11 +29910,14 @@ function textEdits(source, from, to, redundantEscape, inBlock = true) {
     edits.push({ from: at, to: at + match[0].length, text: char });
   }
   for (const { index: index2, length, emoji } of emojiShortcodes(raw)) {
-    if (!escaped(raw, index2)) edits.push({ from: from + index2, to: from + index2 + length, text: emoji });
+    const at = from + index2;
+    if (!escaped(raw, index2) && sameFlanking(source, at, at + length, emoji)) edits.push({ from: at, to: at + length, text: emoji });
   }
   const shortcodeEscapes = /* @__PURE__ */ new Set();
-  for (const match of raw.matchAll(/:(?=([a-z0-9_+-]*)\\([+-][a-z0-9_+-]*):)/g)) {
-    if (Object.hasOwn(nameToEmoji, match[1] + match[2])) shortcodeEscapes.add(match.index + 1 + match[1].length);
+  for (const match of raw.matchAll(/:(?=((?:[a-z0-9_+-]|\\[+-])*\\[+-](?:[a-z0-9_+-]|\\[+-])*):)/g)) {
+    const name = match[1];
+    if (!LINEAR_EMOJI.has(name.replace(/\\([+-])/g, "$1"))) continue;
+    for (const escape2 of name.matchAll(/\\/g)) shortcodeEscapes.add(match.index + 1 + escape2.index);
   }
   for (const match of raw.matchAll(/\\(.|$)/g)) {
     const at = from + match.index;
@@ -29863,7 +29948,7 @@ function tildeUnderscoreEdits(raw, from) {
   const text6 = chars.map(({ char }) => char).join("");
   const shortcode = /* @__PURE__ */ new Set();
   for (const match of text6.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
-    if (Object.hasOwn(nameToEmoji, match[1])) for (let index2 = match.index; index2 < match.index + match[1].length + 2; index2++) shortcode.add(index2);
+    if (LINEAR_EMOJI.has(match[1])) for (let index2 = match.index; index2 < match.index + match[1].length + 2; index2++) shortcode.add(index2);
   }
   const edits = [];
   chars.forEach(({ char, at, backslash }, index2) => {
@@ -29929,7 +30014,7 @@ function plainUrlUnderscores(label) {
 }
 function* emojiShortcodeStarts(label) {
   for (const match of label.matchAll(/:(?=([a-z0-9_+-]+):)/g)) {
-    if (Object.hasOwn(nameToEmoji, match[1])) yield match.index;
+    if (LINEAR_EMOJI.has(match[1])) yield match.index;
   }
 }
 function loneBackticks(source, from, to) {
@@ -30030,7 +30115,10 @@ function spaceReferenceRuns(source, from, to, wide = false) {
 var DELIMITER = /^[*_~]$/;
 var UNICODE_WHITESPACE = /^\s$/u;
 var UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
-function sameFlanking(source, from, to, char) {
+function sameFlanking(source, from, to, text6) {
+  const chars = [...text6];
+  const first = chars[0];
+  const last = chars.at(-1);
   const kind = (c) => c === void 0 || UNICODE_WHITESPACE.test(c) ? "space" : UNICODE_PUNCTUATION.test(c) ? "punctuation" : "other";
   const reads = (delimiter, before, after) => {
     const b = kind(before);
@@ -30044,13 +30132,13 @@ function sameFlanking(source, from, to, char) {
   if (delimiterBefore !== void 0 && DELIMITER.test(delimiterBefore)) {
     let start3 = from - 1;
     while (start3 > 0 && source[start3 - 1] === delimiterBefore) start3--;
-    if (reads(delimiterBefore, codePointBefore(source, start3), source[from]) !== reads(delimiterBefore, codePointBefore(source, start3), char)) return false;
+    if (reads(delimiterBefore, codePointBefore(source, start3), source[from]) !== reads(delimiterBefore, codePointBefore(source, start3), first)) return false;
   }
   const delimiterAfter = source[to];
   if (delimiterAfter !== void 0 && DELIMITER.test(delimiterAfter)) {
     let end2 = to + 1;
     while (end2 < source.length && source[end2] === delimiterAfter) end2++;
-    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end2)) !== reads(delimiterAfter, char, codePointAt(source, end2))) return false;
+    if (reads(delimiterAfter, source[to - 1], codePointAt(source, end2)) !== reads(delimiterAfter, last, codePointAt(source, end2))) return false;
   }
   return true;
 }
@@ -30071,8 +30159,8 @@ var CHARACTER_REFERENCE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z
 var ASTERISK_SPELLING = new RegExp(String.raw`\\.|[*]|` + CHARACTER_REFERENCE.source, "g");
 function* emojiShortcodes(raw) {
   for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
-    const emoji = Object.hasOwn(nameToEmoji, match[1]) ? nameToEmoji[match[1]] : void 0;
-    if (emoji) yield { index: match.index, length: match[0].length, emoji };
+    const emoji = LINEAR_EMOJI.get(match[1]);
+    if (emoji) yield { index: match.index, length: match[0].length, emoji: emoji.startsWith("*") ? `\\${emoji}` : emoji };
   }
 }
 function escaped(text6, at) {
@@ -30329,6 +30417,72 @@ function isSpaceOrTab(char) {
   return char === " " || char === "	";
 }
 
+// src/format/list-text.ts
+var NUMBERED = /^\d{1,3}\\?[.)](?=[ \t]|$)/;
+function listTextWarnings(file, text6) {
+  const { head, body: body2 } = splitFile(text6);
+  const content4 = body2.replace(/\r\n?/g, "\n");
+  if (overContentLimit(content4)) return [];
+  let tree;
+  try {
+    tree = parse3(content4);
+  } catch (error) {
+    if (error instanceof MarkdownLimitError) return [];
+    throw error;
+  }
+  const lines2 = content4.split("\n");
+  const lineStarts = [];
+  for (let at = 0, offset2 = 0; at < lines2.length; offset2 += lines2[at].length + 1, at++) lineStarts.push(offset2);
+  const reported = /* @__PURE__ */ new Set();
+  visit2(tree, (node2, ancestors) => {
+    const item = ancestors.at(-1);
+    if (node2.type !== "paragraph" || item?.type !== "listItem" || ancestors.some((a) => a.type === "blockquote")) return;
+    const textColumn = contentColumn(content4, start2(item));
+    const code4 = [];
+    visit2(node2, (child) => {
+      if (child.type === "inlineCode") code4.push([start2(child), end(child)]);
+    });
+    let listIndent = /^1\\[.)](?=[ \t]|$)/m.test(content4.slice(start2(node2), start2(node2) + 4)) ? columnOf(content4, start2(node2)) : void 0;
+    for (let at = line(node2) + 1; at <= (node2.position?.end.line ?? 0); at++) {
+      const { indent: indent2, rest, width } = indentation(lines2[at - 1]);
+      const number = NUMBERED.exec(rest);
+      const marker = lineStarts[at - 1] + width;
+      if (number === null || code4.some(([from, to]) => marker > from && marker < to)) {
+        listIndent = void 0;
+        continue;
+      }
+      const sameList = listIndent === indent2;
+      listIndent = indent2;
+      if (sameList || indent2 < textColumn) continue;
+      if (indent2 < textColumn + 4 && /^1\\?[.)]$/.test(number[0])) continue;
+      reported.add(at);
+    }
+  });
+  const offset = lineCount(head);
+  return [...reported].sort((a, b) => a - b).map((at) => ({ file, line: at + offset, rule: "list-number-as-text", message: LINT_WARNINGS["list-number-as-text"] }));
+}
+function contentColumn(text6, offset) {
+  let column = columnOf(text6, offset);
+  let at = offset + (LIST_MARKER.exec(text6.slice(offset, offset + 11))?.[0].length ?? 1);
+  for (let from = offset; from < at; from++) column = advanceColumn(column, text6[from]);
+  const markerEnd = column;
+  while (text6[at] === " " || text6[at] === "	") column = advanceColumn(column, text6[at++]);
+  const blank = at >= text6.length || text6[at] === "\n";
+  return blank || column - markerEnd > 4 ? markerEnd + 1 : column;
+}
+var LIST_MARKER = /^(?:[*+-]|\d{1,9}[.)])/;
+function columnOf(text6, offset) {
+  let column = 0;
+  for (let at = text6.lastIndexOf("\n", offset - 1) + 1; at < offset; at++) column = advanceColumn(column, text6[at]);
+  return column;
+}
+function indentation(text6) {
+  let indent2 = 0;
+  let at = 0;
+  while (text6[at] === " " || text6[at] === "	") indent2 = advanceColumn(indent2, text6[at++]);
+  return { indent: indent2, rest: text6.slice(at), width: at };
+}
+
 // src/run/output.ts
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -30423,6 +30577,235 @@ function ifMissing(error) {
   throw error;
 }
 
+// src/sync/image-links.ts
+var IMAGE_REPAIR_INPUT_LIMIT = 4 * CONTENT_LIMIT;
+var IMAGE_REPAIR_TEXT_LIMIT = IMAGE_REPAIR_INPUT_LIMIT;
+var ESCAPE_PASS_LIMIT = 8;
+var ImageRepairBudgetError = class extends Error {
+  constructor() {
+    super(message("assets.image-repair-budget"));
+    this.name = "ImageRepairBudgetError";
+  }
+};
+function checkImageRepairSize(body2) {
+  if (body2.length > IMAGE_REPAIR_INPUT_LIMIT) throw new ImageRepairBudgetError();
+}
+function text5(value) {
+  return toMarkdown({ type: "root", children: [{ type: "paragraph", children: [{ type: "text", value }] }] }).trimEnd();
+}
+function linkLabelText(value) {
+  return text5(value).replace(/(\\*)\]/g, (bracket, backslashes) => backslashes.length % 2 === 0 ? `${backslashes}\\]` : bracket);
+}
+function linearLink(label, url) {
+  const link2 = (destination2) => toMarkdown({ type: "root", children: [{ type: "paragraph", children: [{ type: "link", url: destination2, children: [{ type: "text", value: label }] }] }] }, { resourceLink: true }).trimEnd();
+  const labelled = /^(\[[\s\S]*\])\((?:<>)?\)$/.exec(link2(""));
+  return labelled === null ? link2(url) : `${labelled[1]}(${linkDestination(url)})`;
+}
+function destinationOf(link2) {
+  let url = "";
+  visit2(parse3(link2), (node2) => {
+    if (node2.type === "link" && url === "") url = node2.url;
+  });
+  return url;
+}
+var WEB_IMAGE = /^https?:/i;
+function webImageLinks(body2) {
+  checkImageRepairSize(body2);
+  const tree = parse3(body2);
+  const definitions = /* @__PURE__ */ new Map();
+  visit2(tree, (node2) => {
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2);
+  });
+  const selected = /* @__PURE__ */ new Set();
+  let index2 = 0;
+  visit2(tree, (node2) => {
+    if (node2.type !== "image" && node2.type !== "imageReference") return;
+    index2++;
+    const definition3 = node2.type === "image" ? node2 : definitions.get(node2.identifier);
+    if (definition3 !== void 0 && WEB_IMAGE.test(definition3.url) && !definition3.title) selected.add(index2);
+  });
+  if (selected.size === 0) return void 0;
+  const repair = imageLinks(body2, /* @__PURE__ */ new Set(), selected, "fix");
+  return { body: repair.body, lines: repair.images.map((image2) => image2.line) };
+}
+function imageLinks(body2, deadUploads = /* @__PURE__ */ new Set(), onlyImages, mode = "pull") {
+  checkImageRepairSize(body2);
+  const simple = simpleImageParagraph(body2, onlyImages);
+  if (simple !== void 0) return simple;
+  const tree = parse3(body2);
+  const offset = body2.startsWith("\uFEFF") ? 1 : 0;
+  const definitions = /* @__PURE__ */ new Map();
+  visit2(tree, (node2) => {
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+  });
+  const linkChecks = /* @__PURE__ */ new Map();
+  const permitted = (url) => {
+    if (mode === "fix") return true;
+    const cached = linkChecks.get(url);
+    if (cached !== void 0) return cached;
+    const allowed = allowedLink(url);
+    linkChecks.set(url, allowed);
+    return allowed;
+  };
+  const images = [];
+  const edits = [];
+  const replacements = /* @__PURE__ */ new Map();
+  let replacementSize = 0;
+  let destinationSize = 0;
+  const checkDestination = (url) => {
+    destinationSize += url.length;
+    if (destinationSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
+  };
+  let count4 = 0;
+  visit2(tree, (node2) => {
+    if (node2.type === "image" || node2.type === "imageReference") count4++;
+  });
+  let index2 = 0;
+  visit2(tree, (node2, ancestors) => {
+    const enclosingRemoved = ancestors.some((parent) => parent.type === "link" && !permitted(parent.url) || parent.type === "linkReference" && !permitted(definitions.get(parent.identifier) ?? ""));
+    if (node2.type === "link" || node2.type === "linkReference") {
+      const url2 = node2.type === "link" ? node2.url : definitions.get(node2.identifier) ?? "";
+      checkDestination(url2);
+      if (!permitted(url2) && !enclosingRemoved) edits.push({ from: start2(node2) + offset, to: end(node2) + offset, text: "" });
+      return;
+    }
+    if (node2.type !== "image" && node2.type !== "imageReference") return;
+    index2++;
+    const url = node2.type === "image" ? node2.url : definitions.get(node2.identifier);
+    if (url === void 0) return;
+    checkDestination(url);
+    if (onlyImages !== void 0 && !onlyImages.has(index2)) return;
+    let upload = false;
+    try {
+      const parsed = new URL(url);
+      upload = parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.port === "" && parsed.username === "" && parsed.password === "";
+    } catch {
+    }
+    if (mode === "pull" && upload && !deadUploads.has(url.split("#")[0]) && !deadUploads.has(url) && !ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference")) return;
+    images.push({ image: index2, total: count4, line: line(node2) });
+    if (enclosingRemoved) return;
+    let replacement = { text: "" };
+    if (url !== "" && permitted(url)) {
+      const label = node2.alt || url;
+      const inLink = ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference");
+      const inTable = ancestors.some((parent) => parent.type === "tableCell");
+      const key = JSON.stringify([label, url, inLink, inTable]);
+      const cached = replacements.get(key);
+      if (cached !== void 0) replacement = cached;
+      else {
+        const rendered = inLink ? linkLabelText(label) : linearLink(label, url);
+        const value = inTable ? rendered.replace(/\|/g, "&#124;") : rendered;
+        replacement = { text: value, ...value.startsWith("[") ? { url: destinationOf(value) } : {} };
+        replacements.set(key, replacement);
+      }
+    } else {
+      const link2 = ancestors.at(-1);
+      const linkUrl = link2?.type === "link" ? link2.url : link2?.type === "linkReference" ? definitions.get(link2.identifier) : void 0;
+      const removed = (child) => {
+        if (child.type !== "image" && child.type !== "imageReference") return false;
+        const source = child.type === "image" ? child.url : definitions.get(child.identifier);
+        return source !== void 0 && (source === "" || !permitted(source));
+      };
+      const children = link2 !== void 0 && "children" in link2 ? link2.children : [];
+      if (linkUrl && children.every((child) => removed(child) || child.type === "text" && child.value.trim() === "") && children.find(removed) === node2) {
+        const label = linkLabelText(node2.alt || linkUrl);
+        replacement = { text: ancestors.some((parent) => parent.type === "tableCell") ? label.replace(/\|/g, "&#124;").replace(/\n/g, " ") : label };
+      }
+    }
+    replacementSize += replacement.text.length;
+    if (replacementSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
+    edits.push({ from: start2(node2) + offset, to: end(node2) + offset, ...replacement });
+  });
+  if (mode === "pull") visit2(tree, (node2) => {
+    if (node2.type === "definition" && !permitted(node2.url)) edits.push({ from: start2(node2) + offset, to: end(node2) + offset, text: "" });
+  });
+  let repaired;
+  return { images, get body() {
+    return repaired ??= rewrite(body2, tree, offset, edits);
+  } };
+}
+function simpleImageParagraph(body2, onlyImages) {
+  if (!body2.startsWith("![")) return;
+  const pattern = /!\[([a-z0-9 ]*)\]\(([a-z0-9./-]+)\)(?= |$)( *)/iy;
+  const edits = [];
+  const links = /* @__PURE__ */ new Map();
+  let count4 = 0;
+  const selected = [];
+  while (pattern.lastIndex < body2.length) {
+    const match = pattern.exec(body2);
+    if (match === null) return;
+    count4++;
+    if (onlyImages !== void 0 && !onlyImages.has(count4)) continue;
+    const url = match[2];
+    const label = match[1] || url;
+    const key = `${label}\0${url}`;
+    const replacement = links.get(key) ?? linearLink(label, url);
+    links.set(key, replacement);
+    const to = pattern.lastIndex - match[3].length;
+    edits.push({ from: match.index, to, text: replacement });
+    selected.push(count4);
+  }
+  const images = selected.map((image2) => ({ image: image2, total: count4, line: 1 }));
+  let repaired;
+  return { images, get body() {
+    return repaired ??= spliceEdits(body2, edits, /* @__PURE__ */ new Map()).body;
+  } };
+}
+function destinationsOf(tree, offset) {
+  const definitions = /* @__PURE__ */ new Map();
+  visit2(tree, (node2) => {
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+  });
+  const found = /* @__PURE__ */ new Map();
+  let destinationSize = 0;
+  visit2(tree, (node2) => {
+    const url = node2.type === "link" || node2.type === "image" || node2.type === "definition" ? node2.url : node2.type === "linkReference" || node2.type === "imageReference" ? definitions.get(node2.identifier) : void 0;
+    if (url === void 0) return;
+    destinationSize += url.length;
+    if (destinationSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
+    found.set(start2(node2) + offset, url);
+  });
+  return found;
+}
+function spliceEdits(body2, edits, destinations2) {
+  const parts = [];
+  const allowed = /* @__PURE__ */ new Map();
+  const places = [...destinations2].sort(([a], [b]) => a - b);
+  let next = 0;
+  let cursor = 0;
+  let shift = 0;
+  for (const { from, to, text: text6, url } of edits.sort((a, b) => a.from - b.from || b.to - a.to)) {
+    if (from < cursor) continue;
+    while (next < places.length && places[next][0] < from) {
+      const [at, url2] = places[next++];
+      allowed.set(at + shift, url2);
+    }
+    while (next < places.length && places[next][0] < to) next++;
+    if (url !== void 0) allowed.set(from + shift, url);
+    parts.push(body2.slice(cursor, from), text6);
+    shift += text6.length - (to - from);
+    cursor = to;
+  }
+  if (body2.length + shift > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
+  while (next < places.length) {
+    const [at, url] = places[next++];
+    allowed.set(at + shift, url);
+  }
+  parts.push(body2.slice(cursor));
+  return { body: parts.join(""), allowed };
+}
+function rewrite(body2, tree, offset, edits) {
+  if (edits.length === 0) return body2;
+  let { body: result, allowed } = spliceEdits(body2, edits, destinationsOf(tree, offset));
+  const resultOffset = result.startsWith("\uFEFF") ? 1 : 0;
+  for (let pass = 0; ; pass++) {
+    const added = [...destinationsOf(parse3(result), resultOffset)].filter(([at, url]) => allowed.get(at) !== url && "![<".includes(result[at])).map(([at]) => ({ from: at, to: at, text: "\\" }));
+    if (added.length === 0) return result;
+    if (pass === ESCAPE_PASS_LIMIT) throw new ImageRepairBudgetError();
+    ({ body: result, allowed } = spliceEdits(result, added, allowed));
+  }
+}
+
 // src/format/command.ts
 var SKIPPED_FOLDERS = /* @__PURE__ */ new Set([".git", "node_modules"]);
 var USAGE_ERROR = 2;
@@ -30465,9 +30848,37 @@ function lintAll(files, cwd) {
   const findings = files.flatMap((file) => lintText(file, readFileSync2(join9(cwd, file), "utf8"), { linkedFileExists: linkedFileResolver(file, cwd) }));
   return [...findings, ...duplicateTitles(files)];
 }
+function withWebImageLinks(text6) {
+  const { head, body: body2 } = splitFile(text6);
+  try {
+    const linked = webImageLinks(body2);
+    if (linked === void 0) return void 0;
+    const offset = lineCount(head);
+    return { text: head + linked.body, lines: linked.lines.map((line2) => line2 + offset) };
+  } catch (error) {
+    if (error instanceof ImageRepairBudgetError || error instanceof MarkdownLimitError) return void 0;
+    throw error;
+  }
+}
 function describe(findings) {
   return findings.map((finding) => `${lineText2(finding.file)}:${finding.line}: ${finding.rule}: ${lineText2(finding.message)}
 `).join("");
+}
+function describeWarnings(found) {
+  return found.map((warning2) => `${lineText2(warning2.file)}:${warning2.line}: warning: ${warning2.rule}: ${lineText2(warning2.message)}
+`).join("");
+}
+function warnings(files, cwd) {
+  const found = files.flatMap((file) => {
+    let text6;
+    try {
+      text6 = readFileSync2(join9(cwd, file), "utf8");
+    } catch {
+      return [];
+    }
+    return listTextWarnings(file, text6);
+  });
+  return describeWarnings(found);
 }
 function linkedFileResolver(file, root2) {
   return linkedFileCheck(file.split(sep2).join("/"), (path2) => isFileAt(root2, path2));
@@ -30486,9 +30897,9 @@ function isOwnPath(root2, path2) {
     return false;
   }
 }
-function fixedText(file, text6, cwd) {
+function fixedText(file, text6, cwd, form = fixText) {
   try {
-    return fixText(text6, { linkedFileExists: linkedFileResolver(file, cwd) });
+    return form(text6, { linkedFileExists: linkedFileResolver(file, cwd) });
   } catch (error) {
     if (error instanceof MarkdownLimitError) return void 0;
     throw error;
@@ -30516,7 +30927,7 @@ function lint(paths, cwd) {
   });
   const stdout = describe(findings) + unfixed.map((file) => `${lineText2(file)}: not in Linear's form; run fix
 `).join("");
-  return { exitCode: stdout === "" ? 0 : 1, stdout, stderr: "" };
+  return { exitCode: stdout === "" ? 0 : 1, stdout: stdout + warnings(files, cwd), stderr: "" };
 }
 function runFix(paths, cwd = process.cwd()) {
   return withEscapedErrors(() => fix2(paths, cwd));
@@ -30527,22 +30938,48 @@ function fix2(paths, cwd) {
 ` };
   const files = markdownFiles(paths, cwd);
   const before = [...lintAll(files, cwd), ...refusedUploads(paths, cwd)];
-  const failing = new Set(before.filter((finding) => !FIXED_RULES.has(finding.rule)).map((finding) => finding.file));
+  const decisive = /* @__PURE__ */ new Map();
+  for (const file of new Set(before.filter((finding) => finding.rule === "image-not-in-repository").map((finding) => finding.file))) {
+    const linked = withWebImageLinks(readFileSync2(join9(cwd, file), "utf8"));
+    if (linked !== void 0) decisive.set(file, lintText(file, linked.text, { linkedFileExists: linkedFileResolver(file, cwd) }).filter((finding) => finding.rule !== "content-too-long"));
+  }
+  const blocks = (finding) => !FIXED_RULES.has(finding.rule) && (!decisive.has(finding.file) || finding.rule === "duplicate-title" || finding.rule === "upload-file-refused");
+  const failing = new Set([...before.filter(blocks), ...[...decisive.values()].flat().filter((finding) => !FIXED_RULES.has(finding.rule))].map((finding) => finding.file));
+  for (const [file, findings2] of decisive) {
+    if (!failing.has(file)) continue;
+    const reported = new Set(before.filter((finding) => finding.file === file).map((finding) => finding.rule));
+    before.push(...findings2.filter((finding) => !FIXED_RULES.has(finding.rule) && !reported.has(finding.rule)));
+  }
   const changed2 = [];
   const moved = [];
+  const madeLinks = [];
+  const madeLines = /* @__PURE__ */ new Map();
   for (const file of files) {
     if (failing.has(file)) continue;
     const outcome2 = fixFile(file, cwd);
     if (outcome2 === "complex") before.push(complexity(file));
     else if (outcome2 === "moved") moved.push(file);
-    else if (outcome2 === "fixed") changed2.push(file);
+    else if (outcome2 !== "unchanged") {
+      changed2.push(file);
+      madeLines.set(file, outcome2);
+    }
   }
   const rewritten = new Set(changed2);
-  const findings = [...before.filter((finding) => !rewritten.has(finding.file)), ...lintAll(changed2, cwd)];
+  const after = lintAll(changed2, cwd);
+  const findings = [...before.filter((finding) => !rewritten.has(finding.file)), ...after];
+  for (const file of changed2) {
+    const { imageLines, textLines } = madeLines.get(file);
+    const made = [
+      ...imageLines.map((line2) => ({ file, line: line2, rule: "image-made-link", message: LINT_WARNINGS["image-made-link"] })),
+      ...textLines.map((line2) => ({ file, line: line2, rule: "link-text-from-url", message: LINT_WARNINGS["link-text-from-url"] }))
+    ];
+    madeLinks.push(...made.sort((a, b) => a.line - b.line));
+  }
   const stdout = changed2.map((file) => `${lineText2(file)}: fixed
 `).join("") + moved.map((file) => `${lineText2(file)}: moved while fix ran; left unchanged
 `).join("") + describe(findings);
-  return { exitCode: stdout === "" ? 0 : 1, stdout, stderr: "" };
+  const kept = new Set(moved);
+  return { exitCode: stdout === "" ? 0 : 1, stdout: stdout + describeWarnings(madeLinks) + warnings(files.filter((file) => !kept.has(file)), cwd), stderr: "" };
 }
 function withEscapedErrors(command) {
   try {
@@ -30566,7 +31003,8 @@ function fixFile(file, cwd) {
   } finally {
     closeSync(reader);
   }
-  const fixed = fixedText(file, text6, cwd);
+  const linked = withWebImageLinks(text6);
+  const fixed = linked === void 0 ? fixedText(file, text6, cwd) : fixedText(file, linked.text, cwd, (candidate, options) => linearForm(candidate, options) ?? text6);
   if (fixed === void 0) return "complex";
   if (fixed === text6) return "unchanged";
   const writer = openOwnFile(path2, constants2.O_WRONLY);
@@ -30576,7 +31014,8 @@ function fixFile(file, cwd) {
     const bytes = Buffer.from(fixed, "utf8");
     ftruncateSync(writer, 0);
     for (let written = 0; written < bytes.length; ) written += writeSync(writer, bytes, written, bytes.length - written, written);
-    return "fixed";
+    const textLines = emptyLinkLines(fixed).length === 0 ? emptyLinkLines(text6) : [];
+    return { imageLines: linked?.lines ?? [], textLines };
   } finally {
     closeSync(writer);
   }
@@ -30605,7 +31044,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.1-rc.7" : packageJson.version;
+var VERSION2 = true ? "1.0.1-rc.8" : packageJson.version;
 
 // src/setup/fixes.ts
 var QUICKSTART_PATH = "docs/quickstart.md";
@@ -33302,7 +33741,7 @@ function destinationUrl(raw) {
 function encodeFragment(fragment) {
   return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/gu, (char) => encodeURIComponent(char));
 }
-function rewrite(body2, replace2) {
+function rewrite2(body2, replace2) {
   let result = "";
   let at = 0;
   for (const destination2 of linkDestinations(body2)) {
@@ -33330,7 +33769,7 @@ function linksToLinear(body2, fromPath, map4, seen) {
     const raw = `<${map4.base}/${id}${fragment === void 0 ? "" : `#${encodeFragment(fragment)}`}>`;
     return { raw, url: destinationUrl(raw) ?? raw.slice(1, -1) };
   };
-  return rewrite(body2, (destination2) => {
+  return rewrite2(body2, (destination2) => {
     const original = body2.slice(destination2.from, destination2.to);
     if (destination2.url.startsWith(`${map4.base}/`)) {
       remember(destination2.url, original);
@@ -33365,7 +33804,7 @@ function linksFromLinear(content4, fromPath, map4, seen) {
   const paths = pathsById(map4.ids);
   const prefix = `${map4.base}/`;
   const used = /* @__PURE__ */ new Map();
-  return rewrite(content4, (destination2) => {
+  return rewrite2(content4, (destination2) => {
     if (!destination2.url.startsWith(prefix)) return void 0;
     const index2 = used.get(destination2.url) ?? 0;
     used.set(destination2.url, index2 + 1);
@@ -36576,200 +37015,6 @@ import { posix as posix8 } from "node:path";
 // src/sync/assets.ts
 import { createHash as createHash15 } from "node:crypto";
 import { posix as posix7 } from "node:path";
-
-// src/sync/image-links.ts
-var IMAGE_REPAIR_INPUT_LIMIT = 4 * CONTENT_LIMIT;
-var IMAGE_REPAIR_TEXT_LIMIT = IMAGE_REPAIR_INPUT_LIMIT;
-var ESCAPE_PASS_LIMIT = 8;
-var ImageRepairBudgetError = class extends Error {
-  constructor() {
-    super(message("assets.image-repair-budget"));
-    this.name = "ImageRepairBudgetError";
-  }
-};
-function checkImageRepairSize(body2) {
-  if (body2.length > IMAGE_REPAIR_INPUT_LIMIT) throw new ImageRepairBudgetError();
-}
-function text5(value) {
-  return toMarkdown({ type: "root", children: [{ type: "paragraph", children: [{ type: "text", value }] }] }).trimEnd();
-}
-function linearLink(label, url) {
-  const link2 = (destination2) => toMarkdown({ type: "root", children: [{ type: "paragraph", children: [{ type: "link", url: destination2, children: [{ type: "text", value: label }] }] }] }, { resourceLink: true }).trimEnd();
-  const labelled = /^(\[[\s\S]*\])\((?:<>)?\)$/.exec(link2(""));
-  return labelled === null ? link2(url) : `${labelled[1]}(${linkDestination(url)})`;
-}
-function destinationOf(link2) {
-  let url = "";
-  visit2(parse3(link2), (node2) => {
-    if (node2.type === "link" && url === "") url = node2.url;
-  });
-  return url;
-}
-function imageLinks(body2, deadUploads = /* @__PURE__ */ new Set(), onlyImages) {
-  checkImageRepairSize(body2);
-  const simple = simpleImageParagraph(body2, onlyImages);
-  if (simple !== void 0) return simple;
-  const tree = parse3(body2);
-  const offset = body2.startsWith("\uFEFF") ? 1 : 0;
-  const definitions = /* @__PURE__ */ new Map();
-  visit2(tree, (node2) => {
-    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
-  });
-  const linkChecks = /* @__PURE__ */ new Map();
-  const permitted = (url) => {
-    const cached = linkChecks.get(url);
-    if (cached !== void 0) return cached;
-    const allowed = allowedLink(url);
-    linkChecks.set(url, allowed);
-    return allowed;
-  };
-  const images = [];
-  const edits = [];
-  const replacements = /* @__PURE__ */ new Map();
-  let replacementSize = 0;
-  let destinationSize = 0;
-  const checkDestination = (url) => {
-    destinationSize += url.length;
-    if (destinationSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
-  };
-  let count4 = 0;
-  visit2(tree, (node2) => {
-    if (node2.type === "image" || node2.type === "imageReference") count4++;
-  });
-  let index2 = 0;
-  visit2(tree, (node2, ancestors) => {
-    const enclosingRemoved = ancestors.some((parent) => parent.type === "link" && !permitted(parent.url) || parent.type === "linkReference" && !permitted(definitions.get(parent.identifier) ?? ""));
-    if (node2.type === "link" || node2.type === "linkReference") {
-      const url2 = node2.type === "link" ? node2.url : definitions.get(node2.identifier) ?? "";
-      checkDestination(url2);
-      if (!permitted(url2) && !enclosingRemoved) edits.push({ from: start2(node2) + offset, to: end(node2) + offset, text: "" });
-      return;
-    }
-    if (node2.type !== "image" && node2.type !== "imageReference") return;
-    index2++;
-    const url = node2.type === "image" ? node2.url : definitions.get(node2.identifier);
-    if (url === void 0) return;
-    checkDestination(url);
-    if (onlyImages !== void 0 && !onlyImages.has(index2)) return;
-    let upload = false;
-    try {
-      const parsed = new URL(url);
-      upload = parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.port === "" && parsed.username === "" && parsed.password === "";
-    } catch {
-    }
-    if (upload && !deadUploads.has(url.split("#")[0]) && !deadUploads.has(url) && !ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference")) return;
-    images.push({ image: index2, total: count4, line: line(node2) });
-    if (enclosingRemoved) return;
-    let replacement = { text: "" };
-    if (url !== "" && permitted(url)) {
-      const label = node2.alt || url;
-      const inLink = ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference");
-      const inTable = ancestors.some((parent) => parent.type === "tableCell");
-      const key = JSON.stringify([label, url, inLink, inTable]);
-      const cached = replacements.get(key);
-      if (cached !== void 0) replacement = cached;
-      else {
-        const rendered = inLink ? text5(label) : linearLink(label, url);
-        const value = inTable ? rendered.replace(/\|/g, "&#124;") : rendered;
-        replacement = { text: value, ...value.startsWith("[") ? { url: destinationOf(value) } : {} };
-        replacements.set(key, replacement);
-      }
-    }
-    replacementSize += replacement.text.length;
-    if (replacementSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
-    edits.push({ from: start2(node2) + offset, to: end(node2) + offset, ...replacement });
-  });
-  visit2(tree, (node2) => {
-    if (node2.type === "definition" && !permitted(node2.url)) edits.push({ from: start2(node2) + offset, to: end(node2) + offset, text: "" });
-  });
-  let repaired;
-  return { images, get body() {
-    return repaired ??= rewrite2(body2, tree, offset, edits);
-  } };
-}
-function simpleImageParagraph(body2, onlyImages) {
-  if (!body2.startsWith("![")) return;
-  const pattern = /!\[([a-z0-9 ]*)\]\(([a-z0-9./-]+)\)(?= |$)( *)/iy;
-  const edits = [];
-  const links = /* @__PURE__ */ new Map();
-  let count4 = 0;
-  const selected = [];
-  while (pattern.lastIndex < body2.length) {
-    const match = pattern.exec(body2);
-    if (match === null) return;
-    count4++;
-    if (onlyImages !== void 0 && !onlyImages.has(count4)) continue;
-    const url = match[2];
-    const label = match[1] || url;
-    const key = `${label}\0${url}`;
-    const replacement = links.get(key) ?? linearLink(label, url);
-    links.set(key, replacement);
-    const to = pattern.lastIndex - match[3].length;
-    edits.push({ from: match.index, to, text: replacement });
-    selected.push(count4);
-  }
-  const images = selected.map((image2) => ({ image: image2, total: count4, line: 1 }));
-  let repaired;
-  return { images, get body() {
-    return repaired ??= spliceEdits(body2, edits, /* @__PURE__ */ new Map()).body;
-  } };
-}
-function destinationsOf(tree, offset) {
-  const definitions = /* @__PURE__ */ new Map();
-  visit2(tree, (node2) => {
-    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
-  });
-  const found = /* @__PURE__ */ new Map();
-  let destinationSize = 0;
-  visit2(tree, (node2) => {
-    const url = node2.type === "link" || node2.type === "image" || node2.type === "definition" ? node2.url : node2.type === "linkReference" || node2.type === "imageReference" ? definitions.get(node2.identifier) : void 0;
-    if (url === void 0) return;
-    destinationSize += url.length;
-    if (destinationSize > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
-    found.set(start2(node2) + offset, url);
-  });
-  return found;
-}
-function spliceEdits(body2, edits, destinations2) {
-  const parts = [];
-  const allowed = /* @__PURE__ */ new Map();
-  const places = [...destinations2].sort(([a], [b]) => a - b);
-  let next = 0;
-  let cursor = 0;
-  let shift = 0;
-  for (const { from, to, text: text6, url } of edits.sort((a, b) => a.from - b.from || b.to - a.to)) {
-    if (from < cursor) continue;
-    while (next < places.length && places[next][0] < from) {
-      const [at, url2] = places[next++];
-      allowed.set(at + shift, url2);
-    }
-    while (next < places.length && places[next][0] < to) next++;
-    if (url !== void 0) allowed.set(from + shift, url);
-    parts.push(body2.slice(cursor, from), text6);
-    shift += text6.length - (to - from);
-    cursor = to;
-  }
-  if (body2.length + shift > IMAGE_REPAIR_TEXT_LIMIT) throw new ImageRepairBudgetError();
-  while (next < places.length) {
-    const [at, url] = places[next++];
-    allowed.set(at + shift, url);
-  }
-  parts.push(body2.slice(cursor));
-  return { body: parts.join(""), allowed };
-}
-function rewrite2(body2, tree, offset, edits) {
-  if (edits.length === 0) return body2;
-  let { body: result, allowed } = spliceEdits(body2, edits, destinationsOf(tree, offset));
-  const resultOffset = result.startsWith("\uFEFF") ? 1 : 0;
-  for (let pass = 0; ; pass++) {
-    const added = [...destinationsOf(parse3(result), resultOffset)].filter(([at, url]) => allowed.get(at) !== url && "![<".includes(result[at])).map(([at]) => ({ from: at, to: at, text: "\\" }));
-    if (added.length === 0) return result;
-    if (pass === ESCAPE_PASS_LIMIT) throw new ImageRepairBudgetError();
-    ({ body: result, allowed } = spliceEdits(result, added, allowed));
-  }
-}
-
-// src/sync/assets.ts
 var AttachmentBudgetError = class extends Error {
   constructor() {
     super(message("assets.budget"));
@@ -41024,13 +41269,13 @@ async function runPreflightCommand(command, options) {
 ` };
     throw error;
   }
-  const warnings = [];
+  const warnings2 = [];
   const git = new Git(options.cwd ?? process.cwd());
   const outcome2 = await runOperation(command, inputs, initialSync, {
     git,
     warn: (message2) => {
       if (options.warn) options.warn(message2);
-      else warnings.push(`warning: ${message2}
+      else warnings2.push(`warning: ${message2}
 `);
     },
     log: options.log ?? (() => {
@@ -41044,13 +41289,13 @@ async function runPreflightCommand(command, options) {
   }
   const summaryFile = env["GITHUB_STEP_SUMMARY"];
   if (summaryFile) await appendFile(summaryFile, reportText(outcome2.summary));
-  return endedRun(outcome2, warnings.join(""));
+  return endedRun(outcome2, warnings2.join(""));
 }
-function endedRun(outcome2, warnings) {
+function endedRun(outcome2, warnings2) {
   const ending = runEnding(outcome2);
   const line2 = ending.message === void 0 ? "" : `${ending.status === "warning" ? "warning: " : ""}${ending.message}
 `;
-  return { exitCode: ending.exitCode, stdout: outcome2.summary, stderr: `${warnings}${line2}` };
+  return { exitCode: ending.exitCode, stdout: outcome2.summary, stderr: `${warnings2}${line2}` };
 }
 function notImplemented(command) {
   return { exitCode: COMMANDS[command].notImplementedExitCode, stdout: "", stderr: `${notImplementedMessage(command)}
