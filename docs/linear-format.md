@@ -197,7 +197,8 @@ Blocks:
   text, as code) and drops the backslash of `\+`: there
   `fix` writes `+` and a no-break space at the column of the item's text,
   which Linear keeps as text. Under a quote, and on later lines, the `+`
-  stays as it is.
+  stays as it is. Until then `lint` reports the plain `+` as
+  [`plus-line-in-item`](#plus-line-in-item).
 - A line that opens with three or more `>` signs is a collapsible section
   in Linear, not a nested quote, and `fix` writes it as Linear does: the
   rest of the line becomes the title of a `+++` line, and the section holds
@@ -498,7 +499,10 @@ Inline text:
   ``a ` b`` becomes ``a \` b``.
 - A continuation line of a paragraph keeps its own indentation, as Linear
   does: the quote's `>` or the item's indent is written in place of the
-  source's, and spaces or tabs past it stay. A tab that the item's indent
+  source's, and spaces or tabs past it stay. A tab in the prefix itself,
+  after a list, heading or quote marker, or in an indented code block's
+  indentation is written as spaces; until then `lint` reports it as
+  [`tab-indentation`](#tab-indentation). A tab that the item's indent
   covers only in part leaves its other columns as spaces: under `* item`, a
   line indented with one tab is written with four spaces. Later tabs stay
   tabs: under `1. Plan`, two tabs before `2. step` become four spaces and a
@@ -551,7 +555,9 @@ Each rule is a construct Linear would lose or alter, and its message says
 what to do. `fix` never rewrites a file with a finding, so nothing is lost
 silently; change the file yourself. The exceptions are
 [`hard-break-backslash`](#hard-break-backslash),
-[`section-marker-text`](#section-marker-text) and
+[`plus-line-in-item`](#plus-line-in-item),
+[`section-marker-text`](#section-marker-text),
+[`tab-indentation`](#tab-indentation) and
 [`table-quote-cell`](#table-quote-cell), which `fix` writes in a form
 Linear keeps where it can, and HTTP(S) images, which `fix` writes as links
 ([`image-not-in-repository`](#image-not-in-repository)).
@@ -1074,6 +1080,34 @@ backslash; the sync reads it as text and writes it as `fix` does.
 1. Week
    1. +++Plan
       1. First step
+```
+
+### `plus-line-in-item`
+
+A line of only + right below a list item's first line is text of the item
+in Markdown, but Linear reads it as an empty list item and the text after
+it moves. Run fix to write it as + followed by a no-break space, which
+Linear keeps as text, or remove the line. The sync leaves the document out
+until then.
+
+```markdown
+- Water the beds
+  +
+  in the morning
+```
+
+### `tab-indentation`
+
+A tab in the indentation of a list item, a quote or a code block, or after
+a list, heading or quote marker, is laid out differently by Linear, and
+text moves or is lost. Run fix to write the indentation with spaces, or
+replace the tabs with spaces yourself. A tab in the text of a line past
+its indentation, or in a fenced code block's code, stays and is not
+reported. The sync leaves the document out until then.
+
+```markdown
+- Spring
+	- Sow the peas
 ```
 
 ### `ordered-task-list`

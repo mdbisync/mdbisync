@@ -41,6 +41,8 @@ export const LINT_RULES = {
   'list-number-too-long': 'An ordered list numbered past 999999999: Linear numbers its items on from the first number, and Markdown reads a number of more than nine digits as text of the item above it. Start the list at a smaller number.',
   'block-first-in-list-item': 'A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item. Start the item with a line of text and put the block below it.',
   'section-marker-text': 'A line that starts with +++ and text right after it (+++Plan) is text, but Linear opens a collapsible section from it when more of its list item, quote or document follows. Run fix to write it as \\+++Plan, or put a space after +++ to make it a section.',
+  'plus-line-in-item': "A line of only + right below a list item's first line is text of the item in Markdown, but Linear reads it as an empty list item and the text after it moves. Run fix to write it as + followed by a no-break space, which Linear keeps as text, or remove the line.",
+  'tab-indentation': 'A tab in the indentation of a list item, a quote or a code block, or after a list, heading or quote marker, is laid out differently by Linear, and text moves or is lost. Run fix to write the indentation with spaces, or replace the tabs with spaces yourself.',
   'ordered-task-list': 'An ordered task list becomes a bullet task list. Use a bullet task list, or an ordered list without checkboxes.',
   'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it. Add the file to the repository and link it by its relative path, or run fix to write an HTTP(S) image as a link.',
   'image-file-missing': 'An image must name a file that exists in the repository, not a folder or a Markdown document.',
@@ -85,9 +87,11 @@ export interface Warning {
  * text gets its URL as the text; one without a URL stays with its author.
  * A line of plus signs with text right after them that Linear would read
  * as a section's title gets a backslash (`\+++Plan`); the sync leaves it
- * out until then.
+ * out until then. A lone `+` right below an item's first line gets a
+ * no-break space after it, and the indentation a tab takes in the Markdown
+ * structure is written with spaces; the sync leaves those out until then too.
  */
-export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash', 'link-without-text', 'section-marker-text', 'table-quote-cell']);
+export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash', 'link-without-text', 'plus-line-in-item', 'section-marker-text', 'tab-indentation', 'table-quote-cell']);
 
 /**
  * Rules about where an image's file is, not about what Linear loses. The

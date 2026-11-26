@@ -17,7 +17,7 @@ const markdown = bank.fixtures.filter((fixture) => fixture.synced !== false && f
 const read = (fixture: BankFixture): string => readFileSync(join(bank.dir, fixture.file), 'utf8');
 const golden = (fixture: BankFixture): string | undefined => readOptional(join(bank.dir, goldenMarkdownPath(fixture.file)));
 /** Lint-error fixtures `fix` rewrites into Linear's form (FIXED_RULES); the others of those rules stay as they are. */
-const FIXED_BY_FIX: ReadonlySet<string> = new Set(['construct-singles/break-backslash.md', 'construct-singles/break-backslash-indented.md']);
+const FIXED_BY_FIX: ReadonlySet<string> = new Set(['construct-singles/break-backslash.md', 'construct-singles/break-backslash-indented.md', 'lint-errors/plus-line-in-item.md', 'lint-errors/tab-indentation.md']);
 /**
  * Lint-error fixtures of a rule fix writes whose recorded form shows what
  * Linear loses: fix's form is another fixture, recorded as a fixed point.
@@ -51,6 +51,7 @@ describe('fix on the fixture bank', () => {
         } else {
           assert.equal(fixed, head + form, "L0-02: fix reaches Linear's recorded form");
         }
+        assert.deepEqual(lintText(fixture.file, fixed, options).filter((finding) => FIXED_RULES.has(finding.rule)), [], 'lint reports no rule fix writes after fix');
       } else if (FIXED_BY_FIX.has(fixture.file)) {
         // A rule fix writes in Linear's form: the finding goes and fix reaches the recorded form.
         assert.ok(fixture.class === 'lint-error' && FIXED_RULES.has(fixture.rule as LintRule), 'a fixture of a rule fix writes');
@@ -99,6 +100,9 @@ describe('lint on the fixture bank', () => {
         const expected = (fixture as BankFixture & { line?: number }).line;
         if (expected !== undefined) assert.ok(findings.some((finding) => finding.rule === fixture.rule && finding.line === expected), `on line ${expected}`);
         for (const finding of findings) assert.equal(finding.file, fixture.file);
+      } else if (fixture.class === 'fixable') {
+        // Only what fix writes in Linear's form (a tab in a list prefix), which the fix test sees go.
+        assert.deepEqual(findings.filter((finding) => !FIXED_RULES.has(finding.rule)), [], 'no finding fix leaves');
       } else {
         assert.deepEqual(findings, [], 'no finding');
       }

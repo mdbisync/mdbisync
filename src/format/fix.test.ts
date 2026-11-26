@@ -8,9 +8,12 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fixLinearText, fixText, relativeFileBlocksAsLinks } from './fix.ts';
-import { CONTENT_LIMIT } from './rules.ts';
+import { CONTENT_LIMIT, FIXED_RULES } from './rules.ts';
 import { linkedFileCheck, lintInTree, lintText } from './lint.ts';
 import { parse, sameAsLinear, sameMarkdown, splitFile, visit } from './markdown.ts';
+
+/** Findings `fix` does not write away: what lint still reports after it. */
+const leftToAuthor = (findings: ReturnType<typeof lintText>): ReturnType<typeof lintText> => findings.filter(({ rule }) => !FIXED_RULES.has(rule));
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],
@@ -491,7 +494,9 @@ describe('a code span\'s fence and padding, as Linear writes them', () => {
   it('writes a quote\'s tab Linear keeps in code that would otherwise be spaces alone', () => {
     // Markdown reads the tab's columns as three spaces; Linear holds a space and a tab.
     assert.equal(fixText('> `\n>\t`'), '> ` \t`');
-    assert.deepEqual(lintText('doc.md', '> `\n>\t`'), []);
+    // The tab after `>` is in the quote's prefix: lint reports it until fix has written the line.
+    assert.deepEqual(lintText('doc.md', '> `\n>\t`').map(({ rule, line }) => `${rule}@${line}`), ['tab-indentation@2']);
+    assert.deepEqual(lintText('doc.md', '> ` \t`'), []);
   });
 
   it('leaves code to its author whose outer spaces Linear drops', () => {
@@ -1123,7 +1128,7 @@ describe('what fix leaves alone', () => {
       // `sameMarkdown` keeps a file block's empty marker line apart, so compare what Markdown reads.
       assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
-      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), leftToAuthor(lintText('a.md', text)), `lint finds nothing new: ${text}`);
     }
   });
 
@@ -1162,7 +1167,7 @@ describe('what fix leaves alone', () => {
       assert.equal(fixed, expected, text);
       assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
-      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), leftToAuthor(lintText('a.md', text)), `lint finds nothing new: ${text}`);
     }
   });
 
@@ -1454,7 +1459,7 @@ describe('what fix leaves alone', () => {
       assert.equal(fixed, expected, text);
       assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
-      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), leftToAuthor(lintText('a.md', text)), `lint finds nothing new: ${text}`);
     }
   });
 
@@ -1902,7 +1907,7 @@ describe('what fix leaves alone', () => {
       assert.equal(fixed, expected, text);
       assert.deepEqual(readMarkdown(fixed), readMarkdown(text), `same document: ${text}`);
       assert.equal(fixText(fixed), fixed, `a second fix changes nothing: ${text}`);
-      assert.deepEqual(lintText('a.md', fixed), lintText('a.md', text), `lint finds nothing new: ${text}`);
+      assert.deepEqual(lintText('a.md', fixed), leftToAuthor(lintText('a.md', text)), `lint finds nothing new: ${text}`);
     }
     const [quote] = parse(fixText('> `a\n--\n> b`')).children;
     const [paragraph] = (quote as Blockquote).children;
@@ -2081,7 +2086,7 @@ describe('what fix leaves alone', () => {
       const once = fixText(input);
       assert.equal(once, expected, JSON.stringify(input));
       assert.equal(fixText(once), once, `${JSON.stringify(input)}: the result is a fixed point`);
-      assert.deepEqual(lintText('a.md', once), lintText('a.md', input), `${JSON.stringify(input)}: lint finds nothing new`);
+      assert.deepEqual(lintText('a.md', once), leftToAuthor(lintText('a.md', input)), `${JSON.stringify(input)}: lint finds nothing new`);
       const paragraph = parse(once).children[0] as Paragraph;
       assert.equal(paragraph.children.length, 1, `${JSON.stringify(input)}: one link`);
       const link = paragraph.children[0];

@@ -74,6 +74,10 @@ rules:
     title: "A list item that starts with a heading, code, a quote, a collapsible section or another block is written in a form Markdown reads as an empty item."
   - id: section-marker-text
     title: "A line that starts with +++ and text right after it is text, but Linear opens a collapsible section from it when more of its list item, quote or document follows."
+  - id: plus-line-in-item
+    title: "A line of only + right below a list item's first line is text of the item in Markdown, but Linear reads it as an empty list item."
+  - id: tab-indentation
+    title: "A tab in the indentation of a list item, a quote or a code block, or after a list, heading or quote marker, is laid out differently by Linear."
   - id: ordered-task-list
     title: "An ordered task list becomes a bullet task list."
   - id: table-hash-cell
@@ -4016,3 +4020,25 @@ fixtures:
     canary: kx-575a16ec
     corpus: false
     note: "Linear numbers the list on past nine digits, which Markdown reads as text of the item above"
+  - file: "lint-errors/plus-line-in-item.md"
+    group: lint-errors
+    construct: plain-plus-line-in-item
+    class: lint-error
+    basis: assumed
+    rule: plus-line-in-item
+    line: 4
+    canary: kx-5e1a0130
+    corpus: false
+    probe_pending: true
+    note: "a lone + right below an item's first line is item text in Markdown and an empty item in Linear; fix writes + and a no-break space, which Linear keeps as text"
+  - file: "lint-errors/tab-indentation.md"
+    group: lint-errors
+    construct: tab-indentation
+    class: lint-error
+    basis: assumed
+    rule: tab-indentation
+    line: 4
+    canary: kx-5e1a0131
+    corpus: false
+    probe_pending: true
+    note: "tabs in a nested item's prefix, in an item's continuation and after a quote marker; fix writes the indentation with spaces"

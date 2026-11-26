@@ -372,7 +372,7 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
 `image-in-link`, `table-alignment`, `link-without-text`, `link-title`, `image-title`, `code-in-emphasis`, `hard-break-backslash`,
 `git-conflict-marker`,
-`section-opener`, `section-marker-text`, `url-in-html`, `block-first-in-list-item`, `ordered-task-list`,
+`section-opener`, `section-marker-text`, `plus-line-in-item`, `tab-indentation`, `url-in-html`, `block-first-in-list-item`, `ordered-task-list`,
 `image-not-in-repository`, `image-file-missing` and
 `document-in-assets-folder`. Each is described, with its fix, in
 [linear-format.md](linear-format.md#lint-rules). `fix` writes an HTTP(S)
@@ -382,6 +382,10 @@ URL of a link without text as its text and prints the
 [`link-text-from-url`](linear-format.md#link-text-from-url) warning. A list item that opens
 with a collapsible section (`1. +++ Notes` with more of the item below
 it) is `block-first-in-list-item`: put a line of text first in the item.
+A file that reached the branch without the hook (an edit on the web, a
+push without hooks) can hold a lone `+` below an item's first line
+(`plus-line-in-item`) or tabs in its indentation (`tab-indentation`): run
+`mdbisync fix` on it and commit the result, and the next run syncs it.
 
 `mdbisync lint` and `mdbisync fix` also report `hard-break-in-heading`
 when converting a setext heading to one line would lose a hard break, and

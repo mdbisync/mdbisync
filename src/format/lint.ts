@@ -8,6 +8,8 @@ import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, bracketedLabel, codeSpanText, linearDropsCodeSpaces, listKind, listParts, MAX_LIST_NUMBER, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
 import { plusTextAsText, plusTextLines, sectionsFirstInItem, unwritableSectionLine } from './sections.ts';
+import { plusLines } from './marker-lines.ts';
+import { structuralTabLines } from './tab-indentation.ts';
 import { tabReferences } from './tab-reference.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
@@ -140,6 +142,11 @@ export function lintText(file: string, text: string, options: LintOptions = {}):
     return sorted();
   }
   lintTree(file, tree, content, report, options);
+  // The tree's offsets leave out a byte order mark at the start of the body.
+  const source = content.replace(/^\uFEFF/, '');
+  for (const at of structuralTabLines(tree, source)) report('tab-indentation', at);
+  // Linear's own export holds the form `fix` writes, which it captures as it is.
+  if (options.linearExport !== true) for (const at of plusLines(source, tree)) report('plus-line-in-item', at);
   const { unsafeLine } = tabReferences(content);
   if (unsafeLine !== undefined) report('tab-reference-layout', unsafeLine);
   for (const at of spaceReferenceEdges(tree, content)) report('space-reference-edge', at);

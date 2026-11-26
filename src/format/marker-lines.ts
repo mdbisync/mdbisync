@@ -5,7 +5,7 @@
 // backslash of `\+`. Linear keeps `+` followed by a no-break space at the
 // item's text column as text, which `fix` writes.
 
-import type { Paragraph } from 'mdast';
+import type { ListItem, Paragraph, Root } from 'mdast';
 import { overContentLimit } from './lint.ts';
 import { advanceColumn, end, line, parse, start, visit } from './markdown.ts';
 
@@ -24,11 +24,36 @@ const PLUS_LINE = /\n[ \t]*\\?\+[ \t]*(?:\n|$)/;
  */
 export function plusLinesAsLinear(body: string): string {
   if (!PLUS_LINE.test(body)) return body;
-  const edits: Array<{ from: number; to: number; text: string }> = [];
-  visit(parse(body), (node, ancestors) => {
+  const edits = plusLineMatches(body, parse(body), false);
+  if (edits.length === 0) return body;
+  let out = '';
+  let at = 0;
+  for (const edit of edits) {
+    out += body.slice(at, edit.from) + `${' '.repeat(itemTextColumn(body, start(edit.item)))}+\u00a0${edit.trailing}`;
+    at = edit.to;
+  }
+  out += body.slice(at);
+  return overContentLimit(out) ? body : out;
+}
+
+/**
+ * The 1-based lines of the lone `+` or `\+` lines `fix` writes with a
+ * no-break space (`plus-line-in-item`): Linear reads each as an empty list
+ * item. Here the item's text can also start below its marker: `fix` moves
+ * it onto the marker's line before `plusLinesAsLinear` reads it.
+ */
+export function plusLines(body: string, tree: Root): number[] {
+  return plusLineMatches(body, tree, true).map((match) => match.line);
+}
+
+/** The lone plus lines in document order; `belowMarker` also takes an item whose text starts below its marker. */
+function plusLineMatches(body: string, tree: Root, belowMarker: boolean): Array<{ item: ListItem; from: number; to: number; trailing: string; line: number }> {
+  if (!PLUS_LINE.test(body)) return [];
+  const found: Array<{ item: ListItem; from: number; to: number; trailing: string; line: number }> = [];
+  visit(tree, (node, ancestors) => {
     if (node.type !== 'paragraph') return;
     const item = ancestors.at(-1);
-    if (item?.type !== 'listItem' || item.children[0] !== node || line(node) !== line(item)) return;
+    if (item?.type !== 'listItem' || item.children[0] !== node || (!belowMarker && line(node) !== line(item))) return;
     if (ancestors.some((ancestor) => ancestor.type === 'blockquote')) return;
     const firstEnd = body.indexOf('\n', start(node));
     if (firstEnd === -1 || firstEnd >= end(node)) return;
@@ -36,17 +61,9 @@ export function plusLinesAsLinear(body: string): string {
     const newline = Math.min(...[body.indexOf('\n', from), end(node)].filter((at) => at !== -1));
     const plus = PLUS_ONLY.exec(body.slice(from, newline));
     if (plus === null || !inText(node, from + plus[0].indexOf(plus[1]!))) return;
-    edits.push({ from, to: newline, text: `${' '.repeat(itemTextColumn(body, start(item)))}+\u00a0${plus[2]}` });
+    found.push({ item, from, to: newline, trailing: plus[2]!, line: line(node) + 1 });
   });
-  if (edits.length === 0) return body;
-  let out = '';
-  let at = 0;
-  for (const edit of edits.sort((a, b) => a.from - b.from)) {
-    out += body.slice(at, edit.from) + edit.text;
-    at = edit.to;
-  }
-  out += body.slice(at);
-  return overContentLimit(out) ? body : out;
+  return found.sort((a, b) => a.from - b.from);
 }
 
 /**

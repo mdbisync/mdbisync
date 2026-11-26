@@ -578,6 +578,27 @@ describe('sync: the tracked branch to Linear', () => {
     await assertConverged();
   });
 
+  it('a file with a lone + below an item or a tab in its indentation is left out until fix writes it; other files sync', async () => {
+    const review = await documentOf('eng/notes/review.md');
+    const content = review.content;
+    const text = `# Review\n\n- Findings\n  +\n  more of the item\n- Next\n\t- Nested step ${CANARY}\n`;
+    await commit({ 'eng/notes/review.md': text, 'combined/guide.md': `# Guide\n\nHow to start, again. ${CANARY}\n` });
+    const { result, report, writes, summary } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.match((await documentOf('combined/guide.md')).content ?? '', /again/);
+    assert.deepEqual(report.sync?.leftOut.find((entry) => entry.path === 'eng/notes/review.md')?.rules, ['plus-line-in-item', 'tab-indentation']);
+    assert.match(summary, /^\| eng\/notes\/review\.md \| plus-line-in-item, tab-indentation \|$/m);
+    assert.equal(review.content, content);
+
+    // What `fix` writes syncs.
+    await commit({ 'eng/notes/review.md': fixText(text) });
+    const fixed = await sync();
+    assert.deepEqual(fixed.writes, ['UpdateDocument']);
+    assert.match(review.content ?? '', /Nested step/);
+    assert.equal(fixed.report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/review.md'), false);
+  });
+
   it('L2-13: a synchronized file that gains a footnote is left out and its document stays as it was', async () => {
     const document = await documentOf('eng/notes/review.md');
     const content = document.content;
