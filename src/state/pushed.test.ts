@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { PushedKey } from './pushed.ts';
-import { commitIds, readSyncPushed } from './state.ts';
+import { commitIds, readSyncPushed, readWrittenMacs } from './state.ts';
 import { commitTree } from './objects.ts';
 import { type Fixture, IDENTITY, createFixture } from './test-helpers.ts';
 
@@ -16,6 +16,21 @@ describe('state: signed records of the sync\'s own pushes', () => {
     assert.equal(key.verified(ref, record), head);
     // GitHub compares repository names without case.
     assert.equal(new PushedKey('secret', 'owner/repo').verified(ref, record), head);
+  });
+
+  it('signs an initial sync\'s write receipt for its path, document, text and observed digest only', () => {
+    const [path, id, hash, digest] = ['docs/plan.md', 'doc-1', 'b'.repeat(64), 'c'.repeat(64)];
+    const mac = key.writtenMac(path, id, hash, digest);
+    assert.match(mac, /^[0-9a-f]{64}$/);
+    assert.equal(key.verifiesWritten(path, id, hash, digest, mac), true);
+    assert.equal(key.verifiesWritten(path, id, hash, digest, undefined), false);
+    assert.equal(key.verifiesWritten('docs/other.md', id, hash, digest, mac), false);
+    assert.equal(key.verifiesWritten(path, 'doc-2', hash, digest, mac), false);
+    assert.equal(key.verifiesWritten(path, id, 'd'.repeat(64), digest, mac), false);
+    assert.equal(key.verifiesWritten(path, id, hash, 'e'.repeat(64), mac), false);
+    assert.equal(new PushedKey('secret', 'owner/other').verifiesWritten(path, id, hash, digest, mac), false);
+    assert.equal(new PushedKey('another secret', 'owner/repo').verifiesWritten(path, id, hash, digest, mac), false);
+    assert.equal(key.verifiesWritten(path, id, hash, digest, mac.toUpperCase()), false);
   });
 
   it('refuses a record without its signature, for another head, branch or repository, or under another secret', () => {
@@ -56,6 +71,17 @@ describe('state: signed records of the sync\'s own pushes', () => {
         assert.equal(key.verified(ref, record), undefined);
       }
       assert.deepEqual(await readSyncPushed(fixture.remote, await stored(JSON.stringify({ head }))), { head });
+    });
+
+    it('reads write receipt signatures in any other form as none, so a resume only compares those documents', async () => {
+      const mac = key.writtenMac('docs/a.md', 'doc-a', 'b'.repeat(64), 'c'.repeat(64));
+      const macs = (text: string) => commitTree(fixture.remote, { parents: [], base: null, changes: new Map([['written-macs.json', text]]), message: 'Progress', identity: IDENTITY })
+        .then((commit) => readWrittenMacs(fixture.remote, commit));
+      assert.deepEqual(await macs(JSON.stringify({ 'docs/a.md': mac, 'docs/b.md': '', 'docs/c.md': 42, 'docs/d.md': mac.toUpperCase() })), new Map([['docs/a.md', mac]]));
+      for (const text of ['not json', '[]', 'null', '"text"']) assert.deepEqual(await macs(text), new Map());
+      const written = await commitIds(fixture.remote, null, new Map([['docs/a.md', { id: 'doc-a' }]]), IDENTITY, { written: new Map([['docs/a.md', 'b'.repeat(64)]]), writtenMacs: new Map([['docs/a.md', mac]]) });
+      assert.deepEqual(await readWrittenMacs(fixture.remote, written), new Map([['docs/a.md', mac]]));
+      assert.deepEqual(await readWrittenMacs(fixture.remote, null), new Map());
     });
   });
 });

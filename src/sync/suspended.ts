@@ -15,7 +15,7 @@ import { checkpoint } from '../test-hooks.ts';
 import { GitOutputLimitError } from '../state/git.ts';
 import { VERSION } from '../version.ts';
 import { listPaths, readBlobs } from '../state/objects.ts';
-import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, showCommit, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
+import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, readWrittenMacs, showCommit, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type PushedRecord, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure, ExpectedCheck } from '../pull-request/index.ts';
@@ -175,7 +175,7 @@ async function persistIds(context: RunContext, options: LaneOptions, ids: IdMap,
  */
 export async function commitLaneIds(context: RunContext, parent: Oid | null, ids: IdMap, message: string, identity?: CommitIdentity, syncPushed?: PushedRecord): Promise<Oid> {
   const {git} = context;
-  return commitIds(git, parent, ids, identity ?? context.identity, { message, reserved: await readReservedIds(git, parent), superseded: await readSupersededIds(git, parent), written: await readWrittenHashes(git, parent), ...(syncPushed === undefined ? {} : { syncPushed }) });
+  return commitIds(git, parent, ids, identity ?? context.identity, { message, reserved: await readReservedIds(git, parent), superseded: await readSupersededIds(git, parent), written: await readWrittenHashes(git, parent), writtenMacs: await readWrittenMacs(git, parent), ...(syncPushed === undefined ? {} : { syncPushed }) });
 }
 
 async function push(context: RunContext, options: LaneOptions, ids: IdMap, head: Oid, expected: Oid | null, normal?: { expected: Oid | null; next: Oid }, updateLane = true, tracked = context.fetched.tracked): Promise<boolean> {

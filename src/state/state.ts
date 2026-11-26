@@ -575,9 +575,33 @@ async function readStringMap(git: Git, commit: Oid | null, file: string): Promis
  * In a progress commit only: for each document the unfinished initial sync
  * wrote, the SHA-256 (lowercase hex) of the text it sent. A resumed run
  * skips a document whose text has the same hash, whatever form Linear
- * stored it in.
+ * stored it in, when `WRITTEN_MACS_FILE` holds a valid signature of that
+ * receipt; without one, only when the document holds the text.
  */
 export const WRITTEN_FILE = 'written.json';
+
+/**
+ * In a progress commit only: by path, the sync's signature of the write
+ * receipt (`PushedKey.writtenMac`), checked where it is used. A receipt
+ * without a valid one is not the sync's own.
+ */
+export const WRITTEN_MACS_FILE = 'written-macs.json';
+
+/** The signatures as written; an entry or file in any other form counts as none, so its receipts are only unsigned. */
+export async function readWrittenMacs(git: Git, commit: Oid | null): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const read = commit === null ? null : await git.readBlob(`${commit}:${WRITTEN_MACS_FILE}`);
+  if (read === null) return map;
+  let data: unknown;
+  try {
+    data = JSON.parse(read.toString('utf8'));
+  } catch {
+    return map;
+  }
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return map;
+  for (const [path, mac] of Object.entries(data)) if (typeof mac === 'string' && PUSHED_MAC.test(mac)) map.set(path, mac);
+  return map;
+}
 
 export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<Map<string, string>> {
   if (commit === null) return new Map();
@@ -622,7 +646,7 @@ export async function readSyncPushed(git: Git, commit: Oid | null): Promise<Push
 
 /**
  * Commits the id map (and, when there are any, the reserved ids, the
- * superseded ids, the written hashes and the sync branch's pushed head) on
+ * superseded ids, the written hashes and their signatures, and the sync branch's pushed head) on
  * top of `parent`. Returns `parent` when nothing changed, unless `always`.
  * `syncPushed` records the head the sync pushes on the sync branch together
  * with this commit, signed; left out, the record `parent` holds is kept as it is.
@@ -632,7 +656,7 @@ export async function commitIds(
   parent: Oid | null,
   ids: IdMap,
   identity: CommitIdentity,
-  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string>; syncPushed?: PushedRecord } = {},
+  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string>; writtenMacs?: ReadonlyMap<string, string>; syncPushed?: PushedRecord } = {},
 ): Promise<Oid> {
   checkUniqueDocumentIds(ids);
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
@@ -642,6 +666,7 @@ export async function commitIds(
   if (options.reserved !== undefined && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
   if (options.superseded !== undefined && options.superseded.size > 0) files.set(SUPERSEDED_IDS_FILE, sorted(options.superseded));
   if (options.written !== undefined && options.written.size > 0) files.set(WRITTEN_FILE, sorted(options.written));
+  if (options.writtenMacs !== undefined && options.writtenMacs.size > 0) files.set(WRITTEN_MACS_FILE, sorted(options.writtenMacs));
   const syncPushed = options.syncPushed ?? await readSyncPushed(git, parent);
   if (syncPushed !== undefined) files.set(SYNC_PUSHED_FILE, syncPushed.mac === undefined ? { head: syncPushed.head } : { head: syncPushed.head, mac: syncPushed.mac });
   return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);

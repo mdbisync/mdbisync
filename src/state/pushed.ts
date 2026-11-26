@@ -96,6 +96,21 @@ export class PushedKey {
     return timingSafeEqual(Buffer.from(this.repairMac(path, id, repair), 'hex'), Buffer.from(repair.mac, 'hex'));
   }
 
+  /**
+   * The signature of an unfinished initial sync's write receipt: the path,
+   * the document's id, the hash of the text sent and the digest of what
+   * Linear returned, bound to this repository. A resumed run trusts a
+   * document on that digest alone only with a valid one (see `confirm.ts`).
+   */
+  writtenMac(path: string, id: string, hash: string, observedDigest: string): string {
+    return createHmac('sha256', this.#key).update(JSON.stringify(['written-v1', this.#repository, path, id, hash, observedDigest])).digest('hex');
+  }
+
+  verifiesWritten(path: string, id: string, hash: string, observedDigest: string, mac: unknown): boolean {
+    if (typeof mac !== 'string' || !PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.writtenMac(path, id, hash, observedDigest), 'hex'), Buffer.from(mac, 'hex'));
+  }
+
   #mac(ref: string, head: Oid): string {
     return createHmac('sha256', this.#key).update(`${this.#repository}\n${ref}\n${head}`).digest('hex');
   }
