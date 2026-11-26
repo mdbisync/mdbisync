@@ -442,7 +442,11 @@ Inline text:
   emoji. Other shortcodes stay text, in Linear and in the file: GitHub-only
   names such as `:albania:`, second names such as `:thumbsup:` (use
   `:+1:`), and newer emoji such as `:shaking_face:`. An escaped reference
-  or shortcode (`\&amp;`, `\:tada:`) stays as written.
+  or shortcode (`\&amp;`, `\:tada:`) stays as written. Linear can
+  read back an emoji added in its editor as the shortcode
+  (`:spiral_calendar_pad:` for `🗓️`). The sync reads such a shortcode as
+  its emoji: a file with the emoji is no change, and a pull writes the
+  emoji.
 - A backslash before anything but ASCII punctuation (a letter, a digit, a
   space) is a literal backslash, and it is doubled, as Linear doubles it:
   `$\pi$` becomes `$\\pi$`, and `C:\ 2026` becomes `C:\\ 2026`. So is a

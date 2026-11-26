@@ -48,6 +48,25 @@ describe('sync: a suspended lane an older version captured', () => {
     assert.equal((await documentOf(path)).content, linear, 'Linear keeps its own spelling of the same document');
   });
 
+  it('lets a document go whose emoji Linear exports as its shortcode', async () => {
+    // Linear can export an emoji added in its editor as its shortcode.
+    const shortcode = '# Plan\n\n[:spiral_calendar_pad:](<https://example.com/img/calendar.png>) Week\n';
+    const emoji = '# Plan\n\n[🗓️](<https://example.com/img/calendar.png>) Week\n';
+    await suspendOne(path, shortcode);
+    await gitEdit(path, emoji);
+    await asCapturedByAnOlderVersion(shortcode);
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(await show(`refs/mdbisync/linear:${path}`), emoji, "the shortcode reads as git's emoji");
+    assert.equal(await show(`${SUSPENDED}:${path}`), emoji);
+    const quiet = await sync();
+    assert.deepEqual(quiet.report.capture?.changed, [], 'no change on the next read');
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.equal(await show(`refs/heads/main:${path}`), emoji);
+  });
+
   it('keeps a document suspended when Linear holds another document than git', async () => {
     await suspendOne(path, linear);
     const other = '# Plan\n\n1. Week\n   1. A step git rewrote\n';

@@ -12,6 +12,7 @@ import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { posix } from 'node:path';
 import { domainToASCII } from 'node:url';
 import { bareDomains, httpUrlEnd } from './bare-domain.ts';
+import { emojiShortcodes, escaped, sameFlanking } from './shortcodes.ts';
 
 type ParserEvent = Parameters<EditMap['consume']>[0][number];
 
@@ -746,7 +747,7 @@ export function markdownBaseline(body: string | undefined): string | undefined {
  * table cell, `*` for `_`, a code span on one line), which changes nothing
  * in the document; the sync keeps the file's spelling for those.
  */
-export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean; linearBoldForms?: boolean; ignoreBold?: boolean } = {}): boolean {
+export function sameMarkdown(a: string, b: string, options: { linearNumberSpacing?: boolean; linearBoldForms?: boolean; ignoreBold?: boolean; linearShortcodes?: boolean } = {}): boolean {
   if (a === b) return true;
   return isDeepStrictEqual(comparable(a, options), comparable(b, options));
 }
@@ -758,11 +759,46 @@ export function sameMarkdown(a: string, b: string, options: { linearNumberSpacin
  */
 export function sameAsLinear(content: string, body: string): boolean {
   if (content === body) return true;
-  const restored = linearMarkersAsText(content, body);
-  if (sameMarkdown(restored, body)) return true;
+  // Read Linear's shortcodes as emoji first: a block start in Linear's text
+  // is restored by the file's spelling of the same block.
+  const restored = linearMarkersAsText(linearShortcodesAsEmoji(content), body);
+  if (sameMarkdown(restored, body, { linearShortcodes: true })) return true;
   // A bare closing +++ after an escaped title can be exported as its own
   // paragraph. Compare that legacy spelling with the blank line Linear added.
-  return body.includes('\\+++') && sameMarkdown(restored, linearSectionEnd(body));
+  return body.includes('\\+++') && sameMarkdown(restored, linearSectionEnd(body), { linearShortcodes: true });
+}
+
+/**
+ * The text with each emoji shortcode Linear knows read as its emoji, where
+ * Markdown reads it as text (not in code, a URL or HTML, and not escaped).
+ * Linear can export an emoji added in its editor as the shortcode
+ * (`:spiral_calendar_pad:`), while the same emoji written through the API
+ * is text it exports as is, with or without U+FE0F, in link text too:
+ * one emoji, two spellings.
+ */
+function linearShortcodesAsEmoji(body: string): string {
+  if (!/:[a-z0-9_+-]+:/.test(body)) return body;
+  // Offsets count from after a byte order mark, as the parser reads the text.
+  const bom = body.startsWith(BOM) ? 1 : 0;
+  const parts: string[] = [];
+  let done = 0;
+  visit(parse(body, [], true), (node, ancestors) => {
+    if (node.type !== 'text') return;
+    // An autolink's text is its address: it stays as written.
+    const parent = ancestors.at(-1);
+    if (parent?.type === 'link' && body[start(parent) + bom] !== '[') return;
+    const from = start(node) + bom;
+    const raw = body.slice(from, end(node) + bom);
+    // Only where `fix` would write the emoji: not escaped, and no emphasis run next to it reads otherwise.
+    for (const { index, length, emoji } of emojiShortcodes(raw)) {
+      const at = from + index;
+      if (escaped(raw, index) || !sameFlanking(body, at, at + length, emoji)) continue;
+      parts.push(body.slice(done, at), emoji);
+      done = at + length;
+    }
+  });
+  parts.push(body.slice(done));
+  return parts.join('');
 }
 
 /**
@@ -1242,7 +1278,7 @@ export function linearDropsCodeSpaces(code: string): boolean {
 }
 
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
-function comparable(body: string, { linearNumberSpacing, linearBoldForms, ignoreBold }: NonNullable<Parameters<typeof sameMarkdown>[2]>): unknown {
+function comparable(body: string, { linearNumberSpacing, linearBoldForms, ignoreBold, linearShortcodes }: NonNullable<Parameters<typeof sameMarkdown>[2]>): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
   // A `\+` outside a run of three signs (a bare `+` item text that `fix`
   // escapes, `\++`) cannot be part of `+++`. Markdown reads it as a regular escape.
@@ -1250,8 +1286,9 @@ function comparable(body: string, { linearNumberSpacing, linearBoldForms, ignore
   // in Linear (`* \n  [a](a.pdf)`), which Markdown reads as `* [a](a.pdf)`: keep that line apart too.
   const nested = nestedFileBlocksOnItemLine(body);
   const plainPlus = plainPlusEscapes(nested);
-  const marked = markFileBlockStarts(nested
+  const escapes = markFileBlockStarts(nested
     .replace(/\\[$+]/g, (escape, at: number) => (escape === '\\+' && plainPlus(at) ? escape : LINEAR_SYNTAX_ESCAPES[escape]!)));
+  const marked = linearShortcodes ? linearShortcodesAsEmoji(escapes) : escapes;
   const tree = parse(marked, [], true);
   // Linear returns a top-level code block with one blank line fewer before
   // its closing fence each time it is written, and `fix` writes none: those
