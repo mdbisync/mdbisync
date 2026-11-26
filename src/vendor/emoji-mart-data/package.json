@@ -1,0 +1,7 @@
+{
+  "name": "@emoji-mart/data",
+  "version": "1.2.1",
+  "license": "MIT",
+  "private": true,
+  "description": "Data taken from @emoji-mart/data 1.2.1: linear-emoji.json holds the emoji ids of sets/14/native.json with their first skin's native emoji. See src/format/linear-emoji.ts."
+}

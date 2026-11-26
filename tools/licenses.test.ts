@@ -51,11 +51,13 @@ test("only packages with code in a bundle count as bundled", () => {
           "node_modules/a/index.js": { bytesInOutput: 5 },
           "node_modules/a/node_modules/@s/b/index.js": { bytesInOutput: 3 },
           "node_modules/shaken/index.js": { bytesInOutput: 0 },
+          "src/vendor/data/table.json": { bytesInOutput: 7 },
+          "src/vendor/unused/table.json": { bytesInOutput: 0 },
         },
       },
     },
   } satisfies Metafile;
-  assert.deepEqual(bundledPackagePaths(metafile), ["node_modules/a", "node_modules/a/node_modules/@s/b"]);
+  assert.deepEqual(bundledPackagePaths(metafile), ["node_modules/a", "node_modules/a/node_modules/@s/b", "src/vendor/data"]);
 });
 
 test("a bundled package with a license outside the allow-list fails the check", () => {
