@@ -192,6 +192,28 @@ describe('Trees listed through the object reader', () => {
       }
       await assert.rejects(listTree(git, 'refs/heads/none'), GitError);
 
+      // A bounded listing never reads a tree object larger than its limit: a wide folder goes to `ls-tree`, whose
+      // output stops at the limit, and the answer is the same.
+      const wideFolder = await raw(Array.from({ length: 20_000 }, (_, index): [string, string, string] => ['100644', `entry-${String(index).padStart(5, '0')}.md`, a]));
+      const wideRoot = await raw([['100644', 'README.md', a], ['40000', 'wide', wideFolder]]);
+      const lsTreeOf = async (root: string, asked: string[]) => (await git.run(['--literal-pathspecs', 'ls-tree', '-z', '-l', '--full-tree', root, '--', ...asked])).stdout;
+      const sizes: number[] = [];
+      const readTree = git.readObject.bind(git);
+      git.readObject = async (name) => {
+        const found = await readTree(name);
+        if (found?.type === 'tree') sizes.push(found.size);
+        return found;
+      };
+      for (const [root, limit] of [[wideRoot, 4096], [wideFolder, 4096]] as const) {
+        await assert.rejects(listTree(git, root, limit), GitOutputLimitError);
+        const asked = root === wideRoot ? ['wide/entry-00001.md', 'README.md'] : ['entry-00001.md'];
+        assert.deepEqual(await listPaths(git, root, asked, 1000), parseTreeListing(await lsTreeOf(root, asked)));
+      }
+      assert.ok(sizes.every((size) => size <= 4096), `tree objects of ${Math.max(...sizes)} bytes read for a 4096-byte limit`);
+      const wideAll = (await git.run(['ls-tree', '-r', '-z', '-l', '--full-tree', wideRoot])).stdout;
+      assert.deepEqual(await listTree(git, wideRoot, wideAll.length), parseTreeListing(wideAll));
+      git.readObject = readTree;
+
       // A listing over its limit stops reading the trees it has not reached.
       const folders = await Promise.all(Array.from({ length: 50 }, (_, index) => raw([['100644', `file-${index}.md`, a]])));
       const wide = await raw(folders.map((folder, index): [string, string, string] => ['40000', `folder-${String(index).padStart(2, '0')}`, folder]));

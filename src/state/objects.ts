@@ -8,6 +8,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Git, GitError, GitOutputLimitError, type Oid, mapLimit } from './git.ts';
+import type { GitObject } from './object-reader.ts';
 import { message } from '../messages.ts';
 import type { NewTreeEntry } from './object-writer.ts';
 
@@ -42,9 +43,21 @@ export function listTree(git: Git, treeish: string, maxOutputBytes?: number): Pr
   return git.listTree(treeish, maxOutputBytes);
 }
 
-/** `listTree` itself; `Git.listTree` calls it, so a test can watch or limit each listing there. */
+/**
+ * `listTree` itself; `Git.listTree` calls it, so a test can watch or limit
+ * each listing there. A bounded listing that meets a tree object larger than
+ * what is left of its limit goes to `git ls-tree`, whose output stops at the
+ * limit: no tree object larger than the limit is read here.
+ */
 export async function readTreeListing(git: Git, treeish: string, maxOutputBytes?: number): Promise<TreeEntry[]> {
-  const files = await walkTree(git, treeish, maxOutputBytes === undefined ? undefined : { maxOutputBytes, sized: true });
+  let files: WalkedFile[];
+  try {
+    files = await walkTree(git, treeish, maxOutputBytes === undefined ? undefined : { maxOutputBytes, sized: true });
+  } catch (error) {
+    if (!(error instanceof TreeOverLimit)) throw error;
+    const { stdout } = await git.run(['ls-tree', '-r', '-z', '-l', '--full-tree', treeish], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
   const sizes = await Promise.all(files.map((file) => file.type === 'blob' ? git.objectInfo(file.oid) : null));
   let bytes = 0;
   return files.map((file, index) => {
@@ -74,7 +87,19 @@ export async function listPaths(git: Git, treeish: string, paths: readonly strin
     const { stdout } = await git.run(['--literal-pathspecs', 'ls-tree', '-z', '-l', '--full-tree', treeish, '--', ...paths], { maxOutputBytes });
     return parseTreeListing(stdout);
   }
-  const root = await git.readObject(`${treeish}^{tree}`);
+  try {
+    return await listPathsInTrees(git, treeish, unique, maxOutputBytes);
+  } catch (error) {
+    // A tree object larger than the limit is not read here: `ls-tree` stops at the limit.
+    if (!(error instanceof TreeOverLimit)) throw error;
+    const { stdout } = await git.run(['--literal-pathspecs', 'ls-tree', '-z', '-l', '--full-tree', treeish, '--', ...paths], { maxOutputBytes });
+    return parseTreeListing(stdout);
+  }
+}
+
+/** `listPaths` for ordinary paths, through the object reader. */
+async function listPathsInTrees(git: Git, treeish: string, unique: readonly string[], maxOutputBytes: number | undefined): Promise<TreeEntry[]> {
+  const root = await readTree(git, `${treeish}^{tree}`, maxOutputBytes);
   if (root === null || root.type !== 'tree') throw new GitError(['ls-tree', '--full-tree', treeish], 128, `fatal: not a tree object: ${treeish}`);
   const rawLength = root.oid.length / 2;
   const folders = new Map<string, Promise<RawTreeEntry[] | null>>([['', Promise.resolve(parseTree(root.content, rawLength))]]);
@@ -85,7 +110,7 @@ export async function listPaths(git: Git, treeish: string, paths: readonly strin
       found = (async () => {
         const entry = await entryIn(folder(slash < 0 ? '' : path.slice(0, slash)), path.slice(slash + 1));
         if (entry?.mode !== '040000') return null;
-        const tree = await git.readObject(entry.oid);
+        const tree = await readTree(git, entry.oid, maxOutputBytes);
         return tree?.type === 'tree' ? parseTree(tree.content, rawLength) : null;
       })();
       folders.set(path, found);
@@ -132,7 +157,7 @@ interface WalkedFile {
  * (counting the size field's least width when `sized`).
  */
 async function walkTree(git: Git, treeish: string, limit?: { maxOutputBytes: number; sized: boolean }): Promise<WalkedFile[]> {
-  const root = await git.readObject(`${treeish}^{tree}`);
+  const root = await readTree(git, `${treeish}^{tree}`, limit?.maxOutputBytes);
   if (root === null || root.type !== 'tree') throw new GitError(['ls-tree', '-r', '--full-tree', treeish], 128, `fatal: not a tree object: ${treeish}`);
   const rawLength = root.oid.length / 2;
   const files: WalkedFile[] = [];
@@ -147,7 +172,7 @@ async function walkTree(git: Git, treeish: string, limit?: { maxOutputBytes: num
     for (const [index, entry] of entries.entries()) {
       const path = prefix.length === 0 ? entry.name : Buffer.concat([prefix, SLASH, entry.name]);
       if (entry.mode === '040000') {
-        const tree = await (subtrees[index] ?? git.readObject(entry.oid));
+        const tree = await (subtrees[index] ?? readTree(git, entry.oid, limit === undefined ? undefined : limit.maxOutputBytes - bytes));
         if (tree === null || tree === undefined || tree.type !== 'tree') throw new GitError(['ls-tree', '-r', '--full-tree', treeish], 128, `fatal: not a tree object: ${entry.oid}`);
         await walk(tree.content, path);
         continue;
@@ -167,6 +192,22 @@ async function walkTree(git: Git, treeish: string, limit?: { maxOutputBytes: num
 }
 
 const SLASH = Buffer.from('/');
+
+/** A bounded listing met a tree object larger than what is left of its limit. */
+class TreeOverLimit extends Error {}
+
+/**
+ * Reads a tree object; with a budget, only one no larger than that
+ * (`TreeOverLimit` otherwise), so a bounded listing never holds a tree
+ * object larger than its limit.
+ */
+async function readTree(git: Git, name: string, budget: number | undefined): Promise<GitObject | null> {
+  if (budget === undefined) return git.readObject(name);
+  const info = await git.objectInfo(name);
+  if (info === null) return null;
+  if (info.type === 'tree' && info.size > budget) throw new TreeOverLimit();
+  return git.readObject(info.oid);
+}
 
 interface RawTreeEntry {
   /** The mode as `ls-tree` prints it: git's canonical mode, six octal digits. */
