@@ -136,7 +136,7 @@ describe('sync: the tracked branch to Linear', () => {
   }
 
   /** A file's exact bytes, final newline included. */
-  const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
+  const show = async (spec: string) => (await fixture.remote.showBlob(spec)).stdout.toString('utf8');
   const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
   const ids = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, IdEntry>;
   const live = () => world.linear.documents.filter((d) => d.trashed !== true);

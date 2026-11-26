@@ -9,7 +9,7 @@ import type { TestContext } from 'node:test';
 import { runCli } from '../../../src/cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../../../src/commands.ts';
 import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
-import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
+import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld, virtualCheckClock } from '../../../src/setup/test-helpers.ts';
 import { createFixture, mergeOnGitHub } from '../../../src/state/test-helpers.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { recordRefs, runChecks, startRefHistory } from './checks.ts';
@@ -146,7 +146,7 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
       const env = engineInputs({ names, command, cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: engineApp.clientId, linearClientSecret: engineApp.clientSecret, githubToken: 'app-token' }, reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: {}, timeoutMs: 30_000, linearUrl: LINEAR_API, mergeGraceSeconds: 0, direction, confirm });
       await watchRun(ctx, { throughProxy: false }, async () => {
         const requests: LogEntry[] = [];
-        const result = await runCli([command], { cwd: engine.dir, env: { ...env, PATH: process.env.PATH!, HOME: process.env.HOME!, MDBISYNC_GITHUB_API_URL: GITHUB_API, GITHUB_STEP_SUMMARY: summaryFile }, fetch: serve, log: (entry) => requests.push(entry) });
+        const result = await runCli([command], { cwd: engine.dir, env: { ...env, PATH: process.env.PATH!, HOME: process.env.HOME!, MDBISYNC_GITHUB_API_URL: GITHUB_API, GITHUB_STEP_SUMMARY: summaryFile }, fetch: serve, log: (entry) => requests.push(entry), checkClock: virtualCheckClock() });
         // Exit 4 is a refusal the report names (a pending initial pull request); the scenario's checks judge it. Exit 5,
         // a partial run that the next run continues, only where the scenario expects one.
         assert.ok(result.exitCode === 0 || result.exitCode === 4 || (options.partialRuns === true && result.exitCode === INCOMPLETE_EXIT_CODE), result.stderr);

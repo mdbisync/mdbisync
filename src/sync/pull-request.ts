@@ -65,6 +65,7 @@ import {
   stateRef,
   commitTree,
   showCommit,
+  isAncestor,
 } from '../state/index.ts';
 import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_MESSAGE_LENGTH, linkTarget, plainLine } from './hold.ts';
 import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksAgain, checksAgainTrailer, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold, type RequiredCheck } from './deadline.ts';
@@ -622,9 +623,6 @@ async function needsTrackedMerge(git: Git, tracked: Oid, head: Oid, noted: Merge
   return plain.code !== 0;
 }
 
-async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boolean> {
-  return (await git.run(['merge-base', '--is-ancestor', ancestor, descendant], { okCodes: [0, 1] })).code === 0;
-}
 
 /**
  * The last head the sync's state records it pushed on the sync branch, once the record's signature proves the sync

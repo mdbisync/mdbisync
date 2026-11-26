@@ -31,6 +31,46 @@ export async function showCommit(git: Git, format: string, commit: string): Prom
   return shown;
 }
 
+/**
+ * The most commits `ancestorWithin` reads before it leaves the answer to
+ * git: a walk without generation numbers reads every commit it reaches, so a
+ * "no" in a long history is git's to give.
+ */
+const ANCESTRY_COMMITS = 32;
+
+/**
+ * What `git merge-base --is-ancestor <ancestor> <descendant>` answers, read
+ * from the commits below `descendant` through the object reader: true when
+ * `ancestor` is one of them (or the same commit), false when all of them are
+ * read without it. Undefined when git must answer: a history longer than
+ * `ANCESTRY_COMMITS`, a name that is no commit, a commit git reads its own
+ * way, or a shallow repository or one with grafts.
+ */
+export async function ancestorWithin(git: Git, ancestor: string, descendant: string): Promise<boolean | undefined> {
+  if (await git.rewritesHistory()) return undefined;
+  const [target, start] = await Promise.all([git.objectInfo(`${ancestor}^{commit}`), git.objectInfo(`${descendant}^{commit}`)]);
+  if (target === null || start === null) return undefined;
+  const seen = new Set([start.oid]);
+  let frontier = [start.oid];
+  let read = 0;
+  while (frontier.length > 0) {
+    if (seen.has(target.oid)) return true;
+    read += frontier.length;
+    if (read > ANCESTRY_COMMITS) return undefined;
+    const commits = await Promise.all(frontier.map((oid) => readCommit(git, oid)));
+    frontier = [];
+    for (const commit of commits) {
+      if (commit === undefined) return undefined;
+      for (const parent of commit.parents) {
+        if (seen.has(parent)) continue;
+        seen.add(parent);
+        frontier.push(parent);
+      }
+    }
+  }
+  return seen.has(target.oid);
+}
+
 interface CommitFields {
   tree: string;
   parents: string[];

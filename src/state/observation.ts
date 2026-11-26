@@ -25,7 +25,8 @@ export function signObservation(key: PushedKey): (tree: Oid, parents: readonly O
 export async function signedObservation(git: Git, commit: Oid, key: PushedKey): Promise<boolean> {
   // The tree and parents as git reads them, whatever other headers the object carries.
   const [tree = '', parents = ''] = (await showCommit(git, '%T%n%P', commit)).split('\n');
-  const raw = (await git.run(['cat-file', 'commit', commit])).stdout.toString('utf8');
+  const found = await git.readObject(commit);
+  const raw = (found?.type === 'commit' ? found.content : (await git.run(['cat-file', 'commit', commit])).stdout).toString('utf8');
   const split = raw.indexOf('\n\n');
   if (split < 0) return false;
   // The sync writes UTF-8 without an encoding header; with one, git reads another subject than the signed bytes.

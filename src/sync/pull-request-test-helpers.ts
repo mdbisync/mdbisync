@@ -10,9 +10,8 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { detectConflicts, MARKERS } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
-import { FAKE_APP_SLUG, type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { FAKE_APP_SLUG, type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch, virtualCheckClock } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture, mergeOnGitHub, remoteRef } from '../state/test-helpers.ts';
-import { type CheckClock } from '../pull-request/index.ts';
 
 export const CANARY = 'kx-3c9d1e72';
 
@@ -101,17 +100,6 @@ export function pullRequestHarness() {
     ...extra,
   });
 
-  /**
-   * A clock for a run's waits for checks that moves only when the run sleeps:
-   * a read takes no time on it and is never cut off at the grace deadline, so
-   * what a run reads within its grace never depends on how fast the machine
-   * is, and a grace costs no real time.
-   */
-  function virtualClock(): CheckClock {
-    let elapsed = 0;
-    return { now: () => elapsed, sleep: async (ms) => { elapsed += ms; }, timeout: () => new AbortController().signal };
-  }
-
   async function cli(command: string, extra: Record<string, string> = {}) {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
@@ -120,7 +108,7 @@ export function pullRequestHarness() {
     const mark = await markWorld(world, fixture);
     const linearBefore = linearRequests.length;
     const counted = fetchOverride ?? fakeFetch(world);
-    const clock = virtualClock();
+    const clock = virtualCheckClock();
     const result = await runCli([command], { env: env(extra), cwd, checkClock: clock, fetch: async (input, init) => { if (String(input).startsWith(LINEAR_API)) linearRequests.push(String(input)); if (String(input).startsWith(GITHUB_API)) githubRequests.push(`${init?.method ?? 'GET'} ${String(input)}`); return counted(input, init); } });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;

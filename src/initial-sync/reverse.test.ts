@@ -16,7 +16,7 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { COMMANDS, INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, virtualCheckClock } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { LinearClient } from '../linear/index.ts';
 import { loadMapping } from '../mapping/index.ts';
@@ -123,7 +123,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
     const mark = await markWorld(world, fixture);
-    const result = await runCli([command], { env: env(extra), cwd, fetch: fakeFetch(world) });
+    const result = await runCli([command], { env: env(extra), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
     assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');

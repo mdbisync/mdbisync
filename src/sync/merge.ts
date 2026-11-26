@@ -706,7 +706,7 @@ async function renamesBetween(git: Git, from: Oid, to: Oid): Promise<Map<string,
 
 /** Whether the tracked commit is already merged into `linear`, so there is nothing to take to Linear. */
 export async function alreadyMerged(git: Git, linear: Oid, tracked: Oid): Promise<boolean> {
-  return (await git.run(['merge-base', '--is-ancestor', tracked, linear], { okCodes: [0, 1] })).code === 0;
+  return isAncestor(git, tracked, linear);
 }
 
 /**

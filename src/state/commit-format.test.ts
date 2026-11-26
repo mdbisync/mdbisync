@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { showCommit } from './commit-format.ts';
+import { ancestorWithin, showCommit } from './commit-format.ts';
 import { Git } from './git.ts';
 
 const IDENTITY = { GIT_AUTHOR_NAME: 'Author Name', GIT_AUTHOR_EMAIL: 'author@example.invalid', GIT_COMMITTER_NAME: 'C', GIT_COMMITTER_EMAIL: 'c@example.invalid' };
@@ -87,9 +87,54 @@ describe('Commit fields read from the commit object', () => {
       for (const format of ['%P', '%T %P%n%B', '%s%n%ae%n%P']) {
         assert.equal(await showCommit(clone, format, second), await clone.text(['show', '-s', `--format=${format}`, second]), format);
       }
+      // A boundary commit's parents are not read either.
+      assert.equal(await ancestorWithin(clone, second, second), undefined);
     } finally {
       await rm(source, { recursive: true, force: true });
       await rm(shallow, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Ancestry read from the commit objects', () => {
+  it('answers as git merge-base --is-ancestor does, and leaves to git what it cannot read', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ancestry-'));
+    try {
+      const git = new Git(dir);
+      await git.run(['init', '--quiet', '--bare', '--initial-branch=main']);
+      const tree = await git.text(['mktree'], { input: '' });
+      const commit = (message: string, parents: string[]) => git.text(['commit-tree', tree, ...parents.flatMap((parent) => ['-p', parent]), '-m', message], { env: IDENTITY });
+      const root = await commit('root', []);
+      const left = await commit('left', [root]);
+      const right = await commit('right', [root]);
+      const merged = await commit('merge', [left, right]);
+      const after = await commit('after', [merged]);
+      const other = await commit('unrelated', []);
+      await git.run(['update-ref', 'refs/heads/main', after]);
+      await git.run(['tag', '-a', '-m', 'tag', 'v1', left], { env: IDENTITY });
+      const names = [root, left, right, merged, after, other, 'refs/heads/main', 'v1'];
+      for (const ancestor of names) {
+        for (const descendant of names) {
+          const expected = (await git.run(['merge-base', '--is-ancestor', ancestor, descendant], { okCodes: [0, 1] })).code === 0;
+          assert.equal(await ancestorWithin(git, ancestor, descendant), expected, `${ancestor} ${descendant}`);
+        }
+      }
+      assert.equal(await ancestorWithin(git, 'refs/heads/none', after), undefined);
+      // Grafts replace parents for git: in the repository or in a file the environment names.
+      await mkdir(join(dir, 'info'), { recursive: true });
+      await writeFile(join(dir, 'info', 'grafts'), `${merged} ${left}\n`);
+      assert.equal(await ancestorWithin(git, right, after), undefined);
+      await rm(join(dir, 'info', 'grafts'));
+      assert.equal(await ancestorWithin(new Git(dir, { GIT_GRAFT_FILE: join(dir, 'elsewhere') }), right, after), undefined);
+      assert.equal(await ancestorWithin(git, right, after), true);
+      assert.equal(await ancestorWithin(git, tree, after), undefined);
+      // A history longer than the walk reads is left to git.
+      let tip = root;
+      for (let index = 0; index < 40; index++) tip = await commit(`step ${index}`, [tip]);
+      assert.equal(await ancestorWithin(git, other, tip), undefined);
+      assert.equal(await ancestorWithin(git, tip, tip), true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

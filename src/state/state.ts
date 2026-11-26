@@ -5,7 +5,7 @@
 // the other changes nothing.
 
 import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef, suspendedBranch } from './config.ts';
-import { showCommit } from './commit-format.ts';
+import { ancestorWithin, showCommit } from './commit-format.ts';
 import { type Git, GitError, type Oid, mapLimit } from './git.ts';
 import { type LfsPointer, type LfsReadResult, lfsReader, lfsRemote, parseLfsPointer } from './lfs.ts';
 import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
@@ -211,8 +211,7 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   // Runs of one repository share a concurrency group, which closes it.
   for (const update of changing) {
     if (update.expected !== null && update.replace !== true) {
-      const ancestor = await git.run(['merge-base', '--is-ancestor', update.expected, update.next], { okCodes: [0, 1] });
-      if (ancestor.code !== 0) throw new NotFastForwardError(update.ref);
+      if (!await isAncestor(git, update.expected, update.next)) throw new NotFastForwardError(update.ref);
     }
   }
 
@@ -451,9 +450,13 @@ export async function readInitialSyncProgress(git: Git, commit: Oid | null): Pro
  */
 export const INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear's state";
 
-/** Whether `commit` is `of` or one of its ancestors. */
+/**
+ * Whether `commit` is `of` or one of its ancestors, as
+ * `git merge-base --is-ancestor` answers: read from the commits through the
+ * object reader where it can be, from git otherwise.
+ */
 export async function isAncestor(git: Git, commit: Oid, of: Oid): Promise<boolean> {
-  return (await git.run(['merge-base', '--is-ancestor', commit, of], { okCodes: [0, 1] })).code === 0;
+  return await ancestorWithin(git, commit, of) ?? (await git.run(['merge-base', '--is-ancestor', commit, of], { okCodes: [0, 1] })).code === 0;
 }
 
 /**

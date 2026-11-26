@@ -4,7 +4,7 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -60,25 +60,68 @@ export interface Fixture {
   cleanup(): Promise<void>;
 }
 
+/** The empty remote and seeding working copy every fixture starts from, in `root`. */
+async function createRepositories(root: string): Promise<void> {
+  const top = new Git(root);
+  await top.run(['init', '--quiet', '--bare', '--initial-branch=main', join(root, 'remote.git')]);
+  const work = join(root, 'seed');
+  await top.run(['init', '--quiet', '--initial-branch=main', work]);
+  const seedGit = new Git(work);
+  await seedGit.run(['lfs', 'install', '--local']);
+  await seedGit.run(['config', 'lfs.allowincompletepush', 'true']);
+  await seedGit.run(['remote', 'add', 'origin', pathToFileURL(join(root, 'remote.git')).href]);
+}
+
+/** Templates by the environment git and git-lfs ran in when they made them. */
+const templates = new Map<string, Promise<string>>();
+
+/** What of this process's environment changes how `git init` and `git lfs install` make repositories. */
+function templateKey(): string {
+  return JSON.stringify(Object.entries(process.env).filter(([name]) => ['PATH', 'HOME', 'XDG_CONFIG_HOME'].includes(name) || name.startsWith('GIT_')).sort());
+}
+
+/**
+ * In a test process, fixtures copy the repositories one template holds
+ * instead of creating them again: the same files, with the seeding copy's
+ * remote set to the fixture's own. A change to the environment git runs in
+ * gets a template of its own.
+ */
+async function copyRepositories(root: string): Promise<void> {
+  const key = templateKey();
+  let template = templates.get(key);
+  if (template === undefined) {
+    template = (async () => {
+      const folder = await temporaryDirectory('state-template-');
+      await createRepositories(folder);
+      return folder;
+    })();
+    templates.set(key, template);
+    // A template that failed is made again by the next fixture.
+    template.catch(() => templates.delete(key));
+  }
+  const folder = await template;
+  await cp(join(folder, 'remote.git'), join(root, 'remote.git'), { recursive: true });
+  await cp(join(folder, 'seed'), join(root, 'seed'), { recursive: true });
+  await new Git(join(root, 'seed')).run(['remote', 'set-url', 'origin', pathToFileURL(join(root, 'remote.git')).href]);
+}
+
 export async function createFixture(): Promise<Fixture> {
   const root = await temporaryDirectory('state-test-');
   const bare = join(root, 'remote.git');
   const url = pathToFileURL(bare).href;
   const top = new Git(root);
-  await top.run(['init', '--quiet', '--bare', '--initial-branch=main', bare]);
+  // Release smoke scripts run outside node:test, where nothing would remove a template.
+  if (process.env.NODE_TEST_CONTEXT) await copyRepositories(root);
+  else await createRepositories(root);
   const remote = new Git(bare);
 
   const work = join(root, 'seed');
-  await top.run(['init', '--quiet', '--initial-branch=main', work]);
   const seedGit = new Git(work, {
     GIT_AUTHOR_NAME: IDENTITY.name,
     GIT_AUTHOR_EMAIL: IDENTITY.email,
     GIT_COMMITTER_NAME: IDENTITY.name,
     GIT_COMMITTER_EMAIL: IDENTITY.email,
   });
-  await seedGit.run(['lfs', 'install', '--local']);
-  await seedGit.run(['config', 'lfs.allowincompletepush', 'true']);
-  await seedGit.run(['remote', 'add', 'origin', url]);
 
   return {
     root,

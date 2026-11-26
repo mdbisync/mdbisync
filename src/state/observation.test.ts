@@ -55,6 +55,11 @@ describe('state: signed linear commits', () => {
     assert.ok(await signedObservation(fixture.remote, await copy(signed, {}), key));
   });
 
+  it('fails, as git cat-file commit does, for an object that is no commit', async () => {
+    const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: 'not a commit\n' });
+    await assert.rejects(signedObservation(fixture.remote, blob, key), /cat-file commit/);
+  });
+
   it('refuses a signed message under an encoding header, which makes git read another subject', async () => {
     const signed = await commit({ 'docs/a.md': '# A\n' }, { sign: key });
     const raw = (await fixture.remote.run(['cat-file', 'commit', signed])).stdout.toString('utf8');

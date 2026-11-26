@@ -98,17 +98,34 @@ export class Git {
 
   private reader: ObjectReader | undefined;
   private writer: ObjectWriter | undefined;
-  private format: Promise<string> | undefined;
 
   /** The absolute path of the repository's object directory, for the long-lived processes to notice a repository made again. */
   private readonly objectDirectory = (): Promise<string> => {
-    this.objectPath ??= this.text(['rev-parse', '--path-format=absolute', '--git-path', 'objects']).catch((error: unknown) => {
-      this.objectPath = undefined;
-      throw error;
-    });
-    return this.objectPath;
+    return this.layout().then(({ objects }) => objects);
   };
-  private objectPath: Promise<string> | undefined;
+  private layoutRead: Promise<{ format: string; objects: string; common: string }> | undefined;
+
+  /** The repository's object format and folders, from one `rev-parse`; they do not change while the repository exists. */
+  private layout(): Promise<{ format: string; objects: string; common: string }> {
+    this.layoutRead ??= this.text(['rev-parse', '--show-object-format', '--path-format=absolute', '--git-path', 'objects', '--git-common-dir']).then(
+      async (text) => {
+        const lines = text.split('\n');
+        if (lines.length === 3) return { format: lines[0] as string, objects: lines[1] as string, common: lines[2] as string };
+        // A path with a line break in it: each value from its own call.
+        const [format, objects, common] = await Promise.all([
+          this.text(['rev-parse', '--show-object-format']),
+          this.text(['rev-parse', '--path-format=absolute', '--git-path', 'objects']),
+          this.text(['rev-parse', '--path-format=absolute', '--git-common-dir']),
+        ]);
+        return { format, objects, common };
+      },
+      (error: unknown) => {
+        this.layoutRead = undefined;
+        throw error;
+      },
+    );
+    return this.layoutRead;
+  }
 
   /**
    * Reads objects through one long-lived git process instead of a process
@@ -206,7 +223,6 @@ export class Git {
     return this.plain;
   }
 
-  private common: Promise<string> | undefined;
 
   /**
    * True when git reads some commits' parents other than as stored: a
@@ -214,21 +230,16 @@ export class Git {
    * parents. Checked on every call, as a fetch can make a repository shallow.
    */
   async rewritesHistory(): Promise<boolean> {
-    this.common ??= this.text(['rev-parse', '--path-format=absolute', '--git-common-dir']).catch((error: unknown) => {
-      this.common = undefined;
-      throw error;
-    });
-    const common = await this.common;
+    // Git reads shallow boundaries and grafts from other files when these name them.
+    const env = this.environment({});
+    if (env.GIT_SHALLOW_FILE !== undefined || env.GIT_GRAFT_FILE !== undefined) return true;
+    const { common } = await this.layout();
     return existsSync(join(common, 'shallow')) || existsSync(join(common, 'info', 'grafts'));
   }
 
   /** The repository's object format, `sha1` or `sha256`; it does not change while the repository exists. */
   objectFormat(): Promise<string> {
-    this.format ??= this.text(['rev-parse', '--show-object-format']).catch((error: unknown) => {
-      this.format = undefined;
-      throw error;
-    });
-    return this.format;
+    return this.layout().then(({ format }) => format);
   }
 
   async run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {

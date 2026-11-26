@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { it } from 'node:test';
 import { runCli } from '../../../src/cli.ts';
 import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
-import { FAKE_ACTIONS_APP_ID, fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeCheck } from '../../../src/setup/test-helpers.ts';
+import { FAKE_ACTIONS_APP_ID, fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeCheck, virtualCheckClock } from '../../../src/setup/test-helpers.ts';
 import { resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CHECK_WORKFLOW, CHECK_WORKFLOW_PATH, readCheckState } from '../../corpus/check-workflow.ts';
@@ -210,7 +210,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
           const beforeDocuments = new Map(world.linear.documents.map((d) => [d.id, { ...d }]));
           const beforeComments = new Map([...world.linear.comments].map(([id, c]) => [id, { ...c }]));
           const requests: LogEntry[] = [];
-          const result = await runCli([command], { cwd: engine.dir, env: { ...env, PATH: process.env.PATH!, HOME: process.env.HOME!, MDBISYNC_GITHUB_API_URL: GITHUB_API, GITHUB_STEP_SUMMARY: summaryFile }, fetch: fetchImpl, log: (entry) => requests.push(entry) });
+          const result = await runCli([command], { cwd: engine.dir, env: { ...env, PATH: process.env.PATH!, HOME: process.env.HOME!, MDBISYNC_GITHUB_API_URL: GITHUB_API, GITHUB_STEP_SUMMARY: summaryFile }, fetch: fetchImpl, log: (entry) => requests.push(entry), checkClock: virtualCheckClock() });
           assert.equal(result.exitCode, 0, result.stderr);
           ctx.engine.results.push({ command, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, remote: { runId: ctx.engine.results.length, runAttempt: 1, linearEngine: true, requests }, report: JSON.parse(await readFile(reportFile, 'utf8')), summary: await readFile(summaryFile, 'utf8'), signal: null, durationMs: 0, timedOut: false, notImplemented: false } as EngineResult);
           if (scenario.id === 'L5-35') {

@@ -14,7 +14,7 @@ import { environmentName, readInputs } from '../run/inputs.ts';
 import { runPreflight } from '../run/preflight.ts';
 import { Git, type IdEntry } from '../state/index.ts';
 import { LinearClient, LinearResponseLimitError } from '../linear/index.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch, virtualCheckClock } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { type ConfirmedResult, FINAL_IDS_MESSAGE, PROGRESS_MESSAGE, confirmInitialSync } from './confirm.ts';
 import { type BodyTransform, LeaveOutError } from './transform.ts';
@@ -84,7 +84,7 @@ describe('confirmed initial sync from git to Linear', () => {
     await rm(summaryFile(), { force: true });
     const requestsBefore = world.requests.length;
     const mark = await markWorld(world, fixture);
-    const result = await runCli(['initial-sync'], { env: env(extra), cwd, fetch: wrap(fakeFetch(world)) });
+    const result = await runCli(['initial-sync'], { env: env(extra), cwd, fetch: wrap(fakeFetch(world)), checkClock: virtualCheckClock() });
     assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');
@@ -370,7 +370,7 @@ describe('confirmed initial sync from git to Linear', () => {
     for (const path of SYNCED_PATHS.slice(0, 2)) assert.ok(live(world).some((d) => d.id === progress[path]?.id), `${path} is not written`);
 
     // The sync does not run on a half-written id map.
-    const sync = await runCli(['sync'], { env: { ...env(), MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }, cwd, fetch: fakeFetch(world) });
+    const sync = await runCli(['sync'], { env: { ...env(), MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }, cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
     assert.equal(sync.exitCode, NO_STATE_EXIT_CODE, sync.stderr);
     assert.match(sync.stdout, /An initial sync stopped before it finished/);
 
@@ -439,7 +439,7 @@ describe('confirmed initial sync from git to Linear', () => {
     };
     assert.equal(await holding(), '');
     assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']), await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']));
-    const sync = await runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world) });
+    const sync = await runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
     assert.equal(sync.exitCode, 0, sync.stderr);
     assert.deepEqual(world.github.pullRequests, [], 'a sync pull request was opened');
     assert.equal(await holding(), '');
@@ -486,7 +486,7 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(report.writtenCount, 0);
     assert.equal(report.stoppedEarly, true);
     assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/ids']), PROGRESS_MESSAGE);
-    const sync = await runCli(['sync'], { env: { ...env(), MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }, cwd, fetch: fakeFetch(world) });
+    const sync = await runCli(['sync'], { env: { ...env(), MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }, cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
     assert.equal(sync.exitCode, NO_STATE_EXIT_CODE, sync.stderr);
   });
 
@@ -703,7 +703,7 @@ describe('confirmed initial sync from git to Linear', () => {
     const TABLE = `# Readings\n\n| Day | Change |\n| -- | -- |\n| Monday | -6 |\n| Tuesday | +2 |\n\n${CANARY}`;
     const respell = (content: string) => `${content.replace(/\| -(?=\d)/g, '| \\-')}\n`;
     let world: FakeWorld;
-    const sync = () => runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world) });
+    const sync = () => runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
     const document = async (path: string) => {
       const ids = await readIds();
       return world.linear.documents.find((d) => d.id === ids[path]?.id) as FakeWorld['linear']['documents'][number];

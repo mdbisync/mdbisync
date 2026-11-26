@@ -6,6 +6,7 @@
 import { PERMISSION_PROBES } from './github.ts';
 import { PROJECT_TEAMS_PAGE_SIZE } from './linear.ts';
 import { ACTIONS_APP } from '../pull-request/merge.ts';
+import type { CheckClock } from '../pull-request/index.ts';
 
 export const GITHUB_API = 'https://github.test/api';
 /** The default sync branches, whose rules the setup check reads. */
@@ -255,6 +256,18 @@ export function fakeWorld(): FakeWorld {
     minted: 0,
     revoked: 0,
   };
+}
+
+/**
+ * A clock for a run's waits for checks that moves only when the run sleeps:
+ * a read takes no time on it and is never cut off at the grace deadline, so
+ * what a run reads within its grace never depends on how fast the machine
+ * is, and a grace costs no real time. The fakes' checks change only when a
+ * test changes them, never as time passes.
+ */
+export function virtualCheckClock(): CheckClock {
+  let elapsed = 0;
+  return { now: () => elapsed, sleep: async (ms) => { elapsed += ms; }, timeout: () => new AbortController().signal };
 }
 
 export function fakeFetch(world: FakeWorld): typeof fetch {
