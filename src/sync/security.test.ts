@@ -102,7 +102,7 @@ if (existsSync('docs/first.md') && !existsSync('docs/second.md')) process.exitCo
 `,
   });
   assert.deepEqual(result, { sets: 2, rejected: 1, unanswered: 0 });
-  assert.deepEqual(findings, [[{ hook: 'security', line: 1 }], []]);
+  assert.deepEqual(findings, [[{ hook: 'tree-check', line: 1 }], []]);
   assert.equal(runs.length, 4);
   assert.ok(runs.every((run) => !run.includes('docs/first.md') || !run.includes('docs/second.md')));
 });

@@ -52,6 +52,40 @@ describe('pre-commit hooks', () => {
     assert.equal(readHookConfig('repos: [').invalid, '.pre-commit-config.yaml is not valid YAML');
   });
 
+  it('finds security aliases that hooks inherit through YAML merge keys, as pre-commit does', () => {
+    const config = readHookConfig(`x-security: &security { alias: security }
+repos:
+  - repo: local
+    hooks:
+      - { <<: *security, id: anchored, language: pygrep, entry: KEY }
+      - { <<: { alias: security }, id: inline, language: pygrep, entry: KEY }
+      - { <<: [{ alias: other }, *security], id: first-wins, language: pygrep, entry: KEY }
+      - { <<: *security, alias: own, id: own-wins, language: pygrep, entry: KEY }
+      - { "<<": { alias: security }, id: quoted-key, language: pygrep, entry: KEY }
+`);
+    assert.deepEqual(securityHooks(config), ['anchored', 'inline']);
+    assert.equal(config.securityBatchable, false, 'merged options never count as file-local');
+    const invalid = '.pre-commit-config.yaml is not valid YAML';
+    assert.equal(readHookConfig('repos:\n  - { repo: local, hooks: [{ <<: 3, id: bad }] }\n').invalid, invalid);
+    // PyYAML takes the last merge key's values, this parser the first one's: the run stops.
+    assert.equal(readHookConfig('repos:\n  - { repo: local, hooks: [{ <<: { alias: x }, <<: { alias: security }, id: two }] }\n').invalid, invalid);
+    const directive = readHookConfig('%YAML 1.1\n---\nrepos:\n  - { repo: local, hooks: [{ <<: { alias: security }, id: v11, language: pygrep, entry: KEY }] }\n');
+    assert.deepEqual(securityHooks(directive), ['v11']);
+    assert.equal(directive.securityBatchable, false);
+  });
+
+  it('reads a configuration with a self-referencing anchor and finds hooks with the id security', () => {
+    const config = readHookConfig(`x-meta: &meta { self: *meta }
+repos:
+  - repo: local
+    hooks:
+      - { id: security, language: pygrep, entry: KEY }
+`);
+    assert.equal(config.invalid, undefined);
+    assert.deepEqual(securityHooks(config), ['security']);
+    assert.equal(config.securityBatchable, true);
+  });
+
   it('warns about a Gitleaks security hook that honours inline gitleaks:allow comments', () => {
     const config = (hook: string) => readHookConfig(`repos:\n  - repo: local\n    hooks:\n      - ${hook}\n`);
     const image = 'ghcr.io/gitleaks/gitleaks:v8.30.1';

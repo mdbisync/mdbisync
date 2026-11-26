@@ -1163,6 +1163,33 @@ describe('capture from Linear', () => {
     assert.equal((await readIds(context.git, accepted.state.ids)).get('docs/plan.md')?.saved, undefined);
   });
 
+  it('runs a security hook whose alias comes only from a YAML merge key, and pushes none of its rejected text', async () => {
+    await fixture.seed({
+      '.pre-commit-config.yaml': `x-security: &security
+  alias: security
+repos:
+  - repo: local
+    hooks:
+      - <<: *security
+        id: merged-check
+        name: Merged check
+        entry: node check.mjs
+        language: system
+`,
+      'check.mjs': `import {readFileSync} from 'node:fs'; for (const file of process.argv.slice(2)) { const lines=readFileSync(file,'utf8').split('\\n'); const line=lines.findIndex(x=>x.includes(['merged','value','419'].join('-'))); if(line>=0) { console.log(file+':'+(line+1)+': '+lines[line]); process.exitCode=1; } }`,
+    });
+    await refresh();
+    Object.assign(world.linear.documents[0]!, { content: 'merged-value-419\n', updatedAt: '2026-01-03T00:00:00Z' });
+    const rejected = await run();
+    assert.equal(rejected.blocked.length, 1);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+    assert.match((commentsOf('plan') ?? []).join(''), /Hook `merged-check`, line 5/);
+    // The canary was assembled only at runtime, so no fixture script contains it verbatim.
+    const canary = ['merged', 'value', '419'].join('-');
+    assert.ok(!(await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch'])).includes(canary + '\n'));
+    assert.ok(!(await context.git.text(['cat-file', '--batch-all-objects', '--batch'])).includes(canary + '\n'));
+  });
+
   // Each body as Linear holds it, and as the file holds it: in the form `fix` writes (a reference
   // becomes inline), or as it is when lint leaves it to its author (an image inside a link).
   for (const [body, written] of [

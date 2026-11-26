@@ -2,7 +2,7 @@
 // which hooks are marked `alias: security`, whether they can check files
 // independently, and whether the Linear-format hook is configured.
 
-import { parseQuietly } from '../mapping/front-matter.ts';
+import { isScalar, parseDocument, visit } from 'yaml';
 import { type CheckResult, failed, passed, warning } from './report.ts';
 import { message } from '../messages.ts';
 
@@ -31,28 +31,28 @@ export interface HookConfig {
 export function readHookConfig(text: string | null): HookConfig {
   if (text === null) return { hooks: [] };
   let data: unknown;
+  let merges: boolean;
   try {
-    data = parseQuietly(text);
+    ({ data, merges } = parsePreCommitYaml(text));
   } catch {
     return { hooks: [], invalid: message('setup.hooks-invalid-yaml', { file: PRE_COMMIT_CONFIG }) };
   }
   const repos = isRecord(data) ? data.repos : undefined;
   if (!Array.isArray(repos)) return { hooks: [], invalid: message('setup.hooks-no-repos', { file: PRE_COMMIT_CONFIG }) };
   const hooks: HookConfig['hooks'] = [];
-  // pre-commit resolves YAML merges and remote hook defaults. Unknown effective
-  // aliases may select hooks that inspect more than their file arguments.
-  let securityBatchable = isRecord(data) && !Object.hasOwn(data, '<<') && !/!!merge|!<|%TAG/.test(text);
+  // Remote hook defaults are not resolved here, and merged options are not
+  // trusted to keep a hook file-local. Unknown effective aliases may select
+  // hooks that inspect more than their file arguments.
+  let securityBatchable = !merges && !/!!merge|!<|%TAG/.test(text);
   for (const repo of repos) {
     if (!isRecord(repo)) continue;
-    securityBatchable &&= !Object.hasOwn(repo, '<<');
     if (!Array.isArray(repo.hooks)) continue;
     const pinned = repo.repo === PRE_COMMIT_HOOKS && repo.rev === PRE_COMMIT_HOOKS_REV;
     const source = typeof repo.repo === 'string' ? repo.repo : '';
     for (const hook of repo.hooks) {
       if (!isRecord(hook)) continue;
-      securityBatchable &&= !Object.hasOwn(hook, '<<');
       if (typeof hook.id !== 'string') continue;
-      if (hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS) {
+      if (selectedBySecurity(hook)) {
         securityBatchable &&= fileLocalHook(source, pinned, hook);
       } else if (typeof hook.alias !== 'string') {
         // The pinned manifest defines no aliases. Other remote hooks might.
@@ -81,8 +81,13 @@ function fileLocalHook(repo: string, pinned: boolean, hook: Record<string, unkno
   return pinned && hook.id === 'detect-private-key' && Object.keys(hook).every((key) => selection.includes(key));
 }
 
+/** `pre-commit run security` selects the hooks whose alias or id is `security`. */
+function selectedBySecurity(hook: { id?: unknown; alias?: unknown }): boolean {
+  return hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS;
+}
+
 export function securityHooks(config: HookConfig): string[] {
-  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+  return config.hooks.filter(selectedBySecurity).map((hook) => hook.id);
 }
 
 /**
@@ -93,7 +98,7 @@ export function securityHooks(config: HookConfig): string[] {
 export function checkSecurityHooks(config: HookConfig): CheckResult {
   const ids = securityHooks(config);
   if (ids.length === 0) return warning('security-hooks', message('setup.security-hooks-missing', { alias: SECURITY_ALIAS }));
-  const allowing = config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS && /gitleaks/i.test(`${hook.id} ${hook.command ?? ''}`) && !IGNORES_INLINE_ALLOW.test(hook.command ?? ''));
+  const allowing = config.hooks.filter((hook) => selectedBySecurity(hook) && /gitleaks/i.test(`${hook.id} ${hook.command ?? ''}`) && !IGNORES_INLINE_ALLOW.test(hook.command ?? ''));
   if (allowing.length > 0) return warning('security-hooks', message('setup.security-hooks-inline-allow', { hooks: allowing.map((hook) => hook.id).join(', '), flag: IGNORE_INLINE_ALLOW }));
   return passed('security-hooks', `security hooks present: ${ids.join(', ')}`);
 }
@@ -109,6 +114,28 @@ export function checkLinearFormatHook(config: HookConfig): CheckResult {
   return configured
     ? passed('linear-format-hook', `${PRE_COMMIT_CONFIG} has the ${LINEAR_FORMAT_HOOK} hook`)
     : failed('linear-format-hook', 'linear-format-hook-required', message('setup.format-hook-missing', { file: PRE_COMMIT_CONFIG, hook: LINEAR_FORMAT_HOOK }));
+}
+
+/**
+ * Parses the configuration as pre-commit does: PyYAML resolves merge keys
+ * (`<<: *defaults`), so a hook can get its alias from a merged map. `merges`
+ * tells whether any map has a `<<` key. Throws on invalid YAML, without the
+ * source in the message, and on a map with two merge keys: PyYAML takes the
+ * last one's values and this parser the first one's.
+ */
+function parsePreCommitYaml(text: string): { data: unknown; merges: boolean } {
+  const doc = parseDocument(text, { merge: true, logLevel: 'error', prettyErrors: false });
+  if (doc.errors.length > 0) throw new Error();
+  let merges = false;
+  visit(doc, {
+    Map(_, map) {
+      // A resolved merge key is a symbol; a quoted `"<<"` stays a string.
+      const keys = map.items.filter(({ key }) => isScalar(key) && (typeof key.value === 'symbol' || key.value === '<<'));
+      if (keys.filter(({ key }) => isScalar(key) && typeof key.value === 'symbol').length > 1) throw new Error();
+      merges ||= keys.length > 0;
+    },
+  });
+  return { data: doc.toJS(), merges };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

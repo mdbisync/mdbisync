@@ -127,6 +127,8 @@ From `repo: https://github.com/mdbisync/mdbisync`, pinned with
 
 A hook of any repository with `alias: security` runs on Linear's changes
 before the sync pushes them ([security hooks](quickstart.md#security-hooks)).
+As in `pre-commit run security`, a hook with the id `security` counts too, and
+so does an alias the hook gets through a YAML merge key (`<<: *defaults`).
 
 ## Command line
 
