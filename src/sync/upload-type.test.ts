@@ -141,9 +141,12 @@ it('re-checks only files named as a capture names an upload', async () => {
   const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
   const xhtml = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><iframe xmlns="http://www.w3.org/1999/xhtml" src="javascript:alert(1)"/></svg>');
   assert.equal(isCaptureName(`docs/${hash}.svg`), true);
-  for (const name of [`docs/${hash}.html`, `docs/${hash.toUpperCase()}.svg`, `docs/${hash}.svg.svg`, `docs/${hash.slice(1)}.svg`, 'docs/logo.svg']) assert.equal(isCaptureName(name), false, name);
+  assert.equal(isCaptureName(`docs/${hash}-12.svg`), true, 'a capture whose hash name was taken');
+  assert.equal(isCaptureName(`docs/${hash}-100.svg`), true);
+  for (const name of [`docs/${hash}-101.svg`, `docs/${hash}-0.svg`, `docs/${hash}-01.svg`, `docs/${hash}-.svg`, `docs/${hash}-1-2.svg`, `docs/${hash}.html`, `docs/${hash.toUpperCase()}.svg`, `docs/${hash}.svg.svg`, `docs/${hash.slice(1)}.svg`, 'docs/logo.svg']) assert.equal(isCaptureName(name), false, name);
   assert.equal(admitsCapturedFile(`docs/${hash}.png`, png), true);
   assert.equal(admitsCapturedFile(`docs/${hash}.svg`, xhtml), false, 'bytes the check now refuses');
   assert.equal(admitsCapturedFile(`docs/${hash}.svg`, png), false, 'a type that disagrees with the extension');
+  assert.equal(admitsCapturedFile(`docs/${hash}-1.svg`, xhtml), false, 'a suffixed capture is checked too');
   assert.equal(admitsCapturedFile('docs/logo.svg', xhtml), true, 'a file a person named came through git');
 });
