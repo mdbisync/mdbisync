@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { pullRequestHarness } from '../sync/pull-request-test-helpers.ts';
 import { mergeOnGitHub } from '../state/test-helpers.ts';
+import { UPLOADS_HOST } from '../setup/test-helpers.ts';
+import { CAPTURE_MESSAGE } from '../sync/capture.ts';
 
 const PLAN = 'eng/notes/plan.md';
 const ITEM = 'eng/notes/item-0.md';
@@ -149,6 +151,68 @@ describe('an initial sync keeps plain-link provenance', () => {
     item.content = `${item.content}\n[Records](<../../${SECRET}>)\n`;
     await initialSyncFromLinear();
     await assertUnknownKeptPlain(false);
+  });
+
+  /**
+   * With every state ref deleted, a Linear member's plain link to a repository file that a capture took into the
+   * tracked text, while Linear's text now holds an upload with that file's bytes in its place: the upload may not
+   * bind the document to the file.
+   */
+  async function plantedLinkReplacedByUpload(file: string, bytes: string, contentType: string) {
+    await repairedLink();
+    if (file !== SECRET) await h.editRef('refs/heads/main', file, bytes);
+    const item = await h.documentOf(ITEM);
+    for (const name of ['ids', 'uploads', 'linear']) await deleteRef(name);
+    await h.editRef('refs/heads/main', ITEM, `${await h.show(`refs/heads/main:${ITEM}`)}\n[Copy](../../${file})\n`, CAPTURE_MESSAGE);
+    const url = `${UPLOADS_HOST}/member/copy`;
+    h.world.linear.uploads.push({ filename: 'copy', contentType, size: Buffer.byteLength(bytes), assetUrl: url, bytes: Buffer.from(bytes) });
+    item.content = `${item.content}\n[Copy](${url})\n`;
+  }
+
+  /** The tracked text links `file` only where git wrote it; later changes in git to the document and the file upload none of it. */
+  async function assertUploadNotBound(file: string, edited: string) {
+    const text = await h.show(`refs/heads/main:${ITEM}`);
+    assert.match(text, /\]\(<?\.\.\/\.\.\/public\.csv>?\)/, 'the link written in git lost its path');
+    assert.equal((await h.ids() as Record<string, { plainFiles?: string[] }>)[ITEM]?.plainFiles?.includes(PUBLIC) ?? false, false, 'the link written in git was marked plain');
+    await h.gitEdit(file, edited);
+    await h.gitEdit(ITEM, `${await h.show(`refs/heads/main:${ITEM}`)}\nA repository edit.\n`);
+    for (let run = 0; run < 3; run += 1) assert.equal((await h.sync()).result.exitCode, 0);
+    assert.ok(!h.world.linear.uploads.some((upload) => upload.filename === file), 'a sync after the initial sync from Linear uploaded the file');
+  }
+
+  it('through an initial sync from Linear with every state ref deleted: an upload with the bytes of a file only a taken-in link names is not bound to it', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>\n';
+    await plantedLinkReplacedByUpload('chart.svg', svg, 'image/svg+xml');
+    await initialSyncFromLinear();
+    // The document takes Linear's text, with the upload in its own `assets/` folder.
+    const text = await h.show(`refs/heads/main:${ITEM}`);
+    assert.doesNotMatch(text, /chart\.svg/);
+    assert.match(text, /\[Copy\]\(<?assets\/[0-9a-f]{64}\.svg>?\)/);
+    await assertUploadNotBound('chart.svg', '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"></svg>\n');
+  });
+
+  it('through an initial sync from Linear with every state ref deleted: a file that keeps its tracked text records a taken-in link plain', async () => {
+    // The upload has no type a capture keeps, so the document keeps its tracked text, the member's link with it.
+    await plantedLinkReplacedByUpload(SECRET, 'name,value\nExample,42\n', 'text/csv');
+    await initialSyncFromLinear();
+    assert.match(await h.show(`refs/heads/main:${ITEM}`), /\[Copy\]\(<?\.\.\/\.\.\/records\.csv>?\)/);
+    assert.deepEqual((await h.ids() as Record<string, { plainFiles?: string[] }>)[ITEM]?.plainFiles, [SECRET]);
+    await assertUploadNotBound(SECRET, 'name,value\nExample,43\n');
+  });
+
+  it('through an initial sync from Linear with every state ref deleted: an upload a capture took in keeps its file', async () => {
+    await repairedLink();
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="3" height="3"></svg>\n';
+    const url = `${UPLOADS_HOST}/member/picture`;
+    h.world.linear.uploads.push({ filename: 'picture', contentType: 'image/svg+xml', size: Buffer.byteLength(svg), assetUrl: url, bytes: Buffer.from(svg) });
+    await h.editInLinear(ITEM, `${(await h.documentOf(ITEM)).content}\n[Picture](${url})\n`);
+    await h.settle();
+    const captured = /assets\/[0-9a-f]{64}\.svg/.exec(await h.show(`refs/heads/main:${ITEM}`))?.[0];
+    assert.ok(captured !== undefined, 'the capture did not take the upload in');
+    for (const name of ['ids', 'uploads', 'linear']) await deleteRef(name);
+    await initialSyncFromLinear();
+    assert.match(await h.show(`refs/heads/main:${ITEM}`), new RegExp(`\\[Picture\\]\\(<?${captured}>?\\)`));
+    assert.equal((await h.ids() as Record<string, { plainFiles?: string[] }>)[ITEM]?.plainFiles, undefined);
   });
 
   it('through an initial sync from Linear with every state ref deleted, stopped after the document and resumed', async () => {

@@ -79,9 +79,9 @@ import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync, touchedTitles } from './plan.ts';
-import { readPlainLinkProvenance } from './provenance.ts';
+import { linksTakenInFromLinear, pathLinks, readPlainLinkProvenance } from './provenance.ts';
 import { readPlanSources } from './run.ts';
-import { checkFileTargets, destinations, FileTargetsAddedError, resolveTarget } from './uploads.ts';
+import { checkFileTargets, FileTargetsAddedError } from './uploads.ts';
 import { createPendingProjects } from '../setup/linear.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
@@ -411,6 +411,32 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
   // identity as the initial sync from git does, before the progress commits replace the ids. The record keeps
   // them, so no later write uploads such a file.
   const provenance = await readPlainLinkProvenance(git, fetched.state, fetched.tracked, { create: [], overwrite: [...plan.overwrite, ...plan.create] }, { progressKnown: false });
+  /**
+   * With a document's provenance lost, the links of its tracked text that a commit taking in Linear's text added:
+   * a Linear member's link the state no longer names may be one. Links written in git are not, so they stay as
+   * they were. Each document's history is read once.
+   */
+  const takenIn = new Map<string, Promise<Set<string>>>();
+  const takenInLinks = (path: string): Promise<Set<string>> => {
+    let links = takenIn.get(path);
+    if (links === undefined) {
+      links = (async () => {
+        const tracked = input.texts.get(path);
+        if (tracked === undefined) return new Set<string>();
+        let current: string[];
+        try {
+          current = pathLinks(path, splitFile(tracked).body);
+        } catch (error) {
+          // A tracked text past the Markdown limits: no write parses it to upload a link either.
+          if (error instanceof MarkdownLimitError) return new Set<string>();
+          throw error;
+        }
+        return linksTakenInFromLinear(git, fetched.tracked, path, current);
+      })();
+      takenIn.set(path, links);
+    }
+    return links;
+  };
 
   const expected: StateSnapshot = { ...fetched.state };
   const resumed = (await readInitialSyncProgress(git, expected.ids)) !== null;
@@ -616,6 +642,8 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
       const tracked = input.texts.get(entry.path);
       const trackedBody = markdownBaseline(tracked === undefined ? undefined : splitFile(tracked).body);
       if (trackedBody !== undefined) trackedBodies.set(entry.path, trackedBody);
+      // Read before the download, so a failure to read the history ends the run instead of reading as one of the download.
+      const takenInTargets = provenance.unknown.has(entry.path) ? await takenInLinks(entry.path) : new Set<string>();
       try {
         // Keep parsing and link discovery inside this document's boundary.
         checkImageRepairSize(content);
@@ -626,9 +654,13 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
         if (linksLinearDocuments(readable)) needsLinkBase = true;
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
         // An upload is never bound to a file a Linear member linked, as in the capture; with the document's
-        // provenance lost, any file a plain link of its Linear text names may be one.
+        // provenance lost, any file a plain link of its Linear text names may be one, and so may one the tracked
+        // text took in from Linear: an upload with that file's bytes is downloaded instead.
         const plain = new Set(provenance.plainFiles.get(entry.path));
-        if (provenance.unknown.has(entry.path)) for (const target of pathLinks(entry.path, readable)) plain.add(target);
+        if (provenance.unknown.has(entry.path)) {
+          for (const target of pathLinks(entry.path, readable)) plain.add(target);
+          for (const target of takenInTargets) plain.add(target);
+        }
         const captured = await download(entry.path, restoreBody(transforms, entry.path, readable, readable, input.mapping.files), uploads, trackedBody, entry.path, plain);
         // Initial import records only observations and writes nothing to Linear.
         // Defer a repair to the next ordinary capture, whose PR also records its provenance.
@@ -803,8 +835,11 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
         const plain = new Set(provenance.plainFiles.get(path));
         // A document whose provenance is lost may hold a Linear member's link the state no longer names: a link
         // Linear's text holds as a repository path. A file that keeps its tracked text records only those the
-        // tracked text holds too, so nothing of a text the run did not admit reaches the record.
+        // tracked text holds too, so nothing of a text the run did not admit reaches the record, and those its
+        // tracked text took in from Linear.
         if (provenance.unknown.has(path)) {
+          // Read apart from Linear's text, which may be the one past the Markdown limits.
+          if (kept) for (const target of await takenInLinks(path)) plain.add(target);
           try {
             const linear = pathLinks(path, readableContents.get(path) ?? '');
             const tracked = kept ? new Set(pathLinks(path, splitFile(input.texts.get(path) ?? '').body)) : undefined;
@@ -943,18 +978,6 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     const [subject, email, parents] = (await showCommit(git, '%s%n%ae%n%P', oid)).split('\n');
     return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? '').split(' ').filter(Boolean).length === 1;
   }
-}
-
-/**
- * The repository paths the non-image links of a document's body name, also ones the tree does not hold now (the
- * file may come back): the links a Linear member may have written, when the state no longer says. An upload is
- * held in Linear's text as its URL, so it is never one.
- */
-function pathLinks(path: string, body: string): string[] {
-  return destinations(body).flatMap(({ node }) => {
-    const target = node.type === 'image' ? null : resolveTarget(path, node.url);
-    return target === null ? [] : [target];
-  });
 }
 
 /** Paths whose file the mapping of the new tree does not give the entry's title and place. */
