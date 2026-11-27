@@ -8,7 +8,7 @@ import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef, su
 import { ancestorWithin, showCommit } from './commit-format.ts';
 import { type Git, GitError, type Oid, mapLimit } from './git.ts';
 import { type LfsPointer, type LfsReadResult, lfsReader, lfsRemote, parseLfsPointer } from './lfs.ts';
-import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
+import { type CommitIdentity, type CommitSpec, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
 import { message } from '../messages.ts';
 import { PUSHED_MAC, type PushedKey, type PushedRecord } from './pushed.ts';
 
@@ -662,7 +662,7 @@ export async function commitIds(
   parent: Oid | null,
   ids: IdMap,
   identity: CommitIdentity,
-  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string>; writtenMacs?: ReadonlyMap<string, string>; syncPushed?: PushedRecord } = {},
+  options: CommitStateOptions & { sign?: CommitSpec['sign']; reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string>; writtenMacs?: ReadonlyMap<string, string>; syncPushed?: PushedRecord } = {},
 ): Promise<Oid> {
   checkUniqueDocumentIds(ids);
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
@@ -675,7 +675,7 @@ export async function commitIds(
   if (options.writtenMacs !== undefined && options.writtenMacs.size > 0) files.set(WRITTEN_MACS_FILE, sorted(options.writtenMacs));
   const syncPushed = options.syncPushed ?? await readSyncPushed(git, parent);
   if (syncPushed !== undefined) files.set(SYNC_PUSHED_FILE, syncPushed.mac === undefined ? { head: syncPushed.head } : { head: syncPushed.head, mac: syncPushed.mac });
-  return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);
+  return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true, options.sign);
 }
 
 /**
@@ -796,6 +796,7 @@ function commitJsonFiles(
   message: string,
   identity: CommitIdentity,
   always = false,
+  sign?: CommitSpec['sign'],
 ): Promise<Oid> {
   return commitTree(git, {
     parents: parent === null ? [] : [parent],
@@ -804,6 +805,7 @@ function commitJsonFiles(
     message,
     identity,
     skipIfUnchanged: !always,
+    ...(sign === undefined ? {} : { sign }),
   });
 }
 

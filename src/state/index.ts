@@ -15,7 +15,7 @@ export {
 export { Git, GitError, GitOutputLimitError, type Oid } from './git.ts';
 export { showCommit } from './commit-format.ts';
 export { PushedKey, type PushedRecord, type SignedRepair } from './pushed.ts';
-export { signObservation, signedObservation, trustedObservation } from './observation.ts';
+export { signObservation, signedObservation, trustedObservation, signIdsTrailers, signedIdsMessage } from './observation.ts';
 export { type LfsPointer, type LfsRead, type LfsReadResult, GitLfsMissingError, lfsPush, lfsReader, lfsRemote, type LfsRemote, missingLfsObjects, parseLfsPointer, requireGitLfs } from './lfs.ts';
 export { type CommitIdentity, type CommitSpec, NEUTRAL_IDENTITY, type TreeEntry, buildTree, checkRepoPath, commitTree, listTree, placeEntries, readBlobs, writeBlob } from './objects.ts';
 export {

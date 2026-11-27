@@ -33,6 +33,19 @@ describe('state: signed records of the sync\'s own pushes', () => {
     assert.equal(key.verifiesWritten(path, id, hash, digest, mac.toUpperCase()), false);
   });
 
+  it('binds capture checkpoints to their message, commit and repository', () => {
+    const parents = ['b'.repeat(40)];
+    const text = 'Capture document ids';
+    const mac = key.idsTrailersMac(head, parents, text);
+    assert.equal(key.verifiesIdsTrailers(head, parents, text, mac), true);
+    assert.equal(key.verifiesIdsTrailers(head, parents, 'Record document ids', mac), false);
+    assert.equal(key.verifiesIdsTrailers('c'.repeat(40), parents, text, mac), false);
+    assert.equal(key.verifiesIdsTrailers(head, [], text, mac), false);
+    assert.equal(key.verifiesObservation(head, parents, text, mac), false);
+    assert.equal(key.verifiesIdsTrailers(head, parents, text, key.observationMac(head, parents, text)), false);
+    assert.equal(new PushedKey('secret', 'owner/other').verifiesIdsTrailers(head, parents, text, mac), false);
+  });
+
   it('refuses a record without its signature, for another head, branch or repository, or under another secret', () => {
     const record = key.record(ref, head);
     assert.equal(key.verified(ref, undefined), undefined);

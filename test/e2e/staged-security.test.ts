@@ -23,6 +23,7 @@ import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-help
 import { STAGE_FOLDER } from '../../src/sync/staged.ts';
 import { canaryNameLeaks } from './harness/security-canary.ts';
 import { MARKS } from '../../src/sync/marks.ts';
+import { readCaptureCheckpoints } from '../../src/sync/recorded.ts';
 
 const MAIN = fileURLToPath(new URL('../../src/action/main.ts', import.meta.url));
 const linux = process.platform === 'linux' && existsSync('/proc/self/environ');
@@ -373,6 +374,24 @@ for (const file of process.argv.slice(2)) {
     assert.deepEqual(run.apply, []);
     assert.ok(run.stage.length <= 5, run.stage.join(', '));
     assert.deepEqual([world.minted, world.revoked], [1, 1]);
+  });
+
+  it('upgrades unsigned capture checkpoints in a staged sync', async () => {
+    const time = '2026-01-01T00:00:00.000Z';
+    const ref = stateRef(config, 'ids');
+    const parent = await fixture.remote.revParse(ref);
+    const ids = new Map([['docs/plan.md', {id: 'plan', observedDigest: 'a'.repeat(64)}]]);
+    const legacy = await commitIds(fixture.remote, parent, ids, IDENTITY, {
+      message: `Record document ids\n\nDocument-recorded: plan ${time}`,
+    });
+    await fixture.remote.run(['update-ref', ref, legacy, parent]);
+
+    const run = await stagedRun('checkpoint-upgrade');
+    assert.ok(run.stage.includes('GetDocuments'));
+    assert.deepEqual(run.apply, []);
+    const head = await fixture.remote.revParse(ref);
+    const checkpoints = await readCaptureCheckpoints(fixture.remote, head, await fixture.remote.revParse(stateRef(config, 'linear')), new PushedKey(clientSecret, 'owner/repo'));
+    assert.equal(checkpoints.cursor, time);
   });
 
   it('control: hooks run inside the action\'s own step can read its secrets through /proc', async () => {

@@ -10,10 +10,15 @@
 
 import { posix } from 'node:path';
 import { type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, INITIAL_SYNC_PROGRESS, readIds } from '../state/index.ts';
+import { listPaths } from '../state/objects.ts';
+import { ASSETS_FOLDER, isCaptureName } from '../sync/upload-type.ts';
 import { readPlainFileProvenance } from '../sync/pull-repairs.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from '../sync/write.ts';
 import { SYNC_PULL_REQUEST_TITLE } from '../sync/pull-request.ts';
 import { CAPTURE_MESSAGE } from '../sync/capture.ts';
+import { splitFile } from '../format/index.ts';
+import { MarkdownLimitError } from '../format/markdown.ts';
+import { destinations, resolveTarget } from './uploads.ts';
 
 /**
  * The trailer of an initial sync's record that names a document it left out
@@ -144,15 +149,113 @@ async function readProvenanceUnknown(git: Git, linear: Oid): Promise<Set<string>
 }
 
 /**
- * Whether the tracked branch has taken in text from Linear: a capture, a
- * sync's record, an initial sync from Linear, or the pull request of the
- * sync or of an initial sync from Linear merged by squash. A repository that
+ * The subjects of the commits that take in text from Linear: a capture, a
+ * sync's record, an initial sync from Linear, and the pull request of the
+ * sync or of an initial sync from Linear merged by squash.
+ */
+const linearIntakeSubjects = (): ReadonlySet<string> =>
+  // Built when used: the modules that define them import this one.
+  new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE]);
+
+/** Whether a commit subject is one of `subjects`; a squash merge adds ` (#<n>)`. */
+const hasSubject = (subjects: ReadonlySet<string>, subject: string): boolean => subjects.has(subject.replace(/ \(#\d+\)$/, ''));
+
+/**
+ * Whether the tracked branch has taken in text from Linear. A repository that
  * never synced has none, so its first initial sync uploads every
  * repository-file link as before.
  */
 async function tookInLinear(git: Git, tracked: Oid): Promise<boolean> {
-  const subjects = new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE]);
-  // Subjects only, so a commit that merely quotes one in its body does not count; a squash merge adds ` (#<n>)`.
+  const subjects = linearIntakeSubjects();
+  // Subjects only, so a commit that merely quotes one in its body does not count.
   const log = await git.text(['log', '--format=%s', '--fixed-strings', ...[...subjects].map((subject) => `--grep=${subject}`), tracked]);
-  return log.split('\n').some((subject) => subjects.has(subject.replace(/ \(#\d+\)$/, '')));
+  return log.split('\n').some((subject) => hasSubject(subjects, subject));
+}
+
+/** A historical version larger than this is not read: it counts as one no parse reads. */
+const HISTORY_FILE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The repository paths that `current` (the links of the tracked text of the
+ * document at `path`) names and that a commit taking in a Linear member's
+ * text added to that file: the link is in that commit's file and not in its
+ * parent's. Those commits are captures and initial syncs from Linear, or
+ * their pull requests merged by squash; a sync's record holds what the sync
+ * wrote to Linear from git, so it is not one. The history follows the file
+ * across renames, and a relative link added under an earlier path counts
+ * both where it pointed then and where it points from `path`. A link written
+ * in git that those commits only carried over is not one, nor is a capture's
+ * own file in the document's `assets/` folder, which holds an upload's bytes.
+ * A version that no parse reads, or that is too large to read, may have
+ * added any of them.
+ */
+export async function linksTakenInFromLinear(git: Git, tracked: Oid, path: string, current: readonly string[]): Promise<Set<string>> {
+  const assets = posix.join(posix.dirname(path), ASSETS_FOLDER);
+  const wanted = new Set(current.filter((target) => !(posix.dirname(target) === assets && isCaptureName(target))));
+  const found = new Set<string>();
+  if (wanted.size === 0) return found;
+  const intake = new Set([CAPTURE_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE]);
+  // The file's history from the repository's root, whatever folder the run started in; one entry per commit.
+  const log = await git.text(['log', '-z', '--follow', '-M', '--format=%x01%H %P%x09%s', '--name-status', tracked, '--', `:(top,literal)${path}`]);
+  const parsed = new Map<string, Set<string> | null>();
+  /** The links of the file at `at` in `commit`, resolved from `at`; null when no parse reads it. */
+  const linksAt = async (commit: Oid, at: string): Promise<Set<string> | null> => {
+    const [entry] = await listPaths(git, commit, [at]);
+    if (entry === undefined || entry.type !== 'blob') return new Set();
+    const key = `${entry.oid}\0${at}`;
+    if (!parsed.has(key)) {
+      let links: Set<string> | null = null;
+      if ((entry.size ?? Infinity) <= HISTORY_FILE_BYTES) {
+        const blob = (await git.readBlobs([entry.oid])).get(entry.oid);
+        try {
+          links = new Set(pathLinks(at, splitFile(blob?.toString('utf8') ?? '').body));
+        } catch (error) {
+          if (!(error instanceof MarkdownLimitError)) throw error;
+        }
+      }
+      parsed.set(key, links);
+    }
+    return parsed.get(key)!;
+  };
+  for (const record of log.split('\x01')) {
+    const fields = record.split('\0');
+    const header = fields[0] ?? '';
+    const tab = header.indexOf('\t');
+    if (tab === -1 || !hasSubject(intake, header.slice(tab + 1))) continue;
+    const [commit, parent] = header.slice(0, tab).split(' ');
+    const status = (fields[1] ?? '').trim();
+    const renamed = /^[RC]/.test(status);
+    const at = renamed ? fields[3] : fields[2];
+    if (commit === undefined || at === undefined) continue;
+    const links = await linksAt(commit, at);
+    if (links === null) return wanted;
+    // A copy: the parsed version stays as it is for the commits that share its blob.
+    const added = new Set(links);
+    // A parent's version no parse reads is taken to hold no link, so the commit may have added any.
+    // A document the commit moved keeps a link to the same file, or the same link text, which now points from `at`.
+    const before = renamed ? fields[2]! : at;
+    if (parent !== undefined && parent !== '') {
+      for (const target of await linksAt(parent, before) ?? []) {
+        added.delete(target);
+        added.delete(relocate(target, before, at));
+      }
+    }
+    for (const target of added) {
+      for (const candidate of [target, relocate(target, at, path)]) if (wanted.has(candidate)) found.add(candidate);
+    }
+    if (found.size === wanted.size) break;
+  }
+  return found;
+}
+
+/**
+ * The repository paths the non-image links of a document's body name, also ones the tree does not hold now (the
+ * file may come back): the links a Linear member may have written, when the state no longer says. An upload is
+ * held in Linear's text as its URL, so it is never one.
+ */
+export function pathLinks(path: string, body: string): string[] {
+  return destinations(body).flatMap(({ node }) => {
+    const target = node.type === 'image' ? null : resolveTarget(path, node.url);
+    return target === null ? [] : [target];
+  });
 }
