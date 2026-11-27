@@ -469,6 +469,32 @@ describe('lint and fix commands', () => {
     assert.equal(readFileSync(join(folder, 'spaces.md'), 'utf8'), text);
   });
 
+  it('bounds reference-definition work across nested list items and keeps the file', (t) => {
+    const folder = mkdtempSync(join(tmpdir(), 'nested-list-links-'));
+    t.after(() => rmSync(folder, { recursive: true, force: true }));
+    const guide = 'https://example.test/guide';
+    const definitions = [
+      `[guide]: ${guide}`,
+      ...Array.from({ length: 150 }, (_, index) =>
+        `[entry-${index}]: https://example.test/library/${index}/${'archive/'.repeat(18)}guide`),
+    ].join('\n');
+    const document = (count: number): string => {
+      const items = Array.from({ length: count }, (_, index) => `Inventory ${index + 1}\n1. 2. [Guide][guide]`);
+      return `${items.join('\n\n')}\n\n${definitions}\n`;
+    };
+
+    writeFileSync(join(folder, 'guide.md'), document(1));
+    assert.deepEqual(runFix(['guide.md'], folder), { exitCode: 1, stdout: 'guide.md: fixed\n', stderr: '' });
+    assert.match(readFileSync(join(folder, 'guide.md'), 'utf8'), /2\. \[Guide\]\(<https:\/\/example\.test\/guide>\)/);
+
+    const text = document(20);
+    writeFileSync(join(folder, 'catalog.md'), text);
+    const finding = `catalog.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
+    assert.deepEqual(runLint(['catalog.md'], folder), { exitCode: 1, stdout: finding, stderr: '' });
+    assert.deepEqual(runFix(['catalog.md'], folder), { exitCode: 1, stdout: finding, stderr: '' });
+    assert.equal(readFileSync(join(folder, 'catalog.md'), 'utf8'), text);
+  });
+
   it('reports hard breaks in setext headings and keeps the file through two fixes', (t) => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'heading-hard-break-'));
     t.after(() => rmSync(fixtureDir, { recursive: true, force: true }));

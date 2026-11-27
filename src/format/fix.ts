@@ -46,6 +46,8 @@ interface WriterOptions extends FixOptions {
   breakLines?: ReadonlySet<number>;
   /** The checks of space edits, shared by the writers of one body and the bodies they fix inside it. */
   spaceChecks: SpaceChecks;
+  /** The remaining reference-definition text that nested-list fixes may read in this body. */
+  nestedListWork: { remaining: number };
 }
 
 /**
@@ -74,6 +76,12 @@ interface SpaceChecks {
  */
 const SPACE_CHECK_EXTRA_WORK = 1_000_000;
 const SPACE_CHECK_ROUNDS = 8;
+
+// A nested-list fix can read the same definitions during several formatter
+// passes. Count the appended text over the whole body, with extra room for
+// shorter documents that reuse a few definitions across many items.
+const NESTED_LIST_DEFINITION_ROUNDS = 8;
+const NESTED_LIST_DEFINITION_EXTRA_WORK = CONTENT_LIMIT;
 
 /**
  * Returns the text in Linear's form, or the text itself when lint finds a
@@ -106,9 +114,13 @@ export function linearForm(text: string, options: FixOptions = {}): string | und
   const broken = backslashBreaksAsLinear(lf);
   if (broken === undefined) return undefined;
   const { body: unbroken, lines: breakLines } = broken;
-  // A body fixed inside another (a nested list's text) shares its checks.
-  const spaceChecks = (options as Partial<WriterOptions>).spaceChecks ?? { work: -SPACE_CHECK_ROUNDS * unbroken.length, blocks: new Map() };
-  const fixed = fixBody(unbroken, { ...options, breakLines, spaceChecks });
+  // A body fixed inside another (a nested list's text) shares its budgets.
+  const parent = options as Partial<WriterOptions>;
+  const spaceChecks = parent.spaceChecks ?? { work: -SPACE_CHECK_ROUNDS * unbroken.length, blocks: new Map() };
+  const nestedListWork = parent.nestedListWork ?? {
+    remaining: NESTED_LIST_DEFINITION_ROUNDS * unbroken.length + NESTED_LIST_DEFINITION_EXTRA_WORK,
+  };
+  const fixed = fixBody(unbroken, { ...options, breakLines, spaceChecks, nestedListWork });
   if (fixed === undefined) return undefined;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
@@ -718,10 +730,12 @@ const CELL_BREAK = /^<br[ \t]*\/?>$/i;
 
 class Writer {
   private readonly definitions = new Map<string, Definition>();
+  /** The appended definitions, or null if a definition spans several lines. */
+  private nestedListDefinitions: string | null | undefined;
   private readonly containers: Container[] = [];
   private readonly source: string;
   private readonly tree: Root;
-  private readonly options: FixOptions;
+  private readonly options: WriterOptions;
   /** Where the lines that follow a former backslash break start. */
   private readonly breakLineStarts = new Set<number>();
   private readonly rewriteEscapes: boolean;
@@ -1008,9 +1022,15 @@ class Writer {
     let references = false;
     visit(node, (child) => { if (child.type === 'linkReference' || child.type === 'imageReference') references = true; });
     if (!references) return withoutTrailingNewlines(fixText(raw, this.options));
-    const definitions = [...this.definitions.values()].map((definition) => this.source.slice(start(definition), end(definition)));
-    if (definitions.some((definition) => definition.includes('\n'))) return this.inline(node.children, 'continuation');
-    return withoutTrailingNewlines(fixText(`${raw}\n\n${definitions.join('\n')}`, this.options));
+    if (this.nestedListDefinitions === undefined) {
+      const definitions = [...this.definitions.values()].map((definition) => this.source.slice(start(definition), end(definition)));
+      this.nestedListDefinitions = definitions.some((definition) => definition.includes('\n')) ? null : definitions.join('\n');
+    }
+    const definitions = this.nestedListDefinitions;
+    if (definitions === null) return this.inline(node.children, 'continuation');
+    this.options.nestedListWork.remaining -= definitions.length;
+    if (this.options.nestedListWork.remaining < 0) throw new MarkdownLimitError('nested-list-definitions');
+    return withoutTrailingNewlines(fixText(`${raw}\n\n${definitions}`, this.options));
   }
 
   private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
