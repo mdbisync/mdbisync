@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
+import { PRE_COMMIT_CONFIG, readHookConfig } from '../../../src/setup/hooks.ts';
 import { appendParagraph, editBlock, editParagraph, noteSentence, scanMarkers, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { pullTracked } from './person-git.ts';
@@ -292,13 +293,47 @@ export function linkPairTexts(link: string): { source: string; target: string } 
 /** What `ui.follow-document-links` records about the pair it added: tracked paths, the anchor, and the project that holds them. */
 export type LinkPairFixture = { [K in keyof typeof LINK_PAIR]: string } & { project: string };
 
+/** The fixes a `git.ci-fix` step makes, and the hook each one names in its `Pre-commit-fix` trailer. */
+export function ciFixes(args: Record<string, unknown>): string[] {
+  return Array.isArray(args.fixes) ? (args.fixes as string[]) : ['stable-fix'];
+}
+
+const CI_FIX_HOOKS: Record<string, string> = { 'stable-fix': 'stable-fix', 'linear-would-undo': 'aligned-table' };
+
+export function ciFixHook(fix: string): string {
+  const hook = CI_FIX_HOOKS[fix];
+  if (hook === undefined) throw new Error(`git.ci-fix has no fix ${JSON.stringify(fix)}; it knows ${Object.keys(CI_FIX_HOOKS).join(', ')}`);
+  return hook;
+}
+
 /**
  * Starting state some steps need that the slice does not have: a left-out
  * document to fix (L2-12), a folder of N documents to rename (L2-14) and two
- * documents linked by id (L6-12). Each is made before the initial sync, so
- * the converged start holds it.
+ * documents linked by id (L6-12), and the hooks a simulated CI fix names
+ * (L2-33, L4-09). Each is made before the initial sync, so the converged
+ * start holds it.
  */
 export const STEP_PREPARATION: Record<string, SetupFixture> = {
+  'git.ci-fix': {
+    // A CI job runs the hooks the tracked branch configures. The sync never merges a change to that
+    // configuration from a sync branch (head-unverified), so a person adds the fixing hooks first.
+    async beforeSync(ctx) {
+      const ids = new Set(ctx.scenario.steps.filter((step) => step.kind === 'git' && step.action === 'ci-fix').flatMap((step) => ciFixes(step.args).map(ciFixHook)));
+      const git = await ctx.person();
+      await pullTracked(git, ctx);
+      const file = join(git.dir, PRE_COMMIT_CONFIG);
+      if (!existsSync(file)) throw new EnvBlockedError(`the slice has no ${PRE_COMMIT_CONFIG} for the CI fix hooks`);
+      const text = readFileSync(file, 'utf8');
+      const hooks = readHookConfig(text);
+      if (hooks.invalid !== undefined) throw new EnvBlockedError(hooks.invalid);
+      const configured = new Set(hooks.hooks.map((hook) => hook.id));
+      const missing = [...ids].filter((id) => !configured.has(id)).sort();
+      if (missing.length === 0) return;
+      const config = parse(text) as { repos: unknown[] };
+      config.repos.push({ repo: 'local', hooks: missing.map((id) => ({ id, name: 'Format check', language: 'system', entry: 'true' })) });
+      await commitAsPerson(ctx, new Map([[PRE_COMMIT_CONFIG, stringify(config)]]), 'Add the format check hooks', true);
+    },
+  },
   'ui.follow-document-links': {
     async beforeSync(ctx) {
       const home = projectFolders(ctx)[0];
