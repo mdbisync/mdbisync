@@ -229,6 +229,31 @@ function lastPushed(context: RunContext, options: LaneOptions, ids: IdMap): Oid 
   return context.pushedKey.verified(branchRef(suspendedBranch(options.config)), recordedPushed(ids));
 }
 
+/** The paths of this lane a person edited (see `noteEdits`): the edited documents under their current names, and other files. */
+function editedPaths(ids: IdMap): Set<string> {
+  return new Set([...ids].flatMap(([path, entry]) => [...(entry.suspended?.edited === true ? [path] : []), ...(entry.suspended?.editedFiles ?? [])]));
+}
+
+/**
+ * Notes the lane paths someone else's commits changed since the sync's last push there, before the sync pushes over
+ * them and so hides whose edit they hold. Where the sync cannot prove its last push, or that push is not below the
+ * branch's head (a rewritten branch), every lane path counts as edited.
+ */
+async function noteEdits(context: RunContext, options: LaneOptions, ids: IdMap, previous: Oid, paths: ReadonlySet<string>): Promise<void> {
+  const { git } = context;
+  const pushed = lastPushed(context, options, ids);
+  const below = pushed !== undefined && (pushed === previous || (await git.run(['merge-base', '--is-ancestor', pushed, previous], { okCodes: [0, 1, 128] })).code === 0);
+  const edited = !below ? [...paths] : pushed === previous ? [] : await changedPaths(git, pushed, previous);
+  const known = editedPaths(ids);
+  // A document's own mark stays with its entry, whatever name it takes later; other files are noted on the anchor.
+  const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined)?.suspended;
+  for (const path of edited) if (!known.has(path)) {
+    const own = ids.get(path)?.suspended;
+    if (own !== undefined) own.edited = true;
+    else if (anchor !== undefined) (anchor.editedFiles ??= []).push(path);
+  }
+}
+
 async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap, paths: ReadonlySet<string>, checks: string[], timedOut: string[] = []): Promise<void> {
   // A normal batch can delete a document: capture has already removed its
   // live id entry, but its episode still needs the historical identity.
@@ -291,6 +316,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     head = await commit(context, options, await takePaths(git, tracked, intake, paths), intake === linear ? [tracked] : [tracked, intake], 'Restore suspended changes' + note(tracked, linear, intake));
     bases = { tracked, linear, view: intake };
   } else {
+    const lane = head;
     bases = await recordedBases(git, head);
     // Heal a run that died after GitHub merged but before the atomic state update.
     if (await isAncestor(git, head, tracked)) return release(context, options, ids, paths, head, bases.linear, tracked);
@@ -301,6 +327,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     // Discover documents a person's/CI's changes on this branch added to the batch.
     for (const path of await changedPaths(git, tracked, head)) paths.add(path);
     await addEpisodes(context, options, ids, paths, []);
+    await noteEdits(context, options, ids, lane, paths);
     // A repair the hooks pass after the lane took in its observation changes the view, not the Linear ref.
     const reread = new Set((options.rereadAsTracked ?? []).filter((path) => paths.has(path)));
     if (bases.linear !== linear || reread.size > 0 || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
@@ -314,11 +341,10 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
       // A document this intake now reads as what the tracked branch holds is held no more: the lane takes the tracked
       // file, conflict notices of an older reading included, so it no longer differs there. Only where the sync alone
-      // wrote the lane: a commit someone else pushed there since the sync's last push keeps its paths as merged.
-      const pushed = lastPushed(context, options, ids);
-      const outside = previous === null || pushed === undefined ? undefined : new Set(pushed === previous ? [] : await changedPaths(git, pushed, previous));
-      const converged = outside === undefined ? new Set<string>()
-        : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path) => !outside.has(path))), reread);
+      // wrote the lane: a path someone else's commit there changed during this episode, even one the sync has pushed
+      // over since, keeps that person's edit as merged.
+      const edited = editedPaths(ids);
+      const converged = await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path) => !edited.has(path))), reread);
       const selected = await takePaths(git, await takePaths(git, head, tree, paths), tracked, converged);
       // The reading is the running version's now: the version is noted with this lane's push, never before it. Also where
       // the lane does not know its last push and keeps the path as merged: a later push of its own would hide whose
@@ -475,7 +501,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   let head: Oid;
   // Never adopt an unrelated pre-existing branch, even when main contains it.
   if (previous !== null) await recordedBases(git, previous);
-  if (previous === null || await isAncestor(git, previous, tracked)) {
+  const joins = previous !== null && !(await isAncestor(git, previous, tracked));
+  if (!joins) {
     head = await commit(context, options, batchTree, previous === null ? [failed, tracked, ...(intake === linear ? [] : [intake])] : [previous, failed, tracked, ...(intake === linear ? [] : [intake])], 'Suspend changes from Linear' + note(tracked, linear, intake));
   } else {
     const bases = await recordedBases(git, previous);
@@ -485,6 +512,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   for (const path of await changedPaths(git, tracked, head)) paths.add(path);
   // A comment written from the episode alone (a deferred mark) names the failed checks and the late ones apart.
   await addEpisodes(context, options, ids, paths, checks, timedOut);
+  // The join is pushed over the lane's earlier head: a person's edits there are noted first.
+  if (joins) await noteEdits(context, options, ids, previous, paths);
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
   const normal = await commit(context, options, await git.revParse(`${tracked}^{tree}`), [failed, tracked], SET_ASIDE_MESSAGE);
