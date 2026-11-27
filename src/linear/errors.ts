@@ -146,16 +146,20 @@ export class LinearReadBackError extends LinearError {
 
 /**
  * A create whose answer was lost was applied, but the document read back by
- * its id holds content other than the content sent: someone edited it before
+ * its id is not as sent: someone edited, renamed, moved or trashed it before
  * the read. The create took effect, so the caller keeps `document.id`; the
- * content is not the write's own, and the next read of Linear takes it in.
+ * document as it is now is not the write's own, and the next read of Linear
+ * takes it in. `contentAsSent` tells a rename, move or trash from an edit:
+ * the document still holds the content sent, so that content is the write's.
  */
 export class LinearCreateEditedError extends LinearError {
   readonly document: LinearDocument;
+  readonly contentAsSent: boolean;
 
-  constructor(operation: string, document: LinearDocument) {
+  constructor(operation: string, document: LinearDocument, contentAsSent: boolean) {
     super(operation, message('linear.create-edited', { operation }));
     this.document = document;
+    this.contentAsSent = contentAsSent;
   }
 }
 
