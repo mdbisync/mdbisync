@@ -14,8 +14,9 @@ import type { LinearDocument } from '../linear/index.ts';
 import { type Git, type Oid, type PushedKey, signedIdsMessage } from '../state/index.ts';
 import { message } from '../messages.ts';
 
-const RECORDED = /^Document-recorded: (\S+) (\S+)$/gm;
-const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
+// Git commit message lines are separated by LF. Other characters can occur inside JSON trailer values.
+const RECORDED = /(?:^|\n)Document-recorded: (\S+) (\S+)(?=\n|$)/g;
+const CURSOR = /(?:^|\n)Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)(?=\n|$)/;
 const CURSOR_BATCH_SIZE = 32;
 
 export function captureCursorTrailer(through: string): string {
