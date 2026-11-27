@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -61,18 +61,34 @@ describe('Long-lived git processes', () => {
     }
   });
 
-  it('read a repository made again under the same path, not the one before', async () => {
-    const { dir, git } = await repository('batch-again-');
+  it('read a repository made again under the same path, not the one before', async (t) => {
+    // Keep both processes alive until the repository has been swapped and used.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const root = await mkdtemp(join(tmpdir(), 'batch-again-'));
+    const dir = join(root, 'repo');
+    const objects = join(dir, 'objects');
+    const savedObjects = join(root, 'objects');
+    const git = new Git(dir);
     try {
+      const parent = new Git(root);
+      await parent.run(['init', '--quiet', '--bare', dir]);
       const before = await git.objectWriter().blob(Buffer.from('before\n'));
       assert.equal((await git.readBlob(before))?.toString(), 'before\n');
-      await rm(dir, { recursive: true, force: true });
-      await new Git(tmpdir()).run(['init', '--quiet', '--bare', dir]);
+
+      // Reuse the empty object directory to model a filesystem recycling its inode.
+      await rm(join(objects, before.slice(0, 2)), { recursive: true });
+      await rename(objects, savedObjects);
+      await rm(dir, { recursive: true });
+      await parent.run(['init', '--quiet', '--bare', dir]);
+      await rm(objects, { recursive: true });
+      await rename(savedObjects, objects);
+
       assert.equal(await git.readObject(before), null);
       const after = await git.objectWriter().blob(Buffer.from('after\n'));
       assert.equal((await git.readBlob(after))?.toString(), 'after\n');
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      t.mock.timers.runAll();
+      await rm(root, { recursive: true, force: true });
     }
   });
 
