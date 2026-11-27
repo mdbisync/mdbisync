@@ -1561,11 +1561,40 @@ export function decodedDestinationPath(url: string): string {
   }
 }
 
-/** The repository path a relative destination points to, or null for anything else. */
+/**
+ * `value` as the URL parser reads it: without leading and trailing spaces and controls, and without tabs and
+ * newlines anywhere. So ` https://host/../file` is a URL to the parser, though a path as written.
+ */
+function urlParserReading(value: string): string {
+  return value.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, '').replace(/[\t\n\r]/g, '');
+}
+
+const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/** Whether the URL parser reads a destination as written with a scheme. */
+export function readsWithScheme(url: string): boolean {
+  return SCHEME.test(urlParserReading(url));
+}
+
+/**
+ * Whether a decoded destination path reads with a scheme only once the URL parser drops what it drops:
+ * `%20https://host/../file`, the link the pull writes for ` https://host/../file`. A plain `a%3Ab` stays a path.
+ */
+export function decodedReadsWithScheme(path: string): boolean {
+  const reading = urlParserReading(path);
+  return reading !== path && SCHEME.test(reading);
+}
+
+/**
+ * The repository path a relative destination points to, or null for anything else. A destination with a
+ * scheme as the URL parser reads it, as written or once decoded, names no repository file: a renderer or the
+ * upload check reads it as a URL, and the link the pull writes for it encodes the characters the parser drops.
+ */
 export function resolveTarget(documentPath: string, url: string): string | null {
-  if (url === '' || url.startsWith('#') || url.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
+  const reading = urlParserReading(url);
+  if (reading === '' || reading.startsWith('#') || reading.startsWith('/') || SCHEME.test(reading)) return null;
   const path = decodedDestinationPath(url);
-  if (path === '') return null;
+  if (path === '' || decodedReadsWithScheme(path)) return null;
   const joined = posix.normalize(posix.join(posix.dirname(documentPath), path));
   if (joined === '.' || joined === '..' || joined.startsWith('../') || joined.endsWith('/')) return null;
   return joined;

@@ -29,6 +29,7 @@ import { authMetadata, emitLog, requestTiming, type AuthContext } from './diagno
 import { RequestStats } from './stats.ts';
 import { type LinearReads, graphqlReadKey } from './reads.ts';
 import { message } from '../messages.ts';
+import { isUploadUrl } from './upload-url.ts';
 
 export const DEFAULT_BASE_URL = 'https://api.linear.app';
 
@@ -159,8 +160,7 @@ export class GraphQLTransport {
 
   /** Authenticated storage GET, restricted to Linear's documented upload host. */
   async fetchUpload(url: string, init: RequestInit = {}): Promise<Response> {
-    const target = new URL(url);
-    if (target.protocol !== 'https:' || target.hostname !== 'uploads.linear.app' || target.username !== '' || target.password !== '' || target.port !== '') {
+    if (!isUploadUrl(url)) {
       throw new Error(message('linear.upload-not-allowed'));
     }
     return this.fetch(url, { ...init, method: 'GET', redirect: 'manual', headers: { authorization: `Bearer ${await this.#accessToken()}` } });

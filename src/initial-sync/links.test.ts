@@ -18,7 +18,8 @@ describe('document links', () => {
     assert.deepEqual(resolveRelative('eng/notes/plan.md', './faq.md'), { path: 'eng/notes/faq.md', fragment: undefined });
     assert.deepEqual(resolveRelative('eng/notes/plan.md', 'target%20with%20spaces.md'), { path: 'eng/notes/target with spaces.md', fragment: undefined });
     assert.deepEqual(resolveRelative('eng/notes/plan.md', '/docs/start.md'), { path: 'docs/start.md', fragment: undefined });
-    for (const url of ['https://example.com/a.md', 'mailto:help@example.com', '#details', '//example.com/a.md', '../../../a.md', 'a.md?x=1', '', '../notes/']) {
+    // The URL parser drops a leading space or control and tabs and newlines: these are URLs to it, as written or decoded.
+    for (const url of ['https://example.com/a.md', 'mailto:help@example.com', '#details', '//example.com/a.md', '../../../a.md', 'a.md?x=1', '', '../notes/', ' https://h/x/../../guide.md', '\thttps://h/x/../../guide.md', '%20https://h/x/../../guide.md', 'ht%0Atps://h/x/../../guide.md']) {
       assert.equal(resolveRelative('eng/notes/plan.md', url), undefined, url);
     }
   });

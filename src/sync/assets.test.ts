@@ -10,7 +10,7 @@ import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
 import { captureAssets, createAssetCapture as makeCapture, uploadAccessProbe, DownloadRetryError, ImageBlockedError, checkTypedFileLinks } from './assets.ts';
 import { imageLinks } from './image-links.ts';
-import { destinations, withUploadSuffix } from '../initial-sync/uploads.ts';
+import { destinations, resolveTarget, withUploadSuffix } from '../initial-sync/uploads.ts';
 import { CONTENT_LIMIT, fixText } from '../format/index.ts';
 import { runScaleScript } from '../scale-test-helpers.ts';
 
@@ -591,6 +591,8 @@ it('blocks a link typed in Linear to a repository file the previous text did not
   assert.deepEqual(findings('![i][a]\n\n[a]: https://uploads.linear.app/a.png\n\n> [A]:\n> report.csv'), [[1, 1, 5]]);
   assert.deepEqual(findings('[l][b]\n\n> [b]:\n> report.csv'), [[1, 1, 3]]);
   assert.deepEqual(findings('> [l](\n> report.csv)'), [[1, 1, 1]]);
+  // Whitespace in the query or fragment, which formatting encodes, leaves the link a repository file.
+  assert.deepEqual(findings('[r](<../private/report.csv# >) [s](<../private/report.csv?a\tb>)'), [[1, 2, 1], [2, 2, 1]]);
   assert.deepEqual(findings('[l](report.csv)', '[l][b]\n\n> [b]:\n> report.csv'), []);
   // The formatter drops shadowed definitions. Validate the original text
   // before that rewrite can hide a destination the upload writer would read.
@@ -653,4 +655,40 @@ it('captures many references to a cached upload in a tree of many copies of its 
   `, 180_000);
   assert.ok(result.control.linked && result.scaled.linked, 'every reference is linked to the capture in the assets folder');
   assert.ok(result.scaled.ms < 2 * result.control.ms + 2_000, `small tree ${Math.round(result.control.ms)} ms, large tree ${Math.round(result.scaled.ms)} ms`);
+});
+
+// The URL parser drops leading spaces and controls and removes tabs and newlines, so these spellings were
+// uploads to the download check and, once a dead upload was repaired into a link, paths climbing to `.env`.
+const REWRITTEN_UPLOAD_SPELLINGS = [
+  '< https://uploads.linear.app/a/b/c/../../../../../../.env>',
+  '&#32;https://uploads.linear.app/a/b/c/../../../../../../.env',
+  '&#9;https://uploads.linear.app/a/b/c/../../../../../../.env',
+  '&#10;https://uploads.linear.app/a/b/c/../../../../../../.env',
+  '<\u0001https://uploads.linear.app/a/b/c/../../../../../../.env>',
+];
+
+it('treats an upload URL the URL parser would rewrite as no upload, and its repaired link names no repository file', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'docs/plan.md':'Plan.', '.env':'TOKEN=secret\n'});
+    const git = await fixture.clone('rewritten-upload');
+    const base = await git.text(['rev-parse','origin/main']);
+    for (const spelling of REWRITTEN_UPLOAD_SPELLINGS) {
+      let fetched = 0;
+      const result = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![x](${spelling})\n`, new Map(), async () => { fetched++; return new Response(null, {status:404}); });
+      assert.equal(fetched, 0, spelling);
+      assert.deepEqual(result.deadUploads ?? [], [], spelling);
+      const links = destinations(result.body);
+      assert.equal(links.length, 1, spelling);
+      assert.equal(links[0]!.node.type, 'link', spelling);
+      assert.equal(resolveTarget('docs/plan.md', links[0]!.node.url), null, spelling);
+    }
+    // A genuine dead upload is still downloaded once and repaired into a link to its URL.
+    let fetched = 0;
+    const url = 'https://uploads.linear.app/a/b/c';
+    const dead = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![x](${url})\n`, new Map(), async () => { fetched++; return new Response(null, {status:404}); });
+    assert.equal(fetched, 1);
+    assert.deepEqual(dead.deadUploads, [url]);
+    assert.equal(dead.body, `[x](<${url}>)\n`);
+  } finally { await fixture.cleanup(); }
 });

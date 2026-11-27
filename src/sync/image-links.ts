@@ -4,6 +4,7 @@ import { toMarkdown } from 'mdast-util-to-markdown';
 import { parse, visit, start, end, line, allowedLink, linkDestination } from '../format/markdown.ts';
 import { CONTENT_LIMIT } from '../format/rules.ts';
 import { message } from '../messages.ts';
+import { isUploadUrl } from '../linear/upload-url.ts';
 
 export interface ImageRewrite { image: number; total: number; line: number }
 
@@ -125,9 +126,7 @@ export function imageLinks(body: string, deadUploads: ReadonlySet<string> = new 
     if (url === undefined) return;
     checkDestination(url);
     if (onlyImages !== undefined && !onlyImages.has(index)) return;
-    let upload = false;
-    try { const parsed = new URL(url); upload = parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.port === '' && parsed.username === '' && parsed.password === ''; } catch {}
-    if (mode === 'pull' && upload && !deadUploads.has(url.split('#')[0]!) && !deadUploads.has(url) && !ancestors.some(parent => parent.type === 'link' || parent.type === 'linkReference')) return;
+    if (mode === 'pull' && isUploadUrl(url) && !deadUploads.has(url.split('#')[0]!) && !deadUploads.has(url) && !ancestors.some(parent => parent.type === 'link' || parent.type === 'linkReference')) return;
     images.push({image: index, total: count, line: line(node)});
     if (enclosingRemoved) return;
     let replacement: Pick<Edit, 'text' | 'url'> = {text: ''};

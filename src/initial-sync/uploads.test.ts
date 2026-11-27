@@ -12,7 +12,7 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { fixText } from '../format/index.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
-import { LinearClient } from '../linear/index.ts';
+import { LinearClient, isUploadUrl } from '../linear/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git, commitTree } from '../state/index.ts';
 import { type FakeUpload, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
@@ -628,6 +628,28 @@ describe('file links in a document', () => {
     assert.equal(resolveTarget('b.md', 'mailto:x@example.com'), null);
     assert.equal(resolveTarget('b.md', '../c.png'), null);
     assert.equal(resolveTarget('b.md', 'dir/'), null);
+  });
+
+  it('resolves no destination with a scheme as the URL parser reads it, as written or decoded', () => {
+    // Whitespace in a name or after it is no scheme: the link stays a repository file, which the gate checks.
+    for (const [url, target] of [['my%20file.png', 'my file.png'], ['report%09draft.png', 'report\tdraft.png'], ['c.png#a b', 'c.png'], ['c.png?a%20', 'c.png'], ['a%3Ab.png', 'a:b.png'], ['https%3A//h/x/../../c.png', 'https:/c.png']] as Array<[string, string]>) {
+      assert.equal(resolveTarget('b.md', url), target, JSON.stringify(url));
+    }
+    for (const url of [' https://h/x/../../c.png', '\thttps://h/x/../../c.png', 'ht\ntps://h/../c.png', '\u0001https://h/x/../../c.png', ' /c.png', ' #c', '%20https://h/x/../../c.png', '%09https://h/x/../../c.png', 'ht%0Atps://h/x/../../c.png', '%01https://h/x/../../c.png']) {
+      assert.equal(resolveTarget('b.md', url), null, JSON.stringify(url));
+    }
+  });
+
+  it('counts as an upload only a URL spelled as one, which the authenticated download also refuses otherwise', async () => {
+    assert.equal(isUploadUrl('https://uploads.linear.app/a/b?c#d'), true);
+    const { GraphQLTransport } = await import('../linear/transport.ts');
+    let requests = 0;
+    const transport = new GraphQLTransport({ token: 'test-access-token', fetch: async () => { requests++; return new Response(null); } });
+    for (const url of [' https://uploads.linear.app/a', '\thttps://uploads.linear.app/a', 'https://uploads.linear.app/a\n/b', 'https://uploads.linear.app/a\u0001', 'https://uploads.linear.app/a ', 'HTTPS://uploads.linear.app/a', 'https://Uploads.linear.app/a', 'https:uploads.linear.app/a', 'https:\\\\uploads.linear.app/a', 'https://uploads.linear.app:443/a', 'https://uploads.linear.app.example.com/a']) {
+      assert.equal(isUploadUrl(url), false, JSON.stringify(url));
+      await assert.rejects(transport.fetchUpload(url), /not allowed/, JSON.stringify(url));
+    }
+    assert.equal(requests, 0);
   });
 
   it('an uploaded MP3 alone in a bullet round-trips byte for byte in the form fix writes', () => {

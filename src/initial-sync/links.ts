@@ -20,7 +20,7 @@
 import { posix } from 'node:path';
 import type { Definition, Link, Nodes } from 'mdast';
 import { fixText } from '../format/index.ts';
-import { parse, visit } from '../format/markdown.ts';
+import { decodedReadsWithScheme, parse, readsWithScheme, visit } from '../format/markdown.ts';
 import { type LinearClient } from '../linear/index.ts';
 import { type BodyTransform, type TransformContext } from './transform.ts';
 import { message } from '../messages.ts';
@@ -46,7 +46,8 @@ export function documentUrlBase(urlKey: string): string {
  * document, a query, or a path above the repository.
  */
 export function resolveRelative(fromPath: string, url: string): { path: string; fragment: string | undefined } | undefined {
-  if (url === '' || url.startsWith('#') || url.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(url)) return undefined;
+  // As `resolveTarget` reads it: a destination with a scheme to the URL parser, as written or decoded, is no path.
+  if (url === '' || url.startsWith('#') || url.startsWith('//') || readsWithScheme(url)) return undefined;
   const hash = url.indexOf('#');
   const target = hash === -1 ? url : url.slice(0, hash);
   const fragment = hash === -1 ? undefined : url.slice(hash + 1);
@@ -57,6 +58,7 @@ export function resolveRelative(fromPath: string, url: string): { path: string; 
   } catch {
     return undefined;
   }
+  if (decodedReadsWithScheme(decoded)) return undefined;
   const joined = decoded.startsWith('/') ? decoded.slice(1) : posix.join(posix.dirname(fromPath), decoded);
   const path = posix.normalize(joined);
   if (path === '.' || path.startsWith('../') || path === '..' || path.endsWith('/')) return undefined;
