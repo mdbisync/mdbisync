@@ -69,7 +69,7 @@ import { type Place } from '../mapping/index.ts';
 import { readPlanSources, unchangedSince } from './run.ts';
 import { provenanceUnknownTrailer, readPlainLinkProvenance } from './provenance.ts';
 import { LINK_PROVENANCE_UNKNOWN } from './uploads.ts';
-import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
+import { type BodyTransform, LeaveOutError, restoreBody, restoreWrittenBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { type ConflictNotices, MARKS, noConflictNotices, reconcileDocumentMark } from '../sync/marks.ts';
@@ -619,7 +619,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const reformatted: string[] = [];
     for (const path of [...synced].sort(compare)) {
       const text = texts.get(path) as string;
-      const file = joinFile(splitFile(text).head, restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string, sources.input.mapping.files));
+      const body = restoreWrittenBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string, sources.input.mapping.files);
+      if (body === undefined) continue;
+      const file = joinFile(splitFile(text).head, body);
       if (file !== text) {
         changes.set(path, file);
         reformatted.push(path);

@@ -1031,16 +1031,25 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
       if (passUnlinked.has(id)) continue;
       if (budget.sets <= 0) { budget.short = true; return; }
       const accepted = candidate.files.get(candidate.path) as string;
-      // The candidate's text with the `rejected` targets' fallback links; undefined once the budget is spent.
+      // The candidate's text with the `rejected` targets' fallback links; undefined once the budget is spent, and
+      // null when that text is past the Markdown limits: it is not staged, and the run that would write it leaves the
+      // document out. Its work is spent all the same.
       // With `free`, a text that cannot be staged (the accepted one, or the one the file already holds) costs
       // nothing: candidates that link none of the targets, or whose text is already recorded, cannot use up
       // the budget of the others on every run while the cursor holds. Their work stays one text per pass.
-      const without = (rejected: readonly string[], free = false): string | undefined => {
+      const without = (rejected: readonly string[], free = false): string | null | undefined => {
         const cost = accepted.length + documentIds.size + rejected.length;
         if (budget.work < cost) { budget.short = true; return undefined; }
         const targets = new Map(documentIds);
         reset(new Set(rejected), targets);
-        const text = textOf(candidate, targets);
+        let text: string;
+        try {
+          text = textOf(candidate, targets);
+        } catch (error) {
+          if (!(error instanceof MarkdownLimitError)) throw error;
+          budget.work -= cost;
+          return null;
+        }
         if (!(free && (text === accepted || options.settled?.(candidate, text) === true))) budget.work -= cost + Math.max(0, text.length - accepted.length);
         return text;
       };
@@ -1051,11 +1060,12 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
       if (all === accepted) { passUnlinked.add(id); continue; }
       // The targets it links, found by halving the groups whose rejection changes its text: a text that links
       // a few of many candidates costs a few texts per link, not one per candidate. A group's change is in one
-      // of its halves: when the first leaves the text as it is, the second has the group's text.
+      // of its halves: when the first leaves the text as it is, the second has the group's text. A group whose text
+      // is past the Markdown limits (null) may still link targets whose texts fit: its halves are searched too.
       const alone = new Map<string, string>();
-      const find = (group: readonly string[], text: string): void => {
-        if (alone.size >= LINK_VARIANT_LINKS) return;
-        if (group.length === 1) { alone.set(group[0]!, text); return; }
+      const find = (group: readonly string[], text: string | null | undefined): void => {
+        if (text === undefined || text === accepted || alone.size >= LINK_VARIANT_LINKS) return;
+        if (group.length === 1) { if (text !== null) alone.set(group[0]!, text); return; }
         const first = group.slice(0, group.length >> 1);
         const second = group.slice(group.length >> 1);
         const firstText = without(first);
@@ -1063,20 +1073,20 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
         if (firstText === accepted) { find(second, text); return; }
         find(first, firstText);
         if (alone.size >= LINK_VARIANT_LINKS) return;
-        const secondText = without(second);
-        if (secondText !== undefined && secondText !== accepted) find(second, secondText);
+        find(second, without(second));
       };
       if (!pass.allOnly) find(others, all);
-      const texts = new Set([...alone.values(), all]);
-      // A few targets: also every combination of two or more of them.
+      const texts = new Set(all === null ? alone.values() : [...alone.values(), all]);
+      // A few targets: also every combination of two or more of them. All of them is the text with every target
+      // rejected, unless that one is past the Markdown limits.
       const linked = [...alone.keys()];
       if (linked.length <= LINK_VARIANT_TARGETS) {
-        for (let mask = 1; mask < 2 ** linked.length - 1; mask += 1) {
+        for (let mask = 1; mask < 2 ** linked.length - (all === null ? 0 : 1); mask += 1) {
           const rejected = linked.filter((_, bit) => (mask >> bit) & 1);
           if (rejected.length < 2) continue;
           const text = without(rejected);
           if (text === undefined) break;
-          texts.add(text);
+          if (text !== null) texts.add(text);
         }
       }
       const done = staged.get(id) ?? new Set<string>();

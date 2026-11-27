@@ -836,6 +836,37 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal((await refs())['refs/heads/main'], tracked);
   });
 
+  it('records the file as it is when Linear stores it in a form past the Markdown limits, and records the rest', async () => {
+    const world = fakeWorld();
+    // A chain of tables `fix` cannot end within its budget: putting Linear's form into the file's form would stop.
+    world.linear.store = (content) => (content.startsWith('# Engineering') ? `${content}\n\n${'| A |\n| -- |\ntext\n'.repeat(2_000)}` : content);
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.initialSync?.reformatted, []);
+    assert.equal(await show('refs/mdbisync/linear:eng/README.md'), TREE['eng/README.md']);
+    const ids = await readIds();
+    assert.deepEqual(Object.keys(ids).sort(), SYNCED_PATHS);
+    const sync = () => runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
+    // Until someone edits it, the sync leaves it alone: nothing written, recorded or left out.
+    const writes = world.linear.writes.count;
+    const linear = (await refs())['refs/mdbisync/linear'];
+    const quiet = await sync();
+    assert.equal(quiet.exitCode, 0, quiet.stderr);
+    const quietReport = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
+    assert.deepEqual(quietReport.capture?.leftOut, []);
+    assert.equal(world.linear.writes.count, writes);
+    assert.equal((await refs())['refs/mdbisync/linear'], linear);
+    // An edit in Linear since: the capture leaves the one document out.
+    const document = world.linear.documents.find((d) => d.id === ids['eng/README.md']?.id)!;
+    document.content = `${document.content}\nEdited.\n`;
+    touch(document);
+    const edited = await sync();
+    assert.equal(edited.exitCode, 0, edited.stderr);
+    const next = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
+    assert.deepEqual(next.capture?.leftOut, [{ id: ids['eng/README.md']?.id, rule: 'markdown-complexity' }]);
+    assert.equal(await show('refs/mdbisync/linear:eng/README.md'), TREE['eng/README.md']);
+  });
+
   describe("Linear's own spelling of the same document", () => {
     // Shapes Linear was seen to return for documents a confirmed initial sync
     // wrote from a lint-clean corpus: a final newline the file does not have,

@@ -18,6 +18,7 @@ import { GITHUB_API } from '../setup/test-helpers.ts';
 import { fixText, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { hookRun } from '../format/test-helpers.ts';
 import { LINK_VARIANT_LINKS, type LinkVariantBudget, capture, linkVariants, linkVariantBudget, prepareLfs } from './capture.ts';
+import { MarkdownLimitError } from '../format/markdown.ts';
 import { type FileContent, contentBytes } from '../state/content.ts';
 import { candidateKey } from './staged.ts';
 import { MERGE_RECORD_MESSAGE, writeTrackedToLinear } from './write.ts';
@@ -2465,5 +2466,26 @@ describe('staged texts with rejected link targets', () => {
     const settled = new Set(all.slice(0, 5).map((set) => String([...set.values()][0])));
     const rest = [...dense(10).variants({ budget: unlimited(), settled: (_, text) => settled.has(text) })];
     assert.equal(rest.length, all.length - 5);
+  });
+
+  it('passes over a text past the Markdown limits and stages the other documents', () => {
+    // Document 0 links 1, 2 and 3; its text with 2 rejected is past the limits. Document 4 links 0.
+    const paths = Array.from({ length: 5 }, (_, i) => `docs/d${i}.md`);
+    const documentIds = new Map(paths.map((path, i) => [path, `d${i}`]));
+    const links = (index: number) => (index === 0 ? [1, 2, 3] : index === 4 ? [0] : []);
+    const textOf = (candidate: { index: number }, targets: ReadonlyMap<string, string>) => {
+      if (candidate.index === 0 && !targets.has(paths[2]!)) throw new MarkdownLimitError('tables');
+      return links(candidate.index).map((i) => (targets.has(paths[i]!) ? `[d](./d${i}.md)` : `[d](https://linear.app/team/document/d${i})`)).join('\n');
+    };
+    const candidates = new Map(paths.map((path, i) => [`d${i}`, { index: i, path, files: new Map<string, FileContent>([[path, textOf({ index: i }, documentIds)]]) }]));
+    const reset = (rejected: ReadonlySet<string>, targets: Map<string, string>) => {
+      for (const [path, target] of targets) if (rejected.has(target)) targets.delete(path);
+    };
+    const sets = [...linkVariants(candidates, textOf, reset, documentIds, { budget: { sets: 100, work: 1_000_000 } })];
+    // Document 0's texts that fit are still staged: with 1, with 3, and with both rejected.
+    const link = (i: number, rejected: boolean) => (rejected ? `[d](https://linear.app/team/document/d${i})` : `[d](./d${i}.md)`);
+    const d0 = (one: boolean, three: boolean) => [link(1, one), link(2, false), link(3, three)].join('\n');
+    assert.deepEqual(sets.filter((set) => set.has('docs/d0.md')).map((set) => String(set.get('docs/d0.md'))).sort(), [d0(true, false), d0(false, true), d0(true, true)].sort());
+    assert.deepEqual(sets.filter((set) => set.has('docs/d4.md')).map((set) => String(set.get('docs/d4.md'))), ['[d](https://linear.app/team/document/d0)']);
   });
 });
