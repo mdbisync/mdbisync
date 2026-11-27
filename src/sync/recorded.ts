@@ -32,9 +32,19 @@ export function observedDigest(document: Pick<LinearDocument, 'content' | 'updat
 
 /** Blob ids of the accepted document paths in this Linear record. */
 export async function observedBlobs(git: Git, observation: Oid, paths: readonly string[]): Promise<Map<string, Oid>> {
-  if (paths.length === 0) return new Map();
-  const entries = await listPaths(git, observation, paths);
-  return new Map(entries.filter(({type}) => type === 'blob').map(({path, oid}) => [path, oid]));
+  const blobs = new Map<string, Oid>();
+  // Bound the path arguments even when listPaths falls back to git ls-tree.
+  for (let start = 0, end = 0; start < paths.length; start = end) {
+    let bytes = 0;
+    do {
+      bytes += Buffer.byteLength(paths[end]!) + 1;
+      end += 1;
+    } while (end < paths.length && end - start < 256 && bytes + Buffer.byteLength(paths[end]!) < 64 * 1024);
+    for (const {path, oid, type} of await listPaths(git, observation, paths.slice(start, end))) {
+      if (type === 'blob') blobs.set(path, oid);
+    }
+  }
+  return blobs;
 }
 
 /** Digest and signature of a body this run accepted from Linear. */

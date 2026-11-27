@@ -3103,8 +3103,9 @@ describe('I6 tells an ids move that only records new digests from a real change'
   const without = (entries: Entries, path: string): Entries => Object.fromEntries(Object.entries(entries).filter(([key]) => key !== path));
   const PLAN = 'eng/platform/plan.md';
   type Effect = 'write' | 'tracked' | 'linear' | 'pull-request';
-  const cases: Array<{ name: string; next: (base: Entries) => Entries; base?: (base: Entries) => Entries; files?: Record<string, string>; via?: Record<string, string>; message?: string; startMessage?: string; mode?: string; report?: (base: Entries) => Record<string, unknown>; effect?: Effect; unrelated?: boolean; staleMac?: boolean; pass: boolean; detail?: RegExp }> = [
+  const cases: Array<{ name: string; next: (base: Entries) => Entries; base?: (base: Entries) => Entries; files?: Record<string, string>; via?: Record<string, string>; message?: string; startMessage?: string; mode?: string; report?: (base: Entries) => Record<string, unknown>; effect?: Effect; unrelated?: boolean; staleMac?: boolean; unsignedBase?: boolean; pass: boolean; detail?: RegExp }> = [
     { name: 'passes a move whose one changed entry differs only in its digest', next: (base) => ({ ...base, [PLAN]: { ...base[PLAN], observedDigest: NEW } }), pass: true },
+    { name: 'passes an unchanged digest that gains a valid signature', next: (base) => base, unsignedBase: true, pass: true },
     { name: 'passes new digests on every entry', next: (base) => digests(base, NEW), pass: true },
     { name: 'fails a digest with a stale signature', next: (base) => digests(base, NEW), staleMac: true, pass: false },
     { name: 'fails an added id', next: (base) => ({ ...digests(base, NEW), 'eng/platform/extra.md': { id: 'document-extra', observedDigest: NEW } }), pass: false },
@@ -3157,6 +3158,7 @@ describe('I6 tells an ids move that only records new digests from a real change'
       return [path, typeof digest === 'string' && typeof id === 'string' && blob !== undefined ? { ...entry, observedMac: key.observedMac(path, id, blob, digest) } : entry];
     }));
     const base = signed((fixture.base ?? ((entries) => entries))(digests(ids, OLD)));
+    if (fixture.unsignedBase) delete base[PLAN]!['observedMac'];
     const start = await commitIdsTree(remoteGit, base, (await remoteGit.text(['rev-parse', ref])).trim(), {}, fixture.startMessage);
     await remoteGit.run(['update-ref', ref, start]);
     mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });

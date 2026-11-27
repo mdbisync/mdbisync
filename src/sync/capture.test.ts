@@ -2172,7 +2172,7 @@ repos:
     assert.equal(checkpoints.recorded.size, 0);
   });
 
-  it('refreshes legacy digests across captures without reading them all at once', async () => {
+  it('rotates bounded legacy digest batches past documents it could not read', async (t) => {
     for (let i = 1; i <= 34; i += 1) world.linear.documents.push({
       id: `note-${i}`, title: `note-${i}`, content: 'Meeting notes.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z',
     });
@@ -2186,14 +2186,31 @@ repos:
     const ref = stateRef(config, 'ids');
     await fixture.remote.run(['update-ref', ref, ids, first.state.ids!]);
 
-    const signed = async () => [...(await readIds(context.git, context.fetched.state.ids)).values()].filter(({observedMac}) => observedMac !== undefined).length;
+    const signed = async () => new Set([...(await readIds(context.git, context.fetched.state.ids))]
+      .filter(([, {observedMac}]) => observedMac !== undefined).map(([path]) => path));
+    const getDocuments = context.linear.getDocuments.bind(context.linear);
+    const failed = new Set<string>();
+    let omit = true;
+    t.mock.method(context.linear, 'getDocuments', async (...[ids, options]: Parameters<typeof getDocuments>) => {
+      if (options?.optionalBodyLimit === undefined) return getDocuments(ids, options);
+      if (!omit) return getDocuments(ids.filter((id) => !failed.has(id)), options);
+      for (const id of ids) failed.add(id);
+      return [];
+    });
+
     await refresh();
     assert.equal((await run()).ok, true);
     await refresh();
-    assert.equal(await signed(), 33);
+    assert.deepEqual(await signed(), new Set(['docs/latest.md']));
+    assert.equal(failed.size, 32);
+    assert.ok(!failed.has('plan'));
+
+    // The earlier batch stays unavailable. The documents that follow it can still be signed.
+    omit = false;
     assert.equal((await run()).ok, true);
     await refresh();
-    assert.equal(await signed(), legacy.size);
+    assert.ok((await signed()).has('docs/plan.md'));
+    assert.equal((await signed()).size, legacy.size - failed.size);
   });
 
   it('uses signed checkpoints only on the Linear observation history they describe', async () => {

@@ -858,7 +858,7 @@ const OBSERVED_DIGEST = /^[0-9a-f]{64}$/;
  * The document ids whose entries changed between `old` and `next` (both a
  * parsed `ids.json`) when they changed only in authenticated observed digests:
  * the same paths and entries, with both versions of each changed digest
- * signed for that path and document. Null
+ * signed for that path and document, or an unchanged digest gains a valid signature. Null
  * for any other change, and for none. A capture records Linear's new raw form
  * of a document this way when the file text it maps to did not change, so
  * the next sync does not read the same body again; Linear saves a table
@@ -879,14 +879,12 @@ export function digestOnlyIdsChange(old: unknown, next: unknown, blobs: Readonly
     const { observedDigest: wasDigest, observedMac: wasMac, ...wasRest } = was;
     const { observedDigest: nowDigest, observedMac: nowMac, ...nowRest } = now;
     if (!isDeepStrictEqual(wasRest, nowRest)) return null;
-    if (wasDigest === nowDigest) {
-      if (wasMac !== nowMac) return null;
-      continue;
-    }
+    if (wasDigest === nowDigest && wasMac === nowMac) continue;
     const id = now['id'];
     if (typeof id !== 'string' || typeof wasDigest !== 'string' || typeof nowDigest !== 'string' || !OBSERVED_DIGEST.test(wasDigest) || !OBSERVED_DIGEST.test(nowDigest)) return null;
     const blob = blobs.get(path);
-    if (blob === undefined || !key.verifiesObserved(path, id, blob, wasDigest, wasMac) || !key.verifiesObserved(path, id, blob, nowDigest, nowMac)) return null;
+    if (blob === undefined || !key.verifiesObserved(path, id, blob, nowDigest, nowMac)) return null;
+    if (wasDigest !== nowDigest && !key.verifiesObserved(path, id, blob, wasDigest, wasMac)) return null;
     changed.push(id);
   }
   return changed.length === 0 ? null : changed;

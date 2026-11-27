@@ -616,10 +616,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
     const changes = new Map<string, string>();
     const reformatted: string[] = [];
+    const restored = new Set<string>();
     for (const path of [...synced].sort(compare)) {
       const text = texts.get(path) as string;
       const body = restoreWrittenBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string, sources.input.mapping.files);
       if (body === undefined) continue;
+      restored.add(path);
       const file = joinFile(splitFile(text).head, body);
       if (file !== text) {
         changes.set(path, file);
@@ -641,10 +643,11 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;
 
-    const blobs = await observedBlobs(git, linearCommit, [...finalIds.keys()]);
+    const blobs = await observedBlobs(git, linearCommit, [...restored]);
     for (const [path, entry] of finalIds) {
       const document = rememberedDocuments.get(path);
-      if (document?.id === entry.id) finalIds.set(path, {...entry, ...observedFields(context.pushedKey, path, blobs.get(path), document)});
+      if (!restored.has(path)) finalIds.set(path, {...entry, observedDigest: undefined, observedMac: undefined});
+      else if (document?.id === entry.id) finalIds.set(path, {...entry, ...observedFields(context.pushedKey, path, blobs.get(path), document)});
     }
 
     // New documents left out while writing keep their chosen ids, which other documents may link to.

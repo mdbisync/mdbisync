@@ -12,6 +12,8 @@ import {
   LinearHttpError,
   LinearNetworkError,
   LinearResponseLimitError,
+  LinearError,
+  isTransientLinearError,
   LinearStoppedError,
   type GraphQLErrorShape,
   type StopReason,
@@ -210,6 +212,40 @@ export class GraphQLTransport {
     return answer.data as T;
   }
 
+  /** Give optional reads at most this many extra bytes and leave half the budget for required reads. */
+  optionalBodyLimit(bytes: number): number {
+    return Math.min(this.#bodyBytesRead + bytes, Math.floor(this.#limits.bodyBytes / 2));
+  }
+
+  /** Optional migration data can be omitted and replayed as omitted by the apply step. */
+  async queryOptionalBodies<T>(operation: string, query: string, variables: Record<string, unknown>, limit: number, empty: T): Promise<T> {
+    const requestBody = JSON.stringify({ query, variables, operationName: operation });
+    const key = graphqlReadKey(`optional bodies\n${requestBody}`);
+    const kept = this.reads?.take(key);
+    if (kept !== undefined) {
+      if (kept.body.length > this.#limits.responseBytes || this.#bodyBytesRead + kept.body.length > limit) return empty;
+      this.#chargeBodies(operation, kept.body.length);
+      return keptData<T>(operation, kept.status, kept.body);
+    }
+    // A missing staged answer cannot authorize a live reread in the apply step.
+    if (this.reads?.mode === 'replay') return empty;
+    if (!this.#stopped && this.#bodyBytesRead < limit) {
+      try {
+        const answer = await this.#network(operation, 'query', requestBody, false, Math.min(this.#limits.responseBytes, limit - this.#bodyBytesRead));
+        const body = Buffer.from(answer.text, 'utf8');
+        if (this.#bodyBytesRead + body.length <= limit) {
+          this.#chargeBodies(operation, body.length);
+          this.reads?.keep(key, {status: answer.status, type: 'application/json', body});
+          return answer.data as T;
+        }
+      } catch (error) {
+        if (!(error instanceof LinearResponseLimitError) && !(error instanceof LinearStoppedError)
+          && !(error instanceof LinearError && isTransientLinearError(error))) throw error;
+      }
+    }
+    return empty;
+  }
+
   /** A read that must reflect the token as it is now: never answered from the read store, never kept in it. */
   async queryLive<T>(operation: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
     if (this.#stopped) throw this.#refuse(operation, 'query', this.#stopped);
@@ -223,7 +259,7 @@ export class GraphQLTransport {
   }
 
   /** Network execution shared by reads and writes; has no read-store access. */
-  async #network(operation: string, kind: OperationKind, requestBody: string, bodies = false): Promise<{data: unknown; text: string; status: number}> {
+  async #network(operation: string, kind: OperationKind, requestBody: string, bodies = false, responseLimit = this.#limits.responseBytes): Promise<{data: unknown; text: string; status: number}> {
     for (let attempt = 1; ; attempt += 1) {
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
       const info: RequestInfo = { operation, kind, attempt };
@@ -267,7 +303,7 @@ export class GraphQLTransport {
       let over = false;
       let bytes = 0;
       try {
-        const read = await readText(response, this.#limits.responseBytes);
+        const read = await readText(response, responseLimit);
         if (read === undefined) over = true;
         else {
           text = read.text;
@@ -309,7 +345,7 @@ export class GraphQLTransport {
       this.#log(low ? { ...entry, stop: low } : entry);
 
       if (over) {
-        const error = new LinearResponseLimitError(operation, 'linear-response-too-large', this.#limits.responseBytes);
+        const error = new LinearResponseLimitError(operation, 'linear-response-too-large', responseLimit);
         // A write's answer that was not read leaves its outcome unknown, like a cut connection.
         throw kind === 'mutation' ? new LinearNetworkError(operation, error) : error;
       }

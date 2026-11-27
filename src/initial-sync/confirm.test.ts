@@ -846,6 +846,7 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(await show('refs/mdbisync/linear:eng/README.md'), TREE['eng/README.md']);
     const ids = await readIds();
     assert.deepEqual(Object.keys(ids).sort(), SYNCED_PATHS);
+    assert.equal(ids['eng/README.md']?.observedMac, undefined);
     const sync = () => runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
     // Until someone edits it, the sync leaves it alone: nothing written, recorded or left out.
     const writes = world.linear.writes.count;

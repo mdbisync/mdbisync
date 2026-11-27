@@ -814,7 +814,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     } catch (error) {
       // Past the Markdown limits only the observation tells: a text a run wrote and recorded is held. Any other
       // text (a person's edit) is left out, as before.
-      if (error instanceof MarkdownLimitError && digest !== undefined && digest === observedDigest(held)) return true;
+      if (error instanceof MarkdownLimitError && matchesVerifiedObservedBody(context.pushedKey, file.path, file.oid, entry, held)) return true;
       throw error;
     }
   }
@@ -871,7 +871,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     /** The document as Linear stores it after the content change, for its status mark. */
     let readBack: LinearDocument | undefined;
     /** The digest of a rename or move that kept the recorded text, at its new update time. */
-    let refreshedDigest: string | undefined;
+    let refreshed: Pick<IdEntry, 'observedDigest' | 'observedMac'> | undefined;
     if (change.content) patch.content = await transformBody(transforms, change.to, splitFile(textOf(file)).body);
     if (change.title) patch.title = file.title.normalize('NFC');
     if (change.place) Object.assign(patch, placePatch(file.place));
@@ -894,13 +894,16 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       await checkpoint('after-reread-before-write');
       // A recorded observation of the text: a rename or move changes the update time it holds.
       const recorded = ids.get(change.from);
-      const observed = recorded?.id === change.id && recorded.observedDigest !== undefined && recorded.observedDigest === observedDigest(document);
+      const blob = linearFiles.get(change.from);
+      const observed = blob !== undefined && matchesVerifiedObservedBody(context.pushedKey, change.from, blob, recorded, document);
       const updated = await timed(() => linear.updateDocument(change.id, patch, observed), rereadAt);
       // Without a content write the merge result's file stands: Linear holds its body already.
       if (patch.content !== undefined) {
         stored.set(change.to, { content: updated.content ?? '', sent: patch.content, document: updated });
         readBack = updated;
-      } else if (observed && updated.content === document.content) refreshedDigest = observedDigest(updated);
+      } else if (observed && updated.id === document.id && updated.content !== undefined && updated.content === document.content) {
+        refreshed = observedFields(context.pushedKey, change.to, blob, updated);
+      }
     }
     // The structural rules set Linear's title back: say so where people see it. The comment id follows from the
     // document and the merge, so a run that repeats this merge after stopping finds its comment instead of adding one.
@@ -916,7 +919,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       delete next.observedMac;
     } else if (change.from !== change.to) next = resigned(change.from, change.to, next);
     // The same text at the new time: a text past the Markdown limits is known to be held by this observation only.
-    if (refreshedDigest !== undefined) next.observedDigest = refreshedDigest;
+    if (refreshed !== undefined) next = {...next, ...refreshed};
     const plain = plainFiles.get(change.to);
     if (plain !== undefined && plain.size > 0) next.plainFiles = [...plain];
     nextIds.set(change.to, next);
@@ -1194,6 +1197,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // update-time trailers that let capture skip reading those documents. A partial record can retain dependencies
     // from the tip, such as an image's old bytes, so capture still reads them.
     const asWritten = new Map<string, string>();
+    // A write that Linear accepted provides evidence for the file that was sent even if its returned
+    // text exceeds the parser limits. Its exact returned body is still authenticated for that file.
     const blobs = await observedBlobs(git, commit, [...stored.keys()]);
     for (const [path, {document}] of stored) {
       const file = merge.result.get(path);

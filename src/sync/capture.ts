@@ -12,7 +12,7 @@ import { pendingProject, resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
 import { fixLinearText, joinFile, linkedFileCheck, lintRecorded, sameAsLinear, splitFile } from '../format/index.ts';
-import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, LinearResponseLimitError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
+import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, hasDocumentLinks, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { MarkdownLimitError, linearMarkersAsText, markdownBaseline } from '../format/markdown.ts';
@@ -24,7 +24,7 @@ import { lineText } from '../run/output.ts';
 import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, lfsPush, lfsRemote, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, signIdsTrailers, signObservation, UPLOADS_REBUILDING } from '../state/index.ts';
 import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, markWritesLinear, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
-import { captureCursorTrailer, matchesObservedBody, observedBlobs, observedFields, readCaptureCheckpoints, recordedTime, recordedTrailers, verifiedObservedDigest } from './recorded.ts';
+import { captureCursorTrailer, matchesObservedBody, observedBlobs, observedDigest, observedFields, readCaptureCheckpoints, recordedTime, recordedTrailers, verifiedObservedDigest } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath, isUntitled, keptPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
@@ -107,6 +107,8 @@ export function cursorTime(document: LinearDocument): string {
   return recordedTime(document.updatedAt);
 }
 const DIGEST_REFRESH_LIMIT = 32;
+const DIGEST_REFRESH_BYTES = 8 * 1024 * 1024;
+const DIGEST_REFRESH_MARKER = /(?:^|\n)Digest-refresh-after: ([01]:[^\s]+)(?=\n|$)/;
 const HELD = /^Removal-held: (\S+)$/gm;
 
 /** The ids whose removal the last capture held, from its ids commit. */
@@ -313,7 +315,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor));
       // Leave room for ordinary capture reads. A document without a trusted digest remains eligible on later runs.
       if (!needed && old !== undefined && live(doc) && previous.has(old.path) && !excludedPath(old.path)
-        && verifiedObservedDigest(context.pushedKey, old.path, recordedOids.get(old.path), old.entry) === undefined) legacyDigests.push(doc);
+        && old.entry.observedMac === undefined && (old.entry.observedDigest !== undefined || !asRecorded(doc))) legacyDigests.push(doc);
       return needed;
     });
     const invalidZone = (doc: LinearDocument, path: string) => {
@@ -397,13 +399,6 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (requested.some(({id}) => !answered.has(id))) missingBodies = true;
     };
     await readBodies(selected.filter(live));
-    const refresh = legacyDigests.filter(({id}) => !work.has(id)).slice(0, DIGEST_REFRESH_LIMIT);
-    try {
-      await readBodies(refresh);
-    } catch (error) {
-      if (!(error instanceof LinearResponseLimitError) || error.code !== 'linear-body-budget') throw error;
-      // Ordinary reads already succeeded. The optional batch can wait for a run with room in the budget.
-    }
     // A document renamed or moved after the listing moves by this read: the files linking its old path are read too.
     const late = new Map<string, string>();
     for (const doc of work.values()) {
@@ -416,6 +411,32 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         return !work.has(doc.id) && !unreadIds.has(doc.id) && live(doc) && old !== undefined && linksTo(late, old);
       });
       await readBodies(linking);
+    }
+    let refreshMarker: string | undefined;
+    const pendingRefresh = legacyDigests.filter(({id}) => !work.has(id));
+    if (pendingRefresh.length > 0) {
+      const changed = new Set((await git.text(['diff', '--name-only', '-z', '--no-renames', base, fetched.tracked])).split('\0'));
+      const ranked = pendingRefresh.map((doc) => ({doc, rank: `${changed.has(byId.get(doc.id)!.path) ? 0 : 1}:${encodeURIComponent(doc.id)}`}))
+        .sort((a, b) => a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0);
+      const last = ranked.length <= DIGEST_REFRESH_LIMIT || state.ids === null ? undefined
+        : DIGEST_REFRESH_MARKER.exec(await git.text(['log', '-1', '--first-parent', '--format=%B', '--grep=^Digest-refresh-after: ', state.ids]))?.[1];
+      const urgent = ranked.filter(({rank}) => rank.startsWith('0:')).slice(0, DIGEST_REFRESH_LIMIT / 2);
+      const urgentIds = new Set(urgent.map(({doc}) => doc.id));
+      const rotating = ranked.filter(({doc}) => !urgentIds.has(doc.id));
+      const offset = last === undefined ? 0 : Math.max(0, rotating.findIndex(({rank}) => rank > last));
+      const batch = [...urgent, ...rotating.slice(offset), ...rotating.slice(0, offset)].slice(0, DIGEST_REFRESH_LIMIT);
+      const limit = linear.transport.optionalBodyLimit(DIGEST_REFRESH_BYTES);
+      const refresh = new Map(batch.map(({doc}) => [doc.id, doc]));
+      for (const doc of await linear.getDocuments([...refresh.keys()], {withContent: true, pageSize: 8, optionalBodyLimit: limit})) {
+        const listed = refresh.get(doc.id);
+        // Defer newly changed metadata to an ordinary capture, where inbound links are checked as well.
+        if (listed === undefined || doc.content === undefined || !live(doc) || doc.title !== listed.title
+          || doc.teamId !== listed.teamId || doc.projectId !== listed.projectId || doc.updatedAt !== listed.updatedAt) continue;
+        documents.set(doc.id, doc);
+        work.set(doc.id, doc);
+      }
+      // Remember the last attempt even when some bodies were omitted or blocked.
+      if (ranked.length > DIGEST_REFRESH_LIMIT) refreshMarker = batch.at(-1)!.rank;
     }
     // Keep metadata for out-of-scope documents; never infer deletion from a missing page.
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
@@ -837,7 +858,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // Only a suspended document needs the version of its reading: noting it on every entry would rewrite them all. One
       // that reads as the tracked file keeps the older version until the lane takes that file (`rereadAsTracked`): the
       // lane notes the version with its push, so a run that stops before it reads the document again.
-      const entry = {...old?.entry, id, observedDigest: undefined, observedMac: undefined, ...(old?.entry.suspended === undefined || converged ? {} : {capturedWith: VERSION})};
+      const entry = {...old?.entry, id, ...(old?.path === candidate.path ? {} : {observedDigest: undefined, observedMac: undefined}), ...(old?.entry.suspended === undefined || converged ? {} : {capturedWith: VERSION})};
       delete entry.pullRewrite;
       const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
@@ -905,10 +926,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const trailers = [
       ...(writeCursor ? [captureCursorTrailer(through)] : []),
       ...recordedTrailers(checkpoints),
+      ...(refreshMarker === undefined ? [] : [`Digest-refresh-after: ${refreshMarker}`]),
       ...[...held].filter((id) => /^\S+$/.test(id)).sort().map((id) => `Removal-held: ${id}`),
     ];
     const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
-    const always = recordsRemovals || checkpoints.size > 0 || (writeCursor && through !== cursor);
+    const always = recordsRemovals || checkpoints.size > 0 || refreshMarker !== undefined || (writeCursor && through !== cursor);
     const idsCommit = await commitIds(git, state.ids, ids, identity, {
       message: commitMessage, always, reserved, superseded,
       ...(writeCursor || checkpoints.size > 0 ? { sign: signIdsTrailers(context.pushedKey, linearCommit) } : {}),
@@ -933,14 +955,17 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       try {
         for (const {doc, path, blocked} of marked) {
           const before = ids.get(path)!;
+          const blob = observedOids.get(path) ?? recordedOids.get(path);
+          const digest = verifiedObservedDigest(context.pushedKey, path, blob, before);
+          const canRefresh = digest !== undefined && digest === observedDigest(doc);
           const outcome = await reconcileDocumentMark({document: doc, entry: before, linear, blocked,
-            includeUpdatedBody: before.saved !== undefined && blocked.length === 0 && before.observedDigest !== undefined,
+            includeUpdatedBody: before.saved !== undefined && blocked.length === 0 && canRefresh,
             onConflictNotice: (change) => result.conflictNotices[change].push(path),
             persistEntry: async (entry, cleared) => {
               // Clearing a mark can advance updatedAt. Refresh the digest only from a response holding the
               // same accepted body, because a Linear edit may have arrived while the mark was cleared.
-              if (cleared !== undefined && matchesObservedBody(cleared, doc)) {
-                entry = {...entry, ...observedFields(context.pushedKey, path, observedOids.get(path), cleared)};
+              if (canRefresh && cleared !== undefined && matchesObservedBody(cleared, doc)) {
+                entry = {...entry, ...observedFields(context.pushedKey, path, blob, cleared)};
               }
               ids.set(path, entry);
               const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, superseded, message:'Capture document marks'});
