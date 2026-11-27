@@ -410,7 +410,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
   // Which links came from Linear (a Linear member's path image, repaired into a plain link), rebuilt by document
   // identity as the initial sync from git does, before the progress commits replace the ids. The record keeps
   // them, so no later write uploads such a file.
-  const provenance = await readPlainLinkProvenance(git, fetched.state, fetched.tracked, { create: [], overwrite: [...plan.overwrite, ...plan.create] }, { progressKnown: false });
+  const provenance = await readPlainLinkProvenance(git, fetched.state, fetched.tracked, { create: [], overwrite: [...plan.overwrite, ...plan.create] }, 'linear-to-git');
   /**
    * With a document's provenance lost, the links of its tracked text that a commit taking in Linear's text added:
    * a Linear member's link the state no longer names may be one. Links written in git are not, so they stay as
@@ -468,7 +468,7 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
       unpushed = 0;
       return true;
     }
-    const next = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked), always: true });
+    const next = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked, 'linear-to-git'), always: true });
     const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, 'ids'), expected: expected.ids, next }]);
     if (!pushed.ok) return false;
     expected.ids = next;

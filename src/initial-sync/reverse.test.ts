@@ -1016,7 +1016,9 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(stopped.report.code, 'stopped');
     assert.equal(stopped.report.stoppedEarly, true);
     assert.deepEqual(Object.keys(await readIds()), ['combined/README.md', 'eng/README.md']);
-    assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/ids']), PROGRESS_MESSAGE);
+    const progress = await fixture.remote.text(['show', '-s', '--format=%B', 'refs/mdbisync/ids']);
+    assert.equal(progress.split('\n')[0], PROGRESS_MESSAGE);
+    assert.match(progress, /^Direction: linear-to-git$/m);
     const afterStop = await refs();
     assert.equal(afterStop['refs/mdbisync/linear'], undefined);
     assert.equal(afterStop['refs/heads/mdbisync/linear'], undefined);

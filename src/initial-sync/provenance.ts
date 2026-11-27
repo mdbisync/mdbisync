@@ -9,7 +9,7 @@
 // in the ids it records.
 
 import { posix } from 'node:path';
-import { type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, INITIAL_SYNC_PROGRESS, readIds } from '../state/index.ts';
+import { type Direction, type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, INITIAL_SYNC_PROGRESS, parseInitialSyncProgress, readIds } from '../state/index.ts';
 import { listPaths } from '../state/objects.ts';
 import { ASSETS_FOLDER, isCaptureName } from '../sync/upload-type.ts';
 import { readPlainFileProvenance } from '../sync/pull-repairs.ts';
@@ -54,10 +54,10 @@ export interface PlainLinkProvenance {
  * unfinished initial sync's progress commits), the `Plain-link:` trailers of
  * the `linear` ref's first-parent history, and those the tracked branch took
  * in. A trailer only ever withholds an upload, so reading the tracked
- * branch's whole history cannot grant one. Unless `progressKnown` is false,
- * a document an unfinished initial sync's progress commits name is known.
+ * branch's whole history cannot grant one. Only a git-to-Linear run whose
+ * progress all comes from that direction can use it to establish provenance.
  */
-export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapshot, 'ids' | 'linear'>, tracked: Oid, plan: ProvenancePlan, options: { progressKnown?: boolean } = {}): Promise<PlainLinkProvenance> {
+export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapshot, 'ids' | 'linear'>, tracked: Oid, plan: ProvenancePlan, direction: Direction): Promise<PlainLinkProvenance> {
   const entries: IdMap[] = [await readIds(git, state.ids)];
   const before = await idsBeforeProgress(git, state.ids);
   if (before !== null && before !== state.ids) entries.push(await readIds(git, before));
@@ -112,9 +112,10 @@ export async function readPlainLinkProvenance(git: Git, state: Pick<StateSnapsho
   // With `linear` present, its trailers and the ids are the whole record. Without it, an ids entry still is for
   // its document; any other document Linear holds may carry a Linear member's link the state no longer names.
   const unknown = new Set<string>();
-  // The progress commits of an initial sync from git name only documents it wrote from git text; those of one from
-  // Linear name every document before any provenance is read (`progressKnown: false`).
-  const known = new Set((options.progressKnown === false ? [started] : entries).flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
+  // Linear-to-git progress names documents before their provenance is recorded. A later progress commit can
+  // carry those ids forward, so check the whole unfinished run, including any older directionless commits.
+  const progressKnown = direction === 'git-to-linear' && await onlyGitToLinearProgress(git, state.ids, before);
+  const known = new Set((progressKnown ? entries : [started]).flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
   const unproven = plan.overwrite.filter((entry) => !known.has(entry.documentId));
   if (unproven.length > 0) {
     const marked = state.linear === null ? new Set<string>() : await readProvenanceUnknown(git, state.linear);
@@ -134,6 +135,12 @@ async function idsBeforeProgress(git: Git, ids: Oid | null): Promise<Oid | null>
   if (ids === null) return null;
   const found = (await git.text(['log', '--first-parent', '-1', '--format=%H', '--invert-grep', '--fixed-strings', `--grep=${INITIAL_SYNC_PROGRESS}`, ids])).trim();
   return found === '' ? null : found;
+}
+
+async function onlyGitToLinearProgress(git: Git, ids: Oid | null, before: Oid | null): Promise<boolean> {
+  if (ids === null || ids === before) return false;
+  const messages = await git.text(['log', '--first-parent', '-z', '--format=format:%B', before === null ? ids : `${before}..${ids}`]);
+  return messages.split('\0').every((message) => parseInitialSyncProgress(message)?.direction === 'git-to-linear');
 }
 
 /** The documents an initial sync's record in `linear`'s first-parent history left out for unknown provenance. */

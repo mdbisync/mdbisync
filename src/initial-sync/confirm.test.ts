@@ -364,7 +364,9 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.match(first.summary, /Run initial sync again with the same inputs/);
     const after = await refs();
     assert.equal(after['refs/mdbisync/linear'], undefined, 'a stopped run recorded linear');
-    assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/ids']), PROGRESS_MESSAGE);
+    const progressMessage = await fixture.remote.text(['show', '-s', '--format=%B', 'refs/mdbisync/ids']);
+    assert.equal(progressMessage.split('\n')[0], PROGRESS_MESSAGE);
+    assert.match(progressMessage, /^Direction: git-to-linear$/m);
     // The progress commit holds the written documents' ids and the ids chosen for the ones still to create.
     const progress = await readIds();
     assert.deepEqual(Object.keys(progress).sort(), SYNCED_PATHS);
@@ -490,7 +492,7 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal((await fixture.remote.run(['grep', '-l', '-F', added, ...all], { okCodes: [0, 1] })).stdout.toString().trim(), '');
   });
 
-  it('a resume from progress without signatures, as an earlier version wrote it, writes again what it cannot compare', async () => {
+  it('a resume from progress without signatures or a direction writes again what it cannot compare', async () => {
     const world = fakeWorld();
     // A form the format module does not predict: the document cannot show it holds the file's text.
     world.linear.store = (content) => `${content}\n\nStored.`;
@@ -499,7 +501,7 @@ describe('confirmed initial sync from git to Linear', () => {
     const git = fixture.remote;
     const tip = await git.revParse('refs/mdbisync/ids');
     const unsigned = await commitIds(git, tip, await readIdMap(git, tip), NEUTRAL_IDENTITY, {
-      message: await git.text(['show', '-s', '--format=%B', tip]),
+      message: (await git.text(['show', '-s', '--format=%B', tip])).replace(/^Direction: git-to-linear\n?/m, ''),
       always: true,
       written: await readWrittenHashes(git, tip),
     });
