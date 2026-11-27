@@ -2594,6 +2594,20 @@ describe('git executors', () => {
     await assert.rejects(runStep(ctx, { kind: 'git', action: 'ci-fix', args: {} }), ProductError);
     await commitAsPerson(ctx, new Map([['.pre-commit-config.yaml', `${await remoteFile('.pre-commit-config.yaml')}\ndefault_stages: [pre-commit]\n`]]), 'Set hook stages', true);
     await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, ctx.names.trackedBranch]);
+    // A CI job runs only hooks the tracked branch configures: without the preparation the step refuses.
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'ci-fix', args: {} }), HarnessGapError);
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'ci-fix', args: { fixes: ['linear-would-undue'] } }), /has no fix "linear-would-undue"/);
+    ctx.scenario.steps = [
+      { kind: 'git', action: 'ci-fix', args: { fixes: ['stable-fix', 'linear-would-undo'] } },
+      { kind: 'git', action: 'ci-fix', args: { target: 'first-document' } },
+    ];
+    await STEP_PREPARATION['git.ci-fix']?.beforeSync?.(ctx, ctx.live as LiveWorld, { runStep });
+    const prepared = await remoteFile('.pre-commit-config.yaml');
+    const tracked = await remoteGit.text(['rev-parse', `refs/heads/${ctx.names.trackedBranch}`]);
+    // Configured once: a second preparation commits nothing.
+    await STEP_PREPARATION['git.ci-fix']?.beforeSync?.(ctx, ctx.live as LiveWorld, { runStep });
+    assert.equal(await remoteGit.text(['rev-parse', `refs/heads/${ctx.names.trackedBranch}`]), tracked);
+    await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, ctx.names.trackedBranch]);
     await runStep(ctx, { kind: 'git', action: 'ci-fix', args: { fixes: ['stable-fix', 'linear-would-undo'] } });
     ctx.engine.pausedAt = 'after-capture-push-before-pr';
     await runStep(ctx, { kind: 'git', action: 'ci-fix', args: { target: 'first-document' } });
@@ -2605,10 +2619,14 @@ describe('git executors', () => {
     const synced = await remoteFile(path, ctx.names.syncBranch);
     assert.ok(synced.includes(ctx.observations.get('ciFix.unstable') as string));
     assert.ok(ctx.observations.has('syncBranch.personCommit'));
-    const configured = readHookConfig(await remoteFile('.pre-commit-config.yaml', ctx.names.syncBranch));
+    const configured = readHookConfig(prepared);
     assert.ok(configured.hooks.some((hook) => hook.id === 'aligned-table'));
     assert.ok(configured.hooks.some((hook) => hook.id === 'stable-fix'));
-    assert.deepEqual(parseYaml(await remoteFile('.pre-commit-config.yaml', ctx.names.syncBranch)).default_stages, ['pre-commit']);
+    assert.deepEqual(parseYaml(prepared).default_stages, ['pre-commit']);
+    // The fix commits change only documents: the sync merges no change to the hook configuration (head-unverified).
+    assert.equal(await remoteFile('.pre-commit-config.yaml', ctx.names.syncBranch), prepared);
+    const changed = await remoteGit.text(['diff', '--name-only', `refs/heads/${ctx.names.trackedBranch}`, `refs/heads/${ctx.names.syncBranch}`]);
+    assert.deepEqual(changed.trim().split('\n').filter((file) => !file.endsWith('.md')), []);
     const fixes = await remoteGit.text(['log', '--format=%(trailers:key=Pre-commit-fix,valueonly)', `refs/heads/${ctx.names.syncBranch}`]);
     assert.match(fixes, /aligned-table/);
     assert.match(fixes, /stable-fix/);
