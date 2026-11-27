@@ -7,9 +7,9 @@ import { describeStop } from '../linear/index.ts';
 import { type ConfirmedResult } from './confirm.ts';
 import { type InitialSyncPlan, type LeftOutEntry } from './plan.ts';
 import { type ReversePlan, type ReverseResult } from './reverse.ts';
+import type { Direction } from '../state/index.ts';
 
-export const DIRECTIONS = ['git-to-linear', 'linear-to-git'] as const;
-export type Direction = (typeof DIRECTIONS)[number];
+export { DIRECTIONS, type Direction } from '../state/index.ts';
 
 /** The plan in the run report; every path list is sorted. */
 export interface PlanReport {

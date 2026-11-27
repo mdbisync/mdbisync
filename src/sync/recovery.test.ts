@@ -16,10 +16,11 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { Git, UPLOADS_REBUILDING, UPLOADS_REBUILT } from '../state/index.ts';
+import { Git, type IdEntry, UPLOADS_REBUILDING, UPLOADS_REBUILT } from '../state/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, IDENTITY, createFixture, remoteRef, mergeOnGitHub } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, TEST_PUSHED_KEY, createFixture, remoteRef, mergeOnGitHub } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE } from './write.ts';
+import { observedBlobs, verifiedObservedDigest } from './recorded.ts';
 
 const CANARY = 'kx-0e5b7a31';
 const PRE_COMMIT = `repos:
@@ -143,9 +144,13 @@ describe('sync: lost state and deleted branches', () => {
 
   const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
   const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
+  const rawIds = async (): Promise<Record<string, IdEntry>> => JSON.parse(await show(`${STATE('ids')}:ids.json`)) as Record<string, IdEntry>;
   const ids = async () => {
-    const entries = JSON.parse(await show(`${STATE('ids')}:ids.json`)) as Record<string, { id: string; observedDigest?: string }>;
-    for (const entry of Object.values(entries)) delete entry.observedDigest;
+    const entries = await rawIds();
+    for (const entry of Object.values(entries)) {
+      delete entry.observedDigest;
+      delete entry.observedMac;
+    }
     return entries;
   };
   const live = () => world.linear.documents.filter((document) => document.trashed !== true && document.archivedAt === undefined);
@@ -245,6 +250,11 @@ describe('sync: lost state and deleted branches', () => {
     assert.deepEqual(run.writes, []);
     assert.deepEqual(run.report.capture?.rebuiltIds, { matched: Object.keys(before).length, files: Object.keys(before).length + unmatched });
     assert.deepEqual(await ids(), before, 'every path has its old id again');
+    const rebuilt = await rawIds();
+    const blobs = await observedBlobs(fixture.remote, await rev(STATE('linear')), Object.keys(rebuilt));
+    for (const [path, entry] of Object.entries(rebuilt)) {
+      if (entry.observedMac !== undefined) assert.ok(verifiedObservedDigest(TEST_PUSHED_KEY, path, blobs.get(path), entry), path);
+    }
     await settle();
     assert.deepEqual(await ids(), before);
     assert.deepEqual(await paths(), files, 'no second file');

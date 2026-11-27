@@ -76,6 +76,6 @@ export async function planFromRepository(context: RunContext, options: { remote:
   plan.capacity = assessCapacity(context, sources.containers, plan.create, options.cap);
   const uploads = await readUploads(context.git, context.fetched.state.uploads, context.pushedKey);
   // The provenance the confirmed run rebuilds, so the dry run leaves out what it would.
-  const { plainFiles, unknown } = await readPlainLinkProvenance(context.git, context.fetched.state, context.fetched.tracked, plan);
+  const { plainFiles, unknown } = await readPlainLinkProvenance(context.git, context.fetched.state, context.fetched.tracked, plan, 'git-to-linear');
   return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads, { remote: options.remote, plainFiles, unknownProvenance: unknown }));
 }

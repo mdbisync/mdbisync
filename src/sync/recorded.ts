@@ -11,7 +11,8 @@
 
 import { createHash } from 'node:crypto';
 import type { LinearDocument } from '../linear/index.ts';
-import { type Git, type Oid, type PushedKey, signedIdsMessage } from '../state/index.ts';
+import { type Git, type IdEntry, type Oid, type PushedKey, signedIdsMessage } from '../state/index.ts';
+import { listPaths } from '../state/objects.ts';
 import { message } from '../messages.ts';
 
 // Git commit message lines are separated by LF. Other characters can occur inside JSON trailer values.
@@ -24,9 +25,45 @@ export function captureCursorTrailer(through: string): string {
 }
 
 /** An exact comparison of the body as Linear returned it, including its update time. */
-export function observedDigest(document: LinearDocument): string | undefined {
+export function observedDigest(document: Pick<LinearDocument, 'content' | 'updatedAt'>): string | undefined {
   if (document.content === undefined) return undefined;
   return createHash('sha256').update(JSON.stringify([document.content, document.updatedAt])).digest('hex');
+}
+
+/** Blob ids of the accepted document paths in this Linear record. */
+export async function observedBlobs(git: Git, observation: Oid, paths: readonly string[]): Promise<Map<string, Oid>> {
+  const blobs = new Map<string, Oid>();
+  // Bound the path arguments even when listPaths falls back to git ls-tree.
+  for (let start = 0, end = 0; start < paths.length; start = end) {
+    let bytes = 0;
+    do {
+      bytes += Buffer.byteLength(paths[end]!) + 1;
+      end += 1;
+    } while (end < paths.length && end - start < 256 && bytes + Buffer.byteLength(paths[end]!) < 64 * 1024);
+    for (const {path, oid, type} of await listPaths(git, observation, paths.slice(start, end))) {
+      if (type === 'blob') blobs.set(path, oid);
+    }
+  }
+  return blobs;
+}
+
+/** Digest and signature of a body this run accepted from Linear. */
+export function observedFields(key: PushedKey, path: string, blob: Oid | undefined, document: LinearDocument): Pick<IdEntry, 'observedDigest' | 'observedMac'> {
+  const digest = observedDigest(document);
+  return {observedDigest: digest, observedMac: digest === undefined || blob === undefined ? undefined : key.observedMac(path, document.id, blob, digest)};
+}
+
+/** The recorded body digest, when it can be used as evidence of what the sync accepted. */
+export function verifiedObservedDigest(key: PushedKey, path: string, blob: Oid | undefined, entry: IdEntry): string | undefined {
+  const digest = entry.observedDigest;
+  return digest !== undefined && blob !== undefined && key.verifiesObserved(path, entry.id, blob, digest, entry.observedMac) ? digest : undefined;
+}
+
+/** The write fallback can compare only an authenticated digest for the current file. */
+export function matchesVerifiedObservedBody(key: PushedKey, path: string, blob: Oid, entry: IdEntry | undefined, document: Pick<LinearDocument, 'id' | 'content' | 'updatedAt'>): boolean {
+  if (entry?.id !== document.id) return false;
+  const digest = verifiedObservedDigest(key, path, blob, entry);
+  return digest !== undefined && digest === observedDigest(document);
 }
 
 /** A decoration response may refresh the timestamp of an already accepted body. */

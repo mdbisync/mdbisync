@@ -75,7 +75,9 @@ The first capture after upgrading from a version that stored unsigned capture
 checkpoints rereads the synchronized documents. After a complete capture,
 incremental reads resume using the signed checkpoint. Capture uses a restored
 checkpoint only when its observation belongs to the current Linear record's
-history.
+history. After upgrading from unsigned body digests, capture rereads previously
+synchronized documents in batches. This lets the write step verify them if the
+upload cache is unavailable.
 
 ## A change made in Linear
 

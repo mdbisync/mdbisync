@@ -12,13 +12,27 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { Git, commitTree, type IdEntry } from '../state/index.ts';
+import { Git, PushedKey, commitTree, type IdEntry } from '../state/index.ts';
 import { CONTENT_LIMIT, fixText } from '../format/index.ts';
 import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture, fakeLfsServer, mergeOnGitHub, signTip } from '../state/test-helpers.ts';
+import { matchesVerifiedObservedBody, observedDigest } from './recorded.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 import { MARKS } from './marks.ts';
+
+it('requires a signature for the active file before comparing a matching body digest', () => {
+  const key = new PushedKey('client-secret', 'owner/repo');
+  const path = 'docs/note.md';
+  const document = {id: 'note', content: 'Meeting notes.', updatedAt: '2026-01-01T00:00:00.000Z'};
+  const blob = 'a'.repeat(40);
+  const digest = observedDigest(document)!;
+  const entry = {id: document.id, observedDigest: digest};
+  assert.equal(matchesVerifiedObservedBody(key, path, blob, entry, document), false);
+  const signed = {...entry, observedMac: key.observedMac(path, document.id, blob, digest)};
+  assert.equal(matchesVerifiedObservedBody(key, path, blob, signed, document), true);
+  assert.equal(matchesVerifiedObservedBody(key, path, 'b'.repeat(40), signed, document), false);
+});
 
 const CANARY = 'kx-5b1e0a94';
 const PRE_COMMIT = `repos:
@@ -1333,13 +1347,20 @@ describe('sync: the tracked branch to Linear', () => {
     const previousUrl = uploadUrls(figure.content)[0]!;
     const uploadsBefore = world.linear.uploads.length;
     const legacyIds = await ids();
-    delete legacyIds[path]!.observedDigest;
+    const key = new PushedKey('client-secret', 'owner/repo');
+    const blob = await rev(`refs/mdbisync/linear:${path}`);
+    const before = legacyIds[path]!;
+    assert.ok(key.verifiesObserved(path, before.id, blob, before.observedDigest!, before.observedMac));
+    delete before.observedMac;
     const parent = await rev('refs/mdbisync/ids');
     const legacy = await commitTree(fixture.remote, { parents: [parent], base: parent, identity: IDENTITY,
       changes: new Map([['ids.json', JSON.stringify(legacyIds, null, 2) + '\n']]), message: 'Record document ids' });
     await fixture.remote.run(['update-ref', 'refs/mdbisync/ids', legacy]);
     assert.equal((await sync()).result.exitCode, 0);
-    assert.match((await ids())[path]?.observedDigest ?? '', /^[0-9a-f]{64}$/);
+    const migrated = (await ids())[path]!;
+    assert.equal(migrated.observedDigest, before.observedDigest);
+    assert.ok(key.verifiesObserved(path, migrated.id, blob, migrated.observedDigest!, migrated.observedMac));
+    await assertIdempotent();
     await clearUploadCache();
     await commit({ 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows, edited. ${CANARY}\n` });
     const { result, report, writes } = await sync();
