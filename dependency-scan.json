@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "release": "v1.0.0",
-  "commit": "40e87bd2c58595f6ece04662258a07803def3857",
-  "checked": "2026-11-27T08:47:58Z",
-  "run": "https://github.com/mdbisync/mdbisync/actions/runs/45968447926",
+  "release": "v1.0.1",
+  "commit": "df49168b3cfda3eb364faaf3777c2bc121c09da9",
+  "checked": "2026-11-27T21:27:47Z",
+  "run": "https://github.com/mdbisync/mdbisync/actions/runs/46070426275",
   "high": 0,
   "critical": 0
 }
