@@ -11,11 +11,14 @@ import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts'
 import type { Definition, Image, Link, Nodes } from 'mdast';
 import { fixText } from '../../../src/format/fix.ts';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
+import { lintText } from '../../../src/format/lint.ts';
+import { NOT_IN_LINEAR_EXPORT } from '../../../src/format/rules.ts';
+import { sameText } from '../../format/text-and-places.ts';
 import { readKeptAnnotations } from '../../../src/initial-sync/confirm.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
 import { IDS_FILE, PushedKey, readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
-import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
+import { annotatedFolders, annotationPath, heldBack, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
 import { ownedDocuments } from './ownership.ts';
 import { pullTracked } from './person-git.ts';
@@ -264,6 +267,15 @@ export function gitLinks(content: string, documentPath: string, targets: Require
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
   const expected = expectedDocumentText(text, path, sides);
   return expected === content || expected === fixText(content);
+}
+
+/**
+ * Whether a document differs from its file only by formatting Linear drops: the file has a construct Linear's
+ * export never holds (`NOT_IN_LINEAR_EXPORT`), and the document keeps its text, URLs and their places.
+ */
+export function formattingLinearDrops(text: string, content: string, path: string, sides: LinkTargets): boolean {
+  if (!lintText(path, text).some((finding) => NOT_IN_LINEAR_EXPORT.has(finding.rule))) return false;
+  return sameText(expectedDocumentText(text, path, sides), content);
 }
 
 /** The text a file's document must hold: the file's body, its links in Linear's form. */
@@ -703,12 +715,12 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   const readmes = new Map<string, string>();
   for (const path of tracked) if (/(^|\/)README\.md$/.test(path)) readmes.set(path, readFileSync(join(git.dir, path), 'utf8'));
   const folders = annotatedFolders(readmes);
-  // Files of the slice that the corpus marks as not synchronized or left out (lint errors) have no document.
+  // Files of the slice that the corpus marks as not synchronized or held back (blocking lint errors) have no document.
   const manifest = new Map(world.manifest.files.map((file) => [file.path, file]));
   const unsynced = new Set<string>();
   for (const [target, source] of world.tree.paths) {
     const entry = manifest.get(source);
-    if (entry !== undefined && (!entry.synced || entry.class === 'lint-error')) unsynced.add(target);
+    if (entry !== undefined && (!entry.synced || heldBack(entry))) unsynced.add(target);
   }
   const files = new Map<string, string>();
   const hashToPath = new Map<string, string>();
@@ -942,8 +954,10 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
         continue;
       }
       const actual = document.content ?? '';
-      // Linear stores a text it is sent without its final newline.
-      if (!sameAsFile(text, actual, path, s) && withoutFinalLineBreaks(expectedDocumentText(text, path, s)) !== actual) differing.push({ name: path, detail: `${path}: ${firstDifference(expectedDocumentText(text, path, s), actual)}` });
+      // Linear stores a text it is sent without its final newline, and drops formatting it does not hold: that
+      // comes back in the sync pull request, so until it is merged the file keeps it and the text is the same.
+      if (!sameAsFile(text, actual, path, s) && withoutFinalLineBreaks(expectedDocumentText(text, path, s)) !== actual
+        && !formattingLinearDrops(text, actual, path, s)) differing.push({ name: path, detail: `${path}: ${firstDifference(expectedDocumentText(text, path, s), actual)}` });
     }
     if (differing.length === 0) return ok('I1');
     // Every difference, kept in the run folder: the documents are archived at cleanup. A file that cannot be

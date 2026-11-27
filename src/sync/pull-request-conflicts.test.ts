@@ -71,7 +71,7 @@ describe('sync: pull request conflicts', () => {
     const before = (await documentOf(unstable)).content;
     const fixed = '---\nowner: example\n---\n\n# Plan\n\nReviewed and corrected.\n';
     await editRef(SYNC_BRANCH, stable, fixed, 'Apply pre-commit fixes\n\nPre-commit-fix: stable-fix');
-    const last = await editRef(SYNC_BRANCH, unstable, '# Guide\n\n| Check | Result |\n| :-- | --: |\n| Format | Ready |\n', 'Apply pre-commit fixes\n\nPre-commit-fix: aligned-table\nPre-commit-fix: unknown-output');
+    const last = await editRef(SYNC_BRANCH, unstable, '# Guide\n\nFormat ready.[^1]\n\n[^1]: Checked.\n', 'Apply pre-commit fixes\n\nPre-commit-fix: add-footnote\nPre-commit-fix: unknown-output');
     checksOn(last, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
     const merged = await sync();
     assert.ok(merged.report.pullRequest?.merged);
@@ -81,15 +81,15 @@ describe('sync: pull request conflicts', () => {
     assert.deepEqual(written.report.sync?.updated, [stable]);
     assert.equal((await documentOf(stable)).content, '# Plan\n\nReviewed and corrected.\n');
     assert.equal((await documentOf(unstable)).content, before);
-    assert.deepEqual(written.report.sync?.leftOut, [{ path: unstable, rules: ['table-alignment'], hooks: ['aligned-table'] }]);
+    assert.deepEqual(written.report.sync?.leftOut, [{ path: unstable, rules: ['footnote'], hooks: ['add-footnote'] }]);
     assert.match(written.summary, /CI fixes not written/);
-    assert.match(written.summary, /aligned-table/);
+    assert.match(written.summary, /add-footnote/);
     assert.doesNotMatch(written.summary, /unknown-output/);
     // Later runs neither repeat the write nor lose the diagnostic.
     for (let n = 0; n < 2; n++) {
       const quiet = await sync();
       assert.deepEqual(quiet.writes, []);
-      assert.match(quiet.summary, /aligned-table/);
+      assert.match(quiet.summary, /add-footnote/);
     }
   });
 

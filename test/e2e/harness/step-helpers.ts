@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readIds, stateRef, resolveStateConfig, type Git, type IdMap } from '../../../src/state/index.ts';
 import { ordinalOf } from './conflicts.ts';
-import { annotatedFolders, annotationPath, inheritedTeam } from './corpus.ts';
+import { annotatedFolders, annotationPath, heldBack, inheritedTeam } from './corpus.ts';
 import type { HelperPurpose } from './isolation.ts';
 import type { Project } from './linear-world.ts';
 import { nextToken, type Editor, type RunContext } from './context.ts';
@@ -22,7 +22,7 @@ export function live(ctx: RunContext) {
 /** Synced Markdown documents of the run's tree (not annotation READMEs), sorted. */
 export function documentPaths(ctx: RunContext): string[] {
   const world = live(ctx);
-  const synced = new Set(world.manifest.files.filter((file) => file.synced && file.kind === 'markdown' && file.class !== 'lint-error').map((file) => file.path));
+  const synced = new Set(world.manifest.files.filter((file) => file.synced && file.kind === 'markdown' && !heldBack(file)).map((file) => file.path));
   return [...world.tree.paths].filter(([, source]) => synced.has(source) && !/(^|\/)README\.md$/.test(source)).map(([target]) => target).sort();
 }
 

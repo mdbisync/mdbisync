@@ -15,7 +15,7 @@ import { CheckpointControl } from './checkpoints.ts';
 import { REF_MOVES, runChecks, snapshotRefs, recordRefs, startRefHistory, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
-import { annotatedFolders, CORPUS_DIR, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
+import { annotatedFolders, CORPUS_DIR, heldBack, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { runScheduled } from './schedule.ts';
 import { BudgetBlockedError, budgetFromStatus, estimate, MAX_ADMISSION, type Governor } from './governor.ts';
@@ -368,7 +368,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
   // Census is required before writes while all selected zones are leased.
   const trash: Record<string, { before: number; after?: number }> = {};
-  const synced = new Set(manifest.files.filter((file) => file.synced && file.class !== 'lint-error').map((file) => file.path));
+  const synced = new Set(manifest.files.filter((file) => file.synced && !heldBack(file)).map((file) => file.path));
   const folders = annotatedFolders(readmes);
   const additions = ctx.scenario.steps.reduce((count, step) => count + (['git.add', 'git.copy', 'linear.create'].includes(`${step.kind}.${step.action}`) ? 1 : 0), 0);
   ctx.observations.set('zone.trash', trash);
@@ -456,7 +456,7 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     if (/(^|\/)README\.md$/.test(target)) readmes.set(target, text);
   }
   const folders = annotatedFolders(readmes);
-  const synced = new Set(live.manifest.files.filter((file) => file.synced && file.class !== 'lint-error').map((file) => file.path));
+  const synced = new Set(live.manifest.files.filter((file) => file.synced && !heldBack(file)).map((file) => file.path));
   const seededPaths = new Map<string, string>();
   const images = trackedImageUploads(ctx, live);
   for (const [target, source] of live.tree.paths) {

@@ -1781,10 +1781,10 @@ const GIT: Record<string, Executor> = {
     interleavings.push(ctx.engine.pausedAt === 'after-capture-push-before-pr' ? 'capture-before-fix' : 'fix-before-capture');
     for (const fix of fixes) {
       const token = nextToken(ctx);
-      const id = fix === 'linear-would-undo' ? 'aligned-table' : 'stable-fix';
+      const id = fix === 'linear-would-undo' ? 'add-footnote' : 'stable-fix';
       const addition = fix === 'linear-would-undo'
-        // Column alignment, which Linear drops (it keeps `| -- |` separators).
-        ? `\n| Check | Result |\n|:--|--:|\n| ${token} | ok |\n`
+        // A footnote, whose text Linear moves into a link: the sync holds the file back.
+        ? `\nChecked, ref ${token}.[^1]\n\n[^1]: By the format job.\n`
         // Linear stores a final paragraph without a trailing newline.
         : `\nChecked by the format job, ref ${token}.`;
       commits.push(await commitToSyncBranch(ctx, async (git) => {

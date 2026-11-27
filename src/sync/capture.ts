@@ -11,7 +11,7 @@ import { checkMappingBudget, mapTree } from '../mapping/mapping.ts';
 import { pendingProject, resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
-import { fixLinearText, joinFile, linkedFileCheck, lintInTree, sameAsLinear, splitFile } from '../format/index.ts';
+import { fixLinearText, joinFile, linkedFileCheck, lintRecorded, sameAsLinear, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, hasDocumentLinks, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -273,7 +273,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const excludedPath = (path: string) => {
       const mapped = recorded.documents.find((document) => document.path === path);
       const prior = previous.get(path);
-      return mapped === undefined || (prior !== undefined && lintInTree(path, prior.toString('utf8'), recorded.files).length > 0)
+      return mapped === undefined || (prior !== undefined && lintRecorded(path, prior.toString('utf8'), recorded.files).length > 0)
         || lengthRefusal({title: mapped.title}, linear.facts) !== undefined;
     };
     const retained = new Map<string, string>();

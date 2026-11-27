@@ -38,7 +38,7 @@ const TREE = {
   'eng/backend/notes.md': `# Notes\n\n${CANARY}\n`,
   'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}\n`,
   'eng/notes/plan.md': `# Plan\n\n${CANARY}\n`,
-  'eng/notes/formula.md': `# Formula\n\nWater is H~2~O. ${CANARY}\n`,
+  'eng/notes/formula.md': `# Formula\n\nWater is wet.[^1] ${CANARY}\n\n[^1]: A note.\n`,
   'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}\n`,
   'combined/Guide.md': `# Guide\n\n${CANARY}\n`,
   'combined/guide.md': `# guide\n\n${CANARY}\n`,
@@ -150,8 +150,8 @@ describe('initial sync dry run', () => {
     assert.deepEqual(report.summary?.collisionPaths, ['combined/Guide.md', 'combined/guide.md']);
     assert.deepEqual(report.summary?.leftOutFiles.find((entry) => entry.path === 'eng/notes/formula.md'), {
       path: 'eng/notes/formula.md',
-      rules: ['subscript'],
-      lines: [3],
+      rules: ['footnote'],
+      lines: [3, 5],
       documentId: 'doc-formula',
     });
 
@@ -194,7 +194,7 @@ describe('initial sync dry run', () => {
       [
         ['combined/Guide.md', ['duplicate-title'], ['combined/guide.md']],
         ['combined/guide.md', ['duplicate-title'], ['combined/Guide.md']],
-        ['eng/notes/formula.md', ['subscript'], []],
+        ['eng/notes/formula.md', ['footnote'], []],
       ],
     );
     assert.deepEqual(report.summary?.plan.trash, []);

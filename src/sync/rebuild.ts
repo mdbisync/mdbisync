@@ -16,7 +16,7 @@
 // reserved for documents not created yet, and a marked document's own icon
 // and color.
 
-import { lintInTree } from '../format/index.ts';
+import { lintRecorded } from '../format/index.ts';
 import { type DocumentPlace, type LinearClient, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place } from '../mapping/index.ts';
 import { type PlaceCheck } from './tracked-places.ts';
@@ -68,7 +68,7 @@ export async function rebuildIds({ git, record, linear, facts, targets, allowedP
   const sides = new Map<Oid, Promise<Side>>();
   const leftOut: string[] = [...unmapped];
   for (const document of documents) {
-    if (lintInTree(document.path, document.text, treeFiles).length > 0 || lengthRefusal({ title: document.title }, facts) !== undefined) {
+    if (lintRecorded(document.path, document.text, treeFiles).length > 0 || lengthRefusal({ title: document.title }, facts) !== undefined) {
       leftOut.push(document.path);
       continue;
     }

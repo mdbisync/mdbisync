@@ -4,7 +4,7 @@
 // cannot be trusted to keep, or to reach, an image anywhere else.
 
 import type { Definition, ImageReference, LinkReference, Nodes, PhrasingContent, Root, Table, TableRow } from 'mdast';
-import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
+import { CONTENT_LIMIT, LINT_RULE_BLOCKS, LINT_RULES, NOT_IN_LINEAR_EXPORT, type Finding, type LintRule } from './rules.ts';
 import { ASSETS_FOLDER } from '../sync/upload-type.ts';
 import { allowedLink, bracketedLabel, codeSpanText, linearDropsCodeSpaces, listKind, listParts, MAX_LIST_NUMBER, nestsMarkerText, opensWithText, MARKDOWN_MAX_NODES, MarkdownLimitError, end, imageDestination, line, lineCount, linkDestination, parse, resolveTarget, splitFile, start, visit, endingRow } from './markdown.ts';
 import { plusTextAsText, plusTextLines, sectionsFirstInItem, unwritableSectionLine } from './sections.ts';
@@ -15,7 +15,6 @@ import { tabReferences } from './tab-reference.ts';
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-const FIX_ONLY_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['code-span-padding', 'hard-break-in-heading', 'list-after-item-text', 'list-number-too-long', 'setext-heading-lines', 'table-header-pipe', 'table-list-cell', 'table-quote-cell', 'tab-reference-layout', 'space-reference-edge', 'unplaced-link', 'number-paragraph']);
 const NUMBER_ONLY = /^\d{1,9}\\[.)]$/;
 const LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 const LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
@@ -55,22 +54,25 @@ export function linkedFileCheck(documentPath: string, isFile: (path: string) => 
 }
 
 /**
- * Lint findings for a document of a git tree, whose images must be files of
- * that tree: `files` holds the tree's regular files (no symbolic links), by
- * path. The sync lints every document it reads this way.
+ * The lint findings that hold a document of a git tree back from Linear in
+ * the sync (`LINT_RULE_BLOCKS`). Its images must be files of that tree:
+ * `files` holds the tree's regular files (no symbolic links), by path. The
+ * sync lints every document it reads this way.
  */
 export function lintInTree(file: string, text: string, files: ReadonlySet<string>): Finding[] {
   const findings = lintText(file, text, { linkedFileExists: linkedFileCheck(file, (path) => files.has(path)) });
-  // The heading rules guard the formatter's ATX conversion. The sync can
-  // preserve setext text and uses historical versions to verify writes.
-  // The setext and table rules report text Linear reads differently from
-  // Markdown, but Linear's own export can hold it (a rule, text lines and a
-  // rule; a list in a table cell; an empty quote inside a quote in a cell,
-  // which starts it with `>`): a document Linear wrote is not left out.
-  // `unplaced-link` stops only `fix`: the sync sends the text as it is.
-  // So does `code-span-padding`: Linear keeps the code, and only writes it
-  // without the padding that keeps its outer spaces.
-  return findings.filter((finding) => !FIX_ONLY_RULES.has(finding.rule));
+  return findings.filter((finding) => LINT_RULE_BLOCKS[finding.rule]);
+}
+
+/**
+ * For a version of a file the `linear` chain records: the findings that show
+ * the sync did not give it to Linear. Those of `lintInTree`, and those of the
+ * rules whose construct Linear's export never holds (`NOT_IN_LINEAR_EXPORT`),
+ * which an earlier release left out.
+ */
+export function lintRecorded(file: string, text: string, files: ReadonlySet<string>): Finding[] {
+  const findings = lintText(file, text, { linkedFileExists: linkedFileCheck(file, (path) => files.has(path)) });
+  return findings.filter((finding) => LINT_RULE_BLOCKS[finding.rule] || NOT_IN_LINEAR_EXPORT.has(finding.rule));
 }
 
 /**

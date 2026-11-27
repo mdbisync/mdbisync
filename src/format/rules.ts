@@ -53,6 +53,70 @@ export const LINT_RULES = {
 export type LintRule = keyof typeof LINT_RULES;
 
 /**
+ * Whether a rule's finding holds its file back from Linear in the sync.
+ * A rule blocks when Linear refuses the document, or would move, drop or
+ * split its text: a lost URL, a split table row, text moving out of a list
+ * item or into a collapsible section; or when Linear shows the text
+ * differently while its export writes the same Markdown, so the change never
+ * comes back (a table cell's `#` as a heading). It does not block when only
+ * formatting is lost and the text stays where it was, or when Linear's own
+ * export writes the construct: the sync writes such a file, and the loss
+ * comes back from Linear as a change in the sync pull request.
+ * `test/format/blocking.test.ts` holds each rule's evidence from the
+ * fixture bank's recorded Linear forms.
+ */
+export const LINT_RULE_BLOCKS: { readonly [R in LintRule]: boolean } = {
+  footnote: true,
+  subscript: false,
+  'table-escaped-pipe': true,
+  'table-hash-cell': true,
+  'table-list-cell': false,
+  'table-quote-cell': false,
+  'image-in-link': true,
+  'content-too-long': true,
+  'markdown-complexity': true,
+  'duplicate-title': true,
+  'table-alignment': false,
+  'link-scheme': true,
+  'link-without-text': true,
+  'link-title': false,
+  'image-title': false,
+  'code-in-emphasis': false,
+  'hard-break-backslash': false,
+  'setext-heading-lines': false,
+  'table-header-pipe': false,
+  'code-span-padding': false,
+  'hard-break-in-heading': false,
+  'number-paragraph': false,
+  'tab-reference-layout': false,
+  'space-reference-edge': false,
+  'git-conflict-marker': true,
+  'section-opener': true,
+  'url-in-html': true,
+  'unplaced-link': false,
+  'list-after-item-text': false,
+  'list-number-too-long': false,
+  'block-first-in-list-item': true,
+  'section-marker-text': true,
+  'plus-line-in-item': true,
+  'tab-indentation': true,
+  'ordered-task-list': false,
+  'image-not-in-repository': true,
+  'image-file-missing': true,
+  'upload-file-refused': false,
+  'document-in-assets-folder': true,
+};
+
+/**
+ * Rules whose construct Linear's export never holds: Linear drops the
+ * formatting, so a version with one was never what Linear held. Releases
+ * before 1.0.2 held a file back for them, and their record of the `linear`
+ * chain can still hold such a version of a file left out; the sync reads it
+ * as left out there (`lintRecorded`), so the file is written now.
+ */
+export const NOT_IN_LINEAR_EXPORT: ReadonlySet<LintRule> = new Set<LintRule>(['code-in-emphasis', 'hard-break-backslash', 'image-title', 'link-title', 'ordered-task-list', 'subscript', 'table-alignment']);
+
+/**
  * Warnings: text that may read differently from what its author meant, which
  * formatting and sync keep as it is. `lint` and `fix` print them, but they
  * never fail a command, a hook or CI, and never leave a file out.
@@ -76,20 +140,18 @@ export interface Warning {
 /**
  * Rules whose construct `fix` rewrites into Linear's form without changing
  * what the Markdown says: `lint` reports them until it has, and neither
- * `fixText` nor the `fix` command stops at them. The sync still leaves such
- * a file out until it is fixed. A backslash line break becomes a two-space
- * break, which Linear keeps; where that would change the document (a break
- * in a heading, which `fix` writes on one line, or a line that reads
- * differently without its backslash), `fixText` leaves the text as it is.
- * A `>` that starts a table body cell gets a backslash, the form Linear
- * writes for that text; lint's FIX_ONLY_RULES lets the sync send such a
- * file as it is, since Linear's own export can hold it. A link without
+ * `fixText` nor the `fix` command stops at them. Whether the sync writes
+ * such a file before it is fixed is the rule's LINT_RULE_BLOCKS flag. A
+ * backslash line break becomes a two-space break, which Linear keeps; where
+ * that would change the document (a break in a heading, which `fix` writes
+ * on one line, or a line that reads differently without its backslash),
+ * `fixText` leaves the text as it is. A `>` that starts a table body cell
+ * gets a backslash, the form Linear writes for that text. A link without
  * text gets its URL as the text; one without a URL stays with its author.
  * A line of plus signs with text right after them that Linear would read
- * as a section's title gets a backslash (`\+++Plan`); the sync leaves it
- * out until then. A lone `+` right below an item's first line gets a
- * no-break space after it, and the indentation a tab takes in the Markdown
- * structure is written with spaces; the sync leaves those out until then too.
+ * as a section's title gets a backslash (`\+++Plan`). A lone `+` right
+ * below an item's first line gets a no-break space after it, and the
+ * indentation a tab takes in the Markdown structure is written with spaces.
  */
 export const FIXED_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['hard-break-backslash', 'link-without-text', 'plus-line-in-item', 'section-marker-text', 'tab-indentation', 'table-quote-cell']);
 

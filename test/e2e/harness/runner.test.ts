@@ -9,7 +9,7 @@ import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '..
 import { Git } from '../../../src/state/index.ts';
 import { pathWithoutGitLfs } from '../../../src/state/test-helpers.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
-import { budgetHolds, reportedConflictNotices, reportedHoldChanges, compare, firstDifference, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
+import { budgetHolds, reportedConflictNotices, reportedHoldChanges, compare, firstDifference, formattingLinearDrops, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { loadTestConfig, parseEnvFile, parseRepoUrl } from './config.ts';
 import { Governor } from './governor.ts';
@@ -204,6 +204,14 @@ describe('check helpers', () => {
     const stored = '| Step | State |\n| -- | -- |\n| Draft  | tbd |';
     assert.equal(sameAsFile('| Step | State |\n| -- | -- |\n| Draft | tbd |\n', stored, 'eng/plan.md', sides), true);
     assert.equal(sameAsFile('| Step | State |\n| -- | -- |\n| Drafted | tbd |\n', stored, 'eng/plan.md', sides), false, 'a real body difference still fails I1');
+  });
+
+  it('a document that differs from its file only by formatting Linear drops holds the file until the sync pull request brings that back (I1)', () => {
+    const sides = { hashes: new Map(), uploadsByHash: new Map() };
+    const file = '| Step | State |\n| :-- | --: |\n| Draft | tbd |\n';
+    assert.equal(formattingLinearDrops(file, '| Step | State |\n| -- | -- |\n| Draft | tbd |', 'eng/plan.md', sides), true);
+    assert.equal(formattingLinearDrops(file, '| Step | State |\n| -- | -- |\n| Drafted | tbd |', 'eng/plan.md', sides), false, 'a real body difference still fails I1');
+    assert.equal(formattingLinearDrops('| Step | State |\n| -- | -- |\n| Draft | tbd |\n', '| Step | State |\n| -- | -- |\n| Draft | tbd |', 'eng/plan.md', sides), false, 'only a file with a construct Linear drops');
   });
 
   it('find canaries without quoting the text around them', () => {

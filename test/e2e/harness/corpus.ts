@@ -15,6 +15,7 @@
 import { runNames, type RunNames } from './isolation.ts';
 import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
+import { LINT_RULE_BLOCKS, type LintRule } from '../../../src/format/rules.ts';
 
 export const CORPUS_DIR = 'corpus';
 export const SLICES_DIR = 'corpus-slices';
@@ -39,6 +40,11 @@ export interface ManifestFile {
   role?: string | null;
   /** What the generator built into the file (for example `…, and an invalid diagram`). */
   note?: string | null;
+}
+
+/** Whether the sync leaves the file out: a lint error of a rule that holds a file back from Linear. */
+export function heldBack(file: Pick<ManifestFile, 'class' | 'rule'>): boolean {
+  return file.class === 'lint-error' && (file.rule === null || LINT_RULE_BLOCKS[file.rule as LintRule] !== false);
 }
 
 export interface Manifest {

@@ -49,7 +49,7 @@ import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts
 import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, editsFound, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, REF_HISTORY_TIMES, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
-import { annotationPath, owningFolder, type Folder } from './corpus.ts';
+import { annotationPath, heldBack, owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 import { canaryIsolated, type CanaryFacts } from './security-canary.ts';
 import { isAppBot, runLogs } from './workflows.ts';
@@ -57,7 +57,7 @@ import type { PushActivity, WorkflowRun } from './github.ts';
 import { appTokenClientIds, workflowWriteCredentials } from './run-credentials.ts';
 import { isDocumentWrite, QUIET_SUBJECT, UNTOUCHED_SUBJECT } from './quiet.ts';
 import { commentsWithState, isImageNotice, noticeImageLabels, type ImageRepairSource, type ImageRepairProposal } from './image-gate.ts';
-import { lintInTree } from '../../../src/format/lint.ts';
+import { lintRecorded } from '../../../src/format/lint.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
 import { documentPaths, live, MOVE_SOURCE_FOLDER, projectFolderOf, projectFolders } from './step-helpers.ts';
@@ -1080,7 +1080,7 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'documents.leftOutPaths': async (env) => {
     const view = await env.view();
-    const lintErrors = [...manifestOf(env.ctx)].filter(([, entry]) => entry.class === 'lint-error').map(([path]) => path);
+    const lintErrors = [...manifestOf(env.ctx)].filter(([, entry]) => heldBack(entry)).map(([path]) => path);
     return sorted(lintErrors.filter((path) => view.ids.has(path)));
   },
   'documents.mermaidBytes': async (env) => mermaidFences(env, 'linear'),
@@ -1331,7 +1331,7 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'summary.unstableHookNamed': async (env) => ownResults(env.ctx).some((run) => {
     const sync = run.report?.['sync'] as { leftOut?: Array<{ hooks?: string[] }> } | null | undefined;
-    return sync?.leftOut?.some((file) => file.hooks?.includes('aligned-table')) === true && run.summary.includes('aligned-table');
+    return sync?.leftOut?.some((file) => file.hooks?.includes('add-footnote')) === true && run.summary.includes('add-footnote');
   }),
   'decided.code': async (env) => decidedCode(env.ctx),
 
@@ -1999,7 +1999,7 @@ export const SUBJECTS: Record<string, Compute> = {
       const files = new Set((await listTree(git, head)).filter((entry) => entry.type === 'blob' && entry.mode !== '120000').map((entry) => entry.path));
       const texts = await treeFiles(git, head, (path) => changed.includes(path));
       for (const path of changed) {
-        for (const finding of lintInTree(path, texts.get(path)?.toString('utf8') ?? '', files)) findings.add(`${path}: ${finding.rule}`);
+        for (const finding of lintRecorded(path, texts.get(path)?.toString('utf8') ?? '', files)) findings.add(`${path}: ${finding.rule}`);
       }
     }
     return sorted(findings);
@@ -2199,7 +2199,7 @@ export const SUBJECTS: Record<string, Compute> = {
   'tokens.killedRunRevokedByCleanup': async (env) => tokenRevoked(env, 'killed'),
 
   // --- expectations from the corpus and the setup ----------------------------------------------
-  'corpus.lintErrors': async (env) => env.ctx.live === null ? observed(env.ctx, 'corpus.lintErrors') : sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.class === 'lint-error').map(([path]) => path)),
+  'corpus.lintErrors': async (env) => env.ctx.live === null ? observed(env.ctx, 'corpus.lintErrors') : sorted([...manifestOf(env.ctx)].filter(([, entry]) => heldBack(entry)).map(([path]) => path)),
   'fixtures.bothCollisionPaths': async (env) => sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.synced && entry.kind === 'markdown' && entry.rule === 'duplicate-title').map(([path]) => path)),
   'expected.initialPlan.paths': async (env) => sorted((await env.view()).files.keys()),
   // Every path the dry run acts on (overwrite, create, remove); the annotation READMEs it keeps are not actions.
