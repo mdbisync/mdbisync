@@ -3,6 +3,7 @@
 // longer says where a document's links came from.
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -16,7 +17,6 @@ import { linksTakenInFromLinear, pathLinks } from './provenance.ts';
 
 const DOC = 'eng/notes/doc.md';
 const SECRET = 'records.csv';
-const CAPTURED = `eng/notes/assets/${'a'.repeat(64)}.png`;
 
 describe('links a commit taking in Linear\'s text added', () => {
   const roots: string[] = [];
@@ -88,11 +88,15 @@ describe('links a commit taking in Linear\'s text added', () => {
     assert.deepEqual(await takenIn(git, DOC, text, tip), []);
   });
 
-  it('does not count a capture\'s own file in the document\'s assets folder', async () => {
+  it('does not count a capture\'s own file in the document\'s assets folder, unless its bytes changed since', async () => {
     const { git, root } = await repository();
-    const text = `# Doc\n\n[Picture](assets/${'a'.repeat(64)}.png)\n${member}`;
-    const tip = await commit(git, root, { [CAPTURED]: 'bytes', [DOC]: text }, CAPTURE_MESSAGE);
-    assert.deepEqual(await takenIn(git, DOC, text, tip), [SECRET]);
+    const hash = createHash('sha256').update('bytes').digest('hex');
+    const own = `eng/notes/assets/${hash}.png`;
+    const suffixed = `eng/notes/assets/${hash}-1.png`;
+    const edited = `eng/notes/assets/${'a'.repeat(64)}.png`;
+    const text = `# Doc\n\n[Picture](assets/${hash}.png)\n[Again](assets/${hash}-1.png)\n[Edited](assets/${'a'.repeat(64)}.png)\n${member}`;
+    const tip = await commit(git, root, { [own]: 'bytes', [suffixed]: 'bytes', [edited]: 'bytes', [DOC]: text }, CAPTURE_MESSAGE);
+    assert.deepEqual(await takenIn(git, DOC, text, tip), [edited, SECRET].sort());
   });
 
   it('follows the document across a rename in git', async () => {

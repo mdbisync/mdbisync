@@ -5,13 +5,17 @@ import { parseXml, XmlElement, type XmlNode } from '@rgrove/parse-xml';
 export const ASSETS_FOLDER = 'assets';
 export const UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.png', '.jpg', '.gif', '.webp', '.pdf', '.avif', '.mp4', '.webm', '.svg']);
 
+/** The highest `-<n>` a capture takes when its hash's own name is taken. */
+export const CAPTURE_SUFFIX_LIMIT = 100;
+
 /**
  * Whether `path` is named as a capture names a downloaded upload: its content's
- * SHA-256 in lowercase hex and an extension `uploadExtension` gives.
+ * SHA-256 in lowercase hex, then `-<n>` up to `CAPTURE_SUFFIX_LIMIT` when that
+ * name was taken, and an extension `uploadExtension` gives.
  */
 export function isCaptureName(path: string): boolean {
-  const match = /^[0-9a-f]{64}(\.[a-z0-9]+)$/.exec(path.slice(path.lastIndexOf('/') + 1));
-  return match !== null && UPLOAD_EXTENSIONS.has(match[1]!);
+  const match = /^[0-9a-f]{64}(?:-([1-9][0-9]*))?(\.[a-z0-9]+)$/.exec(path.slice(path.lastIndexOf('/') + 1));
+  return match !== null && Number(match[1] ?? 0) <= CAPTURE_SUFFIX_LIMIT && UPLOAD_EXTENSIONS.has(match[2]!);
 }
 
 /**

@@ -10,7 +10,7 @@ import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, par
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
 import { checkImageRepairSize, imageLinks } from './image-links.ts';
-import { ASSETS_FOLDER, admitsCapturedFile, isCaptureName, uploadExtension } from './upload-type.ts';
+import { ASSETS_FOLDER, CAPTURE_SUFFIX_LIMIT, admitsCapturedFile, isCaptureName, uploadExtension } from './upload-type.ts';
 
 export interface CapturedAssets {
   body: string;
@@ -306,9 +306,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     if (answer.error instanceof LinearStoppedError || (answer.error instanceof LinearError && isTransientLinearError(answer.error))) throw answer.error;
     return false;
   };
-  // The captures of each content hash (files named by the hash), by folder, in tree order.
+  // The captures of each content hash (files named by the hash), by folder, in the order the index ranks them.
   const capturePaths = new Map<string, Map<string, string[]>>();
   const pathHashes = new Map<string, string>();
+  // Captures whose bytes no longer pass the upload check under their name.
+  const refusedCaptures = new Set<string>();
   // Every path of the tree that is not a folder: an `assets` entry that is a file or a symbolic link is no folder to write into.
   const notFolders = new Set<string>();
   // Every folder of the tree: a copy never replaces one.
@@ -336,7 +338,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
       for (const entry of batch) {
         const blob = blobs.get(entry.oid)!;
-        const hash = parseLfsPointer(blob)?.oid ?? createHash('sha256').update(blob).digest('hex');
+        const pointer = parseLfsPointer(blob);
+        const hash = pointer?.oid ?? createHash('sha256').update(blob).digest('hex');
+        // A Git LFS pointer's bytes are checked when the file is reused.
+        if (pointer === null && !admitsCapturedFile(entry.path, blob)) refusedCaptures.add(entry.path);
         if (isCaptureName(entry.path) && posix.basename(entry.path).startsWith(hash)) {
           let byFolder = capturePaths.get(hash);
           if (byFolder === undefined) capturePaths.set(hash, byFolder = new Map());
@@ -348,6 +353,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         pathHashes.set(entry.path, hash);
       }
     }
+    // A capture that still passes the upload check under its name first (one that does not blocks the document only
+    // when it is the only one), then the hash's own name, then the lowest suffix: not tree order, where `-1` sorts before `.`.
+    const rank = (path: string) => (refusedCaptures.has(path) ? CAPTURE_SUFFIX_LIMIT + 1 : 0) + captureSuffix(path);
+    for (const byFolder of capturePaths.values()) for (const paths of byFolder.values()) paths.sort((a, b) => rank(a) - rank(b));
     indexed = true;
   };
   // A repository file an upload maps to is reused only when readable, and, if a capture named it, when its
@@ -443,6 +452,21 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         if (existing === undefined) { placed.set(target, hash); return target; }
       }
       return undefined;
+    };
+    /**
+     * The path a new capture of these bytes takes in the document's `assets/` folder: their hash, or the hash and
+     * `-<n>` when that name is taken (by other bytes, a folder, or a file a Linear member linked, which an upload
+     * is never bound to). A copy this run already chose for the same bytes is shared.
+     */
+    const newCapturePath = (hash: string, extension: string): string => {
+      for (let n = 0; n <= CAPTURE_SUFFIX_LIMIT; n++) {
+        const candidate = posix.join(assetsFolder, `${hash}${n === 0 ? '' : `-${n}`}${extension}`);
+        if (plainTarget(candidate)) continue;
+        const chosen = placed.get(candidate);
+        if (chosen === hash) return candidate;
+        if (chosen === undefined && !notFolders.has(candidate) && !folders.has(candidate)) return candidate;
+      }
+      throw new Error(message('assets.destination-exists'));
     };
     const preferredPaths = new Map<string, string>();
     // Files the previous text linked that cannot be read now (a Git LFS object that is missing), by their hash.
@@ -567,10 +591,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         if (assetPath === undefined) {
           const extension = uploadExtension(contentBytes(asset.file));
           if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
-          assetPath = posix.join(assetsFolder, `${hash}${extension}`);
           // A file or symbolic link named `assets` stays: the document waits until its author moves it.
-          const chosen = placed.get(assetPath);
-          if (!assetsUsable || plainTarget(assetPath) || notFolders.has(assetPath) || folders.has(assetPath) || (chosen !== undefined && chosen !== hash)) throw new Error(message('assets.destination-exists'));
+          if (!assetsUsable) throw new Error(message('assets.destination-exists'));
+          assetPath = newCapturePath(hash, extension);
           placed.set(assetPath, hash);
         }
         // Each document owns its candidate bytes until its security check passes.
@@ -618,6 +641,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     return finish(localized, files, additions);
   };
   return Object.assign(capture, {close: () => spool.close()});
+}
+
+/** The `-<n>` of a capture name, 0 for the hash's own name. */
+function captureSuffix(path: string): number {
+  return Number(/-([1-9][0-9]*)\.[a-z0-9]+$/.exec(path)?.[1] ?? 0);
 }
 
 /** Standalone inverse; a full capture reuses createAssetCapture's hash index. */
