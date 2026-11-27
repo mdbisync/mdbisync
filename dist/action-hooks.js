@@ -50,7 +50,7 @@ var require_identity = __commonJS({
     var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
     var isMap = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
     var isPair = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
-    var isScalar = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
+    var isScalar2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
     var isSeq = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
     function isCollection(node) {
       if (node && typeof node === "object")
@@ -72,7 +72,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node) => (isScalar(node) || isCollection(node)) && !!node.anchor;
+    var hasAnchor = (node) => (isScalar2(node) || isCollection(node)) && !!node.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -87,7 +87,7 @@ var require_identity = __commonJS({
     exports.isMap = isMap;
     exports.isNode = isNode;
     exports.isPair = isPair;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.isSeq = isSeq;
   }
 });
@@ -100,7 +100,7 @@ var require_visit = __commonJS({
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove node");
-    function visit(node, visitor) {
+    function visit2(node, visitor) {
       const visitor_ = initVisitor(visitor);
       if (identity.isDocument(node)) {
         const cd = visit_(null, node.contents, visitor_, Object.freeze([node]));
@@ -109,9 +109,9 @@ var require_visit = __commonJS({
       } else
         visit_(null, node, visitor_, Object.freeze([]));
     }
-    visit.BREAK = BREAK;
-    visit.SKIP = SKIP;
-    visit.REMOVE = REMOVE;
+    visit2.BREAK = BREAK;
+    visit2.SKIP = SKIP;
+    visit2.REMOVE = REMOVE;
     function visit_(key, node, visitor, path) {
       const ctrl = callVisitor(key, node, visitor, path);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
@@ -245,7 +245,7 @@ var require_visit = __commonJS({
         throw new Error(`Cannot replace node with ${pt} parent`);
       }
     }
-    exports.visit = visit;
+    exports.visit = visit2;
     exports.visitAsync = visitAsync;
   }
 });
@@ -255,7 +255,7 @@ var require_directives = __commonJS({
   "node_modules/yaml/dist/doc/directives.js"(exports) {
     "use strict";
     var identity = require_identity();
-    var visit = require_visit();
+    var visit2 = require_visit();
     var escapeChars = {
       "!": "%21",
       ",": "%2C",
@@ -399,7 +399,7 @@ var require_directives = __commonJS({
         let tagNames;
         if (doc && tagEntries.length > 0 && identity.isNode(doc.contents)) {
           const tags = {};
-          visit.visit(doc.contents, (_key, node) => {
+          visit2.visit(doc.contents, (_key, node) => {
             if (identity.isNode(node) && node.tag)
               tags[node.tag] = true;
           });
@@ -426,7 +426,7 @@ var require_anchors = __commonJS({
   "node_modules/yaml/dist/doc/anchors.js"(exports) {
     "use strict";
     var identity = require_identity();
-    var visit = require_visit();
+    var visit2 = require_visit();
     function anchorIsValid(anchor) {
       if (/[\x00-\x19\s,[\]{}]/.test(anchor)) {
         const sa = JSON.stringify(anchor);
@@ -437,7 +437,7 @@ var require_anchors = __commonJS({
     }
     function anchorNames(root) {
       const anchors = /* @__PURE__ */ new Set();
-      visit.visit(root, {
+      visit2.visit(root, {
         Value(_key, node) {
           if (node.anchor)
             anchors.add(node.anchor);
@@ -617,7 +617,7 @@ var require_Alias = __commonJS({
   "node_modules/yaml/dist/nodes/Alias.js"(exports) {
     "use strict";
     var anchors = require_anchors();
-    var visit = require_visit();
+    var visit2 = require_visit();
     var identity = require_identity();
     var Node = require_Node();
     var toJS = require_toJS();
@@ -643,7 +643,7 @@ var require_Alias = __commonJS({
           nodes = ctx.aliasResolveCache;
         } else {
           nodes = [];
-          visit.visit(doc, {
+          visit2.visit(doc, {
             Node: (_key, node) => {
               if (identity.isAlias(node) || identity.hasAnchor(node))
                 nodes.push(node);
@@ -5565,15 +5565,15 @@ var require_cst_visit = __commonJS({
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove item");
-    function visit(cst, visitor) {
+    function visit2(cst, visitor) {
       if ("type" in cst && cst.type === "document")
         cst = { start: cst.start, value: cst.value };
       _visit(Object.freeze([]), cst, visitor);
     }
-    visit.BREAK = BREAK;
-    visit.SKIP = SKIP;
-    visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path) => {
+    visit2.BREAK = BREAK;
+    visit2.SKIP = SKIP;
+    visit2.REMOVE = REMOVE;
+    visit2.itemAtPath = (cst, path) => {
       let item = cst;
       for (const [field, index] of path) {
         const tok = item?.[field];
@@ -5584,8 +5584,8 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path) => {
-      const parent = visit.itemAtPath(cst, path.slice(0, -1));
+    visit2.parentCollection = (cst, path) => {
+      const parent = visit2.itemAtPath(cst, path.slice(0, -1));
       const field = path[path.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
@@ -5616,7 +5616,7 @@ var require_cst_visit = __commonJS({
       }
       return typeof ctrl === "function" ? ctrl(item, path) : ctrl;
     }
-    exports.visit = visit;
+    exports.visit = visit2;
   }
 });
 
@@ -5632,7 +5632,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM:
@@ -5716,7 +5716,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR;
     exports.isCollection = isCollection;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -7246,7 +7246,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument(source, options = {}) {
+    function parseDocument2(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -7272,7 +7272,7 @@ var require_public_api = __commonJS({
       } else if (options === void 0 && reviver && typeof reviver === "object") {
         options = reviver;
       }
-      const doc = parseDocument(src, options);
+      const doc = parseDocument2(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning2) => log.warn(doc.options.logLevel, warning2));
@@ -7308,7 +7308,7 @@ var require_public_api = __commonJS({
     }
     exports.parse = parse3;
     exports.parseAllDocuments = parseAllDocuments;
-    exports.parseDocument = parseDocument;
+    exports.parseDocument = parseDocument2;
     exports.stringify = stringify;
   }
 });
@@ -7332,7 +7332,7 @@ var require_dist = __commonJS({
     var lineCounter = require_line_counter();
     var parser = require_parser();
     var publicApi = require_public_api();
-    var visit = require_visit();
+    var visit2 = require_visit();
     exports.Composer = composer.Composer;
     exports.Document = Document.Document;
     exports.Schema = Schema.Schema;
@@ -7360,8 +7360,8 @@ var require_dist = __commonJS({
     exports.parseAllDocuments = publicApi.parseAllDocuments;
     exports.parseDocument = publicApi.parseDocument;
     exports.stringify = publicApi.stringify;
-    exports.visit = visit.visit;
-    exports.visitAsync = visit.visitAsync;
+    exports.visit = visit2.visit;
+    exports.visitAsync = visit2.visitAsync;
   }
 });
 
@@ -7544,6 +7544,7 @@ var MESSAGES = {
   "linear.body-budget": "linear-body-budget: {operation}: the Linear document bodies this run reads are over the {bytes}-byte budget",
   "linear.too-long": "{operation}: {field} is {length} characters, Linear accepts at most {limit}",
   "linear.read-back-failed": "{operation}: written, but reading back the stored record failed",
+  "linear.create-edited": "{operation}: written, but the document was edited before its lost answer was recovered",
   "linear.token-refused": "oauth.token: Linear refused the token request ({reason})",
   "linear.revoke-unconfirmed": "oauth.revoke: Linear did not confirm the revocation (HTTP {status})",
   "linear.token-request-failed": "{operation}: request to Linear failed",
@@ -8408,8 +8409,98 @@ import { createHash as createHash3 } from "node:crypto";
 import { mkdir as mkdir2, readFile as readFile2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
 import { join as join4 } from "node:path";
 
-// src/mapping/front-matter.ts
+// src/setup/hooks.ts
 var import_yaml = __toESM(require_dist(), 1);
+
+// src/linear/facts.ts
+var CONTENT_LIMIT = 25e4;
+var LINEAR_FACTS = Object.freeze({
+  mutationsReturnStoredContent: true,
+  maxTitleLength: 512,
+  maxContentLength: CONTENT_LIMIT,
+  teamFilterIncludesProjectDocuments: false
+});
+
+// src/setup/hooks.ts
+var PRE_COMMIT_CONFIG = ".pre-commit-config.yaml";
+var SECURITY_ALIAS = "security";
+var LOCAL_REPOS = /* @__PURE__ */ new Set(["local", "meta"]);
+var PRE_COMMIT_HOOKS = "https://github.com/pre-commit/pre-commit-hooks";
+var PRE_COMMIT_HOOKS_REV = "3e8a8703264a2f4a69428a0aa4dcb512790b2c8c";
+function readHookConfig(text) {
+  if (text === null) return { hooks: [] };
+  let data;
+  let merges;
+  try {
+    ({ data, merges } = parsePreCommitYaml(text));
+  } catch {
+    return { hooks: [], invalid: message("setup.hooks-invalid-yaml", { file: PRE_COMMIT_CONFIG }) };
+  }
+  const repos = isRecord(data) ? data.repos : void 0;
+  if (!Array.isArray(repos)) return { hooks: [], invalid: message("setup.hooks-no-repos", { file: PRE_COMMIT_CONFIG }) };
+  const hooks = [];
+  let securityBatchable = !merges && !/!!merge|!<|%TAG/.test(text);
+  for (const repo of repos) {
+    if (!isRecord(repo)) continue;
+    if (!Array.isArray(repo.hooks)) continue;
+    const pinned = repo.repo === PRE_COMMIT_HOOKS && repo.rev === PRE_COMMIT_HOOKS_REV;
+    const source = typeof repo.repo === "string" ? repo.repo : "";
+    for (const hook of repo.hooks) {
+      if (!isRecord(hook)) continue;
+      if (typeof hook.id !== "string") continue;
+      if (selectedBySecurity(hook)) {
+        securityBatchable &&= fileLocalHook(source, pinned, hook);
+      } else if (typeof hook.alias !== "string") {
+        securityBatchable &&= LOCAL_REPOS.has(source) || pinned;
+      }
+      const command = [hook.entry, ...Array.isArray(hook.args) ? hook.args : []].filter((part) => typeof part === "string").join(" ");
+      hooks.push({ id: hook.id, repo: source, ...typeof hook.alias === "string" ? { alias: hook.alias } : {}, ...command ? { command } : {} });
+    }
+  }
+  return { hooks, securityBatchable };
+}
+function fileLocalHook(repo, pinned, hook) {
+  const selection = ["id", "name", "alias", "description", "files", "exclude", "types", "types_or", "exclude_types", "stages", "require_serial", "verbose", "pass_filenames", "always_run"];
+  if (hook.pass_filenames !== void 0 && hook.pass_filenames !== true) return false;
+  if (hook.always_run !== void 0 && hook.always_run !== false) return false;
+  if (repo === "local" && hook.language === "pygrep") {
+    const entry = hook.entry;
+    return typeof entry === "string" && (!entry.startsWith("-") || entry === "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----") && (hook.args === void 0 || Array.isArray(hook.args) && hook.args.every((arg) => ["-i", "--ignore-case", "--multiline", "--negate"].includes(arg))) && Object.keys(hook).every((key) => [...selection, "language", "entry", "args"].includes(key));
+  }
+  return pinned && hook.id === "detect-private-key" && Object.keys(hook).every((key) => selection.includes(key));
+}
+function selectedBySecurity(hook) {
+  return hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS;
+}
+function securityHooks(config) {
+  return config.hooks.filter(selectedBySecurity).map((hook) => hook.id);
+}
+function parsePreCommitYaml(text) {
+  const doc = (0, import_yaml.parseDocument)(text, { merge: true, logLevel: "error", prettyErrors: false });
+  if (doc.errors.length > 0) throw new Error();
+  let merges = false;
+  (0, import_yaml.visit)(doc, {
+    Map(_, map) {
+      const keys = map.items.filter(({ key }) => (0, import_yaml.isScalar)(key) && (typeof key.value === "symbol" || key.value === "<<"));
+      if (keys.filter(({ key }) => (0, import_yaml.isScalar)(key) && typeof key.value === "symbol").length > 1) throw new Error();
+      merges ||= keys.length > 0;
+    }
+  });
+  return { data: doc.toJS(), merges };
+}
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// src/sync/security.ts
+import { spawn as spawn3 } from "node:child_process";
+import { lstat, mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { tmpdir as tmpdir2 } from "node:os";
+import { dirname, join as join3, sep } from "node:path";
+import { createHash as createHash2 } from "node:crypto";
+
+// src/mapping/front-matter.ts
+var import_yaml2 = __toESM(require_dist(), 1);
 
 // node_modules/micromark-util-edit-map/index.js
 var EditMap = class {
@@ -10469,6 +10560,9 @@ var linear_emoji_default = {
 // src/format/linear-emoji.ts
 var LINEAR_EMOJI = new Map(Object.entries(linear_emoji_default));
 
+// src/format/shortcodes.ts
+var LONGEST_EMOJI_NAME = Math.max(...[...LINEAR_EMOJI.keys()].map((name) => name.length));
+
 // src/format/markdown.ts
 EditMap.prototype.consume = function consume(events) {
   this.map.sort((a, b) => a[0] - b[0]);
@@ -10494,83 +10588,6 @@ var AUTOLINK_OR_TAG = new RegExp([
   /<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>/.source,
   /<\/[A-Za-z][A-Za-z0-9-]*\s*>/.source
 ].join("|"), "y");
-
-// src/mapping/front-matter.ts
-function parseQuietly(yaml) {
-  return (0, import_yaml.parse)(yaml, { logLevel: "error", prettyErrors: false });
-}
-
-// src/linear/facts.ts
-var CONTENT_LIMIT = 25e4;
-var LINEAR_FACTS = Object.freeze({
-  mutationsReturnStoredContent: true,
-  maxTitleLength: 512,
-  maxContentLength: CONTENT_LIMIT,
-  teamFilterIncludesProjectDocuments: false
-});
-
-// src/setup/hooks.ts
-var PRE_COMMIT_CONFIG = ".pre-commit-config.yaml";
-var SECURITY_ALIAS = "security";
-var LOCAL_REPOS = /* @__PURE__ */ new Set(["local", "meta"]);
-var PRE_COMMIT_HOOKS = "https://github.com/pre-commit/pre-commit-hooks";
-var PRE_COMMIT_HOOKS_REV = "3e8a8703264a2f4a69428a0aa4dcb512790b2c8c";
-function readHookConfig(text) {
-  if (text === null) return { hooks: [] };
-  let data;
-  try {
-    data = parseQuietly(text);
-  } catch {
-    return { hooks: [], invalid: message("setup.hooks-invalid-yaml", { file: PRE_COMMIT_CONFIG }) };
-  }
-  const repos = isRecord(data) ? data.repos : void 0;
-  if (!Array.isArray(repos)) return { hooks: [], invalid: message("setup.hooks-no-repos", { file: PRE_COMMIT_CONFIG }) };
-  const hooks = [];
-  let securityBatchable = isRecord(data) && !Object.hasOwn(data, "<<") && !/!!merge|!<|%TAG/.test(text);
-  for (const repo of repos) {
-    if (!isRecord(repo)) continue;
-    securityBatchable &&= !Object.hasOwn(repo, "<<");
-    if (!Array.isArray(repo.hooks)) continue;
-    const pinned = repo.repo === PRE_COMMIT_HOOKS && repo.rev === PRE_COMMIT_HOOKS_REV;
-    const source = typeof repo.repo === "string" ? repo.repo : "";
-    for (const hook of repo.hooks) {
-      if (!isRecord(hook)) continue;
-      securityBatchable &&= !Object.hasOwn(hook, "<<");
-      if (typeof hook.id !== "string") continue;
-      if (hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS) {
-        securityBatchable &&= fileLocalHook(source, pinned, hook);
-      } else if (typeof hook.alias !== "string") {
-        securityBatchable &&= LOCAL_REPOS.has(source) || pinned;
-      }
-      const command = [hook.entry, ...Array.isArray(hook.args) ? hook.args : []].filter((part) => typeof part === "string").join(" ");
-      hooks.push({ id: hook.id, repo: source, ...typeof hook.alias === "string" ? { alias: hook.alias } : {}, ...command ? { command } : {} });
-    }
-  }
-  return { hooks, securityBatchable };
-}
-function fileLocalHook(repo, pinned, hook) {
-  const selection = ["id", "name", "alias", "description", "files", "exclude", "types", "types_or", "exclude_types", "stages", "require_serial", "verbose", "pass_filenames", "always_run"];
-  if (hook.pass_filenames !== void 0 && hook.pass_filenames !== true) return false;
-  if (hook.always_run !== void 0 && hook.always_run !== false) return false;
-  if (repo === "local" && hook.language === "pygrep") {
-    const entry = hook.entry;
-    return typeof entry === "string" && (!entry.startsWith("-") || entry === "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----") && (hook.args === void 0 || Array.isArray(hook.args) && hook.args.every((arg) => ["-i", "--ignore-case", "--multiline", "--negate"].includes(arg))) && Object.keys(hook).every((key) => [...selection, "language", "entry", "args"].includes(key));
-  }
-  return pinned && hook.id === "detect-private-key" && Object.keys(hook).every((key) => selection.includes(key));
-}
-function securityHooks(config) {
-  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
-}
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-// src/sync/security.ts
-import { spawn as spawn3 } from "node:child_process";
-import { lstat, mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from "node:fs/promises";
-import { tmpdir as tmpdir2 } from "node:os";
-import { dirname, join as join3, sep } from "node:path";
-import { createHash as createHash2 } from "node:crypto";
 
 // src/mapping/annotations.ts
 var TEAM_KEY = "linear-team";

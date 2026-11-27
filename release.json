@@ -1,6 +1,6 @@
 {
-  "version": "v1.0.1-rc.10",
-  "source": "a93bd7684a3cf1f70aba6c0f811f3be2fa17c36e",
+  "version": "v1.0.1",
+  "source": "df49168b3cfda3eb364faaf3777c2bc121c09da9",
   "files": {
     "action.yml": "df94772623ef2cac885a00ca6d7a9715308e9bfe86f40effd5ccb12341c7bd2b",
     ".pre-commit-hooks.yaml": "b8074bae4e5931ac359a261b69d469a86a80726d8b54609441bd1562ef96a12a",
@@ -9,10 +9,10 @@
     "dist/THIRD_PARTY_NOTICES.txt": "da1d9308d3194a83fd8af9a6098890a2fd5d212a733b9cf28908d5b36ee1a36e",
     "dist/action-main.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
     "dist/action-post.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
-    "dist/action-hooks.js": "1cff5502f39584ddc09d61d1e51a99cd266f74e29b79b8ed6739556daf0bb29c",
-    "dist/action-main.js": "b1e118c3ea68c555ed737b7bf6b5f3aefd1defdb307dd9bf54c27681743057b9",
-    "dist/action-post.js": "ef4ef223c0618b098c8ec6f181cc1cf3e69b3f2ec287512a0a5f2eb2da30ad79",
-    "dist/cli.js": "604207b5e393377bc74e8c15058f7ad6093565155a4c1f3d94368d95d9724d9d",
-    "package.json": "23e84c44bb19106ee0a0426c5549c70b44c4c550144c6c95e8efd7393dcb9456"
+    "dist/action-hooks.js": "a2802cdf51efc07ffe6b1b2b7c38b9d09de2460614dba81e587898508d1ef7fb",
+    "dist/action-main.js": "47a41af43d03d2907e2534763b74641f488c240381bad58e118aeabf34d52b8f",
+    "dist/action-post.js": "d40853aaf5c8735399f1cd51863deba39e077d61dfb3efa0af5cdcaf27770933",
+    "dist/cli.js": "cf1c7a9cfcfb58ff05b567c35d0774e2b85221e141ee0d87e4912eeeab2b957c",
+    "package.json": "5d77a46015b370cc9246bd7192b81f9e8714617a28d7a08766596cf51bb7255f"
   }
 }

@@ -55,7 +55,7 @@ var require_identity = __commonJS({
     var isDocument = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === DOC;
     var isMap3 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === MAP;
     var isPair = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === PAIR;
-    var isScalar2 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SCALAR;
+    var isScalar3 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SCALAR;
     var isSeq2 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SEQ;
     function isCollection(node2) {
       if (node2 && typeof node2 === "object")
@@ -77,7 +77,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node2) => (isScalar2(node2) || isCollection(node2)) && !!node2.anchor;
+    var hasAnchor = (node2) => (isScalar3(node2) || isCollection(node2)) && !!node2.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -92,7 +92,7 @@ var require_identity = __commonJS({
     exports.isMap = isMap3;
     exports.isNode = isNode;
     exports.isPair = isPair;
-    exports.isScalar = isScalar2;
+    exports.isScalar = isScalar3;
     exports.isSeq = isSeq2;
   }
 });
@@ -105,7 +105,7 @@ var require_visit = __commonJS({
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP2 = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove node");
-    function visit3(node2, visitor) {
+    function visit4(node2, visitor) {
       const visitor_ = initVisitor(visitor);
       if (identity.isDocument(node2)) {
         const cd = visit_(null, node2.contents, visitor_, Object.freeze([node2]));
@@ -114,9 +114,9 @@ var require_visit = __commonJS({
       } else
         visit_(null, node2, visitor_, Object.freeze([]));
     }
-    visit3.BREAK = BREAK;
-    visit3.SKIP = SKIP2;
-    visit3.REMOVE = REMOVE;
+    visit4.BREAK = BREAK;
+    visit4.SKIP = SKIP2;
+    visit4.REMOVE = REMOVE;
     function visit_(key, node2, visitor, path2) {
       const ctrl = callVisitor(key, node2, visitor, path2);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
@@ -250,7 +250,7 @@ var require_visit = __commonJS({
         throw new Error(`Cannot replace node with ${pt} parent`);
       }
     }
-    exports.visit = visit3;
+    exports.visit = visit4;
     exports.visitAsync = visitAsync;
   }
 });
@@ -260,7 +260,7 @@ var require_directives = __commonJS({
   "node_modules/yaml/dist/doc/directives.js"(exports) {
     "use strict";
     var identity = require_identity();
-    var visit3 = require_visit();
+    var visit4 = require_visit();
     var escapeChars = {
       "!": "%21",
       ",": "%2C",
@@ -404,7 +404,7 @@ var require_directives = __commonJS({
         let tagNames;
         if (doc && tagEntries.length > 0 && identity.isNode(doc.contents)) {
           const tags = {};
-          visit3.visit(doc.contents, (_key, node2) => {
+          visit4.visit(doc.contents, (_key, node2) => {
             if (identity.isNode(node2) && node2.tag)
               tags[node2.tag] = true;
           });
@@ -431,7 +431,7 @@ var require_anchors = __commonJS({
   "node_modules/yaml/dist/doc/anchors.js"(exports) {
     "use strict";
     var identity = require_identity();
-    var visit3 = require_visit();
+    var visit4 = require_visit();
     function anchorIsValid(anchor) {
       if (/[\x00-\x19\s,[\]{}]/.test(anchor)) {
         const sa = JSON.stringify(anchor);
@@ -442,7 +442,7 @@ var require_anchors = __commonJS({
     }
     function anchorNames(root2) {
       const anchors = /* @__PURE__ */ new Set();
-      visit3.visit(root2, {
+      visit4.visit(root2, {
         Value(_key, node2) {
           if (node2.anchor)
             anchors.add(node2.anchor);
@@ -622,7 +622,7 @@ var require_Alias = __commonJS({
   "node_modules/yaml/dist/nodes/Alias.js"(exports) {
     "use strict";
     var anchors = require_anchors();
-    var visit3 = require_visit();
+    var visit4 = require_visit();
     var identity = require_identity();
     var Node = require_Node();
     var toJS = require_toJS();
@@ -648,7 +648,7 @@ var require_Alias = __commonJS({
           nodes = ctx.aliasResolveCache;
         } else {
           nodes = [];
-          visit3.visit(doc, {
+          visit4.visit(doc, {
             Node: (_key, node2) => {
               if (identity.isAlias(node2) || identity.hasAnchor(node2))
                 nodes.push(node2);
@@ -5570,15 +5570,15 @@ var require_cst_visit = __commonJS({
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP2 = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove item");
-    function visit3(cst, visitor) {
+    function visit4(cst, visitor) {
       if ("type" in cst && cst.type === "document")
         cst = { start: cst.start, value: cst.value };
       _visit(Object.freeze([]), cst, visitor);
     }
-    visit3.BREAK = BREAK;
-    visit3.SKIP = SKIP2;
-    visit3.REMOVE = REMOVE;
-    visit3.itemAtPath = (cst, path2) => {
+    visit4.BREAK = BREAK;
+    visit4.SKIP = SKIP2;
+    visit4.REMOVE = REMOVE;
+    visit4.itemAtPath = (cst, path2) => {
       let item = cst;
       for (const [field, index2] of path2) {
         const tok = item?.[field];
@@ -5589,8 +5589,8 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit3.parentCollection = (cst, path2) => {
-      const parent = visit3.itemAtPath(cst, path2.slice(0, -1));
+    visit4.parentCollection = (cst, path2) => {
+      const parent = visit4.itemAtPath(cst, path2.slice(0, -1));
       const field = path2[path2.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
@@ -5621,7 +5621,7 @@ var require_cst_visit = __commonJS({
       }
       return typeof ctrl === "function" ? ctrl(item, path2) : ctrl;
     }
-    exports.visit = visit3;
+    exports.visit = visit4;
   }
 });
 
@@ -5637,7 +5637,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar3 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM2:
@@ -5721,7 +5721,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR;
     exports.isCollection = isCollection;
-    exports.isScalar = isScalar2;
+    exports.isScalar = isScalar3;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -7251,7 +7251,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument3(source, options = {}) {
+    function parseDocument4(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -7277,7 +7277,7 @@ var require_public_api = __commonJS({
       } else if (options === void 0 && reviver && typeof reviver === "object") {
         options = reviver;
       }
-      const doc = parseDocument3(src, options);
+      const doc = parseDocument4(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning2) => log.warn(doc.options.logLevel, warning2));
@@ -7313,7 +7313,7 @@ var require_public_api = __commonJS({
     }
     exports.parse = parse6;
     exports.parseAllDocuments = parseAllDocuments;
-    exports.parseDocument = parseDocument3;
+    exports.parseDocument = parseDocument4;
     exports.stringify = stringify2;
   }
 });
@@ -7337,7 +7337,7 @@ var require_dist = __commonJS({
     var lineCounter = require_line_counter();
     var parser = require_parser();
     var publicApi = require_public_api();
-    var visit3 = require_visit();
+    var visit4 = require_visit();
     exports.Composer = composer.Composer;
     exports.Document = Document.Document;
     exports.Schema = Schema.Schema;
@@ -7365,8 +7365,8 @@ var require_dist = __commonJS({
     exports.parseAllDocuments = publicApi.parseAllDocuments;
     exports.parseDocument = publicApi.parseDocument;
     exports.stringify = publicApi.stringify;
-    exports.visit = visit3.visit;
-    exports.visitAsync = visit3.visitAsync;
+    exports.visit = visit4.visit;
+    exports.visitAsync = visit4.visitAsync;
   }
 });
 
@@ -7553,6 +7553,7 @@ var MESSAGES = {
   "linear.body-budget": "linear-body-budget: {operation}: the Linear document bodies this run reads are over the {bytes}-byte budget",
   "linear.too-long": "{operation}: {field} is {length} characters, Linear accepts at most {limit}",
   "linear.read-back-failed": "{operation}: written, but reading back the stored record failed",
+  "linear.create-edited": "{operation}: written, but the document was edited before its lost answer was recovered",
   "linear.token-refused": "oauth.token: Linear refused the token request ({reason})",
   "linear.revoke-unconfirmed": "oauth.revoke: Linear did not confirm the revocation (HTTP {status})",
   "linear.token-request-failed": "{operation}: request to Linear failed",
@@ -7722,6 +7723,13 @@ var LinearReadBackError = class extends LinearError {
   document;
   constructor(operation, document4, cause) {
     super(operation, message("linear.read-back-failed", { operation }), { cause });
+    this.document = document4;
+  }
+};
+var LinearCreateEditedError = class extends LinearError {
+  document;
+  constructor(operation, document4) {
+    super(operation, message("linear.create-edited", { operation }));
     this.document = document4;
   }
 };
@@ -8074,6 +8082,18 @@ var LinearReads = class _LinearReads {
   }
 };
 
+// src/linear/upload-url.ts
+var UPLOAD_ORIGIN = "https://uploads.linear.app/";
+function isUploadUrl(url) {
+  if (!url.startsWith(UPLOAD_ORIGIN) || /[\u0000-\u0020\u007f]/.test(url)) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.username === "" && parsed.password === "" && parsed.port === "";
+  } catch {
+    return false;
+  }
+}
+
 // src/linear/transport.ts
 var DEFAULT_BASE_URL = "https://api.linear.app";
 var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
@@ -8110,8 +8130,7 @@ var GraphQLTransport = class {
   }
   /** Authenticated storage GET, restricted to Linear's documented upload host. */
   async fetchUpload(url, init = {}) {
-    const target = new URL(url);
-    if (target.protocol !== "https:" || target.hostname !== "uploads.linear.app" || target.username !== "" || target.password !== "" || target.port !== "") {
+    if (!isUploadUrl(url)) {
       throw new Error(message("linear.upload-not-allowed"));
     }
     return this.fetch(url, { ...init, method: "GET", redirect: "manual", headers: { authorization: `Bearer ${await this.#accessToken()}` } });
@@ -8447,8 +8466,13 @@ var LinearClient = class {
    * id, and when Linear does not have it, the create is sent again with the
    * same id, at most `CREATE_ATTEMPTS` times in all. The id makes the retry
    * safe: Linear cannot hold two documents with it.
+   *
+   * A document found that way is this create's write only while it holds the
+   * content sent: `sameContent(stored, sent)`, or exact equality without it.
+   * Someone may have edited it between the lost answer and the read, so one
+   * holding other content throws `LinearCreateEditedError` with it.
    */
-  async createDocument(place, input) {
+  async createDocument(place, input, { sameContent = (stored, sent) => stored === sent } = {}) {
     this.#refuseTooLong("CreateDocument", input);
     const { id } = input;
     for (let attempt = 1; ; attempt += 1) {
@@ -8461,6 +8485,7 @@ var LinearClient = class {
         const found = await this.#findCreated(id, place, input.title, error);
         if (found !== void 0) {
           this.stats.wrote("CreateDocument");
+          if (!sameContent(found.content ?? "", input.content ?? "")) throw new LinearCreateEditedError("CreateDocument", found);
           return found;
         }
         if (!transient || attempt >= CREATE_ATTEMPTS) throw error;
@@ -10177,6 +10202,19 @@ var PushedKey = class {
     if (typeof repair.mac !== "string" || !PUSHED_MAC.test(repair.mac)) return false;
     return timingSafeEqual(Buffer.from(this.repairMac(path2, id, repair), "hex"), Buffer.from(repair.mac, "hex"));
   }
+  /**
+   * The signature of an unfinished initial sync's write receipt: the path,
+   * the document's id, the hash of the text sent and the digest of what
+   * Linear returned, bound to this repository. A resumed run trusts a
+   * document on that digest alone only with a valid one (see `confirm.ts`).
+   */
+  writtenMac(path2, id, hash, observedDigest2) {
+    return createHmac("sha256", this.#key).update(JSON.stringify(["written-v1", this.#repository, path2, id, hash, observedDigest2])).digest("hex");
+  }
+  verifiesWritten(path2, id, hash, observedDigest2, mac) {
+    if (typeof mac !== "string" || !PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.writtenMac(path2, id, hash, observedDigest2), "hex"), Buffer.from(mac, "hex"));
+  }
   #mac(ref, head) {
     return createHmac("sha256", this.#key).update(`${this.#repository}
 ${ref}
@@ -10544,6 +10582,7 @@ async function readInitialSyncProgress(git, commit2) {
   return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message2)?.[1] ?? null };
 }
 var INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear's state";
+var INITIAL_SYNC_FROM_LINEAR_TITLE = "Initial sync from Linear";
 async function isAncestor(git, commit2, of) {
   return await ancestorWithin(git, commit2, of) ?? (await git.run(["merge-base", "--is-ancestor", commit2, of], { okCodes: [0, 1] })).code === 0;
 }
@@ -10596,6 +10635,21 @@ async function readStringMap(git, commit2, file) {
   return map4;
 }
 var WRITTEN_FILE = "written.json";
+var WRITTEN_MACS_FILE = "written-macs.json";
+async function readWrittenMacs(git, commit2) {
+  const map4 = /* @__PURE__ */ new Map();
+  const read = commit2 === null ? null : await git.readBlob(`${commit2}:${WRITTEN_MACS_FILE}`);
+  if (read === null) return map4;
+  let data;
+  try {
+    data = JSON.parse(read.toString("utf8"));
+  } catch {
+    return map4;
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return map4;
+  for (const [path2, mac] of Object.entries(data)) if (typeof mac === "string" && PUSHED_MAC.test(mac)) map4.set(path2, mac);
+  return map4;
+}
 async function readWrittenHashes(git, commit2) {
   if (commit2 === null) return /* @__PURE__ */ new Map();
   if (await git.readBlob(`${commit2}:${WRITTEN_FILE}`) === null) return /* @__PURE__ */ new Map();
@@ -10632,6 +10686,7 @@ async function commitIds(git, parent, ids, identity, options = {}) {
   if (options.reserved !== void 0 && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
   if (options.superseded !== void 0 && options.superseded.size > 0) files.set(SUPERSEDED_IDS_FILE, sorted(options.superseded));
   if (options.written !== void 0 && options.written.size > 0) files.set(WRITTEN_FILE, sorted(options.written));
+  if (options.writtenMacs !== void 0 && options.writtenMacs.size > 0) files.set(WRITTEN_MACS_FILE, sorted(options.writtenMacs));
   const syncPushed = options.syncPushed ?? await readSyncPushed(git, parent);
   if (syncPushed !== void 0) files.set(SYNC_PUSHED_FILE, syncPushed.mac === void 0 ? { head: syncPushed.head } : { head: syncPushed.head, mac: syncPushed.mac });
   return commitJsonFiles(git, parent, files, options.message ?? "Update document ids", identity, options.always === true);
@@ -10766,7 +10821,7 @@ var LINT_RULES = {
   "table-quote-cell": "A table body cell starting with > becomes a quote, and Linear drops the >; a cell starting with >> can take the rows and text below it into the cell. Run fix to write it as \\>, or put a backslash before the > yourself.",
   "image-in-link": "The link around an image is dropped.",
   "content-too-long": "This document exceeds Linear's 250,000-character content limit. Linear refuses the whole document, so the sync leaves the file out until it fits. The author must decide how to shorten or split it.",
-  "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, and paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse.",
+  "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse, long chains of tables that each end at a line without a pipe right above the next table, and paragraphs with many space references (`&#32;`) where one of them cannot become a space.",
   "duplicate-title": "Two or more files map to one document title.",
   "table-alignment": "Table column alignment is dropped. Remove the colons from the separator row to accept that.",
   "link-scheme": "Links must use http, https, mailto, a path or a fragment. Change the destination, or write the address as inline code.",
@@ -15368,6 +15423,7 @@ function codePointAt(source, at) {
   const code4 = source.codePointAt(at);
   return code4 === void 0 ? void 0 : String.fromCodePoint(code4);
 }
+var LONGEST_EMOJI_NAME = Math.max(...[...LINEAR_EMOJI.keys()].map((name) => name.length));
 function* emojiShortcodes(raw) {
   for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
     const emoji = LINEAR_EMOJI.get(match[1]);
@@ -20595,12 +20651,12 @@ function visitParents(tree, testOrEnterOrVisitors, enterOrVisitorsOrReverse, rev
           typeof value.name === "string" ? value.name : void 0
         )
       );
-      Object.defineProperty(visit3, "name", {
+      Object.defineProperty(visit4, "name", {
         value: "node (" + color(node2.type + (name ? "<" + name + ">" : "")) + ")"
       });
     }
-    return visit3;
-    function visit3() {
+    return visit4;
+    function visit4() {
       const matches = !check2 || is2(node2, index2, parents[parents.length - 1] || void 0);
       let result = empty;
       if (enter && matches) {
@@ -25667,10 +25723,22 @@ function decodedDestinationPath(url) {
     return path2;
   }
 }
+function urlParserReading(value) {
+  return value.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "").replace(/[\t\n\r]/g, "");
+}
+var SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+function readsWithScheme(url) {
+  return SCHEME.test(urlParserReading(url));
+}
+function decodedReadsWithScheme(path2) {
+  const reading = urlParserReading(path2);
+  return reading !== path2 && SCHEME.test(reading);
+}
 function resolveTarget(documentPath2, url) {
-  if (url === "" || url.startsWith("#") || url.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
+  const reading = urlParserReading(url);
+  if (reading === "" || reading.startsWith("#") || reading.startsWith("/") || SCHEME.test(reading)) return null;
   const path2 = decodedDestinationPath(url);
-  if (path2 === "") return null;
+  if (path2 === "" || decodedReadsWithScheme(path2)) return null;
   const joined = posix.normalize(posix.join(posix.dirname(documentPath2), path2));
   if (joined === "." || joined === ".." || joined.startsWith("../") || joined.endsWith("/")) return null;
   return joined;
@@ -28495,6 +28563,8 @@ function endsWithParagraph(node2) {
 }
 
 // src/format/fix.ts
+var SPACE_CHECK_EXTRA_WORK = 1e6;
+var SPACE_CHECK_ROUNDS = 8;
 function fixText(text6, options = {}) {
   return linearForm(text6, options) ?? text6;
 }
@@ -28512,7 +28582,8 @@ function linearForm(text6, options = {}) {
   const broken = backslashBreaksAsLinear(lf2);
   if (broken === void 0) return void 0;
   const { body: unbroken, lines: breakLines } = broken;
-  const fixed = fixBody(unbroken, { ...options, breakLines });
+  const spaceChecks = options.spaceChecks ?? { work: -SPACE_CHECK_ROUNDS * unbroken.length, blocks: /* @__PURE__ */ new Map() };
+  const fixed = fixBody(unbroken, { ...options, breakLines, spaceChecks });
   if (fixed === void 0) return void 0;
   if (unbroken !== lf2 && lineEndings(fixed) < lineEndings(unbroken)) return void 0;
   if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText("", fixed).some((finding) => finding.rule === "number-paragraph")) return void 0;
@@ -28607,21 +28678,33 @@ function backslashBreaksAsLinear(body2) {
   written += body2.slice(at);
   return isDeepStrictEqual3(breakShape(parse3(written)), breakShape(tree)) ? { body: written, lines: lines3 } : void 0;
 }
+var TABLE_END_EXTRA_WORK = 1e5;
+var TABLE_END_ROUNDS = 4;
 function tablesEndAsLinear(body2) {
   if (!body2.includes("|")) return body2;
+  let work = -TABLE_END_ROUNDS * body2.length;
+  let from = 0;
   for (; ; ) {
+    const rest = body2.slice(from);
+    work += rest.length;
+    if (work > TABLE_END_EXTRA_WORK) throw new MarkdownLimitError("tables");
+    const tree = parse3(rest);
     const rows = [];
-    visit2(parse3(body2), (node2) => {
+    visit2(tree, (node2) => {
       if (node2.type !== "table") return;
-      const row = endingRow(body2, node2);
-      if (row !== void 0) rows.push(start2(row));
+      const row = endingRow(rest, node2);
+      if (row !== void 0) rows.push(from + start2(row));
     });
     if (rows.length === 0) return body2;
-    for (const at of rows.sort((a, b) => b - a)) {
+    rows.sort((a, b) => b - a);
+    const first = rows.at(-1);
+    const block = tree.children.findLast((child) => from + start2(child) <= first);
+    for (const at of rows) {
       const lineStart = lineStartOf(body2, at);
       body2 = `${body2.slice(0, lineStart)}${body2.slice(lineStart, at).trimEnd()}
 ${body2.slice(lineStart)}`;
     }
+    from = lineStartOf(body2, from + start2(block));
   }
 }
 function breakShape(tree) {
@@ -28631,7 +28714,7 @@ function breakShape(tree) {
     const children = [];
     let text6;
     const flush = () => {
-      if (text6 !== void 0 && text6 !== "") children.push({ type: "text", value: text6.replace(/[ \t]+\n/g, "\n") });
+      if (text6 !== void 0 && text6 !== "") children.push({ type: "text", value: text6.replace(/(?<![ \t])[ \t]+\n/g, "\n") });
       text6 = void 0;
     };
     for (const child of node2.children) {
@@ -28954,6 +29037,9 @@ var Writer = class {
   movedSpaces = /* @__PURE__ */ new Set();
   /** The space edits made so far in the block being written, which a later one is checked with. */
   spaceEdits = [];
+  /** Whether space edits are taken unchecked, for `render` to check together once the block is written. */
+  trustSpaces = false;
+  spaceChecks;
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   taskParagraph;
   /** First paragraphs of items that Linear reads as a nested list (`nestsMarkerText`). */
@@ -28967,6 +29053,7 @@ var Writer = class {
     this.rewriteEscapes = rewriteEscapes;
     this.rewriteAsterisks = rewriteAsterisks;
     this.rewriteTildeUnderscore = rewriteTildeUnderscore;
+    this.spaceChecks = options.spaceChecks;
     if (options.breakLines !== void 0 && options.breakLines.size > 0) {
       for (let line2 = 0, at = 0; at !== 0 || line2 === 0; line2++) {
         if (options.breakLines.has(line2)) this.breakLineStarts.add(at);
@@ -29338,15 +29425,23 @@ ${lines3.join("\n")}`;
     const moved = [...this.movedSpaces];
     const spaceEdits = [...this.spaceEdits];
     const render3 = (rewriteAsterisks) => {
-      const inline = { edits: [], rewriteAsterisks, changedAsterisks: false };
       const outer = this.inlineFrom;
       const block = this.blockInline;
       this.inlineFrom = from;
       this.blockInline ??= [from, to];
-      this.movedSpaces.clear();
-      for (const at of block === void 0 ? [] : moved) this.movedSpaces.add(at);
-      this.spaceEdits = block === void 0 ? [] : [...spaceEdits];
-      this.inlineChildrenEdits(children, inline);
+      const trusted = this.trustSpaces;
+      const edit = (trust) => {
+        const inline2 = { edits: [], rewriteAsterisks, changedAsterisks: false };
+        this.movedSpaces.clear();
+        for (const at of block === void 0 ? [] : moved) this.movedSpaces.add(at);
+        this.spaceEdits = block === void 0 ? [] : [...spaceEdits];
+        this.trustSpaces = trust;
+        this.inlineChildrenEdits(children, inline2);
+        return inline2;
+      };
+      let inline = edit(block === void 0 || trusted);
+      if (block === void 0 && this.spaceEdits.length > 0 && !this.keepsBlock(this.spaceEdits)) inline = edit(false);
+      this.trustSpaces = trusted;
       this.inlineFrom = outer;
       this.blockInline = block;
       this.movedSpaces.clear();
@@ -30044,6 +30139,8 @@ ${lines3.join("\n")}`;
    * together with the space edits already made in it: all of them when
    * they keep it together, else each group in turn that keeps it with
    * those before, up to a bound, so a long block is not read again and again.
+   * While `trustSpaces` is set it pushes every group unchecked: `render`
+   * then checks them all once the block is written.
    */
   pushIfKept(groups, edits) {
     if (groups.length === 0) return;
@@ -30051,6 +30148,10 @@ ${lines3.join("\n")}`;
       edits.push(...group);
       this.spaceEdits.push(...group);
     };
+    if (this.trustSpaces) {
+      for (const group of groups) accept(group);
+      return;
+    }
     if (this.keepsBlock([...this.spaceEdits, ...groups.flat()])) {
       for (const group of groups) accept(group);
       return;
@@ -30062,7 +30163,8 @@ ${lines3.join("\n")}`;
    * Whether the block being written reads the same with `edits` made,
    * apart from what Linear does with a space (`spaceShape`). The block is
    * read with its first line's prefixes, so a heading's closing hashes
-   * count; a cell is read alone.
+   * count; a cell is read alone. Throws `MarkdownLimitError` past
+   * `SPACE_CHECK_EXTRA_WORK`.
    */
   keepsBlock(edits) {
     if (this.blockInline === void 0) return false;
@@ -30077,7 +30179,16 @@ ${lines3.join("\n")}`;
       at = edit.to;
     }
     edited2 += this.source.slice(at, to);
-    return isDeepStrictEqual3(spaceShape(parse3(edited2)), spaceShape(parse3(this.source.slice(from, to))));
+    const original = this.source.slice(from, to);
+    const read = this.spaceChecks.blocks.get(original);
+    const known = read?.kept.get(edited2);
+    if (known !== void 0) return known;
+    if ((this.spaceChecks.work += edited2.length + (read === void 0 ? original.length : 0)) > SPACE_CHECK_EXTRA_WORK) throw new MarkdownLimitError("space-checks");
+    const block = read ?? { shape: spaceShape(parse3(original)), kept: /* @__PURE__ */ new Map() };
+    this.spaceChecks.blocks.set(original, block);
+    const kept = isDeepStrictEqual3(spaceShape(parse3(edited2)), block.shape);
+    block.kept.set(edited2, kept);
+    return kept;
   }
   /** Linear writes every link destination in angle brackets, without a title. */
   link(children, url) {
@@ -30118,6 +30229,7 @@ ${lines3.join("\n")}`;
     return this.rewritten(from, to, [], code4);
   }
 };
+var ESCAPED_SHORTCODE = new RegExp(`:(?=((?:[a-z0-9_+-]|\\\\[+-]){1,${LONGEST_EMOJI_NAME}}):)`, "g");
 function textEdits(source, from, to, redundantEscape, inBlock = true) {
   const edits = [];
   const raw = source.slice(from, to);
@@ -30136,7 +30248,7 @@ function textEdits(source, from, to, redundantEscape, inBlock = true) {
     if (!escaped(raw, index2) && sameFlanking(source, at, at + length, emoji)) edits.push({ from: at, to: at + length, text: emoji });
   }
   const shortcodeEscapes = /* @__PURE__ */ new Set();
-  for (const match of raw.matchAll(/:(?=((?:[a-z0-9_+-]|\\[+-])*\\[+-](?:[a-z0-9_+-]|\\[+-])*):)/g)) {
+  for (const match of raw.matchAll(ESCAPED_SHORTCODE)) {
     const name = match[1];
     if (!LINEAR_EMOJI.has(name.replace(/\\([+-])/g, "$1"))) continue;
     for (const escape2 of name.matchAll(/\\/g)) shortcodeEscapes.add(match.index + 1 + escape2.index);
@@ -30285,7 +30397,7 @@ function spaceShape(tree) {
         out.push(shape(child));
       }
     }
-    for (const item of out) if (item.type === "text") item.value = item.value.replace(/[ \t]*\n[ \t]*/g, "\n");
+    for (const item of out) if (item.type === "text") item.value = item.value.replace(/(?:(?<![ \t])[ \t]+)?\n[ \t]*/g, "\n");
     return out;
   };
   const shape = (node2) => {
@@ -30843,13 +30955,7 @@ function imageLinks(body2, deadUploads = /* @__PURE__ */ new Set(), onlyImages, 
     if (url === void 0) return;
     checkDestination(url);
     if (onlyImages !== void 0 && !onlyImages.has(index2)) return;
-    let upload = false;
-    try {
-      const parsed = new URL(url);
-      upload = parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.port === "" && parsed.username === "" && parsed.password === "";
-    } catch {
-    }
-    if (mode === "pull" && upload && !deadUploads.has(url.split("#")[0]) && !deadUploads.has(url) && !ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference")) return;
+    if (mode === "pull" && isUploadUrl(url) && !deadUploads.has(url.split("#")[0]) && !deadUploads.has(url) && !ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference")) return;
     images.push({ image: index2, total: count4, line: line(node2) });
     if (enclosingRemoved) return;
     let replacement = { text: "" };
@@ -31212,7 +31318,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.1-rc.10" : packageJson.version;
+var VERSION2 = true ? "1.0.1" : packageJson.version;
 function olderVersion(version, than) {
   if (version === void 0) return true;
   const a = parseVersion(version);
@@ -31261,7 +31367,7 @@ function fixUrl(code4) {
 }
 
 // src/sync/capture.ts
-var import_yaml2 = __toESM(require_dist(), 1);
+var import_yaml3 = __toESM(require_dist(), 1);
 import { createHash as createHash16 } from "node:crypto";
 import { mkdtemp as mkdtemp5, rm as rm5 } from "node:fs/promises";
 import { tmpdir as tmpdir7 } from "node:os";
@@ -31890,6 +31996,7 @@ function trailingEntity(url, end2) {
 }
 
 // src/setup/hooks.ts
+var import_yaml2 = __toESM(require_dist(), 1);
 var PRE_COMMIT_CONFIG = ".pre-commit-config.yaml";
 var SECURITY_ALIAS = "security";
 var LINEAR_FORMAT_HOOK = "linear-format";
@@ -31901,26 +32008,25 @@ var PRE_COMMIT_HOOKS_REV = "3e8a8703264a2f4a69428a0aa4dcb512790b2c8c";
 function readHookConfig(text6) {
   if (text6 === null) return { hooks: [] };
   let data;
+  let merges;
   try {
-    data = parseQuietly(text6);
+    ({ data, merges } = parsePreCommitYaml(text6));
   } catch {
     return { hooks: [], invalid: message("setup.hooks-invalid-yaml", { file: PRE_COMMIT_CONFIG }) };
   }
   const repos = isRecord(data) ? data.repos : void 0;
   if (!Array.isArray(repos)) return { hooks: [], invalid: message("setup.hooks-no-repos", { file: PRE_COMMIT_CONFIG }) };
   const hooks = [];
-  let securityBatchable = isRecord(data) && !Object.hasOwn(data, "<<") && !/!!merge|!<|%TAG/.test(text6);
+  let securityBatchable = !merges && !/!!merge|!<|%TAG/.test(text6);
   for (const repo of repos) {
     if (!isRecord(repo)) continue;
-    securityBatchable &&= !Object.hasOwn(repo, "<<");
     if (!Array.isArray(repo.hooks)) continue;
     const pinned2 = repo.repo === PRE_COMMIT_HOOKS && repo.rev === PRE_COMMIT_HOOKS_REV;
     const source = typeof repo.repo === "string" ? repo.repo : "";
     for (const hook of repo.hooks) {
       if (!isRecord(hook)) continue;
-      securityBatchable &&= !Object.hasOwn(hook, "<<");
       if (typeof hook.id !== "string") continue;
-      if (hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS) {
+      if (selectedBySecurity(hook)) {
         securityBatchable &&= fileLocalHook(source, pinned2, hook);
       } else if (typeof hook.alias !== "string") {
         securityBatchable &&= LOCAL_REPOS.has(source) || pinned2;
@@ -31941,13 +32047,16 @@ function fileLocalHook(repo, pinned2, hook) {
   }
   return pinned2 && hook.id === "detect-private-key" && Object.keys(hook).every((key) => selection.includes(key));
 }
+function selectedBySecurity(hook) {
+  return hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS;
+}
 function securityHooks(config) {
-  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+  return config.hooks.filter(selectedBySecurity).map((hook) => hook.id);
 }
 function checkSecurityHooks(config) {
   const ids = securityHooks(config);
   if (ids.length === 0) return warning("security-hooks", message("setup.security-hooks-missing", { alias: SECURITY_ALIAS }));
-  const allowing = config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS && /gitleaks/i.test(`${hook.id} ${hook.command ?? ""}`) && !IGNORES_INLINE_ALLOW.test(hook.command ?? ""));
+  const allowing = config.hooks.filter((hook) => selectedBySecurity(hook) && /gitleaks/i.test(`${hook.id} ${hook.command ?? ""}`) && !IGNORES_INLINE_ALLOW.test(hook.command ?? ""));
   if (allowing.length > 0) return warning("security-hooks", message("setup.security-hooks-inline-allow", { hooks: allowing.map((hook) => hook.id).join(", "), flag: IGNORE_INLINE_ALLOW }));
   return passed("security-hooks", `security hooks present: ${ids.join(", ")}`);
 }
@@ -31955,6 +32064,19 @@ function checkLinearFormatHook(config) {
   if (config.invalid !== void 0) return failed("linear-format-hook", "linear-format-hook-required", config.invalid);
   const configured = config.hooks.some((hook) => hook.id === LINEAR_FORMAT_HOOK && !LOCAL_REPOS.has(hook.repo));
   return configured ? passed("linear-format-hook", `${PRE_COMMIT_CONFIG} has the ${LINEAR_FORMAT_HOOK} hook`) : failed("linear-format-hook", "linear-format-hook-required", message("setup.format-hook-missing", { file: PRE_COMMIT_CONFIG, hook: LINEAR_FORMAT_HOOK }));
+}
+function parsePreCommitYaml(text6) {
+  const doc = (0, import_yaml2.parseDocument)(text6, { merge: true, logLevel: "error", prettyErrors: false });
+  if (doc.errors.length > 0) throw new Error();
+  let merges = false;
+  (0, import_yaml2.visit)(doc, {
+    Map(_, map4) {
+      const keys = map4.items.filter(({ key }) => (0, import_yaml2.isScalar)(key) && (typeof key.value === "symbol" || key.value === "<<"));
+      if (keys.filter(({ key }) => (0, import_yaml2.isScalar)(key) && typeof key.value === "symbol").length > 1) throw new Error();
+      merges ||= keys.length > 0;
+    }
+  });
+  return { data: doc.toJS(), merges };
 }
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -32550,6 +32672,39 @@ function uploadableLinks(path2, body2, isFile, plain, unknown2 = false) {
   const kept = links.filter((link2) => plain?.has(link2.target) !== true || images.has(link2.target));
   return { links: kept, unproven: unknown2 ? [...new Set(kept.filter((link2) => !images.has(link2.target)).map((link2) => link2.target))] : [] };
 }
+function fileTargets(path2, body2) {
+  const links = /* @__PURE__ */ new Set();
+  const imageUrls = [];
+  const labels = /* @__PURE__ */ new Set();
+  const definitions = /* @__PURE__ */ new Map();
+  visit2(parse3(body2), (node2) => {
+    if (node2.type === "link" || node2.type === "image" || node2.type === "definition") {
+      const target = resolveTarget(path2, node2.url);
+      if (target !== null) links.add(target);
+    }
+    if (node2.type === "image") imageUrls.push(node2.url);
+    if (node2.type === "imageReference") labels.add(node2.identifier);
+    if (node2.type === "definition" && !definitions.has(node2.identifier)) definitions.set(node2.identifier, node2.url);
+  });
+  for (const label of labels) {
+    const url = definitions.get(label);
+    if (url !== void 0) imageUrls.push(url);
+  }
+  const images = new Set(imageUrls.map((url) => resolveTarget(path2, url) ?? `url:${normalizeUri(url)}`));
+  return { links, images };
+}
+function checkFileTargets(path2, before, after) {
+  if (before === after) return;
+  const checked = fileTargets(path2, before);
+  const written = fileTargets(path2, after);
+  if ([...written.links].some((target) => !checked.links.has(target)) || [...written.images].some((target) => !checked.images.has(target))) throw new FileTargetsAddedError();
+}
+var FileTargetsAddedError = class extends Error {
+  constructor() {
+    super();
+    this.name = "FileTargetsAddedError";
+  }
+};
 function findFileLinks(documentPath2, body2, isFile) {
   const result = [];
   for (const { node: node2, range, outer, inTable } of destinations(body2)) {
@@ -33937,7 +34092,7 @@ function documentUrlBase(urlKey) {
   return `https://linear.app/${urlKey}/document`;
 }
 function resolveRelative(fromPath, url) {
-  if (url === "" || url.startsWith("#") || url.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return void 0;
+  if (url === "" || url.startsWith("#") || url.startsWith("//") || readsWithScheme(url)) return void 0;
   const hash = url.indexOf("#");
   const target = hash === -1 ? url : url.slice(0, hash);
   const fragment = hash === -1 ? void 0 : url.slice(hash + 1);
@@ -33948,6 +34103,7 @@ function resolveRelative(fromPath, url) {
   } catch {
     return void 0;
   }
+  if (decodedReadsWithScheme(decoded)) return void 0;
   const joined = decoded.startsWith("/") ? decoded.slice(1) : posix4.join(posix4.dirname(fromPath), decoded);
   const path2 = posix4.normalize(joined);
   if (path2 === "." || path2.startsWith("../") || path2 === ".." || path2.endsWith("/")) return void 0;
@@ -34541,11 +34697,11 @@ async function mergeTree(git, linear, other, base, ids, idsTip) {
   if (merged.resolved.unresolved.length > 0) throw new LaneConflict("A suspended file needs a manual merge", merged.resolved.unresolved);
   return merged.resolved.tree;
 }
-async function convergedPaths(git, intake, base, tracked, paths) {
+async function convergedPaths(git, intake, base, tracked, paths, reread) {
   if (paths.size === 0) return /* @__PURE__ */ new Set();
   const list4 = [...paths];
   const [read, before, held] = await Promise.all([intake, base, tracked].map(async (commit2) => new Map((await listPaths(git, commit2, list4)).filter((entry) => entry.type === "blob").map((entry) => [entry.path, entry.oid]))));
-  const candidates2 = list4.filter((path2) => read.has(path2) && held.has(path2) && read.get(path2) !== before.get(path2));
+  const candidates2 = list4.filter((path2) => read.has(path2) && held.has(path2) && (read.get(path2) !== before.get(path2) || reread.has(path2)));
   const blobs = await readBlobs(git, [...new Set(candidates2.flatMap((path2) => [read.get(path2), held.get(path2)]))]);
   const body2 = (oid) => splitFile(blobs.get(oid).toString("utf8")).body.replace(/\n+$/, "");
   return new Set(candidates2.filter((path2) => body2(read.get(path2)) === body2(held.get(path2))));
@@ -34583,7 +34739,7 @@ async function persistIds(context, options, ids, syncPushed) {
 }
 async function commitLaneIds(context, parent, ids, message2, identity, syncPushed) {
   const { git } = context;
-  return commitIds(git, parent, ids, identity ?? context.identity, { message: message2, reserved: await readReservedIds(git, parent), superseded: await readSupersededIds(git, parent), written: await readWrittenHashes(git, parent), ...syncPushed === void 0 ? {} : { syncPushed } });
+  return commitIds(git, parent, ids, identity ?? context.identity, { message: message2, reserved: await readReservedIds(git, parent), superseded: await readSupersededIds(git, parent), written: await readWrittenHashes(git, parent), writtenMacs: await readWrittenMacs(git, parent), ...syncPushed === void 0 ? {} : { syncPushed } });
 }
 async function push2(context, options, ids, head, expected, normal, updateLane = true, tracked = context.fetched.tracked) {
   if (updateLane) await checkPushScope(context.git, tracked, head, context.mapping.zones);
@@ -34685,7 +34841,8 @@ async function maintainSuspended(context, options) {
     }
     for (const path2 of await changedPaths(git, tracked, head)) paths.add(path2);
     await addEpisodes(context, options, ids, paths, []);
-    if (bases.linear !== linear || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
+    const reread = new Set((options.rereadAsTracked ?? []).filter((path2) => paths.has(path2)));
+    if (bases.linear !== linear || reread.size > 0 || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
       const hold3 = await includeCapturedAssets(git, intake, ids, paths);
       if (hold3 !== void 0) return hold3;
       const input = await treeCommit(git, await takePaths(git, head, intake, paths), linear);
@@ -34694,8 +34851,12 @@ async function maintainSuspended(context, options) {
       const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
       const pushed = lastPushed(context, options, ids);
       const outside = previous3 === null || pushed === void 0 ? void 0 : new Set(pushed === previous3 ? [] : await changedPaths(git, pushed, previous3));
-      const converged = outside === void 0 ? /* @__PURE__ */ new Set() : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path2) => !outside.has(path2))));
+      const converged = outside === void 0 ? /* @__PURE__ */ new Set() : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path2) => !outside.has(path2))), reread);
       const selected = await takePaths(git, await takePaths(git, head, tree, paths), tracked, converged);
+      for (const path2 of reread) {
+        const entry = ids.get(path2);
+        if (entry !== void 0) entry.capturedWith = VERSION2;
+      }
       if (linearChanged || selected !== await git.revParse(`${head}^{tree}`)) {
         head = await commit(context, options, selected, intake === linear ? [head] : [head, intake], LINEAR_INTAKE_MESSAGE + note(tracked, linear, intake));
         bases.linear = linear;
@@ -35278,7 +35439,7 @@ async function writeTrackedToLinear(context, options) {
         }
         differs = written2 !== await transformBody(tipTransforms, change.from, splitFile(textOf(previous3)).body);
       } catch (error) {
-        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
+        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError) && !(error instanceof MarkdownLimitError)) throw error;
         differs = true;
       }
       if (differs) markContent(change);
@@ -35489,7 +35650,14 @@ async function writeTrackedToLinear(context, options) {
       }
       if (restoreCandidate === null) result.adopted.push(change.path);
     } else {
-      document4 = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize("NFC"), content: body2 });
+      try {
+        const sameContent = (stored2, sent) => sameAsLinear(stored2, sent) || stored2 === fixText(sent);
+        document4 = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize("NFC"), content: body2 }, { sameContent });
+      } catch (error) {
+        if (!(error instanceof LinearCreateEditedError)) throw error;
+        for (const { id: superseded2 } of supersededLinks(error.document.content ?? "")) keptSuperseded.add(superseded2);
+        return skip(change.path, "edited-in-linear");
+      }
       await checkpoint2("document-created-before-ids-push");
     }
     stored.set(change.path, { content: document4.content ?? "", sent: body2, document: document4 });
@@ -36765,7 +36933,7 @@ function checkRuns(checks) {
 function provenanceUnknownTrailer(id) {
   return `Provenance-unknown: ${encodeURIComponent(id)}`;
 }
-async function readPlainLinkProvenance(git, state, tracked, plan) {
+async function readPlainLinkProvenance(git, state, tracked, plan, options = {}) {
   const entries = [await readIds(git, state.ids)];
   const before = await idsBeforeProgress(git, state.ids);
   if (before !== null && before !== state.ids) entries.push(await readIds(git, before));
@@ -36810,7 +36978,7 @@ async function readPlainLinkProvenance(git, state, tracked, plan) {
     if (targets.size > 0) plainFiles.set(entry.path, targets);
   }
   const unknown2 = /* @__PURE__ */ new Set();
-  const known = new Set(entries.flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
+  const known = new Set((options.progressKnown === false ? [started] : entries).flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
   const unproven = plan.overwrite.filter((entry) => !known.has(entry.documentId));
   if (unproven.length > 0) {
     const marked = state.linear === null ? /* @__PURE__ */ new Set() : await readProvenanceUnknown(git, state.linear);
@@ -36839,7 +37007,7 @@ async function readProvenanceUnknown(git, linear) {
   return result;
 }
 async function tookInLinear(git, tracked) {
-  const subjects = /* @__PURE__ */ new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, SYNC_PULL_REQUEST_TITLE]);
+  const subjects = /* @__PURE__ */ new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE]);
   const log = await git.text(["log", "--format=%s", "--fixed-strings", ...[...subjects].map((subject2) => `--grep=${subject2}`), tracked]);
   return log.split("\n").some((subject2) => subjects.has(subject2.replace(/ \(#\d+\)$/, "")));
 }
@@ -36930,6 +37098,13 @@ async function confirmInitialSync(context, options) {
   };
   const writtenBefore = resumed ? await readWrittenHashes(git, expected.ids) : /* @__PURE__ */ new Map();
   const sentHashes = new Map(writtenBefore);
+  const writtenMacs = resumed ? await readWrittenMacs(git, expected.ids) : /* @__PURE__ */ new Map();
+  const signedBefore = (path2) => {
+    const entry = previous3.get(path2);
+    const hash = writtenBefore.get(path2);
+    return entry?.observedDigest !== void 0 && hash !== void 0 && context.pushedKey.verifiesWritten(path2, entry.id, hash, entry.observedDigest, writtenMacs.get(path2));
+  };
+  const vouched = new Set([...writtenBefore.keys()].filter(signedBefore));
   const ids = resumed ? new Map(previous3) : /* @__PURE__ */ new Map();
   const uploads = await readUploads(git, expected.uploads, context.pushedKey);
   const uploadsAtStart = uploads.size;
@@ -36969,10 +37144,16 @@ async function confirmInitialSync(context, options) {
   let uploadsPushed = uploads.size;
   const pushProgress = async () => {
     const updates = [];
+    const macs = /* @__PURE__ */ new Map();
+    for (const [path2, hash] of sentHashes) {
+      const entry = ids.get(path2);
+      if (vouched.has(path2) && entry?.observedDigest !== void 0) macs.set(path2, context.pushedKey.writtenMac(path2, entry.id, hash, entry.observedDigest));
+    }
     const idsCommit = await commitIds(git, expected.ids, ids, identity, {
       message: initialSyncProgressMessage(fetched.tracked),
       always: true,
-      written: sentHashes
+      written: sentHashes,
+      writtenMacs: macs
     });
     updates.push({ ref: stateRef(options.config, "ids"), expected: expected.ids, next: idsCommit });
     if (uploads.size !== uploadsAtStart || expected.uploads !== null) {
@@ -37010,6 +37191,7 @@ async function confirmInitialSync(context, options) {
     }
   };
   const skippedTitles = /* @__PURE__ */ new Set();
+  const createdBefore = /* @__PURE__ */ new Set();
   const titleKey2 = (place, title) => `${placeKey2(place)}\0${title.normalize("NFC")}`;
   const work = [
     ...plan.overwrite.map((entry) => ({ kind: "overwrite", entry })),
@@ -37053,12 +37235,14 @@ async function confirmInitialSync(context, options) {
         const body2 = await transformBody(transforms, path2, source);
         const hash = sha2564(body2);
         sent.set(path2, body2);
+        const holdsText = (content4) => holdsBody(content4, body2) || sameLinkDestinations(content4, body2) && holdsBody(fixText(restoreBody(transforms, path2, content4, body2, sources.input.mapping.files), { linearExport: true }), source);
         let held;
-        const holds = () => held ??= document4 !== void 0 && (holdsBody(document4.content ?? "", body2) || sameLinkDestinations(document4.content ?? "", body2) && holdsBody(fixText(restoreBody(transforms, path2, document4.content ?? "", body2, sources.input.mapping.files), { linearExport: true }), source));
+        const holds = () => held ??= document4 !== void 0 && holdsText(document4.content ?? "");
         const before = previous3.get(path2);
-        if (document4 !== void 0 && resumed && before?.id === document4.id && writtenBefore.get(path2) === hash && (before.observedDigest !== void 0 && observedDigest(document4) === before.observedDigest || holds())) {
+        if (document4 !== void 0 && resumed && before?.id === document4.id && writtenBefore.get(path2) === hash && (signedBefore(path2) && observedDigest(document4) === before.observedDigest || holds())) {
           result.skippedCompleted.push(path2);
           sentHashes.set(path2, hash);
+          vouched.add(path2);
           remember(path2, document4);
           await reconcileMark(path2, document4, hash);
           continue;
@@ -37066,8 +37250,15 @@ async function confirmInitialSync(context, options) {
         if (document4 !== void 0 && holds()) {
           result.unchanged.push(path2);
           sentHashes.delete(path2);
+          vouched.delete(path2);
           remember(path2, document4);
           await reconcileMark(path2, document4, hash);
+          continue;
+        }
+        if (document4 !== void 0 && resumed && before?.id === document4.id && before.observedDigest === void 0 && !writtenBefore.has(path2)) {
+          result.leftOutAtWrite.push({ path: path2, rule: "changed-during-run" });
+          skippedTitles.add(titleKey2(item.entry.place, item.entry.title));
+          createdBefore.add(path2);
           continue;
         }
         if (!beforeWriteReached) {
@@ -37077,9 +37268,10 @@ async function confirmInitialSync(context, options) {
         if (item.kind === "create") {
           const title = item.entry.title.normalize("NFC");
           const id = documentIds.get(path2);
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body2 });
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body2 }, { sameContent: holdsText });
           remember(path2, created);
           sentHashes.set(path2, hash);
+          vouched.add(path2);
           result.created.push(path2);
           await checkpoint2("document-created-before-ids-push");
           written += 1;
@@ -37095,6 +37287,7 @@ async function confirmInitialSync(context, options) {
           const updated = await linear.updateDocument(item.entry.documentId, { content: body2 });
           remember(path2, updated);
           sentHashes.set(path2, hash);
+          vouched.add(path2);
           result.overwritten.push(path2);
           written += 1;
           unpushed += 1;
@@ -37117,6 +37310,10 @@ async function confirmInitialSync(context, options) {
           result.stopped = error.reason;
           result.notAttempted = work.slice(index2).map((rest) => rest.entry.path);
           break;
+        }
+        if (error instanceof LinearCreateEditedError) {
+          result.leftOutAtWrite.push({ path: path2, rule: "changed-during-run" });
+          continue;
         }
         if (error instanceof LinearReadBackError) {
           ids.set(path2, withPlainFiles(path2, { id: error.document.id }));
@@ -37214,7 +37411,7 @@ async function confirmInitialSync(context, options) {
 ${plainTrailers.join("\n")}`);
     let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     if (expected.linear !== null && await sameRecord(expected.linear, linearCommit)) linearCommit = expected.linear;
-    const created = new Set(plan.create.map((entry) => entry.path));
+    const created = /* @__PURE__ */ new Set([...plan.create.map((entry) => entry.path), ...createdBefore]);
     const stillReserved = new Map(
       result.leftOutAtWrite.filter(({ path: path2 }) => created.has(path2)).map(({ path: path2 }) => [path2, documentIds.get(path2)])
     );
@@ -37275,14 +37472,6 @@ var AttachmentBudgetError = class extends Error {
 };
 var ATTACHMENT_LIMITS = Object.freeze({ documentCount: 32, documentBytes: 32 * 1024 * 1024, runCount: 256, runBytes: 256 * 1024 * 1024 });
 var LIMIT = 10 * 1024 * 1024;
-function isUpload(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app" && parsed.username === "" && parsed.password === "" && parsed.port === "";
-  } catch {
-    return false;
-  }
-}
 function withNewUploadUrls(text6, added, cache) {
   const urls = [...new Set([...added].filter(([hash, url]) => cache.get(hash) !== url).map(([, url]) => url))];
   return urls.length === 0 ? text6 : `${text6}
@@ -37382,6 +37571,16 @@ function encodeSuffix(suffix) {
   const fragment = hashAt === -1 ? void 0 : suffix.slice(hashAt + 1);
   return (query === "" ? "" : `?${encode2(query.slice(1))}`) + (fragment === void 0 ? "" : `#${encode2(fragment)}`);
 }
+function encodePath(path2) {
+  return path2.split("/").map((segment) => encodeURIComponent(segment).replace(/[()]/g, (char) => char === "(" ? "%28" : "%29")).join("/");
+}
+function checkLocalized(body2, localized, replaced) {
+  const before = destinations(body2);
+  const after = destinations(localized);
+  if (after.length !== before.length || imagesOf(localized).length !== imagesOf(body2).length || before.some(({ node: node2, range, outer }, index2) => after[index2].node.type !== node2.type || !replaced.has(range.from) && !replaced.has(outer.from) && after[index2].node.url !== node2.url)) {
+    throw new Error(message("assets.not-allowed"));
+  }
+}
 function imagesOf(body2) {
   const tree = parse3(body2);
   const definitions = /* @__PURE__ */ new Map();
@@ -37408,7 +37607,7 @@ var DownloadBlockedError = class extends Error {
   }
 };
 async function download(url, fetcher, reads, budget, consume2) {
-  if (!isUpload(url)) throw new Error(message("assets.not-allowed"));
+  if (!isUploadUrl(url)) throw new Error(message("assets.not-allowed"));
   const key = uploadReadKey(url);
   const kept = reads?.take(key);
   if (kept !== void 0) consume2(kept.body.length);
@@ -37533,7 +37732,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
       const rewritten = observedBody === body2 ? source.body : imageLinks(observedBody, deadUploads, new Set(source.images.map((image2) => image2.image))).body;
       const plainFiles = [...relocatedPlain];
       for (const image2 of sourceImages) {
-        const target = !isUpload(image2.url) ? resolveTarget(path2, image2.url) : null;
+        const target = !isUploadUrl(image2.url) ? resolveTarget(path2, image2.url) : null;
         if (target !== null) plainFiles.push(target);
       }
       return { body: rewritten, plainFiles, ...rewritten === observedBody ? {} : { observedBody, deadUploads: [...deadUploads] }, files: files2, uploads: uploads2 };
@@ -37545,7 +37744,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
     let retry;
     const cachedUrl = knownUploadPrefix(uploads.values());
     const knownUpload = (url) => cachedUrl(url) !== void 0;
-    if (!sourceDestinations.some(({ node: node2 }) => isUpload(node2.url) || knownUpload(node2.url))) return finish(body2, files, additions);
+    if (!sourceDestinations.some(({ node: node2 }) => isUploadUrl(node2.url) || knownUpload(node2.url))) return finish(body2, files, additions);
     await index2();
     const assetsFolder = posix7.join(posix7.dirname(path2), ASSETS_FOLDER);
     const assetsUsable = !notFolders.has(assetsFolder);
@@ -37589,7 +37788,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
         const target = copy ?? link2.target;
         if (copy !== void 0 && !pathHashes.has(copy) && !copies.has(copy)) copies.set(copy, link2.target);
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, target);
-        const raw = previousPath === path2 ? link2.written : posix7.relative(posix7.dirname(path2), target).split("/").map(encodeURIComponent).join("/") + link2.suffix;
+        const raw = previousPath === path2 ? link2.written : encodePath(posix7.relative(posix7.dirname(path2), target)) + link2.suffix;
         const key = hash + uploadDestinationUrl(link2.suffix);
         if (!spellings.has(key)) spellings.set(key, []);
         spellings.get(key).push(previousPath !== path2 && link2.written.startsWith("<") ? `<${raw}>` : raw);
@@ -37609,10 +37808,10 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
     };
     const previousLinks = /* @__PURE__ */ new Set();
     if (previousBody !== void 0) visit2(parse3(previousBody), (node2) => {
-      if (node2.type === "link" && isUpload(node2.url)) previousLinks.add(node2.url);
+      if (node2.type === "link" && isUploadUrl(node2.url)) previousLinks.add(node2.url);
     });
-    const externalImages = new Set(sourceImages.filter((image2) => !isUpload(image2.url)).map((image2) => image2.url));
-    const references = sourceDestinations.filter(({ node: node2 }) => (isUpload(node2.url) || knownUpload(node2.url)) && !(node2.type !== "link" && externalImages.has(node2.url)) && !(node2.type === "link" && previousLinks.has(node2.url) && !knownUpload(node2.url)));
+    const externalImages = new Set(sourceImages.filter((image2) => !isUploadUrl(image2.url)).map((image2) => image2.url));
+    const references = sourceDestinations.filter(({ node: node2 }) => (isUploadUrl(node2.url) || knownUpload(node2.url)) && !(node2.type !== "link" && externalImages.has(node2.url)) && !(node2.type === "link" && previousLinks.has(node2.url) && !knownUpload(node2.url)));
     const canonical = (url) => cachedUrl(url) ?? url.split("#")[0];
     const unique = new Set(references.map(({ node: node2 }) => canonical(node2.url)));
     if (unique.size > limits.documentCount) throw new AttachmentBudgetError();
@@ -37655,7 +37854,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
         let asset = downloaded.get(url);
         if (asset === void 0) {
           try {
-            if (!isUpload(url)) {
+            if (!isUploadUrl(url)) {
               rejected.set(node2.url, "unreadable");
               continue;
             }
@@ -37720,7 +37919,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
         replacements.push({ ...outer, text: spelled });
         continue;
       }
-      replacements.push({ ...range, text: posix7.relative(posix7.dirname(path2), assetPath).split("/").map(encodeURIComponent).join("/") + encodeSuffix(suffix) });
+      replacements.push({ ...range, text: encodePath(posix7.relative(posix7.dirname(path2), assetPath)) + encodeSuffix(suffix) });
     }
     if (rejected.size > 0) {
       const images = imagesOf(originalBody);
@@ -37733,7 +37932,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
       const files2 = [];
       visit2(tree, (node2) => {
         const url = node2.type === "link" ? node2.url : node2.type === "linkReference" ? definitions2.get(node2.identifier) : void 0;
-        if (url !== void 0 && (isUpload(url) || knownUpload(url))) files2.push({ url, line: line(node2) });
+        if (url !== void 0 && (isUploadUrl(url) || knownUpload(url))) files2.push({ url, line: line(node2) });
       });
       files2.forEach((file, index3) => {
         const reason = rejected.get(file.url);
@@ -37743,14 +37942,16 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
       throw new Error(message("assets.not-allowed"));
     }
     if (retry !== void 0) throw retry;
-    return finish(replaceRanges(body2, replacements), files, additions);
+    const localized = replaceRanges(body2, replacements);
+    checkLocalized(body2, localized, new Set(replacements.map(({ from }) => from)));
+    return finish(localized, files, additions);
   };
   return Object.assign(capture2, { close: () => spool.close() });
 }
 
 // src/initial-sync/reverse.ts
 var REVERSE_RECORD_MESSAGE = INITIAL_SYNC_FROM_LINEAR_RECORD;
-var PULL_REQUEST_TITLE = "Initial sync from Linear";
+var PULL_REQUEST_TITLE = INITIAL_SYNC_FROM_LINEAR_TITLE;
 function planLinearToGit(input) {
   const plan = planInitialSync(input);
   const annotations = new Set(input.mapping.annotations.map((annotation) => annotation.readme));
@@ -37897,6 +38098,7 @@ async function confirmWithGate(context, options, gate) {
   };
   const treePaths = new Set((await listTree(git, fetched.tracked)).map((entry) => entry.path));
   const plan = planLinearToGit({ ...input, treePaths });
+  const provenance = await readPlainLinkProvenance(git, fetched.state, fetched.tracked, { create: [], overwrite: [...plan.overwrite, ...plan.create] }, { progressKnown: false });
   const expected = { ...fetched.state };
   const resumed = await readInitialSyncProgress(git, expected.ids) !== null;
   const previous3 = await readIds(git, expected.ids);
@@ -38074,7 +38276,9 @@ async function confirmWithGate(context, options, gate) {
         const readable = linearMarkersAsText(content4, trackedBody);
         readableContents.set(entry.path, readable);
         if (linksLinearDocuments(readable)) needsLinkBase = true;
-        const captured = await download2(entry.path, restoreBody(transforms, entry.path, readable, readable, input.mapping.files), uploads, trackedBody);
+        const plain = new Set(provenance.plainFiles.get(entry.path));
+        if (provenance.unknown.has(entry.path)) for (const target of pathLinks(entry.path, readable)) plain.add(target);
+        const captured = await download2(entry.path, restoreBody(transforms, entry.path, readable, readable, input.mapping.files), uploads, trackedBody, entry.path, plain);
         if (captured.observedBody !== void 0) {
           imageBlocked.push(entry.path);
           continue;
@@ -38114,16 +38318,20 @@ async function confirmWithGate(context, options, gate) {
         const before = entries.length;
         const tooComplex = [];
         const frontMatter = [];
+        const addedTargets = [];
         for (const entry of entries) {
           try {
             if (splitFile(joinedOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
+            else checkFileTargets(entry.path, restored(entry), splitFile(textOf(entry)).body);
           } catch (error) {
-            if (!(error instanceof MarkdownLimitError)) throw error;
-            tooComplex.push(entry.path);
+            if (error instanceof FileTargetsAddedError) addedTargets.push(entry.path);
+            else if (error instanceof MarkdownLimitError) tooComplex.push(entry.path);
+            else throw error;
           }
         }
         keepTracked(tooComplex, "markdown-complexity");
         keepTracked(frontMatter, "front-matter-boundary");
+        keepTracked(addedTargets, "image-blocked");
         if (gate.configured) {
           const blocked = [];
           const unchecked = [];
@@ -38153,6 +38361,7 @@ async function confirmWithGate(context, options, gate) {
     const stored = /* @__PURE__ */ new Map();
     const same = (a, b) => a === null || b === null ? a === b : contentBytes(a).equals(contentBytes(b));
     let commit2;
+    let recordedPlain = /* @__PURE__ */ new Map();
     try {
       await screen();
       context.linear.transport.reads?.end();
@@ -38190,6 +38399,28 @@ async function confirmWithGate(context, options, gate) {
       await gate.close?.();
     }
     async function build(list4) {
+      recordedPlain = /* @__PURE__ */ new Map();
+      const held = [
+        ...list4.map((entry) => ({ path: entry.path, id: entry.documentId, kept: false })),
+        ...[...keptTracked].map((path2) => ({ path: path2, id: documentOf.get(path2), kept: true }))
+      ];
+      for (const { path: path2, kept: kept2 } of held) {
+        const plain = new Set(provenance.plainFiles.get(path2));
+        if (provenance.unknown.has(path2)) {
+          try {
+            const linear = pathLinks(path2, readableContents.get(path2) ?? "");
+            const tracked = kept2 ? new Set(pathLinks(path2, splitFile(input.texts.get(path2) ?? "").body)) : void 0;
+            for (const target of linear) if (tracked === void 0 || tracked.has(target)) plain.add(target);
+          } catch (error) {
+            if (!(error instanceof MarkdownLimitError)) throw error;
+          }
+        }
+        if (plain.size > 0) recordedPlain.set(path2, [...plain].sort(compare6));
+      }
+      const plainTrailers = held.flatMap(({ path: path2, id }) => (recordedPlain.get(path2) ?? []).map((target) => `Plain-link: ${encodeURIComponent(id)} ${encodeURIComponent(target)}`)).sort(compare6);
+      const recordMessage = REVERSE_RECORD_MESSAGE + (plainTrailers.length === 0 ? "" : `
+
+${plainTrailers.join("\n")}`);
       const changes = /* @__PURE__ */ new Map();
       for (const entry of list4) {
         for (const [path2, bytes] of bodies.get(entry.path).files) changes.set(path2, bytes);
@@ -38204,7 +38435,7 @@ async function confirmWithGate(context, options, gate) {
           [...changes.keys()].map((path2) => stored.get(path2)).filter(({ input: input2, output }) => output !== null && output !== input2).map(({ output }) => parseLfsPointer(contentBytes(output))?.oid).filter((oid) => oid !== void 0)
         )
       ];
-      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
+      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     }
     const trees = (await git.text(["show", "-s", "--format=%T", commit2, fetched.tracked])).split("\n");
     const changesTracked = trees[0] !== trees[1];
@@ -38223,6 +38454,10 @@ async function confirmWithGate(context, options, gate) {
     for (const { path: path2, documentId } of entries) {
       const document4 = documents.get(documentId);
       finalIds.set(path2, { ...finalIds.get(path2), observedDigest: observedDigest(document4) });
+    }
+    for (const [path2, entry] of finalIds) {
+      const plainFiles = recordedPlain.get(path2);
+      if (plainFiles !== void 0) finalIds.set(path2, { ...entry, plainFiles });
     }
     const through = captureCursor([...keptTracked].map((path2) => documentOf.get(path2)));
     const kept = plan.kept.map((entry) => entry.path);
@@ -38274,6 +38509,12 @@ ${trailers.join("\n")}`,
     const [subject2, email2, parents] = (await showCommit(git, "%s%n%ae%n%P", oid)).split("\n");
     return subject2 === REVERSE_RECORD_MESSAGE && (email2 === identity.email || email2 === NEUTRAL_IDENTITY.email) && (parents ?? "").split(" ").filter(Boolean).length === 1;
   }
+}
+function pathLinks(path2, body2) {
+  return destinations(body2).flatMap(({ node: node2 }) => {
+    const target = node2.type === "image" ? null : resolveTarget(path2, node2.url);
+    return target === null ? [] : [target];
+  });
 }
 function mismatches(mapping, entries) {
   const mapped = new Map(mapping.documents.map((document4) => [document4.path, document4]));
@@ -39422,7 +39663,7 @@ async function capture(context, options) {
       const { assets } = candidate;
       return assets.observedBody === void 0 && old?.path === candidate.path && old.entry.saved === void 0 && previous3.get(candidate.path)?.equals(Buffer.from(text6)) === true && assets.files.size === 0 && assets.uploads.size === 0;
     };
-    const textOf = (candidate, targets2) => {
+    const textOf = (candidate, targets2, staged = false) => {
       let body2 = candidate.assets.body;
       if (linkBase !== void 0) {
         const aliases = superseded.size === 0 ? void 0 : new Map([...superseded].filter(([id, path2]) => targets2.has(path2) && targets2.get(path2) !== id));
@@ -39434,8 +39675,18 @@ async function capture(context, options) {
       if (candidate.compared?.body !== body2) {
         const unchanged = candidate.previousBody !== void 0 && sameAsLinear(body2, candidate.previousBody);
         const text6 = unchanged ? joinFile(candidate.head, candidate.previousBody) : fixLinearText(joinFile(candidate.head, body2), readable.get(candidate.doc.id)?.text ?? candidate.doc.content ?? "", linkedFileCheck(candidate.path, (file) => mapping.files.has(file)), candidate.previousBody);
-        candidate.compared = { body: body2, text: text6 };
+        let addsFiles = false;
+        if (!unchanged) {
+          try {
+            checkFileTargets(candidate.path, body2, splitFile(text6).body);
+          } catch (error) {
+            if (!(error instanceof FileTargetsAddedError)) throw error;
+            addsFiles = true;
+          }
+        }
+        candidate.compared = { body: body2, text: text6, addsFiles };
       }
+      if (candidate.compared.addsFiles && !staged) throw new FileTargetsAddedError();
       return candidate.compared.text;
     };
     let again = true;
@@ -39454,8 +39705,8 @@ async function capture(context, options) {
             observed = textOf(observedCandidate, documentIds);
           }
         } catch (error) {
-          if (!(error instanceof MarkdownLimitError)) throw error;
-          result.leftOut.push({ id, rule: "markdown-complexity" });
+          if (!(error instanceof MarkdownLimitError || error instanceof FileTargetsAddedError)) throw error;
+          result.leftOut.push({ id, rule: error instanceof FileTargetsAddedError ? "capture-translation" : "markdown-complexity" });
           candidates2.delete(id);
           resetTarget(id);
           again = true;
@@ -39507,7 +39758,7 @@ ${assets.plainFiles.join("\n")}
         return saved !== void 0 && saved.notice?.kind !== "conflict";
       }));
       const budget = linkVariantBudget();
-      if (linkBase !== void 0) for (const set of linkVariants(candidates2, textOf, resetTargets, documentIds, { refused, settled: recordedAsIs, budget })) await gate.check(set);
+      if (linkBase !== void 0) for (const set of linkVariants(candidates2, (candidate, targets2) => textOf(candidate, targets2, true), resetTargets, documentIds, { refused, settled: recordedAsIs, budget })) await gate.check(set);
       result.summary = `Staged ${candidates2.size} changed documents for the security hooks.`;
       if (budget.short === true) result.summary += ` ${message("sync.link-variant-budget")}`;
       return result;
@@ -39580,7 +39831,7 @@ ${assets.plainFiles.join("\n")}
         assets = await captureAtBaseline(candidate.path, linearMarkersAsText(candidate.doc.content ?? "", body2), uploads, body2, candidate.path, new Set(byId.get(candidate.doc.id)?.entry.plainFiles));
         return assets.files.size === 0 && textOf({ doc: candidate.doc, path: candidate.path, head, assets, files: /* @__PURE__ */ new Map(), previousBody: body2 }, documentIds) === baseline.text;
       } catch (error) {
-        if (error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError) return false;
+        if (error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError || error instanceof FileTargetsAddedError) return false;
         if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
         throw error;
       }
@@ -39589,6 +39840,7 @@ ${assets.plainFiles.join("\n")}
     for (const [id, candidate] of candidates2) {
       const old = byId.get(id);
       const converged = reread.has(id) && readsAsTracked(candidate.path, String(candidate.files.get(candidate.path)));
+      if (converged) (result.rereadAsTracked ??= []).push(candidate.path);
       if (old?.path === candidate.path && !converged && await asLastAccepted(candidate)) {
         if (reread.has(id)) ids.set(old.path, { ...old.entry, capturedWith: VERSION2 });
         continue;
@@ -39599,7 +39851,7 @@ ${assets.plainFiles.join("\n")}
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      const entry = { ...old?.entry, id, observedDigest: observedDigest(candidate.doc), ...old?.entry.suspended === void 0 ? {} : { capturedWith: VERSION2 } };
+      const entry = { ...old?.entry, id, observedDigest: observedDigest(candidate.doc), ...old?.entry.suspended === void 0 || converged ? {} : { capturedWith: VERSION2 } };
       delete entry.pullRewrite;
       const plainFiles = [.../* @__PURE__ */ new Set([...old?.entry.plainFiles ?? [], ...candidate.assets.plainFiles ?? []])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
@@ -39827,18 +40079,18 @@ function* linkVariants(candidates2, textOf, reset, documentIds, options = {}) {
 function relocatedHead(head) {
   const front = findFrontMatter(head);
   if (front === null) return head;
-  const document4 = (0, import_yaml2.parseDocument)(front.yaml, { logLevel: "error", prettyErrors: false });
+  const document4 = (0, import_yaml3.parseDocument)(front.yaml, { logLevel: "error", prettyErrors: false });
   const metadata = document4.toJS();
   delete metadata[TEAM_KEY];
   delete metadata[PROJECT_KEY];
   document4.delete(TEAM_KEY);
   document4.delete(PROJECT_KEY);
-  if ((0, import_yaml2.isMap)(document4.contents) && document4.contents.items.length === 0) return "";
+  if ((0, import_yaml3.isMap)(document4.contents) && document4.contents.items.length === 0) return "";
   let yaml;
   try {
     yaml = document4.toString();
   } catch {
-    yaml = (0, import_yaml2.stringify)(metadata);
+    yaml = (0, import_yaml3.stringify)(metadata);
   }
   return `---
 ${yaml}---
@@ -39919,7 +40171,7 @@ async function runSyncCycle(context, options) {
   const changed2 = captured.changed.length > 0 || captured.removed.length > 0 || captured.blocked.length > 0;
   if (!captured.ok) return { complete: false, changed: changed2, trackedTip, capture: captured };
   await checkpoint("after-capture-push-before-pr");
-  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks, security: options.security });
+  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks, security: options.security, ...captured.rereadAsTracked === void 0 ? {} : { rereadAsTracked: captured.rereadAsTracked } });
   if (pullRequest.code === "initial-pull-request-pending" || pullRequest.code === "suspended-asset-discovery") return { complete: false, changed: changed2, trackedTip, capture: captured, pullRequest };
   if (pullRequest.code !== "state-moved") {
     const marks = await reconcileHoldMarks(context, { config: options.config, state: captured.state, documents: captured.documents, github: options.github, failure: pullRequest.suspended?.failure, batchFailure: pullRequest.suspended?.batchFailure, linear: context.linear });
@@ -40490,7 +40742,7 @@ function captureReport(captured) {
 }
 
 // src/init/command.ts
-var import_yaml3 = __toESM(require_dist(), 1);
+var import_yaml4 = __toESM(require_dist(), 1);
 import { lstat as lstat3, mkdir as mkdir5, readFile as readFile4, realpath as realpath3, writeFile as writeFile6 } from "node:fs/promises";
 import { dirname as dirname3, isAbsolute as isAbsolute3, join as join15, relative as relative3, resolve as resolve3, sep as sep4 } from "node:path";
 
@@ -41350,8 +41602,8 @@ async function safePath(root2, path2) {
   return target;
 }
 function document3(text6) {
-  const doc = (0, import_yaml3.parseDocument)(text6, { prettyErrors: false });
-  if (doc.errors.length || !(0, import_yaml3.isMap)(doc.contents) && doc.contents !== null) throw new InitError(message("init.invalid-yaml"));
+  const doc = (0, import_yaml4.parseDocument)(text6, { prettyErrors: false });
+  if (doc.errors.length || !(0, import_yaml4.isMap)(doc.contents) && doc.contents !== null) throw new InitError(message("init.invalid-yaml"));
   return doc;
 }
 function lfsAttributes(text6) {
@@ -41377,7 +41629,7 @@ function sameHook(hook, example) {
 function hookConfig(text6, settings) {
   const doc = document3(text6 ?? "default_install_hook_types: [pre-commit, pre-push]\nrepos: []\n");
   const repos = doc.get("repos");
-  if (!(0, import_yaml3.isSeq)(repos)) throw new InitError(message("init.needs-repos", { file: PRE_COMMIT_CONFIG }));
+  if (!(0, import_yaml4.isSeq)(repos)) throw new InitError(message("init.needs-repos", { file: PRE_COMMIT_CONFIG }));
   if (text6 === void 0) repos.flow = false;
   const data = doc.toJS();
   if (data.repos.some((repo) => repo === null || typeof repo !== "object" || !Array.isArray(repo.hooks) || repo.hooks.some((hook) => hook === null || typeof hook !== "object" || typeof hook.id !== "string"))) throw new InitError(message("init.invalid-repository-entry"));
@@ -41393,7 +41645,7 @@ function hookConfig(text6, settings) {
     repo.hooks.forEach((hook, index2) => {
       if (hook.id !== SCANNER_HOOK.id || !EARLIER_SCANNER_ENTRIES.includes(hook.entry) || !sameHook(hook, { ...SCANNER_HOOK, entry: hook.entry })) return;
       const entry = doc.getIn(["repos", at, "hooks", index2, "entry"], true);
-      if (!(0, import_yaml3.isMap)(doc.getIn(["repos", at, "hooks", index2], true)) || !(0, import_yaml3.isScalar)(entry) || entry.anchor) throw new InitError(message("init.security-hook-differs", { hook: SCANNER_HOOK.id }));
+      if (!(0, import_yaml4.isMap)(doc.getIn(["repos", at, "hooks", index2], true)) || !(0, import_yaml4.isScalar)(entry) || entry.anchor) throw new InitError(message("init.security-hook-differs", { hook: SCANNER_HOOK.id }));
       doc.setIn(["repos", at, "hooks", index2, "entry"], SCANNER_ENTRY);
       hook.entry = SCANNER_ENTRY;
       changed2 = true;
