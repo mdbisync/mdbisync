@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { detectConflicts } from '../merge/index.ts';
+import { MarkdownLimitError } from '../format/markdown.ts';
 import type { LinearClient, LinearDocument } from '../linear/index.ts';
 import type { HoldNotice, IdEntry } from '../state/index.ts';
 import type { ImageFinding, FileFinding } from './assets.ts';
@@ -54,6 +55,11 @@ export interface MarkOptions {
   linear: MarkClient;
   /** Current image and security-hook findings. Blocked takes precedence over conflict. */
   blocked?: readonly BlockedFinding[];
+  /**
+   * The body this run just wrote to the document. Its conflict markers decide
+   * the mark when the text Linear stores is past the Markdown limits.
+   */
+  sentBody?: string | undefined;
   /** Include content in responses when changing the decoration. */
   includeUpdatedBody?: boolean;
   /** Must durably record the entry in ids before resolving. Never just queue it. */
@@ -119,9 +125,23 @@ function blockedComment(findings: readonly BlockedFinding[]): string {
   return sections.join('\n\n');
 }
 
+/**
+ * Whether the text holds conflict markers. A text Linear stores past the
+ * Markdown limits cannot be read: the body the sync sent for it, which was
+ * within them, is read instead, when there is one.
+ */
+function holdsConflicts(text: string, sentBody: string | undefined): boolean {
+  try {
+    return detectConflicts(text).length > 0;
+  } catch (error) {
+    if (!(error instanceof MarkdownLimitError) || sentBody === undefined) throw error;
+    return detectConflicts(sentBody).length > 0;
+  }
+}
+
 /** What reconciling a document's mark would find: its state, notice text and the changes it makes. */
-function planMark(document: LinearDocument, entry: IdEntry, blocked: readonly BlockedFinding[]) {
-  const state: MarkState = blocked.length > 0 ? 'blocked' : detectConflicts(document.content ?? '').length > 0 ? 'conflict' : 'clear';
+function planMark(document: LinearDocument, entry: IdEntry, blocked: readonly BlockedFinding[], sentBody?: string) {
+  const state: MarkState = blocked.length > 0 ? 'blocked' : holdsConflicts(document.content ?? '', sentBody) ? 'conflict' : 'clear';
   const body = state === 'clear' ? '' : state === 'conflict' ? CONFLICT_COMMENT : blockedComment(blocked);
   const bodyHash = createHash('sha256').update(body).digest('hex');
   const previousNotice = entry.saved?.notice;
@@ -159,7 +179,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   if (document.content === undefined) throw new Error(message('sync.needs-content'));
   let entry: IdEntry = structuredClone(options.entry);
   const blocked = options.blocked ?? [];
-  const {state, body, bodyHash, previousNotice, resolvesNotice, updatesNotice} = planMark(document, entry, blocked);
+  const {state, body, bodyHash, previousNotice, resolvesNotice, updatesNotice} = planMark(document, entry, blocked, options.sentBody);
   const result: MarkResult = { state, entry, updated: false, commented: false };
   if (document.trashed || document.archivedAt !== null) return result;
 

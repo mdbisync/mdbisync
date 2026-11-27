@@ -802,7 +802,24 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
       return digest !== undefined && digest === observedDigest(held);
     }
-    return sameAsLinear(document.content ?? '', expected);
+    try {
+      return sameAsLinear(document.content ?? '', expected);
+    } catch (error) {
+      // Past the Markdown limits only the observation tells: a text a run wrote and recorded is held. Any other
+      // text (a person's edit) is left out, as before.
+      if (error instanceof MarkdownLimitError && digest !== undefined && digest === observedDigest(held)) return true;
+      throw error;
+    }
+  }
+
+  /** Whether Linear's text is the body; false when the text is past the Markdown limits and cannot be compared. */
+  function storedAs(content: string, body: string): boolean {
+    try {
+      return sameAsLinear(content, body);
+    } catch (error) {
+      if (!(error instanceof MarkdownLimitError)) throw error;
+      return false;
+    }
   }
 
   function resolves(place: Place): boolean {
@@ -854,7 +871,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (document === null || document.trashed || document.archivedAt !== null) return skip(change.to, 'missing-in-linear');
     if (movedSinceCapture(document)) return skip(change.to, 'edited-in-linear');
     const holds =
-      (patch.content === undefined || (document.content != null && sameAsLinear(document.content, patch.content))) &&
+      (patch.content === undefined || (document.content != null && storedAs(document.content, patch.content))) &&
       (patch.title === undefined || document.title.normalize('NFC') === patch.title) &&
       (!resolves(file.place) || inPlace(document, file.place));
     if (holds) {
@@ -1031,6 +1048,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * Sets or clears the document's status mark from the text Linear now
    * stores (conflict markers show the conflict mark), and records the
    * document's own icon and color in `ids` before the mark replaces them.
+   * When Linear stores the text past the Markdown limits, the body this run
+   * sent, which was within them, shows whether it holds conflict markers.
    */
   async function reconcileMark(path: string, document: LinearDocument): Promise<void> {
     const entry = nextIds.get(path);
@@ -1039,6 +1058,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       document,
       entry,
       linear,
+      sentBody: stored.get(path)?.sent,
       includeUpdatedBody: true,
       onConflictNotice: (change) => result.conflictNotices[change].push(path),
       persistEntry: async (next) => {

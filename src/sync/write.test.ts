@@ -18,6 +18,7 @@ import { markerCallout, MARKERS } from '../merge/index.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture, fakeLfsServer, mergeOnGitHub, signTip } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
+import { MARKS } from './marks.ts';
 
 const CANARY = 'kx-5b1e0a94';
 const PRE_COMMIT = `repos:
@@ -814,6 +815,53 @@ describe('sync: the tracked branch to Linear', () => {
     // Until someone edits it, the document is not read, written or left out again.
     await assertIdempotent();
     assert.deepEqual((await sync()).report.sync?.leftOutAtWrite, []);
+  });
+
+  it('an update and a create Linear stores nested past the parser limits are recorded as written, not left out', async () => {
+    // Quotes nested past the depth limit: reading the stored text for conflict markers would stop.
+    const nested = `${'>'.repeat(200)} deep`;
+    world.linear.store = (content) => (content.startsWith('# Plan') ? `${content}\n\n${nested}\n` : content);
+    const plan = `# Plan\n\nStep four. ${CANARY}\n`;
+    const next = `# Plan B\n\nStep one. ${CANARY}\n`;
+    await commit({ 'eng/notes/plan.md': plan, 'eng/notes/plan-b.md': next });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.updated, ['eng/notes/plan.md']);
+    assert.deepEqual(report.sync?.created, ['eng/notes/plan-b.md']);
+    assert.deepEqual(report.sync?.leftOutAtWrite, []);
+    for (const path of ['eng/notes/plan.md', 'eng/notes/plan-b.md']) {
+      assert.ok((await documentOf(path)).content?.includes(nested), `Linear does not hold the nested text of ${path}`);
+    }
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), plan);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan-b.md'), next);
+    // The digest of what Linear stored is kept: the next run sees no change in Linear and writes nothing.
+    await assertIdempotent();
+    assert.deepEqual((await sync()).report.sync?.leftOutAtWrite, []);
+  });
+
+  it('a text Linear stores nested past the parser limits gets its conflict mark from the body sent; removing the markers clears it', async () => {
+    const nested = `${'>'.repeat(200)} deep`;
+    world.linear.store = (content) => (content.startsWith('# Review') ? `${content}\n\n${nested}\n` : content);
+    const document = await documentOf('eng/notes/review.md');
+    document.icon = 'Fire';
+    document.color = '#123456';
+    const conflicted = `# Review\n\n**Sync conflict: git version**\n\nOne way.\n\n**Sync conflict: Linear version**\n\nThe other way.\n\n**Sync conflict: end**\n\n${CANARY}\n`;
+    await commit({ 'eng/notes/review.md': conflicted });
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.report.sync?.updated, ['eng/notes/review.md']);
+    assert.ok(document.content?.includes(nested), 'Linear does not hold the nested text');
+    assert.deepEqual({ icon: document.icon, color: document.color }, MARKS.conflict);
+    assert.equal(world.linear.comments.size, 1);
+
+    await commit({ 'eng/notes/review.md': `# Review\n\nOne way. ${CANARY}\n` });
+    const second = await sync();
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.deepEqual(second.report.sync?.updated, ['eng/notes/review.md']);
+    assert.deepEqual({ icon: document.icon, color: document.color }, { icon: 'Fire', color: '#123456' });
+    assert.ok([...world.linear.comments.values()].every((comment) => comment.resolved === true), 'the conflict notice is still open');
+    assert.equal(((await ids())['eng/notes/review.md'] as { saved?: unknown }).saved, undefined);
+    await assertIdempotent();
   });
 
   it("a document Linear reformats into other Markdown is recorded in Linear's form; its sync pull request merged, the next run writes nothing", async () => {
