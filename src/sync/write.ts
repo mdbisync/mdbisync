@@ -864,6 +864,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const patch: DocumentPatch = {};
     /** The document as Linear stores it after the content change, for its status mark. */
     let readBack: LinearDocument | undefined;
+    /** The digest of a rename or move that kept the recorded text, at its new update time. */
+    let refreshedDigest: string | undefined;
     if (change.content) patch.content = await transformBody(transforms, change.to, splitFile(textOf(file)).body);
     if (change.title) patch.title = file.title.normalize('NFC');
     if (change.place) Object.assign(patch, placePatch(file.place));
@@ -884,12 +886,15 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     } else {
       if (!(await unchangedSinceCapture(document, change.from))) return skip(change.to, 'edited-in-linear');
       await checkpoint('after-reread-before-write');
-      const updated = await timed(() => linear.updateDocument(change.id, patch), rereadAt);
+      // A recorded observation of the text: a rename or move changes the update time it holds.
+      const recorded = ids.get(change.from);
+      const observed = recorded?.id === change.id && recorded.observedDigest !== undefined && recorded.observedDigest === observedDigest(document);
+      const updated = await timed(() => linear.updateDocument(change.id, patch, observed), rereadAt);
       // Without a content write the merge result's file stands: Linear holds its body already.
       if (patch.content !== undefined) {
         stored.set(change.to, { content: updated.content ?? '', sent: patch.content, document: updated });
         readBack = updated;
-      }
+      } else if (observed && updated.content === document.content) refreshedDigest = observedDigest(updated);
     }
     // The structural rules set Linear's title back: say so where people see it. The comment id follows from the
     // document and the merge, so a run that repeats this merge after stopping finds its comment instead of adding one.
@@ -903,6 +908,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       delete next.pullRewrite;
       delete next.observedDigest;
     } else if (change.from !== change.to) next = resigned(change.from, change.to, next);
+    // The same text at the new time: a text past the Markdown limits is known to be held by this observation only.
+    if (refreshedDigest !== undefined) next.observedDigest = refreshedDigest;
     const plain = plainFiles.get(change.to);
     if (plain !== undefined && plain.size > 0) next.plainFiles = [...plain];
     nextIds.set(change.to, next);

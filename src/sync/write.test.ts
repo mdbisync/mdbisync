@@ -837,6 +837,19 @@ describe('sync: the tracked branch to Linear', () => {
     // The digest of what Linear stored is kept: the next run sees no change in Linear and writes nothing.
     await assertIdempotent();
     assert.deepEqual((await sync()).report.sync?.leftOutAtWrite, []);
+
+    // A move changes only the document's update time; the digest follows it, so a later change in git is written.
+    await commit({}, [['eng/notes/plan.md', 'eng/notes/archive/plan.md']]);
+    const moved = await sync();
+    assert.equal(moved.result.exitCode, 0, moved.result.stderr);
+    assert.deepEqual(moved.report.sync?.relocated, [{ from: 'eng/notes/plan.md', to: 'eng/notes/archive/plan.md' }]);
+    await commit({ 'eng/notes/archive/plan.md': `# Plan\n\nStep five. ${CANARY}\n` });
+    const edited = await sync();
+    assert.equal(edited.result.exitCode, 0, edited.result.stderr);
+    assert.deepEqual(edited.report.sync?.leftOutAtWrite, []);
+    assert.deepEqual(edited.report.sync?.updated, ['eng/notes/archive/plan.md']);
+    assert.match((await documentOf('eng/notes/archive/plan.md')).content ?? '', /Step five/);
+    await assertIdempotent();
   });
 
   it('a text Linear stores nested past the parser limits gets its conflict mark from the body sent; removing the markers clears it', async () => {
