@@ -73,7 +73,9 @@ fetch the refs, and the sync writes nothing of its own into your files.
 
 The first capture after upgrading from a version that stored unsigned capture
 checkpoints rereads the synchronized documents. After a complete capture,
-incremental reads resume using the signed checkpoint.
+incremental reads resume using the signed checkpoint. Capture uses a restored
+checkpoint only when its observation belongs to the current Linear record's
+history.
 
 ## A change made in Linear
 

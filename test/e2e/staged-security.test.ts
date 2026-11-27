@@ -390,7 +390,7 @@ for (const file of process.argv.slice(2)) {
     assert.ok(run.stage.includes('GetDocuments'));
     assert.deepEqual(run.apply, []);
     const head = await fixture.remote.revParse(ref);
-    const checkpoints = await readCaptureCheckpoints(fixture.remote, head, new PushedKey(clientSecret, 'owner/repo'));
+    const checkpoints = await readCaptureCheckpoints(fixture.remote, head, await fixture.remote.revParse(stateRef(config, 'linear')), new PushedKey(clientSecret, 'owner/repo'));
     assert.equal(checkpoints.cursor, time);
   });
 

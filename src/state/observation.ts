@@ -12,15 +12,17 @@ import { type PushedKey } from './pushed.ts';
 
 const SIGNATURE = 'Sync-signature';
 const SIGNED = new RegExp(`^([\\s\\S]*)\\n\\n${SIGNATURE}: ([0-9a-f]{64})\\n$`);
+const CAPTURE_OBSERVATION = /\n\nCapture-observation: ([0-9a-f]{40}|[0-9a-f]{64})$/;
 
 /** Signs a `linear` commit: pass as `sign` to `commitTree`. */
 export function signObservation(key: PushedKey): (tree: Oid, parents: readonly Oid[], message: string) => string {
   return signMessage(key.observationMac.bind(key));
 }
 
-/** Signs the message carrying capture checkpoints in an `ids` commit. */
-export function signIdsTrailers(key: PushedKey): (tree: Oid, parents: readonly Oid[], message: string) => string {
-  return signMessage(key.idsTrailersMac.bind(key));
+/** Signs the checkpoints and the `linear` observation they describe. */
+export function signIdsTrailers(key: PushedKey, observation: Oid): (tree: Oid, parents: readonly Oid[], message: string) => string {
+  const sign = signMessage(key.idsTrailersMac.bind(key));
+  return (tree, parents, message) => sign(tree, parents, `${message.replace(/\n+$/, '')}\n\nCapture-observation: ${observation}`);
 }
 
 function signMessage(mac: (tree: Oid, parents: readonly Oid[], text: string) => string): (tree: Oid, parents: readonly Oid[], message: string) => string {
@@ -35,9 +37,13 @@ export async function signedObservation(git: Git, commit: Oid, key: PushedKey): 
   return (await verifiedMessage(git, commit, key.verifiesObservation.bind(key))) !== undefined;
 }
 
-/** The authenticated message text of an `ids` commit, without its signature trailer. */
-export function signedIdsMessage(git: Git, commit: Oid, key: PushedKey): Promise<string | undefined> {
-  return verifiedMessage(git, commit, key.verifiesIdsTrailers.bind(key));
+/** The authenticated checkpoint message and the observation it covers. */
+export async function signedIdsMessage(git: Git, commit: Oid, key: PushedKey): Promise<{text: string; observation: Oid} | undefined> {
+  const text = await verifiedMessage(git, commit, key.verifiesIdsTrailers.bind(key));
+  if (text === undefined) return undefined;
+  const anchor = CAPTURE_OBSERVATION.exec(text);
+  if (anchor === null) return undefined;
+  return {text: text.slice(0, anchor.index), observation: anchor[1]!};
 }
 
 async function verifiedMessage(git: Git, commit: Oid, verifies: (tree: Oid, parents: readonly Oid[], text: string, mac: string) => boolean): Promise<string | undefined> {

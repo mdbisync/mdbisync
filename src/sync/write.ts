@@ -1176,7 +1176,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       && (await unverifiedPaths(git, tracked, commit, context.mapping.zones)).length === 0;
     const idsOf = (syncPushed?: PushedRecord) => commitIds(git, expected.ids, nextIds, identity, {
       message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved,
-      ...(asWritten.size === 0 ? {} : { sign: signIdsTrailers(context.pushedKey) }),
+      ...(asWritten.size === 0 ? {} : { sign: signIdsTrailers(context.pushedKey, commit) }),
       ...(syncPushed === undefined ? {} : { syncPushed }),
     });
     // The ids record the branch's head as the sync's own push, only together with that push.

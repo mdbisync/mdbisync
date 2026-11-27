@@ -183,7 +183,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // Files left out for a title another file has count too: they had a document as much as any other.
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
-    const {cursor, recorded: recordedTimes, needsCursor} = await readCaptureCheckpoints(git, state.ids, context.pushedKey);
+    const {cursor, recorded: recordedTimes, needsCursor} = await readCaptureCheckpoints(git, state.ids, base, context.pushedKey);
     const recordedBlobs = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
     const textEntries = recordedBlobs.filter(readableBlob);
     const unreadIds = new Set(recordedBlobs.filter((entry) => !readableBlob(entry)).map((entry) => ids.get(entry.path)!.id));
@@ -894,7 +894,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const always = recordsRemovals || checkpoints.size > 0 || (writeCursor && through !== cursor);
     const idsCommit = await commitIds(git, state.ids, ids, identity, {
       message: commitMessage, always, reserved, superseded,
-      ...(writeCursor || checkpoints.size > 0 ? { sign: signIdsTrailers(context.pushedKey) } : {}),
+      ...(writeCursor || checkpoints.size > 0 ? { sign: signIdsTrailers(context.pushedKey, linearCommit) } : {}),
     });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     await lfsPush(git, lfsRemote(options.config), prepared.oids);

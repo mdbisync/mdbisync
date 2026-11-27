@@ -874,10 +874,10 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     // A cursor or a kept set that changed is recorded even when the ids did not (a rerun that now keeps a tracked file).
     const previousKept = await readKeptAnnotations(git, expected.ids);
     const markersMoved =
-      (through !== null && through !== (await readCaptureCursor(git, expected.ids, context.pushedKey)).checkpoint?.time) || previousKept.size !== kept.length || kept.some((path) => !previousKept.has(path));
+      (through !== null && through !== (await readCaptureCursor(git, expected.ids, commit, context.pushedKey))) || previousKept.size !== kept.length || kept.some((path) => !previousKept.has(path));
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
       message: trailers.length === 0 ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}\n\n${trailers.join('\n')}`,
-      ...(through === null ? {} : { sign: signIdsTrailers(context.pushedKey) }),
+      ...(through === null ? {} : { sign: signIdsTrailers(context.pushedKey, commit) }),
       always: markersMoved || (await readInitialSyncProgress(git, expected.ids)) !== null,
       // The sync branch moves to the record with this commit: the ids name it as the sync's own push.
       ...(moveSync ? { syncPushed: context.pushedKey.record(branchRef(options.config.syncBranch), commit) } : {}),

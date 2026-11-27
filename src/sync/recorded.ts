@@ -54,15 +54,16 @@ export function withRecorded(message: string, recorded: ReadonlyMap<string, stri
 }
 
 /** Read the last signed cursor and the signed document checkpoints that came after it. */
-export async function readCaptureCheckpoints(git: Git, ids: Oid | null, key: PushedKey): Promise<{cursor: string | null; recorded: Map<string, string>; needsCursor: boolean}> {
+export async function readCaptureCheckpoints(git: Git, ids: Oid | null, linear: Oid, key: PushedKey): Promise<{cursor: string | null; recorded: Map<string, string>; needsCursor: boolean}> {
   const recorded = new Map<string, string>();
   if (ids === null) return {cursor: null, recorded, needsCursor: false};
-  const {checkpoint, sawCursor} = await readCaptureCursor(git, ids, key);
+  const read = checkpointReader(git, linear, key);
+  const {checkpoint, sawCursor} = await findCaptureCursor(git, ids, read);
   const range = checkpoint === null ? ids : `${checkpoint.commit}..${ids}`;
   const log = await git.text(['log', '--first-parent', '--format=%H', '--grep=^Document-recorded: ', range]);
   let needsCursor = checkpoint === null && sawCursor;
   for (const commit of log.trim().split('\n').filter(Boolean)) {
-    const message = await signedIdsMessage(git, commit, key);
+    const message = await read(commit);
     if (message === undefined) {
       if (checkpoint === null) needsCursor = true;
       continue;
@@ -75,8 +76,26 @@ export async function readCaptureCheckpoints(git: Git, ids: Oid | null, key: Pus
   return {cursor: checkpoint?.time ?? null, recorded, needsCursor};
 }
 
-/** Read the newest signed cursor. Ordinary commits may sit above it in `ids` history. */
-export async function readCaptureCursor(git: Git, ids: Oid | null, key: PushedKey): Promise<{checkpoint: {commit: Oid; time: string} | null; sawCursor: boolean}> {
+/** Read the newest signed cursor that applies to the supplied Linear record. */
+export async function readCaptureCursor(git: Git, ids: Oid | null, linear: Oid, key: PushedKey): Promise<string | null> {
+  const {checkpoint} = await findCaptureCursor(git, ids, checkpointReader(git, linear, key));
+  return checkpoint?.time ?? null;
+}
+
+function checkpointReader(git: Git, linear: Oid, key: PushedKey): (commit: Oid) => Promise<string | undefined> {
+  let history: Promise<Set<Oid>> | undefined;
+  return async (commit) => {
+    const signed = await signedIdsMessage(git, commit, key);
+    if (signed === undefined) return undefined;
+    if (signed.observation === linear) return signed.text;
+    // The first parent of each new observation is the previous Linear record.
+    // A commit brought in through the tracked branch cannot establish that history.
+    history ??= git.text(['log', '--first-parent', '--format=%H', linear]).then((log) => new Set(log.split('\n')));
+    return (await history).has(signed.observation) ? signed.text : undefined;
+  };
+}
+
+async function findCaptureCursor(git: Git, ids: Oid | null, read: (commit: Oid) => Promise<string | undefined>): Promise<{checkpoint: {commit: Oid; time: string} | null; sawCursor: boolean}> {
   let tip = ids;
   let sawCursor = false;
   while (tip !== null) {
@@ -86,7 +105,7 @@ export async function readCaptureCursor(git: Git, ids: Oid | null, key: PushedKe
     const candidates = log.split('\n');
     for (const line of candidates) {
       const [commit] = line.split(' ');
-      const message = await signedIdsMessage(git, commit!, key);
+      const message = await read(commit!);
       const time = message === undefined ? undefined : CURSOR.exec(message)?.[1];
       if (time !== undefined) return {checkpoint: {commit: commit!, time}, sawCursor};
     }

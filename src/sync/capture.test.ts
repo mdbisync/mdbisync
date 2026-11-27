@@ -2131,7 +2131,7 @@ repos:
     const partial = await run();
     assert.equal(partial.ok, true);
     assert.ok(bodyIds().includes('plan'));
-    const partialCheckpoints = await readCaptureCheckpoints(context.git, partial.state.ids, context.pushedKey);
+    const partialCheckpoints = await readCaptureCheckpoints(context.git, partial.state.ids, partial.state.linear!, context.pushedKey);
     assert.equal(partialCheckpoints.cursor, null);
     assert.deepEqual(partialCheckpoints.recorded, new Map([['plan', early]]));
 
@@ -2142,7 +2142,7 @@ repos:
     assert.equal(upgraded.ok, true);
     assert.equal(upgraded.state.linear, state.linear);
     assert.deepEqual(bodyIds(), ['later']);
-    assert.equal((await readCaptureCheckpoints(context.git, upgraded.state.ids, context.pushedKey)).cursor, late);
+    assert.equal((await readCaptureCheckpoints(context.git, upgraded.state.ids, upgraded.state.linear!, context.pushedKey)).cursor, late);
 
     await refresh();
     reads.mock.resetCalls();
@@ -2155,7 +2155,7 @@ repos:
     const ids = await commitIds(context.git, first.state.ids, await readIds(context.git, first.state.ids), IDENTITY, {
       message: withRecorded('Record document ids', new Map([['plan', '2026-01-01T00:00:00.000Z']])),
       always: true,
-      sign: signIdsTrailers(context.pushedKey),
+      sign: signIdsTrailers(context.pushedKey, first.state.linear!),
     });
     const ref = stateRef(config, 'ids');
     assert.equal((await pushAtomic(context.git, config, [{ref, expected: first.state.ids, next: ids}])).ok, true);
@@ -2166,9 +2166,38 @@ repos:
     assert.deepEqual(result.state, {...first.state, ids});
     assert.ok(!reads.mock.calls.some(({arguments: [ids, options]}) => options?.withContent === true && ids.includes('plan')));
     const anotherRepo = new PushedKey('client-secret', 'owner/another-repo');
-    const checkpoints = await readCaptureCheckpoints(context.git, ids, anotherRepo);
+    const checkpoints = await readCaptureCheckpoints(context.git, ids, first.state.linear!, anotherRepo);
     assert.equal(checkpoints.cursor, null);
     assert.equal(checkpoints.recorded.size, 0);
+  });
+
+  it('uses signed checkpoints only on the Linear observation history they describe', async () => {
+    const before = context.fetched.state.linear!;
+    const time = '2026-01-04T00:00:00.000Z';
+    world.linear.documents.push({id: 'later', title: 'later', projectId: 'project-api', content: 'Later.\n', createdAt: time});
+    const captured = await run();
+    assert.equal(captured.ok, true);
+    const observation = captured.state.linear!;
+    assert.notEqual(observation, before);
+    const {git, pushedKey} = context;
+    const ids = await commitIds(git, captured.state.ids, await readIds(git, captured.state.ids), IDENTITY, {
+      message: withRecorded('Record document ids', new Map([['later', time]])),
+      always: true,
+      sign: signIdsTrailers(pushedKey, observation),
+    });
+    const next = (parents: string[]) => commitTree(git, {
+      parents, base: parents[0]!, changes: new Map(), message: 'Next observation', identity: IDENTITY, skipIfUnchanged: false,
+    });
+    for (const linear of [observation, await next([observation])]) {
+      const checkpoints = await readCaptureCheckpoints(git, ids, linear, pushedKey);
+      assert.equal(checkpoints.cursor, time);
+      assert.deepEqual(checkpoints.recorded, new Map([['later', time]]));
+    }
+    for (const linear of [before, await next([before, observation])]) {
+      const checkpoints = await readCaptureCheckpoints(git, ids, linear, pushedKey);
+      assert.equal(checkpoints.cursor, null);
+      assert.equal(checkpoints.recorded.size, 0);
+    }
   });
 
   it('keeps the path of a document whose title was cleared only while it is free and safe', () => {
