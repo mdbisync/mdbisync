@@ -3103,9 +3103,10 @@ describe('I6 tells an ids move that only records new digests from a real change'
   const without = (entries: Entries, path: string): Entries => Object.fromEntries(Object.entries(entries).filter(([key]) => key !== path));
   const PLAN = 'eng/platform/plan.md';
   type Effect = 'write' | 'tracked' | 'linear' | 'pull-request';
-  const cases: Array<{ name: string; next: (base: Entries) => Entries; base?: (base: Entries) => Entries; files?: Record<string, string>; via?: Record<string, string>; message?: string; startMessage?: string; mode?: string; report?: (base: Entries) => Record<string, unknown>; effect?: Effect; unrelated?: boolean; pass: boolean; detail?: RegExp }> = [
+  const cases: Array<{ name: string; next: (base: Entries) => Entries; base?: (base: Entries) => Entries; files?: Record<string, string>; via?: Record<string, string>; message?: string; startMessage?: string; mode?: string; report?: (base: Entries) => Record<string, unknown>; effect?: Effect; unrelated?: boolean; staleMac?: boolean; pass: boolean; detail?: RegExp }> = [
     { name: 'passes a move whose one changed entry differs only in its digest', next: (base) => ({ ...base, [PLAN]: { ...base[PLAN], observedDigest: NEW } }), pass: true },
     { name: 'passes new digests on every entry', next: (base) => digests(base, NEW), pass: true },
+    { name: 'fails a digest with a stale signature', next: (base) => digests(base, NEW), staleMac: true, pass: false },
     { name: 'fails an added id', next: (base) => ({ ...digests(base, NEW), 'eng/platform/extra.md': { id: 'document-extra', observedDigest: NEW } }), pass: false },
     { name: 'fails a removed id', next: (base) => without(digests(base, NEW), 'eng/platform/notes.md'), pass: false },
     { name: 'fails a path change', next: (base) => ({ ...without(digests(base, NEW), PLAN), 'eng/platform/plan-moved.md': { ...base[PLAN], observedDigest: NEW } }), pass: false },
@@ -3144,14 +3145,26 @@ describe('I6 tells an ids move that only records new digests from a real change'
     const { ctx, remoteGit, ids } = await fakeRun();
     const { INVARIANT_CHECKS, snapshotRefs } = await import('./checks.ts');
     const ref = `${ctx.names.refPrefix}/ids`;
-    const base = (fixture.base ?? ((entries) => entries))(digests(ids, OLD));
+    const key = new PushedKey(ctx.live!.engineApp.clientSecret, ctx.live!.repository);
+    const { observedBlobs } = await import('../../../src/sync/recorded.ts');
+    const linear = await remoteGit.revParse(`refs/heads/${ctx.names.trackedBranch}`);
+    await remoteGit.run(['update-ref', `${ctx.names.refPrefix}/linear`, linear]);
+    const blobs = await observedBlobs(remoteGit, linear, Object.keys(ids));
+    const signed = (entries: Entries): Entries => Object.fromEntries(Object.entries(entries).map(([path, entry]) => {
+      const digest = entry['observedDigest'];
+      const id = entry['id'];
+      const blob = blobs.get(path);
+      return [path, typeof digest === 'string' && typeof id === 'string' && blob !== undefined ? { ...entry, observedMac: key.observedMac(path, id, blob, digest) } : entry];
+    }));
+    const base = signed((fixture.base ?? ((entries) => entries))(digests(ids, OLD)));
     const start = await commitIdsTree(remoteGit, base, (await remoteGit.text(['rev-parse', ref])).trim(), {}, fixture.startMessage);
     await remoteGit.run(['update-ref', ref, start]);
     mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
     ctx.observations.set('refHistory', [await snapshotRefs(ctx)]);
     mkdirSync(await ctx.engineClone(), { recursive: true });
     // The no-change run's ids move, made here; its other effects are the driver's below.
-    const next = fixture.next(base);
+    const next = signed(fixture.next(base));
+    if (fixture.staleMac) next[PLAN]!['observedMac'] = base[PLAN]!['observedMac'];
     const parent = fixture.unrelated === true ? null : fixture.via === undefined ? start : await commitIdsTree(remoteGit, next, start, fixture.via);
     await remoteGit.run(['update-ref', ref, await commitIdsTree(remoteGit, next, parent, fixture.files, fixture.message, fixture.mode)]);
     const driver = join(ctx.runDir, 'digest-sync.mjs');

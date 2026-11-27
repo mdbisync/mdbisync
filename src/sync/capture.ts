@@ -12,7 +12,7 @@ import { pendingProject, resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, readableBlob } from '../mapping/blobs.ts';
 import { fixLinearText, joinFile, linkedFileCheck, lintRecorded, sameAsLinear, splitFile } from '../format/index.ts';
-import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
+import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, LinearResponseLimitError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, hasDocumentLinks, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { MarkdownLimitError, linearMarkersAsText, markdownBaseline } from '../format/markdown.ts';
@@ -24,7 +24,7 @@ import { lineText } from '../run/output.ts';
 import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, lfsPush, lfsRemote, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, signIdsTrailers, signObservation, UPLOADS_REBUILDING } from '../state/index.ts';
 import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, markWritesLinear, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
-import { captureCursorTrailer, matchesObservedBody, observedDigest, readCaptureCheckpoints, recordedTime, recordedTrailers } from './recorded.ts';
+import { captureCursorTrailer, matchesObservedBody, observedBlobs, observedFields, readCaptureCheckpoints, recordedTime, recordedTrailers, verifiedObservedDigest } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath, isUntitled, keptPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
@@ -106,6 +106,7 @@ export function cursorTime(document: LinearDocument): string {
   // The same form as a recorded document's time: the capture compares the two as text.
   return recordedTime(document.updatedAt);
 }
+const DIGEST_REFRESH_LIMIT = 32;
 const HELD = /^Removal-held: (\S+)$/gm;
 
 /** The ids whose removal the last capture held, from its ids commit. */
@@ -186,6 +187,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const {cursor, recorded: recordedTimes, needsCursor} = await readCaptureCheckpoints(git, state.ids, base, context.pushedKey);
     const recordedBlobs = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
     const textEntries = recordedBlobs.filter(readableBlob);
+    const recordedOids = new Map(textEntries.map(({path, oid}) => [path, oid]));
     const unreadIds = new Set(recordedBlobs.filter((entry) => !readableBlob(entry)).map((entry) => ids.get(entry.path)!.id));
     for (const id of unreadIds) result.leftOut.push({id, rule: 'blob-too-large'});
     const blobs = await blobBudget.read(git, textEntries);
@@ -296,20 +298,23 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const entry = byId.get(doc.id)?.entry;
       return entry?.saved !== undefined && (entry.suspended === undefined || entry.saved.notice?.kind === 'blocked');
     };
-    // Older ids entries have no digest. Read those bodies once so a later write can still verify them if the
-    // attachment cache is unavailable.
     // A stored repair the sync did not sign (one recorded before repairs were signed, or written into the ref) is
     // never applied: its document is read again, so its repair is recorded anew, signed, or dropped.
     const unsignedRepair = (old: {path: string; entry: IdEntry}) => old.entry.pullRewrite !== undefined && signedRepair(context.pushedKey, old.path, old.entry) === undefined;
     // A suspended document whose recorded text another version read is read again, though Linear reports no change:
     // a newer reading can show the document is what git holds, and its lane can then let it go.
     const readByOtherVersion = (old: {path: string; entry: IdEntry}) => old.entry.suspended !== undefined && olderVersion(old.entry.capturedWith, VERSION);
+    const legacyDigests: LinearDocument[] = [];
     let selected = [...listed.values()].filter((doc) => {
       const old = byId.get(doc.id);
-      return old === undefined || marked(doc) || (old.entry.observedDigest === undefined && live(doc) && previous.has(old.path) && !excludedPath(old.path))
+      const needed = old === undefined || marked(doc)
         || (unsignedRepair(old) && live(doc) && previous.has(old.path))
         || (readByOtherVersion(old) && live(doc) && previous.has(old.path))
         || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor));
+      // Leave room for ordinary capture reads. A document without a trusted digest remains eligible on later runs.
+      if (!needed && old !== undefined && live(doc) && previous.has(old.path) && !excludedPath(old.path)
+        && verifiedObservedDigest(context.pushedKey, old.path, recordedOids.get(old.path), old.entry) === undefined) legacyDigests.push(doc);
+      return needed;
     });
     const invalidZone = (doc: LinearDocument, path: string) => {
       const zone = nearestZone(mapping.zones, folderOf(path));
@@ -392,6 +397,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (requested.some(({id}) => !answered.has(id))) missingBodies = true;
     };
     await readBodies(selected.filter(live));
+    const refresh = legacyDigests.filter(({id}) => !work.has(id)).slice(0, DIGEST_REFRESH_LIMIT);
+    try {
+      await readBodies(refresh);
+    } catch (error) {
+      if (!(error instanceof LinearResponseLimitError) || error.code !== 'linear-body-budget') throw error;
+      // Ordinary reads already succeeded. The optional batch can wait for a run with room in the budget.
+    }
     // A document renamed or moved after the listing moves by this read: the files linking its old path are read too.
     const late = new Map<string, string>();
     for (const doc of work.values()) {
@@ -455,7 +467,6 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const tracked = (await listPaths(git, fetched.tracked, rereadPaths)).filter((entry) => entry.type === 'blob' && readableBlob(entry));
       // A tracked file the record holds as it is is read already; the others have a budget of their own, so the
       // record's own reads keep theirs.
-      const recordedOids = new Map(textEntries.map((entry) => [entry.path, entry.oid]));
       const unread = tracked.filter((entry) => recordedOids.get(entry.path) !== entry.oid);
       const blobs = await new MappingBlobBudget().read(git, unread);
       for (const entry of tracked) {
@@ -806,6 +817,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     // The documents whose entry this capture records anew: only their repairs are this capture's to sign.
     const recordedNow = new Set<string>();
+    const observed = new Map<string, LinearDocument>();
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
       const converged = reread.has(id) && readsAsTracked(candidate.path, String(candidate.files.get(candidate.path)));
@@ -825,7 +837,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // Only a suspended document needs the version of its reading: noting it on every entry would rewrite them all. One
       // that reads as the tracked file keeps the older version until the lane takes that file (`rereadAsTracked`): the
       // lane notes the version with its push, so a run that stops before it reads the document again.
-      const entry = {...old?.entry, id, observedDigest: observedDigest(candidate.doc), ...(old?.entry.suspended === undefined || converged ? {} : {capturedWith: VERSION})};
+      const entry = {...old?.entry, id, observedDigest: undefined, observedMac: undefined, ...(old?.entry.suspended === undefined || converged ? {} : {capturedWith: VERSION})};
       delete entry.pullRewrite;
       const plainFiles = [...new Set([...(old?.entry.plainFiles ?? []), ...(candidate.assets.plainFiles ?? [])])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
@@ -853,6 +865,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           const baseline = baselines.get(path);
           if (baseline != null && splitFile(baseline.text).body === splitFile(String(content)).body) continue;
         }
+        if (path === candidate.path) observed.set(path, candidate.doc);
         if (previous.get(path)?.equals(contentBytes(content)) !== true) {
           changes.set(path, content);
           result.changed.push(path);
@@ -870,6 +883,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const plainTrailers = [...ids.values()].flatMap(entry => (entry.plainFiles ?? []).map(target => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: CAPTURE_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`), identity, sign: signObservation(context.pushedKey) });
     if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
+    const observedOids = await observedBlobs(git, linearCommit, [...observed.keys()]);
+    for (const [path, document] of observed) {
+      ids.set(path, {...ids.get(path)!, ...observedFields(context.pushedKey, path, observedOids.get(path), document)});
+    }
     for (const [path, entry] of ids) if (recordedNow.has(entry.id) && entry.pullRewrite !== undefined && entry.pullRewrite.source === undefined) {
       ids.set(path, {...entry, pullRewrite: signRepair(context.pushedKey, path, entry.id, {...entry.pullRewrite, source: linearCommit})});
     }
@@ -923,7 +940,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
               // Clearing a mark can advance updatedAt. Refresh the digest only from a response holding the
               // same accepted body, because a Linear edit may have arrived while the mark was cleared.
               if (cleared !== undefined && matchesObservedBody(cleared, doc)) {
-                entry = {...entry, observedDigest: observedDigest(cleared)};
+                entry = {...entry, ...observedFields(context.pushedKey, path, observedOids.get(path), cleared)};
               }
               ids.set(path, entry);
               const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, superseded, message:'Capture document marks'});

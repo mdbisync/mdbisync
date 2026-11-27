@@ -380,7 +380,11 @@ for (const file of process.argv.slice(2)) {
     const time = '2026-01-01T00:00:00.000Z';
     const ref = stateRef(config, 'ids');
     const parent = await fixture.remote.revParse(ref);
-    const ids = new Map([['docs/plan.md', {id: 'plan', observedDigest: 'a'.repeat(64)}]]);
+    const key = new PushedKey(clientSecret, 'owner/repo');
+    const path = 'docs/plan.md';
+    const digest = 'a'.repeat(64);
+    const blob = await fixture.remote.revParse(`${stateRef(config, 'linear')}:${path}`);
+    const ids = new Map([[path, {id: 'plan', observedDigest: digest, observedMac: key.observedMac(path, 'plan', blob, digest)}]]);
     const legacy = await commitIds(fixture.remote, parent, ids, IDENTITY, {
       message: `Record document ids\n\nDocument-recorded: plan ${time}`,
     });
@@ -390,7 +394,7 @@ for (const file of process.argv.slice(2)) {
     assert.ok(run.stage.includes('GetDocuments'));
     assert.deepEqual(run.apply, []);
     const head = await fixture.remote.revParse(ref);
-    const checkpoints = await readCaptureCheckpoints(fixture.remote, head, await fixture.remote.revParse(stateRef(config, 'linear')), new PushedKey(clientSecret, 'owner/repo'));
+    const checkpoints = await readCaptureCheckpoints(fixture.remote, head, await fixture.remote.revParse(stateRef(config, 'linear')), key);
     assert.equal(checkpoints.cursor, time);
   });
 

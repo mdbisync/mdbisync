@@ -16,7 +16,8 @@ import { LINT_RULE_BLOCKS, NOT_IN_LINEAR_EXPORT } from '../../../src/format/rule
 import { sameText } from '../../format/text-and-places.ts';
 import { readKeptAnnotations } from '../../../src/initial-sync/confirm.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
-import { IDS_FILE, PushedKey, readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
+import { observedBlobs } from '../../../src/sync/recorded.ts';
+import { IDS_FILE, PushedKey, readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap, type Oid } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, annotationPath, heldBack, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
@@ -855,15 +856,15 @@ const OBSERVED_DIGEST = /^[0-9a-f]{64}$/;
 
 /**
  * The document ids whose entries changed between `old` and `next` (both a
- * parsed `ids.json`) when they changed only in `observedDigest` values: the
- * same paths, each with an entry equal to its old one (the same document id)
- * apart from a digest that both record in the form `readIds` accepts. Null
+ * parsed `ids.json`) when they changed only in authenticated observed digests:
+ * the same paths and entries, with both versions of each changed digest
+ * signed for that path and document. Null
  * for any other change, and for none. A capture records Linear's new raw form
  * of a document this way when the file text it maps to did not change, so
  * the next sync does not read the same body again; Linear saves a table
  * document when it is first opened.
  */
-export function digestOnlyIdsChange(old: unknown, next: unknown): string[] | null {
+export function digestOnlyIdsChange(old: unknown, next: unknown, blobs: ReadonlyMap<string, Oid>, key: PushedKey): string[] | null {
   const object = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
   const before = object(old);
   const after = object(next);
@@ -875,12 +876,18 @@ export function digestOnlyIdsChange(old: unknown, next: unknown): string[] | nul
     const was = object(before[path]);
     const now = object(after[path]);
     if (was === null || now === null) return null;
-    const { observedDigest: wasDigest, ...wasRest } = was;
-    const { observedDigest: nowDigest, ...nowRest } = now;
+    const { observedDigest: wasDigest, observedMac: wasMac, ...wasRest } = was;
+    const { observedDigest: nowDigest, observedMac: nowMac, ...nowRest } = now;
     if (!isDeepStrictEqual(wasRest, nowRest)) return null;
-    if (wasDigest === nowDigest) continue;
-    if (typeof wasDigest !== 'string' || typeof nowDigest !== 'string' || !OBSERVED_DIGEST.test(wasDigest) || !OBSERVED_DIGEST.test(nowDigest)) return null;
-    changed.push(String(now['id']));
+    if (wasDigest === nowDigest) {
+      if (wasMac !== nowMac) return null;
+      continue;
+    }
+    const id = now['id'];
+    if (typeof id !== 'string' || typeof wasDigest !== 'string' || typeof nowDigest !== 'string' || !OBSERVED_DIGEST.test(wasDigest) || !OBSERVED_DIGEST.test(nowDigest)) return null;
+    const blob = blobs.get(path);
+    if (blob === undefined || !key.verifiesObserved(path, id, blob, wasDigest, wasMac) || !key.verifiesObserved(path, id, blob, nowDigest, nowMac)) return null;
+    changed.push(id);
   }
   return changed.length === 0 ? null : changed;
 }
@@ -924,7 +931,14 @@ export async function digestOnlyIdsMove(ctx: RunContext, old: string, next: stri
       return null;
     }
   };
-  return digestOnlyIdsChange(await read(old), await read(next));
+  const world = ctx.live;
+  if (world === null) return null;
+  const before = await read(old);
+  const after = await read(next);
+  const linear = await fetchRef(git, `${ctx.names.refPrefix}/linear`);
+  if (linear === null || before === null || typeof before !== 'object') return null;
+  const blobs = await observedBlobs(git, linear, Object.keys(before));
+  return digestOnlyIdsChange(before, after, blobs, new PushedKey(world.engineApp.clientSecret, world.repository));
 }
 
 /**

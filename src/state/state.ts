@@ -356,6 +356,8 @@ export interface IdEntry {
   id: string;
   /** SHA-256 of the raw Linear content and update time of the recorded version. */
   observedDigest?: string | undefined;
+  /** The sync's signature of the observed digest, for this path, document and file version. */
+  observedMac?: string | undefined;
   /** Targets introduced as path images in Linear; ordinary links to them must never upload files. */
   plainFiles?: string[];
   /**
@@ -401,6 +403,7 @@ export async function readIds(git: Git, commit: Oid | null): Promise<IdMap> {
   const map: IdMap = new Map();
   for (const [path, value] of Object.entries(data)) {
     if (!isIdEntry(value)) throw new Error(message('state.invalid-path-entry', { file: IDS_FILE }));
+    if (typeof value.observedMac !== 'string' || !PUSHED_MAC.test(value.observedMac)) delete value.observedMac;
     map.set(path, value);
   }
   checkUniqueDocumentIds(map);

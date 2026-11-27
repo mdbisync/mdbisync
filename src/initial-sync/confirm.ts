@@ -73,7 +73,7 @@ import { type BodyTransform, LeaveOutError, restoreBody, restoreWrittenBody, sam
 import { MarkdownLimitError, parse } from '../format/markdown.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { type ConflictNotices, MARKS, noConflictNotices, reconcileDocumentMark } from '../sync/marks.ts';
-import { matchesObservedBody, observedDigest, withRecorded } from '../sync/recorded.ts';
+import { matchesObservedBody, observedBlobs, observedDigest, observedFields, withRecorded } from '../sync/recorded.ts';
 import { stableId } from '../sync/stable-id.ts';
 import { createPendingProjects } from '../setup/linear.ts';
 import { message } from '../messages.ts';
@@ -614,7 +614,6 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   async function record(): Promise<RecordResult | null> {
     const synced = new Set([...result.created, ...result.overwritten, ...result.unchanged, ...result.skippedCompleted]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
-
     const changes = new Map<string, string>();
     const reformatted: string[] = [];
     for (const path of [...synced].sort(compare)) {
@@ -641,6 +640,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const recordMessage = RECORD_MESSAGE + (plainTrailers.length === 0 ? '' : `\n\n${plainTrailers.join('\n')}`);
     let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;
+
+    const blobs = await observedBlobs(git, linearCommit, [...finalIds.keys()]);
+    for (const [path, entry] of finalIds) {
+      const document = rememberedDocuments.get(path);
+      if (document?.id === entry.id) finalIds.set(path, {...entry, ...observedFields(context.pushedKey, path, blobs.get(path), document)});
+    }
 
     // New documents left out while writing keep their chosen ids, which other documents may link to.
     const created = new Set([...plan.create.map((entry) => entry.path), ...createdBefore]);
