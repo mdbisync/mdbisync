@@ -282,6 +282,32 @@ function fix(paths: readonly string[], cwd: string): CommandResult {
 }
 
 /**
+ * What `fix` does to one document's text, as the command decides it for a
+ * file: `text` is its output (the text itself when `fix` leaves it to its
+ * author) and `findings` what lint reports of that output. The check for
+ * duplicate titles across files and for refused uploads is the caller's.
+ */
+export function fixDocument(file: string, text: string, linkedFileExists: (url: string) => boolean): { text: string; findings: Finding[] } {
+  const options = { linkedFileExists };
+  const before = lintText(file, text, options);
+  const linked = before.some((finding) => finding.rule === 'image-not-in-repository') ? withWebImageLinks(text) : undefined;
+  // A text with web images is judged by its text with them written as links, as `fix` judges it.
+  const judged = linked === undefined ? before : lintText(file, linked.text, options).filter((finding) => finding.rule !== 'content-too-long');
+  if (judged.some((finding) => !FIXED_RULES.has(finding.rule))) {
+    const reported = new Set(before.map((finding) => finding.rule));
+    return { text, findings: [...before, ...(linked === undefined ? [] : judged.filter((finding) => !FIXED_RULES.has(finding.rule) && !reported.has(finding.rule)))] };
+  }
+  let fixed: string;
+  try {
+    fixed = linked === undefined ? fixText(text, options) : linearForm(linked.text, options) ?? text;
+  } catch (error) {
+    if (error instanceof MarkdownLimitError) return { text, findings: [...before, complexity(file)] };
+    throw error;
+  }
+  return fixed === text ? { text, findings: before } : { text: fixed, findings: lintText(file, fixed, options) };
+}
+
+/**
  * Runs a command, rethrowing an error with its message escaped as `lineText`
  * does: a file system error names the file, whose name may hold controls.
  */

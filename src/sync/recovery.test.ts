@@ -256,7 +256,7 @@ describe('sync: lost state and deleted branches', () => {
     await commit({ 'eng/media/diagram.png': null });
     const left = await sync();
     assert.equal(left.result.exitCode, 0, left.result.stderr);
-    assert.deepEqual(left.writes, []);
+    assert.deepEqual(left.writes, ['POST /pulls']);
     assert.deepEqual(left.report.sync?.leftOut, [
       { path: 'eng/notes/chart.md', rules: ['image-file-missing'] },
       { path: 'eng/notes/diagram.md', rules: ['image-file-missing'] },

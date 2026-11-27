@@ -7,6 +7,7 @@ import { PARTIAL, renderStop } from '../run/stop.ts';
 import { type CycleResult } from './cycle.ts';
 import { renderPullRequest } from './pull-request.ts';
 import { type SkipReason } from './write.ts';
+import { type FormatProblemsResult } from './format-problems.ts';
 
 /** Why a document was skipped, as the "Skipped" table says it. */
 export const SKIP_REASON_TEXTS: Record<SkipReason, string> = {
@@ -70,6 +71,7 @@ export function renderSync(result: CycleResult): string {
   table('Renamed or moved', ['From', 'To'], write.relocated.map((entry) => [entry.from, entry.to]));
   table('Moved to trash', ['Path'], write.trashed.map((path) => [path]));
   table('Left out', ['Path', 'Rules'], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(', ')]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);
+  lines.push(...renderFormatProblems(result));
   table('CI fixes not written', ['Path', 'Hooks on the fixing commit', 'Rules'], write.leftOut.filter((entry) => entry.hooks?.length).map((entry) => [entry.path, entry.hooks!.join(', '), entry.rules.join(', ')]));
   return lines.join('\n') + renderCapacity(write.capacity ?? []);
 }
@@ -77,3 +79,24 @@ export function renderSync(result: CycleResult): string {
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
+
+/** The format problems pull request, below the files left out. */
+function renderFormatProblems(result: CycleResult): string[] {
+  const step = result.formatProblems;
+  if (step === undefined) return [];
+  const lines: string[] = [];
+  const pr = step.pullRequest;
+  if (pr !== null) {
+    const fixed = step.files.filter((file) => file.fixed).length;
+    lines.push(`Files left out for their Markdown (${step.files.length}): [format problems pull request #${pr.number}](${pr.url})${pr.opened ? ', opened by this run' : ''}. It holds what \`mdbisync fix\` writes for ${count(fixed, 'file')} and lists what is left to fix by hand; the sync never merges it.`, '');
+  }
+  if (step.dismissed !== null) lines.push(`Files left out for their Markdown (${step.files.length}): format problems pull request #${step.dismissed} was closed without merging; it opens again when the tracked branch changes.`, '');
+  if (step.closed !== null) lines.push(`Closed format problems pull request #${step.closed}: no file is left out for its Markdown.`, '');
+  if (step.code !== undefined) lines.push(`The format problems pull request was not brought up to date (${FORMAT_PROBLEMS_FAILURES[step.code]}); the next run tries again.`, '');
+  return lines;
+}
+
+const FORMAT_PROBLEMS_FAILURES: Record<NonNullable<FormatProblemsResult['code']>, string> = {
+  'state-moved': 'its branch moved while this run worked',
+  'github-failed': 'GitHub refused or did not answer a request, or refused the push of its branch',
+};

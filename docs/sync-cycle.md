@@ -58,11 +58,15 @@ repository share a concurrency group in the supplied workflows
 5. **Record.** The run reads back what it wrote and commits Linear's answer
    to `refs/mdbisync/linear`, so the next run starts from what Linear
    really holds.
+6. **Format problems.** While a file is left out for its Markdown, the run
+   keeps the [format problems pull request](#the-format-problems-pull-request)
+   open and up to date, and closes it once no such file is left.
 
 The sync's state lives in three refs under `refs/mdbisync/` (Linear's
 record, the map of files to Linear document ids, and the cache of uploaded
-images) and in the normal branch `mdbisync/linear` and the suspended branch
-`mdbisync/suspended`, created when first needed. The suspended branch can
+images) and in the normal branch `mdbisync/linear`, the suspended branch
+`mdbisync/suspended` and the format problems branch
+`mdbisync/format-problems`, each created when first needed. The suspended branch can
 stay after release unless GitHub automatically deletes merged branches.
 A plain clone does not
 fetch the refs, and the sync writes nothing of its own into your files.
@@ -279,7 +283,37 @@ confirming its writes.
   those files, the run ends with `head-unverified` (exit code 3), and a
   person reviews and merges it or removes those changes from the branch.
   Linear's changes keep joining the pull request meanwhile.
+- **The format problems pull request**, titled **Fix Markdown format
+  problems**, from `mdbisync/format-problems`, while a file is left out for
+  its Markdown ([the format problems pull request](#the-format-problems-pull-request)).
+  The sync never merges it.
 - Nothing else: the sync never pushes to the tracked branch directly.
+
+### The format problems pull request
+
+A file with Markdown that Linear would lose or alter is left out: it stays
+in git only, and its document in Linear keeps its old text
+([files left out](troubleshooting.md#files-left-out)). The `linear-format`
+hook and the `Pre-commit` workflow catch such a file before it reaches the
+tracked branch; this pull request shows one that got there anyway, by a
+direct push, an edit on the web or a merge with a red check.
+
+- Its commit holds what `mdbisync fix` writes for the files it can rewrite.
+  Review it and merge it; the next run writes the fixed files to Linear.
+- Its description lists, by file, line and rule, each finding `fix` leaves
+  to a person, and whether it holds the file back. Fix those on the
+  tracked branch.
+- Every run brings it up to date with the tracked branch and closes it when
+  no file is left out for its Markdown. Its branch only moves forward. When
+  the tracked branch moves, the run builds the branch's files again from the
+  tracked branch, so a commit added to the branch lasts only until then.
+- Closed without merging, it stays closed until the tracked branch changes.
+- When the run cannot bring it up to date (its branch moved, or GitHub
+  refused or failed a request), the run is
+  [partial](troubleshooting.md#partial-sync-runs) and the next run tries
+  again.
+- The sync never merges it: nothing reaches the tracked branch, or Linear,
+  without a person seeing it.
 
 ### In Linear
 
@@ -632,7 +666,7 @@ files left out. Tables follow, each only when it has rows:
 | Decided by the conflict rules | Deletes and renames that met an edit or another rename ([the rules](troubleshooting.md#decided-by-the-conflict-rules)). |
 | Renamed or moved | Documents renamed or moved, from and to. |
 | Moved to trash | Documents whose files were removed in git. |
-| Left out | Files that stay in git only, with their rules ([files left out](troubleshooting.md#files-left-out)). |
+| Left out | Files that stay in git only, with their rules ([files left out](troubleshooting.md#files-left-out)). Below it, a line links the [format problems pull request](#the-format-problems-pull-request), or says the run closed it. |
 | CI fixes not written | Files left out before writing by format or mapping checks, with their CI fixing commit's hook ids and the rules that prevent writing them to Linear. |
 
 The current pre-commit workflow records modifying hook ids in `Pre-commit-fix`

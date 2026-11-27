@@ -310,7 +310,7 @@ describe('sync: pull request recovery', () => {
     const edited = await sync();
     assert.equal(edited.result.exitCode, 0, edited.result.stderr);
     assert.ok(edited.report.sync?.leftOut.some((entry) => entry.path === path && entry.rules.includes('content-too-long')));
-    assert.deepEqual(edited.writes, []);
+    assert.deepEqual(edited.writes, ['POST /pulls']);
     assert.deepEqual(h.world.linear.documents, before);
   });
 

@@ -171,7 +171,12 @@ there, so the job ends with a warning, not a failure. The summary says
 which documents were written and which were not. The sync pull request
 step's `state-moved`, and its `github-failed` when the request may pass
 next time, end a run the same way (see
-[The sync pull request](#the-sync-pull-request)).
+[The sync pull request](#the-sync-pull-request)). So do `state-moved` and
+`github-failed` of the
+[format problems pull request](sync-cycle.md#the-format-problems-pull-request):
+its branch moved, or GitHub refused or failed a request or the push of its
+branch. A refusal that repeats is usually a ruleset that keeps the sync's
+App from creating or pushing that branch.
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
@@ -339,7 +344,11 @@ shows how.
 ## Files left out
 
 A file left out stays in git only, and its document stays as it is, until
-the reason is fixed. The summaries list each with its rules:
+the reason is fixed. The summaries list each with its rules. A file left
+out for its Markdown (a lint rule below the table) is also in the
+[format problems pull request](sync-cycle.md#the-format-problems-pull-request),
+which holds what `mdbisync fix` writes for it and lists what is left to fix
+by hand:
 
 | Rule | Meaning | What to do |
 | --- | --- | --- |
@@ -384,8 +393,9 @@ with a collapsible section (`1. +++ Notes` with more of the item below
 it) is `block-first-in-list-item`: put a line of text first in the item.
 A file that reached the branch without the hook (an edit on the web, a
 push without hooks) can hold a lone `+` below an item's first line
-(`plus-line-in-item`) or tabs in its indentation (`tab-indentation`): run
-`mdbisync fix` on it and commit the result, and the next run syncs it.
+(`plus-line-in-item`) or tabs in its indentation (`tab-indentation`): merge
+the format problems pull request, or run `mdbisync fix` on it and commit the
+result, and the next run syncs it.
 
 `mdbisync lint` and `mdbisync fix` also report `hard-break-in-heading`
 when converting a setext heading to one line would lose a hard break, and

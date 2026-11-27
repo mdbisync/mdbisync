@@ -8,6 +8,7 @@ export {
   closePullRequestAtHead,
   ensurePullRequest,
   findOpenPullRequest,
+  lastClosedPullRequest,
   openPullRequest,
   type PullRequestState,
   readPullRequest,

@@ -10,6 +10,7 @@ export {
   resolveStateConfig,
   stateRef,
   suspendedBranch,
+  formatProblemsBranch,
 } from './config.ts';
 export { Git, GitError, GitOutputLimitError, type Oid } from './git.ts';
 export { showCommit } from './commit-format.ts';

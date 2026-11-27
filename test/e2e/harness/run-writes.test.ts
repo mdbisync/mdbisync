@@ -26,7 +26,7 @@ function runReport(name: string): Record<string, unknown> {
 const REPORT_KEYS = {
   capacity: true, operation: true, ok: true, code: true, exitStatus: true, stop: true, complete: true, changed: true,
   setupChecks: true, securityHooks: true, notImplemented: true, summary: true, initialSync: true, sync: true,
-  pullRequest: true, capture: true, writtenCount: true, skippedCompletedCount: true, oversizeFiles: true,
+  pullRequest: true, formatProblems: true, capture: true, writtenCount: true, skippedCompletedCount: true, oversizeFiles: true,
   leftOutRules: true, paths: true, resumed: true, writtenDocuments: true, writesAfterLimit: true,
   failedWriteRecorded: true, endpointLimitHeadersPresent: true, rejectedDocumentNamed: true, stoppedEarly: true,
   progressRecorded: true, record: true, atomicPushRefused: true, partialRefUpdates: true, refusedPushes: true,

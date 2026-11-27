@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_STATE_CONFIG, StateConfigError, localRef, refNameProblem, resolveStateConfig, stateRef, suspendedBranch } from './index.ts';
+import { DEFAULT_STATE_CONFIG, StateConfigError, localRef, refNameProblem, resolveStateConfig, stateRef, suspendedBranch, formatProblemsBranch } from './index.ts';
 
 describe('state config', () => {
   it('uses the default names when nothing is given', () => {
@@ -20,6 +20,14 @@ describe('state config', () => {
     assert.equal(suspendedBranch(resolveStateConfig()), 'mdbisync/suspended');
     assert.equal(suspendedBranch(resolveStateConfig({syncBranch:'linear-sync'})), 'linear-sync-suspended');
     assert.equal(suspendedBranch(resolveStateConfig({syncBranch:'suspended'})), 'suspended-suspended');
+  });
+
+  it('keeps the format problems branch in the configured namespace, apart from the tracked branch', () => {
+    assert.equal(formatProblemsBranch(resolveStateConfig()), 'mdbisync/format-problems');
+    assert.equal(formatProblemsBranch(resolveStateConfig({syncBranch:'t/4f1a9c/sync'})), 't/4f1a9c/format-problems');
+    assert.equal(formatProblemsBranch(resolveStateConfig({syncBranch:'linear-sync'})), 'linear-sync-format-problems');
+    assert.throws(() => resolveStateConfig({trackedBranch:'mdbisync/format-problems'}), StateConfigError);
+    assert.throws(() => resolveStateConfig({trackedBranch:'mdbisync/format-problems/main'}), StateConfigError);
   });
 
   it('maps branches to remote-tracking refs and keeps state refs as they are', () => {

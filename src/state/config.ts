@@ -53,14 +53,17 @@ export function resolveStateConfig(input: Partial<StateConfig> = {}): StateConfi
     if (problem !== null) throw new StateConfigError(message('config.invalid-branch', { key, branch: config[key], problem }));
   }
   const suspended = suspendedBranch(config);
-  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended) {
+  const formatProblems = formatProblemsBranch(config);
+  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended || config.trackedBranch === formatProblems) {
     throw new StateConfigError(message('config.same-branches'));
   }
   // git cannot hold both "a" and "a/b" as refs.
   if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
     throw new StateConfigError(message('config.nested-branches'));
   }
-  if (suspended.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${suspended}/`)) throw new StateConfigError(message('config.nested-branches'));
+  for (const derived of [suspended, formatProblems]) {
+    if (derived.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${derived}/`)) throw new StateConfigError(message('config.nested-branches'));
+  }
   const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
   if (prefixProblem !== null) {
     throw new StateConfigError(message('config.invalid-prefix', { prefix: config.refPrefix, problem: prefixProblem }));
@@ -113,4 +116,10 @@ export function refNameProblem(name: string): string | null {
 export function suspendedBranch(config: StateConfig): string {
   return !config.syncBranch.includes('/') || config.syncBranch.endsWith('/suspended')
     ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, 'suspended');
+}
+
+/** The branch of the format problems pull request, in the same namespace as the sync branch. */
+export function formatProblemsBranch(config: StateConfig): string {
+  return !config.syncBranch.includes('/') || config.syncBranch.endsWith('/format-problems')
+    ? `${config.syncBranch}-format-problems` : config.syncBranch.replace(/[^/]+$/, 'format-problems');
 }
