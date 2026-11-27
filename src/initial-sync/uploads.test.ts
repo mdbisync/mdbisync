@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
-import { fixText } from '../format/index.ts';
+import { fixLinearText, fixText } from '../format/index.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { LinearClient, isUploadUrl } from '../linear/index.ts';
 import { type RunReport } from '../run/finish.ts';
@@ -698,6 +698,11 @@ describe('checkFileTargets', () => {
     checkFileTargets('docs/plan.md', '* [Report](report.csv)\n\n![Chart](./chart.png)', '* [Report](<report.csv>)\n\n![Chart](chart.png)');
     // An image written as a link embeds nothing.
     checkFileTargets('docs/plan.md', '![Chart](chart.png)', '[Chart](chart.png)');
+    // An image of a URL in `fix`'s spelling is the same image.
+    checkFileTargets('docs/plan.md', '![Image](</my image.png>)', '![Image](/my%20image.png)');
+    checkFileTargets('docs/plan.md', '![Image](<https://example.com/a b.png>)', '![Image](https://example.com/a%20b.png)');
+    const linear = '![Image](</my image.png>)';
+    checkFileTargets('docs/plan.md', linear, fixLinearText(linear, linear, () => false));
   });
   it('refuses a link or image to a file only the rewritten text holds', () => {
     added('    [Secret](secret.csv)', '[Secret](secret.csv)');

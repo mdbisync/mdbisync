@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
 import type { Handle } from 'mdast-util-from-markdown';
+import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { imageDestination, linkDestination } from '../format/fix.ts';
 import { parse, resolveTarget, splitFile, visit } from '../format/markdown.ts';
 import { LinearError, LinearStoppedError } from '../linear/index.ts';
@@ -648,8 +649,9 @@ function fileTargets(path: string, body: string): { links: Set<string>; images: 
     if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
   });
   for (const label of labels) { const url = definitions.get(label); if (url !== undefined) imageUrls.push(url); }
-  // An image of a URL is kept by its URL: it was never localized or checked as an upload.
-  const images = new Set(imageUrls.map(url => resolveTarget(path, url) ?? `url:${url}`));
+  // An image of a URL is kept by its URL: it was never localized or checked as an upload. The URL is
+  // normalized as `fixLinearText` compares destinations, so `fix`'s spelling (`a%20b` for `a b`) is the same image.
+  const images = new Set(imageUrls.map(url => resolveTarget(path, url) ?? `url:${normalizeUri(url)}`));
   return { links, images };
 }
 
