@@ -412,7 +412,7 @@ sync pull request
 ([which rules hold a file back](linear-format.md#which-rules-hold-a-file-back)).
 
 `mdbisync lint` run on a folder also reports `upload-file-refused` for a
-file an earlier sync captured from Linear (named `<sha256>.<ext>`) that the
+file an earlier sync captured from Linear (named `<sha256>.<ext>` or `<sha256>-<n>.<ext>`) that the
 upload check now refuses. It leaves no file out; a document that links
 the file again from Linear is blocked with a red mark and a comment. Remove
 or replace the file

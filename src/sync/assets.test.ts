@@ -155,6 +155,65 @@ it('repairs a typed path image after an upload localized to a file whose name ha
   } finally { await fixture.cleanup(); }
 });
 
+it('gives an upload a capture of its own when a Linear member linked the capture its hash names', async () => {
+  const fixture = await createFixture();
+  try {
+    const hash = createHash('sha256').update(png).digest('hex');
+    const linked = `docs/assets/${hash}.png`;
+    // A capture of the same bytes under the next name too, which a member also linked: neither is the upload's.
+    await fixture.seed({'docs/plan.md': '# Plan\n', [linked]: png, [`docs/assets/${hash}-1.png`]: png});
+    const git = await fixture.clone('plain-capture-name');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async () => new Response(png));
+    const plain = new Set([linked, `docs/assets/${hash}-1.png`]);
+    const result = await capture('docs/plan.md', `[Copy](assets/${hash}.png) ![Chart](https://uploads.linear.app/workspace/chart)\n`, new Map(), `[Copy](assets/${hash}.png)\n`, 'docs/plan.md', plain);
+    assert.deepEqual([...result.files.keys()], [`docs/assets/${hash}-2.png`]);
+    assert.equal(result.body, `[Copy](assets/${hash}.png) ![Chart](assets/${hash}-2.png)\n`);
+  } finally { await fixture.cleanup(); }
+});
+
+it('never shares a capture this run placed with a document whose member linked its path', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'docs/plan.md': '# Plan\n'});
+    const git = await fixture.clone('plain-placed-name');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const hash = createHash('sha256').update(png).digest('hex');
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async () => new Response(png));
+    const upload = '![Chart](https://uploads.linear.app/workspace/chart)';
+    const first = await capture('docs/plan.md', `${upload}\n`, new Map());
+    assert.deepEqual([...first.files.keys()], [`docs/assets/${hash}.png`]);
+    const second = await capture('docs/notes.md', `[Copy](assets/${hash}.png) ${upload}\n`, new Map(), `[Copy](assets/${hash}.png)\n`, 'docs/notes.md', new Set([`docs/assets/${hash}.png`]));
+    assert.deepEqual([...second.files.keys()], [`docs/assets/${hash}-1.png`]);
+  } finally { await fixture.cleanup(); }
+});
+
+it('links the capture its hash names before a suffixed one of the same bytes', async () => {
+  const fixture = await createFixture();
+  try {
+    const hash = createHash('sha256').update(png).digest('hex');
+    await fixture.seed({'docs/plan.md': '# Plan\n', [`docs/assets/${hash}.png`]: png, [`docs/assets/${hash}-1.png`]: png});
+    const git = await fixture.clone('capture-name-order');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async () => new Response(png));
+    const result = await capture('docs/plan.md', '![Chart](https://uploads.linear.app/workspace/chart)\n', new Map());
+    assert.equal(result.body, `![Chart](assets/${hash}.png)\n`);
+  } finally { await fixture.cleanup(); }
+});
+
+it('links the first capture of the same bytes that still passes the upload check under its name', async () => {
+  const fixture = await createFixture();
+  try {
+    const hash = createHash('sha256').update(png).digest('hex');
+    await fixture.seed({'docs/plan.md': '# Plan\n', [`docs/assets/${hash}-1.svg`]: png, [`docs/assets/${hash}-2.png`]: png});
+    const git = await fixture.clone('capture-name-check');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const capture = createAssetCapture(git, resolveStateConfig({}), base, async () => new Response(png));
+    const result = await capture('docs/plan.md', '![Chart](https://uploads.linear.app/workspace/chart)\n', new Map());
+    assert.equal(result.body, `![Chart](assets/${hash}-2.png)\n`);
+  } finally { await fixture.cleanup(); }
+});
+
 it('refuses a localized body whose links and images no longer line up with Linear\'s text', () => {
   const body = '![Chart](https://uploads.linear.app/workspace/chart) ![Typed](secret.png)\n';
   const at = body.indexOf('https://');
