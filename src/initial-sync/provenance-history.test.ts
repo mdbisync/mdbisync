@@ -62,6 +62,15 @@ describe('links a commit taking in Linear\'s text added', () => {
     assert.deepEqual(await takenIn(git, DOC, text, tip), [SECRET]);
   });
 
+  it('does not count a link written in git when a capture reverts the document to an earlier version', async () => {
+    const { git, root } = await repository();
+    const text = `# Doc\n\n${shared}`;
+    await commit(git, root, { [DOC]: text }, 'Write the document');
+    await commit(git, root, { [DOC]: `${text}\nEdited in Linear.\n` }, CAPTURE_MESSAGE);
+    const tip = await commit(git, root, { [DOC]: text }, CAPTURE_MESSAGE);
+    assert.deepEqual(await takenIn(git, DOC, text, tip), []);
+  });
+
   it('finds a link the squash merge of the sync\'s pull request or an initial sync from Linear added', async () => {
     for (const message of [`${SYNC_PULL_REQUEST_TITLE} (#12)`, INITIAL_SYNC_FROM_LINEAR_RECORD]) {
       const { git, root } = await repository();

@@ -227,8 +227,10 @@ export async function linksTakenInFromLinear(git: Git, tracked: Oid, path: strin
     const renamed = /^[RC]/.test(status);
     const at = renamed ? fields[3] : fields[2];
     if (commit === undefined || at === undefined) continue;
-    const added = await linksAt(commit, at);
-    if (added === null) return wanted;
+    const links = await linksAt(commit, at);
+    if (links === null) return wanted;
+    // A copy: the parsed version stays as it is for the commits that share its blob.
+    const added = new Set(links);
     // A parent's version no parse reads is taken to hold no link, so the commit may have added any.
     // A document the commit moved keeps a link to the same file, or the same link text, which now points from `at`.
     const before = renamed ? fields[2]! : at;
