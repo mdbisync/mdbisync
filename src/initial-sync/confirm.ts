@@ -229,7 +229,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const resumed = (await readInitialSyncProgress(git, expected.ids)) !== null;
   const previous = await readIds(git, expected.ids);
   // Which links came from Linear, rebuilt by document identity before anything is uploaded, and kept in the ids recorded.
-  const provenance = await readPlainLinkProvenance(git, expected, fetched.tracked, plan);
+  const provenance = await readPlainLinkProvenance(git, expected, fetched.tracked, plan, 'git-to-linear');
   const withPlainFiles = (path: string, entry: IdEntry): IdEntry => {
     const plain = provenance.plainFiles.get(path);
     return plain === undefined ? entry : { ...entry, plainFiles: [...plain].sort(compare) };
@@ -300,7 +300,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       if (vouched.has(path) && entry?.observedDigest !== undefined) macs.set(path, context.pushedKey.writtenMac(path, entry.id, hash, entry.observedDigest));
     }
     const idsCommit = await commitIds(git, expected.ids, ids, identity, {
-      message: initialSyncProgressMessage(fetched.tracked),
+      message: initialSyncProgressMessage(fetched.tracked, 'git-to-linear'),
       always: true,
       written: sentHashes,
       writtenMacs: macs,

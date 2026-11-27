@@ -433,23 +433,33 @@ export async function readUploads(git: Git, commit: Oid | null, key: PushedKey):
 
 /**
  * The subject of an `ids` commit made while an initial sync is still
- * writing. Its body names the tracked commit the run writes from, as a
- * `Tracked: <oid>` line. The sync does not run while `ids` is at such a
- * commit: the map may hold only part of the documents.
+ * writing. Its body names the tracked commit and the sync direction. The
+ * sync does not run while `ids` is at such a commit: the map may hold only
+ * part of the documents.
  */
 export const INITIAL_SYNC_PROGRESS = 'Initial sync in progress: document ids';
+export const DIRECTIONS = ['git-to-linear', 'linear-to-git'] as const;
+export type Direction = (typeof DIRECTIONS)[number];
 
-export function initialSyncProgressMessage(tracked: Oid): string {
-  return `${INITIAL_SYNC_PROGRESS}\n\nTracked: ${tracked}\n`;
+export function initialSyncProgressMessage(tracked: Oid, direction: Direction): string {
+  return `${INITIAL_SYNC_PROGRESS}\n\nTracked: ${tracked}\nDirection: ${direction}\n`;
 }
 
-/** When `commit` is a progress commit of an unfinished initial sync, the tracked commit it names; otherwise null. */
-export async function readInitialSyncProgress(git: Git, commit: Oid | null): Promise<{ tracked: Oid | null } | null> {
-  if (commit === null) return null;
-  const message = `${await showCommit(git, '%B', commit)}\n`;
-  const [subject] = message.split('\n');
+/** Older progress commits have no direction. */
+export function parseInitialSyncProgress(message: string): { tracked: Oid | null; direction: Direction | null } | null {
+  const [subject, ...lines] = message.split('\n');
   if (subject !== INITIAL_SYNC_PROGRESS) return null;
-  return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message)?.[1] ?? null };
+  const directions = lines.filter((line) => line.startsWith('Direction:'));
+  const direction = directions.length === 1 ? DIRECTIONS.find((value) => directions[0] === `Direction: ${value}`) : undefined;
+  return {
+    tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message)?.[1] ?? null,
+    direction: direction ?? null,
+  };
+}
+
+/** The progress recorded by an unfinished initial sync, when `commit` records it. */
+export async function readInitialSyncProgress(git: Git, commit: Oid | null): Promise<ReturnType<typeof parseInitialSyncProgress>> {
+  return commit === null ? null : parseInitialSyncProgress(await showCommit(git, '%B', commit));
 }
 
 /**

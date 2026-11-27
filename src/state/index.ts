@@ -20,6 +20,8 @@ export { type LfsPointer, type LfsRead, type LfsReadResult, GitLfsMissingError, 
 export { type CommitIdentity, type CommitSpec, NEUTRAL_IDENTITY, type TreeEntry, buildTree, checkRepoPath, commitTree, listTree, placeEntries, readBlobs, writeBlob } from './objects.ts';
 export {
   type CommitStateOptions,
+  DIRECTIONS,
+  type Direction,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   INITIAL_SYNC_FROM_LINEAR_TITLE,
   INITIAL_SYNC_PROGRESS,
@@ -30,6 +32,7 @@ export {
   initialRecordChangesParent,
   isAncestor,
   initialSyncProgressMessage,
+  parseInitialSyncProgress,
   readInitialSyncProgress,
   RESERVED_IDS_FILE,
   type ReservedIds,

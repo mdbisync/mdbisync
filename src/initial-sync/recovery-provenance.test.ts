@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { pullRequestHarness } from '../sync/pull-request-test-helpers.ts';
 import { mergeOnGitHub } from '../state/test-helpers.ts';
+import { INITIAL_SYNC_PROGRESS, NEUTRAL_IDENTITY, commitIds, readIds } from '../state/index.ts';
 import { UPLOADS_HOST } from '../setup/test-helpers.ts';
 import { CAPTURE_MESSAGE } from '../sync/capture.ts';
 
@@ -275,6 +276,53 @@ describe('an initial sync keeps plain-link provenance', () => {
     const run = await initialSync();
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     await assertProvenanceKept();
+  });
+
+  for (const legacy of [false, true]) it(`leaves unknown links out when a git-to-Linear run follows ${legacy ? 'directionless' : 'Linear-to-git'} progress`, async () => {
+    await repairedLink();
+    await unrecordedLink();
+    const listed = h.world.linear.documents.filter((document) => document.trashed !== true && document.archivedAt === undefined).length;
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(h.fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: String(listed - 1) };
+    Object.assign(process.env, hooks);
+    try {
+      const stopped = await h.cli('initial-sync', { MDBISYNC_DIRECTION: 'linear-to-git', MDBISYNC_CONFIRM: 'true' });
+      assert.equal(stopped.report.linearToGit?.complete, false, JSON.stringify(stopped.report.linearToGit));
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    assert.ok((await h.ids() as Record<string, unknown>)[ITEM] !== undefined, 'the stopped run did not record the item');
+    if (legacy) {
+      const git = h.fixture.remote;
+      const ref = 'refs/mdbisync/ids';
+      const tip = await git.revParse(ref);
+      const tracked = await git.revParse('refs/heads/main');
+      const legacyProgress = await commitIds(git, null, await readIds(git, tip), NEUTRAL_IDENTITY, {
+        message: `${INITIAL_SYNC_PROGRESS}\n\nTracked: ${tracked}`,
+      });
+      await git.run(['update-ref', ref, legacyProgress, tip]);
+    }
+
+    const dry = await initialSync({ MDBISYNC_CONFIRM: 'false' });
+    assert.ok(dry.report.summary?.leftOutFiles.some(({ path, rules }) => path === ITEM && rules.includes('link-provenance-unknown')));
+
+    // A partial run in the new direction carries the old ids forward in its own progress commit.
+    await h.editRef('refs/heads/main', 'combined/extra-0.md', '# Extra 0\n\nDraft.\n');
+    await h.editRef('refs/heads/main', 'combined/extra-1.md', '# Extra 1\n\nDraft.\n');
+    Object.assign(process.env, { ...hooks, MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '1' });
+    try {
+      const stopped = await initialSync();
+      assert.equal(stopped.report.initialSync?.complete, false, JSON.stringify(stopped.report.initialSync));
+      assert.ok((stopped.report.initialSync?.progressPushes ?? 0) > 0, 'the stopped run did not record new progress');
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    assert.ok((await h.ids() as Record<string, unknown>)[ITEM] !== undefined, 'the newer progress did not carry the item');
+
+    const resumed = await initialSync();
+    assert.equal(resumed.result.exitCode, 0, resumed.result.stderr);
+    assert.equal(resumed.report.resumed, true);
+    assert.ok(!h.world.linear.uploads.some((upload) => upload.filename === SECRET), 'the resumed run uploaded a file linked from Linear');
+    assert.ok(resumed.report.initialSync?.leftOutAtWrite.some(({ path, rule }) => path === ITEM && rule === 'link-provenance-unknown'));
   });
 
   it('in a run resumed after a stop', async () => {

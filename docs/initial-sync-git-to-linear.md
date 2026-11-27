@@ -150,7 +150,11 @@ reasons:
 A plain link that came from Linear (a Linear member's image of a repository
 path, which the sync turned into a link) never uploads the file. A recovery
 reads which links those are from the state refs and the tracked branch's
-history, and keeps them in the state it records.
+history, and keeps them in the state it records. After a stop, progress can
+establish provenance only if every progress commit since the last completed
+state is marked `git-to-linear`. If that history includes `linear-to-git`
+progress or older progress without a direction, files with unknown plain-link
+provenance can be left out on resume.
 
 The confirmed run can leave out a few more: a file whose text grows past
 Linear's length limit when its links are rewritten (`content-too-long`), or
