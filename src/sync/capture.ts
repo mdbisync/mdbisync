@@ -21,10 +21,10 @@ import { checkFileTargets, FileTargetsAddedError } from '../initial-sync/uploads
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { lineText } from '../run/output.ts';
-import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, lfsPush, lfsRemote, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, signObservation, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type IdEntry, type Git, GitLfsMissingError, lfsPush, lfsRemote, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readIds, readReservedIds, readSupersededIds, readUploads, signIdsTrailers, signObservation, UPLOADS_REBUILDING } from '../state/index.ts';
 import { checkTitle, securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, type ConflictNotices, markWritesLinear, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
-import { matchesObservedBody, observedDigest, readRecorded, recordedTime } from './recorded.ts';
+import { captureCursorTrailer, matchesObservedBody, observedDigest, readCaptureCheckpoints, recordedTime, recordedTrailers } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath, isUntitled, keptPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
@@ -101,17 +101,6 @@ export interface CaptureResult {
   rereadAsTracked?: string[];
 }
 
-const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
-
-/**
- * The trailer of an `ids` commit that sets the capture cursor: the next
- * capture reads again only the documents Linear changed at or after `through`
- * (and every document without an id).
- */
-export function captureCursorTrailer(through: string): string {
-  return `Capture-through: ${through}`;
-}
-
 /** A document's update time in the cursor's form, so cursor times compare as text. */
 export function cursorTime(document: LinearDocument): string {
   // The same form as a recorded document's time: the capture compares the two as text.
@@ -124,13 +113,6 @@ async function readHeld(context: RunContext, state: StateSnapshot): Promise<Set<
   if (state.ids === null) return new Set();
   const log = await context.git.text(['log', '--format=%B', '--grep=^Capture document ids', '-1', state.ids]);
   return new Set([...log.matchAll(HELD)].map((match) => match[1]!));
-}
-
-/** Cursor is in ids history, so ordinary id commits by later steps cannot erase it. */
-export async function readCaptureCursor(git: Git, ids: Oid | null): Promise<string | null> {
-  if (ids === null) return null;
-  const log = await git.text(['log', '--format=%B', '--grep=^Capture-through:', '-1', ids]);
-  return CURSOR.exec(log)?.[1] ?? null;
 }
 
 /** A download the comparison with a file's last accepted version does not make. */
@@ -201,7 +183,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // Files left out for a title another file has count too: they had a document as much as any other.
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
-    const cursor = await readCaptureCursor(git, state.ids);
+    const {cursor, recorded: recordedTimes, needsCursor} = await readCaptureCheckpoints(git, state.ids, base, context.pushedKey);
     const recordedBlobs = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
     const textEntries = recordedBlobs.filter(readableBlob);
     const unreadIds = new Set(recordedBlobs.filter((entry) => !readableBlob(entry)).map((entry) => ids.get(entry.path)!.id));
@@ -306,7 +288,6 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && placed(doc);
     const normalizedTime = cursorTime;
     // A document still at the update time a run recorded it with is in the record as Linear holds it.
-    const recordedTimes = await readRecorded(git, state.ids);
     const asRecorded = (doc: LinearDocument) => recordedTimes.get(doc.id) === normalizedTime(doc);
     // A marked document is read on every run, so its mark follows its text; a suspended one only when Linear
     // reports it changed (its mark follows the lane, and a long suspension costs no reads), unless security hooks
@@ -396,12 +377,21 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     selected = selected.filter((doc) => !unreadIds.has(doc.id));
     const documents = new Map<string, LinearDocument>([...listed].filter(([, doc]) => placed(doc)));
     const work = new Map<string, LinearDocument>();
-    // A document moved out of the places between the listing and this read is not taken into the map.
-    for (const doc of await linear.getDocuments(selected.filter(live).map((doc) => doc.id), { withContent: true })) {
-      if (placed(doc)) documents.set(doc.id, doc);
-      else documents.delete(doc.id);
-      work.set(doc.id, doc);
-    }
+    let missingBodies = false;
+    const readBodies = async (requested: readonly LinearDocument[]) => {
+      const read = await linear.getDocuments(requested.map((doc) => doc.id), { withContent: true });
+      const answered = new Set<string>();
+      for (const doc of read) {
+        if (live(doc) && doc.content === undefined) continue;
+        // A document moved out of the places between the listing and this read is not taken into the map.
+        if (placed(doc)) documents.set(doc.id, doc);
+        else documents.delete(doc.id);
+        work.set(doc.id, doc);
+        answered.add(doc.id);
+      }
+      if (requested.some(({id}) => !answered.has(id))) missingBodies = true;
+    };
+    await readBodies(selected.filter(live));
     // A document renamed or moved after the listing moves by this read: the files linking its old path are read too.
     const late = new Map<string, string>();
     for (const doc of work.values()) {
@@ -413,11 +403,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const old = byId.get(doc.id);
         return !work.has(doc.id) && !unreadIds.has(doc.id) && live(doc) && old !== undefined && linksTo(late, old);
       });
-      for (const doc of await linear.getDocuments(linking.map((doc) => doc.id), { withContent: true })) {
-        if (placed(doc)) documents.set(doc.id, doc);
-        else documents.delete(doc.id);
-        work.set(doc.id, doc);
-      }
+      await readBodies(linking);
     }
     // Keep metadata for out-of-scope documents; never infer deletion from a missing page.
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
@@ -877,7 +863,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Advance only to timestamps actually observed; equality is reread next run
     // so documents sharing a timestamp or edited during pagination are not lost.
     // A place that listed nothing may have left out changes too: the cursor holds while a removal is held.
-    const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
+    const through = missingBodies || result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
@@ -888,17 +874,28 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       ids.set(path, {...entry, pullRewrite: signRepair(context.pushedKey, path, entry.id, {...entry.pullRewrite, source: linearCommit})});
     }
     // Record a held removal, and a cleared one, so the next capture reads what this one held.
-    // The cursor alone moves no ref. It moves when capture records a change to the
-    // content or uploads. Until then it can only cause another read.
+    // Capture also writes a cursor after its first complete read of legacy state,
+    // even when the content is unchanged.
     const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
     const recordsRemovals = held.size > 0 || heldBefore.size > 0;
+    const writeCursor = through !== null && (needsCursor || recordsChange || recordsRemovals);
+    // During a partial upgrade, keep the progress of bodies accepted by this capture.
+    const checkpoints = new Map<string, string>();
+    if (needsCursor && through === null) for (const id of recordedNow) {
+      const doc = candidates.get(id)!.doc;
+      if (doc.content !== undefined) checkpoints.set(id, doc.updatedAt);
+    }
     const trailers = [
-      ...(through !== null && (recordsChange || recordsRemovals) ? [captureCursorTrailer(through)] : []),
-      ...[...held].sort().map((id) => `Removal-held: ${id}`),
+      ...(writeCursor ? [captureCursorTrailer(through)] : []),
+      ...recordedTrailers(checkpoints),
+      ...[...held].filter((id) => /^\S+$/.test(id)).sort().map((id) => `Removal-held: ${id}`),
     ];
     const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
-    const always = recordsRemovals || (through !== cursor && recordsChange);
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
+    const always = recordsRemovals || checkpoints.size > 0 || (writeCursor && through !== cursor);
+    const idsCommit = await commitIds(git, state.ids, ids, identity, {
+      message: commitMessage, always, reserved, superseded,
+      ...(writeCursor || checkpoints.size > 0 ? { sign: signIdsTrailers(context.pushedKey, linearCommit) } : {}),
+    });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     await lfsPush(git, lfsRemote(options.config), prepared.oids);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
@@ -1034,16 +1031,25 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
       if (passUnlinked.has(id)) continue;
       if (budget.sets <= 0) { budget.short = true; return; }
       const accepted = candidate.files.get(candidate.path) as string;
-      // The candidate's text with the `rejected` targets' fallback links; undefined once the budget is spent.
+      // The candidate's text with the `rejected` targets' fallback links; undefined once the budget is spent, and
+      // null when that text is past the Markdown limits: it is not staged, and the run that would write it leaves the
+      // document out. Its work is spent all the same.
       // With `free`, a text that cannot be staged (the accepted one, or the one the file already holds) costs
       // nothing: candidates that link none of the targets, or whose text is already recorded, cannot use up
       // the budget of the others on every run while the cursor holds. Their work stays one text per pass.
-      const without = (rejected: readonly string[], free = false): string | undefined => {
+      const without = (rejected: readonly string[], free = false): string | null | undefined => {
         const cost = accepted.length + documentIds.size + rejected.length;
         if (budget.work < cost) { budget.short = true; return undefined; }
         const targets = new Map(documentIds);
         reset(new Set(rejected), targets);
-        const text = textOf(candidate, targets);
+        let text: string;
+        try {
+          text = textOf(candidate, targets);
+        } catch (error) {
+          if (!(error instanceof MarkdownLimitError)) throw error;
+          budget.work -= cost;
+          return null;
+        }
         if (!(free && (text === accepted || options.settled?.(candidate, text) === true))) budget.work -= cost + Math.max(0, text.length - accepted.length);
         return text;
       };
@@ -1054,11 +1060,12 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
       if (all === accepted) { passUnlinked.add(id); continue; }
       // The targets it links, found by halving the groups whose rejection changes its text: a text that links
       // a few of many candidates costs a few texts per link, not one per candidate. A group's change is in one
-      // of its halves: when the first leaves the text as it is, the second has the group's text.
+      // of its halves: when the first leaves the text as it is, the second has the group's text. A group whose text
+      // is past the Markdown limits (null) may still link targets whose texts fit: its halves are searched too.
       const alone = new Map<string, string>();
-      const find = (group: readonly string[], text: string): void => {
-        if (alone.size >= LINK_VARIANT_LINKS) return;
-        if (group.length === 1) { alone.set(group[0]!, text); return; }
+      const find = (group: readonly string[], text: string | null | undefined): void => {
+        if (text === undefined || text === accepted || alone.size >= LINK_VARIANT_LINKS) return;
+        if (group.length === 1) { if (text !== null) alone.set(group[0]!, text); return; }
         const first = group.slice(0, group.length >> 1);
         const second = group.slice(group.length >> 1);
         const firstText = without(first);
@@ -1066,20 +1073,20 @@ export function* linkVariants<C extends { path: string; files: Map<string, FileC
         if (firstText === accepted) { find(second, text); return; }
         find(first, firstText);
         if (alone.size >= LINK_VARIANT_LINKS) return;
-        const secondText = without(second);
-        if (secondText !== undefined && secondText !== accepted) find(second, secondText);
+        find(second, without(second));
       };
       if (!pass.allOnly) find(others, all);
-      const texts = new Set([...alone.values(), all]);
-      // A few targets: also every combination of two or more of them.
+      const texts = new Set(all === null ? alone.values() : [...alone.values(), all]);
+      // A few targets: also every combination of two or more of them. All of them is the text with every target
+      // rejected, unless that one is past the Markdown limits.
       const linked = [...alone.keys()];
       if (linked.length <= LINK_VARIANT_TARGETS) {
-        for (let mask = 1; mask < 2 ** linked.length - 1; mask += 1) {
+        for (let mask = 1; mask < 2 ** linked.length - (all === null ? 0 : 1); mask += 1) {
           const rejected = linked.filter((_, bit) => (mask >> bit) & 1);
           if (rejected.length < 2) continue;
           const text = without(rejected);
           if (text === undefined) break;
-          texts.add(text);
+          if (text !== null) texts.add(text);
         }
       }
       const done = staged.get(id) ?? new Set<string>();

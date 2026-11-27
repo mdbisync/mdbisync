@@ -33,7 +33,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
 import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, keptAnnotationsTrailers, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
 import { unchangedSince } from '../initial-sync/run.ts';
-import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
+import { type BodyTransform, LeaveOutError, restoreWrittenBody, transformBody } from '../initial-sync/transform.ts';
 import { linkDestinations, resolveRelative } from '../initial-sync/links.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../initial-sync/uploads.ts';
 import { unverifiedPaths } from './head-check.ts';
@@ -61,6 +61,7 @@ import {
   uploadsRebuilding,
   stateRef,
   branchRef,
+  signIdsTrailers,
   signObservation,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
@@ -1105,7 +1106,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Written documents: the merge result's front matter and what Linear stored.
     for (const [path, { content, sent }] of stored) {
       const file = merge.result.get(path) as SideFile;
-      const text = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path, content, sent, context.mapping.files));
+      const body = restoreWrittenBody(transforms, path, content, sent, context.mapping.files);
+      const text = body === undefined ? textOf(file) : joinFile(splitFile(textOf(file)).head, body);
       if (resultFiles.get(path) !== undefined && text === textOf(file)) continue;
       changes.set(path, text);
     }
@@ -1173,7 +1175,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}\n\n${trailers.join('\n')}`;
     const createBranch = options.createSyncBranch === true && commit !== linearTip
       && (await unverifiedPaths(git, tracked, commit, context.mapping.zones)).length === 0;
-    const idsOf = (syncPushed?: PushedRecord) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...(syncPushed === undefined ? {} : { syncPushed }) });
+    const idsOf = (syncPushed?: PushedRecord) => commitIds(git, expected.ids, nextIds, identity, {
+      message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved,
+      ...(asWritten.size === 0 ? {} : { sign: signIdsTrailers(context.pushedKey, commit) }),
+      ...(syncPushed === undefined ? {} : { syncPushed }),
+    });
     // The ids record the branch's head as the sync's own push, only together with that push.
     let recordedIds = await idsOf(createBranch ? context.pushedKey.record(branchRef(options.config.syncBranch), commit) : undefined);
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the

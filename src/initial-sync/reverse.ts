@@ -66,13 +66,14 @@ import {
   readInitialSyncProgress,
   readUploads,
   stateRef,
+  signIdsTrailers,
   signObservation,
   showCommit,
 } from '../state/index.ts';
 import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
-import { captureCursorTrailer, cursorTime, linkVariants, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
-import { observedDigest } from '../sync/recorded.ts';
+import { cursorTime, linkVariants, prepareLfs } from '../sync/capture.ts';
+import { captureCursorTrailer, observedDigest, readCaptureCursor } from '../sync/recorded.ts';
 import { type SecurityFinding, type SecurityGate, checkTitle, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
@@ -733,6 +734,9 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
         keepTracked(tooComplex, 'markdown-complexity');
         keepTracked(frontMatter, 'front-matter-boundary');
         keepTracked(addedTargets, 'image-blocked');
+        // A new document left out changes the links of the rest, and with them their texts: those are read again
+        // above, where a text past the Markdown limits leaves its document out, before the hooks read any.
+        if (entries.length !== before) continue;
         if (gate.configured) {
           const blocked: string[] = [];
           const unchecked: string[] = [];
@@ -908,9 +912,10 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
     // A cursor or a kept set that changed is recorded even when the ids did not (a rerun that now keeps a tracked file).
     const previousKept = await readKeptAnnotations(git, expected.ids);
     const markersMoved =
-      (through !== null && through !== (await readCaptureCursor(git, expected.ids))) || previousKept.size !== kept.length || kept.some((path) => !previousKept.has(path));
+      (through !== null && through !== (await readCaptureCursor(git, expected.ids, commit, context.pushedKey))) || previousKept.size !== kept.length || kept.some((path) => !previousKept.has(path));
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
       message: trailers.length === 0 ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}\n\n${trailers.join('\n')}`,
+      ...(through === null ? {} : { sign: signIdsTrailers(context.pushedKey, commit) }),
       always: markersMoved || (await readInitialSyncProgress(git, expected.ids)) !== null,
       // The sync branch moves to the record with this commit: the ids name it as the sync's own push.
       ...(moveSync ? { syncPushed: context.pushedKey.record(branchRef(options.config.syncBranch), commit) } : {}),
