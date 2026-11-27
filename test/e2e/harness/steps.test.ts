@@ -3106,6 +3106,8 @@ describe('I6 tells an ids move that only records new digests from a real change'
   const cases: Array<{ name: string; next: (base: Entries) => Entries; base?: (base: Entries) => Entries; files?: Record<string, string>; via?: Record<string, string>; message?: string; startMessage?: string; mode?: string; report?: (base: Entries) => Record<string, unknown>; effect?: Effect; unrelated?: boolean; staleMac?: boolean; unsignedBase?: boolean; pass: boolean; detail?: RegExp }> = [
     { name: 'passes a move whose one changed entry differs only in its digest', next: (base) => ({ ...base, [PLAN]: { ...base[PLAN], observedDigest: NEW } }), pass: true },
     { name: 'passes an unchanged digest that gains a valid signature', next: (base) => base, unsignedBase: true, pass: true },
+    { name: 'passes a refresh position without a tree change', next: (base) => base, message: 'Capture document ids\n\nDigest-refresh-after: 1:plan', pass: true },
+    { name: 'passes digest changes with a refresh position', next: (base) => digests(base, NEW), message: 'Capture document ids\n\nDigest-refresh-after: 1:plan', pass: true },
     { name: 'passes new digests on every entry', next: (base) => digests(base, NEW), pass: true },
     { name: 'fails a digest with a stale signature', next: (base) => digests(base, NEW), staleMac: true, pass: false },
     { name: 'fails an added id', next: (base) => ({ ...digests(base, NEW), 'eng/platform/extra.md': { id: 'document-extra', observedDigest: NEW } }), pass: false },

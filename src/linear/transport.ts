@@ -213,22 +213,24 @@ export class GraphQLTransport {
   }
 
   /** Give optional reads at most this many extra bytes and leave half the budget for required reads. */
-  optionalBodyLimit(bytes: number): number {
-    return Math.min(this.#bodyBytesRead + bytes, Math.floor(this.#limits.bodyBytes / 2));
+  optionalBodyLimit(bytes: number, share = 1): number {
+    const remaining = Math.max(0, Math.floor(this.#limits.bodyBytes / 2) - this.#bodyBytesRead);
+    return this.#bodyBytesRead + Math.floor(Math.min(bytes, remaining) * share);
   }
 
   /** Optional migration data can be omitted and replayed as omitted by the apply step. */
-  async queryOptionalBodies<T>(operation: string, query: string, variables: Record<string, unknown>, limit: number, empty: T): Promise<T> {
+  async queryOptionalBodies<T>(operation: string, query: string, variables: Record<string, unknown>, limit: number, empty: T, allowLiveWithoutStage: boolean): Promise<T | undefined> {
     const requestBody = JSON.stringify({ query, variables, operationName: operation });
     const key = graphqlReadKey(`optional bodies\n${requestBody}`);
     const kept = this.reads?.take(key);
     if (kept !== undefined) {
-      if (kept.body.length > this.#limits.responseBytes || this.#bodyBytesRead + kept.body.length > limit) return empty;
+      if (kept.type === 'application/x-mdbisync-page-split') return undefined;
+      if (kept.body.length === 0 || kept.body.length > this.#limits.responseBytes || this.#bodyBytesRead + kept.body.length > limit) return empty;
       this.#chargeBodies(operation, kept.body.length);
       return keptData<T>(operation, kept.status, kept.body);
     }
     // A missing staged answer cannot authorize a live reread in the apply step.
-    if (this.reads?.mode === 'replay') return empty;
+    if (this.reads?.mode === 'replay' && !allowLiveWithoutStage) return empty;
     if (!this.#stopped && this.#bodyBytesRead < limit) {
       try {
         const answer = await this.#network(operation, 'query', requestBody, false, Math.min(this.#limits.responseBytes, limit - this.#bodyBytesRead));
@@ -239,10 +241,14 @@ export class GraphQLTransport {
           return answer.data as T;
         }
       } catch (error) {
-        if (!(error instanceof LinearResponseLimitError) && !(error instanceof LinearStoppedError)
-          && !(error instanceof LinearError && isTransientLinearError(error))) throw error;
+        if (error instanceof LinearResponseLimitError) {
+          this.reads?.keep(key, {status: 200, type: 'application/x-mdbisync-page-split', body: Buffer.alloc(0)});
+          return undefined;
+        }
+        if (!(error instanceof LinearStoppedError) && !(error instanceof LinearError && isTransientLinearError(error))) throw error;
       }
     }
+    this.reads?.keep(key, {status: 200, type: 'application/json', body: Buffer.alloc(0)});
     return empty;
   }
 

@@ -896,9 +896,10 @@ const BARE_CAPTURE_IDS_MESSAGE = 'Capture document ids';
 /**
  * The document ids whose digests the `ids` state ref's move from `old` to
  * `next` recorded, when that is all the move did: `next` is the ref's tip,
- * every commit from `old` to it has one parent, changes `ids.json` alone and
- * carries a capture's bare message (no cursor or held removal, not an initial
- * sync's progress), and `ids.json` changed as `digestOnlyIdsChange` allows.
+ * every commit from `old` to it has one parent, and records only digests
+ * or migration progress. A progress-only commit carries the refresh position
+ * and has no tree changes. A digest update changes only `ids.json` as
+ * `digestOnlyIdsChange` allows.
  * Null for any other move; a commit git cannot read counts as one.
  */
 export async function digestOnlyIdsMove(ctx: RunContext, old: string, next: string): Promise<string[] | null> {
@@ -912,14 +913,21 @@ export async function digestOnlyIdsMove(ctx: RunContext, old: string, next: stri
   // A bare capture message also clears the removals the last capture held: there must be none to clear.
   const held = await git.run(['log', '-1', '--format=%B', `--grep=^${BARE_CAPTURE_IDS_MESSAGE}`, old], { okCodes: [0, 128] });
   if (held.code !== 0 || /^Removal-held: /m.test(held.stdout.toString('utf8'))) return null;
+  let markerOnly = true;
   for (const [commit, parent] of commits as Array<[string, string]>) {
-    // The one change: ids.json modified in place, an ordinary file before and after.
     const raw = await git.run(['diff-tree', '--no-commit-id', '--no-renames', '--raw', '-r', parent, commit], { okCodes: [0, 128] });
     const lines = raw.stdout.toString('utf8').split('\n').filter(Boolean);
-    if (raw.code !== 0 || lines.length !== 1 || !/^:100644 100644 [0-9a-f]+ [0-9a-f]+ M\t/.test(lines[0] as string) || !(lines[0] as string).endsWith(`\t${IDS_FILE}`)) return null;
     const body = await git.run(['log', '-1', '--format=%B', commit], { okCodes: [0, 128] });
-    if (body.code !== 0 || body.stdout.toString('utf8').trim() !== BARE_CAPTURE_IDS_MESSAGE) return null;
+    if (raw.code !== 0 || body.code !== 0) return null;
+    const text = body.stdout.toString('utf8').trim();
+    const marked = /^Capture document ids\n\nDigest-refresh-after: [01]:\S+$/.test(text);
+    if (!marked && text !== BARE_CAPTURE_IDS_MESSAGE) return null;
+    if (marked && lines.length === 0) continue;
+    // The one other change allowed is ids.json modified in place, an ordinary file before and after.
+    if (lines.length !== 1 || !/^:100644 100644 [0-9a-f]+ [0-9a-f]+ M\t/.test(lines[0] as string) || !(lines[0] as string).endsWith(`\t${IDS_FILE}`)) return null;
+    markerOnly = false;
   }
+  if (markerOnly) return [];
   const read = async (commit: string): Promise<unknown> => {
     const blob = await git.run(['cat-file', 'blob', `${commit}:${IDS_FILE}`], { okCodes: [0, 128] });
     if (blob.code !== 0) return null;

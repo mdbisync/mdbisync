@@ -315,7 +315,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor));
       // Leave room for ordinary capture reads. A document without a trusted digest remains eligible on later runs.
       if (!needed && old !== undefined && live(doc) && previous.has(old.path) && !excludedPath(old.path)
-        && old.entry.observedMac === undefined && (old.entry.observedDigest !== undefined || !asRecorded(doc))) legacyDigests.push(doc);
+        && (old.entry.observedDigest !== undefined || !asRecorded(doc))
+        && verifiedObservedDigest(context.pushedKey, old.path, recordedOids.get(old.path), old.entry) === undefined) legacyDigests.push(doc);
       return needed;
     });
     const invalidZone = (doc: LinearDocument, path: string) => {
@@ -413,30 +414,41 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       await readBodies(linking);
     }
     let refreshMarker: string | undefined;
+    const refreshedIds = new Set<string>();
     const pendingRefresh = legacyDigests.filter(({id}) => !work.has(id));
     if (pendingRefresh.length > 0) {
       const changed = new Set((await git.text(['diff', '--name-only', '-z', '--no-renames', base, fetched.tracked])).split('\0'));
       const ranked = pendingRefresh.map((doc) => ({doc, rank: `${changed.has(byId.get(doc.id)!.path) ? 0 : 1}:${encodeURIComponent(doc.id)}`}))
         .sort((a, b) => a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0);
-      const last = ranked.length <= DIGEST_REFRESH_LIMIT || state.ids === null ? undefined
+      const last = state.ids === null ? undefined
         : DIGEST_REFRESH_MARKER.exec(await git.text(['log', '-1', '--first-parent', '--format=%B', '--grep=^Digest-refresh-after: ', state.ids]))?.[1];
       const urgent = ranked.filter(({rank}) => rank.startsWith('0:')).slice(0, DIGEST_REFRESH_LIMIT / 2);
       const urgentIds = new Set(urgent.map(({doc}) => doc.id));
       const rotating = ranked.filter(({doc}) => !urgentIds.has(doc.id));
       const offset = last === undefined ? 0 : Math.max(0, rotating.findIndex(({rank}) => rank > last));
-      const batch = [...urgent, ...rotating.slice(offset), ...rotating.slice(0, offset)].slice(0, DIGEST_REFRESH_LIMIT);
+      const batch = [...rotating.slice(offset), ...rotating.slice(0, offset)].slice(0, DIGEST_REFRESH_LIMIT - urgent.length);
       const limit = linear.transport.optionalBodyLimit(DIGEST_REFRESH_BYTES);
-      const refresh = new Map(batch.map(({doc}) => [doc.id, doc]));
-      for (const doc of await linear.getDocuments([...refresh.keys()], {withContent: true, pageSize: 8, optionalBodyLimit: limit})) {
-        const listed = refresh.get(doc.id);
-        // Defer newly changed metadata to an ordinary capture, where inbound links are checked as well.
-        if (listed === undefined || doc.content === undefined || !live(doc) || doc.title !== listed.title
-          || doc.teamId !== listed.teamId || doc.projectId !== listed.projectId || doc.updatedAt !== listed.updatedAt) continue;
-        documents.set(doc.id, doc);
-        work.set(doc.id, doc);
-      }
-      // Remember the last attempt even when some bodies were omitted or blocked.
-      if (ranked.length > DIGEST_REFRESH_LIMIT) refreshMarker = batch.at(-1)!.rank;
+      const readRefresh = async (items: typeof batch, bodyLimit: number) => {
+        const refresh = new Map(items.map(({doc}) => [doc.id, doc]));
+        for (const doc of await linear.getDocuments([...refresh.keys()], {
+          withContent: true, pageSize: 8, optionalBodyLimit: bodyLimit, optionalLiveRead: !gate.configured,
+        })) {
+          const listed = refresh.get(doc.id);
+          // Defer newly changed metadata to an ordinary capture, where inbound links are checked as well.
+          if (listed === undefined || doc.content === undefined || !live(doc) || doc.title !== listed.title
+            || doc.teamId !== listed.teamId || doc.projectId !== listed.projectId || doc.updatedAt !== listed.updatedAt) continue;
+          refreshedIds.add(doc.id);
+          documents.set(doc.id, doc);
+          work.set(doc.id, doc);
+        }
+      };
+      await readRefresh(urgent, linear.transport.optionalBodyLimit(DIGEST_REFRESH_BYTES, batch.length === 0 ? 1 : 0.5));
+      await readRefresh(batch, limit);
+      // With an incomplete batch, change which page gets first use of the budget next time.
+      const partiallyRead = batch.some(({doc}) => refreshedIds.has(doc.id)) && batch.some(({doc}) => !refreshedIds.has(doc.id));
+      if (partiallyRead || (rotating.length === batch.length && batch.some(({doc}) => !refreshedIds.has(doc.id)))) {
+        refreshMarker = batch[0]?.rank;
+      } else if (rotating.length > batch.length) refreshMarker = batch.at(-1)?.rank;
     }
     // Keep metadata for out-of-scope documents; never infer deletion from a missing page.
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
@@ -676,6 +688,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         }
         if (Buffer.byteLength(text) > MAPPING_FILE_BYTES || (observed !== undefined && Buffer.byteLength(observed) > MAPPING_FILE_BYTES)) {
           result.leftOut.push({id, rule: 'blob-too-large'});
+          candidates.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
+        if (refreshedIds.has(id) && old?.entry.observedMac !== undefined
+          && (old.path !== path || assets.files.size > 0 || observed !== undefined || previous.get(path)?.equals(Buffer.from(text)) !== true)) {
+          // A stale signature can be refreshed for the same file. A different reading belongs to ordinary capture.
           candidates.delete(id);
           resetTarget(id);
           again = true;

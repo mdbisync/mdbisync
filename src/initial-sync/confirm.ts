@@ -643,10 +643,13 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;
 
-    const blobs = await observedBlobs(git, linearCommit, [...restored]);
+    // A confirmed write or verified resume receipt binds the response to the text sent,
+    // even if Linear stores the response in a form past the parser limits.
+    const evidenced = [...finalIds.keys()].filter((path) => restored.has(path) || vouched.has(path));
+    const blobs = await observedBlobs(git, linearCommit, evidenced);
     for (const [path, entry] of finalIds) {
       const document = rememberedDocuments.get(path);
-      if (!restored.has(path)) finalIds.set(path, {...entry, observedDigest: undefined, observedMac: undefined});
+      if (!restored.has(path) && !vouched.has(path)) finalIds.set(path, {...entry, observedDigest: undefined, observedMac: undefined});
       else if (document?.id === entry.id) finalIds.set(path, {...entry, ...observedFields(context.pushedKey, path, blobs.get(path), document)});
     }
 
