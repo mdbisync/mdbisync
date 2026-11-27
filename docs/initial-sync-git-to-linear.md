@@ -165,11 +165,13 @@ id as in **Move to trash** when no file has its title: it is neither
 written nor trashed, and the next run plans it again. A new document the
 run created is left out the same way when Linear's answer to the create was
 lost and someone edited the document before the run read it back; a resumed
-run leaves it out again. Once the initial sync has completed, run the sync
-for it, not the initial sync: the sync takes the edit in as a change made in
-Linear, while another initial sync would write the file over it. Each rule and
-what to do about it is in
-[troubleshooting.md](troubleshooting.md#files-left-out).
+run leaves it out again. When that document was only renamed, moved,
+trashed or archived, it still holds the file's text and the run counts it as
+created. Once the initial sync has completed, run the sync for either
+document, not the initial sync: the sync takes the change in as one made in
+Linear, while another initial sync would write the file over an edit, or
+create the file again next to a renamed document. Each rule and what to do
+about it is in [troubleshooting.md](troubleshooting.md#files-left-out).
 
 During later syncs, a new document linking an LFS object confirmed absent
 from the remote (404/410) can be left out while the other changes are

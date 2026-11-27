@@ -96,16 +96,6 @@ test('a create without its own id is not retried', async (t) => {
   assert.equal(sent('GetDocuments').length, 0);
 });
 
-test('a document with the id under another title or in another place is not taken as the create', async (t) => {
-  for (const other of [{ title: 'Other' }, { project: { id: 'project-2' } }]) {
-    const { documents, linear, sent } = await world(t, () => ({ apply: false, reply: { reset: true } }));
-    documents.set(id, fakeDocument(id, { title: 'Plans', content: 'Body', ...other }));
-    await assert.rejects(linear.createDocument(place, { id, title: 'Plans', content: 'Body' }), LinearNetworkError);
-    assert.equal(sent('CreateDocument').length, 1);
-    assert.equal(linear.stats.writes.get('CreateDocument'), undefined);
-  }
-});
-
 test('a stop during the read-back stops the create without another try', async (t) => {
   const { fake, linear, sent } = await world(t, () => ({ apply: false, reply: { reset: true } }));
   fake.operations.set('GetDocuments', () => rateLimited());
@@ -120,12 +110,12 @@ test('a read-back that fails outside Linear is thrown as it is, not as the creat
   await assert.rejects(linear.createDocument(place, { id, title: 'Plans', content: 'Body' }), TypeError);
 });
 
-/** A world whose create is applied and its answer lost, and in which the document holds `content` when it is read back. */
-async function readBackHolding(t: Parameters<typeof world>[0], content: string) {
+/** A world whose create is applied and its answer lost, and in which the document holds `content` (and `changed`) when it is read back. */
+async function readBackHolding(t: Parameters<typeof world>[0], content: string, changed: Parameters<typeof fakeDocument>[1] = {}) {
   const setup = await world(t, () => ({ apply: true, reply: { reset: true } }));
   const read = setup.fake.operations.get('GetDocuments')!;
   setup.fake.operations.set('GetDocuments', (request) => {
-    setup.documents.set(id, fakeDocument(id, { title: 'Plans', content, project: { id: place.projectId } }));
+    setup.documents.set(id, fakeDocument(id, { title: 'Plans', content, project: { id: place.projectId }, ...changed }));
     return read(request);
   });
   return setup;
@@ -153,4 +143,39 @@ test("a lost create's document holding the content in Linear's own form is the c
   const sameContent = (stored: string, sent: string) => stored.trimEnd() === sent;
   const created = await linear.createDocument(place, { id, title: 'Plans', content: 'Body' }, { sameContent });
   assert.equal(created.content, 'Body\n');
+});
+
+test('a lost create whose document was renamed, moved or trashed before the read-back is the create, but not returned as written', async (t) => {
+  for (const changed of [{ title: 'Renamed' }, { project: { id: 'project-2' } }, { trashed: true }, { archivedAt: '2026-01-02T00:00:00.000Z' }]) {
+    const { linear, sent } = await readBackHolding(t, 'Body', changed);
+    const error = await linear.createDocument(place, { id, title: 'Plans', content: 'Body' }).then(
+      () => assert.fail(`the changed document was returned as the create: ${JSON.stringify(changed)}`),
+      (rejection: unknown) => rejection,
+    );
+    assert.ok(error instanceof LinearCreateEditedError, JSON.stringify(changed));
+    assert.equal(error.document.id, id);
+    assert.equal(error.contentAsSent, true, 'the content is the one sent');
+    assert.equal(sent('CreateDocument').length, 1, 'not sent again: the id is taken');
+    assert.equal(linear.stats.writes.get('CreateDocument'), 1, 'the create was applied');
+  }
+});
+
+test('after a lost try, a document Linear holds under the id is taken as the create, wherever it is', async (t) => {
+  // The caller checks that the id is free before it creates: a document holding it after a lost try is the create's.
+  const { documents, linear, sent } = await world(t, () => ({ apply: false, reply: { reset: true } }));
+  documents.set(id, fakeDocument(id, { title: 'Other', content: 'Body', project: { id: 'project-2' } }));
+  const error = await linear.createDocument(place, { id, title: 'Plans', content: 'Body' }).then(
+    () => assert.fail('a document in another place was returned as written'),
+    (rejection: unknown) => rejection,
+  );
+  assert.ok(error instanceof LinearCreateEditedError);
+  assert.equal(error.contentAsSent, true);
+  assert.equal(sent('CreateDocument').length, 1);
+  assert.equal(linear.stats.writes.get('CreateDocument'), 1);
+});
+
+test('a lost create read back with its title in another Unicode form is the create', async (t) => {
+  const { linear } = await readBackHolding(t, 'Body', { title: 'Cafe\u0301' });
+  const created = await linear.createDocument(place, { id, title: 'Caf\u00e9', content: 'Body' });
+  assert.equal(created.id, id);
 });

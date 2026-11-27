@@ -933,6 +933,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const rereadAt = performance.now();
     if (listed !== undefined && (existing === null || existing.trashed || existing.archivedAt !== null)) return skip(change.path, 'missing-in-linear');
     let document: LinearDocument;
+    /** A lost create renamed, moved or trashed before its read-back. */
+    let changedBeforeRead = false;
     if (existing !== null) {
       const adopted = existing;
       if (!inPlace(adopted, file.place) || adopted.title.normalize('NFC') !== file.title.normalize('NFC')) return skip(change.path, 'edited-in-linear');
@@ -960,17 +962,24 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body }, { sameContent });
       } catch (error) {
         if (!(error instanceof LinearCreateEditedError)) throw error;
-        // Edited before the read: the text is a person's, not this run's. Like an adopted document that holds
-        // other text, it is left for the next capture, which finds it by its reserved id.
-        for (const { id: superseded } of supersededLinks(error.document.content ?? '')) keptSuperseded.add(superseded);
-        return skip(change.path, 'edited-in-linear');
+        if (!error.contentAsSent) {
+          // Edited before the read: the text is a person's, not this run's. Like an adopted document that holds
+          // other text, it is left for the next capture, which finds it by its reserved id.
+          for (const { id: superseded } of supersededLinks(error.document.content ?? '')) keptSuperseded.add(superseded);
+          return skip(change.path, 'edited-in-linear');
+        }
+        // Renamed, moved or trashed before the read, with this run's text: the create is this path's document, as
+        // if the person changed it just after the answer. The next capture takes the change in, as for any mapped one;
+        // until then it gets no mark, which could land outside the configured places.
+        document = error.document;
+        changedBeforeRead = true;
       }
       await checkpoint('document-created-before-ids-push');
     }
     stored.set(change.path, { content: document.content ?? '', sent: body, document });
     nextIds.set(change.path, { id: document.id });
     result.created.push(change.path);
-    await reconcileMark(change.path, document);
+    if (!changedBeforeRead) await reconcileMark(change.path, document);
     return true;
   }
 

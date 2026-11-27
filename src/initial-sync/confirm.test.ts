@@ -720,6 +720,56 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(world.linear.documents.filter((d) => d.title === 'backend/notes').length, 1);
   });
 
+  /** A fetch wrapper: the first CreateDocument of `backend/notes` is applied, its answer is lost, and `change` runs on the new document before the client reads it back. */
+  const changedLostCreate = (world: FakeWorld, change: (document: FakeWorld['linear']['documents'][number]) => void) => {
+    const fault = { dropped: undefined as string | undefined, wrap: (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) => {
+      const request = String(input) === `${LINEAR_API}/graphql` ? JSON.parse(String(init?.body)) as { operationName?: string; variables?: { input?: { id?: string; title?: string } } } : undefined;
+      if (fault.dropped === undefined && request?.operationName === 'CreateDocument' && request.variables?.input?.title === 'backend/notes') {
+        fault.dropped = request.variables.input.id;
+        await fetch(input, init);
+        const document = world.linear.documents.find((d) => d.id === fault.dropped);
+        assert.ok(document !== undefined);
+        change(document);
+        touch(document);
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
+      }
+      return fetch(input, init);
+    } };
+    return fault;
+  };
+
+  const changesBeforeRead: { name: string; change: Parameters<typeof changedLostCreate>[1] }[] = [
+    { name: 'renamed', change: (document) => { document.title = 'Renamed in Linear'; } },
+    { name: 'moved out of the synchronized places', change: (document) => { document.teamId = 'team-docs'; } },
+    { name: 'trashed', change: (document) => { document.trashed = true; document.archivedAt = new Date().toISOString(); } },
+  ];
+  for (const { name, change } of changesBeforeRead) {
+    it(`a create whose lost answer is read back after a person ${name} the document is the file's; the first sync takes the change in`, async () => {
+      const world = fakeWorld();
+      const path = 'eng/backend/notes.md';
+      const fault = changedLostCreate(world, change);
+      const { result, report } = await run(world, {}, fault.wrap);
+      const { dropped } = fault;
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.ok(dropped !== undefined, 'the fault never fired');
+      assert.deepEqual(report.initialSync?.failed, []);
+      assert.deepEqual(report.initialSync?.leftOutAtWrite, []);
+      assert.deepEqual(report.initialSync?.created, SYNCED_PATHS);
+      assert.equal((await readIds())[path]?.id, dropped);
+      const before = structuredClone(world.linear.documents.find((d) => d.id === dropped));
+
+      const sync = await runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
+      assert.equal(sync.exitCode, 0, sync.stderr);
+      // One document, left as the person changed it; Linear's side no longer holds the file at its first path.
+      assert.deepEqual(world.linear.documents.filter((d) => d.content?.includes('# Notes') === true).map((d) => d.id), [dropped]);
+      assert.deepEqual(world.linear.documents.find((d) => d.id === dropped), before);
+      assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/mdbisync/linear:${path}`], { okCodes: [0, 128] })).code, 128);
+      // A renamed document's file follows it; a moved or trashed one leaves the synchronized files.
+      const at = Object.entries(await readIds()).filter(([, entry]) => entry.id === dropped).map(([mapped]) => mapped);
+      assert.deepEqual(at, name === 'renamed' ? ['eng/Renamed in Linear.md'] : []);
+    });
+  }
+
   it('a rejected write is named; the rest are written, but nothing is trashed or recorded until it succeeds', async () => {
     const world = fakeWorld();
     world.linear.documents = [{ id: 'doc-retired', title: 'retired', projectId: 'project-api', createdAt: '2026-01-01T00:00:01Z', content: 'Retired.' }];
