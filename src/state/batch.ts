@@ -8,7 +8,7 @@
 // repository made again under the same path gets a new one.
 
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { type BigIntStats, statSync } from 'node:fs';
 import { GitError } from './git.ts';
 
 /** How long a process waits for its next request before it ends. */
@@ -63,7 +63,8 @@ class Queue<T> {
 
 interface Running<Request, Answer> {
   child: ChildProcessWithoutNullStreams;
-  identity: string;
+  cwd: BigIntStats | undefined;
+  objects: BigIntStats | undefined;
   pending: Queue<Pending<Request, Answer>>;
   /** Output not parsed yet, in the chunks it came in, and their length. */
   chunks: Buffer[];
@@ -99,7 +100,10 @@ export class BatchProcess<Request, Answer> {
   /** Writes `input` and waits for its answer. */
   async request(input: string | Buffer, request: Request): Promise<Answer> {
     let running = this.running;
-    if (running === undefined || this.directory === undefined || identityOf(this.directory) !== running.identity) running = await this.start();
+    // Git can still be in the old working directory even if the object-directory inode was reused.
+    if (running === undefined || this.directory === undefined || !sameDirectory(running.cwd, this.options.dir) || !sameDirectory(running.objects, this.directory)) {
+      running = await this.start();
+    }
     const current = running;
     return new Promise((resolve, reject) => {
       if (current.idle !== undefined) clearTimeout(current.idle);
@@ -139,9 +143,11 @@ export class BatchProcess<Request, Answer> {
 
   private spawn(directory: string): Running<Request, Answer> {
     const { dir, args, env } = this.options;
+    const cwd = directoryStat(dir);
+    const objects = directoryStat(directory);
     // Each answer must come as soon as it is ready, whatever the caller's GIT_FLUSH says.
     const child = spawn('git', args, { cwd: dir, env: { ...env(), GIT_FLUSH: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
-    const running: Running<Request, Answer> = { child, identity: identityOf(directory), pending: new Queue(), chunks: [], length: 0, need: 0, stderr: '', idle: undefined };
+    const running: Running<Request, Answer> = { child, cwd, objects, pending: new Queue(), chunks: [], length: 0, need: 0, stderr: '', idle: undefined };
     child.stdout.on('data', (chunk: Buffer) => this.receive(running, chunk));
     child.stderr.on('data', (chunk: Buffer) => { if (running.stderr.length < 64 * 1024) running.stderr += chunk.toString('utf8'); });
     child.stdin.on('error', () => {});
@@ -224,12 +230,20 @@ function hold(child: ChildProcessWithoutNullStreams, waiting: boolean): void {
   }
 }
 
-/** The device and inode of a directory: a directory made again under the same path has another. */
-function identityOf(directory: string): string {
+function directoryStat(directory: string): BigIntStats | undefined {
   try {
-    const stat = statSync(directory);
-    return `${stat.dev}:${stat.ino}`;
+    return statSync(directory, { bigint: true });
   } catch {
-    return 'missing';
+    return undefined;
   }
+}
+
+function sameDirectory(before: BigIntStats | undefined, directory: string): boolean {
+  const after = directoryStat(directory);
+  if (before === undefined || after === undefined) return before === after;
+  // Node can substitute mutable ctime for a missing birthtime. Compare creation times
+  // only when both snapshots can distinguish them from that fallback.
+  return before.dev === after.dev && before.ino === after.ino && (
+    before.birthtimeNs === after.birthtimeNs || before.birthtimeNs === before.ctimeNs || after.birthtimeNs === after.ctimeNs
+  );
 }
