@@ -73,7 +73,7 @@ import {
 import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { checkImageRepairSize, ImageRepairBudgetError } from '../sync/image-links.ts';
 import { cursorTime, linkVariants, prepareLfs } from '../sync/capture.ts';
-import { captureCursorTrailer, observedDigest, readCaptureCursor } from '../sync/recorded.ts';
+import { captureCursorTrailer, observedBlobs, observedFields, readCaptureCursor } from '../sync/recorded.ts';
 import { type SecurityFinding, type SecurityGate, checkTitle, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
@@ -896,9 +896,10 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
 
     const synced = new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
+    const blobs = await observedBlobs(git, commit, entries.map(({path}) => path));
     for (const {path, documentId} of entries) {
       const document = documents.get(documentId)!;
-      finalIds.set(path, {...finalIds.get(path)!, observedDigest: observedDigest(document)});
+      finalIds.set(path, {...finalIds.get(path)!, ...observedFields(context.pushedKey, path, blobs.get(path), document)});
     }
     for (const [path, entry] of finalIds) {
       const plainFiles = recordedPlain.get(path);

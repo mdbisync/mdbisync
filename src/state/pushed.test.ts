@@ -33,6 +33,23 @@ describe('state: signed records of the sync\'s own pushes', () => {
     assert.equal(key.verifiesWritten(path, id, hash, digest, mac.toUpperCase()), false);
   });
 
+  it('authenticates observed digests for the original repository, path and document', () => {
+    const path = 'docs/plan.md';
+    const id = 'plan';
+    const blob = 'a'.repeat(40);
+    const digest = 'a'.repeat(64);
+    const mac = key.observedMac(path, id, blob, digest);
+    assert.equal(key.verifiesObserved(path, id, blob, digest, mac), true);
+    assert.equal(key.verifiesObserved(path, id, blob, digest, undefined), false);
+    assert.equal(key.verifiesObserved(path, id, blob, digest, 42), false);
+    assert.equal(key.verifiesObserved(path, id, 'b'.repeat(40), digest, mac), false);
+    assert.equal(key.verifiesObserved(path, id, blob, 'b'.repeat(64), mac), false);
+    assert.equal(key.verifiesObserved('docs/other.md', id, blob, digest, mac), false);
+    assert.equal(key.verifiesObserved(path, 'other', blob, digest, mac), false);
+    assert.equal(new PushedKey('secret', 'owner/other').verifiesObserved(path, id, blob, digest, mac), false);
+    assert.equal(new PushedKey('another secret', 'owner/repo').verifiesObserved(path, id, blob, digest, mac), false);
+  });
+
   it('binds capture checkpoints to their message, commit and repository', () => {
     const parents = ['b'.repeat(40)];
     const text = 'Capture document ids';

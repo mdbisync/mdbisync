@@ -121,6 +121,16 @@ export class PushedKey {
     return timingSafeEqual(Buffer.from(this.writtenMac(path, id, hash, observedDigest), 'hex'), Buffer.from(mac, 'hex'));
   }
 
+  /** Bind a Linear body digest to its path, document and recorded file version. */
+  observedMac(path: string, id: string, blob: Oid, digest: string): string {
+    return createHmac('sha256', this.#key).update(JSON.stringify(['observed-v1', this.#repository, path, id, blob, digest])).digest('hex');
+  }
+
+  verifiesObserved(path: string, id: string, blob: Oid, digest: string, mac: unknown): boolean {
+    if (typeof mac !== 'string' || !PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.observedMac(path, id, blob, digest), 'hex'), Buffer.from(mac, 'hex'));
+  }
+
   #mac(ref: string, head: Oid): string {
     return createHmac('sha256', this.#key).update(`${this.#repository}\n${ref}\n${head}`).digest('hex');
   }

@@ -2172,6 +2172,47 @@ repos:
     assert.equal(checkpoints.recorded.size, 0);
   });
 
+  it('rotates bounded legacy digest batches past documents it could not read', async (t) => {
+    for (let i = 1; i <= 34; i += 1) world.linear.documents.push({
+      id: `note-${i}`, title: `note-${i}`, content: 'Meeting notes.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z',
+    });
+    world.linear.documents.push({id: 'latest', title: 'latest', content: 'Latest notes.\n', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z'});
+    const first = await run();
+    assert.equal(first.ok, true);
+    const legacy = await readIds(context.git, first.state.ids);
+    assert.equal([...legacy.values()].filter(({observedMac}) => observedMac !== undefined).length, legacy.size);
+    for (const entry of legacy.values()) delete entry.observedMac;
+    const ids = await commitIds(fixture.remote, first.state.ids, legacy, IDENTITY, {message: 'Record document ids'});
+    const ref = stateRef(config, 'ids');
+    await fixture.remote.run(['update-ref', ref, ids, first.state.ids!]);
+
+    const signed = async () => new Set([...(await readIds(context.git, context.fetched.state.ids))]
+      .filter(([, {observedMac}]) => observedMac !== undefined).map(([path]) => path));
+    const getDocuments = context.linear.getDocuments.bind(context.linear);
+    const failed = new Set<string>();
+    let omit = true;
+    t.mock.method(context.linear, 'getDocuments', async (...[ids, options]: Parameters<typeof getDocuments>) => {
+      if (options?.optionalBodyLimit === undefined) return getDocuments(ids, options);
+      if (!omit) return getDocuments(ids.filter((id) => !failed.has(id)), options);
+      for (const id of ids) failed.add(id);
+      return [];
+    });
+
+    await refresh();
+    assert.equal((await run()).ok, true);
+    await refresh();
+    assert.deepEqual(await signed(), new Set(['docs/latest.md']));
+    assert.equal(failed.size, 32);
+    assert.ok(!failed.has('plan'));
+
+    // The earlier batch stays unavailable. The documents that follow it can still be signed.
+    omit = false;
+    assert.equal((await run()).ok, true);
+    await refresh();
+    assert.ok((await signed()).has('docs/plan.md'));
+    assert.equal((await signed()).size, legacy.size - failed.size);
+  });
+
   it('uses signed checkpoints only on the Linear observation history they describe', async () => {
     const before = context.fetched.state.linear!;
     const time = '2026-01-04T00:00:00.000Z';

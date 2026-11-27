@@ -227,33 +227,39 @@ export class LinearClient {
    * exist are absent from the result. Bodies read here count toward the
    * run's body budget: the caller holds them together.
    */
-  async getDocuments(ids: readonly string[], options: Omit<ListOptions, 'includeArchived'> = {}): Promise<LinearDocument[]> {
+  async getDocuments(ids: readonly string[], options: Omit<ListOptions, 'includeArchived'> & {optionalBodyLimit?: number; optionalLiveRead?: boolean} = {}): Promise<LinearDocument[]> {
     return this.#documentsById(ids, options, true);
   }
 
-  async #documentsById(ids: readonly string[], options: Omit<ListOptions, 'includeArchived'>, counted: boolean): Promise<LinearDocument[]> {
+  async #documentsById(ids: readonly string[], options: Omit<ListOptions, 'includeArchived'> & {optionalBodyLimit?: number; optionalLiveRead?: boolean}, counted: boolean): Promise<LinearDocument[]> {
     const withContent = options.withContent ?? false;
     const pageSize = clampPageSize(options.pageSize);
     const result: LinearDocument[] = [];
     const pages: Array<readonly string[]> = [];
     for (let start = 0; start < ids.length; start += pageSize) pages.push(ids.slice(start, start + pageSize));
     for (let chunk = pages.shift(); chunk !== undefined; chunk = pages.shift()) {
-      let data: { documents: { nodes: RawDocument[] } };
+      let data: { documents: { nodes: RawDocument[] } } | undefined;
       try {
-        data = await this.transport.query<{ documents: { nodes: RawDocument[] } }>(
-          'GetDocuments',
-          `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
+        const query = `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
             documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
               nodes { ${DOCUMENT_FIELDS} }
             }
-          }`,
-          { ids: chunk, first: chunk.length, withContent },
-          { bodies: withContent && counted },
-        );
+          }`;
+        const variables = {ids: chunk, first: chunk.length, withContent};
+        data = options.optionalBodyLimit === undefined
+          ? await this.transport.query('GetDocuments', query, variables, {bodies: withContent && counted})
+          : await this.transport.queryOptionalBodies('GetDocuments', query, variables, options.optionalBodyLimit, {documents: {nodes: []}}, options.optionalLiveRead === true);
       } catch (error) {
         if (!pageTooLarge(error, chunk.length)) throw error;
         const half = Math.ceil(chunk.length / 2);
         pages.unshift(chunk.slice(0, half), chunk.slice(half));
+        continue;
+      }
+      if (data === undefined) {
+        if (chunk.length > 1) {
+          const half = Math.ceil(chunk.length / 2);
+          pages.unshift(chunk.slice(0, half), chunk.slice(half));
+        }
         continue;
       }
       result.push(...data.documents.nodes.map(toDocument));
