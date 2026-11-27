@@ -1331,7 +1331,7 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'summary.unstableHookNamed': async (env) => ownResults(env.ctx).some((run) => {
     const sync = run.report?.['sync'] as { leftOut?: Array<{ hooks?: string[] }> } | null | undefined;
-    return sync?.leftOut?.some((file) => file.hooks?.includes('add-footnote')) === true && run.summary.includes('add-footnote');
+    return sync?.leftOut?.some((file) => file.hooks?.includes('aligned-table')) === true && run.summary.includes('aligned-table');
   }),
   'decided.code': async (env) => decidedCode(env.ctx),
 

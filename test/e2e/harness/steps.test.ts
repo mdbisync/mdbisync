@@ -2606,11 +2606,11 @@ describe('git executors', () => {
     assert.ok(synced.includes(ctx.observations.get('ciFix.unstable') as string));
     assert.ok(ctx.observations.has('syncBranch.personCommit'));
     const configured = readHookConfig(await remoteFile('.pre-commit-config.yaml', ctx.names.syncBranch));
-    assert.ok(configured.hooks.some((hook) => hook.id === 'add-footnote'));
+    assert.ok(configured.hooks.some((hook) => hook.id === 'aligned-table'));
     assert.ok(configured.hooks.some((hook) => hook.id === 'stable-fix'));
     assert.deepEqual(parseYaml(await remoteFile('.pre-commit-config.yaml', ctx.names.syncBranch)).default_stages, ['pre-commit']);
     const fixes = await remoteGit.text(['log', '--format=%(trailers:key=Pre-commit-fix,valueonly)', `refs/heads/${ctx.names.syncBranch}`]);
-    assert.match(fixes, /add-footnote/);
+    assert.match(fixes, /aligned-table/);
     assert.match(fixes, /stable-fix/);
     // Never pushed to the tracked branch.
     assert.ok(!(await remoteFile(path)).includes(ctx.observations.get('ciFix.stable') as string));
@@ -2618,12 +2618,12 @@ describe('git executors', () => {
 
   it('L2-33 checks the hook name in both the engine report and the rendered summary', async () => {
     const { ctx } = await fakeRun();
-    const result = { report: { sync: { leftOut: [{ path: 'notes.md', hooks: ['add-footnote'] }] } }, summary: 'CI fixes not written: add-footnote' } as unknown as EngineResult;
+    const result = { report: { sync: { leftOut: [{ path: 'notes.md', hooks: ['aligned-table'] }] } }, summary: 'CI fixes not written: aligned-table' } as unknown as EngineResult;
     ctx.engine.results.push(result);
     assert.deepEqual(await resolveSubject(ctx, 'summary.unstableHookNamed'), { known: true, value: true });
     result.summary = 'No hook named';
     assert.deepEqual(await resolveSubject(ctx, 'summary.unstableHookNamed'), { known: true, value: false });
-    result.summary = 'add-footnote';
+    result.summary = 'aligned-table';
     result.report = { sync: { leftOut: [] } };
     assert.deepEqual(await resolveSubject(ctx, 'summary.unstableHookNamed'), { known: true, value: false });
     const scenario = scenarios.find((item) => item.id === 'L2-33')!;

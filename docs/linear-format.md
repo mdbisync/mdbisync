@@ -569,7 +569,7 @@ file back, and its document stays as it is, when Linear would refuse the
 document or corrupt it: text that moves, is dropped or splits, a link
 that loses its URL, or text Linear shows differently while its export
 writes the same Markdown, so the change never comes back (a table cell's
-`#`). Any other finding leaves the text in its place and
+`#`, a tilde subscript). Any other finding leaves the text in its place and
 loses only formatting, or reports text Linear's own export writes: the sync
 writes such a file, and what Linear drops comes back as a change in the
 sync pull request. A file an earlier release held back for such a finding
@@ -582,7 +582,7 @@ with what `fix` writes for it and the findings left to you.
 
 | Holds the file back | Written to Linear |
 | --- | --- |
-| `footnote`, `table-escaped-pipe`, `table-hash-cell`, `image-in-link`, `content-too-long`, `markdown-complexity`, `duplicate-title`, `link-scheme`, `link-without-text`, `git-conflict-marker`, `section-opener`, `url-in-html`, `block-first-in-list-item`, `section-marker-text`, `plus-line-in-item`, `tab-indentation`, `image-not-in-repository`, `image-file-missing`, `document-in-assets-folder` | `subscript`, `table-list-cell`, `table-quote-cell`, `table-alignment`, `link-title`, `image-title`, `code-in-emphasis`, `hard-break-backslash`, `setext-heading-lines`, `table-header-pipe`, `code-span-padding`, `hard-break-in-heading`, `number-paragraph`, `tab-reference-layout`, `space-reference-edge`, `unplaced-link`, `list-after-item-text`, `list-number-too-long`, `ordered-task-list` |
+| `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`, `image-in-link`, `content-too-long`, `markdown-complexity`, `duplicate-title`, `link-scheme`, `link-without-text`, `git-conflict-marker`, `section-opener`, `url-in-html`, `block-first-in-list-item`, `section-marker-text`, `plus-line-in-item`, `tab-indentation`, `image-not-in-repository`, `image-file-missing`, `document-in-assets-folder` | `table-list-cell`, `table-quote-cell`, `table-alignment`, `link-title`, `image-title`, `code-in-emphasis`, `hard-break-backslash`, `setext-heading-lines`, `table-header-pipe`, `code-span-padding`, `hard-break-in-heading`, `number-paragraph`, `tab-reference-layout`, `space-reference-edge`, `unplaced-link`, `list-after-item-text`, `list-number-too-long`, `ordered-task-list` |
 
 ### `footnote`
 

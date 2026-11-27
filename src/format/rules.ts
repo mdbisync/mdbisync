@@ -58,7 +58,8 @@ export type LintRule = keyof typeof LINT_RULES;
  * split its text: a lost URL, a split table row, text moving out of a list
  * item or into a collapsible section; or when Linear shows the text
  * differently while its export writes the same Markdown, so the change never
- * comes back (a table cell's `#` as a heading). It does not block when only
+ * comes back (a table cell's `#` as a heading, tildes around a subscript
+ * that the sync reads as the same Markdown in Linear's escaped form). It does not block when only
  * formatting is lost and the text stays where it was, or when Linear's own
  * export writes the construct: the sync writes such a file, and the loss
  * comes back from Linear as a change in the sync pull request.
@@ -67,7 +68,7 @@ export type LintRule = keyof typeof LINT_RULES;
  */
 export const LINT_RULE_BLOCKS: { readonly [R in LintRule]: boolean } = {
   footnote: true,
-  subscript: false,
+  subscript: true,
   'table-escaped-pipe': true,
   'table-hash-cell': true,
   'table-list-cell': false,
@@ -114,7 +115,7 @@ export const LINT_RULE_BLOCKS: { readonly [R in LintRule]: boolean } = {
  * chain can still hold such a version of a file left out; the sync reads it
  * as left out there (`lintRecorded`), so the file is written now.
  */
-export const NOT_IN_LINEAR_EXPORT: ReadonlySet<LintRule> = new Set<LintRule>(['code-in-emphasis', 'hard-break-backslash', 'image-title', 'link-title', 'ordered-task-list', 'subscript', 'table-alignment']);
+export const NOT_IN_LINEAR_EXPORT: ReadonlySet<LintRule> = new Set<LintRule>(['code-in-emphasis', 'hard-break-backslash', 'image-title', 'link-title', 'ordered-task-list', 'table-alignment']);
 
 /**
  * Warnings: text that may read differently from what its author meant, which

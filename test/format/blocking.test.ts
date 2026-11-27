@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { lintText, splitFile } from '../../src/format/index.ts';
+import { lintText, sameAsLinear, splitFile } from '../../src/format/index.ts';
 import { LINT_RULE_BLOCKS, LINT_RULES, NOT_IN_LINEAR_EXPORT, type LintRule } from '../../src/format/rules.ts';
 import { goldenMarkdownPath, loadBank, readOptional } from '../probe/bank.ts';
 import { textAndPlaces } from './text-and-places.ts';
@@ -24,7 +24,8 @@ import { textAndPlaces } from './text-and-places.ts';
  *   documents, while the bank's fixtures of the rule are still assumed;
  * - `unrecorded`: no recorded form yet, so the rule keeps blocking;
  * - `silent-loss`: Linear shows the text differently (a cell's `#` as an empty heading) while
- *   its export writes the same Markdown, so the loss never comes back as a change;
+ *   its export writes the same Markdown, or a form the sync reads as the file's, so the loss
+ *   never comes back as a change;
  * - `text-kept`: every recorded form keeps the text, its URLs and their places: only
  *   formatting is lost;
  * - `title-dropped`: as `text-kept`, but Linear drops the link's or image's title, which comes
@@ -41,7 +42,7 @@ const BLOCKING_EVIDENCE: ReadonlySet<Evidence> = new Set(['refused', 'text-chang
 
 const EVIDENCE: { readonly [R in LintRule]: Evidence } = {
   footnote: 'text-changed', // a named footnote's text moves into a link destination
-  subscript: 'text-kept',
+  subscript: 'silent-loss', // the sync reads Linear's escaped tildes as the same Markdown
   'table-escaped-pipe': 'text-changed', // the row splits into more cells
   'table-hash-cell': 'silent-loss',
   'table-list-cell': 'linear-writes',
@@ -107,6 +108,11 @@ describe('lint rules that hold a file back from Linear', () => {
 
   it("no recorded Linear form holds a construct of NOT_IN_LINEAR_EXPORT, and none of them blocks", () => {
     for (const rule of NOT_IN_LINEAR_EXPORT) assert.equal(LINT_RULE_BLOCKS[rule], false, rule);
+    // The sync records Linear's form of such a file, not the file: a form it read as the file's would keep
+    // the construct on the `linear` chain, which then reads as never written, and the file is written on every run.
+    for (const { fixture, rule, source, form } of recorded) {
+      if (NOT_IN_LINEAR_EXPORT.has(rule) && form !== undefined) assert.equal(sameAsLinear(form, source), false, `${fixture.file}: the sync reads Linear's form as the file's`);
+    }
     for (const fixture of bank.fixtures) {
       if (!fixture.file.endsWith('.md')) continue;
       const form = readOptional(join(bank.dir, goldenMarkdownPath(fixture.file)));
@@ -136,8 +142,10 @@ describe('lint rules that hold a file back from Linear', () => {
           assert.ok(withForm.some(({ source, form }) => sectionLines(form!) > sectionLines(source)), 'a recorded form opens a collapsible section');
           break;
         case 'linear-writes':
-        case 'silent-loss':
           assert.ok(withForm.some(({ form }) => lintText('', form!, { linearExport: true }).some((finding) => finding.rule === rule)), "Linear's own export writes the construct");
+          break;
+        case 'silent-loss':
+          assert.ok(withForm.some(({ source, form }) => lintText('', form!, { linearExport: true }).some((finding) => finding.rule === rule) || sameAsLinear(form!, source)), 'no change comes back from Linear');
           break;
         case 'editor':
           // Once the probe records how Linear's editor holds them, the rule is decided again from that form.

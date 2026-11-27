@@ -380,7 +380,7 @@ by hand:
 The `linear-format` hook's rules for text Linear would corrupt (text that
 moves, is dropped or splits, a link that loses its URL, or text Linear
 shows differently without the change ever coming back) leave a file out
-too until it is fixed: `footnote`, `table-escaped-pipe`, `table-hash-cell`,
+too until it is fixed: `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
 `image-in-link`, `link-without-text`, `git-conflict-marker`,
 `section-opener`, `section-marker-text`, `plus-line-in-item`,
 `tab-indentation`, `url-in-html`, `block-first-in-list-item`,
@@ -399,7 +399,7 @@ push without hooks) can hold a lone `+` below an item's first line
 the format problems pull request, or run `mdbisync fix` on it and commit the
 result, and the next run syncs it.
 
-The other rules leave no file out: `subscript`, `table-list-cell`, `table-quote-cell`, `table-alignment`, `link-title`,
+The other rules leave no file out: `table-list-cell`, `table-quote-cell`, `table-alignment`, `link-title`,
 `image-title`, `code-in-emphasis`, `hard-break-backslash`,
 `setext-heading-lines`, `table-header-pipe`, `code-span-padding`,
 `hard-break-in-heading`, `number-paragraph`, `tab-reference-layout`,
