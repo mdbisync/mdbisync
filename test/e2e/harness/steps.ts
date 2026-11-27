@@ -37,7 +37,7 @@ import { CHECK_NAME, CHECK_WORKFLOW_PATH, readCheckState } from '../../corpus/ch
 import { calloutDecoration, editParagraph, markerKindAt, noteSentence, removeMarker, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
-import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
+import { ciFixes, ciFixHook, fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { TYPING_METRICS } from './ui-checklist.ts';
 import { commentsWithState, destinationKind, findTypedImage, imageGateRecord, imagePlace, imagesIn, placeLabel, typedImage, withoutImage, writtenImagePath, type ImageRepairSource, type TypedImageRecord } from './image-gate.ts';
 import { hugeDocument, hugeDocumentRecord, hugeDocumentShortfall } from './huge-document.ts';
@@ -1775,13 +1775,13 @@ const GIT: Record<string, Executor> = {
   'git.ci-fix': async (ctx, args) => {
     // Fix commits a CI job makes on the sync pull request's branch.
     const path = typeof args.target === 'string' ? targetPath(ctx, args.target) : targetPath(ctx);
-    const fixes = Array.isArray(args.fixes) ? (args.fixes as string[]) : ['stable-fix'];
+    const fixes = ciFixes(args);
     const commits = (ctx.observations.get('ciFix.commits') as string[] | undefined) ?? [];
     const interleavings = (ctx.observations.get('report.interleavingsCovered') as string[] | undefined) ?? [];
     interleavings.push(ctx.engine.pausedAt === 'after-capture-push-before-pr' ? 'capture-before-fix' : 'fix-before-capture');
     for (const fix of fixes) {
       const token = nextToken(ctx);
-      const id = fix === 'linear-would-undo' ? 'aligned-table' : 'stable-fix';
+      const id = ciFixHook(fix);
       const addition = fix === 'linear-would-undo'
         // A footnote, whose text Linear moves into a link: the sync holds the file back. The hook keeps the id
         // the sandbox's pre-commit configuration gives it, so the fix changes no other file.
@@ -1789,15 +1789,10 @@ const GIT: Record<string, Executor> = {
         // Linear stores a final paragraph without a trailing newline.
         : `\nChecked by the format job, ref ${token}.`;
       commits.push(await commitToSyncBranch(ctx, async (git) => {
+        // A CI job runs only hooks the tracked branch configures (STEP_PREPARATION adds them); the fix changes the document alone.
+        await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.trackedBranch}`]);
+        if (!readHookConfig(await git.text(['show', `FETCH_HEAD:${PRE_COMMIT_CONFIG}`])).hooks.some((hook) => hook.id === id)) throw new HarnessGapError(`git.ci-fix: hook ${id} is not configured on the tracked branch`);
         writeFileSync(join(git.dir, path), `${readFileSync(join(git.dir, path), 'utf8').replace(/\n*$/, '\n')}${addition}`);
-        // The simulated fixing hook must be configured, as in a real CI job.
-        const config = join(git.dir, PRE_COMMIT_CONFIG);
-        const text = readFileSync(config, 'utf8');
-        if (!readHookConfig(text).hooks.some((hook) => hook.id === id)) {
-          const data = parse(text);
-          data.repos.push({ repo: 'local', hooks: [{ id, name: 'Format check', language: 'system', entry: 'true' }] });
-          writeFileSync(config, stringify(data));
-        }
       }, `Apply the format fixes\n\nPre-commit-fix: ${id}`));
       ctx.observations.set(fix === 'linear-would-undo' ? 'ciFix.unstable' : 'ciFix.stable', token);
     }
