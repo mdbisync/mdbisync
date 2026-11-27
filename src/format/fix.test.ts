@@ -332,6 +332,14 @@ describe('space references, adjacent links and lone backticks as Linear stores t
     assert.equal(fixText(fixed), fixed, 'a second fix changes nothing');
   });
 
+  it('checks each space edit of a long paragraph by itself when one of them would change it', () => {
+    // The first reference would make a hard line break: it stays, the marks' spaces still move.
+    const words = 'word '.repeat(280);
+    const text = 'a&#32;&#32;\nb ' + `${words}**&#32;Tip** `.repeat(15) + 'end.';
+    assert.ok(text.length > 20_000);
+    assert.equal(fixText(text), 'a&#32;&#32;\nb ' + `${words} **Tip** `.repeat(15) + 'end.');
+  });
+
   it('leaves a space reference at a block\'s start or end to the author', () => {
     // Linear stores the space on its first write and drops it on the next:
     // no form reads back the same in both, so lint reports it and fix stops.
