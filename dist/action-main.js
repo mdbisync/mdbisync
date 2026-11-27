@@ -29025,7 +29025,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.2-rc.1" : packageJson.version;
+var VERSION = true ? "1.0.2-rc.2" : packageJson.version;
 function olderVersion(version, than) {
   if (version === void 0) return true;
   const a = parseVersion(version);
@@ -29243,7 +29243,7 @@ var ContentSpool = class {
 
 // src/sync/capture.ts
 var import_yaml3 = __toESM(require_dist(), 1);
-import { createHash as createHash16 } from "node:crypto";
+import { createHash as createHash17 } from "node:crypto";
 import { mkdtemp as mkdtemp5, rm as rm6 } from "node:fs/promises";
 import { tmpdir as tmpdir7 } from "node:os";
 import { join as join14, posix as posix9 } from "node:path";
@@ -45432,9 +45432,11 @@ var LinearReadBackError = class extends LinearError {
 };
 var LinearCreateEditedError = class extends LinearError {
   document;
-  constructor(operation, document3) {
+  contentAsSent;
+  constructor(operation, document3, contentAsSent) {
     super(operation, message("linear.create-edited", { operation }));
     this.document = document3;
+    this.contentAsSent = contentAsSent;
   }
 };
 var LinearResponseLimitError = class extends LinearError {
@@ -45809,6 +45811,44 @@ var GraphQLTransport = class {
     if (key2 !== void 0) this.reads?.keep(key2, { status: answer.status, type: "application/json", body: Buffer.from(answer.text, "utf8") });
     return answer.data;
   }
+  /** Give optional reads at most this many extra bytes and leave half the budget for required reads. */
+  optionalBodyLimit(bytes, share = 1) {
+    const remaining = Math.max(0, Math.floor(this.#limits.bodyBytes / 2) - this.#bodyBytesRead);
+    return this.#bodyBytesRead + Math.floor(Math.min(bytes, remaining) * share);
+  }
+  /** Optional migration data can be omitted and replayed as omitted by the apply step. */
+  async queryOptionalBodies(operation, query, variables, limit, empty2, allowLiveWithoutStage) {
+    const requestBody = JSON.stringify({ query, variables, operationName: operation });
+    const key2 = graphqlReadKey(`optional bodies
+${requestBody}`);
+    const kept = this.reads?.take(key2);
+    if (kept !== void 0) {
+      if (kept.type === "application/x-mdbisync-page-split") return void 0;
+      if (kept.body.length === 0 || kept.body.length > this.#limits.responseBytes || this.#bodyBytesRead + kept.body.length > limit) return empty2;
+      this.#chargeBodies(operation, kept.body.length);
+      return keptData(operation, kept.status, kept.body);
+    }
+    if (this.reads?.mode === "replay" && !allowLiveWithoutStage) return empty2;
+    if (!this.#stopped && this.#bodyBytesRead < limit) {
+      try {
+        const answer = await this.#network(operation, "query", requestBody, false, Math.min(this.#limits.responseBytes, limit - this.#bodyBytesRead));
+        const body2 = Buffer.from(answer.text, "utf8");
+        if (this.#bodyBytesRead + body2.length <= limit) {
+          this.#chargeBodies(operation, body2.length);
+          this.reads?.keep(key2, { status: answer.status, type: "application/json", body: body2 });
+          return answer.data;
+        }
+      } catch (error2) {
+        if (error2 instanceof LinearResponseLimitError) {
+          this.reads?.keep(key2, { status: 200, type: "application/x-mdbisync-page-split", body: Buffer.alloc(0) });
+          return void 0;
+        }
+        if (!(error2 instanceof LinearStoppedError) && !(error2 instanceof LinearError && isTransientLinearError(error2))) throw error2;
+      }
+    }
+    this.reads?.keep(key2, { status: 200, type: "application/json", body: Buffer.alloc(0) });
+    return empty2;
+  }
   /** A read that must reflect the token as it is now: never answered from the read store, never kept in it. */
   async queryLive(operation, query, variables = {}) {
     if (this.#stopped) throw this.#refuse(operation, "query", this.#stopped);
@@ -45820,7 +45860,7 @@ var GraphQLTransport = class {
     return (await this.#network(operation, "mutation", requestBody)).data;
   }
   /** Network execution shared by reads and writes; has no read-store access. */
-  async #network(operation, kind, requestBody, bodies = false) {
+  async #network(operation, kind, requestBody, bodies = false, responseLimit = this.#limits.responseBytes) {
     for (let attempt = 1; ; attempt += 1) {
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
       const info2 = { operation, kind, attempt };
@@ -45868,7 +45908,7 @@ var GraphQLTransport = class {
       let over = false;
       let bytes = 0;
       try {
-        const read = await readText(response, this.#limits.responseBytes);
+        const read = await readText(response, responseLimit);
         if (read === void 0) over = true;
         else {
           text6 = read.text;
@@ -45905,7 +45945,7 @@ var GraphQLTransport = class {
       if (low) this.#stopped = low;
       this.#log(low ? { ...entry, stop: low } : entry);
       if (over) {
-        const error2 = new LinearResponseLimitError(operation, "linear-response-too-large", this.#limits.responseBytes);
+        const error2 = new LinearResponseLimitError(operation, "linear-response-too-large", responseLimit);
         throw kind === "mutation" ? new LinearNetworkError(operation, error2) : error2;
       }
       const firstError = body2?.errors?.[0];
@@ -46052,20 +46092,24 @@ var LinearClient = class {
     for (let chunk = pages.shift(); chunk !== void 0; chunk = pages.shift()) {
       let data;
       try {
-        data = await this.transport.query(
-          "GetDocuments",
-          `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
+        const query = `query GetDocuments($ids: [ID!]!, $first: Int!, $withContent: Boolean!) {
             documents(first: $first, includeArchived: true, filter: { id: { in: $ids } }) {
               nodes { ${DOCUMENT_FIELDS} }
             }
-          }`,
-          { ids: chunk, first: chunk.length, withContent },
-          { bodies: withContent && counted }
-        );
+          }`;
+        const variables = { ids: chunk, first: chunk.length, withContent };
+        data = options.optionalBodyLimit === void 0 ? await this.transport.query("GetDocuments", query, variables, { bodies: withContent && counted }) : await this.transport.queryOptionalBodies("GetDocuments", query, variables, options.optionalBodyLimit, { documents: { nodes: [] } }, options.optionalLiveRead === true);
       } catch (error2) {
         if (!pageTooLarge(error2, chunk.length)) throw error2;
         const half = Math.ceil(chunk.length / 2);
         pages.unshift(chunk.slice(0, half), chunk.slice(half));
+        continue;
+      }
+      if (data === void 0) {
+        if (chunk.length > 1) {
+          const half = Math.ceil(chunk.length / 2);
+          pages.unshift(chunk.slice(0, half), chunk.slice(half));
+        }
         continue;
       }
       result.push(...data.documents.nodes.map(toDocument));
@@ -46108,10 +46152,12 @@ var LinearClient = class {
    * same id, at most `CREATE_ATTEMPTS` times in all. The id makes the retry
    * safe: Linear cannot hold two documents with it.
    *
-   * A document found that way is this create's write only while it holds the
-   * content sent: `sameContent(stored, sent)`, or exact equality without it.
-   * Someone may have edited it between the lost answer and the read, so one
-   * holding other content throws `LinearCreateEditedError` with it.
+   * A document found that way is this create's write only while it is as
+   * sent: in the place and under the title sent, not trashed or archived, and holding the
+   * content sent (`sameContent(stored, sent)`, or exact equality without it).
+   * Someone may have edited, renamed, moved or trashed it between the lost
+   * answer and the read, so any other one throws `LinearCreateEditedError`
+   * with it: the create was applied all the same, and is not sent again.
    */
   async createDocument(place, input, { sameContent = (stored, sent) => stored === sent } = {}) {
     this.#refuseTooLong("CreateDocument", input);
@@ -46123,10 +46169,12 @@ var LinearClient = class {
         if (id === void 0 || !(error2 instanceof LinearError) || error2 instanceof LinearStoppedError || error2 instanceof LinearReadBackError) throw error2;
         const transient = isTransientLinearError(error2);
         if (!transient && attempt === 1) throw error2;
-        const found = await this.#findCreated(id, place, input.title, error2);
+        const found = await this.#findCreated(id, error2);
         if (found !== void 0) {
           this.stats.wrote("CreateDocument");
-          if (!sameContent(found.content ?? "", input.content ?? "")) throw new LinearCreateEditedError("CreateDocument", found);
+          const contentAsSent = sameContent(found.content ?? "", input.content ?? "");
+          const samePlace = place.projectId !== void 0 ? found.projectId === place.projectId : found.teamId === place.teamId && found.projectId === null;
+          if (!contentAsSent || !samePlace || found.title.normalize("NFC") !== input.title.normalize("NFC") || found.trashed || found.archivedAt !== null) throw new LinearCreateEditedError("CreateDocument", found, contentAsSent);
           return found;
         }
         if (!transient || attempt >= CREATE_ATTEMPTS) throw error2;
@@ -46396,12 +46444,13 @@ var LinearClient = class {
   }
   /**
    * The document a lost create made, read back with its stored content, or
-   * undefined when Linear does not have the id. A document with the id in
-   * another place or under another title is not this create's: the create's
-   * own error is thrown. A read Linear fails throws that error too, so the
-   * caller reports the create; a stop and any other failure are thrown as they are.
+   * undefined when Linear does not have the id. The id is one the caller
+   * chose and found free before the create, so a document with it is this
+   * create's wherever it is now. A read Linear fails throws the create's own
+   * error, so the caller reports the create; a stop and any other failure are
+   * thrown as they are.
    */
-  async #findCreated(id, place, title, createError) {
+  async #findCreated(id, createError) {
     let found;
     try {
       [found] = await this.#documentsById([id], { withContent: true }, false);
@@ -46409,9 +46458,6 @@ var LinearClient = class {
       if (error2 instanceof LinearStoppedError || !(error2 instanceof LinearError)) throw error2;
       throw createError;
     }
-    if (found === void 0) return void 0;
-    const samePlace = place.projectId !== void 0 ? found.projectId === place.projectId : found.teamId === place.teamId && found.projectId === null;
-    if (!samePlace || found.title !== title || found.trashed) throw createError;
     return found;
   }
   /** The written document's record with its stored content: the payload, or a read-back when the payload may differ. */
@@ -48131,9 +48177,10 @@ function parseXml(xml, options) {
 // src/sync/upload-type.ts
 var ASSETS_FOLDER = "assets";
 var UPLOAD_EXTENSIONS = /* @__PURE__ */ new Set([".png", ".jpg", ".gif", ".webp", ".pdf", ".avif", ".mp4", ".webm", ".svg"]);
+var CAPTURE_SUFFIX_LIMIT = 100;
 function isCaptureName(path7) {
-  const match = /^[0-9a-f]{64}(\.[a-z0-9]+)$/.exec(path7.slice(path7.lastIndexOf("/") + 1));
-  return match !== null && UPLOAD_EXTENSIONS.has(match[1]);
+  const match = /^[0-9a-f]{64}(?:-([1-9][0-9]*))?(\.[a-z0-9]+)$/.exec(path7.slice(path7.lastIndexOf("/") + 1));
+  return match !== null && Number(match[1] ?? 0) <= CAPTURE_SUFFIX_LIMIT && UPLOAD_EXTENSIONS.has(match[2]);
 }
 function admitsCapturedFile(path7, bytes) {
   if (!isCaptureName(path7)) return true;
@@ -52143,6 +52190,14 @@ var PushedKey = class {
     if (!PUSHED_MAC.test(mac)) return false;
     return timingSafeEqual(Buffer.from(this.observationMac(tree, parents, text6), "hex"), Buffer.from(mac, "hex"));
   }
+  /** Bind capture checkpoints to this repository and the `ids` commit that records them. */
+  idsTrailersMac(tree, parents, text6) {
+    return createHmac("sha256", this.#key).update(JSON.stringify(["ids-trailers-v1", this.#repository, tree, parents, text6])).digest("hex");
+  }
+  verifiesIdsTrailers(tree, parents, text6, mac) {
+    if (!PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.idsTrailersMac(tree, parents, text6), "hex"), Buffer.from(mac, "hex"));
+  }
   /**
    * The signature of a pull repair the sync recorded: the document's path and
    * id, the observation commit it came from, the observed bytes it applies to
@@ -52169,6 +52224,14 @@ var PushedKey = class {
     if (typeof mac !== "string" || !PUSHED_MAC.test(mac)) return false;
     return timingSafeEqual(Buffer.from(this.writtenMac(path7, id, hash, observedDigest2), "hex"), Buffer.from(mac, "hex"));
   }
+  /** Bind a Linear body digest to its path, document and recorded file version. */
+  observedMac(path7, id, blob, digest) {
+    return createHmac("sha256", this.#key).update(JSON.stringify(["observed-v1", this.#repository, path7, id, blob, digest])).digest("hex");
+  }
+  verifiesObserved(path7, id, blob, digest, mac) {
+    if (typeof mac !== "string" || !PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.observedMac(path7, id, blob, digest), "hex"), Buffer.from(mac, "hex"));
+  }
   #mac(ref, head) {
     return createHmac("sha256", this.#key).update(`${this.#repository}
 ${ref}
@@ -52179,25 +52242,46 @@ ${head}`).digest("hex");
 // src/state/observation.ts
 var SIGNATURE = "Sync-signature";
 var SIGNED = new RegExp(`^([\\s\\S]*)\\n\\n${SIGNATURE}: ([0-9a-f]{64})\\n$`);
+var CAPTURE_OBSERVATION = /\n\nCapture-observation: ([0-9a-f]{40}|[0-9a-f]{64})$/;
 function signObservation(key2) {
+  return signMessage(key2.observationMac.bind(key2));
+}
+function signIdsTrailers(key2, observation) {
+  const sign = signMessage(key2.idsTrailersMac.bind(key2));
+  return (tree, parents, message2) => sign(tree, parents, `${message2.replace(/\n+$/, "")}
+
+Capture-observation: ${observation}`);
+}
+function signMessage(mac) {
   return (tree, parents, message2) => {
     const text6 = message2.replace(/\n+$/, "");
     return `${text6}
 
-${SIGNATURE}: ${key2.observationMac(tree, parents, text6)}
+${SIGNATURE}: ${mac(tree, parents, text6)}
 `;
   };
 }
 async function signedObservation(git, commit2, key2) {
-  const [tree = "", parents = ""] = (await showCommit(git, "%T%n%P", commit2)).split("\n");
+  return await verifiedMessage(git, commit2, key2.verifiesObservation.bind(key2)) !== void 0;
+}
+async function signedIdsMessage(git, commit2, key2) {
+  const text6 = await verifiedMessage(git, commit2, key2.verifiesIdsTrailers.bind(key2));
+  if (text6 === void 0) return void 0;
+  const anchor = CAPTURE_OBSERVATION.exec(text6);
+  if (anchor === null) return void 0;
+  return { text: text6.slice(0, anchor.index), observation: anchor[1] };
+}
+async function verifiedMessage(git, commit2, verifies) {
   const found = await git.readObject(commit2);
   const raw = (found?.type === "commit" ? found.content : (await git.run(["cat-file", "commit", commit2])).stdout).toString("utf8");
   const split = raw.indexOf("\n\n");
-  if (split < 0) return false;
-  if (raw.slice(0, split).split("\n").some((line2) => line2.startsWith("encoding "))) return false;
+  if (split < 0) return void 0;
+  if (raw.slice(0, split).split("\n").some((line2) => line2.startsWith("encoding "))) return void 0;
   const signed = SIGNED.exec(raw.slice(split + 2));
-  if (signed === null) return false;
-  return key2.verifiesObservation(tree, parents.split(" ").filter(Boolean), signed[1], signed[2]);
+  if (signed === null) return void 0;
+  const [tree = "", parents = ""] = (await showCommit(git, "%T%n%P", commit2)).split("\n");
+  const [, text6, mac] = signed;
+  return verifies(tree, parents.split(" ").filter(Boolean), text6, mac) ? text6 : void 0;
 }
 async function trustedObservation(git, linear, tracked, key2) {
   if (await signedObservation(git, linear, key2)) return true;
@@ -52360,6 +52444,7 @@ async function readIds(git, commit2) {
   const map4 = /* @__PURE__ */ new Map();
   for (const [path7, value] of Object.entries(data)) {
     if (!isIdEntry(value)) throw new Error(message("state.invalid-path-entry", { file: IDS_FILE }));
+    if (typeof value.observedMac !== "string" || !PUSHED_MAC.test(value.observedMac)) delete value.observedMac;
     map4.set(path7, value);
   }
   checkUniqueDocumentIds(map4);
@@ -52387,19 +52472,26 @@ async function readUploads(git, commit2, key2) {
   return map4;
 }
 var INITIAL_SYNC_PROGRESS = "Initial sync in progress: document ids";
-function initialSyncProgressMessage(tracked) {
+var DIRECTIONS = ["git-to-linear", "linear-to-git"];
+function initialSyncProgressMessage(tracked, direction) {
   return `${INITIAL_SYNC_PROGRESS}
 
 Tracked: ${tracked}
+Direction: ${direction}
 `;
 }
-async function readInitialSyncProgress(git, commit2) {
-  if (commit2 === null) return null;
-  const message2 = `${await showCommit(git, "%B", commit2)}
-`;
-  const [subject2] = message2.split("\n");
+function parseInitialSyncProgress(message2) {
+  const [subject2, ...lines3] = message2.split("\n");
   if (subject2 !== INITIAL_SYNC_PROGRESS) return null;
-  return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message2)?.[1] ?? null };
+  const directions = lines3.filter((line2) => line2.startsWith("Direction:"));
+  const direction = directions.length === 1 ? DIRECTIONS.find((value) => directions[0] === `Direction: ${value}`) : void 0;
+  return {
+    tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message2)?.[1] ?? null,
+    direction: direction ?? null
+  };
+}
+async function readInitialSyncProgress(git, commit2) {
+  return commit2 === null ? null : parseInitialSyncProgress(await showCommit(git, "%B", commit2));
 }
 var INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear's state";
 var INITIAL_SYNC_FROM_LINEAR_TITLE = "Initial sync from Linear";
@@ -52509,7 +52601,7 @@ async function commitIds(git, parent, ids, identity, options = {}) {
   if (options.writtenMacs !== void 0 && options.writtenMacs.size > 0) files.set(WRITTEN_MACS_FILE, sorted(options.writtenMacs));
   const syncPushed = options.syncPushed ?? await readSyncPushed(git, parent);
   if (syncPushed !== void 0) files.set(SYNC_PUSHED_FILE, syncPushed.mac === void 0 ? { head: syncPushed.head } : { head: syncPushed.head, mac: syncPushed.mac });
-  return commitJsonFiles(git, parent, files, options.message ?? "Update document ids", identity, options.always === true);
+  return commitJsonFiles(git, parent, files, options.message ?? "Update document ids", identity, options.always === true, options.sign);
 }
 var UPLOADS_REBUILDING = "Upload cache lost: uploading again";
 var UPLOADS_REBUILT = "Upload cache uploaded again";
@@ -52580,7 +52672,7 @@ async function readJsonFile(git, commit2, file, options = {}) {
   }
   return data;
 }
-function commitJsonFiles(git, parent, files, message2, identity, always = false) {
+function commitJsonFiles(git, parent, files, message2, identity, always = false, sign) {
   return commitTree(git, {
     parents: parent === null ? [] : [parent],
     base: null,
@@ -52588,7 +52680,8 @@ function commitJsonFiles(git, parent, files, message2, identity, always = false)
 `])),
     message: message2,
     identity,
-    skipIfUnchanged: !always
+    skipIfUnchanged: !always,
+    ...sign === void 0 ? {} : { sign }
   });
 }
 async function readFiles(git, config, commit2, paths) {
@@ -53341,7 +53434,7 @@ function refusalReason(message2) {
 }
 
 // src/initial-sync/confirm.ts
-import { createHash as createHash14, randomUUID as randomUUID6 } from "node:crypto";
+import { createHash as createHash15, randomUUID as randomUUID6 } from "node:crypto";
 
 // src/test-hooks.ts
 import { existsSync as existsSync3, mkdirSync, renameSync, writeFileSync as writeFileSync3 } from "node:fs";
@@ -53451,6 +53544,14 @@ function restoreBody(transforms, path7, content4, sent, files) {
   for (const transform of [...transforms].reverse()) current = transform.restore({ path: path7, body: current, kept });
   if (kept) return current;
   return fixLinearText(current, content4, linkedFileCheck(path7, (file) => files.has(file)), sent);
+}
+function restoreWrittenBody(transforms, path7, content4, sent, files) {
+  try {
+    return restoreBody(transforms, path7, content4, sent, files);
+  } catch (error2) {
+    if (error2 instanceof MarkdownLimitError) return void 0;
+    throw error2;
+  }
 }
 
 // src/initial-sync/uploads.ts
@@ -53939,6 +54040,7 @@ function compare2(a, b) {
 
 // src/initial-sync/provenance.ts
 import { posix as posix6 } from "node:path";
+import { createHash as createHash14 } from "node:crypto";
 
 // src/sync/pull-repairs.ts
 import { createHash as createHash8 } from "node:crypto";
@@ -55521,8 +55623,16 @@ ${files.map(({ file, total, line: line2, reason }) => `- File ${file} of ${total
 ${locations.join("\n")}`);
   return sections.join("\n\n");
 }
-function planMark(document3, entry, blocked) {
-  const state = blocked.length > 0 ? "blocked" : detectConflicts(document3.content ?? "").length > 0 ? "conflict" : "clear";
+function holdsConflicts(text6, sentBody) {
+  try {
+    return detectConflicts(text6).length > 0;
+  } catch (error2) {
+    if (!(error2 instanceof MarkdownLimitError) || sentBody === void 0) throw error2;
+    return detectConflicts(sentBody).length > 0;
+  }
+}
+function planMark(document3, entry, blocked, sentBody) {
+  const state = blocked.length > 0 ? "blocked" : holdsConflicts(document3.content ?? "", sentBody) ? "conflict" : "clear";
   const body2 = state === "clear" ? "" : state === "conflict" ? CONFLICT_COMMENT : blockedComment(blocked);
   const bodyHash = createHash10("sha256").update(body2).digest("hex");
   const previousNotice = entry.saved?.notice;
@@ -55546,7 +55656,7 @@ async function reconcileDocumentMark(options) {
   if (document3.content === void 0) throw new Error(message("sync.needs-content"));
   let entry = structuredClone(options.entry);
   const blocked = options.blocked ?? [];
-  const { state, body: body2, bodyHash, previousNotice, resolvesNotice, updatesNotice } = planMark(document3, entry, blocked);
+  const { state, body: body2, bodyHash, previousNotice, resolvesNotice, updatesNotice } = planMark(document3, entry, blocked, options.sentBody);
   const result = { state, entry, updated: false, commented: false };
   if (document3.trashed || document3.archivedAt !== null) return result;
   if (entry.suspended !== void 0 && blocked.length === 0) return result;
@@ -56203,10 +56313,42 @@ ${held}${headNote(head, /* @__PURE__ */ new Date(), observed)}
 
 // src/sync/recorded.ts
 import { createHash as createHash11 } from "node:crypto";
-var RECORDED = /^Document-recorded: (\S+) (\S+)$/gm;
+var RECORDED = /(?:^|\n)Document-recorded: (\S+) (\S+)(?=\n|$)/g;
+var CURSOR = /(?:^|\n)Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)(?=\n|$)/;
+var CURSOR_BATCH_SIZE = 32;
+function captureCursorTrailer(through) {
+  return `Capture-through: ${through}`;
+}
 function observedDigest(document3) {
   if (document3.content === void 0) return void 0;
   return createHash11("sha256").update(JSON.stringify([document3.content, document3.updatedAt])).digest("hex");
+}
+async function observedBlobs(git, observation, paths) {
+  const blobs = /* @__PURE__ */ new Map();
+  for (let start3 = 0, end2 = 0; start3 < paths.length; start3 = end2) {
+    let bytes = 0;
+    do {
+      bytes += Buffer.byteLength(paths[end2]) + 1;
+      end2 += 1;
+    } while (end2 < paths.length && end2 - start3 < 256 && bytes + Buffer.byteLength(paths[end2]) < 64 * 1024);
+    for (const { path: path7, oid, type } of await listPaths(git, observation, paths.slice(start3, end2))) {
+      if (type === "blob") blobs.set(path7, oid);
+    }
+  }
+  return blobs;
+}
+function observedFields(key2, path7, blob, document3) {
+  const digest = observedDigest(document3);
+  return { observedDigest: digest, observedMac: digest === void 0 || blob === void 0 ? void 0 : key2.observedMac(path7, document3.id, blob, digest) };
+}
+function verifiedObservedDigest(key2, path7, blob, entry) {
+  const digest = entry.observedDigest;
+  return digest !== void 0 && blob !== void 0 && key2.verifiesObserved(path7, entry.id, blob, digest, entry.observedMac) ? digest : void 0;
+}
+function matchesVerifiedObservedBody(key2, path7, blob, entry, document3) {
+  if (entry?.id !== document3.id) return false;
+  const digest = verifiedObservedDigest(key2, path7, blob, entry);
+  return digest !== void 0 && digest === observedDigest(document3);
 }
 function matchesObservedBody(document3, observed) {
   return document3.id === observed.id && document3.content !== void 0 && document3.content === observed.content && document3.title === observed.title && document3.projectId === observed.projectId && document3.teamId === observed.teamId && !document3.trashed && document3.archivedAt === null;
@@ -56217,24 +56359,65 @@ function recordedTime(updatedAt) {
   return time.toISOString();
 }
 function recordedTrailers(recorded) {
-  return [...recorded].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([id, time]) => `Document-recorded: ${id} ${recordedTime(time)}`);
+  return [...recorded].filter(([id]) => /^\S+$/.test(id)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([id, time]) => `Document-recorded: ${id} ${recordedTime(time)}`);
 }
 function withRecorded(message2, recorded) {
   return recorded.size === 0 ? message2 : `${message2}
 
 ${recordedTrailers(recorded).join("\n")}`;
 }
-async function readRecorded(git, ids) {
-  if (ids === null) return /* @__PURE__ */ new Map();
-  const cursor = (await git.text(["log", "-1", "--format=%H", "--grep=^Capture-through:", ids])).trim();
-  const log = await git.text(["log", "--format=%B%x00", cursor === "" ? ids : `${cursor}..${ids}`]);
+async function readCaptureCheckpoints(git, ids, linear, key2) {
   const recorded = /* @__PURE__ */ new Map();
-  for (const message2 of log.split("\0")) {
+  if (ids === null) return { cursor: null, recorded, needsCursor: false };
+  const read = checkpointReader(git, linear, key2);
+  const { checkpoint: checkpoint2, sawCursor } = await findCaptureCursor(git, ids, read);
+  const range = checkpoint2 === null ? ids : `${checkpoint2.commit}..${ids}`;
+  const log = await git.text(["log", "--first-parent", "--format=%H", "--grep=^Document-recorded: ", range]);
+  let needsCursor = checkpoint2 === null && sawCursor;
+  for (const commit2 of log.trim().split("\n").filter(Boolean)) {
+    const message2 = await read(commit2);
+    if (message2 === void 0) {
+      if (checkpoint2 === null) needsCursor = true;
+      continue;
+    }
     const seen = /* @__PURE__ */ new Map();
     for (const match of message2.matchAll(RECORDED)) seen.set(match[1], match[2]);
     for (const [id, time] of seen) if (!recorded.has(id)) recorded.set(id, time);
   }
-  return recorded;
+  return { cursor: checkpoint2?.time ?? null, recorded, needsCursor };
+}
+async function readCaptureCursor(git, ids, linear, key2) {
+  const { checkpoint: checkpoint2 } = await findCaptureCursor(git, ids, checkpointReader(git, linear, key2));
+  return checkpoint2?.time ?? null;
+}
+function checkpointReader(git, linear, key2) {
+  let history;
+  return async (commit2) => {
+    const signed = await signedIdsMessage(git, commit2, key2);
+    if (signed === void 0) return void 0;
+    if (signed.observation === linear) return signed.text;
+    history ??= git.text(["log", "--first-parent", "--format=%H", linear]).then((log) => new Set(log.split("\n")));
+    return (await history).has(signed.observation) ? signed.text : void 0;
+  };
+}
+async function findCaptureCursor(git, ids, read) {
+  let tip = ids;
+  let sawCursor = false;
+  while (tip !== null) {
+    const log = await git.text(["log", `-${CURSOR_BATCH_SIZE}`, "--first-parent", "--format=%H %P", "--grep=^Capture-through: ", tip]);
+    if (log === "") break;
+    sawCursor = true;
+    const candidates2 = log.split("\n");
+    for (const line2 of candidates2) {
+      const [commit2] = line2.split(" ");
+      const message2 = await read(commit2);
+      const time = message2 === void 0 ? void 0 : CURSOR.exec(message2)?.[1];
+      if (time !== void 0) return { checkpoint: { commit: commit2, time }, sawCursor };
+    }
+    if (candidates2.length < CURSOR_BATCH_SIZE) break;
+    tip = candidates2.at(-1).split(" ")[1] || null;
+  }
+  return { checkpoint: null, sawCursor };
 }
 
 // src/sync/write.ts
@@ -56413,8 +56596,15 @@ async function writeTrackedToLinear(context, options) {
   }
   const nextIds = new Map(ids);
   const resigned = (from, to, entry) => {
-    const repair = signedRepair(context.pushedKey, from, entry);
-    return repair === void 0 ? entry : { ...entry, pullRewrite: signRepair(context.pushedKey, to, entry.id, repair) };
+    const key2 = context.pushedKey;
+    const repair = signedRepair(key2, from, entry);
+    const blob = linearFiles.get(from);
+    const digest = verifiedObservedDigest(key2, from, blob, entry);
+    return {
+      ...entry,
+      ...repair === void 0 ? {} : { pullRewrite: signRepair(key2, to, entry.id, repair) },
+      observedMac: digest === void 0 || blob === void 0 ? void 0 : key2.observedMac(to, entry.id, blob, digest)
+    };
   };
   for (const change of merge.unchanged) {
     if (change.from === change.to) continue;
@@ -56656,8 +56846,7 @@ async function writeTrackedToLinear(context, options) {
     if (held.trashed || held.archivedAt !== null) return false;
     const synchronized = merge.linear.get(path7);
     if (synchronized !== void 0) {
-      const entry = ids.get(path7);
-      return holdsVersion(held, synchronized, textOf(synchronized), tipTransforms, entry?.id === held.id ? entry.observedDigest : void 0);
+      return holdsVersion(held, synchronized, textOf(synchronized), tipTransforms, ids.get(path7));
     }
     const baseline = await lastSynchronized(git, linearTip, path7, linear.facts);
     if (baseline === null) return false;
@@ -56687,7 +56876,7 @@ async function writeTrackedToLinear(context, options) {
       return id === void 0 || path7 === void 0 ? [] : [{ from, to, id, path: path7 }];
     });
   }
-  async function holdsVersion(held, file, text6, through, digest) {
+  async function holdsVersion(held, file, text6, through, entry) {
     const document3 = withCurrentIds(held);
     const folder = file.path.slice(0, -(file.title.length + ".md".length)).replace(/\/$/, "");
     const occupied = new Set([...linearFiles.keys()].filter((path7) => path7 !== file.path));
@@ -56708,9 +56897,22 @@ async function writeTrackedToLinear(context, options) {
       expected2 = await transformBody(through, file.path, splitFile(text6).body);
     } catch (error2) {
       if (!(error2 instanceof LeaveOutError) && !(error2 instanceof UploadRefusedError)) throw error2;
-      return digest !== void 0 && digest === observedDigest(held);
+      return matchesVerifiedObservedBody(context.pushedKey, file.path, file.oid, entry, held);
     }
-    return sameAsLinear(document3.content ?? "", expected2);
+    try {
+      return sameAsLinear(document3.content ?? "", expected2);
+    } catch (error2) {
+      if (error2 instanceof MarkdownLimitError && matchesVerifiedObservedBody(context.pushedKey, file.path, file.oid, entry, held)) return true;
+      throw error2;
+    }
+  }
+  function storedAs(content4, body2) {
+    try {
+      return sameAsLinear(content4, body2);
+    } catch (error2) {
+      if (!(error2 instanceof MarkdownLimitError)) throw error2;
+      return false;
+    }
   }
   function resolves(place) {
     return place.kind === "project" ? targets.projects.has(projectKey(place.team, place.project)) : targets.teams.has(place.team);
@@ -56744,6 +56946,7 @@ async function writeTrackedToLinear(context, options) {
     const file = merge.result.get(change.to);
     const patch = {};
     let readBack;
+    let refreshed;
     if (change.content) patch.content = await transformBody(transforms, change.to, splitFile(textOf(file)).body);
     if (change.title) patch.title = file.title.normalize("NFC");
     if (change.place) Object.assign(patch, placePatch(file.place));
@@ -56751,7 +56954,7 @@ async function writeTrackedToLinear(context, options) {
     const rereadAt = performance.now();
     if (document3 === null || document3.trashed || document3.archivedAt !== null) return skip(change.to, "missing-in-linear");
     if (movedSinceCapture(document3)) return skip(change.to, "edited-in-linear");
-    const holds = (patch.content === void 0 || document3.content != null && sameAsLinear(document3.content, patch.content)) && (patch.title === void 0 || document3.title.normalize("NFC") === patch.title) && (!resolves(file.place) || inPlace(document3, file.place));
+    const holds = (patch.content === void 0 || document3.content != null && storedAs(document3.content, patch.content)) && (patch.title === void 0 || document3.title.normalize("NFC") === patch.title) && (!resolves(file.place) || inPlace(document3, file.place));
     if (holds) {
       if (patch.content !== void 0) {
         stored.set(change.to, { content: document3.content ?? "", sent: patch.content, document: document3 });
@@ -56760,10 +56963,15 @@ async function writeTrackedToLinear(context, options) {
     } else {
       if (!await unchangedSinceCapture(document3, change.from)) return skip(change.to, "edited-in-linear");
       await checkpoint2("after-reread-before-write");
-      const updated = await timed(() => linear.updateDocument(change.id, patch), rereadAt);
+      const recorded2 = ids.get(change.from);
+      const blob = linearFiles.get(change.from);
+      const observed = blob !== void 0 && matchesVerifiedObservedBody(context.pushedKey, change.from, blob, recorded2, document3);
+      const updated = await timed(() => linear.updateDocument(change.id, patch, observed), rereadAt);
       if (patch.content !== void 0) {
         stored.set(change.to, { content: updated.content ?? "", sent: patch.content, document: updated });
         readBack = updated;
+      } else if (observed && updated.id === document3.id && updated.content !== void 0 && updated.content === document3.content) {
+        refreshed = observedFields(context.pushedKey, change.to, blob, updated);
       }
     }
     if (change.comment !== void 0 && document3.documentContentId !== null) {
@@ -56775,7 +56983,9 @@ async function writeTrackedToLinear(context, options) {
     if (change.content) {
       delete next.pullRewrite;
       delete next.observedDigest;
+      delete next.observedMac;
     } else if (change.from !== change.to) next = resigned(change.from, change.to, next);
+    if (refreshed !== void 0) next = { ...next, ...refreshed };
     const plain = plainFiles.get(change.to);
     if (plain !== void 0 && plain.size > 0) next.plainFiles = [...plain];
     nextIds.set(change.to, next);
@@ -56798,6 +57008,7 @@ async function writeTrackedToLinear(context, options) {
     const rereadAt = performance.now();
     if (listed !== void 0 && (existing === null || existing.trashed || existing.archivedAt !== null)) return skip(change.path, "missing-in-linear");
     let document3;
+    let changedBeforeRead = false;
     if (existing !== null) {
       const adopted = existing;
       if (!inPlace(adopted, file.place) || adopted.title.normalize("NFC") !== file.title.normalize("NFC")) return skip(change.path, "edited-in-linear");
@@ -56818,15 +57029,19 @@ async function writeTrackedToLinear(context, options) {
         document3 = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize("NFC"), content: body2 }, { sameContent });
       } catch (error2) {
         if (!(error2 instanceof LinearCreateEditedError)) throw error2;
-        for (const { id: superseded2 } of supersededLinks(error2.document.content ?? "")) keptSuperseded.add(superseded2);
-        return skip(change.path, "edited-in-linear");
+        if (!error2.contentAsSent) {
+          for (const { id: superseded2 } of supersededLinks(error2.document.content ?? "")) keptSuperseded.add(superseded2);
+          return skip(change.path, "edited-in-linear");
+        }
+        document3 = error2.document;
+        changedBeforeRead = true;
       }
       await checkpoint2("document-created-before-ids-push");
     }
     stored.set(change.path, { content: document3.content ?? "", sent: body2, document: document3 });
     nextIds.set(change.path, { id: document3.id });
     result.created.push(change.path);
-    await reconcileMark(change.path, document3);
+    if (!changedBeforeRead) await reconcileMark(change.path, document3);
     return true;
   }
   async function restore(change, file, body2, removed, rereadAt) {
@@ -56851,6 +57066,7 @@ async function writeTrackedToLinear(context, options) {
     const previous3 = nextIds.get(change.path);
     const entry = previous3?.id === document3.id ? { ...previous3 } : { id: document3.id };
     delete entry.observedDigest;
+    delete entry.observedMac;
     nextIds.set(change.path, entry);
     await reconcileMark(change.path, document3);
     return true;
@@ -56886,6 +57102,7 @@ async function writeTrackedToLinear(context, options) {
       document: document3,
       entry,
       linear,
+      sentBody: stored.get(path7)?.sent,
       includeUpdatedBody: true,
       onConflictNotice: (change) => result.conflictNotices[change].push(path7),
       persistEntry: async (next) => {
@@ -56935,7 +57152,8 @@ async function writeTrackedToLinear(context, options) {
     const keepTip = (path7) => fromTip.add(path7);
     for (const [path7, { content: content4, sent }] of stored) {
       const file = merge.result.get(path7);
-      const text6 = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path7, content4, sent, context.mapping.files));
+      const body2 = restoreWrittenBody(transforms, path7, content4, sent, context.mapping.files);
+      const text6 = body2 === void 0 ? textOf(file) : joinFile(splitFile(textOf(file)).head, body2);
       if (resultFiles.get(path7) !== void 0 && text6 === textOf(file)) continue;
       changes.set(path7, text6);
     }
@@ -56971,11 +57189,12 @@ ${plainTrailers.join("\n")}`);
     }
     for (const path7 of nextIds.keys()) nextReserved.delete(path7);
     const asWritten = /* @__PURE__ */ new Map();
+    const blobs = await observedBlobs(git, commit2, [...stored.keys()]);
     for (const [path7, { document: document3 }] of stored) {
       const file = merge.result.get(path7);
       if (fromTip.has(path7) || file === void 0 || document3.title.normalize("NFC") !== file.title.normalize("NFC") || !inPlace(document3, file.place)) continue;
       const entry = nextIds.get(path7);
-      nextIds.set(path7, { ...entry, observedDigest: observedDigest(document3) });
+      nextIds.set(path7, { ...entry, ...observedFields(context.pushedKey, path7, blobs.get(path7), document3) });
       if (merged) asWritten.set(document3.id, document3.updatedAt);
     }
     const keptMoved = merged && merge.keptMoves.size > 0;
@@ -56985,7 +57204,14 @@ ${plainTrailers.join("\n")}`);
 
 ${trailers.join("\n")}`;
     const createBranch = options.createSyncBranch === true && commit2 !== linearTip && (await unverifiedPaths(git, tracked, commit2, context.mapping.zones)).length === 0;
-    const idsOf = (syncPushed) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...syncPushed === void 0 ? {} : { syncPushed } });
+    const idsOf = (syncPushed) => commitIds(git, expected.ids, nextIds, identity, {
+      message: idsMessage,
+      reserved: nextReserved,
+      superseded: nextSuperseded(),
+      always: asWritten.size > 0 || keptMoved,
+      ...asWritten.size === 0 ? {} : { sign: signIdsTrailers(context.pushedKey, commit2) },
+      ...syncPushed === void 0 ? {} : { syncPushed }
+    });
     let recordedIds = await idsOf(createBranch ? context.pushedKey.record(branchRef(options.config.syncBranch), commit2) : void 0);
     const rebuilt = cacheLost && merged && result.stopped === void 0 ? { message: UPLOADS_REBUILT, always: true } : {};
     const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey, rebuilt);
@@ -58096,7 +58322,7 @@ function checkRuns(checks) {
 function provenanceUnknownTrailer(id) {
   return `Provenance-unknown: ${encodeURIComponent(id)}`;
 }
-async function readPlainLinkProvenance(git, state, tracked, plan, options = {}) {
+async function readPlainLinkProvenance(git, state, tracked, plan, direction) {
   const entries = [await readIds(git, state.ids)];
   const before = await idsBeforeProgress(git, state.ids);
   if (before !== null && before !== state.ids) entries.push(await readIds(git, before));
@@ -58141,7 +58367,8 @@ async function readPlainLinkProvenance(git, state, tracked, plan, options = {}) 
     if (targets.size > 0) plainFiles.set(entry.path, targets);
   }
   const unknown2 = /* @__PURE__ */ new Set();
-  const known = new Set((options.progressKnown === false ? [started] : entries).flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
+  const progressKnown = direction === "git-to-linear" && await onlyGitToLinearProgress(git, state.ids, before);
+  const known = new Set((progressKnown ? entries : [started]).flatMap((ids) => [...ids.values()].map((entry) => entry.id)));
   const unproven = plan.overwrite.filter((entry) => !known.has(entry.documentId));
   if (unproven.length > 0) {
     const marked = state.linear === null ? /* @__PURE__ */ new Set() : await readProvenanceUnknown(git, state.linear);
@@ -58158,6 +58385,11 @@ async function idsBeforeProgress(git, ids) {
   const found = (await git.text(["log", "--first-parent", "-1", "--format=%H", "--invert-grep", "--fixed-strings", `--grep=${INITIAL_SYNC_PROGRESS}`, ids])).trim();
   return found === "" ? null : found;
 }
+async function onlyGitToLinearProgress(git, ids, before) {
+  if (ids === null || ids === before) return false;
+  const messages = await git.text(["log", "--first-parent", "-z", "--format=format:%B", before === null ? ids : `${before}..${ids}`]);
+  return messages.split("\0").every((message2) => parseInitialSyncProgress(message2)?.direction === "git-to-linear");
+}
 async function readProvenanceUnknown(git, linear) {
   const log = await git.text(["log", "--first-parent", "--format=%B", "--grep=^Provenance-unknown:", linear]);
   const result = /* @__PURE__ */ new Set();
@@ -58169,10 +58401,85 @@ async function readProvenanceUnknown(git, linear) {
   }
   return result;
 }
+var linearIntakeSubjects = () => (
+  // Built when used: the modules that define them import this one.
+  /* @__PURE__ */ new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE])
+);
+var hasSubject = (subjects, subject2) => subjects.has(subject2.replace(/ \(#\d+\)$/, ""));
 async function tookInLinear(git, tracked) {
-  const subjects = /* @__PURE__ */ new Set([CAPTURE_MESSAGE, MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE]);
+  const subjects = linearIntakeSubjects();
   const log = await git.text(["log", "--format=%s", "--fixed-strings", ...[...subjects].map((subject2) => `--grep=${subject2}`), tracked]);
-  return log.split("\n").some((subject2) => subjects.has(subject2.replace(/ \(#\d+\)$/, "")));
+  return log.split("\n").some((subject2) => hasSubject(subjects, subject2));
+}
+var HISTORY_FILE_BYTES = 4 * 1024 * 1024;
+async function linksTakenInFromLinear(git, tracked, path7, current) {
+  const assets = posix6.join(posix6.dirname(path7), ASSETS_FOLDER);
+  const named = [...new Set(current.filter((target) => posix6.dirname(target) === assets && isCaptureName(target)))];
+  const captures = /* @__PURE__ */ new Set();
+  const listed = named.length === 0 ? [] : (await listPaths(git, tracked, named)).filter((entry) => entry.type === "blob");
+  const blobs = listed.length === 0 ? /* @__PURE__ */ new Map() : await git.readBlobs(listed.map((entry) => entry.oid));
+  for (const entry of listed) {
+    const blob = blobs.get(entry.oid);
+    if (blob === void 0) continue;
+    const hash = parseLfsPointer(blob)?.oid ?? createHash14("sha256").update(blob).digest("hex");
+    if (posix6.basename(entry.path).startsWith(hash)) captures.add(entry.path);
+  }
+  const wanted = new Set(current.filter((target) => !captures.has(target)));
+  const found = /* @__PURE__ */ new Set();
+  if (wanted.size === 0) return found;
+  const intake = /* @__PURE__ */ new Set([CAPTURE_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE]);
+  const log = await git.text(["log", "-z", "--follow", "-M", "--format=%x01%H %P%x09%s", "--name-status", tracked, "--", `:(top,literal)${path7}`]);
+  const parsed = /* @__PURE__ */ new Map();
+  const linksAt = async (commit2, at) => {
+    const [entry] = await listPaths(git, commit2, [at]);
+    if (entry === void 0 || entry.type !== "blob") return /* @__PURE__ */ new Set();
+    const key2 = `${entry.oid}\0${at}`;
+    if (!parsed.has(key2)) {
+      let links = null;
+      if ((entry.size ?? Infinity) <= HISTORY_FILE_BYTES) {
+        const blob = (await git.readBlobs([entry.oid])).get(entry.oid);
+        try {
+          links = new Set(pathLinks(at, splitFile(blob?.toString("utf8") ?? "").body));
+        } catch (error2) {
+          if (!(error2 instanceof MarkdownLimitError)) throw error2;
+        }
+      }
+      parsed.set(key2, links);
+    }
+    return parsed.get(key2);
+  };
+  for (const record of log.split("")) {
+    const fields = record.split("\0");
+    const header = fields[0] ?? "";
+    const tab = header.indexOf("	");
+    if (tab === -1 || !hasSubject(intake, header.slice(tab + 1))) continue;
+    const [commit2, parent] = header.slice(0, tab).split(" ");
+    const status = (fields[1] ?? "").trim();
+    const renamed2 = /^[RC]/.test(status);
+    const at = renamed2 ? fields[3] : fields[2];
+    if (commit2 === void 0 || at === void 0) continue;
+    const links = await linksAt(commit2, at);
+    if (links === null) return wanted;
+    const added = new Set(links);
+    const before = renamed2 ? fields[2] : at;
+    if (parent !== void 0 && parent !== "") {
+      for (const target of await linksAt(parent, before) ?? []) {
+        added.delete(target);
+        added.delete(relocate(target, before, at));
+      }
+    }
+    for (const target of added) {
+      for (const candidate of [target, relocate(target, at, path7)]) if (wanted.has(candidate)) found.add(candidate);
+    }
+    if (found.size === wanted.size) break;
+  }
+  return found;
+}
+function pathLinks(path7, body2) {
+  return destinations(body2).flatMap(({ node: node2 }) => {
+    const target = node2.type === "image" ? null : resolveTarget(path7, node2.url);
+    return target === null ? [] : [target];
+  });
 }
 
 // src/initial-sync/run.ts
@@ -58209,7 +58516,7 @@ async function planFromRepository(context, options) {
   const plan = planInitialSync(sources.input);
   plan.capacity = assessCapacity(context, sources.containers, plan.create, options.cap);
   const uploads = await readUploads(context.git, context.fetched.state.uploads, context.pushedKey);
-  const { plainFiles, unknown: unknown2 } = await readPlainLinkProvenance(context.git, context.fetched.state, context.fetched.tracked, plan);
+  const { plainFiles, unknown: unknown2 } = await readPlainLinkProvenance(context.git, context.fetched.state, context.fetched.tracked, plan, "git-to-linear");
   return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads, { remote: options.remote, plainFiles, unknownProvenance: unknown2 }));
 }
 
@@ -58254,7 +58561,7 @@ async function confirmInitialSync(context, options) {
   const expected = { ...fetched.state };
   const resumed = await readInitialSyncProgress(git, expected.ids) !== null;
   const previous3 = await readIds(git, expected.ids);
-  const provenance = await readPlainLinkProvenance(git, expected, fetched.tracked, plan);
+  const provenance = await readPlainLinkProvenance(git, expected, fetched.tracked, plan, "git-to-linear");
   const withPlainFiles = (path7, entry) => {
     const plain = provenance.plainFiles.get(path7);
     return plain === void 0 ? entry : { ...entry, plainFiles: [...plain].sort(compare5) };
@@ -58313,7 +58620,7 @@ async function confirmInitialSync(context, options) {
       if (vouched.has(path7) && entry?.observedDigest !== void 0) macs.set(path7, context.pushedKey.writtenMac(path7, entry.id, hash, entry.observedDigest));
     }
     const idsCommit = await commitIds(git, expected.ids, ids, identity, {
-      message: initialSyncProgressMessage(fetched.tracked),
+      message: initialSyncProgressMessage(fetched.tracked, "git-to-linear"),
       always: true,
       written: sentHashes,
       writtenMacs: macs
@@ -58431,7 +58738,12 @@ async function confirmInitialSync(context, options) {
         if (item.kind === "create") {
           const title = item.entry.title.normalize("NFC");
           const id = documentIds.get(path7);
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body2 }, { sameContent: holdsText });
+          let changedBeforeRead = false;
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body2 }, { sameContent: holdsText }).catch((error2) => {
+            if (!(error2 instanceof LinearCreateEditedError) || !error2.contentAsSent) throw error2;
+            changedBeforeRead = true;
+            return error2.document;
+          });
           remember(path7, created);
           sentHashes.set(path7, hash);
           vouched.add(path7);
@@ -58439,7 +58751,7 @@ async function confirmInitialSync(context, options) {
           await checkpoint2("document-created-before-ids-push");
           written += 1;
           unpushed += 1;
-          await reconcileMark(path7, created, hash);
+          if (!changedBeforeRead) await reconcileMark(path7, created, hash);
         } else {
           const current = await linear.getDocument(item.entry.documentId);
           if (current === null || !unchangedSince(current, document3)) {
@@ -58552,9 +58864,13 @@ async function confirmInitialSync(context, options) {
     const finalIds = new Map([...ids].filter(([path7]) => synced.has(path7)));
     const changes = /* @__PURE__ */ new Map();
     const reformatted = [];
+    const restored = /* @__PURE__ */ new Set();
     for (const path7 of [...synced].sort(compare5)) {
       const text6 = texts.get(path7);
-      const file = joinFile(splitFile(text6).head, restoreBody(transforms, path7, stored.get(path7) ?? "", sent.get(path7), sources.input.mapping.files));
+      const body2 = restoreWrittenBody(transforms, path7, stored.get(path7) ?? "", sent.get(path7), sources.input.mapping.files);
+      if (body2 === void 0) continue;
+      restored.add(path7);
+      const file = joinFile(splitFile(text6).head, body2);
       if (file !== text6) {
         changes.set(path7, file);
         reformatted.push(path7);
@@ -58574,6 +58890,13 @@ async function confirmInitialSync(context, options) {
 ${plainTrailers.join("\n")}`);
     let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: recordMessage, identity, skipIfUnchanged: false, sign: signObservation(context.pushedKey) });
     if (expected.linear !== null && await sameRecord(expected.linear, linearCommit)) linearCommit = expected.linear;
+    const evidenced = [...finalIds.keys()].filter((path7) => restored.has(path7) || vouched.has(path7));
+    const blobs = await observedBlobs(git, linearCommit, evidenced);
+    for (const [path7, entry] of finalIds) {
+      const document3 = rememberedDocuments.get(path7);
+      if (!restored.has(path7) && !vouched.has(path7)) finalIds.set(path7, { ...entry, observedDigest: void 0, observedMac: void 0 });
+      else if (document3?.id === entry.id) finalIds.set(path7, { ...entry, ...observedFields(context.pushedKey, path7, blobs.get(path7), document3) });
+    }
     const created = /* @__PURE__ */ new Set([...plan.create.map((entry) => entry.path), ...createdBefore]);
     const stillReserved = new Map(
       result.leftOutAtWrite.filter(({ path: path7 }) => created.has(path7)).map(({ path: path7 }) => [path7, documentIds.get(path7)])
@@ -58592,7 +58915,8 @@ ${plainTrailers.join("\n")}`);
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
       reserved: stillReserved,
       message: withRecorded(FINAL_IDS_MESSAGE, recorded),
-      always: await readInitialSyncProgress(git, expected.ids) !== null
+      ...recorded.size === 0 ? {} : { sign: signIdsTrailers(context.pushedKey, linearCommit) },
+      always: recorded.size > 0 && linearCommit !== expected.linear || await readInitialSyncProgress(git, expected.ids) !== null
     });
     const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey);
     const updates = [
@@ -58613,7 +58937,7 @@ ${plainTrailers.join("\n")}`);
   }
 }
 function sha2564(text6) {
-  return createHash14("sha256").update(text6, "utf8").digest("hex");
+  return createHash15("sha256").update(text6, "utf8").digest("hex");
 }
 function holdsBody(content4, body2) {
   return sameAsLinear(content4, body2) || content4 === fixText(body2);
@@ -58626,7 +58950,7 @@ function compare5(a, b) {
 import { posix as posix8 } from "node:path";
 
 // src/sync/assets.ts
-import { createHash as createHash15 } from "node:crypto";
+import { createHash as createHash16 } from "node:crypto";
 import { posix as posix7 } from "node:path";
 var AttachmentBudgetError = class extends Error {
   constructor() {
@@ -58825,6 +59149,7 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
   };
   const capturePaths = /* @__PURE__ */ new Map();
   const pathHashes = /* @__PURE__ */ new Map();
+  const refusedCaptures = /* @__PURE__ */ new Set();
   const notFolders = /* @__PURE__ */ new Set();
   const folders = /* @__PURE__ */ new Set();
   const placed = /* @__PURE__ */ new Map();
@@ -58848,7 +59173,9 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
       const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
       for (const entry of batch) {
         const blob = blobs.get(entry.oid);
-        const hash = parseLfsPointer(blob)?.oid ?? createHash15("sha256").update(blob).digest("hex");
+        const pointer = parseLfsPointer(blob);
+        const hash = pointer?.oid ?? createHash16("sha256").update(blob).digest("hex");
+        if (pointer === null && !admitsCapturedFile(entry.path, blob)) refusedCaptures.add(entry.path);
         if (isCaptureName(entry.path) && posix7.basename(entry.path).startsWith(hash)) {
           let byFolder = capturePaths.get(hash);
           if (byFolder === void 0) capturePaths.set(hash, byFolder = /* @__PURE__ */ new Map());
@@ -58860,6 +59187,8 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
         pathHashes.set(entry.path, hash);
       }
     }
+    const rank = (path7) => (refusedCaptures.has(path7) ? CAPTURE_SUFFIX_LIMIT + 1 : 0) + captureSuffix(path7);
+    for (const byFolder of capturePaths.values()) for (const paths of byFolder.values()) paths.sort((a, b) => rank(a) - rank(b));
     indexed = true;
   };
   const reuse = /* @__PURE__ */ new Map();
@@ -58933,6 +59262,16 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
         }
       }
       return void 0;
+    };
+    const newCapturePath = (hash, extension2) => {
+      for (let n = 0; n <= CAPTURE_SUFFIX_LIMIT; n++) {
+        const candidate = posix7.join(assetsFolder, `${hash}${n === 0 ? "" : `-${n}`}${extension2}`);
+        if (plainTarget(candidate)) continue;
+        const chosen = placed.get(candidate);
+        if (chosen === hash) return candidate;
+        if (chosen === void 0 && !notFolders.has(candidate) && !folders.has(candidate)) return candidate;
+      }
+      throw new Error(message("assets.destination-exists"));
     };
     const preferredPaths = /* @__PURE__ */ new Map();
     const unreadableLinks = /* @__PURE__ */ new Map();
@@ -59066,9 +59405,8 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
             rejected.set(node2.url, "unsupported-type");
             continue;
           }
-          assetPath = posix7.join(assetsFolder, `${hash}${extension2}`);
-          const chosen = placed.get(assetPath);
-          if (!assetsUsable || plainTarget(assetPath) || notFolders.has(assetPath) || folders.has(assetPath) || chosen !== void 0 && chosen !== hash) throw new Error(message("assets.destination-exists"));
+          if (!assetsUsable) throw new Error(message("assets.destination-exists"));
+          assetPath = newCapturePath(hash, extension2);
           placed.set(assetPath, hash);
         }
         files.set(assetPath, asset.file);
@@ -59110,6 +59448,9 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
     return finish(localized, files, additions);
   };
   return Object.assign(capture2, { close: () => spool.close() });
+}
+function captureSuffix(path7) {
+  return Number(/-([1-9][0-9]*)\.[a-z0-9]+$/.exec(path7)?.[1] ?? 0);
 }
 
 // src/initial-sync/reverse.ts
@@ -59261,7 +59602,27 @@ async function confirmWithGate(context, options, gate) {
   };
   const treePaths = new Set((await listTree(git, fetched.tracked)).map((entry) => entry.path));
   const plan = planLinearToGit({ ...input, treePaths });
-  const provenance = await readPlainLinkProvenance(git, fetched.state, fetched.tracked, { create: [], overwrite: [...plan.overwrite, ...plan.create] }, { progressKnown: false });
+  const provenance = await readPlainLinkProvenance(git, fetched.state, fetched.tracked, { create: [], overwrite: [...plan.overwrite, ...plan.create] }, "linear-to-git");
+  const takenIn = /* @__PURE__ */ new Map();
+  const takenInLinks = (path7) => {
+    let links = takenIn.get(path7);
+    if (links === void 0) {
+      links = (async () => {
+        const tracked = input.texts.get(path7);
+        if (tracked === void 0) return /* @__PURE__ */ new Set();
+        let current;
+        try {
+          current = pathLinks(path7, splitFile(tracked).body);
+        } catch (error2) {
+          if (error2 instanceof MarkdownLimitError) return /* @__PURE__ */ new Set();
+          throw error2;
+        }
+        return linksTakenInFromLinear(git, fetched.tracked, path7, current);
+      })();
+      takenIn.set(path7, links);
+    }
+    return links;
+  };
   const expected = { ...fetched.state };
   const resumed = await readInitialSyncProgress(git, expected.ids) !== null;
   const previous3 = await readIds(git, expected.ids);
@@ -59286,7 +59647,7 @@ async function confirmWithGate(context, options, gate) {
       unpushed = 0;
       return true;
     }
-    const next = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked), always: true });
+    const next = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked, "linear-to-git"), always: true });
     const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, "ids"), expected: expected.ids, next }]);
     if (!pushed.ok) return false;
     expected.ids = next;
@@ -59434,13 +59795,17 @@ async function confirmWithGate(context, options, gate) {
       const tracked = input.texts.get(entry.path);
       const trackedBody = markdownBaseline(tracked === void 0 ? void 0 : splitFile(tracked).body);
       if (trackedBody !== void 0) trackedBodies.set(entry.path, trackedBody);
+      const takenInTargets = provenance.unknown.has(entry.path) ? await takenInLinks(entry.path) : /* @__PURE__ */ new Set();
       try {
         checkImageRepairSize(content4);
         const readable = linearMarkersAsText(content4, trackedBody);
         readableContents.set(entry.path, readable);
         if (linksLinearDocuments(readable)) needsLinkBase = true;
         const plain = new Set(provenance.plainFiles.get(entry.path));
-        if (provenance.unknown.has(entry.path)) for (const target of pathLinks(entry.path, readable)) plain.add(target);
+        if (provenance.unknown.has(entry.path)) {
+          for (const target of pathLinks(entry.path, readable)) plain.add(target);
+          for (const target of takenInTargets) plain.add(target);
+        }
         const captured = await download2(entry.path, restoreBody(transforms, entry.path, readable, readable, input.mapping.files), uploads, trackedBody, entry.path, plain);
         if (captured.observedBody !== void 0) {
           imageBlocked.push(entry.path);
@@ -59495,6 +59860,7 @@ async function confirmWithGate(context, options, gate) {
         keepTracked(tooComplex, "markdown-complexity");
         keepTracked(frontMatter, "front-matter-boundary");
         keepTracked(addedTargets, "image-blocked");
+        if (entries.length !== before) continue;
         if (gate.configured) {
           const blocked = [];
           const unchecked = [];
@@ -59570,6 +59936,7 @@ async function confirmWithGate(context, options, gate) {
       for (const { path: path7, kept: kept2 } of held) {
         const plain = new Set(provenance.plainFiles.get(path7));
         if (provenance.unknown.has(path7)) {
+          if (kept2) for (const target of await takenInLinks(path7)) plain.add(target);
           try {
             const linear = pathLinks(path7, readableContents.get(path7) ?? "");
             const tracked = kept2 ? new Set(pathLinks(path7, splitFile(input.texts.get(path7) ?? "").body)) : void 0;
@@ -59614,9 +59981,10 @@ ${plainTrailers.join("\n")}`);
     if (moveSync) await checkPushScope(git, fetched.tracked, commit2, context.mapping.zones);
     const synced = /* @__PURE__ */ new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds = new Map([...ids].filter(([path7]) => synced.has(path7)));
+    const blobs = await observedBlobs(git, commit2, entries.map(({ path: path7 }) => path7));
     for (const { path: path7, documentId } of entries) {
       const document3 = documents.get(documentId);
-      finalIds.set(path7, { ...finalIds.get(path7), observedDigest: observedDigest(document3) });
+      finalIds.set(path7, { ...finalIds.get(path7), ...observedFields(context.pushedKey, path7, blobs.get(path7), document3) });
     }
     for (const [path7, entry] of finalIds) {
       const plainFiles = recordedPlain.get(path7);
@@ -59626,11 +59994,12 @@ ${plainTrailers.join("\n")}`);
     const kept = plan.kept.map((entry) => entry.path);
     const trailers = [...through === null ? [] : [captureCursorTrailer(through)], ...kept.map(keptAnnotationTrailer)];
     const previousKept = await readKeptAnnotations(git, expected.ids);
-    const markersMoved = through !== null && through !== await readCaptureCursor(git, expected.ids) || previousKept.size !== kept.length || kept.some((path7) => !previousKept.has(path7));
+    const markersMoved = through !== null && through !== await readCaptureCursor(git, expected.ids, commit2, context.pushedKey) || previousKept.size !== kept.length || kept.some((path7) => !previousKept.has(path7));
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
       message: trailers.length === 0 ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}
 
 ${trailers.join("\n")}`,
+      ...through === null ? {} : { sign: signIdsTrailers(context.pushedKey, commit2) },
       always: markersMoved || await readInitialSyncProgress(git, expected.ids) !== null,
       // The sync branch moves to the record with this commit: the ids name it as the sync's own push.
       ...moveSync ? { syncPushed: context.pushedKey.record(branchRef(options.config.syncBranch), commit2) } : {}
@@ -59673,12 +60042,6 @@ ${trailers.join("\n")}`,
     return subject2 === REVERSE_RECORD_MESSAGE && (email2 === identity.email || email2 === NEUTRAL_IDENTITY.email) && (parents ?? "").split(" ").filter(Boolean).length === 1;
   }
 }
-function pathLinks(path7, body2) {
-  return destinations(body2).flatMap(({ node: node2 }) => {
-    const target = node2.type === "image" ? null : resolveTarget(path7, node2.url);
-    return target === null ? [] : [target];
-  });
-}
 function mismatches(mapping, entries) {
   const mapped = new Map(mapping.documents.map((document3) => [document3.path, document3]));
   return entries.filter((entry) => {
@@ -59718,7 +60081,6 @@ function compare6(a, b) {
 }
 
 // src/initial-sync/summary.ts
-var DIRECTIONS = ["git-to-linear", "linear-to-git"];
 function toPlanReport(plan, direction, confirm) {
   const paths = (entries) => entries.map((entry) => entry.path);
   return {
@@ -60421,23 +60783,17 @@ function compare9(a, b) {
 
 // src/sync/capture.ts
 var CAPTURE_MESSAGE = "Capture Linear changes";
-var CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
-function captureCursorTrailer(through) {
-  return `Capture-through: ${through}`;
-}
 function cursorTime(document3) {
   return recordedTime(document3.updatedAt);
 }
+var DIGEST_REFRESH_LIMIT = 32;
+var DIGEST_REFRESH_BYTES = 8 * 1024 * 1024;
+var DIGEST_REFRESH_MARKER = /(?:^|\n)Digest-refresh-after: ([01]:[^\s]+)(?=\n|$)/;
 var HELD = /^Removal-held: (\S+)$/gm;
 async function readHeld(context, state) {
   if (state.ids === null) return /* @__PURE__ */ new Set();
   const log = await context.git.text(["log", "--format=%B", "--grep=^Capture document ids", "-1", state.ids]);
   return new Set([...log.matchAll(HELD)].map((match) => match[1]));
-}
-async function readCaptureCursor(git, ids) {
-  if (ids === null) return null;
-  const log = await git.text(["log", "--format=%B", "--grep=^Capture-through:", "-1", ids]);
-  return CURSOR.exec(log)?.[1] ?? null;
 }
 var NotDownloaded = class extends Error {
 };
@@ -60496,9 +60852,10 @@ async function capture(context, options) {
       }
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
-    const cursor = await readCaptureCursor(git, state.ids);
+    const { cursor, recorded: recordedTimes, needsCursor } = await readCaptureCheckpoints(git, state.ids, base, context.pushedKey);
     const recordedBlobs = entries.filter((entry) => entry.type === "blob" && ids.has(entry.path));
     const textEntries = recordedBlobs.filter(readableBlob);
+    const recordedOids = new Map(textEntries.map(({ path: path7, oid }) => [path7, oid]));
     const unreadIds = new Set(recordedBlobs.filter((entry) => !readableBlob(entry)).map((entry) => ids.get(entry.path).id));
     for (const id of unreadIds) result.leftOut.push({ id, rule: "blob-too-large" });
     const blobs = await blobBudget.read(git, textEntries);
@@ -60581,7 +60938,6 @@ async function capture(context, options) {
     const placed = (doc) => folderFor(doc) !== void 0 || retained.has(doc.id) && retainedPlace.get(doc.id) === placeKeyOf(doc);
     const live = (doc) => !doc.trashed && doc.archivedAt === null && placed(doc);
     const normalizedTime = cursorTime;
-    const recordedTimes = await readRecorded(git, state.ids);
     const asRecorded = (doc) => recordedTimes.get(doc.id) === normalizedTime(doc);
     const marked = (doc) => {
       const entry = byId.get(doc.id)?.entry;
@@ -60589,9 +60945,12 @@ async function capture(context, options) {
     };
     const unsignedRepair = (old) => old.entry.pullRewrite !== void 0 && signedRepair(context.pushedKey, old.path, old.entry) === void 0;
     const readByOtherVersion = (old) => old.entry.suspended !== void 0 && olderVersion(old.entry.capturedWith, VERSION);
+    const legacyDigests = [];
     let selected = [...listed.values()].filter((doc) => {
       const old = byId.get(doc.id);
-      return old === void 0 || marked(doc) || old.entry.observedDigest === void 0 && live(doc) && previous3.has(old.path) && !excludedPath(old.path) || unsignedRepair(old) && live(doc) && previous3.has(old.path) || readByOtherVersion(old) && live(doc) && previous3.has(old.path) || !asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor);
+      const needed = old === void 0 || marked(doc) || unsignedRepair(old) && live(doc) && previous3.has(old.path) || readByOtherVersion(old) && live(doc) && previous3.has(old.path) || !asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor);
+      if (!needed && old !== void 0 && live(doc) && previous3.has(old.path) && !excludedPath(old.path) && (old.entry.observedDigest !== void 0 || !asRecorded(doc)) && verifiedObservedDigest(context.pushedKey, old.path, recordedOids.get(old.path), old.entry) === void 0) legacyDigests.push(doc);
+      return needed;
     });
     const invalidZone = (doc, path7) => {
       const zone = nearestZone(mapping.zones, folderOf(path7));
@@ -60647,11 +61006,20 @@ async function capture(context, options) {
     selected = selected.filter((doc) => !unreadIds.has(doc.id));
     const documents = new Map([...listed].filter(([, doc]) => placed(doc)));
     const work = /* @__PURE__ */ new Map();
-    for (const doc of await linear.getDocuments(selected.filter(live).map((doc2) => doc2.id), { withContent: true })) {
-      if (placed(doc)) documents.set(doc.id, doc);
-      else documents.delete(doc.id);
-      work.set(doc.id, doc);
-    }
+    let missingBodies = false;
+    const readBodies = async (requested) => {
+      const read = await linear.getDocuments(requested.map((doc) => doc.id), { withContent: true });
+      const answered2 = /* @__PURE__ */ new Set();
+      for (const doc of read) {
+        if (live(doc) && doc.content === void 0) continue;
+        if (placed(doc)) documents.set(doc.id, doc);
+        else documents.delete(doc.id);
+        work.set(doc.id, doc);
+        answered2.add(doc.id);
+      }
+      if (requested.some(({ id }) => !answered2.has(id))) missingBodies = true;
+    };
+    await readBodies(selected.filter(live));
     const late = /* @__PURE__ */ new Map();
     for (const doc of work.values()) {
       const old = byId.get(doc.id);
@@ -60662,11 +61030,42 @@ async function capture(context, options) {
         const old = byId.get(doc.id);
         return !work.has(doc.id) && !unreadIds.has(doc.id) && live(doc) && old !== void 0 && linksTo(late, old);
       });
-      for (const doc of await linear.getDocuments(linking.map((doc2) => doc2.id), { withContent: true })) {
-        if (placed(doc)) documents.set(doc.id, doc);
-        else documents.delete(doc.id);
-        work.set(doc.id, doc);
-      }
+      await readBodies(linking);
+    }
+    let refreshMarker;
+    const refreshedIds = /* @__PURE__ */ new Set();
+    const pendingRefresh = legacyDigests.filter(({ id }) => !work.has(id));
+    if (pendingRefresh.length > 0) {
+      const changed2 = new Set((await git.text(["diff", "--name-only", "-z", "--no-renames", base, fetched.tracked])).split("\0"));
+      const ranked = pendingRefresh.map((doc) => ({ doc, rank: `${changed2.has(byId.get(doc.id).path) ? 0 : 1}:${encodeURIComponent(doc.id)}` })).sort((a, b) => a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0);
+      const last = state.ids === null ? void 0 : DIGEST_REFRESH_MARKER.exec(await git.text(["log", "-1", "--first-parent", "--format=%B", "--grep=^Digest-refresh-after: ", state.ids]))?.[1];
+      const urgent = ranked.filter(({ rank }) => rank.startsWith("0:")).slice(0, DIGEST_REFRESH_LIMIT / 2);
+      const urgentIds = new Set(urgent.map(({ doc }) => doc.id));
+      const rotating = ranked.filter(({ doc }) => !urgentIds.has(doc.id));
+      const offset = last === void 0 ? 0 : Math.max(0, rotating.findIndex(({ rank }) => rank > last));
+      const batch = [...rotating.slice(offset), ...rotating.slice(0, offset)].slice(0, DIGEST_REFRESH_LIMIT - urgent.length);
+      const limit = linear.transport.optionalBodyLimit(DIGEST_REFRESH_BYTES);
+      const readRefresh = async (items, bodyLimit) => {
+        const refresh = new Map(items.map(({ doc }) => [doc.id, doc]));
+        for (const doc of await linear.getDocuments([...refresh.keys()], {
+          withContent: true,
+          pageSize: 8,
+          optionalBodyLimit: bodyLimit,
+          optionalLiveRead: !gate.configured
+        })) {
+          const listed2 = refresh.get(doc.id);
+          if (listed2 === void 0 || doc.content === void 0 || !live(doc) || doc.title !== listed2.title || doc.teamId !== listed2.teamId || doc.projectId !== listed2.projectId || doc.updatedAt !== listed2.updatedAt) continue;
+          refreshedIds.add(doc.id);
+          documents.set(doc.id, doc);
+          work.set(doc.id, doc);
+        }
+      };
+      await readRefresh(urgent, linear.transport.optionalBodyLimit(DIGEST_REFRESH_BYTES, batch.length === 0 ? 1 : 0.5));
+      await readRefresh(batch, limit);
+      const partiallyRead = batch.some(({ doc }) => refreshedIds.has(doc.id)) && batch.some(({ doc }) => !refreshedIds.has(doc.id));
+      if (partiallyRead || rotating.length === batch.length && batch.some(({ doc }) => !refreshedIds.has(doc.id))) {
+        refreshMarker = batch[0]?.rank;
+      } else if (rotating.length > batch.length) refreshMarker = batch.at(-1)?.rank;
     }
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
     result.documents = documents;
@@ -60708,7 +61107,6 @@ async function capture(context, options) {
     const trackedBodies = /* @__PURE__ */ new Map();
     if (rereadPaths.length > 0) {
       const tracked = (await listPaths(git, fetched.tracked, rereadPaths)).filter((entry) => entry.type === "blob" && readableBlob(entry));
-      const recordedOids = new Map(textEntries.map((entry) => [entry.path, entry.oid]));
       const unread = tracked.filter((entry) => recordedOids.get(entry.path) !== entry.oid);
       const blobs2 = await new MappingBlobBudget().read(git, unread);
       for (const entry of tracked) {
@@ -60856,13 +61254,13 @@ async function capture(context, options) {
         const { doc, path: path7, head, assets } = candidate;
         const old = byId.get(id);
         let text6;
-        let observed;
+        let observed2;
         try {
           text6 = textOf(candidate, documentIds);
           if (assets.observedBody !== void 0) {
             const observedCandidate = { ...candidate, assets: { ...assets, body: assets.observedBody } };
             delete observedCandidate.compared;
-            observed = textOf(observedCandidate, documentIds);
+            observed2 = textOf(observedCandidate, documentIds);
           }
         } catch (error2) {
           if (!(error2 instanceof MarkdownLimitError || error2 instanceof FileTargetsAddedError)) throw error2;
@@ -60872,15 +61270,21 @@ async function capture(context, options) {
           again = true;
           break;
         }
-        if (Buffer.byteLength(text6) > MAPPING_FILE_BYTES || observed !== void 0 && Buffer.byteLength(observed) > MAPPING_FILE_BYTES) {
+        if (Buffer.byteLength(text6) > MAPPING_FILE_BYTES || observed2 !== void 0 && Buffer.byteLength(observed2) > MAPPING_FILE_BYTES) {
           result.leftOut.push({ id, rule: "blob-too-large" });
           candidates2.delete(id);
           resetTarget(id);
           again = true;
           break;
         }
+        if (refreshedIds.has(id) && old?.entry.observedMac !== void 0 && (old.path !== path7 || assets.files.size > 0 || observed2 !== void 0 || previous3.get(path7)?.equals(Buffer.from(text6)) !== true)) {
+          candidates2.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
         candidate.files.set(path7, text6);
-        if (candidate.checked === text6 && candidate.observed === observed) continue;
+        if (candidate.checked === text6 && candidate.observed === observed2) continue;
         let findings = [];
         if (!recordedAsIs(candidate, text6)) {
           const original = withNewUploadUrls(head + (doc.content ?? ""), assets.uploads, uploads) + ((assets.plainFiles?.length ?? 0) === 0 ? "" : `
@@ -60888,8 +61292,8 @@ ${assets.plainFiles.join("\n")}
 `);
           if (original !== text6) findings = await gate.check(new Map([[path7, original], ...assets.files]));
           if (findings?.length === 0) findings = await gate.check(candidate.files);
-          if (findings?.length === 0 && observed !== void 0) {
-            if (observed !== text6 && observed !== original) findings = await gate.check(new Map([[path7, observed], ...assets.files]));
+          if (findings?.length === 0 && observed2 !== void 0) {
+            if (observed2 !== text6 && observed2 !== original) findings = await gate.check(new Map([[path7, observed2], ...assets.files]));
             if (findings?.length === 0 && candidate.files.size > 1) findings = await gate.check(repairSet(path7, text6));
           }
         }
@@ -60908,7 +61312,7 @@ ${assets.plainFiles.join("\n")}
           break;
         }
         candidate.checked = text6;
-        if (observed !== void 0) candidate.observed = observed;
+        if (observed2 !== void 0) candidate.observed = observed2;
       }
     }
     linear.transport.reads?.end();
@@ -60997,6 +61401,7 @@ ${assets.plainFiles.join("\n")}
       }
     };
     const recordedNow = /* @__PURE__ */ new Set();
+    const observed = /* @__PURE__ */ new Map();
     for (const [id, candidate] of candidates2) {
       const old = byId.get(id);
       const converged = reread.has(id) && readsAsTracked(candidate.path, String(candidate.files.get(candidate.path)));
@@ -61011,18 +61416,18 @@ ${assets.plainFiles.join("\n")}
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      const entry = { ...old?.entry, id, observedDigest: observedDigest(candidate.doc), ...old?.entry.suspended === void 0 || converged ? {} : { capturedWith: VERSION } };
+      const entry = { ...old?.entry, id, ...old?.path === candidate.path ? {} : { observedDigest: void 0, observedMac: void 0 }, ...old?.entry.suspended === void 0 || converged ? {} : { capturedWith: VERSION } };
       delete entry.pullRewrite;
       const plainFiles = [.../* @__PURE__ */ new Set([...old?.entry.plainFiles ?? [], ...candidate.assets.plainFiles ?? []])];
       if (plainFiles.length > 0) entry.plainFiles = plainFiles;
       const repaired = candidate.files.get(candidate.path);
       if (candidate.observed !== void 0) {
-        const observed = candidate.observed;
-        candidate.files.set(candidate.path, observed);
+        const observed2 = candidate.observed;
+        candidate.files.set(candidate.path, observed2);
         const deadUploads = candidate.assets.deadUploads ?? [];
         entry.pullRewrite = {
-          hash: createHash16("sha256").update(observed).digest("hex"),
-          observedHash: createHash16("sha256").update(candidate.doc.content ?? "").digest("hex"),
+          hash: createHash17("sha256").update(observed2).digest("hex"),
+          observedHash: createHash17("sha256").update(candidate.doc.content ?? "").digest("hex"),
           replacement: String(repaired),
           // The images are counted in the text the capture read; the digest stays on Linear's content.
           images: imageLinks(readable.get(id)?.text ?? candidate.doc.content ?? "", new Set(deadUploads)).images
@@ -61038,6 +61443,7 @@ ${assets.plainFiles.join("\n")}
           const baseline = baselines.get(path7);
           if (baseline != null && splitFile(baseline.text).body === splitFile(String(content4)).body) continue;
         }
+        if (path7 === candidate.path) observed.set(path7, candidate.doc);
         if (previous3.get(path7)?.equals(contentBytes(content4)) !== true) {
           changes.set(path7, content4);
           result.changed.push(path7);
@@ -61045,7 +61451,7 @@ ${assets.plainFiles.join("\n")}
       }
       for (const [hash, url] of candidate.assets.uploads) uploads.set(hash, url);
     }
-    const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
+    const through = missingBodies || result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, context.pushedKey, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const plainTrailers = [...ids.values()].flatMap((entry) => (entry.plainFiles ?? []).map((target) => `Plain-link: ${encodeURIComponent(entry.id)} ${encodeURIComponent(target)}`));
@@ -61053,20 +61459,38 @@ ${assets.plainFiles.join("\n")}
 
 ${plainTrailers.join("\n")}`), identity, sign: signObservation(context.pushedKey) });
     if (linearCommit !== base) await checkMappingBudget(git, linearCommit, ids);
+    const observedOids = await observedBlobs(git, linearCommit, [...observed.keys()]);
+    for (const [path7, document3] of observed) {
+      ids.set(path7, { ...ids.get(path7), ...observedFields(context.pushedKey, path7, observedOids.get(path7), document3) });
+    }
     for (const [path7, entry] of ids) if (recordedNow.has(entry.id) && entry.pullRewrite !== void 0 && entry.pullRewrite.source === void 0) {
       ids.set(path7, { ...entry, pullRewrite: signRepair(context.pushedKey, path7, entry.id, { ...entry.pullRewrite, source: linearCommit }) });
     }
     const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
     const recordsRemovals = held.size > 0 || heldBefore.size > 0;
+    const writeCursor = through !== null && (needsCursor || recordsChange || recordsRemovals);
+    const checkpoints = /* @__PURE__ */ new Map();
+    if (needsCursor && through === null) for (const id of recordedNow) {
+      const doc = candidates2.get(id).doc;
+      if (doc.content !== void 0) checkpoints.set(id, doc.updatedAt);
+    }
     const trailers = [
-      ...through !== null && (recordsChange || recordsRemovals) ? [captureCursorTrailer(through)] : [],
-      ...[...held].sort().map((id) => `Removal-held: ${id}`)
+      ...writeCursor ? [captureCursorTrailer(through)] : [],
+      ...recordedTrailers(checkpoints),
+      ...refreshMarker === void 0 ? [] : [`Digest-refresh-after: ${refreshMarker}`],
+      ...[...held].filter((id) => /^\S+$/.test(id)).sort().map((id) => `Removal-held: ${id}`)
     ];
     const commitMessage = trailers.length === 0 ? "Capture document ids" : `Capture document ids
 
 ${trailers.join("\n")}`;
-    const always = recordsRemovals || through !== cursor && recordsChange;
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
+    const always = recordsRemovals || checkpoints.size > 0 || refreshMarker !== void 0 || writeCursor && through !== cursor;
+    const idsCommit = await commitIds(git, state.ids, ids, identity, {
+      message: commitMessage,
+      always,
+      reserved,
+      superseded,
+      ...writeCursor || checkpoints.size > 0 ? { sign: signIdsTrailers(context.pushedKey, linearCommit) } : {}
+    });
     await lfsPush(git, lfsRemote(options.config), prepared.oids);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
     const pushed = await pushAtomic(git, options.config, ["linear", "ids", "uploads"].map((store) => ({ ref: stateRef(options.config, store), expected: state[store], next: next[store] })));
@@ -61088,16 +61512,19 @@ ${trailers.join("\n")}`;
       try {
         for (const { doc, path: path7, blocked } of marked2) {
           const before = ids.get(path7);
+          const blob = observedOids.get(path7) ?? recordedOids.get(path7);
+          const digest = verifiedObservedDigest(context.pushedKey, path7, blob, before);
+          const canRefresh = digest !== void 0 && digest === observedDigest(doc);
           const outcome2 = await reconcileDocumentMark({
             document: doc,
             entry: before,
             linear,
             blocked,
-            includeUpdatedBody: before.saved !== void 0 && blocked.length === 0 && before.observedDigest !== void 0,
+            includeUpdatedBody: before.saved !== void 0 && blocked.length === 0 && canRefresh,
             onConflictNotice: (change) => result.conflictNotices[change].push(path7),
             persistEntry: async (entry, cleared) => {
-              if (cleared !== void 0 && matchesObservedBody(cleared, doc)) {
-                entry = { ...entry, observedDigest: observedDigest(cleared) };
+              if (canRefresh && cleared !== void 0 && matchesObservedBody(cleared, doc)) {
+                entry = { ...entry, ...observedFields(context.pushedKey, path7, blob, cleared) };
               }
               ids.set(path7, entry);
               const tip = await commitIds(git, result.state.ids, ids, identity, { reserved, superseded, message: "Capture document marks" });
@@ -61176,7 +61603,14 @@ function* linkVariants(candidates2, textOf, reset, documentIds, options = {}) {
         }
         const targets = new Map(documentIds);
         reset(new Set(rejected), targets);
-        const text6 = textOf(candidate, targets);
+        let text6;
+        try {
+          text6 = textOf(candidate, targets);
+        } catch (error2) {
+          if (!(error2 instanceof MarkdownLimitError)) throw error2;
+          budget.work -= cost;
+          return null;
+        }
         if (!(free && (text6 === accepted || options.settled?.(candidate, text6) === true))) budget.work -= cost + Math.max(0, text6.length - accepted.length);
         return text6;
       };
@@ -61190,9 +61624,9 @@ function* linkVariants(candidates2, textOf, reset, documentIds, options = {}) {
       }
       const alone = /* @__PURE__ */ new Map();
       const find = (group2, text6) => {
-        if (alone.size >= LINK_VARIANT_LINKS) return;
+        if (text6 === void 0 || text6 === accepted || alone.size >= LINK_VARIANT_LINKS) return;
         if (group2.length === 1) {
-          alone.set(group2[0], text6);
+          if (text6 !== null) alone.set(group2[0], text6);
           return;
         }
         const first = group2.slice(0, group2.length >> 1);
@@ -61205,25 +61639,24 @@ function* linkVariants(candidates2, textOf, reset, documentIds, options = {}) {
         }
         find(first, firstText);
         if (alone.size >= LINK_VARIANT_LINKS) return;
-        const secondText = without(second);
-        if (secondText !== void 0 && secondText !== accepted) find(second, secondText);
+        find(second, without(second));
       };
       if (!pass.allOnly) find(others, all2);
-      const texts = /* @__PURE__ */ new Set([...alone.values(), all2]);
+      const texts = new Set(all2 === null ? alone.values() : [...alone.values(), all2]);
       const linked = [...alone.keys()];
       if (linked.length <= LINK_VARIANT_TARGETS) {
-        for (let mask = 1; mask < 2 ** linked.length - 1; mask += 1) {
+        for (let mask = 1; mask < 2 ** linked.length - (all2 === null ? 0 : 1); mask += 1) {
           const rejected = linked.filter((_, bit) => mask >> bit & 1);
           if (rejected.length < 2) continue;
           const text6 = without(rejected);
           if (text6 === void 0) break;
-          texts.add(text6);
+          if (text6 !== null) texts.add(text6);
         }
       }
       const done = staged.get(id) ?? /* @__PURE__ */ new Set();
       staged.set(id, done);
       for (const text6 of texts) {
-        const hash = createHash16("sha256").update(text6).digest("hex");
+        const hash = createHash17("sha256").update(text6).digest("hex");
         if (text6 === accepted || done.has(hash) || options.settled?.(candidate, text6) === true) continue;
         if (budget.sets <= 0) {
           budget.short = true;
@@ -61311,7 +61744,7 @@ async function prepareLfs(git, tracked, changes) {
       const pointer = parseLfsPointer(cleaned.stdout);
       if (!cleaned.stdout.equals(bytes)) {
         if (pointer === null) throw new Error(message("sync.no-lfs-pointer"));
-        if (pointer.size !== bytes.length || pointer.oid !== createHash16("sha256").update(bytes).digest("hex")) throw new Error(message("sync.lfs-pointer-mismatch"));
+        if (pointer.size !== bytes.length || pointer.oid !== createHash17("sha256").update(bytes).digest("hex")) throw new Error(message("sync.lfs-pointer-mismatch"));
       }
       if (pointer !== null) oids.push(pointer.oid);
       result.set(path7, cleaned.stdout);
@@ -61543,7 +61976,7 @@ var FORMAT_PROBLEMS_FAILURES = {
 import { rm as rm8 } from "node:fs/promises";
 
 // src/sync/staged.ts
-import { createHash as createHash17 } from "node:crypto";
+import { createHash as createHash18 } from "node:crypto";
 import { mkdir as mkdir5, readFile as readFile3, rm as rm7, writeFile as writeFile6 } from "node:fs/promises";
 import { join as join15 } from "node:path";
 var SECURITY_STEPS = ["stage", "apply"];
@@ -61560,7 +61993,7 @@ function stageFolder(env = process.env) {
   return join15(base, STAGE_FOLDER);
 }
 var readsFolder = (folder) => join15(folder, READS);
-var sha2565 = (content4) => createHash17("sha256").update(contentBytes(content4)).digest("hex");
+var sha2565 = (content4) => createHash18("sha256").update(contentBytes(content4)).digest("hex");
 function candidateKey(files) {
   const pairs = [...files].map(([path7, content4]) => [path7, sha2565(content4)]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
   return sha2565(JSON.stringify(pairs));
