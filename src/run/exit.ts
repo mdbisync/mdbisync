@@ -39,7 +39,8 @@ export type PartialCode =
  * (in the setup check, the capture or the write step), failed a request
  * while capturing, held a removal it could not confirm, failed or rejected
  * a write, or a state ref moved; or, Linear's side done, the sync pull
- * request step stopped on a moved ref or a failed GitHub request. A
+ * request step, or the format problems pull request step, stopped on a
+ * moved ref or a failed GitHub request. A
  * container at its document cap is not partial: the next run cannot go on
  * until a person makes room; nor is a sync pull request that needs a person.
  */
@@ -47,7 +48,8 @@ export function partialCode(outcome: OperationOutcome): PartialCode | undefined 
   if (pullRequestEnding(outcome) !== null) return undefined;
   const linear = linearPartialCode(outcome);
   if (linear !== undefined || outcome.operation !== 'sync' || outcome.sync?.write?.code === 'container-cap') return linear;
-  return pullRequestPartialCode(outcome.sync?.pullRequest);
+  // The format problems pull request comes last: it was not brought up to date, and the next run tries again.
+  return pullRequestPartialCode(outcome.sync?.pullRequest) ?? outcome.sync?.formatProblems?.code;
 }
 
 /**

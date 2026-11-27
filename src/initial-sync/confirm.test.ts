@@ -446,7 +446,7 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']), await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']));
     const sync = await runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
     assert.equal(sync.exitCode, 0, sync.stderr);
-    assert.deepEqual(world.github.pullRequests, [], 'a sync pull request was opened');
+    assert.deepEqual(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems'), [], 'a sync pull request was opened');
     assert.equal(await holding(), '');
   });
 
@@ -865,7 +865,7 @@ describe('confirmed initial sync from git to Linear', () => {
       const writes = world.linear.writes.count;
       const result = await sync();
       assert.equal(result.exitCode, 0, result.stderr);
-      assert.deepEqual(world.github.pullRequests, [], 'a sync pull request was opened');
+      assert.deepEqual(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems'), [], 'a sync pull request was opened');
       assert.equal(world.linear.writes.count, writes, 'the sync wrote to Linear');
       assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']), await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']));
     };
@@ -890,7 +890,7 @@ describe('confirmed initial sync from git to Linear', () => {
       touch(readings);
       const edited = await sync();
       assert.equal(edited.exitCode, 0, edited.stderr);
-      assert.equal(world.github.pullRequests.length, 1, 'the edit opened no sync pull request');
+      assert.equal(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems').length, 1, 'the edit opened no sync pull request');
       const changed = await fixture.remote.text(['diff', '--name-only', 'refs/heads/main', 'refs/mdbisync/linear']);
       assert.equal(changed.trim(), 'eng/notes/readings.md');
     });

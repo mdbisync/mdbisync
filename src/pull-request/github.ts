@@ -91,6 +91,25 @@ export async function findOpenPullRequest(target: GitHubRepository, head: string
   return found ?? null;
 }
 
+/**
+ * The pull request from this repository's `head` into `base` that was closed
+ * last, with the commit it was closed at and whether it was merged; null
+ * when none was.
+ */
+export async function lastClosedPullRequest(target: GitHubRepository, head: string, base: string): Promise<{ number: number; head: string; merged: boolean } | null> {
+  const owner = target.repository.split('/')[0] as string;
+  const query = new URLSearchParams({ state: 'closed', head: `${owner}:${head}`, base, sort: 'updated', direction: 'desc', per_page: '10' });
+  const answer = await request(target, 'GET', `/pulls?${query.toString()}`);
+  if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message('github.listing'), answer);
+  const found = (answer.json as unknown[]).map((json) => ({ pr: toPullRequest(json), json: json as { head?: { sha?: unknown }; merged_at?: unknown } }))
+    .find(({ pr }) => pr !== null && pr.head === head && pr.base === base && pr.headRepository?.toLowerCase() === target.repository.toLowerCase());
+  if (found === undefined || found.pr === null) return null;
+  const read = await request(target, 'GET', `/pulls/${found.pr.number}`);
+  const pr = read.json as { head?: { sha?: unknown }; merged?: unknown } | null;
+  if (read.status !== 200 || typeof pr?.head?.sha !== 'string') throw answerError(message('github.reading-pull-request'), read);
+  return { number: found.pr.number, head: pr.head.sha, merged: pr.merged === true };
+}
+
 /** Opens a pull request; the caller checks first that none is open. */
 export async function openPullRequest(target: GitHubRepository, spec: NewPullRequest): Promise<PullRequest> {
   const answer = await request(target, 'POST', '/pulls', { title: spec.title, head: spec.head, base: spec.base, body: spec.body, maintainer_can_modify: false }, { kind: 'opened', accepted: 201 });

@@ -261,7 +261,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.match(summary, /^\| eng\/ops\/runbook\.md \| team "ENG" \| doc-runbook \|$/m);
     assert.deepEqual(await refs(), before);
     assert.deepEqual(world.writes, []);
-    assert.deepEqual(world.github.pullRequests, []);
+    assert.deepEqual(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems'), []);
   });
 
   it('names the App as author and committer of every commit it makes, given the App slug', async () => {
@@ -361,7 +361,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     // path included (L1R-05): the capture finds its file, and no sync pull request opens.
     assert.equal(await fixture.remote.text(['diff', '--name-status', 'refs/heads/main', 'refs/mdbisync/linear']), '');
     assert.equal(after.report.pullRequest?.pullRequest?.opened ?? false, false);
-    assert.equal(world.github.pullRequests.length, 1);
+    assert.equal(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems').length, 1);
   });
 
   for (const deleted of [false, true]) {
@@ -395,8 +395,10 @@ describe('initial sync from Linear to the tracked branch', () => {
         assert.equal(after.report.writtenCount, 0, `${pass} sync wrote documents`);
         assert.equal(linearMutations(world).length, mutations, `${pass} sync wrote to Linear`);
         assert.deepEqual(world.linear.documents, documents, `${pass} sync changed Linear`);
-        assert.deepEqual(await refs(), before, `${pass} sync moved a ref`);
-        assert.equal(world.github.pullRequests.length, 1, `${pass} sync opened a pull request`);
+        // The tree's left-out file has its format problems pull request, opened by the first pass.
+        const synced = (all: Record<string, string>) => Object.fromEntries(Object.entries(all).filter(([ref]) => ref !== 'refs/heads/mdbisync/format-problems'));
+        assert.deepEqual(synced(await refs()), synced(before), `${pass} sync moved a ref`);
+        assert.equal(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems').length, 1, `${pass} sync opened a pull request`);
       }
       assert.equal(await show('refs/heads/main:combined/README.md'), TREE['combined/README.md']);
       assert.ok(!world.linear.documents.some((d) => d.projectId === 'project-handbook'), 'a document was created for the kept README');
@@ -979,7 +981,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     const again = await run(world);
     assert.equal(again.result.exitCode, 0, again.result.stderr);
     assert.equal(again.report.linearToGit?.pullRequest, null);
-    assert.equal(world.github.pullRequests.length, 1);
+    assert.equal(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems').length, 1);
   });
 
   it('runs again with nothing changed: refs stay, no second pull request', async () => {
@@ -1017,7 +1019,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     const afterStop = await refs();
     assert.equal(afterStop['refs/mdbisync/linear'], undefined);
     assert.equal(afterStop['refs/heads/mdbisync/linear'], undefined);
-    assert.deepEqual(world.github.pullRequests, []);
+    assert.deepEqual(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems'), []);
     assert.match(stopped.summary, /Run initial sync again with the same inputs/);
 
     // The sync does not run on half a map.
@@ -1324,7 +1326,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     assert.equal(report.linearToGit?.record?.changesTracked, false);
     assert.equal(report.linearToGit?.pullRequest, null);
-    assert.deepEqual(world.github.pullRequests, []);
+    assert.deepEqual(world.github.pullRequests.filter((pr) => pr.head !== 'mdbisync/format-problems'), []);
     assert.equal((await refs())['refs/heads/mdbisync/linear'], undefined);
     assert.match(summary, /no pull request is needed/);
 

@@ -83,6 +83,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "linear.restore": ["actor", "fixture"],
   "linear.rich-edit": ["actor", "constructs"],
   "linear.trash": ["actor"],
+  "merge.format-problems": [],
   "merge.pull-request": ["actor"],
   "run.burst": ["durationSeconds", "gitPushesPerMinute", "linearEditsPerMinute"],
   "run.capture": [],

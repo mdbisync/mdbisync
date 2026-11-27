@@ -24,6 +24,7 @@
 // A subject that none of these knows is a harness gap; the scenario-set
 // test keeps that list empty.
 
+import { formatProblemsBranch, type StateConfig } from '../../../src/state/config.ts';
 import { collectCanaryEvidence } from './checks.ts';
 import { scanNight } from './night-scan.ts';
 import { createHash } from 'node:crypto';
@@ -1061,6 +1062,21 @@ export const SUBJECTS: Record<string, Compute> = {
       const document = id === undefined ? undefined : view.documents.get(id);
       return document !== undefined && documentBody(view, path, document) === fileBody(view, path);
     });
+  },
+  // The format problems pull request: what it held when a person merged it, and how many are open now.
+  'formatProblems.beforeMerge': async (env) => observed(env.ctx, 'formatProblems.beforeMerge'),
+  'formatProblems.openCount': async (env) => {
+    const branch = formatProblemsBranch({ syncBranch: env.ctx.names.syncBranch } as StateConfig);
+    return (await env.ctx.live?.rest.pullRequests(branch, 'open') ?? []).filter((pr) => pr.head.ref === branch).length;
+  },
+  // The files this scenario gave format problems that the last run's format problems pull request still lists.
+  'formatProblems.scenarioFilesLeft': async (env) => {
+    const report = ownResults(env.ctx).at(-1)?.report as { formatProblems?: { files?: Array<{ path: string }> } | null } | null | undefined;
+    const files = report?.formatProblems?.files;
+    if (files === undefined) throw new Error('the last run reported no format problems step');
+    const own = new Set([env.ctx.observations.get('target.path'), env.ctx.observations.get('git.added')].filter((path): path is string => typeof path === 'string'));
+    if (own.size !== 2) throw new Error('the scenario recorded neither its footnoted target nor its added file');
+    return sorted(files.map((file) => file.path).filter((path) => own.has(path)));
   },
   'documents.leftOutPaths': async (env) => {
     const view = await env.view();

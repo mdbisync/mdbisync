@@ -34,7 +34,6 @@ const TREE: Record<string, string> = {
   'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}\n`,
   'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two. ${CANARY}\n`,
   'eng/notes/review.md': `# Review\n\nFindings of the review. ${CANARY}\n`,
-  'eng/notes/draft.md': `# Draft\n\nA claim.[^1] ${CANARY}\n\n[^1]: A source.\n`,
   'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}\n`,
   'combined/guide.md': `# Guide\n\nHow to start. ${CANARY}\n`,
   'eng/media/diagram.png': Buffer.from('first diagram bytes').toString('latin1'),
@@ -69,8 +68,8 @@ describe('sync: the tracked branch to Linear', () => {
     world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
     assert.equal(initial.result.exitCode, 0, initial.result.stderr);
-    // The footnote of `eng/notes/draft.md` leaves it out; an initial sync from git names no file from a title.
-    assert.deepEqual(initial.report.leftOutRules, ['footnote']);
+    // An initial sync from git names no file from a title.
+    assert.deepEqual(initial.report.leftOutRules, []);
     assert.equal(initial.report.paths, null);
   });
   afterEach(() => fixture.cleanup());
@@ -569,12 +568,19 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
-  it('L2-12: a left-out file that is fixed joins: a document is created', async () => {
+  it('L2-12: a left-out file that is fixed joins: a document is created, and the format problems pull request closes', async () => {
+    await commit({ 'eng/notes/draft.md': `# Draft\n\nA claim.[^1] ${CANARY}\n\n[^1]: A source.\n` });
+    const held = await sync();
+    assert.deepEqual(held.report.sync?.leftOut, [{ path: 'eng/notes/draft.md', rules: ['footnote'] }]);
+    assert.deepEqual(held.writes, ['POST /pulls']);
     assert.equal(live().some((d) => d.title === 'draft'), false);
     await commit({ 'eng/notes/draft.md': `# Draft\n\nA claim. ${CANARY}\n` });
-    const { result, report } = await sync();
+    const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.sync?.created, ['eng/notes/draft.md']);
+    assert.deepEqual(writes, ['CreateDocument', 'PATCH /pulls/1']);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+    assert.equal(world.github.pullRequests[0]?.merged, false);
     await assertConverged();
   });
 
@@ -585,7 +591,7 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/notes/review.md': text, 'combined/guide.md': `# Guide\n\nHow to start, again. ${CANARY}\n` });
     const { result, report, writes, summary } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.deepEqual(writes, ['UpdateDocument', 'POST /pulls']);
     assert.match((await documentOf('combined/guide.md')).content ?? '', /again/);
     assert.deepEqual(report.sync?.leftOut.find((entry) => entry.path === 'eng/notes/review.md')?.rules, ['plus-line-in-item', 'tab-indentation']);
     assert.match(summary, /^\| eng\/notes\/review\.md \| plus-line-in-item, tab-indentation \|$/m);
@@ -594,7 +600,7 @@ describe('sync: the tracked branch to Linear', () => {
     // What `fix` writes syncs.
     await commit({ 'eng/notes/review.md': fixText(text) });
     const fixed = await sync();
-    assert.deepEqual(fixed.writes, ['UpdateDocument']);
+    assert.deepEqual(fixed.writes, ['UpdateDocument', 'PATCH /pulls/1']);
     assert.match(review.content ?? '', /Nested step/);
     assert.equal(fixed.report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/review.md'), false);
   });
@@ -605,7 +611,8 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, []);
+    // Nothing reaches Linear; the format problems pull request shows the file.
+    assert.deepEqual(writes, ['POST /pulls']);
     assert.ok(report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/review.md' && entry.rules.includes('footnote')));
     assert.deepEqual(report.leftOutRules, ['footnote']);
     assert.equal(document.content, content);
@@ -619,10 +626,7 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(quiet.writes, []);
     assert.equal(quiet.report.changed, false);
     assert.equal(quiet.report.writtenDocuments, 0);
-    assert.deepEqual(quiet.report.sync?.leftOut, [
-      { path: 'eng/notes/draft.md', rules: ['footnote'] },
-      { path: 'eng/notes/review.md', rules: ['footnote'] },
-    ]);
+    assert.deepEqual(quiet.report.sync?.leftOut, [{ path: 'eng/notes/review.md', rules: ['footnote'] }]);
     assert.deepEqual(quiet.report.leftOutRules, ['footnote']);
     assert.match(quiet.summary, /^\| eng\/notes\/review\.md \| footnote \|$/m);
     assert.equal(document.content, content);
@@ -630,7 +634,7 @@ describe('sync: the tracked branch to Linear', () => {
     // Fixed again: the same document gets the text.
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed. ${CANARY}\n` });
     const fixed = await sync();
-    assert.deepEqual(fixed.writes, ['UpdateDocument']);
+    assert.deepEqual(fixed.writes, ['UpdateDocument', 'PATCH /pulls/1']);
     assert.match(document.content ?? '', /fixed/);
   });
 
@@ -708,10 +712,10 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal(second.result.exitCode, 0, second.result.stderr);
     assert.deepEqual(second.writes, ['CreateDocument', 'CreateDocument']);
     assert.equal(second.report.complete, true);
-    // The footnote file of the tree stays left out through the stop and the resume.
-    assert.deepEqual(first.report.leftOutRules, ['footnote']);
+    // No file of the tree is left out through the stop and the resume.
+    assert.deepEqual(first.report.leftOutRules, []);
     assert.equal(second.report.resumed, true);
-    assert.deepEqual(second.report.leftOutRules, ['footnote']);
+    assert.deepEqual(second.report.leftOutRules, []);
     const parents = (await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^@'])).split('\n');
     assert.equal(parents.length, 2);
     assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^^']), previous);
@@ -1127,7 +1131,7 @@ describe('sync: the tracked branch to Linear', () => {
   it('a file renamed to one that is left out keeps its document where it is; the run is not complete', async () => {
     const { document, recorded, held: { result, report, writes } } = await heldReview();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, []);
+    assert.deepEqual(writes, ['POST /pulls']);
     assert.equal(document.trashed, undefined);
     assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'renamed-to-unwritable' }]);
     assert.equal(report.complete, false);
@@ -1143,7 +1147,7 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({}, [['eng/notes/figure.md', 'eng/notes/old/figure.md']]);
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, []);
+    assert.deepEqual(writes, ['POST /pulls']);
     assert.ok(report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/old/figure.md' && entry.rules.includes('image-file-missing')));
     assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/figure.md', reason: 'renamed-to-unwritable' }]);
     assert.equal(figure.content, content);
@@ -1437,12 +1441,12 @@ describe('sync: the tracked branch to Linear', () => {
   it('a left-out file fixed in git does not overwrite an edit made in Linear after capture', async () => {
     const document = await documentOf('eng/notes/review.md');
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
-    assert.deepEqual((await sync()).writes, []);
+    assert.deepEqual((await sync()).writes, ['POST /pulls']);
     afterCapture(() => { document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}\n`; touch(document); });
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, []);
+    assert.deepEqual(writes, ['PATCH /pulls/1']);
     assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
     assert.match(document.content ?? '', /Typed in Linear meanwhile/);
   });
@@ -1450,14 +1454,14 @@ describe('sync: the tracked branch to Linear', () => {
   it('an edit of an excluded file made before capture is recorded and conflicts with a different git fix', async () => {
     const document = await documentOf('eng/notes/review.md');
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
-    assert.deepEqual((await sync()).writes, []);
+    assert.deepEqual((await sync()).writes, ['POST /pulls']);
     document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}\n`;
     touch(document);
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     // Both versions are written between the conflict markers, and the document gets the conflict mark and its notice.
-    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'CommentOnDocument']);
+    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'CommentOnDocument', 'PATCH /pulls/1']);
     assert.deepEqual(report.sync?.skipped, []);
     assert.deepEqual(report.sync?.conflicts, ['eng/notes/review.md']);
     assert.ok(report.capture?.changed.includes('eng/notes/review.md'));
@@ -1471,12 +1475,12 @@ describe('sync: the tracked branch to Linear', () => {
     // Two git commits between runs: a clean version Linear never receives, then one the linter leaves out.
     await commit({ 'eng/notes/review.md': `# Review\n\nA version Linear never sees. ${CANARY}\n` });
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
-    assert.deepEqual((await sync()).writes, []);
+    assert.deepEqual((await sync()).writes, ['POST /pulls']);
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.sync?.skipped, []);
-    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.deepEqual(writes, ['UpdateDocument', 'PATCH /pulls/1']);
     assert.match(document.content ?? '', /fixed in git/);
   });
 
@@ -1523,13 +1527,12 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/media/diagram.png': null, 'eng/notes/new-figure.md': text });
     const first = await sync();
     assert.equal(first.result.exitCode, 0, first.result.stderr);
-    assert.deepEqual(first.writes, []);
+    assert.deepEqual(first.writes, ['POST /pulls']);
     assert.deepEqual(first.report.sync?.leftOut, [
-      { path: 'eng/notes/draft.md', rules: ['footnote'] },
       { path: 'eng/notes/figure.md', rules: ['image-file-missing'] },
       { path: 'eng/notes/new-figure.md', rules: ['image-file-missing'] },
     ]);
-    assert.deepEqual(first.report.leftOutRules, ['footnote', 'image-file-missing']);
+    assert.deepEqual(first.report.leftOutRules, ['image-file-missing']);
     assert.equal(figure.content, content);
     assert.equal(live().some((document) => document.title === 'new-figure'), false);
     assert.ok(!world.linear.documents.some((document) => (document.content ?? '').includes('missing.png')), 'an unresolved image path reached Linear');
@@ -1539,7 +1542,7 @@ describe('sync: the tracked branch to Linear', () => {
     const second = await sync();
     assert.equal(second.result.exitCode, 0, second.result.stderr);
     assert.deepEqual(second.report.sync?.created, ['eng/notes/new-figure.md']);
-    assert.deepEqual(second.report.sync?.leftOut, [{ path: 'eng/notes/draft.md', rules: ['footnote'] }]);
+    assert.deepEqual(second.report.sync?.leftOut, []);
     assert.equal(uploadUrls((await documentOf('eng/notes/new-figure.md')).content).length, 1);
     assert.equal((await ids())['eng/notes/figure.md']?.id, figure.id);
     await assertIdempotent();
@@ -1551,7 +1554,7 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(kinds((await sync()).writes), ['upload', 'UpdateDocument']);
     const content = figure.content;
     await commit({ 'eng/media/diagram.png': null });
-    assert.deepEqual((await sync()).writes, []);
+    assert.deepEqual((await sync()).writes, ['POST /pulls']);
     // Restored with other bytes: the document gets the new image.
     await commit({ 'eng/media/diagram.png': Buffer.from('third diagram bytes').toString('latin1') });
     const { result, report } = await sync();

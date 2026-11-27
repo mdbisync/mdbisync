@@ -50,6 +50,18 @@ describe('the ending of a sync run', () => {
     });
   }
 
+  it('a format problems pull request not brought up to date makes the run partial, after every other code', () => {
+    for (const code of ['state-moved', 'github-failed'] as const) {
+      const outcome = sync(undefined, undefined);
+      (outcome.sync as unknown as { formatProblems: unknown }).formatProblems = { code };
+      assert.equal(partialCode(outcome), code);
+      assert.equal(exitStatusOf(outcome), 'warning');
+    }
+    const both = sync(undefined, 'write-failed');
+    (both.sync as unknown as { formatProblems: unknown }).formatProblems = { code: 'github-failed' };
+    assert.equal(partialCode(both), 'write-failed');
+  });
+
   it('suspended marks that stopped part way make the run partial with their code', () => {
     for (const code of ['write-failed', 'stopped', 'state-moved'] as const) {
       const outcome = sync(undefined, undefined);

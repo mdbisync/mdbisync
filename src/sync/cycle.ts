@@ -3,6 +3,7 @@
 // 1. Capture: Linear's changes onto the `linear` state ref.
 // 2. The sync pull request: `linear`'s changes towards the tracked branch.
 // 3-5. The tracked branch's changes to Linear (write.ts).
+// 6. The format problems pull request: the files left out for their Markdown (format-problems.ts).
 //
 // Each step takes the state refs as the previous step left them and returns
 // them as it leaves them, so every push leases the values it expects.
@@ -18,6 +19,7 @@ import { type PullRequestResult, syncPullRequest } from './pull-request.ts';
 import { type RequiredCheck } from './deadline.ts';
 import { type WriteResult, writeTrackedToLinear } from './write.ts';
 import { holdChanges, reconcileHoldMarks } from './hold.ts';
+import { type FormatProblemsResult, formatProblemsPullRequest } from './format-problems.ts';
 
 export interface CycleOptions {
   documentCap?: number | undefined;
@@ -47,6 +49,8 @@ export interface CycleResult {
   pullRequest?: PullRequestResult;
   /** Absent when capture stops before the write step. */
   write?: WriteResult;
+  /** Absent when the run stops before step 6. */
+  formatProblems?: FormatProblemsResult;
 }
 
 export async function runSyncCycle(context: RunContext, options: CycleOptions): Promise<CycleResult> {
@@ -72,6 +76,9 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   const moved = holdChanges(pullRequest.holdMarks) > 0 || pullRequest.suspended?.changed === true || pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
   const createSyncBranch = context.fetched.sync === null && !pullRequest.branchMoved;
   const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, containers: captured.containers, createSyncBranch, state:captured.state, captured:captured.documents, ...(options.transforms ? { transforms: options.transforms } : {}) });
+  // The run's mapping holds the tracked branch while it is where the run found it.
+  const formatProblems = await formatProblemsPullRequest(context, { config: options.config, github: options.github, ...(context.fetched.tracked === trackedTip ? { mapping: context.mapping } : {}) });
+  const formatMoved = formatProblems.branchMoved || formatProblems.closed !== null || formatProblems.pullRequest?.opened === true || formatProblems.pullRequest?.updated === true;
   // A held removal waits for the next run to confirm it.
-  return {complete:write.complete && marksDone && pullRequest.code === undefined && captured.heldRemovals.length === 0, changed:changed || moved || write.changed, trackedTip, capture:captured, pullRequest, write};
+  return {complete:write.complete && marksDone && pullRequest.code === undefined && captured.heldRemovals.length === 0 && formatProblems.code === undefined, changed:changed || moved || write.changed || formatMoved, trackedTip, capture:captured, pullRequest, write, formatProblems};
 }

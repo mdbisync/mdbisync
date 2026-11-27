@@ -8,6 +8,7 @@
 // steps are left to the UI session's checklist. Every text a step writes is
 // neutral work text with a run token, so I2 can find it on both sides.
 
+import { formatProblemsBranch, type StateConfig } from '../../../src/state/config.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -1550,7 +1551,9 @@ const GIT: Record<string, Executor> = {
       return;
     }
     const path = typeof args.path === 'string' ? resolveDestination(ctx, targetPath(ctx), args.path) : sibling(targetPath(ctx), `notes-${token}.md`);
-    await commitAsPerson(ctx, new Map([[path, `# Notes\n\n${noteSentence(token)}\n`]]), 'Add notes', args.bypassHook === true);
+    // `plus-line`: a lone + below an item's first line, which the Linear-format hook writes with a no-break space after it.
+    const text = args.fixture === 'plus-line' ? `# Notes\n\n- Water the beds\n  +\n- ${noteSentence(token)}\n` : `# Notes\n\n${noteSentence(token)}\n`;
+    await commitAsPerson(ctx, new Map([[path, text]]), 'Add notes', args.bypassHook === true);
     ctx.edits.push({ side: 'git', path, token });
     ctx.observations.set('git.added', path);
   },
@@ -1600,9 +1603,10 @@ const GIT: Record<string, Executor> = {
     const text = await readWorking(git, path);
     await commitAsPerson(ctx, new Map([[path, `${text.replace(/\n*$/, '\n')}\nSee the note.[^1]\n\n[^1]: Added later.\n`]]), 'Add a footnote', args.bypassHook === true);
   },
-  'git.remove-footnote': async (ctx) => {
-    const path = ctx.observations.get('fixture.leftOut') as string | undefined;
-    if (path === undefined) throw new Error('git.remove-footnote needs the left-out document its setup adds');
+  'git.remove-footnote': async (ctx, args) => {
+    // The left-out document the setup adds, or the target `git.add-footnote` gave a footnote.
+    const path = args.target === 'footnoted' ? ctx.observations.get('target.path') as string | undefined : ctx.observations.get('fixture.leftOut') as string | undefined;
+    if (path === undefined) throw new Error('git.remove-footnote needs the left-out document its setup adds, or a document git.add-footnote changed');
     const git = await ctx.person();
     await pull(git, ctx);
     const text = await readWorking(git, path);
@@ -2597,6 +2601,25 @@ const OTHER: Record<string, Executor> = {
     ctx.engine.results.push(result);
     ctx.observations.set(`runs.${ctx.engine.results.length - 1 - ctx.engine.setupRuns}.killed`, true);
     await recordRunView(ctx, ctx.engine.results.length - 1 - ctx.engine.setupRuns);
+  },
+  'merge.format-problems': async (ctx) => {
+    // A person reviews the format problems pull request and merges it; what it held is kept for the assertions.
+    const world = live(ctx);
+    const branch = formatProblemsBranch({ syncBranch: ctx.names.syncBranch } as StateConfig);
+    const open = await world.rest.pullRequests(branch, 'open');
+    const [pr] = open.filter((candidate) => candidate.head.ref === branch);
+    if (pr === undefined) throw new ProductError('no format problems pull request is open to merge');
+    const added = ctx.observations.get('git.added') as string | undefined;
+    const target = ctx.observations.get('target.path') as string | undefined;
+    const rewritten = added === undefined ? undefined : await world.rest.fileText(added, pr.head.sha);
+    ctx.observations.set('formatProblems.beforeMerge', {
+      open: open.filter((candidate) => candidate.head.ref === branch).length,
+      rewroteAdded: rewritten !== undefined && /^ {2}\+\u00a0$/m.test(rewritten),
+      // The path is escaped for a table; the footnote row is this scenario's only one.
+      listsFootnote: target !== undefined && /\| footnote \| yes \|/.test(pr.body ?? ''),
+    });
+    const merged = await world.rest.mergePullRequest(pr.number);
+    ctx.observations.set('merge.commit', merged.sha);
   },
   'merge.pull-request': async (ctx) => {
     // A person merges the sync pull request (Linear → git initial sync).

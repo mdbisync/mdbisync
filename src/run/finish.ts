@@ -5,6 +5,7 @@ import { type ContainerCapacity } from './capacity.ts';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
+import { type FormatProblemsResult } from '../sync/format-problems.ts';
 import { PATH_RULE } from '../sync/paths.ts';
 import { type ExitStatus, runEnding } from './exit.ts';
 import { cell } from './summary.ts';
@@ -48,6 +49,8 @@ export interface RunReport {
   sync: SyncReport | null;
   /** A sync run's step 2, the sync pull request; null for other runs and when capture stopped before it. */
   pullRequest: PullRequestResult | null;
+  /** A sync run's step 6, the format problems pull request; null for other runs and when the run stopped before it. */
+  formatProblems: FormatProblemsResult | null;
   capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'heldRemovals' | 'blocked' | 'leftOut' | 'writeBackWarnings' | 'stopped' | 'rebuiltIds'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
@@ -213,6 +216,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     initialSync: confirmed === undefined ? null : toConfirmedReport(confirmed),
     capture: captureReport(outcome.captured),
     pullRequest: outcome.sync?.pullRequest ?? null,
+    formatProblems: outcome.sync?.formatProblems ?? null,
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? reverse?.skippedCompleted.length ?? 0,
@@ -303,6 +307,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     initialSync: null,
     capture: captureReport(outcome.captured),
     pullRequest: outcome.sync?.pullRequest ?? null,
+    formatProblems: outcome.sync?.formatProblems ?? null,
     sync: {
       complete: write.complete,
       updated: write.updated,

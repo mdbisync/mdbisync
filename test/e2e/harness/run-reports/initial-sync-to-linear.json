@@ -46,6 +46,7 @@
   },
   "sync": null,
   "pullRequest": null,
+  "formatProblems": null,
   "capture": null,
   "writtenCount": 4,
   "skippedCompletedCount": 0,

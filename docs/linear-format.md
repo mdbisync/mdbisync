@@ -562,6 +562,12 @@ silently; change the file yourself. The exceptions are
 Linear keeps where it can, and HTTP(S) images, which `fix` writes as links
 ([`image-not-in-repository`](#image-not-in-repository)).
 
+The sync leaves a file out of Linear for a finding of these rules, except
+the ones that, as their sections say, only stop `fix`. When such a file
+reaches the synchronized branch without the hook, the sync opens the
+[format problems pull request](sync-cycle.md#the-format-problems-pull-request)
+with what `fix` writes for it and the findings left to you.
+
 ### `footnote`
 
 Footnotes are dropped. Linear keeps the reference as plain text and drops

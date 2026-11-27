@@ -25,6 +25,7 @@
   "initialSync": null,
   "sync": null,
   "pullRequest": null,
+  "formatProblems": null,
   "capture": null,
   "writtenCount": 0,
   "skippedCompletedCount": 0,

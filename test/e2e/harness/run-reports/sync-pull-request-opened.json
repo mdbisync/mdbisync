@@ -57,6 +57,12 @@
     "marked": [],
     "decided": []
   },
+  "formatProblems": {
+    "files": [],
+    "pullRequest": null,
+    "closed": null,
+    "branchMoved": false
+  },
   "capture": {
     "ok": true,
     "changed": [

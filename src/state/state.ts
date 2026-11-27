@@ -4,7 +4,7 @@
 // ref, so of two runs that started from the same state exactly one wins and
 // the other changes nothing.
 
-import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef, suspendedBranch } from './config.ts';
+import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef, suspendedBranch, formatProblemsBranch } from './config.ts';
 import { ancestorWithin, showCommit } from './commit-format.ts';
 import { type Git, GitError, type Oid, mapLimit } from './git.ts';
 import { type LfsPointer, type LfsReadResult, lfsReader, lfsRemote, parseLfsPointer } from './lfs.ts';
@@ -21,6 +21,8 @@ export interface FetchedState {
   /** The sync branch's commit, null when it does not exist. */
   sync: Oid | null;
   suspended?: Oid | null;
+  /** The format problems branch's commit, null when it does not exist. */
+  formatProblems?: Oid | null;
   state: StateSnapshot;
 }
 
@@ -33,7 +35,8 @@ export async function fetchState(git: Git, config: StateConfig): Promise<Fetched
   const tracked = branchRef(config.trackedBranch);
   const sync = branchRef(config.syncBranch);
   const suspended = branchRef(suspendedBranch(config));
-  const advertised = await lsRemote(git, config.remote, [tracked, sync, suspended, ...STORES.map((store) => stateRef(config, store))]);
+  const formatProblems = branchRef(formatProblemsBranch(config));
+  const advertised = await lsRemote(git, config.remote, [tracked, sync, suspended, formatProblems, ...STORES.map((store) => stateRef(config, store))]);
   if (!advertised.has(tracked)) {
     throw new Error(message('state.tracked-missing', { branch: config.trackedBranch, remote: config.remote }));
   }
@@ -53,7 +56,7 @@ export async function fetchState(git: Git, config: StateConfig): Promise<Fetched
   const gone: string[] = [];
   const state = {} as StateSnapshot;
   for (const store of STORES) state[store] = await read(stateRef(config, store));
-  const fetched = { tracked: (await read(tracked)) as Oid, sync: await read(sync), suspended: await read(suspended), state };
+  const fetched = { tracked: (await read(tracked)) as Oid, sync: await read(sync), suspended: await read(suspended), formatProblems: await read(formatProblems), state };
   // One call forgets them all, as `update-ref -d` does for each: a ref that is not there is no error.
   if (gone.length > 0) await git.run(['update-ref', '--stdin'], { input: gone.map((ref) => `delete ${ref}\n`).join('') });
   return fetched;
@@ -152,7 +155,7 @@ export function refusedPushes(git: Git): readonly RefusedPush[] {
 }
 
 /** What a moved ref is to the sync: one of the state refs, the sync branch or the tracked branch. */
-export type RefRole = Store | 'suspendedBranch' | 'syncBranch' | 'trackedBranch' | 'other';
+export type RefRole = Store | 'suspendedBranch' | 'syncBranch' | 'formatProblemsBranch' | 'trackedBranch' | 'other';
 
 const moves = new WeakMap<Git, Map<RefRole, number>>();
 
@@ -170,6 +173,7 @@ function refRole(config: StateConfig, ref: string): RefRole {
   if (store !== undefined) return store;
   if (ref === branchRef(suspendedBranch(config))) return 'suspendedBranch';
   if (ref === branchRef(config.syncBranch)) return 'syncBranch';
+  if (ref === branchRef(formatProblemsBranch(config))) return 'formatProblemsBranch';
   return ref === branchRef(config.trackedBranch) ? 'trackedBranch' : 'other';
 }
 

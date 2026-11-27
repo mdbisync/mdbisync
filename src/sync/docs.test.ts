@@ -14,6 +14,7 @@ import { HOLD_TIMED_OUT, holdComment } from './hold.ts';
 import { SUSPENDED_TITLE, SET_ASIDE_MESSAGE } from './suspended.ts';
 import { BLOCKED_COMMENT, MARKS } from './marks.ts';
 import { SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
+import { FORMAT_PROBLEMS_TITLE } from './format-problems.ts';
 import { SKIP_REASON_TEXTS } from './summary.ts';
 import { CAPTURE_LEFT_OUT_RULES, PULL_REQUEST_CODES, WRITE_BACK_WARNING_CODES } from '../codes.ts';
 
@@ -46,10 +47,10 @@ function described(source: string, messages: readonly string[]) {
 describe('the sync cycle page', () => {
   it('names the run steps in the order the code runs them', () => {
     const steps = [...page.matchAll(/^\d\. \*\*([^*]+)\*\*/gm)].map((match) => match[1]);
-    assert.deepEqual(steps, ['Setup check.', 'Capture.', 'Linear to git.', 'Git to Linear, computed.', 'Write.', 'Record.']);
-    // The cycle calls its steps in that order: capture, the sync pull request, then steps 3 to 5.
+    assert.deepEqual(steps, ['Setup check.', 'Capture.', 'Linear to git.', 'Git to Linear, computed.', 'Write.', 'Record.', 'Format problems.']);
+    // The cycle calls its steps in that order: capture, the sync pull request, steps 3 to 5, then the format problems pull request.
     const cycle = read('src/sync/cycle.ts');
-    const calls = ['await capture(', 'await syncPullRequest(', 'await writeTrackedToLinear('].map((call) => cycle.indexOf(call));
+    const calls = ['await capture(', 'await syncPullRequest(', 'await writeTrackedToLinear(', 'await formatProblemsPullRequest('].map((call) => cycle.indexOf(call));
     assert.ok(calls.every((at) => at >= 0), 'the cycle calls every step');
     assert.deepEqual([...calls].sort((a, b) => a - b), calls, 'the cycle calls the steps in the page order');
     // Steps 3 to 5 in the write step, in the same order: merge locally, write, record.
@@ -60,6 +61,7 @@ describe('the sync cycle page', () => {
 
   it('names the sync pull request and the blocked mark as the code makes them', () => {
     assert.ok(flat.includes(`**${SYNC_PULL_REQUEST_TITLE}**`), 'the pull request title');
+    assert.ok(flat.includes(`**${FORMAT_PROBLEMS_TITLE}**`), 'the format problems pull request title');
     assert.ok(flat.includes(BLOCKED_COMMENT), 'the blocked comment');
     assert.match(page, /^ *> - Hook `[^`]+`, line \d+\.$/m, 'a finding line as the comment writes it');
     assert.ok(flat.includes(`Red \`${MARKS.blocked.icon}\``), 'the blocked icon');

@@ -171,7 +171,12 @@ there, so the job ends with a warning, not a failure. The summary says
 which documents were written and which were not. The sync pull request
 step's `state-moved`, and its `github-failed` when the request may pass
 next time, end a run the same way (see
-[The sync pull request](#the-sync-pull-request)).
+[The sync pull request](#the-sync-pull-request)). So do `state-moved` and
+`github-failed` of the
+[format problems pull request](sync-cycle.md#the-format-problems-pull-request):
+its branch moved, or GitHub refused or failed a request or the push of its
+branch. A refusal that repeats is usually a ruleset that keeps the sync's
+App from creating or pushing that branch.
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
@@ -339,7 +344,11 @@ shows how.
 ## Files left out
 
 A file left out stays in git only, and its document stays as it is, until
-the reason is fixed. The summaries list each with its rules:
+the reason is fixed. The summaries list each with its rules. A file left
+out for its Markdown (a lint rule below the table) is also in the
+[format problems pull request](sync-cycle.md#the-format-problems-pull-request),
+which holds what `mdbisync fix` writes for it and lists what is left to fix
+by hand:
 
 | Rule | Meaning | What to do |
 | --- | --- | --- |
@@ -384,8 +393,9 @@ with a collapsible section (`1. +++ Notes` with more of the item below
 it) is `block-first-in-list-item`: put a line of text first in the item.
 A file that reached the branch without the hook (an edit on the web, a
 push without hooks) can hold a lone `+` below an item's first line
-(`plus-line-in-item`) or tabs in its indentation (`tab-indentation`): run
-`mdbisync fix` on it and commit the result, and the next run syncs it.
+(`plus-line-in-item`) or tabs in its indentation (`tab-indentation`): merge
+the format problems pull request, or run `mdbisync fix` on it and commit the
+result, and the next run syncs it.
 
 `mdbisync lint` and `mdbisync fix` also report `hard-break-in-heading`
 when converting a setext heading to one line would lose a hard break, and
@@ -566,7 +576,7 @@ document named.
 | `FileUpload: Linear returned no upload target`, `FileUploads: Linear returned no upload target`, `<operation>: storage request failed`, `<operation>: storage answered HTTP <status>` | Uploading a linked file failed. |
 | `upload destination is not allowed` | Linear gave an upload address outside its own storage; the run refused to send the file there. |
 | `asset destination is not allowed`, `asset could not be downloaded`, `asset destination already exists` | Downloading a file a document embeds failed or was refused (only Linear's own storage, up to 10 MB). An initial sync from Linear leaves the document out with `image-blocked` or `download-failed`. |
-| `GitHub answered HTTP <status> while <what>`, `GitHub did not answer while <what>` | A GitHub request failed. `<what>` is one of: listing open pull requests, reading a pull request, opening a pull request, updating a pull request, closing a pull request, sending `<method>` to the pull request API, reading the check runs of the sync pull request, reading the commit statuses of the sync pull request, reading the annotations of a failed check run, merging the sync pull request. A failed read of a check run's annotations does not stop the run: the suspended documents' comments name that check without them, and the run summary says so. |
+| `GitHub answered HTTP <status> while <what>`, `GitHub did not answer while <what>` | A GitHub request failed. `<what>` is one of: listing open pull requests, reading a pull request, opening a pull request, updating a pull request, closing a pull request, sending `<method>` to the pull request API, reading the check runs of the sync pull request, reading the commit statuses of the sync pull request, reading the annotations of a failed check run, merging the sync pull request, pushing the format problems branch. A failed read of a check run's annotations does not stop the run: the suspended documents' comments name that check without them, and the run summary says so. |
 | `git <arguments> failed with exit code <n>: <output>` | A git command failed; its own output follows. Often a network problem or missing rights to push. |
 | `refusing to move <ref> to a commit that does not descend from its current value` | A state ref or the sync branch was changed by hand. Undo that change, or recover with an initial sync. |
 | `previously synchronized project "<project>" of team "<team>" is missing in Linear. Restore access to the project or update its annotation before syncing` | Check whether the project was renamed, archived, or made inaccessible to the app. If the mapping needs to change, review a new [initial sync dry run](#recovery-with-initial-sync). |

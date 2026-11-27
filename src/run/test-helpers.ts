@@ -13,6 +13,7 @@ const REFS = {
   uploads: 'refs/mdbisync/uploads',
   syncBranch: 'refs/heads/mdbisync/linear',
   suspendedBranch: 'refs/heads/mdbisync/suspended',
+  formatProblemsBranch: 'refs/heads/mdbisync/format-problems',
 } as const;
 
 /** The Linear mutations that write a document or a comment; uploads are compared by the bytes storage took. */
