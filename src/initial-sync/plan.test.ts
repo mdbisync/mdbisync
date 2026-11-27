@@ -66,7 +66,7 @@ const TREE = {
   'eng/notes/plan.md': `# Plan\n\n${CANARY}\n`,
   'eng/notes/sources.md': `# Sources\n\nA claim.[^1]\n\n[^1]: A source. ${CANARY}\n`,
   'combined/README.md': `---\nlinear-team: DOCS\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}\n`,
-  'combined/Guide.md': `# Guide\n\nWater is H~2~O. ${CANARY}\n`,
+  'combined/Guide.md': `# Guide\n\nWater is wet.[^1] ${CANARY}\n\n[^1]: A note.\n`,
   [NFD_PATH]: `# Caf\u00e9\n\n${CANARY}\n`,
   'eng/backend/big.md': LFS_POINTER,
   'combined/guide.md': `# guide\n\n${CANARY}\n`,
@@ -157,7 +157,7 @@ describe('planInitialSync', () => {
 
   it('leaves out lint errors, both colliding files (with their own lint rules), too-long titles and files kept in LFS, and keeps their documents as they are', () => {
     assert.deepEqual(plan.leftOut, [
-      { path: 'combined/Guide.md', rules: ['duplicate-title', 'subscript'], lines: [3], collidesWith: ['combined/guide.md'], documentId: guide.id },
+      { path: 'combined/Guide.md', rules: ['duplicate-title', 'footnote'], lines: [3, 5], collidesWith: ['combined/guide.md'], documentId: guide.id },
       { path: 'combined/guide.md', rules: ['duplicate-title'], lines: [], collidesWith: ['combined/Guide.md'] },
       { path: `combined/${'t'.repeat(513)}.md`, rules: ['title-too-long'], lines: [] },
       { path: 'eng/backend/big.md', rules: ['stored-in-lfs'], lines: [], documentId: big.id },

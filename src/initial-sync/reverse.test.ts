@@ -49,7 +49,7 @@ const TREE: Record<string, string> = {
   'eng/backend/notes.md': `# Notes\n\n${CANARY}`,
   'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}`,
   'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\nOld steps. ${CANARY}`,
-  'eng/notes/formula.md': `# Formula\n\nWater is H~2~O. ${CANARY}`,
+  'eng/notes/formula.md': `# Formula\n\nWater is wet.[^1] ${CANARY}\n\n[^1]: A note.`,
   'eng/notes/diagram.png': 'not really a picture',
   'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}`,
   'combined/Guide.md': `# Guide\n\n${CANARY}`,

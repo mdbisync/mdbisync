@@ -65,7 +65,7 @@ import {
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { nameFixingHooks } from './fix-hooks.ts';
-import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
+import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, tipLeftOut, mergeLocally } from './merge.ts';
 import { signRepair, signedRepair, signedRepairs } from './pull-repairs.ts';
 import { type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold } from './marks.ts';
 import { stableId } from './stable-id.ts';
@@ -240,10 +240,12 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const releasing = [...ids.values()].some((entry) => entry.releaseBase !== undefined);
   for (const [path, entry] of ids) if (entry.suspended !== undefined) result.skipped.push({ path, reason: 'suspended' });
   const nothingNew = (await alreadyMerged(git, linearTip, tracked)) || (await mergedInitialRecord(git, linearTip, tracked));
-  if (nothingNew && !cacheLost && !releasing) {
+  // A file an earlier release left out for a construct Linear drops is written now, though nothing else changed.
+  const tip = nothingNew && !releasing ? await tipLeftOut(git, linearTip, linear.facts) : undefined;
+  if (tip !== undefined && tip.writable.length === 0 && !cacheLost) {
     // Nothing to write, but the files left out stay left out: the report names them on every run, not only on
     // the run that first met them. The `linear` tip holds what a merge would give.
-    result.leftOut = await leftOutFiles(git, linearTip, linear.facts);
+    result.leftOut = tip.leftOut;
     await nameFixingHooks(git, tracked, result.leftOut);
     // The capacity report can use this run's earlier listing.
     const containers = options.containers ?? await readContainers();
@@ -264,8 +266,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const knownId = knownIdLookup(git, expected.ids, ids);
   const keptAnnotations = await readKeptAnnotations(git, expected.ids);
   const merge = await mergeLocally(git, linearTip, tracked, signedIds, linear.facts, { knownId, keptAnnotations });
-  // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
-  if (nothingNew && !releasing) merge.changes.length = 0;
+  // The tracked branch has nothing new: only the documents the cache rebuild relinks, and the files an earlier
+  // release left out, are written.
+  if (tip !== undefined) {
+    const writable = new Set(tip.writable);
+    const kept = merge.changes.filter((change) => (change.kind === 'keep' && writable.has(change.to)) || (change.kind === 'create' && writable.has(change.path)));
+    merge.changes.splice(0, merge.changes.length, ...kept);
+  }
   // Frozen paths remain exactly as capture left them, including deletes and renames.
   const pendingRepairs = new Set<string>();
   for (const [path, entry] of signedIds) {

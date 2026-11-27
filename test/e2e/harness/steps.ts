@@ -1783,8 +1783,9 @@ const GIT: Record<string, Executor> = {
       const token = nextToken(ctx);
       const id = fix === 'linear-would-undo' ? 'aligned-table' : 'stable-fix';
       const addition = fix === 'linear-would-undo'
-        // Column alignment, which Linear drops (it keeps `| -- |` separators).
-        ? `\n| Check | Result |\n|:--|--:|\n| ${token} | ok |\n`
+        // A footnote, whose text Linear moves into a link: the sync holds the file back. The hook keeps the id
+        // the sandbox's pre-commit configuration gives it, so the fix changes no other file.
+        ? `\nChecked, ref ${token}.[^1]\n\n[^1]: By the format job.\n`
         // Linear stores a final paragraph without a trailing newline.
         : `\nChecked by the format job, ref ${token}.`;
       commits.push(await commitToSyncBranch(ctx, async (git) => {

@@ -377,11 +377,13 @@ by hand:
 | `link-scheme` | Links must use http, https, mailto, a path or a fragment. | Replace the unsupported destination. Pull removes unsupported links together with their text; push lint refuses them. |
 | `capture-translation` | The run could not turn the document's text from Linear into the file's text, for example because writing it in the `linear-format` hook's form would turn text Markdown reads as code into a link or image to a file. | Check the document in Linear for unusual content, or report it as a bug. |
 
-The `linear-format` hook's rules leave a file out too until it is fixed:
-`footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
-`image-in-link`, `table-alignment`, `link-without-text`, `link-title`, `image-title`, `code-in-emphasis`, `hard-break-backslash`,
-`git-conflict-marker`,
-`section-opener`, `section-marker-text`, `plus-line-in-item`, `tab-indentation`, `url-in-html`, `block-first-in-list-item`, `ordered-task-list`,
+The `linear-format` hook's rules for text Linear would corrupt (text that
+moves, is dropped or splits, a link that loses its URL, or text Linear
+shows differently without the change ever coming back) leave a file out
+too until it is fixed: `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
+`image-in-link`, `link-without-text`, `git-conflict-marker`,
+`section-opener`, `section-marker-text`, `plus-line-in-item`,
+`tab-indentation`, `url-in-html`, `block-first-in-list-item`,
 `image-not-in-repository`, `image-file-missing` and
 `document-in-assets-folder`. Each is described, with its fix, in
 [linear-format.md](linear-format.md#lint-rules). `fix` writes an HTTP(S)
@@ -397,24 +399,17 @@ push without hooks) can hold a lone `+` below an item's first line
 the format problems pull request, or run `mdbisync fix` on it and commit the
 result, and the next run syncs it.
 
-`mdbisync lint` and `mdbisync fix` also report `hard-break-in-heading`
-when converting a setext heading to one line would lose a hard break, and
-`setext-heading-lines`, `table-header-pipe`, `table-list-cell`,
-`table-quote-cell`, `list-after-item-text`, `list-number-too-long` and
-`number-paragraph` for
-text Linear reads differently from Markdown; the sync sends such a file as
-it is, since Linear's own export can hold that text. See
-[hard breaks in headings](linear-format.md#hard-break-in-heading) and the
-seven rules in [linear-format.md](linear-format.md#lint-rules).
-They also report `unplaced-link` when `fix` cannot write a web address found
-inside other text as a link; the sync sends such a file as it is. See
-[unplaced links](linear-format.md#unplaced-link).
-The same applies to [`tab-reference-layout`](linear-format.md#tab-reference-layout)
-when reading a literal tab would change the Markdown, and to
-[`code-span-padding`](linear-format.md#code-span-padding) for inline code
-whose outer spaces Linear drops, and to
-[`space-reference-edge`](linear-format.md#space-reference-edge) for a space
-reference at the start or end of a block's text.
+The other rules leave no file out: `table-list-cell`, `table-quote-cell`, `table-alignment`, `link-title`,
+`image-title`, `code-in-emphasis`, `hard-break-backslash`,
+`setext-heading-lines`, `table-header-pipe`, `code-span-padding`,
+`hard-break-in-heading`, `number-paragraph`, `tab-reference-layout`,
+`space-reference-edge`, `unplaced-link`, `list-after-item-text`,
+`list-number-too-long` and `ordered-task-list`. With them the text stays
+where it is and only formatting is lost, Linear's own export writes the
+construct, or the finding is about what `fix` can write. The sync writes
+such a file as it is, and what Linear drops comes back as a change in the
+sync pull request
+([which rules hold a file back](linear-format.md#which-rules-hold-a-file-back)).
 
 `mdbisync lint` run on a folder also reports `upload-file-refused` for a
 file an earlier sync captured from Linear (named `<sha256>.<ext>`) that the

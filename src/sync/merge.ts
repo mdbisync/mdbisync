@@ -8,7 +8,8 @@ import { readAnnotation } from '../mapping/index.ts';
 import { MAPPING_FILE_BYTES, MAPPING_TREE_BYTES, MappingBlobBudget, MappingBlobBudgetError, readableBlob } from '../mapping/blobs.ts';
 import { mapTree, requireReadableAnnotations } from '../mapping/mapping.ts';
 import { type TreeEntry, listPaths } from '../state/objects.ts';
-import { lintInTree, splitFile } from '../format/index.ts';
+import { lintInTree, lintRecorded, splitFile } from '../format/index.ts';
+import { NOT_IN_LINEAR_EXPORT, type LintRule } from '../format/rules.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping } from '../mapping/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
@@ -148,7 +149,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
   const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase, true);
   const { tree, unresolved: conflicts } = resolved;
 
-  const linearSide = await synchronizedFiles(git, linear, facts, ids);
+  const linearSide = await synchronizedFiles(git, linear, facts, { recorded: true, observedRepairs: ids });
   const resultSide = await synchronizedFiles(git, tree, facts);
   const conflicted = new Set(conflicts);
 
@@ -346,9 +347,11 @@ export interface Side {
 /**
  * The files of a commit or tree that are synchronized: mapped, and neither
  * reported by the linter, nor with a title Linear refuses, nor colliding.
- * The same rules as the initial sync's plan.
+ * The same rules as the initial sync's plan. With `recorded`, the commit is
+ * one of the `linear` chain, which `lintRecorded` judges.
  */
-async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts, observedRepairs?: IdMap): Promise<Side> {
+async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts, options: { recorded?: boolean; observedRepairs?: IdMap } = {}): Promise<Side> {
+  const lint = options.recorded === true ? lintRecorded : lintInTree;
   const entries = await listTree(git, treeish, MAPPING_TREE_BYTES);
   requireReadableAnnotations(entries);
   const budget = new MappingBlobBudget();
@@ -359,10 +362,10 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts, obs
   const leftOut: Array<{ path: string; rules: FileLeftOutRule[] }> = [];
   const leave = (path: string, rules: FileLeftOutRule[]) => leftOut.push({ path, rules: [...new Set(rules)].sort() });
   for (const document of mapping.documents) {
-    const rules: FileLeftOutRule[] = lintInTree(document.path, (blobs.get(document.oid) as Buffer).toString('utf8'), mapping.files).map((finding) => finding.rule);
+    const rules: FileLeftOutRule[] = lint(document.path, (blobs.get(document.oid) as Buffer).toString('utf8'), mapping.files).map((finding) => finding.rule);
     if (lengthRefusal({ title: document.title }, facts) !== undefined) rules.push('title-too-long');
     // A checked repair's source is an observation used only for comparison, never a writable result.
-    const repair = observedRepairs?.get(document.path)?.pullRewrite;
+    const repair = options.observedRepairs?.get(document.path)?.pullRewrite;
     const observed = repair !== undefined && createHash('sha256').update(blobs.get(document.oid)!).digest('hex') === repair.hash;
     if (rules.length > 0 && !observed) leave(document.path, rules);
     else files.set(document.path, toSideFile(document));
@@ -374,11 +377,21 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts, obs
 }
 
 /**
- * The files of a commit or tree the sync leaves out, with their rules: the
- * list a merge gives for its result, for a run that has nothing to merge.
+ * The files the `linear` tip leaves out, with their rules: the list a merge
+ * gives for its result, for a run that has nothing to merge. `writable`
+ * names the files the tip records as left out only for constructs Linear's
+ * export never holds: a release that held a file back for them left it out,
+ * and the sync writes it now.
  */
-export async function leftOutFiles(git: Git, treeish: Oid, facts: LinearFacts = LINEAR_FACTS): Promise<Array<{ path: string; rules: FileLeftOutRule[] }>> {
-  return (await synchronizedFiles(git, treeish, facts)).leftOut;
+export async function tipLeftOut(git: Git, tip: Oid, facts: LinearFacts = LINEAR_FACTS): Promise<{ leftOut: Array<{ path: string; rules: FileLeftOutRule[] }>; writable: string[] }> {
+  const leftOut: Array<{ path: string; rules: FileLeftOutRule[] }> = [];
+  const writable: string[] = [];
+  for (const entry of (await synchronizedFiles(git, tip, facts, { recorded: true })).leftOut) {
+    const rules = entry.rules.filter((rule) => !NOT_IN_LINEAR_EXPORT.has(rule as LintRule));
+    if (rules.length > 0) leftOut.push({ path: entry.path, rules });
+    else writable.push(entry.path);
+  }
+  return { leftOut, writable };
 }
 
 /** Commits of the `linear` chain examined for a file's last synchronized version: those that change it or a file it links. */
@@ -407,7 +420,7 @@ export async function lastSynchronized(
   oldest?: Oid,
 ): Promise<{ commit: Oid; file: SideFile; text: string } | null> {
   for (const commit of await baselineCommits(git, linear, path, oldest)) {
-    const file = await synchronizedAt(git, commit, path, facts, sides);
+    const file = await synchronizedAt(git, commit, path, facts, sides, true);
     if (file !== undefined) return { commit, file, text: ((await readBlobs(git, [file.oid])).get(file.oid) as Buffer).toString('utf8') };
   }
   return null;
@@ -430,9 +443,12 @@ export async function baselineCommits(git: Git, linear: Oid, path: string, oldes
   return linked.length === 0 ? versions : await log([path, ...linked]);
 }
 
-/** The file at `path` as `commit` synchronizes it, or undefined when the sync leaves it out there. Calls that share `sides` read each commit once. */
-export async function synchronizedAt(git: Git, commit: Oid, path: string, facts: LinearFacts, sides: Map<Oid, Promise<Side>>): Promise<SideFile | undefined> {
-  if (!sides.has(commit)) sides.set(commit, synchronizedFiles(git, commit, facts));
+/**
+ * The file at `path` as `commit` synchronizes it, or undefined when the sync leaves it out there. Calls that share
+ * `sides` read each commit once, and pass the same `recorded`: whether the commits are the `linear` chain's.
+ */
+export async function synchronizedAt(git: Git, commit: Oid, path: string, facts: LinearFacts, sides: Map<Oid, Promise<Side>>, recorded = false): Promise<SideFile | undefined> {
+  if (!sides.has(commit)) sides.set(commit, synchronizedFiles(git, commit, facts, { recorded }));
   return (await (sides.get(commit) as Promise<Side>)).files.get(path);
 }
 

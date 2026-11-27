@@ -23,7 +23,7 @@ export const PRE_COMMIT = `repos:
   - repo: local
     hooks:
       - id: stable-fix
-      - id: aligned-table
+      - id: add-footnote
 `;
 
 export const MANY = 20;

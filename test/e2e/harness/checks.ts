@@ -11,11 +11,14 @@ import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts'
 import type { Definition, Image, Link, Nodes } from 'mdast';
 import { fixText } from '../../../src/format/fix.ts';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
+import { lintText } from '../../../src/format/lint.ts';
+import { LINT_RULE_BLOCKS, NOT_IN_LINEAR_EXPORT } from '../../../src/format/rules.ts';
+import { sameText } from '../../format/text-and-places.ts';
 import { readKeptAnnotations } from '../../../src/initial-sync/confirm.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
 import { IDS_FILE, PushedKey, readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
-import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
+import { annotatedFolders, annotationPath, heldBack, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
 import { ownedDocuments } from './ownership.ts';
 import { pullTracked } from './person-git.ts';
@@ -264,6 +267,15 @@ export function gitLinks(content: string, documentPath: string, targets: Require
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
   const expected = expectedDocumentText(text, path, sides);
   return expected === content || expected === fixText(content);
+}
+
+/**
+ * Whether a document differs from its file only by formatting Linear drops: the file has a construct Linear's
+ * export never holds (`NOT_IN_LINEAR_EXPORT`), and the document keeps its text, URLs and their places.
+ */
+export function formattingLinearDrops(text: string, content: string, path: string, sides: LinkTargets): boolean {
+  if (!lintText(path, text).some((finding) => NOT_IN_LINEAR_EXPORT.has(finding.rule))) return false;
+  return sameText(expectedDocumentText(text, path, sides), content);
 }
 
 /** The text a file's document must hold: the file's body, its links in Linear's form. */
@@ -703,12 +715,12 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   const readmes = new Map<string, string>();
   for (const path of tracked) if (/(^|\/)README\.md$/.test(path)) readmes.set(path, readFileSync(join(git.dir, path), 'utf8'));
   const folders = annotatedFolders(readmes);
-  // Files of the slice that the corpus marks as not synchronized or left out (lint errors) have no document.
+  // Files of the slice that the corpus marks as not synchronized or held back (blocking lint errors) have no document.
   const manifest = new Map(world.manifest.files.map((file) => [file.path, file]));
   const unsynced = new Set<string>();
   for (const [target, source] of world.tree.paths) {
     const entry = manifest.get(source);
-    if (entry !== undefined && (!entry.synced || entry.class === 'lint-error')) unsynced.add(target);
+    if (entry !== undefined && (!entry.synced || heldBack(entry))) unsynced.add(target);
   }
   const files = new Map<string, string>();
   const hashToPath = new Map<string, string>();
@@ -928,6 +940,25 @@ function capturedNothing(capture: Record<string, unknown> | null | undefined, do
   return documents.every((id) => !leftOut.has(id));
 }
 
+/** The paths a sync run's report says it wrote to Linear: updated, created, restored or moved. */
+function writtenPaths(report: Record<string, unknown> | null | undefined): string[] {
+  const sync = report?.['sync'] as { updated?: string[]; created?: string[]; restored?: string[]; relocated?: Array<{ to: string }> } | null | undefined;
+  if (sync === null || sync === undefined) return [];
+  return [...new Set([...(sync.updated ?? []), ...(sync.created ?? []), ...(sync.restored ?? []), ...(sync.relocated ?? []).map((entry) => entry.to)])].sort();
+}
+
+/** The paths whose file on the tracked branch has no lint finding, or one that holds it back from Linear. */
+async function writtenWithoutNonBlockingFinding(ctx: RunContext, paths: readonly string[]): Promise<string[]> {
+  const git = await ctx.person();
+  await pullTracked(git, ctx);
+  const unexpected: string[] = [];
+  for (const path of paths) {
+    const findings = lintText(path, readFileSync(join(git.dir, path), 'utf8'));
+    if (findings.length === 0 || findings.some((finding) => LINT_RULE_BLOCKS[finding.rule])) unexpected.push(path);
+  }
+  return unexpected;
+}
+
 export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   async I1(ctx, sides) {
     const s = await sides();
@@ -942,8 +973,10 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
         continue;
       }
       const actual = document.content ?? '';
-      // Linear stores a text it is sent without its final newline.
-      if (!sameAsFile(text, actual, path, s) && withoutFinalLineBreaks(expectedDocumentText(text, path, s)) !== actual) differing.push({ name: path, detail: `${path}: ${firstDifference(expectedDocumentText(text, path, s), actual)}` });
+      // Linear stores a text it is sent without its final newline, and drops formatting it does not hold: that
+      // comes back in the sync pull request, so until it is merged the file keeps it and the text is the same.
+      if (!sameAsFile(text, actual, path, s) && withoutFinalLineBreaks(expectedDocumentText(text, path, s)) !== actual
+        && !formattingLinearDrops(text, actual, path, s)) differing.push({ name: path, detail: `${path}: ${firstDifference(expectedDocumentText(text, path, s), actual)}` });
     }
     if (differing.length === 0) return ok('I1');
     // Every difference, kept in the run folder: the documents are archived at cleanup. A file that cannot be
@@ -1014,14 +1047,32 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 
   async I6(ctx) {
-    const before = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined)?.at(-1) ?? {};
+    const { STEP_ACTIONS } = await import('./steps.ts');
+    let before = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined)?.at(-1) ?? {};
+    // The first sync after an initial sync from git has its own work: it opens the format problems pull request for
+    // files left out for their Markdown, and takes in what Linear dropped of a file with a finding that does not hold
+    // it back (an aligned table's alignment), once. The runs settle first, within a bound: at most one of them writes
+    // documents to Linear, and only files whose findings all let them through. The no-change run after them must
+    // then write nothing.
+    if (ctx.live !== null && ctx.engine.results.at(-1)?.command === 'initial-sync') {
+      const settleFrom = ctx.engine.results.length;
+      try {
+        await (STEP_ACTIONS['run.settle'] as (c: RunContext, a: Record<string, unknown>) => Promise<void>)(ctx, {});
+      } catch (error) {
+        return bad('I6', `idempotence was not established: the runs after the initial sync did not settle (${error instanceof Error ? error.message : String(error)})`);
+      }
+      const writing = ctx.engine.results.slice(settleFrom).map((result) => writtenPaths(result.report)).filter((paths) => paths.length > 0);
+      if (writing.length > 1) return bad('I6', `idempotence was not established: ${writing.length} runs after the initial sync wrote documents (${writing.map((paths) => paths.join(', ')).join('; ')}); at most one may`);
+      const unexpected = writing.length === 0 ? [] : await writtenWithoutNonBlockingFinding(ctx, writing[0]!);
+      if (unexpected.length > 0) return bad('I6', `idempotence was not established: a run after the initial sync wrote files without a finding that lets them through: ${unexpected.join(', ')}`);
+      before = await snapshotRefs(ctx);
+    }
     const world = ctx.live;
     const trackedBefore = world === null ? undefined : await trackedTip(ctx);
     const pullRequestsBefore = world === null ? 0 : (await world.rest.pullRequests(`t/${ctx.names.runId}/`)).length;
     const proxy = ctx.proxy;
     const mutationsBefore = proxy?.counts().mutations ?? 0;
     const runsBefore = ctx.engine.results.length;
-    const { STEP_ACTIONS } = await import('./steps.ts');
     await (STEP_ACTIONS['run.sync'] as (c: RunContext, a: Record<string, unknown>) => Promise<void>)(ctx, {});
     const run = ctx.engine.results.length === runsBefore + 1 ? ctx.engine.results.at(-1) : undefined;
     if (run === undefined) return bad('I6', `idempotence was not established: expected one result for the no-change sync run, recorded ${ctx.engine.results.length - runsBefore}`);

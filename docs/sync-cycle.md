@@ -124,10 +124,11 @@ squash-merges that pull request, the record is still missing from the
 tracked branch, so the next run opens the pull request again.
 
 A file Linear cannot hold as it is, such as Markdown that Linear would
-change or lose ([linear-format.md](linear-format.md)), or an image over
-Linear's upload limit, is left out: it stays in git, and the run summary
-lists it under **Left out** with the rule that stopped it, until it is
-fixed.
+corrupt ([which rules hold a file back](linear-format.md#which-rules-hold-a-file-back)),
+or an image over Linear's upload limit, is left out: it stays in git, and
+the run summary lists it under **Left out** with the rule that stopped it,
+until it is fixed. A file whose Markdown only loses formatting in Linear is
+written; the loss comes back as a change in the sync pull request.
 
 A new document linking an LFS object the remote confirms is absent
 (404/410) is also left out, so the other changes can be recorded. The
