@@ -477,7 +477,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           // Matching compares titles in NFC; a new title is written in that form too, so the next run matches it.
           const title = item.entry.title.normalize('NFC');
           const id = documentIds.get(path) as string;
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body }, { sameContent: holdsText });
+          let changedBeforeRead = false;
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body }, { sameContent: holdsText }).catch((error: unknown) => {
+            // Renamed, moved or trashed before the lost answer was read back, still with this run's body: the create
+            // is the file's document, as if the change came just after the answer. The first sync takes the change in;
+            // until then it gets no mark, which could land outside the configured places.
+            if (!(error instanceof LinearCreateEditedError) || !error.contentAsSent) throw error;
+            changedBeforeRead = true;
+            return error.document;
+          });
           remember(path, created);
           sentHashes.set(path, hash);
           vouched.add(path);
@@ -485,7 +493,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           await checkpoint('document-created-before-ids-push');
           written += 1;
           unpushed += 1;
-          await reconcileMark(path, created, hash);
+          if (!changedBeforeRead) await reconcileMark(path, created, hash);
         } else {
           // The document may have moved, been trashed or edited since the plan read it: write only the one planned.
           const current = await linear.getDocument(item.entry.documentId);

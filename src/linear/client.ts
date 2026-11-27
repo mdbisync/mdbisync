@@ -304,10 +304,12 @@ export class LinearClient {
    * same id, at most `CREATE_ATTEMPTS` times in all. The id makes the retry
    * safe: Linear cannot hold two documents with it.
    *
-   * A document found that way is this create's write only while it holds the
-   * content sent: `sameContent(stored, sent)`, or exact equality without it.
-   * Someone may have edited it between the lost answer and the read, so one
-   * holding other content throws `LinearCreateEditedError` with it.
+   * A document found that way is this create's write only while it is as
+   * sent: in the place and under the title sent, not trashed or archived, and holding the
+   * content sent (`sameContent(stored, sent)`, or exact equality without it).
+   * Someone may have edited, renamed, moved or trashed it between the lost
+   * answer and the read, so any other one throws `LinearCreateEditedError`
+   * with it: the create was applied all the same, and is not sent again.
    */
   async createDocument(place: DocumentPlace, input: CreateDocumentInput, { sameContent = (stored: string, sent: string) => stored === sent }: CreateOptions = {}): Promise<LinearDocument> {
     this.#refuseTooLong('CreateDocument', input);
@@ -321,10 +323,12 @@ export class LinearClient {
         // A refusal of the first try is an answer: nothing was created.
         if (!transient && attempt === 1) throw error;
         // A lost try may have been applied; after one, a refusal may be Linear refusing the id that try took.
-        const found = await this.#findCreated(id, place, input.title, error);
+        const found = await this.#findCreated(id, error);
         if (found !== undefined) {
           this.stats.wrote('CreateDocument');
-          if (!sameContent(found.content ?? '', input.content ?? '')) throw new LinearCreateEditedError('CreateDocument', found);
+          const contentAsSent = sameContent(found.content ?? '', input.content ?? '');
+          const samePlace = place.projectId !== undefined ? found.projectId === place.projectId : found.teamId === place.teamId && found.projectId === null;
+          if (!contentAsSent || !samePlace || found.title.normalize('NFC') !== input.title.normalize('NFC') || found.trashed || found.archivedAt !== null) throw new LinearCreateEditedError('CreateDocument', found, contentAsSent);
           return found;
         }
         if (!transient || attempt >= CREATE_ATTEMPTS) throw error;
@@ -625,12 +629,13 @@ export class LinearClient {
 
   /**
    * The document a lost create made, read back with its stored content, or
-   * undefined when Linear does not have the id. A document with the id in
-   * another place or under another title is not this create's: the create's
-   * own error is thrown. A read Linear fails throws that error too, so the
-   * caller reports the create; a stop and any other failure are thrown as they are.
+   * undefined when Linear does not have the id. The id is one the caller
+   * chose and found free before the create, so a document with it is this
+   * create's wherever it is now. A read Linear fails throws the create's own
+   * error, so the caller reports the create; a stop and any other failure are
+   * thrown as they are.
    */
-  async #findCreated(id: string, place: DocumentPlace, title: string, createError: LinearError): Promise<LinearDocument | undefined> {
+  async #findCreated(id: string, createError: LinearError): Promise<LinearDocument | undefined> {
     let found: LinearDocument | undefined;
     try {
       [found] = await this.#documentsById([id], { withContent: true }, false);
@@ -638,9 +643,6 @@ export class LinearClient {
       if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
       throw createError;
     }
-    if (found === undefined) return undefined;
-    const samePlace = place.projectId !== undefined ? found.projectId === place.projectId : found.teamId === place.teamId && found.projectId === null;
-    if (!samePlace || found.title !== title || found.trashed) throw createError;
     return found;
   }
 

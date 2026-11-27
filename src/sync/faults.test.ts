@@ -543,6 +543,95 @@ describe('sync: rate limits and transport faults', () => {
     assert.equal(withNewPage().length, 1, 'created once');
   });
 
+  // A rename, move or trash Linear applied between the lost answer and the read-back: the create is the file's document.
+  const changesBeforeRead: { name: string; change: (document: FakeDocument) => void; next: (id: string) => Promise<void> }[] = [
+    {
+      name: 'renames',
+      change: (document) => { document.title = 'Renamed in Linear'; },
+      next: async (id) => {
+        // The rename is taken in as a rename of the file.
+        assert.deepEqual(Object.entries(await ids()).filter(([, entry]) => entry.id === id).map(([path]) => path), ['combined/Renamed in Linear.md']);
+        assert.match(await recorded('combined/Renamed in Linear.md'), /A new page\./);
+      },
+    },
+    {
+      name: 'moves out of the synchronized places',
+      change: (document) => { document.projectId = 'project-api'; },
+      next: async (id) => {
+        assert.ok(!Object.values(await ids()).some((entry) => entry.id === id), 'the moved document is still mapped');
+        assert.equal(world.linear.documents.find((d) => d.id === id)?.projectId, 'project-api');
+      },
+    },
+    {
+      name: 'trashes',
+      change: (document) => { document.trashed = true; document.archivedAt = new Date().toISOString(); },
+      next: async (id) => {
+        assert.ok(!Object.values(await ids()).some((entry) => entry.id === id), 'the trashed document is still mapped');
+        assert.equal(world.linear.documents.find((d) => d.id === id)?.trashed, true);
+      },
+    },
+  ];
+  for (const { name, change, next: takenIn } of changesBeforeRead) {
+    it(`a lost create whose document a person ${name} before it is read back is the file's document; the next run takes the change in`, async () => {
+      const path = 'combined/new.md';
+      await commit({ [path]: `# New\n\nA new page. ${CANARY}` });
+      let createdId: string | undefined;
+      transport.arm({
+        writeError: 'reset-after',
+        writeErrorOn: 'CreateDocument',
+        beforeFaultedCreateRead: (id) => {
+          createdId = id;
+          const document = world.linear.documents.find((d) => d.id === id) as FakeDocument;
+          change(document);
+          touch(document);
+        },
+      });
+      const run = await sync();
+      assert.equal(run.result.exitCode, 0, run.result.stderr);
+      assert.ok(createdId !== undefined, 'the fault never fired');
+      assert.deepEqual(run.report.sync?.failed, []);
+      assert.deepEqual(run.report.sync?.created, [path]);
+      assert.equal(transport.exchanges.filter((exchange) => exchange.operation === 'CreateDocument').length, 1, 'a create Linear applied is read back, not sent again');
+      assert.equal(await idOf(path), createdId);
+
+      transport.clear();
+      const next = await sync();
+      assert.equal(next.result.exitCode, 0, next.result.stderr);
+      const pages = world.linear.documents.filter((d) => d.content?.includes('A new page.') === true);
+      assert.deepEqual(pages.map((d) => d.id), [createdId], 'no second document');
+      await takenIn(createdId);
+      // The file follows the document: Linear's side no longer holds it at the path the create was made for.
+      assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/mdbisync/linear:${path}`], { okCodes: [0, 128] })).code, 128);
+      assert.deepEqual(next.report.sync?.restored, [], 'the person\'s change is not undone');
+    });
+  }
+
+  it('a lost create moved out of the synchronized places before it is read back gets no conflict mark or comment there', async () => {
+    const path = 'combined/new.md';
+    const conflicted = '**Sync conflict: git version**\n\nMine.\n\n**Sync conflict: Linear version**\n\nTheirs.\n\n**Sync conflict: end**\n';
+    await commit({ [path]: `# New\n\nA new page. ${CANARY}\n\n${conflicted}` });
+    let createdId: string | undefined;
+    transport.arm({
+      writeError: 'reset-after',
+      writeErrorOn: 'CreateDocument',
+      beforeFaultedCreateRead: (id) => {
+        createdId = id;
+        const document = world.linear.documents.find((d) => d.id === id) as FakeDocument;
+        document.projectId = 'project-api';
+        touch(document);
+      },
+    });
+    const commentsBefore = world.linear.comments.size;
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.ok(createdId !== undefined, 'the fault never fired');
+    assert.deepEqual(run.report.sync?.created, [path]);
+    const moved = world.linear.documents.find((d) => d.id === createdId) as FakeDocument;
+    assert.equal(moved.projectId, 'project-api');
+    assert.deepEqual({ icon: moved.icon ?? null, color: moved.color ?? null }, { icon: null, color: null }, 'marked outside the synchronized places');
+    assert.equal(world.linear.comments.size, commentsBefore, 'commented outside the synchronized places');
+  });
+
   it('L5-10: a document Linear rejects is named; the others are written; the run exits partial', async () => {
     await editAll(3, 'Second text.');
     transport.arm({ rejectId: await idOf(pathOf(1)) });
