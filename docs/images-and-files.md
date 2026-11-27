@@ -25,7 +25,8 @@ and do not upload repository files.
 ## From Linear to git
 
 Images and documents pasted in Linear land in an `assets/` folder beside
-the document, one per folder, named by content (`assets/<sha256>.png`).
+the document, one per folder, named by content (`assets/<sha256>.png`, or
+`assets/<sha256>-1.png` and so on when that name is taken).
 Downloaded files use the extension detected from their bytes, regardless of
 the upload URL or declared content type.
 
@@ -55,7 +56,7 @@ identified from their bytes. An SVG is blocked when it has `script` or
 `xml:base` or non-fragment `href` references.
 
 Files already in the repository keep working, except a file an earlier sync
-captured (named `<sha256>.<ext>`) that the check now refuses: a document
+captured (named `<sha256>.<ext>` or `<sha256>-<n>.<ext>`) that the check now refuses: a document
 that links it again from Linear is blocked, and `mdbisync lint` names the
 file (`upload-file-refused`) for you to remove or replace.
 

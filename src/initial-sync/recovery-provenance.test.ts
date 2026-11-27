@@ -216,6 +216,41 @@ describe('an initial sync keeps plain-link provenance', () => {
     assert.equal((await h.ids() as Record<string, { plainFiles?: string[] }>)[ITEM]?.plainFiles, undefined);
   });
 
+  it('through an initial sync from Linear with every state ref deleted: an upload whose capture a path link of Linear\'s text names gets its own capture', async () => {
+    await repairedLink();
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"></svg>\n';
+    const url = `${UPLOADS_HOST}/member/drawing`;
+    h.world.linear.uploads.push({ filename: 'drawing', contentType: 'image/svg+xml', size: Buffer.byteLength(svg), assetUrl: url, bytes: Buffer.from(svg) });
+    await h.editInLinear(ITEM, `${(await h.documentOf(ITEM)).content}\n[Drawing](${url})\n`);
+    await h.settle();
+    const captured = /assets\/([0-9a-f]{64})\.svg/.exec(await h.show(`refs/heads/main:${ITEM}`));
+    assert.ok(captured !== null, 'the capture did not take the upload in');
+    // A Linear member links the capture's file as a repository path beside the upload; the state is lost.
+    const item = await h.documentOf(ITEM);
+    for (const name of ['ids', 'uploads', 'linear']) await deleteRef(name);
+    item.content = `${item.content}\n[Copy](${captured[0]})\n`;
+    const run = await h.cli('initial-sync', { MDBISYNC_DIRECTION: 'linear-to-git', MDBISYNC_CONFIRM: 'true' });
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.report.linearToGit?.leftOutAtRecord, []);
+    // The upload takes a capture of its own; the member's link stays plain and keeps its path.
+    const text = await h.show(`refs/mdbisync/linear:${ITEM}`);
+    assert.match(text, new RegExp(`\\[Drawing\\]\\(<?assets/${captured[1]}-1\\.svg>?\\)`));
+    assert.match(text, new RegExp(`\\[Copy\\]\\(<?assets/${captured[1]}\\.svg>?\\)`));
+    assert.equal(await h.show(`refs/mdbisync/linear:eng/notes/assets/${captured[1]}-1.svg`), svg);
+    assert.deepEqual((await h.ids() as Record<string, { plainFiles?: string[] }>)[ITEM]?.plainFiles, [`eng/notes/${captured[0]}`]);
+    // Later runs keep the document syncing, and the member's link never uploads its file.
+    for (const pr of h.world.github.pullRequests.filter((pr) => pr.state === 'open' && pr.head === 'mdbisync/linear')) {
+      const head = await h.fixture.remote.text(['rev-parse', `refs/heads/${pr.head}`]);
+      assert.ok('sha' in await mergeOnGitHub(h.fixture, pr, head.trim()));
+      Object.assign(pr, { state: 'closed', merged: true });
+    }
+    h.start = (await h.fixture.remote.text(['rev-parse', 'refs/heads/main'])).trim();
+    await h.gitEdit(ITEM, `${await h.show(`refs/heads/main:${ITEM}`)}\nA repository edit.\n`);
+    for (let attempt = 0; attempt < 3; attempt += 1) assert.equal((await h.sync()).result.exitCode, 0);
+    assert.ok(!h.world.linear.uploads.some((upload) => upload.filename === `${captured[1]}.svg`), 'a sync uploaded the file a Linear member linked');
+    assert.match((await h.documentOf(ITEM)).content!, /A repository edit\./);
+  });
+
   it('through an initial sync from Linear with every state ref deleted, stopped after the document and resumed', async () => {
     await repairedLink();
     await unrecordedLink();

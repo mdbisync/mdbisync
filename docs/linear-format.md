@@ -1211,7 +1211,8 @@ Instead, fix the path, or add the missing file in the same change.
 A file named as the sync names a captured upload fails the upload check:
 documents that link it are blocked when they change in Linear. When the
 sync captures a file uploaded in Linear, it names it by its content's
-SHA-256 and the extension of its type (`<sha256>.png`). A later sync checks
+SHA-256 and the extension of its type (`<sha256>.png`, or `<sha256>-1.png`
+when that name is taken). A later sync checks
 such a file again before a document links it, and a file an earlier, weaker
 check admitted, such as an SVG with HTML inside it, no longer passes. `lint`
 reports every such file under the paths it checks, so `mdbisync lint` with

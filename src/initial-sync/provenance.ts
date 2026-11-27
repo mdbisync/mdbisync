@@ -9,7 +9,8 @@
 // in the ids it records.
 
 import { posix } from 'node:path';
-import { type Direction, type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, INITIAL_SYNC_PROGRESS, parseInitialSyncProgress, readIds } from '../state/index.ts';
+import { createHash } from 'node:crypto';
+import { type Direction, type Git, type IdMap, type Oid, type StateSnapshot, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, INITIAL_SYNC_PROGRESS, parseInitialSyncProgress, parseLfsPointer, readIds } from '../state/index.ts';
 import { listPaths } from '../state/objects.ts';
 import { ASSETS_FOLDER, isCaptureName } from '../sync/upload-type.ts';
 import { readPlainFileProvenance } from '../sync/pull-repairs.ts';
@@ -192,13 +193,25 @@ const HISTORY_FILE_BYTES = 4 * 1024 * 1024;
  * across renames, and a relative link added under an earlier path counts
  * both where it pointed then and where it points from `path`. A link written
  * in git that those commits only carried over is not one, nor is a capture's
- * own file in the document's `assets/` folder, which holds an upload's bytes.
+ * own file in the document's `assets/` folder whose bytes still have the hash
+ * its name gives: they are an upload's.
  * A version that no parse reads, or that is too large to read, may have
  * added any of them.
  */
 export async function linksTakenInFromLinear(git: Git, tracked: Oid, path: string, current: readonly string[]): Promise<Set<string>> {
+  // A capture's own file in the document's `assets/` folder: named by its bytes' hash, which they still have.
   const assets = posix.join(posix.dirname(path), ASSETS_FOLDER);
-  const wanted = new Set(current.filter((target) => !(posix.dirname(target) === assets && isCaptureName(target))));
+  const named = [...new Set(current.filter((target) => posix.dirname(target) === assets && isCaptureName(target)))];
+  const captures = new Set<string>();
+  const listed = named.length === 0 ? [] : (await listPaths(git, tracked, named)).filter((entry) => entry.type === 'blob');
+  const blobs = listed.length === 0 ? new Map<Oid, Buffer>() : await git.readBlobs(listed.map((entry) => entry.oid));
+  for (const entry of listed) {
+    const blob = blobs.get(entry.oid);
+    if (blob === undefined) continue;
+    const hash = parseLfsPointer(blob)?.oid ?? createHash('sha256').update(blob).digest('hex');
+    if (posix.basename(entry.path).startsWith(hash)) captures.add(entry.path);
+  }
+  const wanted = new Set(current.filter((target) => !captures.has(target)));
   const found = new Set<string>();
   if (wanted.size === 0) return found;
   const intake = new Set([CAPTURE_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD, INITIAL_SYNC_FROM_LINEAR_TITLE, SYNC_PULL_REQUEST_TITLE]);

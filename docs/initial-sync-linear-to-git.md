@@ -82,7 +82,8 @@ What it writes to git:
   document are removed, except annotation `README.md` files;
 - images and other files a document embeds from Linear are downloaded into
   the `assets/` folder beside it, named by their content's SHA-256 hash
-  (`assets/<hash>.png`), and linked relatively. A file the tracked text
+  (`assets/<hash>.png`, or `assets/<hash>-1.png` when that name is taken),
+  and linked relatively. A file the tracked text
   already links, or such a capture already in that `assets/` folder, is linked
   instead of copied; another file with the same content never is, so a
   document never comes to link a file its text did not name. The repository's `.gitattributes` decides whether a file
