@@ -8,7 +8,7 @@
 // document itself.
 
 import { fixLinearText, fixText, linkedFileCheck, relativeFileBlocksAsLinks, sameAsLinear } from '../format/index.ts';
-import { parse, visit } from '../format/markdown.ts';
+import { MarkdownLimitError, parse, visit } from '../format/markdown.ts';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { type LinearClient } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap } from '../state/index.ts';
@@ -158,4 +158,20 @@ export function restoreBody(transforms: readonly BodyTransform[], path: string, 
   for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
   if (kept) return current;
   return fixLinearText(current, content, linkedFileCheck(path, (file) => files.has(file)), sent);
+}
+
+/**
+ * `restoreBody` for a document already written, or undefined when Linear
+ * stored the body in a form past the Markdown limits, which `fix` cannot
+ * put in the file's form. The record then keeps the file as it is, so the
+ * run records the other documents instead of stopping; a capture of a later
+ * edit in Linear finds the text over the limits and leaves the document out.
+ */
+export function restoreWrittenBody(transforms: readonly BodyTransform[], path: string, content: string, sent: string, files: ReadonlySet<string>): string | undefined {
+  try {
+    return restoreBody(transforms, path, content, sent, files);
+  } catch (error) {
+    if (error instanceof MarkdownLimitError) return undefined;
+    throw error;
+  }
 }

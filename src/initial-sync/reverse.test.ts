@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fixText } from '../format/index.ts';
 import { hookRun } from '../format/test-helpers.ts';
+import { MarkdownLimitError } from '../format/markdown.ts';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
@@ -1929,6 +1930,35 @@ describe('the security gate of an initial sync from Linear', () => {
       assert.deepEqual(run.result.leftOutAtRecord, []);
       const uploads = await run.fixture.remote.text(['show', 'refs/mdbisync/uploads:uploads.json']);
       assert.ok(uploads.includes(url), 'the passed URL is missing from the cache');
+    } finally {
+      await run.fixture.cleanup();
+    }
+  });
+
+  it('leaves out a document whose text a left-out link target puts past the Markdown limits, before the hooks read it', async () => {
+    // The runbook links the FAQ, a new document left out (its text reads as front matter): the link turns back into
+    // its Linear URL. Tables `fix` ends one after another fit its budget with the relative link, not with that URL.
+    const faq = `https://linear.app/example-team/document/doc-faq`;
+    const chain = (count: number) => '| A |\n| -- |\ntext\n'.repeat(count);
+    const runbook = (count: number, link: string) => `# Runbook\n\n${chain(count)}See [the FAQ](${link}).\n${chain(3)}`;
+    const fits = (text: string) => { try { fixText(text); return true; } catch (error) { if (error instanceof MarkdownLimitError) return false; throw error; } };
+    // The shortest chain that does not fit with the URL; it still fits with the relative link.
+    let [low, count] = [0, 200];
+    while (low < count) {
+      const middle = (low + count) >> 1;
+      if (fits(runbook(middle, `<${faq}>`))) low = middle + 1;
+      else count = middle;
+    }
+    assert.ok(fits(runbook(count, '../notes/faq.md')) && !fits(runbook(count, `<${faq}>`)), 'no chain fits only with the relative link');
+    const run = await importUpload('limit-after-left-out', 'never-written', `${UPLOADS_HOST}/0/chart.pdf`, (d) => (
+      d.id === 'doc-faq' ? { ...d, content: `---\nlinear-team: DOCS\n---\nLooks like metadata. ${CANARY}` }
+        : d.id === 'doc-runbook' ? { ...d, content: runbook(count, faq) } : d
+    ));
+    try {
+      assert.deepEqual(run.result.leftOutAtRecord, [
+        { path: 'eng/notes/faq.md', rule: 'front-matter-boundary' },
+        { path: 'eng/ops/runbook.md', rule: 'markdown-complexity' },
+      ]);
     } finally {
       await run.fixture.cleanup();
     }

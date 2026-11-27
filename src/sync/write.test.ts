@@ -800,6 +800,22 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  it('records the file as it is when Linear stores a written document in a form past the Markdown limits, and records the rest', async () => {
+    // A chain of tables `fix` cannot end within its budget: putting Linear's form into the file's form would stop.
+    world.linear.store = (content) => (content.startsWith('# Plan') ? `${content}\n${'| A |\n| -- |\ntext\n'.repeat(2_000)}` : content);
+    const plan = `---\nowner: example\n---\n\n# Plan\n\nStep three. ${CANARY}\n`;
+    const review = `# Review\n\nMore findings. ${CANARY}\n`;
+    await commit({ 'eng/notes/plan.md': plan, 'eng/notes/review.md': review });
+    const { result } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), plan);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/review.md'), review);
+    assert.equal((await documentOf('eng/notes/review.md')).content, `# Review\n\nMore findings. ${CANARY}\n`);
+    // Until someone edits it, the document is not read, written or left out again.
+    await assertIdempotent();
+    assert.deepEqual((await sync()).report.sync?.leftOutAtWrite, []);
+  });
+
   it("a document Linear reformats into other Markdown is recorded in Linear's form; its sync pull request merged, the next run writes nothing", async () => {
     // Like Linear: a reference link is stored inline.
     world.linear.store = (content) => fixText(content);
