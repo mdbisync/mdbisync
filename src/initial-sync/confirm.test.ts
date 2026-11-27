@@ -561,21 +561,136 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(sync.exitCode, NO_STATE_EXIT_CODE, sync.stderr);
   });
 
-  it('a resumed run does not reuse the id of a document trashed since the stop', async () => {
+  const changesSinceStop: { name: string; change: (document: FakeWorld['linear']['documents'][number]) => void }[] = [
+    { name: 'renamed', change: (document) => { document.title = 'Renamed in Linear'; } },
+    { name: 'moved out of the synchronized places', change: (document) => { document.teamId = 'team-docs'; } },
+    { name: 'trashed', change: (document) => { document.trashed = true; document.archivedAt = new Date().toISOString(); } },
+  ];
+  for (const { name, change } of changesSinceStop) {
+    it(`a resumed run keeps a document the stopped run created and a person ${name} since; the first sync takes the change in`, async () => {
+      const world = fakeWorld();
+      world.linear.writes.rateLimitAt = 4;
+      assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+      const path = 'eng/backend/notes.md';
+      const id = (await readIds())[path]?.id as string;
+      const document = world.linear.documents.find((d) => d.id === id);
+      assert.ok(document !== undefined && document.content === SYNCED[path].body, `${path} was not written by the first run`);
+      change(document);
+      touch(document);
+      const changed = structuredClone(document);
+
+      delete world.linear.writes.rateLimitAt;
+      const { result, report } = await run(world);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(report.resumed, true);
+      assert.ok(report.initialSync?.skippedCompleted.includes(path), JSON.stringify(report.initialSync));
+      assert.ok(!report.initialSync?.created.includes(path) && !report.initialSync?.trashed.some((trashed) => trashed.includes(id)));
+      assert.deepEqual(report.initialSync?.leftOutAtWrite, []);
+      // One document holds the file's text, left as the person changed it.
+      assert.deepEqual(world.linear.documents.filter((d) => d.content === SYNCED[path].body).map((d) => d.id), [id]);
+      assert.deepEqual(world.linear.documents.find((d) => d.id === id), changed);
+      assert.equal((await readIds())[path]?.id, id);
+
+      const sync = await runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
+      assert.equal(sync.exitCode, 0, sync.stderr);
+      assert.deepEqual(world.linear.documents.filter((d) => d.content === SYNCED[path].body).map((d) => d.id), [id]);
+      assert.deepEqual(world.linear.documents.find((d) => d.id === id), changed);
+      assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/mdbisync/linear:${path}`], { okCodes: [0, 128] })).code, 128);
+      // A renamed document's file follows it; a moved or trashed one leaves the synchronized files.
+      const at = Object.entries(await readIds()).filter(([, entry]) => entry.id === id).map(([mapped]) => mapped);
+      assert.deepEqual(at, name === 'renamed' ? ['eng/Renamed in Linear.md'] : []);
+    });
+  }
+
+  for (const edit of ['edited in Linear', 'changed in git'] as const) {
+    it(`a resumed run leaves out a document the stopped run created that a person renamed since and that was ${edit}; the first sync keeps one document`, async () => {
+      const world = fakeWorld();
+      world.linear.writes.rateLimitAt = 4;
+      assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+      const path = 'eng/backend/notes.md';
+      const id = (await readIds())[path]?.id as string;
+      const document = world.linear.documents.find((d) => d.id === id);
+      assert.ok(document !== undefined);
+      document.title = 'Renamed in Linear';
+      if (edit === 'edited in Linear') document.content = `${document.content ?? ''}\n\nTyped in Linear.`;
+      else await fixture.seed({ [path]: `# Notes\n\nRevised. ${CANARY}` });
+      touch(document);
+      const changed = structuredClone(document);
+
+      delete world.linear.writes.rateLimitAt;
+      const { result, report } = await run(world);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.deepEqual(report.initialSync?.leftOutAtWrite, [{ path, rule: 'changed-during-run' }]);
+      assert.deepEqual(report.initialSync?.trashed, []);
+      assert.ok(!report.initialSync?.created.includes(path));
+      // Neither overwritten, trashed nor duplicated; its id stays reserved for the path.
+      assert.deepEqual(world.linear.documents.find((d) => d.id === id), changed);
+      assert.equal(world.linear.documents.filter((d) => d.title === 'backend/notes').length, 0);
+      assert.equal((await readIds())[path], undefined);
+      assert.equal((JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json')) as Record<string, string>)[path], id);
+
+      // The sync takes the document in at its new title as Linear holds it, and creates no document for the file,
+      // on the first run or the next.
+      for (let syncs = 0; syncs < 2; syncs += 1) {
+        const sync = await runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world), checkClock: virtualCheckClock() });
+        assert.equal(sync.exitCode, 0, sync.stderr);
+      }
+      assert.deepEqual(world.linear.documents.filter((d) => d.content?.includes('# Notes') === true).map((d) => d.id), [id]);
+      assert.deepEqual(world.linear.documents.find((d) => d.id === id), changed);
+      const at = Object.entries(await readIds()).filter(([, entry]) => entry.id === id).map(([mapped]) => mapped);
+      assert.deepEqual(at, ['eng/Renamed in Linear.md']);
+    });
+  }
+
+  it('a resumed run that Linear rate limits while it reads the stopped run\'s documents stops and runs again', async () => {
     const world = fakeWorld();
-    world.linear.writes.rateLimitAt = 3;
+    world.linear.writes.rateLimitAt = 4;
     assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
-    const [first] = SYNCED_PATHS as [string];
-    const trashedId = (await readIds())[first]?.id as string;
-    const trashed = world.linear.documents.find((d) => d.id === trashedId);
-    assert.ok(trashed !== undefined);
-    trashed.trashed = true;
+    const path = 'eng/backend/notes.md';
+    const id = (await readIds())[path]?.id as string;
+    const document = world.linear.documents.find((d) => d.id === id);
+    assert.ok(document !== undefined);
+    document.trashed = true;
+    touch(document);
+    delete world.linear.writes.rateLimitAt;
+
+    let limited = false;
+    const wrap = (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) => {
+      const request = String(input) === `${LINEAR_API}/graphql` ? JSON.parse(String(init?.body)) as { operationName?: string; variables?: { ids?: string[] } } : undefined;
+      if (!limited && request?.operationName === 'GetDocuments' && request.variables?.ids?.includes(id) === true) {
+        limited = true;
+        return new Response(JSON.stringify({ errors: [{ message: 'Rate limit exceeded', extensions: { code: 'RATELIMITED' } }] }), { status: 429, headers: { 'content-type': 'application/json' } });
+      }
+      return fetch(input, init);
+    };
+    const stopped = await run(world, {}, wrap);
+    assert.ok(limited, 'the fault never fired');
+    assert.equal(stopped.result.exitCode, INCOMPLETE_EXIT_CODE, stopped.result.stderr);
+    assert.equal(stopped.report.code, 'stopped');
+
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.initialSync?.skippedCompleted.includes(path));
+    assert.deepEqual(world.linear.documents.filter((d) => d.content?.includes('# Notes') === true).map((d) => d.id), [id]);
+  });
+
+  it('a resumed run does not keep a document the stopped run created that a person gave another file\'s title: it is that title\'s newer duplicate', async () => {
+    const world = fakeWorld();
+    world.linear.writes.rateLimitAt = 4;
+    assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    const path = 'eng/backend/notes.md';
+    const id = (await readIds())[path]?.id as string;
+    const document = world.linear.documents.find((d) => d.id === id);
+    assert.ok(document !== undefined);
+    document.title = 'README';
+    touch(document);
 
     delete world.linear.writes.rateLimitAt;
     const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.ok(report.initialSync?.created.includes(first), `${first} was not created again`);
-    assert.notEqual((await readIds())[first]?.id, trashedId);
+    assert.ok(report.initialSync?.trashed.includes('eng/README.md'), JSON.stringify(report.initialSync));
+    assert.ok(report.initialSync?.created.includes(path));
+    assert.notEqual((await readIds())[path]?.id, id);
     await assertConverged(world);
   });
 

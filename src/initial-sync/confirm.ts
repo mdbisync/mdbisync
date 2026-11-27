@@ -21,8 +21,10 @@
 // `linear`. Run again with the same inputs: while the `ids` tip is a
 // progress commit, recorded documents are skipped, and a document created
 // just before a crash, before its id was pushed, is matched by its title
-// like any other. Run again after the state is lost and the refs are
-// rebuilt, without duplicates.
+// like any other. One recorded and since renamed, moved out of the places or
+// trashed stays its file's document, neither trashed nor created again; the
+// first sync takes the change in. Run again after the state is lost and the
+// refs are rebuilt, without duplicates.
 
 import { assessCapacity, capacityBlocked } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -375,17 +377,63 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   // A file left out while writing on an earlier run keeps the id reserved for it then.
   const reserved = await readReservedIds(git, expected.ids);
   const saved = new Map<string, string>();
+  // A document the stopped run created or wrote for a path the plan creates: someone renamed it, moved it out of the
+  // places or trashed it since, so the plan found no document with its title. It stays the path's document (no
+  // second one, and it is not trashed); the first sync takes the change in. Not when it now has another file's
+  // title: then the plan made it that file's document, a left-out file's, or a newer duplicate of that title.
+  const filePaths = new Set([...plan.create, ...plan.overwrite, ...plan.leftOut].map((entry) => entry.path));
+  const claimed = new Set([
+    ...plan.overwrite.map((entry) => entry.documentId),
+    ...plan.leftOut.flatMap((entry) => (entry.documentId === undefined ? [] : [entry.documentId])),
+    ...plan.trash.filter((entry) => filePaths.has(entry.path)).map((entry) => entry.documentId),
+  ]);
+  const stoppedRunIds = new Map<string, string>();
   for (const entry of plan.create) {
-    const chosen = (resumed ? previous.get(entry.path)?.id : undefined) ?? reserved.get(entry.path);
-    if (chosen !== undefined && !sources.documents.has(chosen)) saved.set(entry.path, chosen);
+    const before = resumed ? previous.get(entry.path)?.id : undefined;
+    const chosen = before ?? reserved.get(entry.path);
+    if (chosen === undefined) continue;
+    if (!sources.documents.has(chosen)) saved.set(entry.path, chosen);
+    if (before !== undefined && !claimed.has(before)) stoppedRunIds.set(entry.path, before);
   }
   // An id absent from the listed containers may still exist elsewhere in
-  // Linear. Check before reusing it: create refuses an existing id.
-  const taken = new Set<string>();
-  if (saved.size > 0) for (const document of await linear.getDocuments([...new Set(saved.values())])) taken.add(document.id);
+  // Linear. Check before reusing it: create refuses an existing id. The
+  // stopped run's documents are read with their content, to compare with the
+  // file, unless the plan read it already (a live one in its places; the
+  // listing holds none for trashed or archived ones).
+  const inPlace = (id: string) => sources.documents.get(id)?.content !== undefined;
+  const withContent = new Set([...stoppedRunIds.values()].filter((id) => !inPlace(id)));
+  const withoutContent = new Set([...saved.values()].filter((id) => !withContent.has(id)));
+  let read: LinearDocument[];
+  try {
+    read = [
+      ...(withContent.size > 0 ? await linear.getDocuments([...withContent], { withContent: true }) : []),
+      ...(withoutContent.size > 0 ? await linear.getDocuments([...withoutContent]) : []),
+    ];
+  } catch (error) {
+    if (!(error instanceof LinearStoppedError)) throw error;
+    // Nothing written yet: run again, as after any stop.
+    result.stopped = error.reason;
+    result.code = 'stopped';
+    result.notAttempted = [...plan.create, ...plan.overwrite, ...plan.trash].map((entry) => entry.path).sort();
+    return { plan, result };
+  }
+  const found = new Map(read.map((document) => [document.id, document]));
+  for (const id of stoppedRunIds.values()) {
+    const listed = sources.documents.get(id);
+    if (listed !== undefined && inPlace(id)) found.set(id, listed);
+  }
+  const taken = new Set(read.map((document) => document.id));
+  const createdElsewhere = new Map<string, LinearDocument>();
+  for (const [path, id] of stoppedRunIds) {
+    const document = found.get(id);
+    if (document !== undefined) createdElsewhere.set(path, document);
+  }
+  /** The ids of those documents: no trash entry of the plan takes them. */
+  const keptElsewhere = new Set([...createdElsewhere.values()].map((document) => document.id));
   for (const entry of plan.create) {
     const chosen = saved.get(entry.path);
-    documentIds.set(entry.path, chosen !== undefined && !taken.has(chosen) ? chosen : newId());
+    const kept = createdElsewhere.get(entry.path)?.id;
+    documentIds.set(entry.path, kept ?? (chosen !== undefined && !taken.has(chosen) ? chosen : newId()));
     ids.set(entry.path, withPlainFiles(entry.path, { id: documentIds.get(entry.path) as string }));
   }
 
@@ -406,7 +454,10 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         break;
       }
 
-      const document = item.kind === 'overwrite' ? sources.documents.get(item.entry.documentId) : undefined;
+      const document = item.kind === 'overwrite' ? sources.documents.get(item.entry.documentId) : createdElsewhere.get(path);
+      const elsewhere = item.kind === 'create' && document !== undefined;
+      // Out of its places, trashed or archived, its mark waits for the first sync.
+      const unmarked = elsewhere && !inPlace(document.id);
       if (item.kind === 'overwrite' && document === undefined) throw new Error(message('initial-sync.document-not-listed', { path }));
 
       try {
@@ -447,7 +498,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           vouched.add(path);
           remember(path, document);
           // The stopped run may have stopped between the write and the mark.
-          await reconcileMark(path, document, hash);
+          if (!unmarked) await reconcileMark(path, document, hash);
           continue;
         }
         if (document !== undefined && holds()) {
@@ -457,13 +508,16 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           sentHashes.delete(path);
           vouched.delete(path);
           remember(path, document);
-          await reconcileMark(path, document, hash);
+          if (!unmarked) await reconcileMark(path, document, hash);
           continue;
         }
         // The stopped run chose this document's id for the path and created it, but never recorded what it holds:
         // its lost answer was read back edited, or the read-back failed. Text other than the body is someone's edit
         // since, so it is left out as when the stopped run saw it, never overwritten.
-        if (document !== undefined && resumed && before?.id === document.id && before.observedDigest === undefined && !writtenBefore.has(path)) {
+        // So is one the stopped run created that someone renamed, moved or trashed and that no longer holds the text
+        // to send (edited, or the file changed): the first sync takes it in as Linear holds it.
+        if (document !== undefined && resumed && before?.id === document.id
+          && (elsewhere || (before.observedDigest === undefined && !writtenBefore.has(path)))) {
           result.leftOutAtWrite.push({ path, rule: 'changed-during-run' });
           skippedTitles.add(titleKey(item.entry.place, item.entry.title));
           createdBefore.add(path);
@@ -562,7 +616,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           break;
         }
         try {
-          if (skippedTitles.has(titleKey(entry.place, entry.title))) continue;
+          if (skippedTitles.has(titleKey(entry.place, entry.title)) || keptElsewhere.has(entry.documentId)) continue;
           // Trash only the document the plan read in its place, unchanged since. One that shares its would-be
           // path with a planned file is not reported: that file is written as planned.
           const listed = sources.documents.get(entry.documentId);
