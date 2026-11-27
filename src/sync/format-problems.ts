@@ -13,6 +13,7 @@ import { type RepositoryMapping, loadMapping } from '../mapping/mapping.ts';
 import { type GitHubRepository, PullRequestError, closePullRequest, ensurePullRequest, findOpenPullRequest, lastClosedPullRequest } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { cell } from '../run/summary.ts';
+import { message } from '../messages.ts';
 import { type CommitIdentity, GitError, type Oid, type StateConfig, branchRef, commitTree, formatProblemsBranch, isAncestor, pushAtomic, readBlobs } from '../state/index.ts';
 
 export const FORMAT_PROBLEMS_TITLE = 'Fix Markdown format problems';
@@ -161,7 +162,7 @@ export async function formatProblemsPullRequest(context: RunContext, options: Fo
       } catch (error) {
         // A push the remote did not answer (a lost connection, an outage): the next run pushes again.
         if (!(error instanceof GitError)) throw error;
-        return { ...result, code: 'github-failed', error: 'the push of the format problems branch did not complete' };
+        return { ...result, code: 'github-failed', error: message('github.no-answer', { action: message('github.pushing-format-problems') }) };
       }
       if (!pushed.ok) return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : { ...result, code: 'github-failed', error: pushed.refs.map((ref) => `${ref.ref}: ${ref.message}`).join('; ') };
       context.fetched.formatProblems = next;

@@ -208,6 +208,7 @@ export const MESSAGES = {
   'github.opening': 'opening a pull request',
   'github.updating': 'updating a pull request',
   'github.closing': 'closing a pull request',
+  'github.pushing-format-problems': 'pushing the format problems branch',
   'github.sending': 'sending {method} to the pull request API',
   'github.reading-check-runs': 'reading the check runs of the sync pull request',
   'github.reading-annotations': 'reading the annotations of a failed check run',
