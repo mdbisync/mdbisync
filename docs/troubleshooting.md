@@ -366,7 +366,7 @@ the reason is fixed. The summaries list each with its rules:
 | `image-repair-budget` | Markdown exceeds the image repair budget. Repair limits the source, resolved destinations, replacement text, and output to 1,000,000 UTF-16 code units each. It allows up to eight rounds of escaping. The document keeps its previous text and the capture cursor holds. | Simplify or split the document and rerun. |
 | `download-retry` | An upload download timed out, lost its connection, or returned 429 or a server error. The document stays out of this capture without a mark. | The next run retries automatically. |
 | `link-scheme` | Links must use http, https, mailto, a path or a fragment. | Replace the unsupported destination. Pull removes unsupported links together with their text; push lint refuses them. |
-| `capture-translation` | The run could not turn the document's text from Linear into the file's text. | Check the document in Linear for unusual content, or report it as a bug. |
+| `capture-translation` | The run could not turn the document's text from Linear into the file's text, for example because writing it in the `linear-format` hook's form would turn text Markdown reads as code into a link or image to a file. | Check the document in Linear for unusual content, or report it as a bug. |
 
 The `linear-format` hook's rules leave a file out too until it is fixed:
 `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,

@@ -17,7 +17,7 @@ import { type RunReport } from '../run/finish.ts';
 import { Git, commitTree } from '../state/index.ts';
 import { type FakeUpload, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, countLocalLfsObjects, createFixture } from '../state/test-helpers.ts';
-import { DEFAULT_UPLOAD_LIMIT, findFileLinks, replaceRanges, resolveTarget, restoreFileLinks } from './uploads.ts';
+import { DEFAULT_UPLOAD_LIMIT, FileTargetsAddedError, checkFileTargets, findFileLinks, replaceRanges, resolveTarget, restoreFileLinks } from './uploads.ts';
 import { runScaleScript } from '../scale-test-helpers.ts';
 
 const CANARY = 'kx-5d2a9e40';
@@ -689,6 +689,24 @@ describe('file links in a document', () => {
       'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)\n\n![x](a.png) ![y](./a.png) [z](<b.png#p>)\n\n![w](<c d.png>)\n\n[v](e.png#q)',
       'only the written destinations are mapped back',
     );
+  });
+});
+
+describe('checkFileTargets', () => {
+  const added = (before: string, after: string) => assert.throws(() => checkFileTargets('docs/plan.md', before, after), FileTargetsAddedError, JSON.stringify(after));
+  it('allows a rewrite that keeps the files linked and embedded, in another spelling', () => {
+    checkFileTargets('docs/plan.md', '* [Report](report.csv)\n\n![Chart](./chart.png)', '* [Report](<report.csv>)\n\n![Chart](chart.png)');
+    // An image written as a link embeds nothing.
+    checkFileTargets('docs/plan.md', '![Chart](chart.png)', '[Chart](chart.png)');
+  });
+  it('refuses a link or image to a file only the rewritten text holds', () => {
+    added('    [Secret](secret.csv)', '[Secret](secret.csv)');
+    added('    ![x](secret.png)', '![x](secret.png)');
+    // A link to a file does not let the rewrite embed it as an image, also through a reference.
+    added('[x](secret.png)', '![x](secret.png)');
+    added('[x][s]\n\n[s]: secret.png', '![x][s]\n\n[s]: secret.png');
+    // An image of a URL the checks never read is refused too.
+    added('    ![x](https://uploads.linear.app/workspace/a)', '![x](https://uploads.linear.app/workspace/a)');
   });
 });
 

@@ -80,7 +80,7 @@ import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTraile
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync, touchedTitles } from './plan.ts';
 import { readPlainLinkProvenance } from './provenance.ts';
 import { readPlanSources } from './run.ts';
-import { destinations, resolveTarget } from './uploads.ts';
+import { checkFileTargets, destinations, FileTargetsAddedError, resolveTarget } from './uploads.ts';
 import { createPendingProjects } from '../setup/linear.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
@@ -686,16 +686,21 @@ async function confirmWithGate(context: RunContext, options: ReverseOptions, gat
         // matter would become the file's metadata (or a folder's annotation).
         const tooComplex: string[] = [];
         const frontMatter: string[] = [];
+        const addedTargets: string[] = [];
         for (const entry of entries) {
           try {
             if (splitFile(joinedOf(entry)).body !== restored(entry)) frontMatter.push(entry.path);
+            // The asset checks read the restored body: the file may link or embed no file they did not see there.
+            else checkFileTargets(entry.path, restored(entry), splitFile(textOf(entry)).body);
           } catch (error) {
-            if (!(error instanceof MarkdownLimitError)) throw error;
-            tooComplex.push(entry.path);
+            if (error instanceof FileTargetsAddedError) addedTargets.push(entry.path);
+            else if (error instanceof MarkdownLimitError) tooComplex.push(entry.path);
+            else throw error;
           }
         }
         keepTracked(tooComplex, 'markdown-complexity');
         keepTracked(frontMatter, 'front-matter-boundary');
+        keepTracked(addedTargets, 'image-blocked');
         if (gate.configured) {
           const blocked: string[] = [];
           const unchecked: string[] = [];

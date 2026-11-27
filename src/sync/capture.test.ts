@@ -311,6 +311,21 @@ describe('capture from Linear', () => {
     assert.deepEqual(hookRun('docs/new.md', recorded), {exitCode: 0, stdout: '', stderr: ''});
   });
 
+  it('leaves out a document whose nested block join would turn a code block\'s image into a live one', async () => {
+    const tracked = await commitTree(context.git, {parents: [context.fetched.tracked], base: context.fetched.tracked, changes: new Map([['docs/secret.png', png]]), message: 'Add an image', identity: IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    // Read as Linear's text, the image is indented code; joined onto the item's line, it is the item's paragraph.
+    world.linear.documents[0]!.content = 'Parent\n*\n  [Site](https://example.com/a)\n\n    ![x](secret.png)\n';
+    world.linear.documents.push({id: 'safe', title: 'safe', projectId: 'project-api', content: 'Parent\n*\n  [Site](https://example.com/a)\n\n    code\n', createdAt: '2026-01-04T00:00:00Z'});
+    const result = await run();
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.leftOut, [{id: 'plan', rule: 'capture-translation'}]);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+    assert.equal(await text('docs/safe.md'), 'Parent\n\n* [Site](<https://example.com/a>)\n\n  code');
+  });
+
   it('takes Linear\'s nested file block right after its parent\'s text as the git one-line item, and captures it in that form', async () => {
     const oneLine = '* Review the counts.\n  * [Inventory](<report.csv>)\n  * Order more labels.';
     const initial = await run();

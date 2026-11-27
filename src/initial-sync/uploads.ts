@@ -631,6 +631,52 @@ function uploadableLinks(path: string, body: string, isFile: (path: string) => b
   return { links: kept, unproven: unknown ? [...new Set(kept.filter(link => !images.has(link.target)).map(link => link.target))] : [] };
 }
 
+/** The paths `body`'s destinations resolve to, and those of its images (or their URLs), as `uploadableLinks` reads them. */
+function fileTargets(path: string, body: string): { links: Set<string>; images: Set<string> } {
+  // One parse: every link, image and definition node, a superset of `destinations`, on both sides alike.
+  const links = new Set<string>();
+  const imageUrls: string[] = [];
+  const labels = new Set<string>();
+  const definitions = new Map<string, string>();
+  visit(parse(body), node => {
+    if (node.type === 'link' || node.type === 'image' || node.type === 'definition') {
+      const target = resolveTarget(path, node.url);
+      if (target !== null) links.add(target);
+    }
+    if (node.type === 'image') imageUrls.push(node.url);
+    if (node.type === 'imageReference') labels.add(node.identifier);
+    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
+  });
+  for (const label of labels) { const url = definitions.get(label); if (url !== undefined) imageUrls.push(url); }
+  // An image of a URL is kept by its URL: it was never localized or checked as an upload.
+  const images = new Set(imageUrls.map(url => resolveTarget(path, url) ?? `url:${url}`));
+  return { links, images };
+}
+
+/**
+ * Throws when `after` links a path `before` does not, or embeds as an image a path or URL `before` does not embed.
+ * The capture's checks read `before`; a rewrite that changes the text's structure (a code block that
+ * becomes an item's text) can turn text they never saw into a live link or image, whose file a later
+ * write would upload.
+ */
+export function checkFileTargets(path: string, before: string, after: string): void {
+  if (before === after) return;
+  const checked = fileTargets(path, before);
+  const written = fileTargets(path, after);
+  if ([...written.links].some(target => !checked.links.has(target)) || [...written.images].some(target => !checked.images.has(target))) throw new FileTargetsAddedError();
+}
+
+/**
+ * A rewrite of a document's text would link or embed a file the capture's checks did not read. Its callers
+ * leave the document out under a rule of their own, so it is never shown and has no text.
+ */
+export class FileTargetsAddedError extends Error {
+  constructor() {
+    super();
+    this.name = 'FileTargetsAddedError';
+  }
+}
+
 /** Links, images and link definitions in `body` whose destination is a file of the repository. */
 export function findFileLinks(documentPath: string, body: string, isFile: (path: string) => boolean): FileLink[] {
   const result: FileLink[] = [];

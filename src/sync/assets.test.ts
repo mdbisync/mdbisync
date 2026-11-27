@@ -8,7 +8,7 @@ import { it, afterEach } from 'node:test';
 import { LinearClient, LinearHttpError, LinearNetworkError, LinearReads, LinearStoppedError } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture as makeCapture, uploadAccessProbe, DownloadRetryError, ImageBlockedError, checkTypedFileLinks } from './assets.ts';
+import { captureAssets, createAssetCapture as makeCapture, uploadAccessProbe, DownloadRetryError, ImageBlockedError, checkLocalized, checkTypedFileLinks } from './assets.ts';
 import { imageLinks } from './image-links.ts';
 import { destinations, resolveTarget, withUploadSuffix } from '../initial-sync/uploads.ts';
 import { CONTENT_LIMIT, fixText } from '../format/index.ts';
@@ -135,6 +135,35 @@ it('restores cached upload spellings before restricting new downloads to the upl
     assert.equal(image.body, `[Image](<${url}?download=1#page=2>)\n`);
 
   } finally { await fixture.cleanup(); }
+});
+
+it('repairs a typed path image after an upload localized to a file whose name has an unbalanced parenthesis', async () => {
+  const fixture = await createFixture();
+  try {
+    const previous = '![Chart](<chart(1.png>)\n';
+    await fixture.seed({'docs/plan.md': previous, 'docs/chart(1.png': png, 'docs/secret.png': png});
+    const git = await fixture.clone('unbalanced-name');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const hash = createHash('sha256').update(png).digest('hex');
+    const url = 'https://uploads.linear.app/workspace/chart';
+    // The fragment matches no spelling of the previous text, so the path is written as a bare destination.
+    const read = createAssetCapture(git, resolveStateConfig({}), base, async () => { throw new Error('a cached link must not be downloaded'); });
+    const result = await read('docs/plan.md', `![Chart](${url}#top) ![Typed](secret.png)\n`, new Map([[hash, url]]), previous);
+    assert.equal(result.body, '![Chart](chart%281.png#top) [Typed](<secret.png>)\n');
+    assert.deepEqual(result.plainFiles, ['docs/secret.png']);
+    assert.deepEqual(destinations(result.body).map(({node}) => [node.type, resolveTarget('docs/plan.md', node.url)]), [['image', 'docs/chart(1.png'], ['link', 'docs/secret.png']]);
+  } finally { await fixture.cleanup(); }
+});
+
+it('refuses a localized body whose links and images no longer line up with Linear\'s text', () => {
+  const body = '![Chart](https://uploads.linear.app/workspace/chart) ![Typed](secret.png)\n';
+  const at = body.indexOf('https://');
+  const localize = (path: string) => body.replace('https://uploads.linear.app/workspace/chart', path);
+  checkLocalized(body, localize('chart%281.png'), new Set([at]));
+  // An unbalanced parenthesis ends the image early: the typed image would take the first one's place.
+  assert.throws(() => checkLocalized(body, localize('chart(1.png'), new Set([at])), /not allowed/);
+  // A destination that was not localized may not change.
+  assert.throws(() => checkLocalized(body, localize('chart.png').replace('secret.png', 'other.png'), new Set([at])), /not allowed/);
 });
 
 it('keeps the previous attachment spelling and query when rebuilding a cache entry', async () => {

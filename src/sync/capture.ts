@@ -17,6 +17,7 @@ import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, hasDocumentLinks, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { MarkdownLimitError, linearMarkersAsText, markdownBaseline } from '../format/markdown.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
+import { checkFileTargets, FileTargetsAddedError } from '../initial-sync/uploads.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { lineText } from '../run/output.ts';
@@ -499,7 +500,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     const linkBase = needsLinkBase ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
     const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool, undefined, uploadAccessProbe(linear));
-    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; observed?: string; compared?: { body: string; text: string } };
+    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; observed?: string; compared?: { body: string; text: string; addsFiles: boolean } };
     const candidates = new Map<string, Candidate>();
     // A rejected target links to its accepted file, if it has one.
     const resetTargets = (rejected: ReadonlySet<string>, targets: Map<string, string>) => {
@@ -599,8 +600,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     // A rejected target may change other documents' relative links. Recheck
     // only bodies that change as targets fall back to their accepted paths.
-    // A candidate's text with its links written against these targets.
-    const textOf = (candidate: Candidate, targets: ReadonlyMap<string, string>) => {
+    // A candidate's text with its links written against these targets. A text that would link or embed a file the
+    // asset checks did not read throws, unless `staged`: a link variant is only shown to the hooks, never recorded.
+    const textOf = (candidate: Candidate, targets: ReadonlyMap<string, string>, staged = false) => {
       let body = candidate.assets.body;
       if (linkBase !== undefined) {
         // A link by an id its target did not get (the document was created under another) reads back as the link
@@ -618,8 +620,17 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (candidate.compared?.body !== body) {
         const unchanged = candidate.previousBody !== undefined && sameAsLinear(body, candidate.previousBody);
         const text = unchanged ? joinFile(candidate.head, candidate.previousBody!) : fixLinearText(joinFile(candidate.head, body), readable.get(candidate.doc.id)?.text ?? candidate.doc.content ?? '', linkedFileCheck(candidate.path, (file) => mapping.files.has(file)), candidate.previousBody);
-        candidate.compared = {body, text};
+        // The asset checks read `body`: the file may link or embed no file they did not see there.
+        let addsFiles = false;
+        if (!unchanged) {
+          try { checkFileTargets(candidate.path, body, splitFile(text).body); } catch (error) {
+            if (!(error instanceof FileTargetsAddedError)) throw error;
+            addsFiles = true;
+          }
+        }
+        candidate.compared = {body, text, addsFiles};
       }
+      if (candidate.compared.addsFiles && !staged) throw new FileTargetsAddedError();
       return candidate.compared.text;
     };
     let again = true;
@@ -638,8 +649,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
             observed = textOf(observedCandidate, documentIds);
           }
         } catch (error) {
-          if (!(error instanceof MarkdownLimitError)) throw error;
-          result.leftOut.push({id, rule: 'markdown-complexity'});
+          if (!(error instanceof MarkdownLimitError || error instanceof FileTargetsAddedError)) throw error;
+          result.leftOut.push({id, rule: error instanceof FileTargetsAddedError ? 'capture-translation' : 'markdown-complexity'});
           candidates.delete(id);
           resetTarget(id);
           again = true;
@@ -701,7 +712,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // The documents the hooks refused before come first: those that link them make progress on every run.
       const refused = new Set([...candidates.keys()].filter((id) => { const saved = byId.get(id)?.entry.saved; return saved !== undefined && saved.notice?.kind !== 'conflict'; }));
       const budget = linkVariantBudget();
-      if (linkBase !== undefined) for (const set of linkVariants(candidates, textOf, resetTargets, documentIds, {refused, settled: recordedAsIs, budget})) await gate.check(set);
+      // A variant that would add a file is staged too: the capture that falls back to it leaves the document out.
+      if (linkBase !== undefined) for (const set of linkVariants(candidates, (candidate, targets) => textOf(candidate, targets, true), resetTargets, documentIds, {refused, settled: recordedAsIs, budget})) await gate.check(set);
       result.summary = `Staged ${candidates.size} changed documents for the security hooks.`;
       if (budget.short === true) result.summary += ` ${message('sync.link-variant-budget')}`;
       return result;
@@ -800,7 +812,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         // Linear's spelling of that version reads back as its text.
         return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head, assets, files: new Map(), previousBody: body}, documentIds) === baseline.text;
       } catch (error) {
-        if (error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError) return false;
+        if (error instanceof MarkdownLimitError || error instanceof ImageRepairBudgetError || error instanceof FileTargetsAddedError) return false;
         // An image that version did not have: the document changed.
         if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
         throw error;

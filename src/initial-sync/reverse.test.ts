@@ -713,6 +713,18 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.linear.comments.size, 0);
   });
 
+  it('leaves out a document whose nested block join would turn a code block\'s image into a live one', async () => {
+    const world = fakeWorld();
+    // Read as Linear's text, the image is indented code; joined onto the item's line, it is the item's paragraph.
+    world.linear.documents = linearDocuments().map((doc) => doc.id === 'doc-runbook' ? {...doc, content: 'Parent\n*\n  [Site](https://example.com/a)\n\n    ![x](secret.png)\n'} : doc);
+    const {result, report} = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{path:'eng/ops/runbook.md', rule:'image-blocked'}]);
+    const tree = await files('refs/mdbisync/linear');
+    assert.ok(!tree.includes('eng/ops/runbook.md'));
+    assert.ok(tree.includes('eng/notes/faq.md'));
+  });
+
   it('refuses unsupported attachment bytes equal to a removed Markdown page instead of linking that page', async () => {
     const world = fakeWorld();
     const bytes = Buffer.from(TREE['eng/backend/notes.md'] as string);

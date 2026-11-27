@@ -190,6 +190,26 @@ function encodeSuffix(suffix: string): string {
   return (query === '' ? '' : `?${encode(query.slice(1))}`) + (fragment === undefined ? '' : `#${encode(fragment)}`);
 }
 
+/** A relative path as a bare destination: each segment percent-encoded, the parentheses too, which could end it early. */
+function encodePath(path: string): string {
+  return path.split('/').map((segment) => encodeURIComponent(segment).replace(/[()]/g, (char) => (char === '(' ? '%28' : '%29'))).join('/');
+}
+
+/**
+ * `finish` repairs the localized body's images by their place in Linear's text: localization rewrites destinations
+ * only, so the localized body must hold the same links, images and definitions in the same order, each with its
+ * destination unless it starts at one of `replaced`. Any other change, such as a destination that no longer parses,
+ * would move every image after it, and the document is refused.
+ */
+export function checkLocalized(body: string, localized: string, replaced: ReadonlySet<number>): void {
+  const before = destinations(body);
+  const after = destinations(localized);
+  if (after.length !== before.length || imagesOf(localized).length !== imagesOf(body).length
+    || before.some(({node, range, outer}, index) => after[index]!.node.type !== node.type || (!replaced.has(range.from) && !replaced.has(outer.from) && after[index]!.node.url !== node.url))) {
+    throw new Error(message('assets.not-allowed'));
+  }
+}
+
 /** Inspect the original Linear text, before localization or any download. */
 function imagesOf(body: string): Array<{ url: string; line: number }> {
   const tree = parse(body);
@@ -449,7 +469,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         const target = copy ?? link.target;
         if (copy !== undefined && !pathHashes.has(copy) && !copies.has(copy)) copies.set(copy, link.target);
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, target);
-        const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), target).split('/').map(encodeURIComponent).join('/') + link.suffix;
+        const raw = previousPath === path ? link.written : encodePath(posix.relative(posix.dirname(path), target)) + link.suffix;
         const key = hash + uploadDestinationUrl(link.suffix);
         if (!spellings.has(key)) spellings.set(key, []);
         spellings.get(key)!.push(previousPath !== path && link.written.startsWith('<') ? `<${raw}>` : raw);
@@ -570,7 +590,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       }
       // The query and fragment as the parser decoded them, encoded again: a space, `>` or a parenthesis would end
       // the bare destination early and could spell another link.
-      replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + encodeSuffix(suffix)});
+      replacements.push({...range, text: encodePath(posix.relative(posix.dirname(path), assetPath)) + encodeSuffix(suffix)});
     }
     if (rejected.size > 0) {
       const images = imagesOf(originalBody);
@@ -593,7 +613,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       throw new Error(message('assets.not-allowed'));
     }
     if (retry !== undefined) throw retry;
-    return finish(replaceRanges(body, replacements), files, additions);
+    const localized = replaceRanges(body, replacements);
+    checkLocalized(body, localized, new Set(replacements.map(({from}) => from)));
+    return finish(localized, files, additions);
   };
   return Object.assign(capture, {close: () => spool.close()});
 }
