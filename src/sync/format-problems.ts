@@ -13,7 +13,7 @@ import { type RepositoryMapping, loadMapping } from '../mapping/mapping.ts';
 import { type GitHubRepository, PullRequestError, closePullRequest, ensurePullRequest, findOpenPullRequest, lastClosedPullRequest } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { cell } from '../run/summary.ts';
-import { type CommitIdentity, type Oid, type StateConfig, branchRef, commitTree, formatProblemsBranch, isAncestor, pushAtomic, readBlobs } from '../state/index.ts';
+import { type CommitIdentity, GitError, type Oid, type StateConfig, branchRef, commitTree, formatProblemsBranch, isAncestor, pushAtomic, readBlobs } from '../state/index.ts';
 
 export const FORMAT_PROBLEMS_TITLE = 'Fix Markdown format problems';
 export const FORMAT_PROBLEMS_MESSAGE = 'Fix Markdown format problems\n\nWhat mdbisync fix writes for the files the sync leaves out for their Markdown.';
@@ -155,7 +155,14 @@ export async function formatProblemsPullRequest(context: RunContext, options: Fo
     const changes = new Map(problems.filter((problem) => problem.fixed).map((problem) => [problem.path, problem.text]));
     const next = await nextHead(context, head, tracked, changes, options.identity ?? context.identity);
     if (next !== head) {
-      const pushed = await pushAtomic(git, options.config, [{ ref: branchRef(branch), expected: head, next }]);
+      let pushed: Awaited<ReturnType<typeof pushAtomic>>;
+      try {
+        pushed = await pushAtomic(git, options.config, [{ ref: branchRef(branch), expected: head, next }]);
+      } catch (error) {
+        // A push the remote did not answer (a lost connection, an outage): the next run pushes again.
+        if (!(error instanceof GitError)) throw error;
+        return { ...result, code: 'github-failed', error: 'the push of the format problems branch did not complete' };
+      }
       if (!pushed.ok) return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : { ...result, code: 'github-failed', error: pushed.refs.map((ref) => `${ref.ref}: ${ref.message}`).join('; ') };
       context.fetched.formatProblems = next;
       result.branchMoved = true;

@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "id": "L2-43",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "add-footnote",
+      "args": {
+        "bypassHook": true
+      }
+    },
+    {
+      "kind": "git",
+      "action": "add",
+      "args": {
+        "bypassHook": true,
+        "fixture": "plus-line"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "merge",
+      "action": "format-problems",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "git",
+      "action": "remove-footnote",
+      "args": {
+        "target": "footnoted"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "formatProblems.beforeMerge",
+        "operator": "equal",
+        "expected": {
+          "open": 1,
+          "rewroteAdded": true,
+          "listsFootnote": true
+        }
+      },
+      {
+        "subject": "formatProblems.openCount",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "formatProblems.scenarioFilesLeft",
+        "operator": "equal",
+        "expected": []
+      }
+    ]
+  }
+}
