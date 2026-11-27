@@ -44,7 +44,36 @@ export interface FixOptions {
 interface WriterOptions extends FixOptions {
   /** The lines (0-based) that follow a backslash line break `fix` wrote as a plain line ending. */
   breakLines?: ReadonlySet<number>;
+  /** The checks of space edits, shared by the writers of one body and the bodies they fix inside it. */
+  spaceChecks: SpaceChecks;
 }
+
+/**
+ * What the checks of space edits (`keepsBlock`) have read for one body:
+ * the characters parsed (`SPACE_CHECK_EXTRA_WORK`), and for each block as
+ * it stands, its shape and the results for its edited texts. A writer
+ * tried again (another fence, asterisk or escape choice, a later pass)
+ * often checks the same edits of the same block: it reads them once.
+ */
+interface SpaceChecks {
+  work: number;
+  readonly blocks: Map<string, { shape: unknown; kept: Map<string, boolean> }>;
+}
+
+/**
+ * Characters the checks of space edits (`keepsBlock`) may parse beyond
+ * `SPACE_CHECK_ROUNDS` readings of the body, over all writers of one body.
+ * Each check reads the whole block the edit is in. A block's edits are
+ * checked together once; only when one of them would change the block
+ * is each checked by itself, so a long paragraph holding thousands of
+ * space references (`**&#32;x**`) would then take the square of its
+ * length. A body past this budget stays with its author as too complex.
+ * An ordinary document reads each block with such edits a few times, and
+ * a paragraph of tens of thousands of characters with dozens of them
+ * still fits.
+ */
+const SPACE_CHECK_EXTRA_WORK = 1_000_000;
+const SPACE_CHECK_ROUNDS = 8;
 
 /**
  * Returns the text in Linear's form, or the text itself when lint finds a
@@ -77,7 +106,9 @@ export function linearForm(text: string, options: FixOptions = {}): string | und
   const broken = backslashBreaksAsLinear(lf);
   if (broken === undefined) return undefined;
   const { body: unbroken, lines: breakLines } = broken;
-  const fixed = fixBody(unbroken, { ...options, breakLines });
+  // A body fixed inside another (a nested list's text) shares its checks.
+  const spaceChecks = (options as Partial<WriterOptions>).spaceChecks ?? { work: -SPACE_CHECK_ROUNDS * unbroken.length, blocks: new Map() };
+  const fixed = fixBody(unbroken, { ...options, breakLines, spaceChecks });
   if (fixed === undefined) return undefined;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
@@ -719,6 +750,9 @@ class Writer {
   private readonly movedSpaces = new Set<number>();
   /** The space edits made so far in the block being written, which a later one is checked with. */
   private spaceEdits: Edit[] = [];
+  /** Whether space edits are taken unchecked, for `render` to check together once the block is written. */
+  private trustSpaces = false;
+  private readonly spaceChecks: SpaceChecks;
   /** The paragraph that follows a task item's checkbox: it does not start its line. */
   private taskParagraph: Paragraph | undefined;
   /** First paragraphs of items that Linear reads as a nested list (`nestsMarkerText`). */
@@ -733,6 +767,7 @@ class Writer {
     this.rewriteEscapes = rewriteEscapes;
     this.rewriteAsterisks = rewriteAsterisks;
     this.rewriteTildeUnderscore = rewriteTildeUnderscore;
+    this.spaceChecks = options.spaceChecks;
     if (options.breakLines !== undefined && options.breakLines.size > 0) {
       for (let line = 0, at = 0; at !== 0 || line === 0; line++) {
         if (options.breakLines.has(line)) this.breakLineStarts.add(at);
@@ -1201,15 +1236,26 @@ class Writer {
     const moved = [...this.movedSpaces];
     const spaceEdits = [...this.spaceEdits];
     const render = (rewriteAsterisks: boolean) => {
-      const inline: InlineEdits = { edits: [], rewriteAsterisks, changedAsterisks: false };
       const outer = this.inlineFrom;
       const block = this.blockInline;
       this.inlineFrom = from;
       this.blockInline ??= [from, to];
-      this.movedSpaces.clear();
-      for (const at of block === undefined ? [] : moved) this.movedSpaces.add(at);
-      this.spaceEdits = block === undefined ? [] : [...spaceEdits];
-      this.inlineChildrenEdits(children, inline);
+      const trusted = this.trustSpaces;
+      const edit = (trust: boolean): InlineEdits => {
+        const inline: InlineEdits = { edits: [], rewriteAsterisks, changedAsterisks: false };
+        this.movedSpaces.clear();
+        for (const at of block === undefined ? [] : moved) this.movedSpaces.add(at);
+        this.spaceEdits = block === undefined ? [] : [...spaceEdits];
+        this.trustSpaces = trust;
+        this.inlineChildrenEdits(children, inline);
+        return inline;
+      };
+      // A block's space edits are checked together once, when its text is
+      // written: one by one (`pushIfKept`) only when they do not keep it
+      // together, so a long block with many of them is not read again for each.
+      let inline = edit(block === undefined || trusted);
+      if (block === undefined && this.spaceEdits.length > 0 && !this.keepsBlock(this.spaceEdits)) inline = edit(false);
+      this.trustSpaces = trusted;
       this.inlineFrom = outer;
       this.blockInline = block;
       this.movedSpaces.clear();
@@ -2051,6 +2097,8 @@ class Writer {
    * together with the space edits already made in it: all of them when
    * they keep it together, else each group in turn that keeps it with
    * those before, up to a bound, so a long block is not read again and again.
+   * While `trustSpaces` is set it pushes every group unchecked: `render`
+   * then checks them all once the block is written.
    */
   private pushIfKept(groups: readonly Edit[][], edits: Edit[]): void {
     if (groups.length === 0) return;
@@ -2058,6 +2106,10 @@ class Writer {
       edits.push(...group);
       this.spaceEdits.push(...group);
     };
+    if (this.trustSpaces) {
+      for (const group of groups) accept(group);
+      return;
+    }
     if (this.keepsBlock([...this.spaceEdits, ...groups.flat()])) {
       for (const group of groups) accept(group);
       return;
@@ -2070,7 +2122,8 @@ class Writer {
    * Whether the block being written reads the same with `edits` made,
    * apart from what Linear does with a space (`spaceShape`). The block is
    * read with its first line's prefixes, so a heading's closing hashes
-   * count; a cell is read alone.
+   * count; a cell is read alone. Throws `MarkdownLimitError` past
+   * `SPACE_CHECK_EXTRA_WORK`.
    */
   private keepsBlock(edits: readonly Edit[]): boolean {
     if (this.blockInline === undefined) return false;
@@ -2085,7 +2138,16 @@ class Writer {
       at = edit.to;
     }
     edited += this.source.slice(at, to);
-    return isDeepStrictEqual(spaceShape(parse(edited)), spaceShape(parse(this.source.slice(from, to))));
+    const original = this.source.slice(from, to);
+    const read = this.spaceChecks.blocks.get(original);
+    const known = read?.kept.get(edited);
+    if (known !== undefined) return known;
+    if ((this.spaceChecks.work += edited.length + (read === undefined ? original.length : 0)) > SPACE_CHECK_EXTRA_WORK) throw new MarkdownLimitError('space-checks');
+    const block = read ?? { shape: spaceShape(parse(original)), kept: new Map<string, boolean>() };
+    this.spaceChecks.blocks.set(original, block);
+    const kept = isDeepStrictEqual(spaceShape(parse(edited)), block.shape);
+    block.kept.set(edited, kept);
+    return kept;
   }
 
   /** Linear writes every link destination in angle brackets, without a title. */

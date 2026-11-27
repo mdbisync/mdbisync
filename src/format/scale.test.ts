@@ -112,6 +112,35 @@ describe('tables that ending another exposes', () => {
   });
 });
 
+describe('space references at the inner edge of marks', () => {
+  // Every `**&#32;x**` checked its move by parsing the whole paragraph
+  // again, so a long paragraph of them took the square of its length.
+  const spans = `'Intro ' + ('word '.repeat(20) + '**&#32;x** ').repeat(1_400)`;
+
+  it('move out of 1,400 marks in one long paragraph in a few times a parse', { timeout: 160_000 }, () => {
+    const timing = timed(`${spans} + 'end.'`, `if (fix.fixText(text) !== text.replaceAll('**&#32;x**', ' **x**')) throw new Error('the spaces did not move')`);
+    assert.ok(timing.length > 150_000, 'the paragraph is near the content limit');
+    assert.ok(timing.ms < 10 * timing.parseMs + 2_000, report(timing));
+  });
+
+  it('check the same edits of a paragraph near the content limit once, however often the writer is tried again', { timeout: 160_000 }, () => {
+    // The italic changes its marks and the backtick in a destination keeps fences: the
+    // writer writes the paragraph again for each, and the bold after it for the escapes.
+    const build = `'Intro a&#32;b _italic_ ' + 'word '.repeat(46_000) + 'end. [Reference](https://example.test/a\`b)\\n\\ncost**~$5**\\n'`;
+    const timing = timed(build, `if (!fix.fixText(text).startsWith('Intro a b *italic* word')) throw new Error('the space did not move')`);
+    assert.ok(timing.length > 230_000, 'the paragraph is near the content limit');
+  });
+
+  it('stop with the space-checks limit when they must be checked one by one, within a bound', { timeout: 160_000 }, () => {
+    // The first reference would make a hard line break, so the moves are not
+    // kept together. The budget is eight readings of the body and 1,000,000
+    // characters more, each check costing about a parse of the paragraph.
+    const limited = `let limit; try { fix.fixText(text); } catch (error) { limit = error.limit; } if (limit !== 'space-checks') throw new Error('expected the space-checks limit, got ' + limit)`;
+    const timing = timed(`'a&#32;&#32;\\nb ' + ${spans} + 'end.'`, limited);
+    assert.ok(timing.ms < 30 * timing.parseMs + 2_000, report(timing));
+  });
+});
+
 describe('file blocks', () => {
   it('join each file block onto its item line', () => {
     assert.equal(relativeFileBlocksAsLinks('-\n  [a](a.pdf)\n-\n  [b](b.pdf)\n\ntext\n'), '- [a](a.pdf)\n- [b](b.pdf)\n\ntext\n');

@@ -457,6 +457,18 @@ describe('lint and fix commands', () => {
     assert.equal(readFileSync(join(folder, 'chain.md'), 'utf8'), text);
   });
 
+  it('reports a paragraph whose many space references at mark edges cannot all move as markdown-complexity and keeps the file', (t) => {
+    const folder = mkdtempSync(join(tmpdir(), 'edge-spaces-'));
+    t.after(() => rmSync(folder, { recursive: true, force: true }));
+    // The first reference would make a hard line break: every other one is then checked by itself.
+    const text = 'a&#32;&#32;\nb ' + ('word '.repeat(20) + '**&#32;x** ').repeat(200) + 'end.\n';
+    writeFileSync(join(folder, 'spaces.md'), text);
+    const finding = `spaces.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
+    assert.deepEqual(runLint([], folder), { exitCode: 1, stdout: finding, stderr: '' });
+    assert.deepEqual(runFix([], folder), { exitCode: 1, stdout: finding, stderr: '' });
+    assert.equal(readFileSync(join(folder, 'spaces.md'), 'utf8'), text);
+  });
+
   it('reports hard breaks in setext headings and keeps the file through two fixes', (t) => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'heading-hard-break-'));
     t.after(() => rmSync(fixtureDir, { recursive: true, force: true }));

@@ -691,9 +691,10 @@ tables whose short rows, padded to the header width, would add over 250,000
 characters or take the tree over that node limit, reference links whose
 destinations, each written in full, would take the text over 250,000
 characters, paragraphs whose inline syntax, or whose many lines continued
-without their quote or list prefix, would take too long to parse, and
+without their quote or list prefix, would take too long to parse,
 long chains of tables that each end at a line without a pipe right above
-the next table. This keeps traversal and formatting bounded independently
+the next table, and paragraphs with many space references (`&#32;`)
+where one of them cannot become a space. This keeps traversal and formatting bounded independently
 of the text length. `fix` writes every row of a table with as many cells as its
 header, the form Linear stores, so a wide header over many short rows grows
 far beyond its source. It also writes every reference link (`[text][ref]`)
@@ -712,7 +713,13 @@ too. Write the prefix on each line, or split the paragraph. `fix` ends a
 table at its first row without a pipe, as Linear does, which can expose a
 table in the lines below it; a chain of thousands of such tables would
 take it minutes, so it stops at a budget. Put a blank line after each
-table.
+table. `fix` writes a space reference as a space, moved out of the
+marks around it (`**&#32;Tip**` becomes ` **Tip**`), where the block
+still reads the same. When one of a paragraph's references would change
+it (two before a line ending make a line break), `fix` checks each
+reference by itself, reading the paragraph again for each, and stops at a
+budget. Write that reference as a plain space or leave it out, or split
+the paragraph.
 For example, this generates a document that exceeds the nesting limit:
 
 ```javascript
