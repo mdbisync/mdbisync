@@ -103,8 +103,11 @@ What it writes to git:
   `ids` state ref does not name the document, or an earlier recovery found its
   provenance unknown), a plain link that Linear's text holds as a repository
   path counts as a Linear member's: its file is never uploaded from that
-  document. Links Linear holds as uploads are not affected. Write the link as
-  an image to share the file;
+  document. So does a link of the file's text that a capture or an initial
+  sync from Linear added: an upload with that file's bytes is kept as its own
+  copy in `assets/`, not linked to the file, and a file that keeps its text
+  keeps that link from uploading the file. Other links Linear holds as
+  uploads are not affected. Write the link as an image to share the file;
 - state refs (under `refs/mdbisync/` by default) that tie each file to its
   document, and
   the sync branch (`mdbisync/linear` by default) with one commit on top of the
