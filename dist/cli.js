@@ -25,9 +25,9 @@ var __export = (target, all2) => {
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    for (let key2 of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key2) && key2 !== except)
+        __defProp(to, key2, { get: () => from[key2], enumerable: !(desc = __getOwnPropDesc(from, key2)) || desc.enumerable });
   }
   return to;
 };
@@ -117,11 +117,11 @@ var require_visit = __commonJS({
     visit4.BREAK = BREAK;
     visit4.SKIP = SKIP2;
     visit4.REMOVE = REMOVE;
-    function visit_(key, node2, visitor, path2) {
-      const ctrl = callVisitor(key, node2, visitor, path2);
+    function visit_(key2, node2, visitor, path2) {
+      const ctrl = callVisitor(key2, node2, visitor, path2);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path2, ctrl);
-        return visit_(key, ctrl, visitor, path2);
+        replaceNode(key2, path2, ctrl);
+        return visit_(key2, ctrl, visitor, path2);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
@@ -165,11 +165,11 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP2;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node2, visitor, path2) {
-      const ctrl = await callVisitor(key, node2, visitor, path2);
+    async function visitAsync_(key2, node2, visitor, path2) {
+      const ctrl = await callVisitor(key2, node2, visitor, path2);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path2, ctrl);
-        return visitAsync_(key, ctrl, visitor, path2);
+        replaceNode(key2, path2, ctrl);
+        return visitAsync_(key2, ctrl, visitor, path2);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
@@ -219,27 +219,27 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node2, visitor, path2) {
+    function callVisitor(key2, node2, visitor, path2) {
       if (typeof visitor === "function")
-        return visitor(key, node2, path2);
+        return visitor(key2, node2, path2);
       if (identity.isMap(node2))
-        return visitor.Map?.(key, node2, path2);
+        return visitor.Map?.(key2, node2, path2);
       if (identity.isSeq(node2))
-        return visitor.Seq?.(key, node2, path2);
+        return visitor.Seq?.(key2, node2, path2);
       if (identity.isPair(node2))
-        return visitor.Pair?.(key, node2, path2);
+        return visitor.Pair?.(key2, node2, path2);
       if (identity.isScalar(node2))
-        return visitor.Scalar?.(key, node2, path2);
+        return visitor.Scalar?.(key2, node2, path2);
       if (identity.isAlias(node2))
-        return visitor.Alias?.(key, node2, path2);
+        return visitor.Alias?.(key2, node2, path2);
       return void 0;
     }
-    function replaceNode(key, path2, node2) {
+    function replaceNode(key2, path2, node2) {
       const parent = path2[path2.length - 1];
       if (identity.isCollection(parent)) {
-        parent.items[key] = node2;
+        parent.items[key2] = node2;
       } else if (identity.isPair(parent)) {
-        if (key === "key")
+        if (key2 === "key")
           parent.key = node2;
         else
           parent.value = node2;
@@ -500,7 +500,7 @@ var require_anchors = __commonJS({
 var require_applyReviver = __commonJS({
   "node_modules/yaml/dist/doc/applyReviver.js"(exports) {
     "use strict";
-    function applyReviver(reviver, obj, key, val) {
+    function applyReviver(reviver, obj, key2, val) {
       if (val && typeof val === "object") {
         if (Array.isArray(val)) {
           for (let i = 0, len = val.length; i < len; ++i) {
@@ -540,7 +540,7 @@ var require_applyReviver = __commonJS({
           }
         }
       }
-      return reviver.call(obj, key, val);
+      return reviver.call(obj, key2, val);
     }
     exports.applyReviver = applyReviver;
   }
@@ -903,14 +903,14 @@ var require_Collection = __commonJS({
         if (isEmptyPath(path2))
           this.add(value);
         else {
-          const [key, ...rest] = path2;
-          const node2 = this.get(key, true);
+          const [key2, ...rest] = path2;
+          const node2 = this.get(key2, true);
           if (identity.isCollection(node2))
             node2.addIn(rest, value);
           else if (node2 === void 0 && this.schema)
-            this.set(key, collectionFromPath(this.schema, rest, value));
+            this.set(key2, collectionFromPath(this.schema, rest, value));
           else
-            throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+            throw new Error(`Expected YAML collection at ${key2}. Remaining path: ${rest}`);
         }
       }
       /**
@@ -918,14 +918,14 @@ var require_Collection = __commonJS({
        * @returns `true` if the item was found and removed.
        */
       deleteIn(path2) {
-        const [key, ...rest] = path2;
+        const [key2, ...rest] = path2;
         if (rest.length === 0)
-          return this.delete(key);
-        const node2 = this.get(key, true);
+          return this.delete(key2);
+        const node2 = this.get(key2, true);
         if (identity.isCollection(node2))
           return node2.deleteIn(rest);
         else
-          throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+          throw new Error(`Expected YAML collection at ${key2}. Remaining path: ${rest}`);
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -933,8 +933,8 @@ var require_Collection = __commonJS({
        * `true` (collections are always returned intact).
        */
       getIn(path2, keepScalar) {
-        const [key, ...rest] = path2;
-        const node2 = this.get(key, true);
+        const [key2, ...rest] = path2;
+        const node2 = this.get(key2, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node2) ? node2.value : node2;
         else
@@ -952,10 +952,10 @@ var require_Collection = __commonJS({
        * Checks if the collection includes a value with the key `key`.
        */
       hasIn(path2) {
-        const [key, ...rest] = path2;
+        const [key2, ...rest] = path2;
         if (rest.length === 0)
-          return this.has(key);
-        const node2 = this.get(key, true);
+          return this.has(key2);
+        const node2 = this.get(key2, true);
         return identity.isCollection(node2) ? node2.hasIn(rest) : false;
       }
       /**
@@ -963,17 +963,17 @@ var require_Collection = __commonJS({
        * boolean to add/remove the item from the set.
        */
       setIn(path2, value) {
-        const [key, ...rest] = path2;
+        const [key2, ...rest] = path2;
         if (rest.length === 0) {
-          this.set(key, value);
+          this.set(key2, value);
         } else {
-          const node2 = this.get(key, true);
+          const node2 = this.get(key2, true);
           if (identity.isCollection(node2))
             node2.setIn(rest, value);
           else if (node2 === void 0 && this.schema)
-            this.set(key, collectionFromPath(this.schema, rest, value));
+            this.set(key2, collectionFromPath(this.schema, rest, value));
           else
-            throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+            throw new Error(`Expected YAML collection at ${key2}. Remaining path: ${rest}`);
         }
       }
     };
@@ -1551,19 +1551,19 @@ var require_stringifyPair = __commonJS({
     var Scalar = require_Scalar();
     var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
-    function stringifyPair({ key, value }, ctx, onComment, onChompKeep) {
+    function stringifyPair({ key: key2, value }, ctx, onComment, onChompKeep) {
       const { allNullValues, doc, indent: indent2, indentStep, options: { commentString, indentSeq, simpleKeys } } = ctx;
-      let keyComment = identity.isNode(key) && key.comment || null;
+      let keyComment = identity.isNode(key2) && key2.comment || null;
       if (simpleKeys) {
         if (keyComment) {
           throw new Error("With simple keys, key nodes cannot have comments");
         }
-        if (identity.isCollection(key) || !identity.isNode(key) && typeof key === "object") {
+        if (identity.isCollection(key2) || !identity.isNode(key2) && typeof key2 === "object") {
           const msg = "With simple keys, collection cannot be used as a key value";
           throw new Error(msg);
         }
       }
-      let explicitKey = !simpleKeys && (!key || keyComment && value == null && !ctx.inFlow || identity.isCollection(key) || (identity.isScalar(key) ? key.type === Scalar.Scalar.BLOCK_FOLDED || key.type === Scalar.Scalar.BLOCK_LITERAL : typeof key === "object"));
+      let explicitKey = !simpleKeys && (!key2 || keyComment && value == null && !ctx.inFlow || identity.isCollection(key2) || (identity.isScalar(key2) ? key2.type === Scalar.Scalar.BLOCK_FOLDED || key2.type === Scalar.Scalar.BLOCK_LITERAL : typeof key2 === "object"));
       ctx = Object.assign({}, ctx, {
         allNullValues: false,
         implicitKey: !explicitKey && (simpleKeys || !allNullValues),
@@ -1571,7 +1571,7 @@ var require_stringifyPair = __commonJS({
       });
       let keyCommentDone = false;
       let chompKeep = false;
-      let str = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      let str = stringify2.stringify(key2, ctx, () => keyCommentDone = true, () => chompKeep = true);
       if (!explicitKey && !ctx.inFlow && str.length > 1024) {
         if (simpleKeys)
           throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
@@ -1715,7 +1715,7 @@ var require_merge = __commonJS({
       }),
       stringify: () => MERGE_KEY
     };
-    var isMergeKey = (ctx, key) => (merge.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge.tag && tag.default);
+    var isMergeKey = (ctx, key2) => (merge.identify(key2) || identity.isScalar(key2) && (!key2.type || key2.type === Scalar.Scalar.PLAIN) && merge.identify(key2.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge.tag && tag.default);
     function addMergeToJSMap(ctx, map4, value) {
       const source = resolveAliasValue(ctx, value);
       if (identity.isSeq(source))
@@ -1732,14 +1732,14 @@ var require_merge = __commonJS({
       if (!identity.isMap(source))
         throw new Error("Merge sources must be maps or map aliases");
       const srcMap = source.toJSON(null, ctx, Map);
-      for (const [key, value2] of srcMap) {
+      for (const [key2, value2] of srcMap) {
         if (map4 instanceof Map) {
-          if (!map4.has(key))
-            map4.set(key, value2);
+          if (!map4.has(key2))
+            map4.set(key2, value2);
         } else if (map4 instanceof Set) {
-          map4.add(key);
-        } else if (!Object.prototype.hasOwnProperty.call(map4, key)) {
-          Object.defineProperty(map4, key, {
+          map4.add(key2);
+        } else if (!Object.prototype.hasOwnProperty.call(map4, key2)) {
+          Object.defineProperty(map4, key2, {
             value: value2,
             writable: true,
             enumerable: true,
@@ -1767,19 +1767,19 @@ var require_addPairToJSMap = __commonJS({
     var stringify2 = require_stringify();
     var identity = require_identity();
     var toJS = require_toJS();
-    function addPairToJSMap(ctx, map4, { key, value }) {
-      if (identity.isNode(key) && key.addToJSMap)
-        key.addToJSMap(ctx, map4, value);
-      else if (merge.isMergeKey(ctx, key))
+    function addPairToJSMap(ctx, map4, { key: key2, value }) {
+      if (identity.isNode(key2) && key2.addToJSMap)
+        key2.addToJSMap(ctx, map4, value);
+      else if (merge.isMergeKey(ctx, key2))
         merge.addMergeToJSMap(ctx, map4, value);
       else {
-        const jsKey = toJS.toJS(key, "", ctx);
+        const jsKey = toJS.toJS(key2, "", ctx);
         if (map4 instanceof Map) {
           map4.set(jsKey, toJS.toJS(value, jsKey, ctx));
         } else if (map4 instanceof Set) {
           map4.add(jsKey);
         } else {
-          const stringKey = stringifyKey(key, jsKey, ctx);
+          const stringKey = stringifyKey(key2, jsKey, ctx);
           const jsValue = toJS.toJS(value, stringKey, ctx);
           if (stringKey in map4)
             Object.defineProperty(map4, stringKey, {
@@ -1794,19 +1794,19 @@ var require_addPairToJSMap = __commonJS({
       }
       return map4;
     }
-    function stringifyKey(key, jsKey, ctx) {
+    function stringifyKey(key2, jsKey, ctx) {
       if (jsKey === null)
         return "";
       if (typeof jsKey !== "object")
         return String(jsKey);
-      if (identity.isNode(key) && ctx?.doc) {
+      if (identity.isNode(key2) && ctx?.doc) {
         const strCtx = stringify2.createStringifyContext(ctx.doc, {});
         strCtx.anchors = /* @__PURE__ */ new Set();
         for (const node2 of ctx.anchors.keys())
           strCtx.anchors.add(node2.anchor);
         strCtx.inFlow = true;
         strCtx.inStringifyKey = true;
-        const strKey = key.toString(strCtx);
+        const strKey = key2.toString(strCtx);
         if (!ctx.mapKeyWarned) {
           let jsonStr = JSON.stringify(strKey);
           if (jsonStr.length > 40)
@@ -1830,24 +1830,24 @@ var require_Pair = __commonJS({
     var stringifyPair = require_stringifyPair();
     var addPairToJSMap = require_addPairToJSMap();
     var identity = require_identity();
-    function createPair(key, value, ctx) {
-      const k = createNode.createNode(key, void 0, ctx);
+    function createPair(key2, value, ctx) {
+      const k = createNode.createNode(key2, void 0, ctx);
       const v = createNode.createNode(value, void 0, ctx);
       return new Pair(k, v);
     }
     var Pair = class _Pair {
-      constructor(key, value = null) {
+      constructor(key2, value = null) {
         Object.defineProperty(this, identity.NODE_TYPE, { value: identity.PAIR });
-        this.key = key;
+        this.key = key2;
         this.value = value;
       }
       clone(schema) {
-        let { key, value } = this;
-        if (identity.isNode(key))
-          key = key.clone(schema);
+        let { key: key2, value } = this;
+        if (identity.isNode(key2))
+          key2 = key2.clone(schema);
         if (identity.isNode(value))
           value = value.clone(schema);
-        return new _Pair(key, value);
+        return new _Pair(key2, value);
       }
       toJSON(_, ctx) {
         const pair2 = ctx?.mapAsMap ? /* @__PURE__ */ new Map() : {};
@@ -2023,11 +2023,11 @@ var require_YAMLMap = __commonJS({
     var identity = require_identity();
     var Pair = require_Pair();
     var Scalar = require_Scalar();
-    function findPair(items, key) {
-      const k = identity.isScalar(key) ? key.value : key;
+    function findPair(items, key2) {
+      const k = identity.isScalar(key2) ? key2.value : key2;
       for (const it of items) {
         if (identity.isPair(it)) {
-          if (it.key === key || it.key === k)
+          if (it.key === key2 || it.key === k)
             return it;
           if (identity.isScalar(it.key) && it.key.value === k)
             return it;
@@ -2050,20 +2050,20 @@ var require_YAMLMap = __commonJS({
       static from(schema, obj, ctx) {
         const { keepUndefined, replacer } = ctx;
         const map4 = new this(schema);
-        const add = (key, value) => {
+        const add = (key2, value) => {
           if (typeof replacer === "function")
-            value = replacer.call(obj, key, value);
-          else if (Array.isArray(replacer) && !replacer.includes(key))
+            value = replacer.call(obj, key2, value);
+          else if (Array.isArray(replacer) && !replacer.includes(key2))
             return;
           if (value !== void 0 || keepUndefined)
-            map4.items.push(Pair.createPair(key, value, ctx));
+            map4.items.push(Pair.createPair(key2, value, ctx));
         };
         if (obj instanceof Map) {
-          for (const [key, value] of obj)
-            add(key, value);
+          for (const [key2, value] of obj)
+            add(key2, value);
         } else if (obj && typeof obj === "object") {
-          for (const key of Object.keys(obj))
-            add(key, obj[key]);
+          for (const key2 of Object.keys(obj))
+            add(key2, obj[key2]);
         }
         if (typeof schema.sortMapEntries === "function") {
           map4.items.sort(schema.sortMapEntries);
@@ -2103,23 +2103,23 @@ var require_YAMLMap = __commonJS({
           this.items.push(_pair);
         }
       }
-      delete(key) {
-        const it = findPair(this.items, key);
+      delete(key2) {
+        const it = findPair(this.items, key2);
         if (!it)
           return false;
         const del = this.items.splice(this.items.indexOf(it), 1);
         return del.length > 0;
       }
-      get(key, keepScalar) {
-        const it = findPair(this.items, key);
+      get(key2, keepScalar) {
+        const it = findPair(this.items, key2);
         const node2 = it?.value;
         return (!keepScalar && identity.isScalar(node2) ? node2.value : node2) ?? void 0;
       }
-      has(key) {
-        return !!findPair(this.items, key);
+      has(key2) {
+        return !!findPair(this.items, key2);
       }
-      set(key, value) {
-        this.add(new Pair.Pair(key, value), true);
+      set(key2, value) {
+        this.add(new Pair.Pair(key2, value), true);
       }
       /**
        * @param ctx - Conversion context, originally set in Document#toJS()
@@ -2208,15 +2208,15 @@ var require_YAMLSeq = __commonJS({
        *
        * @returns `true` if the item was found and removed.
        */
-      delete(key) {
-        const idx = asItemIndex(key);
+      delete(key2) {
+        const idx = asItemIndex(key2);
         if (typeof idx !== "number")
           return false;
         const del = this.items.splice(idx, 1);
         return del.length > 0;
       }
-      get(key, keepScalar) {
-        const idx = asItemIndex(key);
+      get(key2, keepScalar) {
+        const idx = asItemIndex(key2);
         if (typeof idx !== "number")
           return void 0;
         const it = this.items[idx];
@@ -2228,8 +2228,8 @@ var require_YAMLSeq = __commonJS({
        * `key` must contain a representation of an integer for this to succeed.
        * It may be wrapped in a `Scalar`.
        */
-      has(key) {
-        const idx = asItemIndex(key);
+      has(key2) {
+        const idx = asItemIndex(key2);
         return typeof idx === "number" && idx < this.items.length;
       }
       /**
@@ -2239,10 +2239,10 @@ var require_YAMLSeq = __commonJS({
        * If `key` does not contain a representation of an integer, this will throw.
        * It may be wrapped in a `Scalar`.
        */
-      set(key, value) {
-        const idx = asItemIndex(key);
+      set(key2, value) {
+        const idx = asItemIndex(key2);
         if (typeof idx !== "number")
-          throw new Error(`Expected a valid index, not ${key}.`);
+          throw new Error(`Expected a valid index, not ${key2}.`);
         const prev = this.items[idx];
         if (identity.isScalar(prev) && Scalar.isScalarValue(value))
           prev.value = value;
@@ -2276,8 +2276,8 @@ var require_YAMLSeq = __commonJS({
           let i = 0;
           for (let it of obj) {
             if (typeof replacer === "function") {
-              const key = obj instanceof Set ? it : String(i++);
-              it = replacer.call(obj, key, it);
+              const key2 = obj instanceof Set ? it : String(i++);
+              it = replacer.call(obj, key2, it);
             }
             seq.items.push(createNode.createNode(it, void 0, ctx));
           }
@@ -2285,8 +2285,8 @@ var require_YAMLSeq = __commonJS({
         return seq;
       }
     };
-    function asItemIndex(key) {
-      let idx = identity.isScalar(key) ? key.value : key;
+    function asItemIndex(key2) {
+      let idx = identity.isScalar(key2) ? key2.value : key2;
       if (idx && typeof idx === "string")
         idx = Number(idx);
       return typeof idx === "number" && Number.isInteger(idx) && idx >= 0 ? idx : null;
@@ -2700,25 +2700,25 @@ ${cn.comment}` : item.comment;
         for (let it of iterable) {
           if (typeof replacer === "function")
             it = replacer.call(iterable, String(i++), it);
-          let key, value;
+          let key2, value;
           if (Array.isArray(it)) {
             if (it.length === 2) {
-              key = it[0];
+              key2 = it[0];
               value = it[1];
             } else
               throw new TypeError(`Expected [key, value] tuple: ${it}`);
           } else if (it && it instanceof Object) {
             const keys = Object.keys(it);
             if (keys.length === 1) {
-              key = keys[0];
-              value = it[key];
+              key2 = keys[0];
+              value = it[key2];
             } else {
               throw new TypeError(`Expected tuple with one key, not ${keys.length} keys`);
             }
           } else {
-            key = it;
+            key2 = it;
           }
-          pairs2.items.push(Pair.createPair(key, value, ctx));
+          pairs2.items.push(Pair.createPair(key2, value, ctx));
         }
       return pairs2;
     }
@@ -2765,16 +2765,16 @@ var require_omap = __commonJS({
         if (ctx?.onCreate)
           ctx.onCreate(map4);
         for (const pair2 of this.items) {
-          let key, value;
+          let key2, value;
           if (identity.isPair(pair2)) {
-            key = toJS.toJS(pair2.key, "", ctx);
-            value = toJS.toJS(pair2.value, key, ctx);
+            key2 = toJS.toJS(pair2.key, "", ctx);
+            value = toJS.toJS(pair2.value, key2, ctx);
           } else {
-            key = toJS.toJS(pair2, "", ctx);
+            key2 = toJS.toJS(pair2, "", ctx);
           }
-          if (map4.has(key))
+          if (map4.has(key2))
             throw new Error("Ordered maps must not include duplicate keys");
-          map4.set(key, value);
+          map4.set(key2, value);
         }
         return map4;
       }
@@ -2795,12 +2795,12 @@ var require_omap = __commonJS({
       resolve(seq, onError) {
         const pairs$1 = pairs.resolvePairs(seq, onError);
         const seenKeys = [];
-        for (const { key } of pairs$1.items) {
-          if (identity.isScalar(key)) {
-            if (seenKeys.includes(key.value)) {
-              onError(`Ordered maps must not include duplicate keys: ${key.value}`);
+        for (const { key: key2 } of pairs$1.items) {
+          if (identity.isScalar(key2)) {
+            if (seenKeys.includes(key2.value)) {
+              onError(`Ordered maps must not include duplicate keys: ${key2.value}`);
             } else {
-              seenKeys.push(key.value);
+              seenKeys.push(key2.value);
             }
           }
         }
@@ -2985,14 +2985,14 @@ var require_set = __commonJS({
         super(schema);
         this.tag = _YAMLSet.tag;
       }
-      add(key) {
+      add(key2) {
         let pair2;
-        if (identity.isPair(key))
-          pair2 = key;
-        else if (key && typeof key === "object" && "key" in key && "value" in key && key.value === null)
-          pair2 = new Pair.Pair(key.key, null);
+        if (identity.isPair(key2))
+          pair2 = key2;
+        else if (key2 && typeof key2 === "object" && "key" in key2 && "value" in key2 && key2.value === null)
+          pair2 = new Pair.Pair(key2.key, null);
         else
-          pair2 = new Pair.Pair(key, null);
+          pair2 = new Pair.Pair(key2, null);
         const prev = YAMLMap.findPair(this.items, pair2.key);
         if (!prev)
           this.items.push(pair2);
@@ -3001,18 +3001,18 @@ var require_set = __commonJS({
        * If `keepPair` is `true`, returns the Pair matching `key`.
        * Otherwise, returns the value of that Pair's key.
        */
-      get(key, keepPair) {
-        const pair2 = YAMLMap.findPair(this.items, key);
+      get(key2, keepPair) {
+        const pair2 = YAMLMap.findPair(this.items, key2);
         return !keepPair && identity.isPair(pair2) ? identity.isScalar(pair2.key) ? pair2.key.value : pair2.key : pair2;
       }
-      set(key, value) {
+      set(key2, value) {
         if (typeof value !== "boolean")
           throw new Error(`Expected boolean value for set(key, value) in a YAML set, not ${typeof value}`);
-        const prev = YAMLMap.findPair(this.items, key);
+        const prev = YAMLMap.findPair(this.items, key2);
         if (prev && !value) {
           this.items.splice(this.items.indexOf(prev), 1);
         } else if (!prev && value) {
-          this.items.push(new Pair.Pair(key));
+          this.items.push(new Pair.Pair(key2));
         }
       }
       toJSON(_, ctx) {
@@ -3259,7 +3259,7 @@ var require_tags = __commonJS({
         if (Array.isArray(customTags))
           tags = [];
         else {
-          const keys = Array.from(schemas.keys()).filter((key) => key !== "yaml11").map((key) => JSON.stringify(key)).join(", ");
+          const keys = Array.from(schemas.keys()).filter((key2) => key2 !== "yaml11").map((key2) => JSON.stringify(key2)).join(", ");
           throw new Error(`Unknown schema "${schemaName}"; use one of ${keys} or define customTags array`);
         }
       }
@@ -3275,7 +3275,7 @@ var require_tags = __commonJS({
         const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
         if (!tagObj) {
           const tagName = JSON.stringify(tag);
-          const keys = Object.keys(tagsByName).map((key) => JSON.stringify(key)).join(", ");
+          const keys = Object.keys(tagsByName).map((key2) => JSON.stringify(key2)).join(", ");
           throw new Error(`Unknown custom tag ${tagName}; use one of ${keys}`);
         }
         if (!tags2.includes(tagObj))
@@ -3539,8 +3539,8 @@ var require_Document = __commonJS({
        * Convert a key and a value into a `Pair` using the current schema,
        * recursively wrapping all values as `Scalar` or `Collection` nodes.
        */
-      createPair(key, value, options = {}) {
-        const k = this.createNode(key, null, options);
+      createPair(key2, value, options = {}) {
+        const k = this.createNode(key2, null, options);
         const v = this.createNode(value, null, options);
         return new Pair.Pair(k, v);
       }
@@ -3548,8 +3548,8 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      delete(key) {
-        return assertCollection(this.contents) ? this.contents.delete(key) : false;
+      delete(key2) {
+        return assertCollection(this.contents) ? this.contents.delete(key2) : false;
       }
       /**
        * Removes a value from the document.
@@ -3569,8 +3569,8 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      get(key, keepScalar) {
-        return identity.isCollection(this.contents) ? this.contents.get(key, keepScalar) : void 0;
+      get(key2, keepScalar) {
+        return identity.isCollection(this.contents) ? this.contents.get(key2, keepScalar) : void 0;
       }
       /**
        * Returns item at `path`, or `undefined` if not found. By default unwraps
@@ -3585,8 +3585,8 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value with the key `key`.
        */
-      has(key) {
-        return identity.isCollection(this.contents) ? this.contents.has(key) : false;
+      has(key2) {
+        return identity.isCollection(this.contents) ? this.contents.has(key2) : false;
       }
       /**
        * Checks if the document includes a value at `path`.
@@ -3600,11 +3600,11 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      set(key, value) {
+      set(key2, value) {
         if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, [key], value);
+          this.contents = Collection.collectionFromPath(this.schema, [key2], value);
         } else if (assertCollection(this.contents)) {
-          this.contents.set(key, value);
+          this.contents.set(key2, value);
         }
       }
       /**
@@ -3912,24 +3912,24 @@ var require_resolve_props = __commonJS({
 var require_util_contains_newline = __commonJS({
   "node_modules/yaml/dist/compose/util-contains-newline.js"(exports) {
     "use strict";
-    function containsNewline(key) {
-      if (!key)
+    function containsNewline(key2) {
+      if (!key2)
         return null;
-      switch (key.type) {
+      switch (key2.type) {
         case "alias":
         case "scalar":
         case "double-quoted-scalar":
         case "single-quoted-scalar":
-          if (key.source.includes("\n"))
+          if (key2.source.includes("\n"))
             return true;
-          if (key.end) {
-            for (const st of key.end)
+          if (key2.end) {
+            for (const st of key2.end)
               if (st.type === "newline")
                 return true;
           }
           return false;
         case "flow-collection":
-          for (const it of key.items) {
+          for (const it of key2.items) {
             for (const st of it.start)
               if (st.type === "newline")
                 return true;
@@ -4003,10 +4003,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start: start3, key, sep: sep5, value } = collItem;
+        const { start: start3, key: key2, sep: sep5, value } = collItem;
         const keyProps = resolveProps.resolveProps(start3, {
           indicator: "explicit-key-ind",
-          next: key ?? sep5?.[0],
+          next: key2 ?? sep5?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4014,10 +4014,10 @@ var require_resolve_block_map = __commonJS({
         });
         const implicitKey = !keyProps.found;
         if (implicitKey) {
-          if (key) {
-            if (key.type === "block-seq")
+          if (key2) {
+            if (key2.type === "block-seq")
               onError(offset, "BLOCK_AS_IMPLICIT_KEY", "A block sequence may not be used as an implicit map key");
-            else if ("indent" in key && key.indent !== bm.indent)
+            else if ("indent" in key2 && key2.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
           if (!keyProps.anchor && !keyProps.tag && !sep5) {
@@ -4030,17 +4030,17 @@ var require_resolve_block_map = __commonJS({
             }
             continue;
           }
-          if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key)) {
-            onError(key ?? start3[start3.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
+          if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key2)) {
+            onError(key2 ?? start3[start3.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
           }
         } else if (keyProps.found?.indent !== bm.indent) {
           onError(offset, "BAD_INDENT", startColMsg);
         }
         ctx.atKey = true;
         const keyStart = keyProps.end;
-        const keyNode = key ? composeNode(ctx, key, keyProps, onError) : composeEmptyNode(ctx, keyStart, start3, null, keyProps, onError);
+        const keyNode = key2 ? composeNode(ctx, key2, keyProps, onError) : composeEmptyNode(ctx, keyStart, start3, null, keyProps, onError);
         if (ctx.schema.compat)
-          utilFlowIndentCheck.flowIndentCheck(bm.indent, key, onError);
+          utilFlowIndentCheck.flowIndentCheck(bm.indent, key2, onError);
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map4.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
@@ -4050,7 +4050,7 @@ var require_resolve_block_map = __commonJS({
           offset: keyNode.range[2],
           onError,
           parentIndent: bm.indent,
-          startOnNewline: !key || key.type === "block-scalar"
+          startOnNewline: !key2 || key2.type === "block-scalar"
         });
         offset = valueProps.end;
         if (valueProps.found) {
@@ -4214,11 +4214,11 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start: start3, key, sep: sep5, value } = collItem;
+        const { start: start3, key: key2, sep: sep5, value } = collItem;
         const props = resolveProps.resolveProps(start3, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep5?.[0],
+          next: key2 ?? sep5?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
@@ -4239,9 +4239,9 @@ var require_resolve_flow_collection = __commonJS({
             offset = props.end;
             continue;
           }
-          if (!isMap3 && ctx.options.strict && utilContainsNewline.containsNewline(key))
+          if (!isMap3 && ctx.options.strict && utilContainsNewline.containsNewline(key2))
             onError(
-              key,
+              key2,
               // checked by containsNewline()
               "MULTILINE_IMPLICIT_KEY",
               "Implicit keys of flow sequence pairs need to be on a single line"
@@ -4288,8 +4288,8 @@ var require_resolve_flow_collection = __commonJS({
         } else {
           ctx.atKey = true;
           const keyStart = props.end;
-          const keyNode = key ? composeNode(ctx, key, props, onError) : composeEmptyNode(ctx, keyStart, start3, null, props, onError);
-          if (isBlock(key))
+          const keyNode = key2 ? composeNode(ctx, key2, props, onError) : composeEmptyNode(ctx, keyStart, start3, null, props, onError);
+          if (isBlock(key2))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
           const valueProps = resolveProps.resolveProps(sep5 ?? [], {
@@ -5439,9 +5439,9 @@ var require_cst_scalar = __commonJS({
         ];
         if (!addEndtoBlockProps(props, "end" in token ? token.end : void 0))
           props.push({ type: "newline", offset: -1, indent: indent2, source: "\n" });
-        for (const key of Object.keys(token))
-          if (key !== "type" && key !== "offset")
-            delete token[key];
+        for (const key2 of Object.keys(token))
+          if (key2 !== "type" && key2 !== "offset")
+            delete token[key2];
         Object.assign(token, { type: "block-scalar", indent: indent2, props, source: body2 });
       }
     }
@@ -5489,9 +5489,9 @@ var require_cst_scalar = __commonJS({
         default: {
           const indent2 = "indent" in token ? token.indent : -1;
           const end2 = "end" in token && Array.isArray(token.end) ? token.end.filter((st) => st.type === "space" || st.type === "comment" || st.type === "newline") : [];
-          for (const key of Object.keys(token))
-            if (key !== "type" && key !== "offset")
-              delete token[key];
+          for (const key2 of Object.keys(token))
+            if (key2 !== "type" && key2 !== "offset")
+              delete token[key2];
           Object.assign(token, { type, indent: indent2, source, end: end2 });
         }
       }
@@ -5546,12 +5546,12 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start: start3, key, sep: sep5, value }) {
+    function stringifyItem({ start: start3, key: key2, sep: sep5, value }) {
       let res = "";
       for (const st of start3)
         res += st.source;
-      if (key)
-        res += stringifyToken(key);
+      if (key2)
+        res += stringifyToken(key2);
       if (sep5)
         for (const st of sep5)
           res += st.source;
@@ -6883,7 +6883,7 @@ var require_parser = __commonJS({
                   });
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start4 = getFirstKeyStartProps(it.start);
-                  const key = it.key;
+                  const key2 = it.key;
                   const sep5 = it.sep;
                   sep5.push(this.sourceToken);
                   delete it.key;
@@ -6892,7 +6892,7 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start4, key, sep: sep5 }]
+                    items: [{ start: start4, key: key2, sep: sep5 }]
                   });
                 } else if (start3.length > 0) {
                   it.sep = it.sep.concat(start3, this.sourceToken);
@@ -7567,6 +7567,7 @@ var MESSAGES = {
   "github.opening": "opening a pull request",
   "github.updating": "updating a pull request",
   "github.closing": "closing a pull request",
+  "github.pushing-format-problems": "pushing the format problems branch",
   "github.sending": "sending {method} to the pull request API",
   "github.reading-check-runs": "reading the check runs of the sync pull request",
   "github.reading-annotations": "reading the annotations of a failed check run",
@@ -7615,9 +7616,9 @@ var MESSAGES = {
   "assets.download-failed": "asset could not be downloaded",
   "assets.destination-exists": "asset destination already exists"
 };
-function message(key, ...values) {
+function message(key2, ...values) {
   const filled = values[0];
-  return MESSAGES[key].replace(/\{(\w+)\}/g, (_, name) => String(filled?.[name]));
+  return MESSAGES[key2].replace(/\{(\w+)\}/g, (_, name) => String(filled?.[name]));
 }
 
 // src/commands.ts
@@ -7806,13 +7807,13 @@ var DEFAULT_BUDGET_FLOOR = {
 function readRateLimitHeaders(headers) {
   const raw = {};
   for (const [name, value] of headers) {
-    const key = name.toLowerCase();
-    if (key.startsWith("x-ratelimit-") || key === "x-complexity") {
-      raw[key] = value;
+    const key2 = name.toLowerCase();
+    if (key2.startsWith("x-ratelimit-") || key2 === "x-complexity") {
+      raw[key2] = value;
     }
   }
-  const num = (key) => {
-    const value = raw[key];
+  const num = (key2) => {
+    const value = raw[key2];
     if (value === void 0) return void 0;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : void 0;
@@ -7992,7 +7993,7 @@ var LinearReads = class _LinearReads {
       reads.#token = index2.token;
       if (index2.answers.length > 8192) return null;
       let total = 0;
-      for (const { key, status, type, body: body2 } of index2.answers) {
+      for (const { key: key2, status, type, body: body2 } of index2.answers) {
         if (!/^[0-9a-f]{64}$/.test(body2)) return null;
         const file = join2(folder, BODIES, body2);
         const handle2 = await open(file, "r");
@@ -8010,7 +8011,7 @@ var LinearReads = class _LinearReads {
           }
           const extra = await handle2.read(Buffer.alloc(1), 0, 1, size);
           if (extra.bytesRead !== 0 || sha256(bytes) !== body2) return null;
-          reads.#add(key, { status, type, body: { file, hash: body2, size } });
+          reads.#add(key2, { status, type, body: { file, hash: body2, size } });
         } finally {
           await handle2.close();
         }
@@ -8029,15 +8030,15 @@ var LinearReads = class _LinearReads {
     if (this.mode === "record") this.#token = { scope: [...scope], context: authMetadata(context) };
   }
   /** The kept answer to this read, taken so it answers once; none while recording or after the capture ended. */
-  take(key) {
+  take(key2) {
     if (this.mode !== "replay" || this.#ended) return void 0;
-    const answer = this.#answers.get(key)?.shift();
+    const answer = this.#answers.get(key2)?.shift();
     return answer === void 0 ? void 0 : { ...answer, body: contentBytes(answer.body) };
   }
   /** Keeps a successful answer while recording. */
-  keep(key, answer) {
+  keep(key2, answer) {
     if (this.mode !== "record" || this.#ended || answer.status < 200 || answer.status >= 300) return;
-    this.#add(key, { ...answer, body: this.#spool.put(answer.body) });
+    this.#add(key2, { ...answer, body: this.#spool.put(answer.body) });
   }
   /** A mark of what is kept so far, for `dropSince`. */
   mark() {
@@ -8049,7 +8050,7 @@ var LinearReads = class _LinearReads {
    */
   dropSince(mark2) {
     if (this.mode !== "record") return;
-    for (const key of this.#order.splice(mark2).reverse()) this.#answers.get(key)?.pop();
+    for (const key2 of this.#order.splice(mark2).reverse()) this.#answers.get(key2)?.pop();
   }
   /** The capture ended: nothing more is kept or answered. */
   end() {
@@ -8059,13 +8060,13 @@ var LinearReads = class _LinearReads {
   async save(folder) {
     await mkdir(join2(folder, BODIES), { recursive: true, mode: 448 });
     const index2 = { version: VERSION, token: this.#token, answers: [] };
-    const queues = new Map([...this.#answers].map(([key, answers]) => [key, [...answers]]));
-    for (const key of this.#order) {
-      const answer = queues.get(key)?.shift();
+    const queues = new Map([...this.#answers].map(([key2, answers]) => [key2, [...answers]]));
+    for (const key2 of this.#order) {
+      const answer = queues.get(key2)?.shift();
       if (answer === void 0) continue;
       const body2 = answer.body.hash;
       await writeFile(join2(folder, BODIES, body2), contentBytes(answer.body), { mode: 384 });
-      index2.answers.push({ key, status: answer.status, type: answer.type, body: body2 });
+      index2.answers.push({ key: key2, status: answer.status, type: answer.type, body: body2 });
     }
     await writeFile(join2(folder, INDEX), JSON.stringify(index2), { mode: 384 });
   }
@@ -8074,11 +8075,11 @@ var LinearReads = class _LinearReads {
     this.#answers.clear();
     this.#order = [];
   }
-  #add(key, answer) {
-    const queue = this.#answers.get(key);
-    if (queue === void 0) this.#answers.set(key, [answer]);
+  #add(key2, answer) {
+    const queue = this.#answers.get(key2);
+    if (queue === void 0) this.#answers.set(key2, [answer]);
     else queue.push(answer);
-    this.#order.push(key);
+    this.#order.push(key2);
   }
 };
 
@@ -8157,15 +8158,15 @@ var GraphQLTransport = class {
   async query(operation, query, variables = {}, { bodies = false } = {}) {
     if (this.#stopped) throw this.#refuse(operation, "query", this.#stopped);
     const requestBody = JSON.stringify({ query, variables, operationName: operation });
-    const key = this.reads === void 0 ? void 0 : graphqlReadKey(requestBody);
-    const kept = key === void 0 ? void 0 : this.reads?.take(key);
+    const key2 = this.reads === void 0 ? void 0 : graphqlReadKey(requestBody);
+    const kept = key2 === void 0 ? void 0 : this.reads?.take(key2);
     if (kept !== void 0) {
       if (kept.body.length > this.#limits.responseBytes) throw new LinearResponseLimitError(operation, "linear-response-too-large", this.#limits.responseBytes);
       if (bodies) this.#chargeBodies(operation, kept.body.length);
       return keptData(operation, kept.status, kept.body);
     }
     const answer = await this.#network(operation, "query", requestBody, bodies);
-    if (key !== void 0) this.reads?.keep(key, { status: answer.status, type: "application/json", body: Buffer.from(answer.text, "utf8") });
+    if (key2 !== void 0) this.reads?.keep(key2, { status: answer.status, type: "application/json", body: Buffer.from(answer.text, "utf8") });
     return answer.data;
   }
   /** A read that must reflect the token as it is now: never answered from the read store, never kept in it. */
@@ -8731,7 +8732,7 @@ var LinearClient = class {
   /** Sends a file's bytes to the storage URL Linear issued for it. */
   async #putUpload(operation, target, input) {
     const headers = new Headers({ "content-type": input.contentType, "cache-control": "public, max-age=31536000" });
-    for (const { key, value } of target.headers) headers.set(key, value);
+    for (const { key: key2, value } of target.headers) headers.set(key2, value);
     this.stats.storagePuts += 1;
     let response;
     try {
@@ -9013,9 +9014,9 @@ var StateConfigError = class extends Error {
   }
 };
 function resolveStateConfig(input = {}) {
-  const pick = (key) => {
-    const value = input[key];
-    return value === void 0 || value.trim() === "" ? DEFAULT_STATE_CONFIG[key] : value.trim();
+  const pick = (key2) => {
+    const value = input[key2];
+    return value === void 0 || value.trim() === "" ? DEFAULT_STATE_CONFIG[key2] : value.trim();
   };
   const config = {
     remote: pick("remote"),
@@ -9026,18 +9027,21 @@ function resolveStateConfig(input = {}) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.remote)) {
     throw new StateConfigError(message("config.invalid-remote", { remote: config.remote }));
   }
-  for (const key of ["trackedBranch", "syncBranch"]) {
-    const problem = refNameProblem(`refs/heads/${config[key]}`) ?? (config[key].startsWith("-") ? message("config.starts-with-dash") : null);
-    if (problem !== null) throw new StateConfigError(message("config.invalid-branch", { key, branch: config[key], problem }));
+  for (const key2 of ["trackedBranch", "syncBranch"]) {
+    const problem = refNameProblem(`refs/heads/${config[key2]}`) ?? (config[key2].startsWith("-") ? message("config.starts-with-dash") : null);
+    if (problem !== null) throw new StateConfigError(message("config.invalid-branch", { key: key2, branch: config[key2], problem }));
   }
   const suspended = suspendedBranch(config);
-  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended) {
+  const formatProblems2 = formatProblemsBranch(config);
+  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended || config.trackedBranch === formatProblems2) {
     throw new StateConfigError(message("config.same-branches"));
   }
   if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
     throw new StateConfigError(message("config.nested-branches"));
   }
-  if (suspended.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${suspended}/`)) throw new StateConfigError(message("config.nested-branches"));
+  for (const derived of [suspended, formatProblems2]) {
+    if (derived.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${derived}/`)) throw new StateConfigError(message("config.nested-branches"));
+  }
   const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
   if (prefixProblem !== null) {
     throw new StateConfigError(message("config.invalid-prefix", { prefix: config.refPrefix, problem: prefixProblem }));
@@ -9075,6 +9079,9 @@ function refNameProblem(name) {
 }
 function suspendedBranch(config) {
   return !config.syncBranch.includes("/") || config.syncBranch.endsWith("/suspended") ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, "suspended");
+}
+function formatProblemsBranch(config) {
+  return !config.syncBranch.includes("/") || config.syncBranch.endsWith("/format-problems") ? `${config.syncBranch}-format-problems` : config.syncBranch.replace(/[^/]+$/, "format-problems");
 }
 
 // src/state/git.ts
@@ -9462,7 +9469,7 @@ function hold2(child, waiting) {
   }
 }
 function withoutUndefined(failure) {
-  return Object.fromEntries(Object.entries(failure).filter(([key, value]) => key !== "message" && value !== void 0 && value !== null));
+  return Object.fromEntries(Object.entries(failure).filter(([key2, value]) => key2 !== "message" && value !== void 0 && value !== null));
 }
 function spawnGit(request2) {
   helper ??= start();
@@ -9815,7 +9822,7 @@ async function rebuild(git, content4, node2, context) {
     const oid = await rebuild(git, subtree, below, context);
     return oid === null ? null : { mode: "040000", type: "tree", oid, name: bytes };
   }));
-  const kept = [...entries.entries()].filter(([key]) => !changedKeys.has(key)).map(([, entry]) => entry);
+  const kept = [...entries.entries()].filter(([key2]) => !changedKeys.has(key2)).map(([, entry]) => entry);
   const holds = await Promise.all(kept.map((entry) => entry.type === "tree" ? holdsFile(git, entry.oid, context) : true));
   const result = [...kept.filter((_, index2) => holds[index2]), ...changed2.filter((entry) => entry !== null)];
   if (result.length === 0) return null;
@@ -9894,8 +9901,8 @@ var Git = class {
   }
   environment(options) {
     const env = options.onlyEnv !== void 0 ? { ...BASE_ENV, ...options.onlyEnv } : { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
-    for (const key of Object.keys(env)) {
-      if (env[key] === void 0) delete env[key];
+    for (const key2 of Object.keys(env)) {
+      if (env[key2] === void 0) delete env[key2];
     }
     return env;
   }
@@ -10225,16 +10232,16 @@ ${head}`).digest("hex");
 // src/state/observation.ts
 var SIGNATURE = "Sync-signature";
 var SIGNED = new RegExp(`^([\\s\\S]*)\\n\\n${SIGNATURE}: ([0-9a-f]{64})\\n$`);
-function signObservation(key) {
+function signObservation(key2) {
   return (tree, parents, message2) => {
     const text6 = message2.replace(/\n+$/, "");
     return `${text6}
 
-${SIGNATURE}: ${key.observationMac(tree, parents, text6)}
+${SIGNATURE}: ${key2.observationMac(tree, parents, text6)}
 `;
   };
 }
-async function signedObservation(git, commit2, key) {
+async function signedObservation(git, commit2, key2) {
   const [tree = "", parents = ""] = (await showCommit(git, "%T%n%P", commit2)).split("\n");
   const found = await git.readObject(commit2);
   const raw = (found?.type === "commit" ? found.content : (await git.run(["cat-file", "commit", commit2])).stdout).toString("utf8");
@@ -10243,10 +10250,10 @@ async function signedObservation(git, commit2, key) {
   if (raw.slice(0, split).split("\n").some((line2) => line2.startsWith("encoding "))) return false;
   const signed = SIGNED.exec(raw.slice(split + 2));
   if (signed === null) return false;
-  return key.verifiesObservation(tree, parents.split(" ").filter(Boolean), signed[1], signed[2]);
+  return key2.verifiesObservation(tree, parents.split(" ").filter(Boolean), signed[1], signed[2]);
 }
-async function trustedObservation(git, linear, tracked, key) {
-  if (await signedObservation(git, linear, key)) return true;
+async function trustedObservation(git, linear, tracked, key2) {
+  if (await signedObservation(git, linear, key2)) return true;
   const tree = await git.revParse(`${linear}^{tree}`);
   const trees = (await git.text(["log", "--first-parent", "--format=%T", tracked])).split("\n");
   return trees.includes(tree);
@@ -10273,18 +10280,18 @@ function parseLfsPointer(blob) {
   for (const line2 of lines3.slice(1)) {
     const space = line2.indexOf(" ");
     if (space <= 0) return null;
-    const key = line2.slice(0, space);
+    const key2 = line2.slice(0, space);
     const value = line2.slice(space + 1);
-    if (key === "oid") {
+    if (key2 === "oid") {
       const match = /^sha256:([0-9a-f]{64})$/.exec(value);
       if (match === null) return null;
       oid = match[1];
-    } else if (key === "size") {
+    } else if (key2 === "size") {
       if (!/^(0|[1-9][0-9]*)$/.test(value)) return null;
       size = Number(value);
-    } else if (!/^[a-z0-9.-]+$/.test(key)) {
+    } else if (!/^[a-z0-9.-]+$/.test(key2)) {
       return null;
-    } else if (key.startsWith("ext-")) {
+    } else if (key2.startsWith("ext-")) {
       extensions = true;
     }
   }
@@ -10393,7 +10400,8 @@ async function fetchState(git, config) {
   const tracked = branchRef(config.trackedBranch);
   const sync = branchRef(config.syncBranch);
   const suspended = branchRef(suspendedBranch(config));
-  const advertised = await lsRemote(git, config.remote, [tracked, sync, suspended, ...STORES.map((store) => stateRef(config, store))]);
+  const formatProblems2 = branchRef(formatProblemsBranch(config));
+  const advertised = await lsRemote(git, config.remote, [tracked, sync, suspended, formatProblems2, ...STORES.map((store) => stateRef(config, store))]);
   if (!advertised.has(tracked)) {
     throw new Error(message("state.tracked-missing", { branch: config.trackedBranch, remote: config.remote }));
   }
@@ -10409,7 +10417,7 @@ async function fetchState(git, config) {
   const gone = [];
   const state = {};
   for (const store of STORES) state[store] = await read(stateRef(config, store));
-  const fetched = { tracked: await read(tracked), sync: await read(sync), suspended: await read(suspended), state };
+  const fetched = { tracked: await read(tracked), sync: await read(sync), suspended: await read(suspended), formatProblems: await read(formatProblems2), state };
   if (gone.length > 0) await git.run(["update-ref", "--stdin"], { input: gone.map((ref) => `delete ${ref}
 `).join("") });
   return fetched;
@@ -10445,6 +10453,7 @@ function refRole(config, ref) {
   if (store !== void 0) return store;
   if (ref === branchRef(suspendedBranch(config))) return "suspendedBranch";
   if (ref === branchRef(config.syncBranch)) return "syncBranch";
+  if (ref === branchRef(formatProblemsBranch(config))) return "formatProblemsBranch";
   return ref === branchRef(config.trackedBranch) ? "trackedBranch" : "other";
 }
 function logMoves(git, config, refs) {
@@ -10552,7 +10561,7 @@ function checkUniqueDocumentIds(ids) {
     seen.add(entry.id);
   }
 }
-async function readUploads(git, commit2, key) {
+async function readUploads(git, commit2, key2) {
   const [data, macs] = await Promise.all([
     readJsonFile(git, commit2, UPLOADS_FILE),
     readJsonFile(git, commit2, UPLOAD_MACS_FILE, { optional: true })
@@ -10561,7 +10570,7 @@ async function readUploads(git, commit2, key) {
   for (const [hash, url] of Object.entries(data)) {
     if (!/^[0-9a-f]{64}$/.test(hash) || typeof url !== "string") throw new Error(message("state.invalid-entry", { file: UPLOADS_FILE }));
     if (!/^https:\/\/uploads\.linear\.app\//i.test(url) || /[<>\\\s\x00-\x1f\x7f]/u.test(url)) continue;
-    if (!key.verifiesUpload(hash, url, macs[hash])) continue;
+    if (!key2.verifiesUpload(hash, url, macs[hash])) continue;
     map4.set(hash, url);
   }
   return map4;
@@ -10628,9 +10637,9 @@ async function readStringMap(git, commit2, file) {
   if (await git.readBlob(`${commit2}:${file}`) === null) return /* @__PURE__ */ new Map();
   const data = await readJsonFile(git, commit2, file);
   const map4 = /* @__PURE__ */ new Map();
-  for (const [key, value] of Object.entries(data)) {
+  for (const [key2, value] of Object.entries(data)) {
     if (typeof value !== "string" || value === "") throw new Error(message("state.invalid-entry", { file }));
-    map4.set(key, value);
+    map4.set(key2, value);
   }
   return map4;
 }
@@ -10698,10 +10707,10 @@ async function uploadsRebuilding(git, commit2) {
   const subject2 = await git.text(["log", "-1", "--format=%s", "--fixed-strings", `--grep=${UPLOADS_REBUILDING}`, `--grep=${UPLOADS_REBUILT}`, commit2]);
   return subject2.trim() === UPLOADS_REBUILDING;
 }
-function commitUploads(git, parent, uploads, identity, key, options = {}) {
+function commitUploads(git, parent, uploads, identity, key2, options = {}) {
   const entries = [...uploads.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries);
-  const macs = Object.fromEntries(entries.map(([hash, url]) => [hash, key.uploadMac(hash, url)]));
+  const macs = Object.fromEntries(entries.map(([hash, url]) => [hash, key2.uploadMac(hash, url)]));
   const files = /* @__PURE__ */ new Map([[UPLOADS_FILE, data]]);
   if (entries.length > 0) files.set(UPLOAD_MACS_FILE, macs);
   return commitJsonFiles(git, parent, files, options.message ?? "Update upload cache", identity, options.always === true);
@@ -10853,6 +10862,48 @@ var LINT_RULES = {
   "upload-file-refused": "A file named as the sync names a captured upload fails the upload check: documents that link it are blocked when they change in Linear.",
   "document-in-assets-folder": "A Markdown document cannot be inside a folder named assets, which holds the files documents embed."
 };
+var LINT_RULE_BLOCKS = {
+  footnote: true,
+  subscript: true,
+  "table-escaped-pipe": true,
+  "table-hash-cell": true,
+  "table-list-cell": false,
+  "table-quote-cell": false,
+  "image-in-link": true,
+  "content-too-long": true,
+  "markdown-complexity": true,
+  "duplicate-title": true,
+  "table-alignment": false,
+  "link-scheme": true,
+  "link-without-text": true,
+  "link-title": false,
+  "image-title": false,
+  "code-in-emphasis": false,
+  "hard-break-backslash": false,
+  "setext-heading-lines": false,
+  "table-header-pipe": false,
+  "code-span-padding": false,
+  "hard-break-in-heading": false,
+  "number-paragraph": false,
+  "tab-reference-layout": false,
+  "space-reference-edge": false,
+  "git-conflict-marker": true,
+  "section-opener": true,
+  "url-in-html": true,
+  "unplaced-link": false,
+  "list-after-item-text": false,
+  "list-number-too-long": false,
+  "block-first-in-list-item": true,
+  "section-marker-text": true,
+  "plus-line-in-item": true,
+  "tab-indentation": true,
+  "ordered-task-list": false,
+  "image-not-in-repository": true,
+  "image-file-missing": true,
+  "upload-file-refused": false,
+  "document-in-assets-folder": true
+};
+var NOT_IN_LINEAR_EXPORT = /* @__PURE__ */ new Set(["code-in-emphasis", "hard-break-backslash", "image-title", "link-title", "ordered-task-list", "table-alignment"]);
 var LINT_WARNINGS = {
   "image-made-link": "fix wrote an image from a URL as a link to it, or as the text of the link around it: Linear shows no image. To show the image, add the file to the repository and link it by its relative path.",
   "link-text-from-url": "fix wrote the URL of a link without text as its text: Linear drops a link without text. To show other words, replace the text.",
@@ -11055,6 +11106,18 @@ async function findOpenPullRequest(target, head, base) {
   if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message("github.listing"), answer);
   const found = answer.json.map(toPullRequest).find((pr) => pr !== null && pr.head === head && pr.base === base && pr.headRepository?.toLowerCase() === target.repository.toLowerCase());
   return found ?? null;
+}
+async function lastClosedPullRequest(target, head, base) {
+  const owner = target.repository.split("/")[0];
+  const query = new URLSearchParams({ state: "closed", head: `${owner}:${head}`, base, sort: "updated", direction: "desc", per_page: "10" });
+  const answer = await request(target, "GET", `/pulls?${query.toString()}`);
+  if (answer.status !== 200 || !Array.isArray(answer.json)) throw answerError(message("github.listing"), answer);
+  const found = answer.json.map((json) => ({ pr: toPullRequest(json), json })).find(({ pr: pr2 }) => pr2 !== null && pr2.head === head && pr2.base === base && pr2.headRepository?.toLowerCase() === target.repository.toLowerCase());
+  if (found === void 0 || found.pr === null) return null;
+  const read = await request(target, "GET", `/pulls/${found.pr.number}`);
+  const pr = read.json;
+  if (read.status !== 200 || typeof pr?.head?.sha !== "string") throw answerError(message("github.reading-pull-request"), read);
+  return { number: found.pr.number, head: pr.head.sha, merged: pr.merged === true };
 }
 async function openPullRequest(target, spec) {
   const answer = await request(target, "POST", "/pulls", { title: spec.title, head: spec.head, base: spec.base, body: spec.body, maintainer_can_modify: false }, { kind: "opened", accepted: 201 });
@@ -20403,37 +20466,37 @@ function configure(combined, extensions) {
   }
 }
 function extension(combined, extension2) {
-  let key;
-  for (key in extension2) {
-    if (own2.call(extension2, key)) {
-      switch (key) {
+  let key2;
+  for (key2 in extension2) {
+    if (own2.call(extension2, key2)) {
+      switch (key2) {
         case "canContainEols": {
-          const right = extension2[key];
+          const right = extension2[key2];
           if (right) {
-            combined[key].push(...right);
+            combined[key2].push(...right);
           }
           break;
         }
         case "transforms": {
-          const right = extension2[key];
+          const right = extension2[key2];
           if (right) {
-            combined[key].push(...right);
+            combined[key2].push(...right);
           }
           break;
         }
         case "afterExit":
         case "beforeEnter": {
-          const right = extension2[key];
+          const right = extension2[key2];
           if (right) {
-            combined[key].push(right);
+            combined[key2].push(right);
           }
           break;
         }
         case "enter":
         case "exit": {
-          const right = extension2[key];
+          const right = extension2[key2];
           if (right) {
-            Object.assign(combined[key], right);
+            Object.assign(combined[key2], right);
           }
           break;
         }
@@ -20550,9 +20613,9 @@ function propertiesFactory(check2) {
       /** @type {unknown} */
       node2
     );
-    let key;
-    for (key in check2) {
-      if (nodeAsRecord[key] !== checkAsRecord[key]) return false;
+    let key2;
+    for (key2 in check2) {
+      if (nodeAsRecord[key2] !== checkAsRecord[key2]) return false;
     }
     return true;
   }
@@ -21071,13 +21134,13 @@ var phrasing = (
 
 // node_modules/zwitch/index.js
 var own3 = {}.hasOwnProperty;
-function zwitch(key, options) {
+function zwitch(key2, options) {
   const settings = options || {};
   function one2(value, ...parameters) {
     let fn = one2.invalid;
     const handlers = one2.handlers;
-    if (value && own3.call(value, key)) {
-      const id = String(value[key]);
+    if (value && own3.call(value, key2)) {
+      const id = String(value[key2]);
       fn = own3.call(handlers, id) ? handlers[id] : one2.unknown;
     }
     if (fn) {
@@ -21094,33 +21157,33 @@ function zwitch(key, options) {
 var own4 = {}.hasOwnProperty;
 function configure2(base, extension2) {
   let index2 = -1;
-  let key;
+  let key2;
   if (extension2.extensions) {
     while (++index2 < extension2.extensions.length) {
       configure2(base, extension2.extensions[index2]);
     }
   }
-  for (key in extension2) {
-    if (own4.call(extension2, key)) {
-      switch (key) {
+  for (key2 in extension2) {
+    if (own4.call(extension2, key2)) {
+      switch (key2) {
         case "extensions": {
           break;
         }
         /* c8 ignore next 4 */
         case "unsafe": {
-          list2(base[key], extension2[key]);
+          list2(base[key2], extension2[key2]);
           break;
         }
         case "join": {
-          list2(base[key], extension2[key]);
+          list2(base[key2], extension2[key2]);
           break;
         }
         case "handlers": {
-          map(base[key], extension2[key]);
+          map(base[key2], extension2[key2]);
           break;
         }
         default: {
-          base.options[key] = extension2[key];
+          base.options[key2] = extension2[key2];
         }
       }
     }
@@ -25224,9 +25287,9 @@ function acceptedBlockStarts(previous3) {
   visit2(parse3(previous3), (node2, ancestors) => {
     const first = line(node2) - 1;
     if (node2.type === "table") {
-      const key = tableKey(lines3[first], linearLineText(lines3[first + 1] ?? ""));
-      tableHeaders.add(key);
-      tables.add(key + "\n" + tableRowsKey(lines3, first + 2, node2.position?.end.line ?? first + 2));
+      const key2 = tableKey(lines3[first], linearLineText(lines3[first + 1] ?? ""));
+      tableHeaders.add(key2);
+      tables.add(key2 + "\n" + tableRowsKey(lines3, first + 2, node2.position?.end.line ?? first + 2));
       return;
     }
     if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
@@ -25244,9 +25307,9 @@ function acceptedBlockStarts(previous3) {
       if (!ESCAPED_BLOCK_START.test(raw)) continue;
       const literal = raw.slice(1);
       if (literal.startsWith("|")) {
-        const key = tableKey(lines3[index2 - 1] ?? "", literal);
-        escapes.add(key);
-        escapes.add(key + "\n" + tableRowsKey(lines3, index2 + 1, paragraph2.position?.end.line ?? index2 + 1));
+        const key2 = tableKey(lines3[index2 - 1] ?? "", literal);
+        escapes.add(key2);
+        escapes.add(key2 + "\n" + tableRowsKey(lines3, index2 + 1, paragraph2.position?.end.line ?? index2 + 1));
       } else {
         escapes.add(blockLineKey(literal, index2 === line(paragraph2) - 1));
         if (SECTION_TITLE.test(literal) && line(paragraph2) === index2 + 1 && paragraph2.position?.end.line === index2 + 1) {
@@ -25255,7 +25318,7 @@ function acceptedBlockStarts(previous3) {
       }
     }
   });
-  for (const key of plain) escapes.delete(key);
+  for (const key2 of plain) escapes.delete(key2);
   return { escapes, tables, tableHeaders, html: html2 };
 }
 function divsClosedInAnotherBlock(tree, source) {
@@ -25306,10 +25369,10 @@ function linearMarkersAsText(content4, previous3 = "") {
         const delimiter = rowAt(index2 + 1);
         if (!delimiter.startsWith("|")) return;
         const canonical = /^\|(?: -- \|)+$/.test(delimiter);
-        const key = tableKey(lines3[index2], delimiter);
-        const table = key + "\n" + tableRowsKey(lines3, index2 + 2, node2.position?.end.line ?? index2 + 2);
+        const key2 = tableKey(lines3[index2], delimiter);
+        const table = key2 + "\n" + tableRowsKey(lines3, index2 + 2, node2.position?.end.line ?? index2 + 2);
         if (accepted.tables.has(table)) return;
-        const knownLiteral = accepted.tableHeaders.has(key) ? accepted.escapes.has(table) : accepted.escapes.has(key);
+        const knownLiteral = accepted.tableHeaders.has(key2) ? accepted.escapes.has(table) : accepted.escapes.has(key2);
         const literal = knownLiteral || !canonical || end(node2) === text6.length || ancestors.at(-1)?.type === "listItem" && at2 > rowStart(index2);
         if (literal) escapes.add(rowStart(index2 + 1));
       } else if (node2.type === "html" && ancestors.at(-1)?.type !== "paragraph") {
@@ -26335,9 +26398,9 @@ var XmlDeclaration = class extends XmlNode {
   toJSON() {
     let json = XmlNode.prototype.toJSON.call(this);
     json.version = this.version;
-    for (let key of ["encoding", "standalone"]) {
-      if (this[key] !== null) {
-        json[key] = this[key];
+    for (let key2 of ["encoding", "standalone"]) {
+      if (this[key2] !== null) {
+        json[key2] = this[key2];
       }
     }
     return json;
@@ -26437,9 +26500,9 @@ var XmlDocumentType = class extends XmlNode {
   toJSON() {
     let json = XmlNode.prototype.toJSON.call(this);
     json.name = this.name;
-    for (let key of ["publicId", "systemId", "internalSubset"]) {
-      if (this[key] !== null) {
-        json[key] = this[key];
+    for (let key2 of ["publicId", "systemId", "internalSubset"]) {
+      if (this[key2] !== null) {
+        json[key2] = this[key2];
       }
     }
     return json;
@@ -27317,10 +27380,10 @@ var STATIC_SVG_ELEMENTS = /* @__PURE__ */ new Set([
 function loadsCss(css) {
   return /\\|@import|image-set[ \t\n\r\f]*\(|\bsrc[ \t\n\r\f]*\(|url[ \t\n\r\f]*\([ \t\n\r\f]*(?=[^ \t\n\r\f])(?!['"]?[ \t\n\r\f]*#)/i.test(css);
 }
-function declaredPrefix(key) {
-  if (key === "xmlns") return "";
-  if (!key.startsWith("xmlns:")) return void 0;
-  const prefix = key.slice(6);
+function declaredPrefix(key2) {
+  if (key2 === "xmlns") return "";
+  if (!key2.startsWith("xmlns:")) return void 0;
+  const prefix = key2.slice(6);
   return prefix === "" || prefix.includes(":") || prefix === "xml" || prefix === "xmlns" ? null : prefix;
 }
 function safeSvg(bytes) {
@@ -27350,8 +27413,8 @@ function safeSvg(bytes) {
       if (++complexity2 > MAX_SVG_COMPLEXITY) return false;
       const undoLength = undo.length;
       const attributes = Object.entries(node2.attributes);
-      for (const [key, value] of attributes) {
-        const prefix = declaredPrefix(key);
+      for (const [key2, value] of attributes) {
+        const prefix = declaredPrefix(key2);
         if (prefix === null) return false;
         if (prefix === void 0) continue;
         if (++complexity2 > MAX_SVG_COMPLEXITY) return false;
@@ -27362,11 +27425,11 @@ function safeSvg(bytes) {
       if (name.length > 2 || scope.get(name.length === 2 ? name[0] : "") !== SVG_NAMESPACE) return false;
       if (!STATIC_SVG_ELEMENTS.has(name.at(-1))) return false;
       if (name.at(-1) === "style" && (node2.children.some((child) => child instanceof XmlElement) || loadsCss(node2.text))) return false;
-      for (const [key, value] of attributes) {
-        if (declaredPrefix(key) !== void 0) continue;
-        const parts = key.split(":");
+      for (const [key2, value] of attributes) {
+        if (declaredPrefix(key2) !== void 0) continue;
+        const parts = key2.split(":");
         if (parts.length > 2) return false;
-        const [prefix, local] = parts.length === 2 ? parts : ["", key];
+        const [prefix, local] = parts.length === 2 ? parts : ["", key2];
         if (prefix === "xml" ? !["lang", "space"].includes(local) : prefix !== "" && scope.get(prefix) !== XLINK_NAMESPACE) return false;
         if (local.toLowerCase().startsWith("on") || local === "href" && !value.startsWith("#") || loadsCss(value)) return false;
       }
@@ -28123,7 +28186,6 @@ function extractTabs(children, leading) {
 var GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 var QUOTE_PREFIX = /^ {0,3}> ?/;
 var ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
-var FIX_ONLY_RULES = /* @__PURE__ */ new Set(["code-span-padding", "hard-break-in-heading", "list-after-item-text", "list-number-too-long", "setext-heading-lines", "table-header-pipe", "table-list-cell", "table-quote-cell", "tab-reference-layout", "space-reference-edge", "unplaced-link", "number-paragraph"]);
 var NUMBER_ONLY = /^\d{1,9}\\[.)]$/;
 var LIST_CELL = /^(?:[*+-]|\d{1,9}\))(?:[ \t]|$)/;
 var LINK_ATTRIBUTE = /\b(?:src|href)\s*=/i;
@@ -28138,7 +28200,11 @@ function linkedFileCheck(documentPath2, isFile) {
 }
 function lintInTree(file, text6, files) {
   const findings = lintText(file, text6, { linkedFileExists: linkedFileCheck(file, (path2) => files.has(path2)) });
-  return findings.filter((finding) => !FIX_ONLY_RULES.has(finding.rule));
+  return findings.filter((finding) => LINT_RULE_BLOCKS[finding.rule]);
+}
+function lintRecorded(file, text6, files) {
+  const findings = lintText(file, text6, { linkedFileExists: linkedFileCheck(file, (path2) => files.has(path2)) });
+  return findings.filter((finding) => LINT_RULE_BLOCKS[finding.rule] || NOT_IN_LINEAR_EXPORT.has(finding.rule));
 }
 function linearCode(value, raw, ancestors) {
   const plain = value.replace(/\r\n?|\n/g, " ");
@@ -28174,9 +28240,9 @@ function lintText(file, text6, options = {}) {
   const findings = [];
   const reported = /* @__PURE__ */ new Set();
   const report = (rule, bodyLine) => {
-    const key = `${rule}:${bodyLine}`;
-    if (reported.has(key)) return;
-    reported.add(key);
+    const key2 = `${rule}:${bodyLine}`;
+    if (reported.has(key2)) return;
+    reported.add(key2);
     findings.push({ file, line: bodyLine + offset, rule, message: LINT_RULES[rule] });
   };
   const sorted = () => findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
@@ -28271,11 +28337,11 @@ function referencesOverLimit(tree, body2) {
   if (references.length === 0) return void 0;
   const destinations2 = /* @__PURE__ */ new Map();
   const destinationLength = (reference, url) => {
-    const key = `${reference.type}:${reference.identifier}`;
-    let length2 = destinations2.get(key);
+    const key2 = `${reference.type}:${reference.identifier}`;
+    let length2 = destinations2.get(key2);
     if (length2 === void 0) {
       length2 = codePoints(reference.type === "linkReference" ? linkDestination(url) : imageDestination(url));
-      destinations2.set(key, length2);
+      destinations2.set(key2, length2);
     }
     return length2;
   };
@@ -28529,9 +28595,9 @@ var COLLISIONS_NAMED = 3;
 function duplicateTitles(files) {
   const groups = /* @__PURE__ */ new Map();
   for (const file of files) {
-    const key = file.replace(/\.md$/i, "").normalize("NFC").toUpperCase().toLowerCase();
-    const group = groups.get(key);
-    if (group === void 0) groups.set(key, [file]);
+    const key2 = file.replace(/\.md$/i, "").normalize("NFC").toUpperCase().toLowerCase();
+    const group = groups.get(key2);
+    if (group === void 0) groups.set(key2, [file]);
     else group.push(file);
   }
   return [...groups.values()].filter((group) => group.length > 1).flatMap((group) => {
@@ -30963,14 +31029,14 @@ function imageLinks(body2, deadUploads = /* @__PURE__ */ new Set(), onlyImages, 
       const label = node2.alt || url;
       const inLink = ancestors.some((parent) => parent.type === "link" || parent.type === "linkReference");
       const inTable = ancestors.some((parent) => parent.type === "tableCell");
-      const key = JSON.stringify([label, url, inLink, inTable]);
-      const cached = replacements.get(key);
+      const key2 = JSON.stringify([label, url, inLink, inTable]);
+      const cached = replacements.get(key2);
       if (cached !== void 0) replacement = cached;
       else {
         const rendered = inLink ? linkLabelText(label) : linearLink(label, url);
         const value = inTable ? rendered.replace(/\|/g, "&#124;") : rendered;
         replacement = { text: value, ...value.startsWith("[") ? { url: destinationOf(value) } : {} };
-        replacements.set(key, replacement);
+        replacements.set(key2, replacement);
       }
     } else {
       const link2 = ancestors.at(-1);
@@ -31012,9 +31078,9 @@ function simpleImageParagraph(body2, onlyImages) {
     if (onlyImages !== void 0 && !onlyImages.has(count4)) continue;
     const url = match[2];
     const label = match[1] || url;
-    const key = `${label}\0${url}`;
-    const replacement = links.get(key) ?? linearLink(label, url);
-    links.set(key, replacement);
+    const key2 = `${label}\0${url}`;
+    const replacement = links.get(key2) ?? linearLink(label, url);
+    links.set(key2, replacement);
     const to = pattern.lastIndex - match[3].length;
     edits.push({ from: match.index, to, text: replacement });
     selected.push(count4);
@@ -31255,6 +31321,24 @@ function fix2(paths, cwd) {
   const kept = new Set(moved);
   return { exitCode: stdout === "" ? 0 : 1, stdout: stdout + describeWarnings(madeLinks) + warnings(files.filter((file) => !kept.has(file)), cwd), stderr: "" };
 }
+function fixDocument(file, text6, linkedFileExists) {
+  const options = { linkedFileExists };
+  const before = lintText(file, text6, options);
+  const linked = before.some((finding) => finding.rule === "image-not-in-repository") ? withWebImageLinks(text6) : void 0;
+  const judged = linked === void 0 ? before : lintText(file, linked.text, options).filter((finding) => finding.rule !== "content-too-long");
+  if (judged.some((finding) => !FIXED_RULES.has(finding.rule))) {
+    const reported = new Set(before.map((finding) => finding.rule));
+    return { text: text6, findings: [...before, ...linked === void 0 ? [] : judged.filter((finding) => !FIXED_RULES.has(finding.rule) && !reported.has(finding.rule))] };
+  }
+  let fixed;
+  try {
+    fixed = linked === void 0 ? fixText(text6, options) : linearForm(linked.text, options) ?? text6;
+  } catch (error) {
+    if (error instanceof MarkdownLimitError) return { text: text6, findings: [...before, complexity(file)] };
+    throw error;
+  }
+  return fixed === text6 ? { text: text6, findings: before } : { text: fixed, findings: lintText(file, fixed, options) };
+}
 function withEscapedErrors(command) {
   try {
     return command();
@@ -31318,7 +31402,7 @@ function sameFile(a, b) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION2 = true ? "1.0.1" : packageJson.version;
+var VERSION2 = true ? "1.0.2-rc.1" : packageJson.version;
 function olderVersion(version, than) {
   if (version === void 0) return true;
   const a = parseVersion(version);
@@ -31407,11 +31491,11 @@ function readAnnotation(readme, text6) {
   }
   if (data === null || typeof data !== "object" || Array.isArray(data)) return { annotation: null };
   const annotation = { folder, readme };
-  for (const [key, field] of [[TEAM_KEY, "team"], [PROJECT_KEY, "project"]]) {
-    if (!Object.hasOwn(data, key)) continue;
-    const value = data[key];
+  for (const [key2, field] of [[TEAM_KEY, "team"], [PROJECT_KEY, "project"]]) {
+    if (!Object.hasOwn(data, key2)) continue;
+    const value = data[key2];
     if (typeof value !== "string" || value.trim() === "") {
-      return { problem: { readme, kind: "invalid-annotation", message: message("annotations.empty-name", { readme, key }) } };
+      return { problem: { readme, kind: "invalid-annotation", message: message("annotations.empty-name", { readme, key: key2 }) } };
     }
     annotation[field] = value.trim();
   }
@@ -31668,9 +31752,9 @@ var COLLISIONS_NAMED2 = 3;
 function separateCollisions(mapped) {
   const groups = /* @__PURE__ */ new Map();
   for (const document4 of mapped) {
-    const key = titleKey(document4.place, document4.title);
-    const group = groups.get(key);
-    if (group === void 0) groups.set(key, [document4]);
+    const key2 = titleKey(document4.place, document4.title);
+    const group = groups.get(key2);
+    if (group === void 0) groups.set(key2, [document4]);
     else group.push(document4);
   }
   const documents = [];
@@ -31837,7 +31921,7 @@ async function resolveTargets(client, zones, { retryDelayMs = TEAMS_RETRY_DELAY_
     if (matches.length === 1) targets.teams.set(ref, matches[0]);
     else (matches.length === 0 ? missing : ambiguous).push(`team "${ref}"`);
   }
-  for (const [key, ref] of [...projectRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+  for (const [key2, ref] of [...projectRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
     const team = targets.teams.get(ref.team);
     if (team === void 0) continue;
     const matches = [];
@@ -31856,11 +31940,11 @@ async function resolveTargets(client, zones, { retryDelayMs = TEAMS_RETRY_DELAY_
     }
     if (matches.length === 1) {
       const { id, name } = matches[0];
-      targets.projects.set(key, { id, name });
+      targets.projects.set(key2, { id, name });
     } else if (matches.length === 0 && createProjects) {
       const id = stableId("project", team.id, ref.project);
       targets.pendingProjects ??= /* @__PURE__ */ new Map();
-      targets.pendingProjects.set(key, { id, name: ref.project, teamId: team.id, team: ref.team });
+      targets.pendingProjects.set(key2, { id, name: ref.project, teamId: team.id, team: ref.team });
     } else {
       (matches.length === 0 ? missing : ambiguous).push(`project "${ref.project}" of team "${ref.team}"`);
     }
@@ -31883,14 +31967,14 @@ async function resolveTargets(client, zones, { retryDelayMs = TEAMS_RETRY_DELAY_
 async function createPendingProjects(client, targets) {
   const pending2 = targets.pendingProjects;
   if (!pending2?.size) return false;
-  for (const [key, { id, name, teamId, team }] of pending2) {
+  for (const [key2, { id, name, teamId, team }] of pending2) {
     try {
-      targets.projects.set(key, await createProject(client, id, name, teamId));
+      targets.projects.set(key2, await createProject(client, id, name, teamId));
     } catch (error) {
       if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
       throw new ProjectCreationError(name, team, error);
     }
-    pending2.delete(key);
+    pending2.delete(key2);
   }
   return true;
 }
@@ -31937,8 +32021,8 @@ function sharedDestinations(zones, targets) {
   const folders = /* @__PURE__ */ new Map();
   for (const zone of zones) {
     const team = targets.teams.get(zone.team);
-    const key = zone.project === void 0 ? void 0 : projectKey(zone.team, zone.project);
-    const [id, label, folder] = zone.project === void 0 ? [`team\0${team.id}`, `the documents of team "${team.name}"`, zone.teamFolder] : [`project\0${(targets.projects.get(key) ?? targets.pendingProjects?.get(key)).id}`, `project "${zone.project}"`, zone.projectFolder];
+    const key2 = zone.project === void 0 ? void 0 : projectKey(zone.team, zone.project);
+    const [id, label, folder] = zone.project === void 0 ? [`team\0${team.id}`, `the documents of team "${team.name}"`, zone.teamFolder] : [`project\0${(targets.projects.get(key2) ?? targets.pendingProjects?.get(key2)).id}`, `project "${zone.project}"`, zone.projectFolder];
     const entry = folders.get(id) ?? { label, folders: /* @__PURE__ */ new Set() };
     entry.folders.add(folder === "" ? "the repository root" : `${folder}/`);
     folders.set(id, entry);
@@ -32043,9 +32127,9 @@ function fileLocalHook(repo, pinned2, hook) {
   if (hook.always_run !== void 0 && hook.always_run !== false) return false;
   if (repo === "local" && hook.language === "pygrep") {
     const entry = hook.entry;
-    return typeof entry === "string" && (!entry.startsWith("-") || entry === "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----") && (hook.args === void 0 || Array.isArray(hook.args) && hook.args.every((arg) => ["-i", "--ignore-case", "--multiline", "--negate"].includes(arg))) && Object.keys(hook).every((key) => [...selection, "language", "entry", "args"].includes(key));
+    return typeof entry === "string" && (!entry.startsWith("-") || entry === "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----") && (hook.args === void 0 || Array.isArray(hook.args) && hook.args.every((arg) => ["-i", "--ignore-case", "--multiline", "--negate"].includes(arg))) && Object.keys(hook).every((key2) => [...selection, "language", "entry", "args"].includes(key2));
   }
-  return pinned2 && hook.id === "detect-private-key" && Object.keys(hook).every((key) => selection.includes(key));
+  return pinned2 && hook.id === "detect-private-key" && Object.keys(hook).every((key2) => selection.includes(key2));
 }
 function selectedBySecurity(hook) {
   return hook.alias === SECURITY_ALIAS || hook.id === SECURITY_ALIAS;
@@ -32071,8 +32155,8 @@ function parsePreCommitYaml(text6) {
   let merges = false;
   (0, import_yaml2.visit)(doc, {
     Map(_, map4) {
-      const keys = map4.items.filter(({ key }) => (0, import_yaml2.isScalar)(key) && (typeof key.value === "symbol" || key.value === "<<"));
-      if (keys.filter(({ key }) => (0, import_yaml2.isScalar)(key) && typeof key.value === "symbol").length > 1) throw new Error();
+      const keys = map4.items.filter(({ key: key2 }) => (0, import_yaml2.isScalar)(key2) && (typeof key2.value === "symbol" || key2.value === "<<"));
+      if (keys.filter(({ key: key2 }) => (0, import_yaml2.isScalar)(key2) && typeof key2.value === "symbol").length > 1) throw new Error();
       merges ||= keys.length > 0;
     }
   });
@@ -32633,9 +32717,9 @@ function restoreFileLinks(body2, written, uploads) {
   for (const link2 of written) {
     const url = uploads.get(link2.hash);
     if (url === void 0) continue;
-    const key = withUploadSuffix(url, link2.suffix);
-    const list4 = raws.get(key);
-    if (list4 === void 0) raws.set(key, [link2.written]);
+    const key2 = withUploadSuffix(url, link2.suffix);
+    const list4 = raws.get(key2);
+    if (list4 === void 0) raws.set(key2, [link2.written]);
     else list4.push(link2.written);
   }
   if (raws.size === 0) return body2;
@@ -33493,7 +33577,7 @@ async function mergeLocally(git, linear, tracked, ids, facts = LINEAR_FACTS, opt
   }
   const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase, true);
   const { tree, unresolved: conflicts } = resolved;
-  const linearSide = await synchronizedFiles(git, linear, facts, ids);
+  const linearSide = await synchronizedFiles(git, linear, facts, { recorded: true, observedRepairs: ids });
   const resultSide = await synchronizedFiles(git, tree, facts);
   const conflicted = new Set(conflicts);
   const changes = [];
@@ -33632,7 +33716,8 @@ function changePath(change) {
 function placeKey(place) {
   return place.kind === "project" ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
 }
-async function synchronizedFiles(git, treeish, facts, observedRepairs) {
+async function synchronizedFiles(git, treeish, facts, options = {}) {
+  const lint2 = options.recorded === true ? lintRecorded : lintInTree;
   const entries = await listTree(git, treeish, MAPPING_TREE_BYTES);
   requireReadableAnnotations(entries);
   const budget = new MappingBlobBudget();
@@ -33643,9 +33728,9 @@ async function synchronizedFiles(git, treeish, facts, observedRepairs) {
   const leftOut = [];
   const leave = (path2, rules) => leftOut.push({ path: path2, rules: [...new Set(rules)].sort() });
   for (const document4 of mapping.documents) {
-    const rules = lintInTree(document4.path, blobs.get(document4.oid).toString("utf8"), mapping.files).map((finding) => finding.rule);
+    const rules = lint2(document4.path, blobs.get(document4.oid).toString("utf8"), mapping.files).map((finding) => finding.rule);
     if (lengthRefusal({ title: document4.title }, facts) !== void 0) rules.push("title-too-long");
-    const repair = observedRepairs?.get(document4.path)?.pullRewrite;
+    const repair = options.observedRepairs?.get(document4.path)?.pullRewrite;
     const observed = repair !== void 0 && createHash7("sha256").update(blobs.get(document4.oid)).digest("hex") === repair.hash;
     if (rules.length > 0 && !observed) leave(document4.path, rules);
     else files.set(document4.path, toSideFile(document4));
@@ -33655,13 +33740,20 @@ async function synchronizedFiles(git, treeish, facts, observedRepairs) {
   leftOut.sort((a, b) => compare3(a.path, b.path));
   return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)) };
 }
-async function leftOutFiles(git, treeish, facts = LINEAR_FACTS) {
-  return (await synchronizedFiles(git, treeish, facts)).leftOut;
+async function tipLeftOut(git, tip, facts = LINEAR_FACTS) {
+  const leftOut = [];
+  const writable = [];
+  for (const entry of (await synchronizedFiles(git, tip, facts, { recorded: true })).leftOut) {
+    const rules = entry.rules.filter((rule) => !NOT_IN_LINEAR_EXPORT.has(rule));
+    if (rules.length > 0) leftOut.push({ path: entry.path, rules });
+    else writable.push(entry.path);
+  }
+  return { leftOut, writable };
 }
 var BASELINE_DEPTH = 20;
 async function lastSynchronized(git, linear, path2, facts = LINEAR_FACTS, sides = /* @__PURE__ */ new Map(), oldest) {
   for (const commit2 of await baselineCommits(git, linear, path2, oldest)) {
-    const file = await synchronizedAt(git, commit2, path2, facts, sides);
+    const file = await synchronizedAt(git, commit2, path2, facts, sides, true);
     if (file !== void 0) return { commit: commit2, file, text: (await readBlobs(git, [file.oid])).get(file.oid).toString("utf8") };
   }
   return null;
@@ -33676,8 +33768,8 @@ async function baselineCommits(git, linear, path2, oldest) {
   const linked = await linkedFiles(git, versions, path2);
   return linked.length === 0 ? versions : await log([path2, ...linked]);
 }
-async function synchronizedAt(git, commit2, path2, facts, sides) {
-  if (!sides.has(commit2)) sides.set(commit2, synchronizedFiles(git, commit2, facts));
+async function synchronizedAt(git, commit2, path2, facts, sides, recorded = false) {
+  if (!sides.has(commit2)) sides.set(commit2, synchronizedFiles(git, commit2, facts, { recorded }));
   return (await sides.get(commit2)).files.get(path2);
 }
 async function linkedFiles(git, commits, path2) {
@@ -33928,21 +34020,21 @@ function isReadme(path2) {
 
 // src/sync/pull-repairs.ts
 var repairSet = (path2, replacement) => /* @__PURE__ */ new Map([[path2, replacement]]);
-function signRepair(key, path2, id, repair) {
+function signRepair(key2, path2, id, repair) {
   const { mac: _, ...unsigned } = repair;
-  return { ...unsigned, mac: key.repairMac(path2, id, unsigned) };
+  return { ...unsigned, mac: key2.repairMac(path2, id, unsigned) };
 }
-function signedRepair(key, path2, entry) {
-  return entry.pullRewrite !== void 0 && key.verifiesRepair(path2, entry.id, entry.pullRewrite) ? entry.pullRewrite : void 0;
+function signedRepair(key2, path2, entry) {
+  return entry.pullRewrite !== void 0 && key2.verifiesRepair(path2, entry.id, entry.pullRewrite) ? entry.pullRewrite : void 0;
 }
-function signedRepairs(ids, key) {
+function signedRepairs(ids, key2) {
   return new Map([...ids].map(([path2, entry]) => {
-    if (entry.pullRewrite === void 0 || signedRepair(key, path2, entry) !== void 0) return [path2, entry];
+    if (entry.pullRewrite === void 0 || signedRepair(key2, path2, entry) !== void 0) return [path2, entry];
     const { pullRewrite: _, ...rest } = entry;
     return [path2, rest];
   }));
 }
-async function pendingRepairs(git, linear, ids, zones, key, paths) {
+async function pendingRepairs(git, linear, ids, zones, key2, paths) {
   const counts2 = /* @__PURE__ */ new Map();
   for (const entry of ids.values()) counts2.set(entry.id, (counts2.get(entry.id) ?? 0) + 1);
   const pending2 = [...ids].filter(([path2, entry]) => entry.pullRewrite !== void 0 && counts2.get(entry.id) === 1 && (paths === void 0 || paths.has(path2)));
@@ -33960,16 +34052,16 @@ async function pendingRepairs(git, linear, ids, zones, key, paths) {
     const repair = entry.pullRewrite;
     if (source === void 0 || createHash8("sha256").update(source).digest("hex") !== repair.hash) continue;
     if (source.toString("utf8") === repair.replacement) continue;
-    if (signedRepair(key, path2, entry) === void 0) unsigned.add(path2);
+    if (signedRepair(key2, path2, entry) === void 0) unsigned.add(path2);
     else repairs.set(path2, repair);
   }
   return { repairs, unsigned };
 }
-async function checkedPullView(git, linear, ids, zones, identity, gate, key, hold3, paths) {
+async function checkedPullView(git, linear, ids, zones, identity, gate, key2, hold3, paths) {
   const changes = /* @__PURE__ */ new Map();
   const held = /* @__PURE__ */ new Set();
   const notes = [];
-  const { repairs, unsigned } = await pendingRepairs(git, linear, ids, zones, key, paths);
+  const { repairs, unsigned } = await pendingRepairs(git, linear, ids, zones, key2, paths);
   for (const path2 of unsigned) held.add(path2);
   for (const [path2, repair] of repairs) {
     const findings = await gate.check(repairSet(path2, repair.replacement));
@@ -33995,9 +34087,9 @@ async function checkedPullView(git, linear, ids, zones, identity, gate, key, hol
   } });
   return { commit: commit2, notes };
 }
-async function stagePullRepairs(git, state, zones, gate, key) {
+async function stagePullRepairs(git, state, zones, gate, key2) {
   if (state.linear === null) return;
-  const { repairs } = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones, key);
+  const { repairs } = await pendingRepairs(git, state.linear, await readIds(git, state.ids), zones, key2);
   for (const [path2, repair] of repairs) await gate.check(repairSet(path2, repair.replacement));
 }
 async function readPlainFileProvenance(git, linear, options = {}) {
@@ -34057,7 +34149,7 @@ function pathKey(path2) {
 function conflictsIn(folder, occupied, invalid2) {
   const keys = [...occupied].map(pathKey);
   const inAssets = (path2) => inAssetsFolder(folder === "" ? path2 : path2.slice(folder.length + 1));
-  return (path2) => inAssets(path2) || invalid2(path2) || keys.some((key) => key === pathKey(path2) || key.startsWith(`${pathKey(path2)}/`) || pathKey(path2).startsWith(`${key}/`));
+  return (path2) => inAssets(path2) || invalid2(path2) || keys.some((key2) => key2 === pathKey(path2) || key2.startsWith(`${pathKey(path2)}/`) || pathKey(path2).startsWith(`${key2}/`));
 }
 var unsafe2 = (folder, path2) => folder === "" && path2.startsWith("-") || path2.split("/").some(isGitDirectoryName);
 var ENCODED_EMPTY = /^%00(?:~[0-9a-f]{12}(?:-\d+)?)?\.md$/;
@@ -34568,7 +34660,7 @@ function checksAgainFrom(message2) {
 }
 function distinct(checks) {
   const byKey = new Map(checks.map((check2) => [notedCheck(check2), check2]));
-  return [...byKey.keys()].sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map((key) => byKey.get(key));
+  return [...byKey.keys()].sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map((key2) => byKey.get(key2));
 }
 async function registeredChecks(github, sha) {
   try {
@@ -35145,8 +35237,9 @@ async function writeTrackedToLinear(context, options) {
   const releasing = [...ids.values()].some((entry) => entry.releaseBase !== void 0);
   for (const [path2, entry] of ids) if (entry.suspended !== void 0) result.skipped.push({ path: path2, reason: "suspended" });
   const nothingNew = await alreadyMerged(git, linearTip, tracked) || await mergedInitialRecord(git, linearTip, tracked);
-  if (nothingNew && !cacheLost && !releasing) {
-    result.leftOut = await leftOutFiles(git, linearTip, linear.facts);
+  const tip = nothingNew && !releasing ? await tipLeftOut(git, linearTip, linear.facts) : void 0;
+  if (tip !== void 0 && tip.writable.length === 0 && !cacheLost) {
+    result.leftOut = tip.leftOut;
     await nameFixingHooks(git, tracked, result.leftOut);
     const containers2 = options.containers ?? await readContainers();
     if (containers2 === void 0) return result;
@@ -35164,7 +35257,11 @@ async function writeTrackedToLinear(context, options) {
   const knownId = knownIdLookup(git, expected.ids, ids);
   const keptAnnotations = await readKeptAnnotations(git, expected.ids);
   const merge = await mergeLocally(git, linearTip, tracked, signedIds, linear.facts, { knownId, keptAnnotations });
-  if (nothingNew && !releasing) merge.changes.length = 0;
+  if (tip !== void 0) {
+    const writable = new Set(tip.writable);
+    const kept = merge.changes.filter((change) => change.kind === "keep" && writable.has(change.to) || change.kind === "create" && writable.has(change.path));
+    merge.changes.splice(0, merge.changes.length, ...kept);
+  }
   const pendingRepairs2 = /* @__PURE__ */ new Set();
   for (const [path2, entry] of signedIds) {
     if (entry.pullRewrite?.source === void 0 || frozen.has(path2)) continue;
@@ -35295,14 +35392,14 @@ async function writeTrackedToLinear(context, options) {
     for (const change of [...merge.unchanged, ...merge.changes]) {
       if (change.kind === "trash") {
         covered.add(change.path);
-        const tip2 = merge.linear.get(change.path);
-        if (tip2 !== void 0) linked(change.path, textOf(tip2));
+        const tip3 = merge.linear.get(change.path);
+        if (tip3 !== void 0) linked(change.path, textOf(tip3));
       }
       if (change.kind !== "keep") continue;
       covered.add(change.from);
       linked(change.to, textOf(merge.result.get(change.to)));
-      const tip = merge.linear.get(change.from);
-      if (tip !== void 0) linked(change.to, textOf(tip), change.from);
+      const tip2 = merge.linear.get(change.from);
+      if (tip2 !== void 0) linked(change.to, textOf(tip2), change.from);
     }
     const rest = [...ids.keys()].flatMap((path2) => {
       const oid = covered.has(path2) ? void 0 : resultFiles.get(path2) ?? linearFiles.get(path2);
@@ -35469,10 +35566,10 @@ async function writeTrackedToLinear(context, options) {
     const byPlace = /* @__PURE__ */ new Map();
     for (const change of changes) {
       const file = merge.result.get(change.path);
-      const key = containerKey(context, file.place);
-      const group = byPlace.get(key) ?? { place: file.place, paths: [] };
+      const key2 = containerKey(context, file.place);
+      const group = byPlace.get(key2) ?? { place: file.place, paths: [] };
       group.paths.push(change.path);
-      byPlace.set(key, group);
+      byPlace.set(key2, group);
     }
     for (const { place, paths } of byPlace.values()) {
       const listed = (containers.get(containerKey(context, place)) ?? []).filter((document4) => !document4.trashed && document4.archivedAt === null);
@@ -36168,12 +36265,12 @@ function syncedPlaces(git, tracked, current, listed, facts) {
   const answers = /* @__PURE__ */ new Map();
   const history = new TrackedHistory(git, tracked, facts);
   return async (path2, place) => {
-    const key = placeKey2(place);
+    const key2 = placeKey2(place);
     const zone = nearestZone(listed, folderOf(path2));
-    if (anywhere.has(key) || zone !== void 0 && placeKey2(placeOf(zone)) === key) return true;
+    if (anywhere.has(key2) || zone !== void 0 && placeKey2(placeOf(zone)) === key2) return true;
     let places = answers.get(path2);
     if (places === void 0) answers.set(path2, places = history.placesWhileSynchronized(path2));
-    return (await places).has(key);
+    return (await places).has(key2);
   };
 }
 var TrackedHistory = class {
@@ -37608,8 +37705,8 @@ var DownloadBlockedError = class extends Error {
 };
 async function download(url, fetcher, reads, budget, consume2) {
   if (!isUploadUrl(url)) throw new Error(message("assets.not-allowed"));
-  const key = uploadReadKey(url);
-  const kept = reads?.take(key);
+  const key2 = uploadReadKey(url);
+  const kept = reads?.take(key2);
   if (kept !== void 0) consume2(kept.body.length);
   if (kept !== void 0 && kept.body.length > budget) throw new AttachmentBudgetError();
   if (kept !== void 0 && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
@@ -37641,7 +37738,7 @@ async function download(url, fetcher, reads, budget, consume2) {
       chunks.push(Buffer.from(chunk));
     }
     const asset = { bytes: Buffer.concat(chunks), type: response.headers.get("content-type")?.split(";")[0]?.trim() ?? "" };
-    reads?.keep(key, { status: response.status, type: asset.type, body: asset.bytes });
+    reads?.keep(key2, { status: response.status, type: asset.type, body: asset.bytes });
     return asset;
   } catch (error) {
     if (error instanceof AttachmentBudgetError || error instanceof LinearError || error instanceof DownloadBlockedError || error instanceof DownloadRetryError) throw error;
@@ -37789,17 +37886,17 @@ function createAssetCapture(git, config, base, fetcher = fetch, reads, spool = n
         if (copy !== void 0 && !pathHashes.has(copy) && !copies.has(copy)) copies.set(copy, link2.target);
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, target);
         const raw = previousPath === path2 ? link2.written : encodePath(posix7.relative(posix7.dirname(path2), target)) + link2.suffix;
-        const key = hash + uploadDestinationUrl(link2.suffix);
-        if (!spellings.has(key)) spellings.set(key, []);
-        spellings.get(key).push(previousPath !== path2 && link2.written.startsWith("<") ? `<${raw}>` : raw);
+        const key2 = hash + uploadDestinationUrl(link2.suffix);
+        if (!spellings.has(key2)) spellings.set(key2, []);
+        spellings.get(key2).push(previousPath !== path2 && link2.written.startsWith("<") ? `<${raw}>` : raw);
       }
     }
     const occurrences2 = /* @__PURE__ */ new Map();
-    const spelling = (key, opener) => {
-      const choices = spellings.get(key);
+    const spelling = (key2, opener) => {
+      const choices = spellings.get(key2);
       if (choices === void 0) return void 0;
-      const index3 = occurrences2.get(key) ?? 0;
-      occurrences2.set(key, index3 + 1);
+      const index3 = occurrences2.get(key2) ?? 0;
+      occurrences2.set(key2, index3 + 1);
       const written = choices[Math.min(index3, choices.length - 1)];
       const inner = written.startsWith("<") ? written.slice(1, -1) : written;
       if (/[<>]/.test(inner)) return written;
@@ -38237,11 +38334,11 @@ async function confirmWithGate(context, options, gate) {
     const fixedTexts = /* @__PURE__ */ new Map();
     const textOf = (entry, ids2) => {
       const joined = joinedOf(entry, ids2);
-      const key = `${entry.path}\0${joined}`;
-      let text6 = fixedTexts.get(key);
+      const key2 = `${entry.path}\0${joined}`;
+      let text6 = fixedTexts.get(key2);
       if (text6 === void 0) {
         text6 = fixLinearText(joined, readableContents.get(entry.path) ?? contentOf(entry), linkedFileCheck(entry.path, (file) => input.mapping.files.has(file)), trackedBodies.get(entry.path));
-        fixedTexts.set(key, text6);
+        fixedTexts.set(key2, text6);
       }
       return text6;
     };
@@ -38940,21 +39037,21 @@ function containersOf(context, listed) {
 function assessCapacity(context, documents, creates, cap = DEFAULT_DOCUMENT_CAP) {
   const planned = /* @__PURE__ */ new Map();
   for (const { place } of creates) {
-    const key = containerKey(context, place);
-    planned.set(key, (planned.get(key) ?? 0) + 1);
+    const key2 = containerKey(context, place);
+    planned.set(key2, (planned.get(key2) ?? 0) + 1);
   }
   const result = /* @__PURE__ */ new Map();
   for (const { place } of annotatedPlaces(context.mapping.zones)) {
-    const key = containerKey(context, place);
-    if (result.has(key)) continue;
-    const listed = documents.get(key);
+    const key2 = containerKey(context, place);
+    if (result.has(key2)) continue;
+    const listed = documents.get(key2);
     if (listed === void 0) throw new Error(message("run.container-not-read"));
     const unique = [...new Map(listed.map((document4) => [document4.id, document4])).values()];
     const trashed = unique.filter((document4) => document4.trashed).length;
     const archived = unique.filter((document4) => !document4.trashed && document4.archivedAt !== null).length;
-    const count4 = planned.get(key) ?? 0;
+    const count4 = planned.get(key2) ?? 0;
     const total = unique.length + count4;
-    result.set(key, {
+    result.set(key2, {
       place,
       live: unique.length - trashed - archived,
       trashed,
@@ -38992,15 +39089,15 @@ function annotatedPlaces(zones) {
   const places = /* @__PURE__ */ new Map();
   for (const zone of [...zones.values()].sort((a, b) => compare8(zoneFolder(a), zoneFolder(b)))) {
     const place = zone.project !== void 0 ? { kind: "project", team: zone.team, project: zone.project } : { kind: "team", team: zone.team };
-    const key = placeKey2(place);
-    if (!places.has(key)) places.set(key, { place, folder: zoneFolder(zone) });
+    const key2 = placeKey2(place);
+    if (!places.has(key2)) places.set(key2, { place, folder: zoneFolder(zone) });
   }
   return [...places.values()];
 }
 function placeId(targets, place) {
   if (place.kind === "project") {
-    const key = projectKey(place.team, place.project);
-    const project = targets.projects.get(key) ?? targets.pendingProjects?.get(key);
+    const key2 = projectKey(place.team, place.project);
+    const project = targets.projects.get(key2) ?? targets.pendingProjects?.get(key2);
     if (project === void 0) throw new Error(message("initial-sync.project-not-resolved", { project: place.project, team: place.team }));
     return { projectId: project.id };
   }
@@ -39061,8 +39158,8 @@ function planInitialSync(input) {
   const occupied = new Set([...mapping.documents, ...mapping.leftOut, ...mapping.unsynced].map((file) => file.path));
   for (const { place, documents } of input.places) {
     const folder = folders.get(placeKey2(place)) ?? "";
-    const wouldBeAt = (key, document4) => {
-      const own6 = filesByTitle.get(key)?.path ?? leftOutTitles.get(key);
+    const wouldBeAt = (key2, document4) => {
+      const own6 = filesByTitle.get(key2)?.path ?? leftOutTitles.get(key2);
       if (own6 !== void 0) return own6;
       const path2 = documentPath(folder, document4.id, document4.id, occupied);
       occupied.add(path2);
@@ -39071,27 +39168,27 @@ function planInitialSync(input) {
     const oldestFirst = [...documents].sort((a, b) => compare8(a.createdAt, b.createdAt) || compare8(a.id, b.id));
     for (const document4 of oldestFirst) {
       if (!live(document4)) continue;
-      const key = titleIn(place, document4.title);
+      const key2 = titleIn(place, document4.title);
       if (touched(place, document4.title)) {
-        const leftOutPath2 = leftOutTitles.get(key);
+        const leftOutPath2 = leftOutTitles.get(key2);
         const entry = leftOutPath2 === void 0 ? void 0 : leftOut.get(leftOutPath2);
         if (entry !== void 0) {
           entry.documentId ??= document4.id;
           if (changed2.has(document4.id)) leaveOut(entry.path, ["changed-during-run"]);
         } else if (changed2.has(document4.id)) {
-          const path2 = wouldBeAt(key, document4);
+          const path2 = wouldBeAt(key2, document4);
           leaveOut(path2, ["changed-during-run"]);
           leftOut.get(path2).documentId ??= document4.id;
         }
         continue;
       }
-      const file = filesByTitle.get(key);
-      if (file !== void 0 && !matched.has(key)) {
-        matched.add(key);
+      const file = filesByTitle.get(key2);
+      if (file !== void 0 && !matched.has(key2)) {
+        matched.add(key2);
         plan.overwrite.push({ path: file.path, title: file.title, place, documentId: document4.id });
         continue;
       }
-      const leftOutPath = leftOutTitles.get(key);
+      const leftOutPath = leftOutTitles.get(key2);
       if (leftOutPath !== void 0) {
         const entry = leftOut.get(leftOutPath);
         if (entry.documentId === void 0) {
@@ -39099,7 +39196,7 @@ function planInitialSync(input) {
           continue;
         }
       }
-      plan.trash.push({ path: wouldBeAt(key, document4), title: document4.title, place, documentId: document4.id });
+      plan.trash.push({ path: wouldBeAt(key2, document4), title: document4.title, place, documentId: document4.id });
     }
   }
   for (const document4 of synced) {
@@ -39187,7 +39284,7 @@ async function rebuildIds({ git, record, linear, facts, targets, allowedPlace, d
   const sides = /* @__PURE__ */ new Map();
   const leftOut = [...unmapped];
   for (const document4 of documents) {
-    if (lintInTree(document4.path, document4.text, treeFiles2).length > 0 || lengthRefusal({ title: document4.title }, facts) !== void 0) {
+    if (lintRecorded(document4.path, document4.text, treeFiles2).length > 0 || lengthRefusal({ title: document4.title }, facts) !== void 0) {
       leftOut.push(document4.path);
       continue;
     }
@@ -39392,7 +39489,7 @@ async function capture(context, options) {
     const excludedPath = (path2) => {
       const mapped = recorded.documents.find((document4) => document4.path === path2);
       const prior = previous3.get(path2);
-      return mapped === void 0 || prior !== void 0 && lintInTree(path2, prior.toString("utf8"), recorded.files).length > 0 || lengthRefusal({ title: mapped.title }, linear.facts) !== void 0;
+      return mapped === void 0 || prior !== void 0 && lintRecorded(path2, prior.toString("utf8"), recorded.files).length > 0 || lengthRefusal({ title: mapped.title }, linear.facts) !== void 0;
     };
     const retained = /* @__PURE__ */ new Map();
     const retainedPlace = /* @__PURE__ */ new Map();
@@ -39584,11 +39681,11 @@ async function capture(context, options) {
       }
     };
     const resetTarget = (id, targets2 = documentIds) => resetTargets(/* @__PURE__ */ new Set([id]), targets2);
-    const recordBlocked = (doc, path2, findings, key = byId.get(doc.id)?.path ?? path2) => {
+    const recordBlocked = (doc, path2, findings, key2 = byId.get(doc.id)?.path ?? path2) => {
       const old = byId.get(doc.id);
       const saved = old?.entry.saved ?? { icon: doc.icon, color: doc.color };
-      ids.set(key, { ...old?.entry, id: doc.id, saved });
-      result.blocked.push({ id: doc.id, path: key, findings });
+      ids.set(key2, { ...old?.entry, id: doc.id, saved });
+      result.blocked.push({ id: doc.id, path: key2, findings });
       resetTarget(doc.id);
     };
     const restores = [];
@@ -40162,6 +40259,119 @@ async function prepareLfs(git, tracked, changes) {
   }
 }
 
+// src/sync/format-problems.ts
+var FORMAT_PROBLEMS_TITLE = "Fix Markdown format problems";
+var FORMAT_PROBLEMS_MESSAGE = "Fix Markdown format problems\n\nWhat mdbisync fix writes for the files the sync leaves out for their Markdown.";
+function formatProblems(mapping, texts) {
+  const problems = [];
+  const exists = (path2) => linkedFileCheck(path2, (file) => mapping.files.has(file));
+  const candidates2 = [...mapping.documents.map((document4) => ({ path: document4.path, colliding: false })), ...mapping.leftOut.map((file) => ({ path: file.path, colliding: true }))].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  for (const { path: path2, colliding } of candidates2) {
+    const text6 = texts.get(path2);
+    if (text6 === void 0) continue;
+    const holding = new Set(lintInTree(path2, text6, mapping.files).map(key));
+    if (colliding) {
+      const findings = lintText(path2, text6, { linkedFileExists: exists(path2) });
+      if (findings.length > 0) problems.push({ path: path2, fixed: false, text: text6, findings: findings.map((finding) => ({ ...findingOf(finding), holdsBack: holding.has(key(finding)) })) });
+      continue;
+    }
+    if (holding.size === 0) continue;
+    const fixed = fixDocument(path2, text6, exists(path2));
+    const held = new Set(lintInTree(path2, fixed.text, mapping.files).map(key));
+    problems.push({ path: path2, fixed: fixed.text !== text6, text: fixed.text, findings: fixed.findings.map((finding) => ({ ...findingOf(finding), holdsBack: held.has(key(finding)) })) });
+  }
+  return problems;
+}
+var key = (finding) => `${finding.line}:${finding.rule}`;
+var findingOf = (finding) => ({ line: finding.line, rule: finding.rule, message: finding.message });
+var BODY_BUDGET = 6e4;
+function formatProblemsBody(files) {
+  const fixed = files.filter((file) => file.fixed);
+  const findings = files.flatMap((file) => file.findings.map((finding) => ({ path: file.path, ...finding })));
+  const lines3 = [
+    "The sync leaves these files out of Linear: their Markdown has constructs Linear would lose or alter. Their documents in Linear stay as they are until the files are fixed.",
+    "",
+    "The sync updates this pull request on every run, closes it when no file is left out for its Markdown, and never merges it. Once it is merged, the next sync run writes the fixed files to Linear. Closed without merging, it stays closed until the tracked branch changes.",
+    ""
+  ];
+  let budget = BODY_BUDGET;
+  const rows = (all2, more) => {
+    let shown = 0;
+    for (const row of all2) {
+      if (row.length + 1 > budget) break;
+      lines3.push(row);
+      budget -= row.length + 1;
+      shown += 1;
+    }
+    if (shown < all2.length) lines3.push("", more(all2.length - shown));
+    lines3.push("");
+  };
+  if (fixed.length > 0) {
+    lines3.push(`### Fixed by \`mdbisync fix\` (${fixed.length})`, "", "Review the changes before merging.", "", "| File |", "| --- |");
+    rows(fixed.map((file) => `| ${cell(file.path)} |`), (left) => `And ${left} more files: see the changes of this pull request.`);
+  }
+  if (findings.length > 0) {
+    lines3.push(`### Left for you to fix (${findings.length})`, "", "`mdbisync fix` cannot write these in a form Linear keeps. Fix them on the tracked branch.", "");
+    lines3.push("| File | Line | Rule | Holds the file back | What to do |", "| --- | --- | --- | --- | --- |");
+    rows(findings.map((finding) => `| ${cell(finding.path)} | ${finding.line} | ${cell(finding.rule)} | ${finding.holdsBack ? "yes" : "no"} | ${cell(finding.message)} |`), (left) => `And ${left} more: run \`mdbisync lint\` on the files to see them all.`);
+  }
+  return lines3.join("\n");
+}
+async function formatProblemsPullRequest(context, options) {
+  const { git } = context;
+  const tracked = context.fetched.tracked;
+  const mapping = options.mapping ?? await loadMapping(git, tracked);
+  const branch = formatProblemsBranch(options.config);
+  const head = context.fetched.formatProblems ?? null;
+  const candidates2 = [...mapping.documents, ...mapping.leftOut];
+  const blobs = await readBlobs(git, candidates2.map((file) => file.oid));
+  const texts = new Map(candidates2.map((file) => [file.path, blobs.get(file.oid).toString("utf8")]));
+  const problems = formatProblems(mapping, texts);
+  const files = problems.map(({ text: _text, ...file }) => file);
+  const result = { files, pullRequest: null, dismissed: null, closed: null, branchMoved: false };
+  const target = { head: branch, base: options.config.trackedBranch };
+  try {
+    if (problems.length === 0) {
+      if (head === null) return result;
+      const open3 = await findOpenPullRequest(options.github, target.head, target.base);
+      if (open3 !== null) {
+        await closePullRequest(options.github, open3.number);
+        result.closed = open3.number;
+      }
+      return result;
+    }
+    const changes = new Map(problems.filter((problem) => problem.fixed).map((problem) => [problem.path, problem.text]));
+    const next = await nextHead(context, head, tracked, changes, options.identity ?? context.identity);
+    if (next !== head) {
+      let pushed;
+      try {
+        pushed = await pushAtomic(git, options.config, [{ ref: branchRef(branch), expected: head, next }]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        return { ...result, code: "github-failed", error: message("github.no-answer", { action: message("github.pushing-format-problems") }) };
+      }
+      if (!pushed.ok) return pushed.reason === "stale" ? { ...result, code: "state-moved" } : { ...result, code: "github-failed", error: pushed.refs.map((ref) => `${ref.ref}: ${ref.message}`).join("; ") };
+      context.fetched.formatProblems = next;
+      result.branchMoved = true;
+    } else if (await findOpenPullRequest(options.github, target.head, target.base) === null) {
+      const closed = await lastClosedPullRequest(options.github, target.head, target.base);
+      if (closed !== null && !closed.merged && closed.head === head) return { ...result, dismissed: closed.number };
+    }
+    const ensured = await ensurePullRequest(options.github, { ...target, title: FORMAT_PROBLEMS_TITLE, body: formatProblemsBody(files) });
+    result.pullRequest = { number: ensured.pullRequest.number, url: ensured.pullRequest.url, opened: ensured.opened, updated: ensured.updated };
+    return result;
+  } catch (error) {
+    if (!(error instanceof PullRequestError)) throw error;
+    return { ...result, code: "github-failed", error: error.message };
+  }
+}
+async function nextHead(context, head, tracked, changes, identity) {
+  const { git } = context;
+  if (head !== null && head !== tracked && await isAncestor(git, tracked, head)) return head;
+  const behind = head === null || await isAncestor(git, head, tracked);
+  return commitTree(git, { parents: behind ? [tracked] : [head, tracked], base: tracked, changes, message: FORMAT_PROBLEMS_MESSAGE, identity, skipIfUnchanged: false });
+}
+
 // src/sync/cycle.ts
 async function runSyncCycle(context, options) {
   const state = { ...context.fetched.state };
@@ -40181,7 +40391,9 @@ async function runSyncCycle(context, options) {
   const moved = holdChanges(pullRequest.holdMarks) > 0 || pullRequest.suspended?.changed === true || pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
   const createSyncBranch = context.fetched.sync === null && !pullRequest.branchMoved;
   const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, containers: captured.containers, createSyncBranch, state: captured.state, captured: captured.documents, ...options.transforms ? { transforms: options.transforms } : {} });
-  return { complete: write.complete && marksDone && pullRequest.code === void 0 && captured.heldRemovals.length === 0, changed: changed2 || moved || write.changed, trackedTip, capture: captured, pullRequest, write };
+  const formatProblems2 = await formatProblemsPullRequest(context, { config: options.config, github: options.github, ...context.fetched.tracked === trackedTip ? { mapping: context.mapping } : {} });
+  const formatMoved = formatProblems2.branchMoved || formatProblems2.closed !== null || formatProblems2.pullRequest?.opened === true || formatProblems2.pullRequest?.updated === true;
+  return { complete: write.complete && marksDone && pullRequest.code === void 0 && captured.heldRemovals.length === 0 && formatProblems2.code === void 0, changed: changed2 || moved || write.changed || formatMoved, trackedTip, capture: captured, pullRequest, write, formatProblems: formatProblems2 };
 }
 
 // src/sync/summary.ts
@@ -40238,12 +40450,31 @@ function renderSync(result) {
   table("Renamed or moved", ["From", "To"], write.relocated.map((entry) => [entry.from, entry.to]));
   table("Moved to trash", ["Path"], write.trashed.map((path2) => [path2]));
   table("Left out", ["Path", "Rules"], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(", ")]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);
+  lines3.push(...renderFormatProblems(result));
   table("CI fixes not written", ["Path", "Hooks on the fixing commit", "Rules"], write.leftOut.filter((entry) => entry.hooks?.length).map((entry) => [entry.path, entry.hooks.join(", "), entry.rules.join(", ")]));
   return lines3.join("\n") + renderCapacity(write.capacity ?? []);
 }
 function count3(n, noun) {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
+function renderFormatProblems(result) {
+  const step = result.formatProblems;
+  if (step === void 0) return [];
+  const lines3 = [];
+  const pr = step.pullRequest;
+  if (pr !== null) {
+    const fixed = step.files.filter((file) => file.fixed).length;
+    lines3.push(`Files left out for their Markdown (${step.files.length}): [format problems pull request #${pr.number}](${pr.url})${pr.opened ? ", opened by this run" : ""}. It holds what \`mdbisync fix\` writes for ${count3(fixed, "file")} and lists what is left to fix by hand; the sync never merges it.`, "");
+  }
+  if (step.dismissed !== null) lines3.push(`Files left out for their Markdown (${step.files.length}): format problems pull request #${step.dismissed} was closed without merging; it opens again when the tracked branch changes.`, "");
+  if (step.closed !== null) lines3.push(`Closed format problems pull request #${step.closed}: no file is left out for its Markdown.`, "");
+  if (step.code !== void 0) lines3.push(`The format problems pull request was not brought up to date (${FORMAT_PROBLEMS_FAILURES[step.code]}); the next run tries again.`, "");
+  return lines3;
+}
+var FORMAT_PROBLEMS_FAILURES = {
+  "state-moved": "its branch moved while this run worked",
+  "github-failed": "GitHub refused or did not answer a request, or refused the push of its branch"
+};
 
 // src/run/operation.ts
 import { rm as rm7 } from "node:fs/promises";
@@ -40273,8 +40504,8 @@ async function stagingGate(git, tracked, folder) {
     configured,
     async check(files) {
       if (!configured) return [];
-      const key = candidateKey(files);
-      if (!sets.has(key)) {
+      const key2 = candidateKey(files);
+      if (!sets.has(key2)) {
         const entries = [];
         for (const [path2, content4] of files) {
           checkRepoPath(path2);
@@ -40282,7 +40513,7 @@ async function stagingGate(git, tracked, folder) {
           await writeFile5(join14(folder, "files", hash), contentBytes(content4), { mode: 384 });
           entries.push({ path: path2, sha256: hash });
         }
-        sets.set(key, { key, files: entries });
+        sets.set(key2, { key: key2, files: entries });
       }
       return [];
     },
@@ -40311,8 +40542,8 @@ async function answeringGate(git, tracked, folder) {
     configured,
     async check(files) {
       if (!configured) return [];
-      const key = candidateKey(files);
-      const found = Object.hasOwn(answers, key) ? answers[key] : void 0;
+      const key2 = candidateKey(files);
+      const found = Object.hasOwn(answers, key2) ? answers[key2] : void 0;
       if (!Array.isArray(found)) return null;
       return found.map(({ hook, line: line2 }) => ({ hook: hooks.has(hook) ? hook : SECURITY_ALIAS, line: Number.isSafeInteger(line2) && line2 > 0 ? line2 : 1 }));
     }
@@ -40479,7 +40710,7 @@ function partialCode(outcome2) {
   if (pullRequestEnding(outcome2) !== null) return void 0;
   const linear = linearPartialCode(outcome2);
   if (linear !== void 0 || outcome2.operation !== "sync" || outcome2.sync?.write?.code === "container-cap") return linear;
-  return pullRequestPartialCode(outcome2.sync?.pullRequest);
+  return pullRequestPartialCode(outcome2.sync?.pullRequest) ?? outcome2.sync?.formatProblems?.code;
 }
 function pullRequestEnding(outcome2) {
   const failure = pullRequestFailure(outcome2.sync?.pullRequest);
@@ -40501,8 +40732,8 @@ function runEnding(outcome2) {
     return { status: "warning", exitCode: INCOMPLETE_EXIT_CODE, message: `${command}: ${PARTIAL} (${partial})`, code: partial };
   }
   if (outcome2.stopped !== void 0) {
-    const key = outcome2.stopped.operation === "CreateProject" ? "run.project-create-stopped" : "run.stopped-by-linear";
-    return { status: "failure", exitCode: INCOMPLETE_EXIT_CODE, message: message(key, { command }), code: outcome2.code ?? "stopped" };
+    const key2 = outcome2.stopped.operation === "CreateProject" ? "run.project-create-stopped" : "run.stopped-by-linear";
+    return { status: "failure", exitCode: INCOMPLETE_EXIT_CODE, message: message(key2, { command }), code: outcome2.code ?? "stopped" };
   }
   if (outcome2.projectCreateFailed) {
     return { status: "failure", exitCode: INCOMPLETE_EXIT_CODE, message: unfinishedMessage(command, "write-failed"), code: "write-failed" };
@@ -40576,6 +40807,7 @@ function toRunReport(outcome2) {
     initialSync: confirmed === void 0 ? null : toConfirmedReport(confirmed),
     capture: captureReport(outcome2.captured),
     pullRequest: outcome2.sync?.pullRequest ?? null,
+    formatProblems: outcome2.sync?.formatProblems ?? null,
     sync: null,
     writtenCount: confirmed === void 0 ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? reverse?.skippedCompleted.length ?? 0,
@@ -40648,6 +40880,7 @@ function toSyncRunReport(outcome2, write) {
     initialSync: null,
     capture: captureReport(outcome2.captured),
     pullRequest: outcome2.sync?.pullRequest ?? null,
+    formatProblems: outcome2.sync?.formatProblems ?? null,
     sync: {
       complete: write.complete,
       updated: write.updated,
@@ -40922,7 +41155,7 @@ jobs:
       # it ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's documents
         id: stage
-        uses: mdbisync/mdbisync@7931bd5f1d8b457fe1d51ddff8991e2c59f24503 # v1.0.0
+        uses: mdbisync/mdbisync@d1581273f02614f9fcfedb293f7483182e73ed4b # v1.0.1
         with:
           operation: initial-sync
           security-step: stage
@@ -40949,7 +41182,7 @@ jobs:
       # what the hooks saw; a document they have not seen (the hooks step did
       # not run) keeps the tracked branch's version and is listed as left out.
       - name: Initial sync
-        uses: mdbisync/mdbisync@7931bd5f1d8b457fe1d51ddff8991e2c59f24503 # v1.0.0
+        uses: mdbisync/mdbisync@d1581273f02614f9fcfedb293f7483182e73ed4b # v1.0.1
         with:
           operation: initial-sync
           security-step: apply
@@ -41123,7 +41356,7 @@ jobs:
       # ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's changes
         id: stage
-        uses: mdbisync/mdbisync@7931bd5f1d8b457fe1d51ddff8991e2c59f24503 # v1.0.0
+        uses: mdbisync/mdbisync@d1581273f02614f9fcfedb293f7483182e73ed4b # v1.0.1
         with:
           operation: sync
           security-step: stage
@@ -41148,7 +41381,7 @@ jobs:
       # so it pushes what the hooks saw; a later change in Linear waits for
       # the next run.
       - name: Sync
-        uses: mdbisync/mdbisync@7931bd5f1d8b457fe1d51ddff8991e2c59f24503 # v1.0.0
+        uses: mdbisync/mdbisync@d1581273f02614f9fcfedb293f7483182e73ed4b # v1.0.1
         with:
           operation: sync
           security-step: apply
@@ -41515,7 +41748,18 @@ var older_releases_default = {
   e79d5a36ab6fe330fd6c116e8d82eb7e8afa78b0: "v1.0.0-rc.1",
   "034afc218a2371d692be0a5e0639993ade5f6116": "v1.0.0-rc.2",
   f7d44a3c3f55b824946eaa47e33502f37c94c4df: "v1.0.0-rc.3",
-  ccc41512d7d701b6c5a36b763b053f994a5980c0: "v1.0.0-rc.4"
+  ccc41512d7d701b6c5a36b763b053f994a5980c0: "v1.0.0-rc.4",
+  "7931bd5f1d8b457fe1d51ddff8991e2c59f24503": "v1.0.0",
+  "80df869f9114f4dd9f4113bbf645f5f24e3a58f3": "v1.0.1-rc.1",
+  "2fbda8929a09eb5ed27d2995aff50a12d2496dc5": "v1.0.1-rc.2",
+  "5b9d4f150a38d03c3daba54c8586c6ff5e8550c2": "v1.0.1-rc.3",
+  "729538fe1f1d0bf7fb250263831284d021da24a0": "v1.0.1-rc.4",
+  "743c6abbba5f2a1de532706d8387b8e314b69177": "v1.0.1-rc.5",
+  "9687f340feb3eedebf1777af43af2445182d8dbd": "v1.0.1-rc.6",
+  "6bfe820012ef302d68f4eccd258845a82597f49a": "v1.0.1-rc.7",
+  c5a9091ae5c0cfc17c177d1d739c3b5be19c6bcf: "v1.0.1-rc.8",
+  c06cfc4cad502a19e879d95c2ac199606afb8fe9: "v1.0.1-rc.9",
+  d4b6511523134eba6d704fd516777ff2277f9a1a: "v1.0.1-rc.10"
 };
 
 // src/init/releases.ts
@@ -41571,9 +41815,9 @@ function parseArgs(args) {
     if (!INIT_VALUE_FLAGS.includes(flag ?? "")) throw new InitError(message("init.unknown-option", { option: String(flag) }));
     const value = args[++i];
     if (value === void 0 || value.startsWith("--") || !value.trim()) throw new InitError(message("init.needs-value", { option: String(flag) }));
-    const key = flag === "--release-sha" ? "sha" : "version";
-    if (settings[key] !== void 0) throw new InitError(message("init.given-twice", { option: String(flag) }));
-    settings[key] = value;
+    const key2 = flag === "--release-sha" ? "sha" : "version";
+    if (settings[key2] !== void 0) throw new InitError(message("init.given-twice", { option: String(flag) }));
+    settings[key2] = value;
   }
   return settings;
 }
@@ -41624,7 +41868,7 @@ var SECURITY_HOOK_EXAMPLES = [
   { id: "private-key-pattern", name: "Private key pattern", alias: SECURITY_ALIAS, language: "pygrep", entry: "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----", args: ["--multiline"], stages: ["pre-commit", "pre-push"] }
 ];
 function sameHook(hook, example) {
-  return Object.entries(example).every(([key, value]) => JSON.stringify(hook[key]) === JSON.stringify(value));
+  return Object.entries(example).every(([key2, value]) => JSON.stringify(hook[key2]) === JSON.stringify(value));
 }
 function hookConfig(text6, settings) {
   const doc = document3(text6 ?? "default_install_hook_types: [pre-commit, pre-push]\nrepos: []\n");
