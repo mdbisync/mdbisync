@@ -61,6 +61,7 @@ import {
   uploadsRebuilding,
   stateRef,
   branchRef,
+  signIdsTrailers,
   signObservation,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
@@ -1173,7 +1174,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}\n\n${trailers.join('\n')}`;
     const createBranch = options.createSyncBranch === true && commit !== linearTip
       && (await unverifiedPaths(git, tracked, commit, context.mapping.zones)).length === 0;
-    const idsOf = (syncPushed?: PushedRecord) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...(syncPushed === undefined ? {} : { syncPushed }) });
+    const idsOf = (syncPushed?: PushedRecord) => commitIds(git, expected.ids, nextIds, identity, {
+      message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved,
+      ...(asWritten.size === 0 ? {} : { sign: signIdsTrailers(context.pushedKey) }),
+      ...(syncPushed === undefined ? {} : { syncPushed }),
+    });
     // The ids record the branch's head as the sync's own push, only together with that push.
     let recordedIds = await idsOf(createBranch ? context.pushedKey.record(branchRef(options.config.syncBranch), commit) : undefined);
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the

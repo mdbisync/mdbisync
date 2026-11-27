@@ -81,6 +81,16 @@ export class PushedKey {
     return timingSafeEqual(Buffer.from(this.observationMac(tree, parents, text), 'hex'), Buffer.from(mac, 'hex'));
   }
 
+  /** Bind capture checkpoints to this repository and the `ids` commit that records them. */
+  idsTrailersMac(tree: Oid, parents: readonly Oid[], text: string): string {
+    return createHmac('sha256', this.#key).update(JSON.stringify(['ids-trailers-v1', this.#repository, tree, parents, text])).digest('hex');
+  }
+
+  verifiesIdsTrailers(tree: Oid, parents: readonly Oid[], text: string, mac: string): boolean {
+    if (!PUSHED_MAC.test(mac)) return false;
+    return timingSafeEqual(Buffer.from(this.idsTrailersMac(tree, parents, text), 'hex'), Buffer.from(mac, 'hex'));
+  }
+
   /**
    * The signature of a pull repair the sync recorded: the document's path and
    * id, the observation commit it came from, the observed bytes it applies to

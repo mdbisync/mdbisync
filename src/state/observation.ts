@@ -15,25 +15,44 @@ const SIGNED = new RegExp(`^([\\s\\S]*)\\n\\n${SIGNATURE}: ([0-9a-f]{64})\\n$`);
 
 /** Signs a `linear` commit: pass as `sign` to `commitTree`. */
 export function signObservation(key: PushedKey): (tree: Oid, parents: readonly Oid[], message: string) => string {
+  return signMessage(key.observationMac.bind(key));
+}
+
+/** Signs the message carrying capture checkpoints in an `ids` commit. */
+export function signIdsTrailers(key: PushedKey): (tree: Oid, parents: readonly Oid[], message: string) => string {
+  return signMessage(key.idsTrailersMac.bind(key));
+}
+
+function signMessage(mac: (tree: Oid, parents: readonly Oid[], text: string) => string): (tree: Oid, parents: readonly Oid[], message: string) => string {
   return (tree, parents, message) => {
     const text = message.replace(/\n+$/, '');
-    return `${text}\n\n${SIGNATURE}: ${key.observationMac(tree, parents, text)}\n`;
+    return `${text}\n\n${SIGNATURE}: ${mac(tree, parents, text)}\n`;
   };
 }
 
 /** Whether the sync signed `commit` as a `linear` commit of this repository. */
 export async function signedObservation(git: Git, commit: Oid, key: PushedKey): Promise<boolean> {
-  // The tree and parents as git reads them, whatever other headers the object carries.
-  const [tree = '', parents = ''] = (await showCommit(git, '%T%n%P', commit)).split('\n');
+  return (await verifiedMessage(git, commit, key.verifiesObservation.bind(key))) !== undefined;
+}
+
+/** The authenticated message text of an `ids` commit, without its signature trailer. */
+export function signedIdsMessage(git: Git, commit: Oid, key: PushedKey): Promise<string | undefined> {
+  return verifiedMessage(git, commit, key.verifiesIdsTrailers.bind(key));
+}
+
+async function verifiedMessage(git: Git, commit: Oid, verifies: (tree: Oid, parents: readonly Oid[], text: string, mac: string) => boolean): Promise<string | undefined> {
   const found = await git.readObject(commit);
   const raw = (found?.type === 'commit' ? found.content : (await git.run(['cat-file', 'commit', commit])).stdout).toString('utf8');
   const split = raw.indexOf('\n\n');
-  if (split < 0) return false;
+  if (split < 0) return undefined;
   // The sync writes UTF-8 without an encoding header; with one, git reads another subject than the signed bytes.
-  if (raw.slice(0, split).split('\n').some((line) => line.startsWith('encoding '))) return false;
+  if (raw.slice(0, split).split('\n').some((line) => line.startsWith('encoding '))) return undefined;
   const signed = SIGNED.exec(raw.slice(split + 2));
-  if (signed === null) return false;
-  return key.verifiesObservation(tree, parents.split(' ').filter(Boolean), signed[1] as string, signed[2] as string);
+  if (signed === null) return undefined;
+  // The tree and parents as git reads them, whatever other headers the object carries.
+  const [tree = '', parents = ''] = (await showCommit(git, '%T%n%P', commit)).split('\n');
+  const [, text, mac] = signed;
+  return verifies(tree, parents.split(' ').filter(Boolean), text!, mac!) ? text : undefined;
 }
 
 /**

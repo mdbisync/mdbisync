@@ -71,6 +71,10 @@ stay after release unless GitHub automatically deletes merged branches.
 A plain clone does not
 fetch the refs, and the sync writes nothing of its own into your files.
 
+The first capture after upgrading from a version that stored unsigned capture
+checkpoints rereads the synchronized documents. After a complete capture,
+incremental reads resume using the signed checkpoint.
+
 ## A change made in Linear
 
 1. Someone edits, creates, renames, moves, trashes or restores a document

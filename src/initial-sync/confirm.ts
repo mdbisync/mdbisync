@@ -59,6 +59,7 @@ import {
   readIds,
   readUploads,
   stateRef,
+  signIdsTrailers,
   signObservation,
   showCommit,
 } from '../state/index.ts';
@@ -661,6 +662,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
       reserved: stillReserved,
       message: withRecorded(FINAL_IDS_MESSAGE, recorded),
+      ...(recorded.size === 0 ? {} : { sign: signIdsTrailers(context.pushedKey) }),
       always: (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
     const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity, context.pushedKey);
