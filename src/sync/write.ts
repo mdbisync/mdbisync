@@ -33,7 +33,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
 import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, keptAnnotationsTrailers, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
 import { unchangedSince } from '../initial-sync/run.ts';
-import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
+import { type BodyTransform, LeaveOutError, restoreWrittenBody, transformBody } from '../initial-sync/transform.ts';
 import { linkDestinations, resolveRelative } from '../initial-sync/links.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../initial-sync/uploads.ts';
 import { unverifiedPaths } from './head-check.ts';
@@ -1105,7 +1105,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Written documents: the merge result's front matter and what Linear stored.
     for (const [path, { content, sent }] of stored) {
       const file = merge.result.get(path) as SideFile;
-      const text = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path, content, sent, context.mapping.files));
+      const body = restoreWrittenBody(transforms, path, content, sent, context.mapping.files);
+      const text = body === undefined ? textOf(file) : joinFile(splitFile(textOf(file)).head, body);
       if (resultFiles.get(path) !== undefined && text === textOf(file)) continue;
       changes.set(path, text);
     }
