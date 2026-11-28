@@ -11,7 +11,7 @@ import { after, describe, it } from 'node:test';
 import { markdownFiles, runFix, runLint } from './command.ts';
 import { fixLinearText, fixText } from './fix.ts';
 import { duplicateTitles, lintInTree, lintText } from './lint.ts';
-import { parse, visit } from './markdown.ts';
+import { MarkdownLimitError, parse, visit } from './markdown.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
 const cases: Array<[LintRule, string, number]> = [
@@ -487,12 +487,33 @@ describe('lint and fix commands', () => {
     assert.deepEqual(runFix(['guide.md'], folder), { exitCode: 1, stdout: 'guide.md: fixed\n', stderr: '' });
     assert.match(readFileSync(join(folder, 'guide.md'), 'utf8'), /2\. \[Guide\]\(<https:\/\/example\.test\/guide>\)/);
 
-    const text = document(20);
+    const text = document(50);
+    assert.throws(() => fixText(text), (error) => error instanceof MarkdownLimitError && error.limit === 'nested-list-definitions');
     writeFileSync(join(folder, 'catalog.md'), text);
     const finding = `catalog.md:1: markdown-complexity: ${LINT_RULES['markdown-complexity']}\n`;
     assert.deepEqual(runLint(['catalog.md'], folder), { exitCode: 1, stdout: finding, stderr: '' });
     assert.deepEqual(runFix(['catalog.md'], folder), { exitCode: 1, stdout: finding, stderr: '' });
     assert.equal(readFileSync(join(folder, 'catalog.md'), 'utf8'), text);
+  });
+
+  it('formats an operations handbook with many nested references and a procedure index', () => {
+    const procedures = Array.from({ length: 200 }, (_, index) => ({
+      name: `procedure-${index + 1}`,
+      url: `https://example.test/operations/${index + 1}`,
+    }));
+    const chapters = procedures.slice(0, 60).map(({ name }) => [
+      `## ${name}`,
+      '',
+      'Contents for the next shift:',
+      `1. 2. [Read the procedure][${name}]`,
+      '2. Confirm the new owner and update the shift report.',
+    ].join('\n'));
+    const index = procedures.map(({ name }) => `- [${name}][${name}]`).join('\n');
+    const definitions = procedures.map(({ name, url }) => `[${name}]: ${url}`).join('\n');
+    const text = ['# Operations handbook', '_Shift notes_ and \\_archived notes.', ...chapters, index, definitions].join('\n\n');
+    const fixed = fixText(text);
+    for (const { url } of procedures.slice(0, 60)) assert.ok(fixed.includes(`[Read the procedure](<${url}>)`));
+    assert.equal(fixText(fixed), fixed);
   });
 
   it('reports hard breaks in setext headings and keeps the file through two fixes', (t) => {

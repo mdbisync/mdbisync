@@ -742,9 +742,14 @@ still reads the same. When one of a paragraph's references would change
 it (two before a line ending make a line break), `fix` checks each
 reference by itself, reading the paragraph again for each, and stops at a
 budget. Write that reference as a plain space or leave it out, or split
-the paragraph. If formatting a nested list exceeds the reference-definition
-budget, `fix` leaves the file unchanged. Use inline links in the nested list
-or split the document.
+the paragraph.
+
+A document with many nested list items using reference links and a large
+set of link definitions can exceed the formatting limit. `lint` reports
+`markdown-complexity`, `fix` leaves the file unchanged, and sync skips the
+change for that document. Use inline links in nested lists or split the
+document.
+
 For example, this generates a document that exceeds the nesting limit:
 
 ```javascript

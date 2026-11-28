@@ -48,6 +48,8 @@ interface WriterOptions extends FixOptions {
   spaceChecks: SpaceChecks;
   /** The remaining reference-definition text that nested-list fixes may read in this body. */
   nestedListWork: { remaining: number };
+  /** Fixed nested-item text that can be reused when a writer retries the same tree. */
+  nestedListTexts: WeakMap<Paragraph, string>;
 }
 
 /**
@@ -81,7 +83,7 @@ const SPACE_CHECK_ROUNDS = 8;
 // passes. Count the appended text over the whole body, with extra room for
 // shorter documents that reuse a few definitions across many items.
 const NESTED_LIST_DEFINITION_ROUNDS = 8;
-const NESTED_LIST_DEFINITION_EXTRA_WORK = CONTENT_LIMIT;
+const NESTED_LIST_DEFINITION_EXTRA_WORK = 1_000_000;
 
 /**
  * Returns the text in Linear's form, or the text itself when lint finds a
@@ -120,7 +122,7 @@ export function linearForm(text: string, options: FixOptions = {}): string | und
   const nestedListWork = parent.nestedListWork ?? {
     remaining: NESTED_LIST_DEFINITION_ROUNDS * unbroken.length + NESTED_LIST_DEFINITION_EXTRA_WORK,
   };
-  const fixed = fixBody(unbroken, { ...options, breakLines, spaceChecks, nestedListWork });
+  const fixed = fixBody(unbroken, { ...options, breakLines, spaceChecks, nestedListWork, nestedListTexts: new WeakMap() });
   if (fixed === undefined) return undefined;
   // The writer can still lose a line ending of a former break (text split
   // off at an image is trimmed, a lazy line given its prefix can open a
@@ -1022,6 +1024,8 @@ class Writer {
     let references = false;
     visit(node, (child) => { if (child.type === 'linkReference' || child.type === 'imageReference') references = true; });
     if (!references) return withoutTrailingNewlines(fixText(raw, this.options));
+    const cached = this.options.nestedListTexts.get(node);
+    if (cached !== undefined) return cached;
     if (this.nestedListDefinitions === undefined) {
       const definitions = [...this.definitions.values()].map((definition) => this.source.slice(start(definition), end(definition)));
       this.nestedListDefinitions = definitions.some((definition) => definition.includes('\n')) ? null : definitions.join('\n');
@@ -1030,7 +1034,9 @@ class Writer {
     if (definitions === null) return this.inline(node.children, 'continuation');
     this.options.nestedListWork.remaining -= definitions.length;
     if (this.options.nestedListWork.remaining < 0) throw new MarkdownLimitError('nested-list-definitions');
-    return withoutTrailingNewlines(fixText(`${raw}\n\n${definitions}`, this.options));
+    const fixed = withoutTrailingNewlines(fixText(`${raw}\n\n${definitions}`, this.options));
+    this.options.nestedListTexts.set(node, fixed);
+    return fixed;
   }
 
   private listItem(item: ListItem, marker: string, interruptsParagraph: boolean): string {
