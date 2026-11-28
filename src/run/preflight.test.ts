@@ -283,6 +283,31 @@ describe('preflight', () => {
     assert.equal(world.revoked, 1);
   });
 
+  it('passes the setup check when another run of the same Linear app revoked the shared token', async () => {
+    const entries: LogEntry[] = [];
+    const world = fakeWorld();
+    const request = fakeFetch(world);
+    // Linear hands both runs `fake-token`; the other run ends and revokes it before this run's first read.
+    let ended = false;
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === `${LINEAR_API}/oauth/token` && ended) {
+        world.minted += 1;
+        return Response.json({ access_token: 'fresh-token', expires_in: 3600, scope: 'read write' });
+      }
+      if (url === `${LINEAR_API}/graphql` && new Headers(init?.headers).get('authorization') === 'Bearer fake-token') {
+        ended = true;
+        return Response.json({ errors: [{ message: 'Authentication required', extensions: { code: 'AUTHENTICATION_ERROR' } }] }, { status: 401 });
+      }
+      return request(input, init);
+    };
+    const result = await runCli(['check'], { env: env(), cwd, fetch, log: (entry: LogEntry) => { entries.push(entry); } });
+    assert.equal(result.exitCode, 0, result.stdout);
+    assert.deepEqual(entries.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTargets', 401], ['oauth.token', 200], ['SetupTargets', 200], ['oauth.revoke', 200]]);
+    assert.equal(world.minted, 2);
+    assert.equal(world.revoked, 1);
+  });
+
   it('emits the rejected mint even when setup returns a credential failure', async () => {
     const entries: LogEntry[] = [];
     const log = (entry: LogEntry) => { entries.push(entry); };

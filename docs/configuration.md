@@ -175,6 +175,21 @@ match for a workflow it generated with the earlier comment
 and keeps that wording. An edited workflow still causes an
 `existing workflow differs` error.
 
+## Sharing a Linear app
+
+Linear gives every run of one OAuth app the same token while it is active,
+so when two repositories, or a repository and another process, use one app,
+a run that ends revokes the token the other run still holds. The other
+run's next request gets `AUTHENTICATION_ERROR (HTTP 401)`; the run then
+gets a fresh token and sends that request once more. Linear refuses such a
+request before running it, so a repeated write is not written twice.
+
+Sharing therefore works, at a cost: an extra token request and a repeated
+request each time another run ends, and a run fails when the fresh token is
+refused too. Leave `cleanup-tokens` off on a shared app: it replaces the
+tokens the other runs hold. A dedicated app per repository avoids all of
+this.
+
 ## Tokens left by interrupted jobs
 
 The action revokes each run's Linear token when it ends and retries in its
