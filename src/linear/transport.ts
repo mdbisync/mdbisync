@@ -6,6 +6,12 @@
 // - otherwise stop: this request and every later one throws LinearStoppedError.
 // After each response the remaining-budget headers are checked against the
 // budget floor; below it the client stops before the next request.
+//
+// Authentication (Linear answers 401 without data, as for a revoked token,
+// with code AUTHENTICATION_ERROR): with `renewToken`, the request is sent once more
+// with a fresh token, as another run of the same Linear app may have revoked
+// the shared one. Linear refuses such a request before running it, so a
+// write is repeated safely.
 
 import {
   LinearGraphQLError,
@@ -66,7 +72,7 @@ export type OperationKind = 'query' | 'mutation';
 export interface RequestInfo {
   operation: string;
   kind: OperationKind;
-  /** 1 for the first try, 2 for the single retry after a short Retry-After. */
+  /** 1 for the first try; each retry (after a short Retry-After, with a renewed token) counts one more. */
   attempt: number;
 }
 
@@ -110,6 +116,8 @@ export interface LinearHooks {
 export interface TransportOptions {
   /** OAuth access token, or how to get it when the first request needs one (a run whose reads are all kept needs none). */
   token: string | (() => Promise<string>);
+  /** A fresh token after Linear refused `rejected` (see `TokenRenewal`); without it a refusal is final. */
+  renewToken?: (rejected: string) => Promise<string>;
   /** Answers kept from an earlier step of the job, or where to keep this one's (see reads.ts). */
   reads?: LinearReads;
   /** Safe mint metadata for correlating this token's requests, never credentials. */
@@ -134,6 +142,7 @@ export class GraphQLTransport {
   readonly fetch: typeof fetch;
   readonly reads?: LinearReads;
   #token: string | (() => Promise<string>);
+  #renewToken: ((rejected: string) => Promise<string>) | undefined;
   #auth: AuthContext | undefined;
   #floor: BudgetFloor;
   #maxRetryAfterSeconds: number;
@@ -147,6 +156,7 @@ export class GraphQLTransport {
 
   constructor(options: TransportOptions) {
     this.#token = options.token;
+    this.#renewToken = options.renewToken;
     if (options.reads !== undefined) this.reads = options.reads;
     this.#auth = authMetadata(options.auth);
     this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
@@ -165,7 +175,28 @@ export class GraphQLTransport {
     if (!isUploadUrl(url)) {
       throw new Error(message('linear.upload-not-allowed'));
     }
-    return this.fetch(url, { ...init, method: 'GET', redirect: 'manual', headers: { authorization: `Bearer ${await this.#accessToken()}` } });
+    const get = (token: string) => this.fetch(url, { ...init, method: 'GET', redirect: 'manual', headers: { authorization: `Bearer ${token}` } });
+    const token = await this.#accessToken();
+    const response = await get(token);
+    // The upload host refuses a revoked token as it refuses a file: only a new token tells them apart.
+    // So each refused file costs one token request: refused files are rare, and a token revoked after an
+    // earlier refusal must still be told apart from the next refusal.
+    if (response.status !== 401) return response;
+    // A renewal that fails leaves the upload refused, as before: the capture decides what that means.
+    const fresh = await this.#renewed(token).catch(() => undefined);
+    if (fresh === undefined) return response;
+    await response.body?.cancel().catch(() => {});
+    return get(fresh);
+  }
+
+  /** A token to retry with after Linear refused `rejected`, or undefined when there is none (`rejected` is still the run's token). */
+  async #renewed(rejected: string): Promise<string | undefined> {
+    if (this.#renewToken === undefined) return undefined;
+    const fresh = await this.#renewToken(rejected);
+    if (fresh === rejected) return undefined;
+    // Later requests start from the fresh token.
+    this.#token = fresh;
+    return fresh;
   }
 
   #accessToken(): Promise<string> {
@@ -266,6 +297,8 @@ export class GraphQLTransport {
 
   /** Network execution shared by reads and writes; has no read-store access. */
   async #network(operation: string, kind: OperationKind, requestBody: string, bodies = false, responseLimit = this.#limits.responseBytes): Promise<{data: unknown; text: string; status: number}> {
+    let waited = false;
+    let renewed = false;
     for (let attempt = 1; ; attempt += 1) {
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
       const info: RequestInfo = { operation, kind, attempt };
@@ -336,7 +369,8 @@ export class GraphQLTransport {
         const retryAfterSeconds = parseRetryAfter(response.headers.get('retry-after'));
         const shortWait = retryAfterSeconds !== undefined && retryAfterSeconds <= this.#maxRetryAfterSeconds;
         // No retry when the same answer also says the budget is below the floor.
-        if (attempt === 1 && shortWait && !findLowBudget(operation, rateLimit, this.#floor)) {
+        if (!waited && shortWait && !findLowBudget(operation, rateLimit, this.#floor)) {
+          waited = true;
           this.#log({ ...entry, retryAfterSeconds });
           await this.#sleep(retryAfterSeconds * 1000);
           continue;
@@ -349,6 +383,12 @@ export class GraphQLTransport {
       const low = findLowBudget(operation, rateLimit, this.#floor);
       if (low) this.#stopped = low;
       this.#log(low ? { ...entry, stop: low } : entry);
+
+      // Not after a stop: the request would be refused anyway.
+      if (!renewed && !this.#stopped && isAuthenticationRefusal(response.status, body)) {
+        renewed = true;
+        if ((await this.#renewed(token)) !== undefined) continue;
+      }
 
       if (over) {
         const error = new LinearResponseLimitError(operation, 'linear-response-too-large', responseLimit);
@@ -422,6 +462,11 @@ async function readText(response: Response, limit: number): Promise<{ text: stri
     chunks.push(value);
   }
   return { text: new TextDecoder().decode(Buffer.concat(chunks, bytes)), bytes };
+}
+
+/** A 401 without data: Linear refused the token before running anything, so the request can be sent again. */
+function isAuthenticationRefusal(status: number, body: { data?: unknown } | undefined): boolean {
+  return status === 401 && (body?.data === undefined || body.data === null);
 }
 
 function isRateLimited(status: number, errors: GraphQLErrorShape[] | undefined): boolean {
