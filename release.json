@@ -1,5 +1,5 @@
 {
-  "version": "v1.0.2-rc.3",
+  "version": "v1.0.2",
   "source": "ed49ca51236a937a5e845063a814e478c951e197",
   "files": {
     "action.yml": "df94772623ef2cac885a00ca6d7a9715308e9bfe86f40effd5ccb12341c7bd2b",
@@ -10,9 +10,9 @@
     "dist/action-main.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
     "dist/action-post.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
     "dist/action-hooks.js": "e91b1c1778e082fac7f7369cde94305870056c81daa40bc4aeb612f7a1eba2bf",
-    "dist/action-main.js": "77c7a014702e8a71af148a96e4c8b58a24e041c626f3fee5a22e2bfaa9b4079c",
+    "dist/action-main.js": "708ae0daf3415a0f98912573aac80b1f1aa6b7bbf4f417c4b78c46c4c858919f",
     "dist/action-post.js": "fb0e6331f571c64612c2e21858bf6b62f22a0a1353c8d152506c8dde125339e2",
-    "dist/cli.js": "36724dd0b2116a8c73406bbad03b07e2b9e7dea23a7d54e266e8018d1a155bbb",
-    "package.json": "dc53e46bda99e0c7c1c15eb4dc92fe9183750ae5b6f4a7b26698697240f30ded"
+    "dist/cli.js": "6f68f52c33cf9c6686da933bc624fab14665dec310fc9e1051190c7ebdf71ab7",
+    "package.json": "294783b3c4d48c90704e4d6bad356dfbec8129cdf1f59a9e268030d4b517babf"
   }
 }

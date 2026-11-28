@@ -29025,7 +29025,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.2-rc.3" : packageJson.version;
+var VERSION = true ? "1.0.2" : packageJson.version;
 function olderVersion(version, than) {
   if (version === void 0) return true;
   const a = parseVersion(version);
