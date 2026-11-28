@@ -67,7 +67,7 @@ import {
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, tipLeftOut, mergeLocally } from './merge.ts';
-import { signRepair, signedRepair, signedRepairs } from './pull-repairs.ts';
+import { addRecordedPlainFiles, signRepair, signedRepair, signedRepairs } from './pull-repairs.ts';
 import { type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold } from './marks.ts';
 import { stableId } from './stable-id.ts';
 import { suspendedPaths } from './suspended.ts';
@@ -233,6 +233,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // would move `linear` with nothing written (I6). A sync branch GitHub deleted on that merge comes back with the
   // next record, as a branch a person deleted does.
   const ids = await readIds(git, expected.ids);
+  // The ids ref is taken as any writer left it: the plain files of the record's history always count.
+  await addRecordedPlainFiles(git, ids, linearTip, context.pushedKey);
   // Only a repair the sync signed is one (`signedRepair`): it alone vouches for a held text or makes its document
   // wait for its merge. Capture, earlier in the run, reads the document of any other again and records its repair anew.
   const signedIds = signedRepairs(ids, context.pushedKey);

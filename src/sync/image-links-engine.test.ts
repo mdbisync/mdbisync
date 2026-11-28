@@ -107,6 +107,60 @@ describe('image repairs through the sync pull request', () => {
     assert.equal(h.world.linear.uploads.length, before + 1, 'a repository-authored image should still upload');
   });
 
+  for (const removed of ['plain files', 'plain files for repeated other targets', 'plain files and points linear at the tracked branch', 'plain files, then the same bytes uploaded in Linear', 'entry']) it(`never uploads an unchanged repaired link when a writer removes its ${removed} from the ids ref`, async () => {
+    const path = 'eng/notes/plan.md';
+    const report = '%PDF-1.4\nQuarterly figures.\n';
+    await h.editRef('refs/heads/main', 'report.pdf', report);
+    const before = h.world.linear.uploads.length;
+    await h.editInLinear(path, '# Plan\n\n![Report](../../report.pdf)\n');
+    await h.settle();
+    const repaired = (await h.documentOf(path)).content!;
+    assert.match(repaired, /\[Report\]\(<?\.\.\/\.\.\/report\.pdf>?\)/);
+    const ids = JSON.parse(await h.show('refs/mdbisync/ids:ids.json'));
+    assert.deepEqual(ids[path].plainFiles, ['report.pdf']);
+
+    // Anyone who may push can rewrite the state refs: the entry, still valid, loses its plain files (or the entry goes),
+    // and the upload cache is gone, so the next run writes every document that links a file again.
+    if (removed === 'entry') delete ids[path];
+    // Repeated targets keep the array's length: the record is still read by membership.
+    else if (removed === 'plain files for repeated other targets') ids[path].plainFiles = ['other.txt', 'other.txt'];
+    else delete ids[path].plainFiles;
+    if (removed === 'plain files and points linear at the tracked branch') {
+      // A `linear` holding a tree of the tracked branch is trusted unsigned; its first parents carry no record.
+      assert.equal(await h.rev('refs/heads/main^{tree}'), await h.rev('refs/mdbisync/linear^{tree}'));
+      await h.fixture.remote.run(['update-ref', 'refs/mdbisync/linear', await h.rev('refs/heads/main')]);
+    }
+    await h.editRef('refs/mdbisync/ids', 'ids.json', `${JSON.stringify(ids, null, 2)}\n`, 'Update document ids');
+    await h.fixture.remote.run(['update-ref', '-d', 'refs/mdbisync/uploads']);
+    if (removed === 'entry') {
+      // Without its entry the document's link reads as a new one from Linear: capture holds it back.
+      const run = await h.sync();
+      assert.deepEqual(run.report.capture?.blocked.map((blocked) => blocked.findings.map((finding) => 'reason' in finding ? finding.reason : finding)), [['not-uploaded']]);
+      await h.sync();
+      assert.equal(h.world.linear.uploads.length, before, 'the repaired link uploaded its target');
+      return;
+    }
+    if (removed === 'plain files, then the same bytes uploaded in Linear') {
+      // Capture reads the document again: an upload with the file's bytes is a new file, not the member's link target.
+      const upload = 'https://uploads.linear.app/workspace/scan.pdf';
+      const network = fakeFetch(h.world);
+      h.fetchOverride = async (input, init) => String(input) === upload ? new Response(report) : network(input, init);
+      await h.editInLinear(path, `${repaired}\n\n![Copy](${upload})\n`);
+      assert.deepEqual((await h.sync()).report.capture?.blocked, []);
+      const hash = createHash('sha256').update(report).digest('hex');
+      assert.match(await h.show(`${SYNC_BRANCH}:${path}`), new RegExp(`!\\[Copy\\]\\(assets/${hash}\\.pdf\\)`));
+    }
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before, 'the repaired link uploaded its target');
+    assert.match((await h.documentOf(path)).content!, /\[Report\]\(<?\.\.\/\.\.\/report\.pdf>?\)/);
+    assert.ok(JSON.parse(await h.show('refs/mdbisync/ids:ids.json'))[path].plainFiles.includes('report.pdf'), 'the plain file is recorded again');
+
+    // A later version of the file uploads nothing either.
+    await h.gitEdit('report.pdf', '%PDF-1.4\nRevised figures.\n');
+    await h.settle();
+    assert.equal(h.world.linear.uploads.length, before);
+  });
+
   it('records the plain targets of repaired links when Linear moves a document', async () => {
     const path = 'eng/notes/plan.md';
     const moved = 'eng/plan.md';
