@@ -1,6 +1,6 @@
 // A checked branch view is derived from an observation without changing the observation ref.
 import { createHash } from 'node:crypto';
-import { type Git, type Oid, type IdMap, type IdEntry, type CommitIdentity, type StateSnapshot, type PushedKey, listTree, buildTree, readIds } from '../state/index.ts';
+import { type Git, type Oid, type IdMap, type IdEntry, type CommitIdentity, type StateSnapshot, type PushedKey, listTree, buildTree, readIds, signedObservation } from '../state/index.ts';
 import { candidateFiles, mapFiles, type Zone } from '../mapping/index.ts';
 import { MAPPING_TREE_BYTES, MappingBlobBudget } from '../mapping/blobs.ts';
 import { isSyncedChange, oneLine } from './head-check.ts';
@@ -124,4 +124,26 @@ export async function readPlainFileProvenance(git: Git, linear: Oid, options: { 
     } catch { /* A malformed trailer grants no upload permission. */ }
   }
   return result;
+}
+
+/**
+ * Joins each entry's plain files with those the `linear` record's history names for its document. Anyone who may
+ * push can rewrite the ids ref, so an entry without plain files proves nothing: the `Plain-link:` trailers of the
+ * sync's `linear` commits are the record of every link a Linear member made, and a run reads them on every run, not
+ * only when the ids ref is lost. A `linear` the sync did not sign (one trusted for holding a tree of the tracked
+ * branch) has no first-parent record of its own: then every commit it holds is read, the sync's records the tracked
+ * branch merged included. A trailer only withholds an upload, so the join never grants one.
+ */
+export async function addRecordedPlainFiles(git: Git, ids: IdMap, linear: Oid, key: PushedKey): Promise<void> {
+  const recorded = await readPlainFileProvenance(git, linear, { firstParent: await signedObservation(git, linear, key) });
+  if (recorded.size === 0) return;
+  for (const [path, entry] of ids) {
+    const targets = recorded.get(entry.id);
+    if (targets === undefined) continue;
+    // By membership: the ids ref may hold any array, repeated targets included.
+    const plainFiles = new Set(entry.plainFiles ?? []);
+    if ([...targets].every((target) => plainFiles.has(target))) continue;
+    for (const target of targets) plainFiles.add(target);
+    ids.set(path, {...entry, plainFiles: [...plainFiles]});
+  }
 }

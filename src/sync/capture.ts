@@ -30,7 +30,7 @@ import { documentPath, isUntitled, keptPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, uploadAccessProbe, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
-import { readPlainFileProvenance, repairSet, signRepair, signedRepair } from './pull-repairs.ts';
+import { addRecordedPlainFiles, repairSet, signRepair, signedRepair } from './pull-repairs.ts';
 import { checkImageRepairSize, imageLinks, ImageRepairBudgetError } from './image-links.ts';
 import { rebuildIds } from './rebuild.ts';
 import { pendingMove, syncedPlaces } from './tracked-places.ts';
@@ -178,14 +178,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const paths = new Set(recorded.documents.map((document) => document.path));
       const texts = await blobBudget.read(git, entries.filter((entry) => paths.has(entry.path)));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      const plainProvenance = await readPlainFileProvenance(git, base);
-      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) {
-        const plainFiles = plainProvenance.get(entry.id);
-        ids.set(path, plainFiles === undefined ? entry : {...entry, plainFiles: [...plainFiles]});
-      }
+      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) ids.set(path, entry);
       // Files left out for a title another file has count too: they had a document as much as any other.
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
+    // The ids ref is taken as any writer left it: the plain files of the record's history always count.
+    await addRecordedPlainFiles(git, ids, base, context.pushedKey);
     const {cursor, recorded: recordedTimes, needsCursor} = await readCaptureCheckpoints(git, state.ids, base, context.pushedKey);
     const recordedBlobs = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
     const textEntries = recordedBlobs.filter(readableBlob);
