@@ -509,7 +509,11 @@ file, any conflict notice there included, and the document no longer
 differs in the suspended pull request. The same holds when a Linear edit
 makes a suspended document read as the tracked branch's file. Its mark
 clears when the lane merges. A document whose Linear text still differs
-stays suspended.
+stays suspended. A document someone edited by a commit on the suspended
+branch keeps that edit, even after the sync has pushed over that commit;
+the edit reaches the tracked branch when the lane merges. When the sync
+cannot prove which head it last pushed there, or the branch was rewritten,
+every document on the branch counts as edited.
 
 The suspended lane goes first: while its head's checks are pending before
 the deadline, the normal lane may collect changes but cannot merge. A
