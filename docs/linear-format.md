@@ -715,8 +715,9 @@ destinations, each written in full, would take the text over 250,000
 characters, paragraphs whose inline syntax, or whose many lines continued
 without their quote or list prefix, would take too long to parse,
 long chains of tables that each end at a line without a pipe right above
-the next table, and paragraphs with many space references (`&#32;`)
-where one of them cannot become a space. This keeps traversal and formatting bounded independently
+the next table, nested lists that take too much work to format with reference
+links, and paragraphs with many space references (`&#32;`) where one of
+them cannot become a space. This keeps traversal and formatting bounded independently
 of the text length. `fix` writes every row of a table with as many cells as its
 header, the form Linear stores, so a wide header over many short rows grows
 far beyond its source. It also writes every reference link (`[text][ref]`)
@@ -742,6 +743,13 @@ it (two before a line ending make a line break), `fix` checks each
 reference by itself, reading the paragraph again for each, and stops at a
 budget. Write that reference as a plain space or leave it out, or split
 the paragraph.
+
+A document with many nested list items using reference links and a large
+set of link definitions can exceed the formatting limit. `lint` reports
+`markdown-complexity`, `fix` leaves the file unchanged, and sync skips the
+change for that document. Use inline links in nested lists or split the
+document.
+
 For example, this generates a document that exceeds the nesting limit:
 
 ```javascript
