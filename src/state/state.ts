@@ -349,6 +349,14 @@ export interface SuspensionEpisode {
   checks: string[];
   /** Checks of the suspended batch that did not finish in time: a comment written from the episode alone says so. */
   timedOut?: string[];
+  /**
+   * Someone else's commit on the suspended branch changed this document before the sync pushed over it. Until the
+   * episode ends, a reading that converges on the tracked branch's file keeps the document as merged, so that person's
+   * edit is not lost. The mark stays with the entry when the document is renamed.
+   */
+  edited?: true;
+  /** The same for other files of the lane, those without an entry of their own (assets): on the lane's first episode. */
+  editedFiles?: string[];
 }
 
 export interface IdEntry {
@@ -738,7 +746,9 @@ function isIdEntry(value: unknown): value is IdEntry {
       || (episode.pushed !== undefined && (typeof episode.pushed !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.pushed)))
       || !Array.isArray(episode.paths) || !episode.paths.every((path) => typeof path === 'string')
       || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === 'string')
-      || (episode.timedOut !== undefined && (!Array.isArray(episode.timedOut) || !episode.timedOut.every((name) => typeof name === 'string')))) return false;
+      || (episode.timedOut !== undefined && (!Array.isArray(episode.timedOut) || !episode.timedOut.every((name) => typeof name === 'string')))
+      || (episode.edited !== undefined && episode.edited !== true)
+      || (episode.editedFiles !== undefined && (!Array.isArray(episode.editedFiles) || !episode.editedFiles.every((path) => typeof path === 'string')))) return false;
   }
   if (entry.pullRewrite !== undefined) {
     const repair = entry.pullRewrite as IdEntry['pullRewrite'];

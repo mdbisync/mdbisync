@@ -137,7 +137,7 @@ export const INLINE_WORK_LIMIT = 250_000_000;
 export const LAZY_WORK_LIMIT = 20_000_000;
 
 export class MarkdownLimitError extends Error {
-  readonly limit: 'depth' | 'nodes' | 'inline' | 'lazy' | 'widening' | 'merge-marker' | 'merge-output' | 'tables' | 'space-checks';
+  readonly limit: 'depth' | 'nodes' | 'inline' | 'lazy' | 'widening' | 'merge-marker' | 'merge-output' | 'tables' | 'space-checks' | 'nested-list-definitions';
   constructor(limit: MarkdownLimitError['limit']) {
     super(`Markdown exceeds the ${limit} limit.`);
     this.name = 'MarkdownLimitError';
