@@ -29025,7 +29025,7 @@ function notImplementedMessage(command) {
 
 // src/version.ts
 var PROJECT_URL = "https://github.com/mdbisync/mdbisync";
-var VERSION = true ? "1.0.2-rc.2" : packageJson.version;
+var VERSION = true ? "1.0.2-rc.3" : packageJson.version;
 function olderVersion(version, than) {
   if (version === void 0) return true;
   const a = parseVersion(version);
@@ -29085,7 +29085,7 @@ var LINT_RULES = {
   "table-quote-cell": "A table body cell starting with > becomes a quote, and Linear drops the >; a cell starting with >> can take the rows and text below it into the cell. Run fix to write it as \\>, or put a backslash before the > yourself.",
   "image-in-link": "The link around an image is dropped.",
   "content-too-long": "This document exceeds Linear's 250,000-character content limit. Linear refuses the whole document, so the sync leaves the file out until it fits. The author must decide how to shorten or split it.",
-  "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse, long chains of tables that each end at a line without a pipe right above the next table, and paragraphs with many space references (`&#32;`) where one of them cannot become a space.",
+  "markdown-complexity": "Markdown trees over 128 levels deep or 500,000 nodes are rejected, as are tables whose short rows, padded to the header width, would add over 250,000 characters or take the tree over that node limit, reference links whose destinations, each written in full, would take the text over 250,000 characters, paragraphs whose inline syntax, or whose many lines continued without their quote or list prefix, would take too long to parse, long chains of tables that each end at a line without a pipe right above the next table, nested lists that take too much work to format with reference links, and paragraphs with many space references (`&#32;`) where one of them cannot become a space.",
   "duplicate-title": "Two or more files map to one document title.",
   "table-alignment": "Table column alignment is dropped. Remove the colons from the separator row to accept that.",
   "link-scheme": "Links must use http, https, mailto, a path or a fragment. Change the destination, or write the address as inline code.",
@@ -43967,7 +43967,9 @@ var BatchProcess = class {
   /** Writes `input` and waits for its answer. */
   async request(input, request2) {
     let running = this.running;
-    if (running === void 0 || this.directory === void 0 || identityOf(this.directory) !== running.identity) running = await this.start();
+    if (running === void 0 || this.directory === void 0 || !sameDirectory(running.cwd, this.options.dir) || !sameDirectory(running.objects, this.directory)) {
+      running = await this.start();
+    }
     const current = running;
     return new Promise((resolve3, reject) => {
       if (current.idle !== void 0) clearTimeout(current.idle);
@@ -44004,8 +44006,10 @@ var BatchProcess = class {
   }
   spawn(directory) {
     const { dir, args, env } = this.options;
+    const cwd = directoryStat(dir);
+    const objects = directoryStat(directory);
     const child2 = spawn2("git", args, { cwd: dir, env: { ...env(), GIT_FLUSH: "1" }, stdio: ["pipe", "pipe", "pipe"] });
-    const running = { child: child2, identity: identityOf(directory), pending: new Queue(), chunks: [], length: 0, need: 0, stderr: "", idle: void 0 };
+    const running = { child: child2, cwd, objects, pending: new Queue(), chunks: [], length: 0, need: 0, stderr: "", idle: void 0 };
     child2.stdout.on("data", (chunk) => this.receive(running, chunk));
     child2.stderr.on("data", (chunk) => {
       if (running.stderr.length < 64 * 1024) running.stderr += chunk.toString("utf8");
@@ -44083,13 +44087,17 @@ function hold(child2, waiting) {
     else handle2.unref();
   }
 }
-function identityOf(directory) {
+function directoryStat(directory) {
   try {
-    const stat2 = statSync(directory);
-    return `${stat2.dev}:${stat2.ino}`;
+    return statSync(directory, { bigint: true });
   } catch {
-    return "missing";
+    return void 0;
   }
+}
+function sameDirectory(before, directory) {
+  const after = directoryStat(directory);
+  if (before === void 0 || after === void 0) return before === after;
+  return before.dev === after.dev && before.ino === after.ino && (before.birthtimeNs === after.birthtimeNs || before.birthtimeNs === before.ctimeNs || after.birthtimeNs === after.ctimeNs);
 }
 
 // src/state/object-reader.ts
@@ -45747,6 +45755,7 @@ var GraphQLTransport = class {
   fetch;
   reads;
   #token;
+  #renewToken;
   #auth;
   #floor;
   #maxRetryAfterSeconds;
@@ -45759,6 +45768,7 @@ var GraphQLTransport = class {
   #bodyBytesRead = 0;
   constructor(options) {
     this.#token = options.token;
+    this.#renewToken = options.renewToken;
     if (options.reads !== void 0) this.reads = options.reads;
     this.#auth = authMetadata(options.auth);
     this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
@@ -45776,7 +45786,23 @@ var GraphQLTransport = class {
     if (!isUploadUrl(url)) {
       throw new Error(message("linear.upload-not-allowed"));
     }
-    return this.fetch(url, { ...init, method: "GET", redirect: "manual", headers: { authorization: `Bearer ${await this.#accessToken()}` } });
+    const get = (token2) => this.fetch(url, { ...init, method: "GET", redirect: "manual", headers: { authorization: `Bearer ${token2}` } });
+    const token = await this.#accessToken();
+    const response = await get(token);
+    if (response.status !== 401) return response;
+    const fresh = await this.#renewed(token).catch(() => void 0);
+    if (fresh === void 0) return response;
+    await response.body?.cancel().catch(() => {
+    });
+    return get(fresh);
+  }
+  /** A token to retry with after Linear refused `rejected`, or undefined when there is none (`rejected` is still the run's token). */
+  async #renewed(rejected) {
+    if (this.#renewToken === void 0) return void 0;
+    const fresh = await this.#renewToken(rejected);
+    if (fresh === rejected) return void 0;
+    this.#token = fresh;
+    return fresh;
   }
   #accessToken() {
     return typeof this.#token === "string" ? Promise.resolve(this.#token) : this.#token();
@@ -45861,6 +45887,8 @@ ${requestBody}`);
   }
   /** Network execution shared by reads and writes; has no read-store access. */
   async #network(operation, kind, requestBody, bodies = false, responseLimit = this.#limits.responseBytes) {
+    let waited = false;
+    let renewed = false;
     for (let attempt = 1; ; attempt += 1) {
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
       const info2 = { operation, kind, attempt };
@@ -45932,7 +45960,8 @@ ${requestBody}`);
       if (isRateLimited(response.status, body2?.errors)) {
         const retryAfterSeconds = parseRetryAfter(response.headers.get("retry-after"));
         const shortWait = retryAfterSeconds !== void 0 && retryAfterSeconds <= this.#maxRetryAfterSeconds;
-        if (attempt === 1 && shortWait && !findLowBudget(operation, rateLimit, this.#floor)) {
+        if (!waited && shortWait && !findLowBudget(operation, rateLimit, this.#floor)) {
+          waited = true;
           this.#log({ ...entry, retryAfterSeconds });
           await this.#sleep(retryAfterSeconds * 1e3);
           continue;
@@ -45944,6 +45973,10 @@ ${requestBody}`);
       const low = findLowBudget(operation, rateLimit, this.#floor);
       if (low) this.#stopped = low;
       this.#log(low ? { ...entry, stop: low } : entry);
+      if (!renewed && !this.#stopped && isAuthenticationRefusal(response.status, body2)) {
+        renewed = true;
+        if (await this.#renewed(token) !== void 0) continue;
+      }
       if (over) {
         const error2 = new LinearResponseLimitError(operation, "linear-response-too-large", responseLimit);
         throw kind === "mutation" ? new LinearNetworkError(operation, error2) : error2;
@@ -46002,6 +46035,9 @@ async function readText(response, limit) {
     chunks.push(value);
   }
   return { text: new TextDecoder().decode(Buffer.concat(chunks, bytes)), bytes };
+}
+function isAuthenticationRefusal(status, body2) {
+  return status === 401 && (body2?.data === void 0 || body2.data === null);
 }
 function isRateLimited(status, errors) {
   return status === 429 || (errors ?? []).some((error2) => error2.extensions?.code === "RATELIMITED");
@@ -46572,13 +46608,51 @@ async function revokeToken(accessToken, options = {}) {
     });
   }
 }
+var RunTokenHold = class {
+  #credentials;
+  #options;
+  #current;
+  #last;
+  constructor(credentials, options) {
+    this.#credentials = credentials;
+    this.#options = options;
+  }
+  token() {
+    return this.#current ??= this.#mint();
+  }
+  async accessToken() {
+    return (await this.token()).accessToken;
+  }
+  async renew(rejected) {
+    const held = this.#current;
+    const current = await held?.catch(() => void 0);
+    if (this.#current !== held || current !== void 0 && current.accessToken !== rejected) return this.accessToken();
+    const next = this.#mint();
+    this.#current = next;
+    next.catch(() => {
+      if (this.#current === next) this.#current = held;
+    });
+    return this.accessToken();
+  }
+  async #mint() {
+    const token = await mintAppToken(this.#credentials, this.#options);
+    this.#last = token;
+    this.#options.lifecycle?.minted(token.accessToken);
+    return token;
+  }
+  /** Revokes the last token; a failure goes to `onRevokeError`, never replacing the run's outcome. */
+  async end() {
+    await this.#current?.catch(() => void 0);
+    if (this.#last !== void 0) await endRunToken(this.#last, this.#options);
+  }
+};
 async function withRunToken(credentials, options, work) {
-  const token = await mintAppToken(credentials, options);
+  const hold3 = new RunTokenHold(credentials, options);
   try {
-    options.lifecycle?.minted(token.accessToken);
-    return await work(token);
+    const token = await hold3.token();
+    return await work({ ...token, current: () => hold3.accessToken(), renew: (rejected) => hold3.renew(rejected) });
   } finally {
-    await endRunToken(token, options);
+    await hold3.end();
   }
 }
 async function endRunToken(token, options) {
@@ -46597,28 +46671,17 @@ async function endRunToken(token, options) {
   }
 }
 async function withDeferredRunToken(credentials, known, options, work) {
-  let minting;
-  let access2;
+  const hold3 = new RunTokenHold(credentials, options);
   const token = {
     scope: [...known.scope],
     context: known.context,
-    accessToken() {
-      if (access2 === void 0) {
-        const mint = mintAppToken(credentials, options);
-        minting = mint;
-        access2 = mint.then((minted) => {
-          options.lifecycle?.minted(minted.accessToken);
-          return minted.accessToken;
-        });
-      }
-      return access2;
-    }
+    accessToken: () => hold3.accessToken(),
+    renew: (rejected) => hold3.renew(rejected)
   };
   try {
     return await work(token);
   } finally {
-    const minted = minting === void 0 ? void 0 : await minting.catch(() => void 0);
-    if (minted !== void 0) await endRunToken(minted, options);
+    await hold3.end();
   }
 }
 async function oauthPost(operation, path7, body2, options, requestedScopes) {
@@ -49533,6 +49596,8 @@ function endsWithParagraph(node2) {
 // src/format/fix.ts
 var SPACE_CHECK_EXTRA_WORK = 1e6;
 var SPACE_CHECK_ROUNDS = 8;
+var NESTED_LIST_DEFINITION_ROUNDS = 8;
+var NESTED_LIST_DEFINITION_EXTRA_WORK = 1e6;
 function fixText(text6, options = {}) {
   return linearForm(text6, options) ?? text6;
 }
@@ -49550,8 +49615,12 @@ function linearForm(text6, options = {}) {
   const broken = backslashBreaksAsLinear(lf2);
   if (broken === void 0) return void 0;
   const { body: unbroken, lines: breakLines } = broken;
-  const spaceChecks = options.spaceChecks ?? { work: -SPACE_CHECK_ROUNDS * unbroken.length, blocks: /* @__PURE__ */ new Map() };
-  const fixed = fixBody(unbroken, { ...options, breakLines, spaceChecks });
+  const parent = options;
+  const spaceChecks = parent.spaceChecks ?? { work: -SPACE_CHECK_ROUNDS * unbroken.length, blocks: /* @__PURE__ */ new Map() };
+  const nestedListWork = parent.nestedListWork ?? {
+    remaining: NESTED_LIST_DEFINITION_ROUNDS * unbroken.length + NESTED_LIST_DEFINITION_EXTRA_WORK
+  };
+  const fixed = fixBody(unbroken, { ...options, breakLines, spaceChecks, nestedListWork, nestedListTexts: /* @__PURE__ */ new WeakMap() });
   if (fixed === void 0) return void 0;
   if (unbroken !== lf2 && lineEndings(fixed) < lineEndings(unbroken)) return void 0;
   if (NUMBER_PARAGRAPH_LINE.test(fixed) && lintText("", fixed).some((finding) => finding.rule === "number-paragraph")) return void 0;
@@ -49967,6 +50036,8 @@ var LINEAR_ALERT = /^\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i;
 var CELL_BREAK = /^<br[ \t]*\/?>$/i;
 var Writer = class {
   definitions = /* @__PURE__ */ new Map();
+  /** The appended definitions, or null if a definition spans several lines. */
+  nestedListDefinitions;
   containers = [];
   source;
   tree;
@@ -50220,11 +50291,21 @@ ${math[1]}
       if (child2.type === "linkReference" || child2.type === "imageReference") references = true;
     });
     if (!references) return withoutTrailingNewlines(fixText(raw, this.options));
-    const definitions = [...this.definitions.values()].map((definition3) => this.source.slice(start(definition3), end(definition3)));
-    if (definitions.some((definition3) => definition3.includes("\n"))) return this.inline(node2.children, "continuation");
-    return withoutTrailingNewlines(fixText(`${raw}
+    const cached = this.options.nestedListTexts.get(node2);
+    if (cached !== void 0) return cached;
+    if (this.nestedListDefinitions === void 0) {
+      const definitions2 = [...this.definitions.values()].map((definition3) => this.source.slice(start(definition3), end(definition3)));
+      this.nestedListDefinitions = definitions2.some((definition3) => definition3.includes("\n")) ? null : definitions2.join("\n");
+    }
+    const definitions = this.nestedListDefinitions;
+    if (definitions === null) return this.inline(node2.children, "continuation");
+    this.options.nestedListWork.remaining -= definitions.length;
+    if (this.options.nestedListWork.remaining < 0) throw new MarkdownLimitError("nested-list-definitions");
+    const fixed = withoutTrailingNewlines(fixText(`${raw}
 
-${definitions.join("\n")}`, this.options));
+${definitions}`, this.options));
+    this.options.nestedListTexts.set(node2, fixed);
+    return fixed;
   }
   listItem(item, marker, interruptsParagraph) {
     const indent2 = " ".repeat(/^ *[^ ]+/.exec(marker)[0].length + 1);
@@ -52632,7 +52713,7 @@ function isIdEntry(value) {
   if (entry.releaseBase !== void 0 && (typeof entry.releaseBase !== "string" || !/^[0-9a-f]{40,64}$/.test(entry.releaseBase))) return false;
   if (entry.suspended !== void 0) {
     const episode = entry.suspended;
-    if (episode === null || typeof episode !== "object" || typeof episode.noticeId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(episode.noticeId) || episode.head !== void 0 && (typeof episode.head !== "string" || !/^[0-9a-f]{40,64}$/.test(episode.head)) || episode.pushed !== void 0 && (typeof episode.pushed !== "string" || !/^[0-9a-f]{40,64}$/.test(episode.pushed)) || !Array.isArray(episode.paths) || !episode.paths.every((path7) => typeof path7 === "string") || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === "string") || episode.timedOut !== void 0 && (!Array.isArray(episode.timedOut) || !episode.timedOut.every((name) => typeof name === "string"))) return false;
+    if (episode === null || typeof episode !== "object" || typeof episode.noticeId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(episode.noticeId) || episode.head !== void 0 && (typeof episode.head !== "string" || !/^[0-9a-f]{40,64}$/.test(episode.head)) || episode.pushed !== void 0 && (typeof episode.pushed !== "string" || !/^[0-9a-f]{40,64}$/.test(episode.pushed)) || !Array.isArray(episode.paths) || !episode.paths.every((path7) => typeof path7 === "string") || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === "string") || episode.timedOut !== void 0 && (!Array.isArray(episode.timedOut) || !episode.timedOut.every((name) => typeof name === "string")) || episode.edited !== void 0 && episode.edited !== true || episode.editedFiles !== void 0 && (!Array.isArray(episode.editedFiles) || !episode.editedFiles.every((path7) => typeof path7 === "string"))) return false;
   }
   if (entry.pullRewrite !== void 0) {
     const repair = entry.pullRewrite;
@@ -55274,6 +55355,18 @@ async function readPlainFileProvenance(git, linear, options = {}) {
   }
   return result;
 }
+async function addRecordedPlainFiles(git, ids, linear, key2) {
+  const recorded = await readPlainFileProvenance(git, linear, { firstParent: await signedObservation(git, linear, key2) });
+  if (recorded.size === 0) return;
+  for (const [path7, entry] of ids) {
+    const targets = recorded.get(entry.id);
+    if (targets === void 0) continue;
+    const plainFiles = new Set(entry.plainFiles ?? []);
+    if ([...targets].every((target) => plainFiles.has(target))) continue;
+    for (const target of targets) plainFiles.add(target);
+    ids.set(path7, { ...entry, plainFiles: [...plainFiles] });
+  }
+}
 
 // src/sync/write.ts
 import { createHash as createHash12, randomUUID as randomUUID5 } from "node:crypto";
@@ -56047,6 +56140,22 @@ function recordedPushed(ids) {
 function lastPushed(context, options, ids) {
   return context.pushedKey.verified(branchRef(suspendedBranch(options.config)), recordedPushed(ids));
 }
+function editedPaths(ids) {
+  return new Set([...ids].flatMap(([path7, entry]) => [...entry.suspended?.edited === true ? [path7] : [], ...entry.suspended?.editedFiles ?? []]));
+}
+async function noteEdits(context, options, ids, previous3, paths) {
+  const { git } = context;
+  const pushed = lastPushed(context, options, ids);
+  const below = pushed !== void 0 && (pushed === previous3 || (await git.run(["merge-base", "--is-ancestor", pushed, previous3], { okCodes: [0, 1, 128] })).code === 0);
+  const edited2 = !below ? [...paths] : pushed === previous3 ? [] : await changedPaths(git, pushed, previous3);
+  const known = editedPaths(ids);
+  const anchor = [...ids.values()].find((entry) => entry.suspended !== void 0)?.suspended;
+  for (const path7 of edited2) if (!known.has(path7)) {
+    const own6 = ids.get(path7)?.suspended;
+    if (own6 !== void 0) own6.edited = true;
+    else if (anchor !== void 0) (anchor.editedFiles ??= []).push(path7);
+  }
+}
 async function addEpisodes(context, options, ids, paths, checks, timedOut = []) {
   const knownId = knownIdLookup(context.git, options.state.ids, ids);
   for (const path7 of paths) if (!ids.has(path7)) {
@@ -56101,6 +56210,7 @@ async function maintainSuspended(context, options) {
     head = await commit(context, options, await takePaths(git, tracked, intake, paths), intake === linear ? [tracked] : [tracked, intake], "Restore suspended changes" + note(tracked, linear, intake));
     bases = { tracked, linear, view: intake };
   } else {
+    const lane = head;
     bases = await recordedBases(git, head);
     if (await isAncestor(git, head, tracked)) return release(context, options, ids, paths, head, bases.linear, tracked);
     if (bases.tracked !== tracked) {
@@ -56109,6 +56219,7 @@ async function maintainSuspended(context, options) {
     }
     for (const path7 of await changedPaths(git, tracked, head)) paths.add(path7);
     await addEpisodes(context, options, ids, paths, []);
+    await noteEdits(context, options, ids, lane, paths);
     const reread = new Set((options.rereadAsTracked ?? []).filter((path7) => paths.has(path7)));
     if (bases.linear !== linear || reread.size > 0 || await treeOf(git, intake) !== await treeOf(git, bases.view ?? bases.linear)) {
       const hold3 = await includeCapturedAssets(git, intake, ids, paths);
@@ -56117,9 +56228,8 @@ async function maintainSuspended(context, options) {
       const base = await treeCommit(git, await takePaths(git, head, bases.view ?? bases.linear, paths), bases.linear);
       const tree = await mergeTree(git, input, head, base, ids, options.state.ids);
       const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
-      const pushed = lastPushed(context, options, ids);
-      const outside = previous3 === null || pushed === void 0 ? void 0 : new Set(pushed === previous3 ? [] : await changedPaths(git, pushed, previous3));
-      const converged = outside === void 0 ? /* @__PURE__ */ new Set() : await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path7) => !outside.has(path7))), reread);
+      const edited2 = editedPaths(ids);
+      const converged = await convergedPaths(git, intake, bases.view ?? bases.linear, tracked, new Set([...paths].filter((path7) => !edited2.has(path7))), reread);
       const selected = await takePaths(git, await takePaths(git, head, tree, paths), tracked, converged);
       for (const path7 of reread) {
         const entry = ids.get(path7);
@@ -56276,7 +56386,8 @@ async function suspendBatch(context, options, failed2, normalNumber, failures, t
   const previous3 = context.fetched.suspended ?? null;
   let head;
   if (previous3 !== null) await recordedBases(git, previous3);
-  if (previous3 === null || await isAncestor(git, previous3, tracked)) {
+  const joins = previous3 !== null && !await isAncestor(git, previous3, tracked);
+  if (!joins) {
     head = await commit(context, options, batchTree, previous3 === null ? [failed2, tracked, ...intake === linear ? [] : [intake]] : [previous3, failed2, tracked, ...intake === linear ? [] : [intake]], "Suspend changes from Linear" + note(tracked, linear, intake));
   } else {
     const bases = await recordedBases(git, previous3);
@@ -56285,6 +56396,7 @@ async function suspendBatch(context, options, failed2, normalNumber, failures, t
   }
   for (const path7 of await changedPaths(git, tracked, head)) paths.add(path7);
   await addEpisodes(context, options, ids, paths, checks, timedOut);
+  if (joins) await noteEdits(context, options, ids, previous3, paths);
   const anchor = [...ids.values()].find((entry) => entry.suspended !== void 0);
   if (anchor?.suspended !== void 0) anchor.suspended.paths = [...paths].sort();
   const normal = await commit(context, options, await git.revParse(`${tracked}^{tree}`), [failed2, tracked], SET_ASIDE_MESSAGE);
@@ -56480,6 +56592,7 @@ async function writeTrackedToLinear(context, options) {
   };
   const cacheLost = await uploadsRebuilding(git, expected.uploads);
   const ids = await readIds(git, expected.ids);
+  await addRecordedPlainFiles(git, ids, linearTip, context.pushedKey);
   const signedIds = signedRepairs(ids, context.pushedKey);
   const frozen = suspendedPaths(ids);
   const plainFiles = new Map([...ids].map(([path7, entry]) => [path7, new Set(entry.plainFiles ?? [])]));
@@ -58671,15 +58784,52 @@ async function confirmInitialSync(context, options) {
   for (const entry of plan.overwrite) documentIds.set(entry.path, entry.documentId);
   const reserved = await readReservedIds(git, expected.ids);
   const saved = /* @__PURE__ */ new Map();
+  const filePaths = new Set([...plan.create, ...plan.overwrite, ...plan.leftOut].map((entry) => entry.path));
+  const claimed = /* @__PURE__ */ new Set([
+    ...plan.overwrite.map((entry) => entry.documentId),
+    ...plan.leftOut.flatMap((entry) => entry.documentId === void 0 ? [] : [entry.documentId]),
+    ...plan.trash.filter((entry) => filePaths.has(entry.path)).map((entry) => entry.documentId)
+  ]);
+  const stoppedRunIds = /* @__PURE__ */ new Map();
   for (const entry of plan.create) {
-    const chosen = (resumed ? previous3.get(entry.path)?.id : void 0) ?? reserved.get(entry.path);
-    if (chosen !== void 0 && !sources.documents.has(chosen)) saved.set(entry.path, chosen);
+    const before = resumed ? previous3.get(entry.path)?.id : void 0;
+    const chosen = before ?? reserved.get(entry.path);
+    if (chosen === void 0) continue;
+    if (!sources.documents.has(chosen)) saved.set(entry.path, chosen);
+    if (before !== void 0 && !claimed.has(before)) stoppedRunIds.set(entry.path, before);
   }
-  const taken = /* @__PURE__ */ new Set();
-  if (saved.size > 0) for (const document3 of await linear.getDocuments([...new Set(saved.values())])) taken.add(document3.id);
+  const inPlace = (id) => sources.documents.get(id)?.content !== void 0;
+  const withContent = new Set([...stoppedRunIds.values()].filter((id) => !inPlace(id)));
+  const withoutContent = new Set([...saved.values()].filter((id) => !withContent.has(id)));
+  let read;
+  try {
+    read = [
+      ...withContent.size > 0 ? await linear.getDocuments([...withContent], { withContent: true }) : [],
+      ...withoutContent.size > 0 ? await linear.getDocuments([...withoutContent]) : []
+    ];
+  } catch (error2) {
+    if (!(error2 instanceof LinearStoppedError)) throw error2;
+    result.stopped = error2.reason;
+    result.code = "stopped";
+    result.notAttempted = [...plan.create, ...plan.overwrite, ...plan.trash].map((entry) => entry.path).sort();
+    return { plan, result };
+  }
+  const found = new Map(read.map((document3) => [document3.id, document3]));
+  for (const id of stoppedRunIds.values()) {
+    const listed = sources.documents.get(id);
+    if (listed !== void 0 && inPlace(id)) found.set(id, listed);
+  }
+  const taken = new Set(read.map((document3) => document3.id));
+  const createdElsewhere = /* @__PURE__ */ new Map();
+  for (const [path7, id] of stoppedRunIds) {
+    const document3 = found.get(id);
+    if (document3 !== void 0) createdElsewhere.set(path7, document3);
+  }
+  const keptElsewhere = new Set([...createdElsewhere.values()].map((document3) => document3.id));
   for (const entry of plan.create) {
     const chosen = saved.get(entry.path);
-    documentIds.set(entry.path, chosen !== void 0 && !taken.has(chosen) ? chosen : newId());
+    const kept = createdElsewhere.get(entry.path)?.id;
+    documentIds.set(entry.path, kept ?? (chosen !== void 0 && !taken.has(chosen) ? chosen : newId()));
     ids.set(entry.path, withPlainFiles(entry.path, { id: documentIds.get(entry.path) }));
   }
   try {
@@ -58697,7 +58847,9 @@ async function confirmInitialSync(context, options) {
         result.notAttempted = work.slice(index2).map((rest) => rest.entry.path);
         break;
       }
-      const document3 = item.kind === "overwrite" ? sources.documents.get(item.entry.documentId) : void 0;
+      const document3 = item.kind === "overwrite" ? sources.documents.get(item.entry.documentId) : createdElsewhere.get(path7);
+      const elsewhere = item.kind === "create" && document3 !== void 0;
+      const unmarked = elsewhere && !inPlace(document3.id);
       if (item.kind === "overwrite" && document3 === void 0) throw new Error(message("initial-sync.document-not-listed", { path: path7 }));
       try {
         if (document3 !== void 0) parse2(document3.content ?? "");
@@ -58714,7 +58866,7 @@ async function confirmInitialSync(context, options) {
           sentHashes.set(path7, hash);
           vouched.add(path7);
           remember(path7, document3);
-          await reconcileMark(path7, document3, hash);
+          if (!unmarked) await reconcileMark(path7, document3, hash);
           continue;
         }
         if (document3 !== void 0 && holds()) {
@@ -58722,10 +58874,10 @@ async function confirmInitialSync(context, options) {
           sentHashes.delete(path7);
           vouched.delete(path7);
           remember(path7, document3);
-          await reconcileMark(path7, document3, hash);
+          if (!unmarked) await reconcileMark(path7, document3, hash);
           continue;
         }
-        if (document3 !== void 0 && resumed && before?.id === document3.id && before.observedDigest === void 0 && !writtenBefore.has(path7)) {
+        if (document3 !== void 0 && resumed && before?.id === document3.id && (elsewhere || before.observedDigest === void 0 && !writtenBefore.has(path7))) {
           result.leftOutAtWrite.push({ path: path7, rule: "changed-during-run" });
           skippedTitles.add(titleKey2(item.entry.place, item.entry.title));
           createdBefore.add(path7);
@@ -58812,7 +58964,7 @@ async function confirmInitialSync(context, options) {
           break;
         }
         try {
-          if (skippedTitles.has(titleKey2(entry.place, entry.title))) continue;
+          if (skippedTitles.has(titleKey2(entry.place, entry.title)) || keptElsewhere.has(entry.documentId)) continue;
           const listed = sources.documents.get(entry.documentId);
           const current = await linear.getDocument(entry.documentId);
           if (listed === void 0 || current === null || !unchangedSince(current, listed)) {
@@ -60373,16 +60525,16 @@ async function runPreflight(operation, inputs, options, work) {
   const runOptions = { ...tokenOptions, onRevokeError, ...options.tokenLifecycle ? { lifecycle: options.tokenLifecycle } : {} };
   const withToken = (work2) => {
     const known = reads?.token;
-    if (known != null) return withDeferredRunToken(credentials, known, runOptions, (token) => work2({ ...token, accessToken: () => token.accessToken() }));
+    if (known != null) return withDeferredRunToken(credentials, known, runOptions, (token) => work2(token));
     return withRunToken(credentials, runOptions, (token) => {
       reads?.tokenMinted(token.scope, token.context);
-      return work2(token);
+      return work2({ ...token, accessToken: token.current });
     });
   };
   try {
     return await withToken(async (token) => {
       minted = true;
-      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context, ...reads ? { reads } : {} });
+      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, renewToken: token.renew, auth: token.context, ...reads ? { reads } : {} });
       let setup;
       try {
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope }, createProjects: inputs.createProjects });
@@ -60845,13 +60997,10 @@ async function capture(context, options) {
       const paths2 = new Set(recorded.documents.map((document3) => document3.path));
       const texts = await blobBudget.read(git, entries.filter((entry) => paths2.has(entry.path)));
       const documents2 = recorded.documents.map((document3) => ({ ...document3, text: texts.get(document3.oid).toString("utf8") }));
-      const plainProvenance = await readPlainFileProvenance(git, base);
-      for (const [path7, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents: documents2, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) {
-        const plainFiles = plainProvenance.get(entry.id);
-        ids.set(path7, plainFiles === void 0 ? entry : { ...entry, plainFiles: [...plainFiles] });
-      }
+      for (const [path7, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents: documents2, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) ids.set(path7, entry);
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
+    await addRecordedPlainFiles(git, ids, base, context.pushedKey);
     const { cursor, recorded: recordedTimes, needsCursor } = await readCaptureCheckpoints(git, state.ids, base, context.pushedKey);
     const recordedBlobs = entries.filter((entry) => entry.type === "blob" && ids.has(entry.path));
     const textEntries = recordedBlobs.filter(readableBlob);

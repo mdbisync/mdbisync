@@ -7665,7 +7665,9 @@ var BatchProcess = class {
   /** Writes `input` and waits for its answer. */
   async request(input, request) {
     let running = this.running;
-    if (running === void 0 || this.directory === void 0 || identityOf(this.directory) !== running.identity) running = await this.start();
+    if (running === void 0 || this.directory === void 0 || !sameDirectory(running.cwd, this.options.dir) || !sameDirectory(running.objects, this.directory)) {
+      running = await this.start();
+    }
     const current = running;
     return new Promise((resolve, reject) => {
       if (current.idle !== void 0) clearTimeout(current.idle);
@@ -7702,8 +7704,10 @@ var BatchProcess = class {
   }
   spawn(directory) {
     const { dir, args, env } = this.options;
+    const cwd = directoryStat(dir);
+    const objects = directoryStat(directory);
     const child = spawn("git", args, { cwd: dir, env: { ...env(), GIT_FLUSH: "1" }, stdio: ["pipe", "pipe", "pipe"] });
-    const running = { child, identity: identityOf(directory), pending: new Queue(), chunks: [], length: 0, need: 0, stderr: "", idle: void 0 };
+    const running = { child, cwd, objects, pending: new Queue(), chunks: [], length: 0, need: 0, stderr: "", idle: void 0 };
     child.stdout.on("data", (chunk) => this.receive(running, chunk));
     child.stderr.on("data", (chunk) => {
       if (running.stderr.length < 64 * 1024) running.stderr += chunk.toString("utf8");
@@ -7781,13 +7785,17 @@ function hold(child, waiting) {
     else handle.unref();
   }
 }
-function identityOf(directory) {
+function directoryStat(directory) {
   try {
-    const stat = statSync(directory);
-    return `${stat.dev}:${stat.ino}`;
+    return statSync(directory, { bigint: true });
   } catch {
-    return "missing";
+    return void 0;
   }
+}
+function sameDirectory(before, directory) {
+  const after = directoryStat(directory);
+  if (before === void 0 || after === void 0) return before === after;
+  return before.dev === after.dev && before.ino === after.ino && (before.birthtimeNs === after.birthtimeNs || before.birthtimeNs === before.ctimeNs || after.birthtimeNs === after.ctimeNs);
 }
 
 // src/state/object-reader.ts
