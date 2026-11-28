@@ -1,5 +1,7 @@
 // Run tokens: each run exchanges the OAuth app's client credentials for a
 // fresh app-actor token and revokes it when the run ends, also on failure.
+// A request Linear refuses because another run of the same app revoked the
+// shared token gets a fresh one (`TokenRenewal`).
 // The action's `post` step revokes a token left behind by a killed run with
 // `revokeToken`.
 
@@ -81,27 +83,102 @@ export interface TokenLifecycle {
 }
 
 /**
+ * A run's hold on its token, for a token another holder of the same Linear
+ * app may revoke. Linear gives concurrent mints of one app's client
+ * credentials the same token, so another run (another repository on the same
+ * app, a test worker) that ends revokes the token this run holds. A request
+ * Linear refuses with 401 then asks `renew` for a fresh token.
+ */
+export interface TokenRenewal {
+  /**
+   * The token to use after Linear refused `rejected`: the run's current one
+   * when another request already renewed it, a freshly minted one otherwise.
+   * When Linear hands back `rejected` itself, the token is still active and
+   * the refusal was about something else; the caller then keeps the refusal.
+   */
+  renew(rejected: string): Promise<string>;
+}
+
+type RunTokenOptions = TokenOptions & { onRevokeError: (error: unknown) => void; lifecycle?: TokenLifecycle };
+
+/**
+ * Mints the run's token on first use and again on renewal, and revokes the
+ * last one at the end. A token replaced by a renewal is not revoked: Linear
+ * refused it, so it is already ended.
+ */
+class RunTokenHold implements TokenRenewal {
+  readonly #credentials: AppCredentials;
+  readonly #options: RunTokenOptions;
+  #current: Promise<RunToken> | undefined;
+  #last: RunToken | undefined;
+
+  constructor(credentials: AppCredentials, options: RunTokenOptions) {
+    this.#credentials = credentials;
+    this.#options = options;
+  }
+
+  token(): Promise<RunToken> {
+    return this.#current ??= this.#mint();
+  }
+
+  async accessToken(): Promise<string> {
+    return (await this.token()).accessToken;
+  }
+
+  async renew(rejected: string): Promise<string> {
+    const held = this.#current;
+    const current = await held?.catch(() => undefined);
+    // Another request renewed it while this one waited, or a mint is under way.
+    if (this.#current !== held || (current !== undefined && current.accessToken !== rejected)) return this.accessToken();
+    const next = this.#mint();
+    this.#current = next;
+    // A failed renewal fails only the request that asked for it: later ones go on from the token held before.
+    next.catch(() => {
+      if (this.#current === next) this.#current = held;
+    });
+    return this.accessToken();
+  }
+
+  async #mint(): Promise<RunToken> {
+    const token = await mintAppToken(this.#credentials, this.#options);
+    this.#last = token;
+    // A lifecycle that fails fails the request; the token is still revoked at the end.
+    this.#options.lifecycle?.minted(token.accessToken);
+    return token;
+  }
+
+  /** Revokes the last token; a failure goes to `onRevokeError`, never replacing the run's outcome. */
+  async end(): Promise<void> {
+    // A mint that failed left no token; its error reached the request that asked for it.
+    await this.#current?.catch(() => undefined);
+    if (this.#last !== undefined) await endRunToken(this.#last, this.#options);
+  }
+}
+
+/**
  * Mints a token, runs `work` with it and revokes it afterwards, whether `work`
  * succeeded or not. A failed revocation never replaces the run's own outcome
  * (its result or its error): it goes to `onRevokeError`, which the caller
- * must give, so a token left active is reported, never silent.
+ * must give, so a token left active is reported, never silent. `accessToken`
+ * is the first token; requests that pass `current` and `renew` to the client
+ * survive another run of the same app revoking it.
  */
 export async function withRunToken<T>(
   credentials: AppCredentials,
-  options: TokenOptions & { onRevokeError: (error: unknown) => void; lifecycle?: TokenLifecycle },
-  work: (token: RunToken) => Promise<T>,
+  options: RunTokenOptions,
+  work: (token: RunToken & TokenRenewal & { current(): Promise<string> }) => Promise<T>,
 ): Promise<T> {
-  const token = await mintAppToken(credentials, options);
+  const hold = new RunTokenHold(credentials, options);
   try {
-    options.lifecycle?.minted(token.accessToken);
-    return await work(token);
+    const token = await hold.token();
+    return await work({ ...token, current: () => hold.accessToken(), renew: (rejected) => hold.renew(rejected) });
   } finally {
-    await endRunToken(token, options);
+    await hold.end();
   }
 }
 
 /** Revokes a run's token; a failure goes to `onRevokeError`, never replacing the run's outcome. */
-async function endRunToken(token: RunToken, options: TokenOptions & { onRevokeError: (error: unknown) => void; lifecycle?: TokenLifecycle }): Promise<void> {
+async function endRunToken(token: RunToken, options: RunTokenOptions): Promise<void> {
   let revoked = false;
   try {
     await revokeToken(token.accessToken, { ...options, auth: token.context });
@@ -120,11 +197,11 @@ async function endRunToken(token: RunToken, options: TokenOptions & { onRevokeEr
 }
 
 /** A run token that is minted when a request first needs it. */
-export interface DeferredRunToken {
+export interface DeferredRunToken extends TokenRenewal {
   /** The scopes an earlier step's token of the same credentials returned. */
   scope: string[];
   context: AuthContext;
-  /** Mints the token on the first call; later calls give the same one. */
+  /** Mints the token on the first call; later calls give the same one until a renewal. */
   accessToken(): Promise<string>;
 }
 
@@ -136,33 +213,20 @@ export interface DeferredRunToken {
 export async function withDeferredRunToken<T>(
   credentials: AppCredentials,
   known: { scope: string[]; context: AuthContext },
-  options: TokenOptions & { onRevokeError: (error: unknown) => void; lifecycle?: TokenLifecycle },
+  options: RunTokenOptions,
   work: (token: DeferredRunToken) => Promise<T>,
 ): Promise<T> {
-  let minting: Promise<RunToken> | undefined;
-  let access: Promise<string> | undefined;
+  const hold = new RunTokenHold(credentials, options);
   const token: DeferredRunToken = {
     scope: [...known.scope],
     context: known.context,
-    accessToken() {
-      if (access === undefined) {
-        const mint = mintAppToken(credentials, options);
-        minting = mint;
-        // A lifecycle that fails fails the request; the token is still revoked below.
-        access = mint.then((minted) => {
-          options.lifecycle?.minted(minted.accessToken);
-          return minted.accessToken;
-        });
-      }
-      return access;
-    },
+    accessToken: () => hold.accessToken(),
+    renew: (rejected) => hold.renew(rejected),
   };
   try {
     return await work(token);
   } finally {
-    // A mint that failed left no token; its error reached the request that asked for it.
-    const minted = minting === undefined ? undefined : await minting.catch(() => undefined);
-    if (minted !== undefined) await endRunToken(minted, options);
+    await hold.end();
   }
 }
 

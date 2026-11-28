@@ -139,18 +139,19 @@ export async function runPreflight(
   let minted = false;
   const reads = options.reads;
   const runOptions = { ...tokenOptions, onRevokeError, ...(options.tokenLifecycle ? { lifecycle: options.tokenLifecycle } : {}) };
-  const withToken = <T>(work: (token: { accessToken: string | (() => Promise<string>); scope: string[]; context: AuthContext }) => Promise<T>) => {
+  // Requests survive another run of the same Linear app revoking the shared token (`TokenRenewal`).
+  const withToken = <T>(work: (token: { accessToken: () => Promise<string>; renew: (rejected: string) => Promise<string>; scope: string[]; context: AuthContext }) => Promise<T>) => {
     const known = reads?.token;
-    if (known != null) return withDeferredRunToken(credentials, known, runOptions, (token) => work({ ...token, accessToken: () => token.accessToken() }));
+    if (known != null) return withDeferredRunToken(credentials, known, runOptions, (token) => work(token));
     return withRunToken(credentials, runOptions, (token) => {
       reads?.tokenMinted(token.scope, token.context);
-      return work(token);
+      return work({ ...token, accessToken: token.current });
     });
   };
   try {
     return await withToken(async (token) => {
       minted = true;
-      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context, ...(reads ? { reads } : {}) });
+      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, renewToken: token.renew, auth: token.context, ...(reads ? { reads } : {}) });
       let setup: SetupReport | undefined;
       try {
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope }, createProjects: inputs.createProjects });
