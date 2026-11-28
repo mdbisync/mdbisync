@@ -93,6 +93,8 @@ the workspace's public teams; an admin can change the app's team access
 on its page in Linear's settings
 ([Linear OAuth](https://linear.app/developers/oauth-2-0-authentication)).
 Every team your folders name must be one the app reaches.
+Use one app per docs repository
+([sharing a Linear app](configuration.md#sharing-a-linear-app)).
 
 In your docs repository, add the client ID under Settings → Secrets
 and variables → Actions → Variables, or under Settings → Environments →
