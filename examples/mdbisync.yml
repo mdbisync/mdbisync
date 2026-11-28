@@ -161,7 +161,7 @@ jobs:
       # ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's changes
         id: stage
-        uses: mdbisync/mdbisync@d1581273f02614f9fcfedb293f7483182e73ed4b # v1.0.1
+        uses: mdbisync/mdbisync@14fe5d316319a44156334a8cc228bda23a7a57fa # v1.0.2
         with:
           operation: sync
           security-step: stage
@@ -186,7 +186,7 @@ jobs:
       # so it pushes what the hooks saw; a later change in Linear waits for
       # the next run.
       - name: Sync
-        uses: mdbisync/mdbisync@d1581273f02614f9fcfedb293f7483182e73ed4b # v1.0.1
+        uses: mdbisync/mdbisync@14fe5d316319a44156334a8cc228bda23a7a57fa # v1.0.2
         with:
           operation: sync
           security-step: apply
