@@ -269,6 +269,13 @@ Run it again with the same inputs, after the reset time in the summary when
 it was rate limited. It plans again, skips the documents an earlier run
 wrote, finds a document created just before a crash by its title instead
 of creating it twice, and records `linear` once everything is written.
+A document an earlier run created or wrote and someone renamed, moved to
+another team or project, trashed or archived since stays the file's
+document, unless its new title is another file's: it is neither trashed nor
+created again, and the sync takes the change in once the initial sync has
+completed. When that document no longer holds the
+file's text (edited, or the file changed), it is left out
+(`changed-during-run`) and the sync takes it in as Linear holds it.
 It trusts what an earlier run recorded about a written document only when
 the sync signed that record with its Linear client secret; otherwise,
 for example after the secret changed or someone edited the state, it skips
